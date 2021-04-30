@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+  "partiql",
+  "partiql-eval",
+  "partiql-irgen",
+  "partiql-parser",
+  "partiql-rewriter",
+]
