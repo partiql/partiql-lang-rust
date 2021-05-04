@@ -1,0 +1,49 @@
+name: CI Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    # We want to run on external PRs, but not on internal ones as push automatically builds
+    # H/T: https://github.com/Dart-Code/Dart-Code/commit/612732d5879730608baa9622bf7f5e5b7b51ae65
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != 'partiql/partiql-lang-rust'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Remove MSys64 MingW64 Binaries
+        if: runner.os == 'Windows'
+        # remove this because there is a bad libclang.dll that confuses bindgen
+        run: Remove-Item -LiteralPath "C:\msys64\mingw64\bin" -Force -Recurse
+      - name: Install Dependencies
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+      - name: Git Checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Rust Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cargo Build 
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose --workspace
+      - name: Cargo Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose --workspace
+      - name: Rustfmt Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --verbose -- --check
+
