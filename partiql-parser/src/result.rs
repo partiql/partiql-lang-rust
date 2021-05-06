@@ -30,8 +30,8 @@ pub enum ParserError {
 }
 
 impl ParserError {
-    /// Convenience function to create a [SyntaxError].
-    fn syntax_error<S: Into<String>>(message: S, position: Position) -> Self {
+    /// Convenience function to create a [SyntaxError](ParserError::SyntaxError).
+    pub fn syntax_error<S: Into<String>>(message: S, position: Position) -> Self {
         Self::SyntaxError {
             message: message.into(),
             position,
