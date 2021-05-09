@@ -1,9 +1,15 @@
 WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
 
-// really basic rules to just detect a sequence of keywords
-// two dip our toes in Pest
+// TODO implement a full grammar, this is a very primitive version to start
+//      working with Pest and its APIs.
 
-Keywords = _{ SOI ~ Keyword+ ~ EOI}
+// Entry point for full query parsing
+Query = _{ SOI ~ Keyword+ ~ EOI}
+
+// Entry point for query "scanning"
+// Note that this is factored this way to support an iteration style API
+// where we can call back into this rule on subsequent input.
+Scanner = _{ SOI ~ Keyword }
 
 Keyword = { AllKeywords }
 
