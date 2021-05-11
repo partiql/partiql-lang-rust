@@ -9,15 +9,19 @@
 
 use crate::peg::{PairExt, PairsExt, PartiQLParser, Rule};
 use crate::prelude::*;
-use crate::result::syntax_error;
 use pest::iterators::Pair;
 use pest::Parser;
+use std::borrow::Cow;
 
 /// The parsed content associated with a [`Token`] that has been scanned.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Content<'val> {
-    /// A PartiQL keyword. Contains a `str` reference to the UTF8 input bytes that comprise the keyword.
-    Keyword(&'val str),
+    /// A PartiQL keyword.  Contains the slice for the keyword case folded to upper case.
+    Keyword(Cow<'val, str>),
+    /// An identifier.  Contains the slice for the text of the identifier.
+    Identifier(Cow<'val, str>),
+    /// A string literal.  Contains the slice for the content of the literal.
+    String(Cow<'val, str>),
     // TODO things like literals, punctuation, etc.
 }
 
@@ -68,8 +72,8 @@ pub struct Token<'val> {
 
 impl<'val> Token<'val> {
     /// Returns the parsed content of this token.
-    pub fn content(&self) -> Content<'val> {
-        self.content
+    pub fn content(&self) -> &Content<'val> {
+        &self.content
     }
 
     /// Returns the location of where this token starts in the input.
@@ -105,6 +109,20 @@ pub struct PartiQLScanner<'val> {
     remainder: Remainder<'val>,
 }
 
+/// Removes PartiQL escapes from a string literal and dequotes it.
+#[inline]
+fn normalize_string_lit(raw_text: &str) -> Cow<str> {
+    raw_text[1..(raw_text.len() - 1)].replace("''", "'").into()
+}
+
+/// Removes PartiQL escapes from a quoted identifier and dequotes it.
+#[inline]
+fn normalize_quoted_ident(raw_text: &str) -> Cow<str> {
+    raw_text[1..(raw_text.len() - 1)]
+        .replace(r#""""#, r#"""#)
+        .into()
+}
+
 impl<'val> PartiQLScanner<'val> {
     fn do_next_token(&mut self) -> ParserResult<Token<'val>> {
         // the scanner rule is expected to return a single node
@@ -117,8 +135,19 @@ impl<'val> PartiQLScanner<'val> {
         self.remainder = self.remainder.consume(start_off + text.len(), pair.end()?);
 
         let content = match pair.as_rule() {
-            Rule::Keyword => Content::Keyword(text),
-            _ => return syntax_error(format!("Unexpected rule: {:?}", pair), pair.start()?.into()),
+            Rule::Keyword => Content::Keyword(text.to_uppercase().into()),
+            Rule::String => Content::String(normalize_string_lit(pair.as_str())),
+            Rule::Identifier => {
+                let ident_pair = pair.into_inner().exactly_one()?;
+                match ident_pair.as_rule() {
+                    Rule::NonQuotedIdentifier => Content::Identifier(ident_pair.as_str().into()),
+                    Rule::QuotedIdentifier => {
+                        Content::Identifier(normalize_quoted_ident(ident_pair.as_str()))
+                    }
+                    _ => return ident_pair.syntax_error(),
+                }
+            }
+            _ => return pair.syntax_error(),
         };
 
         Ok(Token {
@@ -170,6 +199,7 @@ pub fn scanner(input: &str) -> PartiQLScanner {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::result::syntax_error;
     use rstest::*;
 
     #[rstest]
@@ -177,7 +207,7 @@ mod test {
         "  SELECT  ",
         vec![
             Ok(Token {
-                content: Content::Keyword("SELECT"),
+                content: Content::Keyword("SELECT".into()),
                 start: LineAndColumn::at(1, 3),
                 end: LineAndColumn::at(1, 9),
                 text: "SELECT",
@@ -186,14 +216,14 @@ mod test {
                     offset: LineAndColumn::at(1, 9)
                 }
             }),
-            syntax_error("Expected [Keyword]", Position::at(1, 11)),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 11)),
         ]
     )]
     #[case::some_keywords(
         "  CASE\tFROM\n \x0B\x0CWHERE",
         vec![
             Ok(Token {
-                content: Content::Keyword("CASE"),
+                content: Content::Keyword("CASE".into()),
                 start: LineAndColumn::at(1, 3),
                 end: LineAndColumn::at(1, 7),
                 text: "CASE",
@@ -203,7 +233,7 @@ mod test {
                 }
             }),
             Ok(Token {
-                content: Content::Keyword("FROM"),
+                content: Content::Keyword("FROM".into()),
                 start: LineAndColumn::at(1, 8),
                 end: LineAndColumn::at(1, 12),
                 text: "FROM",
@@ -213,7 +243,7 @@ mod test {
                 }
             }),
             Ok(Token {
-                content: Content::Keyword("WHERE"),
+                content: Content::Keyword("WHERE".into()),
                 start: LineAndColumn::at(2, 4),
                 end: LineAndColumn::at(2, 9),
                 text: "WHERE",
@@ -222,7 +252,147 @@ mod test {
                     offset: LineAndColumn::at(2, 9)
                 }
             }),
-            syntax_error("Expected [Keyword]", Position::at(2, 9)),
+            syntax_error("IGNORED MESSAGE", Position::at(2, 9)),
+        ]
+    )]
+    #[case::plain_identifiers(
+        "moo_cow_1999 _1 $$$$",
+        vec![
+            Ok(Token {
+                content: Content::Identifier("moo_cow_1999".into()),
+                start: LineAndColumn::at(1, 1),
+                end: LineAndColumn::at(1, 13),
+                text: "moo_cow_1999",
+                remainder: Remainder {
+                    input: " _1 $$$$",
+                    offset: LineAndColumn::at(1, 13)
+                }
+            }),
+            Ok(Token {
+                content: Content::Identifier("_1".into()),
+                start: LineAndColumn::at(1, 14),
+                end: LineAndColumn::at(1, 16),
+                text: "_1",
+                remainder: Remainder {
+                    input: " $$$$",
+                    offset: LineAndColumn::at(1, 16)
+                }
+            }),
+            Ok(Token {
+                content: Content::Identifier("$$$$".into()),
+                start: LineAndColumn::at(1, 17),
+                end: LineAndColumn::at(1, 21),
+                text: "$$$$",
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 21)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 21)),
+        ]
+    )]
+    #[case::bad_identifier(
+        "        99ranch",
+        vec![
+            syntax_error("IGNORED MESSAGE", Position::at(1, 9)),
+        ]
+    )]
+    #[case::quoted_identifiers(
+        r#"    "moo"   """ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
+        vec![
+            Ok(Token {
+                content: Content::Identifier("moo".into()),
+                start: LineAndColumn::at(1, 5),
+                end: LineAndColumn::at(1, 10),
+                text: r#""moo""#,
+                remainder: Remainder {
+                    input: r#"   """ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
+                    offset: LineAndColumn::at(1, 10)
+                }
+            }),
+            Ok(Token {
+                content: Content::Identifier("\"ʕノ•ᴥ•ʔノ ︵ ┻━┻".into()),
+                start: LineAndColumn::at(1, 13),
+                end: LineAndColumn::at(1, 30),
+                text: r#""""ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 30)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 30)),
+        ]
+    )]
+    #[case::string_literals(
+        "    'boo'   '''┬─┬''ノ( º _ ºノ)'",
+        vec![
+            Ok(Token {
+                content: Content::String("boo".into()),
+                start: LineAndColumn::at(1, 5),
+                end: LineAndColumn::at(1, 10),
+                text: "'boo'",
+                remainder: Remainder {
+                    input: "   '''┬─┬''ノ( º _ ºノ)'",
+                    offset: LineAndColumn::at(1, 10)
+                }
+            }),
+            Ok(Token {
+                content: Content::String("'┬─┬'ノ( º _ ºノ)".into()),
+                start: LineAndColumn::at(1, 13),
+                end: LineAndColumn::at(1, 32),
+                text: "'''┬─┬''ノ( º _ ºノ)'",
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 32)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 32)),
+        ]
+    )]
+    #[case::select_from(
+        r#"SelEct '✨✨✨' fROM "┬─┬" "#,
+        vec![
+            Ok(Token {
+                content: Content::Keyword("SELECT".into()),
+                start: LineAndColumn::at(1, 1),
+                end: LineAndColumn::at(1, 7),
+                text: "SelEct",
+                remainder: Remainder {
+                    input: r#" '✨✨✨' fROM "┬─┬" "#,
+                    offset: LineAndColumn::at(1, 7)
+                }
+            }),
+            Ok(Token {
+                content: Content::String("✨✨✨".into()),
+                start: LineAndColumn::at(1, 8),
+                end: LineAndColumn::at(1, 13),
+                text: "'✨✨✨'",
+                remainder: Remainder {
+                    input: r#" fROM "┬─┬" "#,
+                    offset: LineAndColumn::at(1, 13)
+                }
+            }),
+            Ok(Token {
+                content: Content::Keyword("FROM".into()),
+                start: LineAndColumn::at(1, 14),
+                end: LineAndColumn::at(1, 18),
+                text: "fROM",
+                remainder: Remainder {
+                    input: r#" "┬─┬" "#,
+                    offset: LineAndColumn::at(1, 18)
+                }
+            }),
+            Ok(Token {
+                content: Content::Identifier("┬─┬".into()),
+                start: LineAndColumn::at(1, 19),
+                end: LineAndColumn::at(1, 24),
+                text: r#""┬─┬""#,
+                remainder: Remainder {
+                    input: " ",
+                    offset: LineAndColumn::at(1, 24)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 25)),
         ]
     )]
     fn tokenize(
@@ -236,7 +406,7 @@ mod test {
                 (Ok(expected_tok), Ok(actual_tok)) => {
                     assert_eq!(expected_tok, actual_tok);
                     // make sure accessors do what we expect
-                    assert_eq!(expected_tok.content, actual_tok.content(), "Content NE");
+                    assert_eq!(expected_tok.content, *actual_tok.content(), "Content NE");
                     assert_eq!(expected_tok.start, actual_tok.start(), "Start Location NE");
                     assert_eq!(expected_tok.end, actual_tok.end(), "End Location NE");
                     assert_eq!(expected_tok.text, actual_tok.text(), "Text NE");
@@ -246,9 +416,18 @@ mod test {
                         "Remainder NE"
                     );
                 }
-                (Err(expected_err), Err(actual_err)) => {
-                    // TODO make this less strict with respect to error message
-                    assert_eq!(expected_err, actual_err);
+                (
+                    Err(ParserError::SyntaxError {
+                        position: expected_position,
+                        ..
+                    }),
+                    Err(ParserError::SyntaxError {
+                        position: actual_position,
+                        ..
+                    }),
+                ) => {
+                    // just compare the positions for syntax errors...
+                    assert_eq!(expected_position, actual_position);
                 }
                 _ => panic!("Did not expect: {:?} and {:?}", expected, actual),
             }

@@ -45,6 +45,9 @@ pub(crate) trait PairExt<'val, R: RuleType> {
 
     /// Translates the end position of the [`Pair`] into a [`LineAndColumn`].
     fn end(&self) -> ParserResult<LineAndColumn>;
+
+    /// Returns an `Err` with a syntax error from the pair
+    fn syntax_error<T>(&self) -> ParserResult<T>;
 }
 
 impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
@@ -56,6 +59,10 @@ impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
     #[inline]
     fn end(&self) -> ParserResult<LineAndColumn> {
         self.as_span().end_pos().line_col().try_into()
+    }
+
+    fn syntax_error<T>(&self) -> ParserResult<T> {
+        syntax_error(format!("Unexpected rule: {:?}", self), self.start()?.into())
     }
 }
 
@@ -73,20 +80,35 @@ pub fn recognize_partiql(input: &str) -> ParserResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::result::syntax_error;
+    use rstest::*;
 
-    #[test]
-    fn simple() -> ParserResult<()> {
-        recognize_partiql("SELECT FROM WHERE")
-    }
-
-    #[test]
-    fn error() -> ParserResult<()> {
-        match recognize_partiql("SELECT FROM MOO") {
-            Err(ParserError::SyntaxError { position, .. }) => {
-                assert_eq!(Position::at(1, 13), position)
+    #[rstest]
+    #[case::simple("select \"🍦\" fRoM \"🚽\" WHERE is_defined", Ok(()))]
+    #[case::error(
+        "SELECT SOMETHING FROM 99_RANCH",
+        syntax_error("IGNORED MESSAGE", Position::at(1, 23))
+    )]
+    fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
+        let actual = recognize_partiql(input);
+        match (expected, actual) {
+            (
+                Err(ParserError::SyntaxError {
+                    position: expected_position,
+                    ..
+                }),
+                Err(ParserError::SyntaxError {
+                    position: actual_position,
+                    ..
+                }),
+            ) => {
+                // just compare the positions for syntax errors...
+                assert_eq!(expected_position, actual_position)
             }
-            _ => panic!("Expected Syntax Error"),
-        };
+            (expected, actual) => {
+                assert_eq!(expected, actual);
+            }
+        }
         Ok(())
     }
 }
