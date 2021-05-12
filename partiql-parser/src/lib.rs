@@ -21,7 +21,7 @@
 //!     // get the parsed variant of the token
 //!     match first.content() {
 //!         Keyword(kw) => assert_eq!("SELECT", kw),
-//!         Identifier(_) | String(_) => panic!("Didn't get a keyword!"),
+//!         Identifier(_) | StringLiteral(_) => panic!("Didn't get a keyword!"),
 //!     }
 //!     // the entire text of a token can be fetched--which looks the roughly the
 //!     // same for a keyword.
@@ -30,7 +30,7 @@
 //!     let second = scanner.next_token()?;
 //!     // get the parsed variant of the token
 //!     match second.content() {
-//!         String(text) => assert_eq!("🦄💩", text),
+//!         StringLiteral(text) => assert_eq!("🦄💩", text),
 //!         Keyword(_) | Identifier(_) => panic!("Didn't get a string literal!"),
 //!     }
 //!     // the other thing we can do is get line/column information from a token

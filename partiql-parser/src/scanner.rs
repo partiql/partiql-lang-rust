@@ -21,7 +21,7 @@ pub enum Content<'val> {
     /// An identifier.  Contains the slice for the text of the identifier.
     Identifier(Cow<'val, str>),
     /// A string literal.  Contains the slice for the content of the literal.
-    String(Cow<'val, str>),
+    StringLiteral(Cow<'val, str>),
     // TODO things like literals, punctuation, etc.
 }
 
@@ -136,7 +136,7 @@ impl<'val> PartiQLScanner<'val> {
 
         let content = match pair.as_rule() {
             Rule::Keyword => Content::Keyword(text.to_uppercase().into()),
-            Rule::String => Content::String(normalize_string_lit(pair.as_str())),
+            Rule::String => Content::StringLiteral(normalize_string_lit(pair.as_str())),
             Rule::Identifier => {
                 let ident_pair = pair.into_inner().exactly_one()?;
                 match ident_pair.as_rule() {
