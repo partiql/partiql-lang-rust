@@ -327,7 +327,7 @@ mod test {
         "    'boo'   '''┬─┬''ノ( º _ ºノ)'",
         vec![
             Ok(Token {
-                content: Content::String("boo".into()),
+                content: Content::StringLiteral("boo".into()),
                 start: LineAndColumn::at(1, 5),
                 end: LineAndColumn::at(1, 10),
                 text: "'boo'",
@@ -337,7 +337,7 @@ mod test {
                 }
             }),
             Ok(Token {
-                content: Content::String("'┬─┬'ノ( º _ ºノ)".into()),
+                content: Content::StringLiteral("'┬─┬'ノ( º _ ºノ)".into()),
                 start: LineAndColumn::at(1, 13),
                 end: LineAndColumn::at(1, 32),
                 text: "'''┬─┬''ノ( º _ ºノ)'",
@@ -363,7 +363,7 @@ mod test {
                 }
             }),
             Ok(Token {
-                content: Content::String("✨✨✨".into()),
+                content: Content::StringLiteral("✨✨✨".into()),
                 start: LineAndColumn::at(1, 8),
                 end: LineAndColumn::at(1, 13),
                 text: "'✨✨✨'",
