@@ -11,7 +11,14 @@ This is a collection of crates to provide Rust support for the [PartiQL][partiql
 ***The crates in this repository are considered experimental, under active/early development,
 and APIs are subject to change.***
 
-This project uses [workspaces][workspaces] to manage the crates in this repository.
+This project uses [workspaces][workspaces] to manage the crates in this repository.  The `partiql` crate is intended
+to be the crate that exports all the relevant `partiql-*` sub-crate functionality.  It is factored in this way
+to make applications needing only some sub-component of the PartiQL implementation possible (e.g. an application
+that only requires the PartiQL parser can depend on `partiql-parser` directly).
+
+Due to the lack of namespacing in [crates.io][crates], we have published `0.0.0` versions for the sub-crates we know
+we will need.  A crate with a version `0.1.0` or higher, should have real, albeit potentially very experimental and/or
+early implementations.
 
 ## Security
 
@@ -23,3 +30,4 @@ This project is licensed under the Apache-2.0 License.
 
 [partiql]: https://partiql.org/
 [workspaces]: https://doc.rust-lang.org/stable/cargo/reference/workspaces.html
+[crates]: https://crates.io/policies
