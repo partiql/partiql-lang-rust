@@ -16,7 +16,7 @@ pub enum Position {
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Position::Unknown => write!(f, "UNKNOWN POSITION"),
+            Position::Unknown => write!(f, "unknown position"),
             Position::At { line, column } => write!(f, "line {}, column {}", *line, *column),
         }
     }
@@ -73,7 +73,7 @@ mod tests {
     )]
     #[case::syntax_error_no_pos(
         ParserError::syntax_error("Moo", Position::Unknown),
-        "Syntax Error: Moo (UNKNOWN POSITION)"
+        "Syntax Error: Moo (unknown position)"
     )]
     fn display(#[case] error: ParserError, #[case] expected: &str) {
         let message = format!("{}", error);
