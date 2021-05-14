@@ -32,8 +32,8 @@
 //!         Keyword(kw) => assert_eq!("FROM", kw),
 //!     }
 //!     // the other thing we can do is get line/column information from a token
-//!     assert_eq!(LineAndColumn::at(1, 8), second.start_loc());
-//!     assert_eq!(LineAndColumn::at(1, 12), second.end_loc());
+//!     assert_eq!(LineAndColumn::at(1, 8), second.start());
+//!     assert_eq!(LineAndColumn::at(1, 12), second.end());
 //!
 //!     // this API is built on immutable slices, so we can restart scanning from any token
 //!     scanner = first.into();

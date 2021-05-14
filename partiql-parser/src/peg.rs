@@ -28,7 +28,7 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
                 if let Some(other_pair) = self.next() {
                     syntax_error(
                         format!("Expected one token pair, got: {:?}, {:?}", pair, other_pair),
-                        pair.start_loc().into(),
+                        pair.start().into(),
                     )?;
                 }
                 Ok(pair)
@@ -44,20 +44,20 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
 /// Extension methods for working with [`Pair`].
 pub(crate) trait PairExt<'val, R: RuleType> {
     /// Translates the start position of the [`Pair`] into a [`LineAndColumn`].
-    fn start_loc(&self) -> LineAndColumn;
+    fn start(&self) -> LineAndColumn;
 
     /// Translates the end position of the [`Pair`] into a [`LineAndColumn`].
-    fn end_loc(&self) -> LineAndColumn;
+    fn end(&self) -> LineAndColumn;
 }
 
 impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
     #[inline]
-    fn start_loc(&self) -> LineAndColumn {
+    fn start(&self) -> LineAndColumn {
         self.as_span().start_pos().line_col().into()
     }
 
     #[inline]
-    fn end_loc(&self) -> LineAndColumn {
+    fn end(&self) -> LineAndColumn {
         self.as_span().end_pos().line_col().into()
     }
 }

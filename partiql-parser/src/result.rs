@@ -34,6 +34,7 @@ impl LineAndColumn {
     /// ## Examples
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// // we're not repositioning anything!
     /// assert_eq!(
     ///     LineAndColumn::at(1, 1),
     ///     LineAndColumn::at(1, 1).position_from(LineAndColumn::at(1, 1))
@@ -42,6 +43,7 @@ impl LineAndColumn {
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// // same here, we're really at the origin
     /// assert_eq!(
     ///     LineAndColumn::at(1, 2),
     ///     LineAndColumn::at(1, 2).position_from(LineAndColumn::at(1, 1))
@@ -50,6 +52,7 @@ impl LineAndColumn {
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// // same line from origin, adjust only the column
     /// assert_eq!(
     ///     LineAndColumn::at(5, 10),
     ///     LineAndColumn::at(1, 4).position_from(LineAndColumn::at(5, 7))
@@ -58,6 +61,7 @@ impl LineAndColumn {
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// // we're moving lines, adjust the line and take the target column as-is
     /// assert_eq!(
     ///     LineAndColumn::at(21, 2),
     ///     LineAndColumn::at(20, 2).position_from(LineAndColumn::at(2, 15))

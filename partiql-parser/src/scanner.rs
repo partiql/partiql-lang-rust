@@ -57,9 +57,9 @@ pub struct Token<'val> {
     /// The underlying value of the token.
     content: Content<'val>,
     /// Start location for this token.
-    start_location: LineAndColumn,
+    start: LineAndColumn,
     /// End location for this token.
-    end_location: LineAndColumn,
+    end: LineAndColumn,
     /// Slice from the input containing the whole token.
     text: &'val str,
     /// The remaining unscanned value after this token.
@@ -73,13 +73,13 @@ impl<'val> Token<'val> {
     }
 
     /// Returns the location of where this token starts in the input.
-    pub fn start_loc(&self) -> LineAndColumn {
-        self.start_location
+    pub fn start(&self) -> LineAndColumn {
+        self.start
     }
 
     /// Returns the location of where this token ends in the input.
-    pub fn end_loc(&self) -> LineAndColumn {
-        self.end_location
+    pub fn end(&self) -> LineAndColumn {
+        self.end
     }
 
     /// Returns the slice of the input encompassing the entire token.
@@ -88,7 +88,7 @@ impl<'val> Token<'val> {
     }
 
     /// Returns the remainder of the input after this token.
-    pub fn rem(&self) -> &str {
+    pub fn text_after(&self) -> &str {
         self.remainder.input
     }
 }
@@ -110,28 +110,21 @@ impl<'val> PartiQLScanner<'val> {
         // the scanner rule is expected to return a single node
         let pair: Pair<'val, Rule> =
             PartiQLParser::parse(Rule::Scanner, self.remainder.input)?.exactly_one()?;
-        let start_location = pair.start_loc().position_from(self.remainder.offset);
-        let end_location = pair.end_loc().position_from(self.remainder.offset);
+        let start = pair.start().position_from(self.remainder.offset);
+        let end = pair.end().position_from(self.remainder.offset);
         let text = pair.as_str();
         let start_off = pair.as_span().start();
-        self.remainder = self
-            .remainder
-            .consume(start_off + text.len(), pair.end_loc());
+        self.remainder = self.remainder.consume(start_off + text.len(), pair.end());
 
         let content = match pair.as_rule() {
             Rule::Keyword => Content::Keyword(text),
-            _ => {
-                return syntax_error(
-                    format!("Unexpected rule: {:?}", pair),
-                    pair.start_loc().into(),
-                )
-            }
+            _ => return syntax_error(format!("Unexpected rule: {:?}", pair), pair.start().into()),
         };
 
         Ok(Token {
             content,
-            start_location,
-            end_location,
+            start,
+            end,
             text,
             remainder: self.remainder,
         })
@@ -182,8 +175,8 @@ mod test {
         vec![
             Ok(Token {
                 content: Content::Keyword("SELECT"),
-                start_location: LineAndColumn::at(1, 3),
-                end_location: LineAndColumn::at(1, 9),
+                start: LineAndColumn::at(1, 3),
+                end: LineAndColumn::at(1, 9),
                 text: "SELECT",
                 remainder: Remainder {
                     input: "  ",
@@ -198,8 +191,8 @@ mod test {
         vec![
             Ok(Token {
                 content: Content::Keyword("CASE"),
-                start_location: LineAndColumn::at(1, 3),
-                end_location: LineAndColumn::at(1, 7),
+                start: LineAndColumn::at(1, 3),
+                end: LineAndColumn::at(1, 7),
                 text: "CASE",
                 remainder: Remainder {
                     input: "\tFROM\n \x0B\x0CWHERE",
@@ -208,8 +201,8 @@ mod test {
             }),
             Ok(Token {
                 content: Content::Keyword("FROM"),
-                start_location: LineAndColumn::at(1, 8),
-                end_location: LineAndColumn::at(1, 12),
+                start: LineAndColumn::at(1, 8),
+                end: LineAndColumn::at(1, 12),
                 text: "FROM",
                 remainder: Remainder {
                     input: "\n \x0B\x0CWHERE",
@@ -218,8 +211,8 @@ mod test {
             }),
             Ok(Token {
                 content: Content::Keyword("WHERE"),
-                start_location: LineAndColumn::at(2, 4),
-                end_location: LineAndColumn::at(2, 9),
+                start: LineAndColumn::at(2, 4),
+                end: LineAndColumn::at(2, 9),
                 text: "WHERE",
                 remainder: Remainder {
                     input: "",
@@ -241,20 +234,12 @@ mod test {
                     assert_eq!(expected_tok, actual_tok);
                     // make sure accessors do what we expect
                     assert_eq!(expected_tok.content, actual_tok.content(), "Content NE");
-                    assert_eq!(
-                        expected_tok.start_location,
-                        actual_tok.start_loc(),
-                        "Start Location NE"
-                    );
-                    assert_eq!(
-                        expected_tok.end_location,
-                        actual_tok.end_loc(),
-                        "End Location NE"
-                    );
+                    assert_eq!(expected_tok.start, actual_tok.start(), "Start Location NE");
+                    assert_eq!(expected_tok.end, actual_tok.end(), "End Location NE");
                     assert_eq!(expected_tok.text, actual_tok.text(), "Text NE");
                     assert_eq!(
                         expected_tok.remainder.input,
-                        actual_tok.rem(),
+                        actual_tok.text_after(),
                         "Remainder NE"
                     );
                 }
