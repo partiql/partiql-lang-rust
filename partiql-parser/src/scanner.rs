@@ -16,7 +16,7 @@ use pest::Parser;
 /// The parsed content associated with a [`Token`] that has been scanned.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Content<'val> {
-    /// A PartiQL keyword.  Contains the slice for
+    /// A PartiQL keyword. Contains a `str` reference to the UTF8 input bytes that comprise the keyword.
     Keyword(&'val str),
     // TODO things like literals, punctuation, etc.
 }
@@ -30,7 +30,7 @@ pub enum Content<'val> {
 struct Remainder<'val> {
     /// The remainder of text to scan.
     input: &'val str,
-    /// The offset in the input translate locations from
+    /// The offset in the input to translate locations from
     offset: LineAndColumn,
 }
 
