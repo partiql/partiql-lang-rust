@@ -28,7 +28,7 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
                 if let Some(other_pair) = self.next() {
                     syntax_error(
                         format!("Expected one token pair, got: {:?}, {:?}", pair, other_pair),
-                        pair.start().into(),
+                        pair.start()?.into(),
                     )?;
                 }
                 Ok(pair)
@@ -44,21 +44,21 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
 /// Extension methods for working with [`Pair`].
 pub(crate) trait PairExt<'val, R: RuleType> {
     /// Translates the start position of the [`Pair`] into a [`LineAndColumn`].
-    fn start(&self) -> LineAndColumn;
+    fn start(&self) -> ParserResult<LineAndColumn>;
 
     /// Translates the end position of the [`Pair`] into a [`LineAndColumn`].
-    fn end(&self) -> LineAndColumn;
+    fn end(&self) -> ParserResult<LineAndColumn>;
 }
 
 impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
     #[inline]
-    fn start(&self) -> LineAndColumn {
-        self.as_span().start_pos().line_col().into()
+    fn start(&self) -> ParserResult<LineAndColumn> {
+        self.as_span().start_pos().line_col().try_into()
     }
 
     #[inline]
-    fn end(&self) -> LineAndColumn {
-        self.as_span().end_pos().line_col().into()
+    fn end(&self) -> ParserResult<LineAndColumn> {
+        self.as_span().end_pos().line_col().try_into()
     }
 }
 

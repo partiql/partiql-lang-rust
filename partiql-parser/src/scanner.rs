@@ -110,15 +110,15 @@ impl<'val> PartiQLScanner<'val> {
         // the scanner rule is expected to return a single node
         let pair: Pair<'val, Rule> =
             PartiQLParser::parse(Rule::Scanner, self.remainder.input)?.exactly_one()?;
-        let start = pair.start().position_from(self.remainder.offset);
-        let end = pair.end().position_from(self.remainder.offset);
+        let start = pair.start()?.position_from(self.remainder.offset);
+        let end = pair.end()?.position_from(self.remainder.offset);
         let text = pair.as_str();
         let start_off = pair.as_span().start();
-        self.remainder = self.remainder.consume(start_off + text.len(), pair.end());
+        self.remainder = self.remainder.consume(start_off + text.len(), pair.end()?);
 
         let content = match pair.as_rule() {
             Rule::Keyword => Content::Keyword(text),
-            _ => return syntax_error(format!("Unexpected rule: {:?}", pair), pair.start().into()),
+            _ => return syntax_error(format!("Unexpected rule: {:?}", pair), pair.start()?.into()),
         };
 
         Ok(Token {
@@ -143,6 +143,9 @@ impl<'val> Scanner<'val> for PartiQLScanner<'val> {
                 };
                 ParserError::syntax_error(message, position)
             }
+            // other errors that don't have position information just pass up as position is not
+            // relevant...
+            error => error,
         })
     }
 }

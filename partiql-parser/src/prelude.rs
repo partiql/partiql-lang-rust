@@ -8,3 +8,5 @@ pub use crate::result::ParserError;
 pub use crate::result::ParserResult;
 pub use crate::result::Position;
 pub use crate::scanner::Scanner;
+pub use std::convert::TryFrom;
+pub use std::convert::TryInto;

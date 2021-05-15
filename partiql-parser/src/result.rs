@@ -3,6 +3,7 @@
 //! [`Error`] and [`Result`] types for parsing PartiQL.
 
 use pest::error::{ErrorVariant, LineColLocation};
+use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Formatter;
 use thiserror::Error;
@@ -14,20 +15,42 @@ use thiserror::Error;
 /// ## Example
 /// ```
 /// # use partiql_parser::prelude::*;
-/// println!("Beginning of a document: {}", LineAndColumn::at(1, 1));
+/// println!("Beginning of a document: {}", LineAndColumn::try_at(1, 1).unwrap());
 /// ```
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct LineAndColumn(pub usize, pub usize);
+pub struct LineAndColumn(usize, usize);
 
 impl LineAndColumn {
+    /// Constructs at [`LineAndColumn`] without verifying 1-position invariant.
+    #[inline]
+    pub(crate) fn at(line: usize, column: usize) -> Self {
+        Self(line, column)
+    }
+
     /// Constructs a [`LineAndColumn`].
     ///
-    /// Note that this function will panic if `line` or `column` is zero.
+    /// Note that this function will return `Err` if `line` or `column` is zero.
     #[inline]
-    pub fn at(line: usize, column: usize) -> Self {
-        assert_ne!(0, line);
-        assert_ne!(0, column);
-        Self(line, column)
+    pub fn try_at(line: usize, column: usize) -> ParserResult<Self> {
+        if line == 0 || column == 0 {
+            invalid_argument(format!(
+                "Cannot create position at line {}, column {}",
+                line, column
+            ))?;
+        }
+        Ok(Self(line, column))
+    }
+
+    /// Returns the line associated with this [`LineAndColumn`].
+    #[inline]
+    pub fn line(&self) -> usize {
+        self.0
+    }
+
+    /// Returns the column associated with this [`LineAndColumn`].
+    #[inline]
+    pub fn column(&self) -> usize {
+        self.1
     }
 
     /// Returns a [`LineAndColumn`] that repositions this position relative
@@ -38,38 +61,50 @@ impl LineAndColumn {
     /// ## Examples
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// # fn main() -> ParserResult<()> {
     /// // we're not repositioning anything!
     /// assert_eq!(
-    ///     LineAndColumn::at(1, 1),
-    ///     LineAndColumn::at(1, 1).position_from(LineAndColumn::at(1, 1))
+    ///     LineAndColumn::try_at(1, 1)?,
+    ///     LineAndColumn::try_at(1, 1)?.position_from(LineAndColumn::try_at(1, 1)?)
     /// );
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// # fn main() -> ParserResult<()> {
     /// // same here, we're really at the origin
     /// assert_eq!(
-    ///     LineAndColumn::at(1, 2),
-    ///     LineAndColumn::at(1, 2).position_from(LineAndColumn::at(1, 1))
+    ///     LineAndColumn::try_at(1, 2)?,
+    ///     LineAndColumn::try_at(1, 2)?.position_from(LineAndColumn::try_at(1, 1)?)
     /// );
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// # fn main() -> ParserResult<()> {
     /// // same line from origin, adjust only the column
     /// assert_eq!(
-    ///     LineAndColumn::at(5, 10),
-    ///     LineAndColumn::at(1, 4).position_from(LineAndColumn::at(5, 7))
+    ///     LineAndColumn::try_at(5, 10)?,
+    ///     LineAndColumn::try_at(1, 4)?.position_from(LineAndColumn::try_at(5, 7)?)
     /// );
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// ```
     /// # use partiql_parser::prelude::*;
+    /// # fn main() -> ParserResult<()> {
     /// // we're moving lines, adjust the line and take the target column as-is
     /// assert_eq!(
-    ///     LineAndColumn::at(21, 2),
-    ///     LineAndColumn::at(20, 2).position_from(LineAndColumn::at(2, 15))
+    ///     LineAndColumn::try_at(21, 2)?,
+    ///     LineAndColumn::try_at(20, 2)?.position_from(LineAndColumn::try_at(2, 15)?)
     /// );
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn position_from(self, location: LineAndColumn) -> Self {
         match (location, self) {
@@ -77,24 +112,26 @@ impl LineAndColumn {
                 let diff_line = dest_line - 1;
                 if diff_line > 0 {
                     // we're moving lines, adjust the line and take the target column as-is
-                    LineAndColumn::at(base_line + diff_line, dest_column)
+                    Self(base_line + diff_line, dest_column)
                 } else {
                     // same line from base, adjust only the column
                     let diff_column = dest_column - 1;
-                    LineAndColumn::at(base_line, base_column + diff_column)
+                    Self(base_line, base_column + diff_column)
                 }
             }
         }
     }
 }
 
-impl From<(usize, usize)> for LineAndColumn {
+impl TryFrom<(usize, usize)> for LineAndColumn {
+    type Error = ParserError;
+
     /// Constructs a [`LineAndColumn`] from a pair.
     ///
-    /// This function will panic if the `line` or `column` is zero.
-    fn from(line_and_column: (usize, usize)) -> Self {
+    /// This function will return `Err` if `line` or `column` is zero.
+    fn try_from(line_and_column: (usize, usize)) -> Result<Self, Self::Error> {
         let (line, column) = line_and_column;
-        Self::at(line, column)
+        Self::try_at(line, column)
     }
 }
 
@@ -116,10 +153,13 @@ pub enum Position {
 impl Position {
     /// Shorthand for creating a [`Position::At`] variant.
     ///
-    /// Note that this will panic if `line` or `column` is zero.
+    /// Note that this will return [`Position::Unknown`] if `line` or `column` is zero.
     #[inline]
     pub fn at(line: usize, column: usize) -> Self {
-        Self::At(LineAndColumn::at(line, column))
+        match LineAndColumn::try_at(line, column) {
+            Ok(location) => Self::At(location),
+            Err(_) => Self::Unknown,
+        }
     }
 }
 
@@ -146,6 +186,10 @@ pub enum ParserError {
     /// Indicates that there was a problem with syntax.
     #[error("Syntax Error: {message} ({position})")]
     SyntaxError { message: String, position: Position },
+
+    /// Indicates that there is a problem with run-time violation of some API.
+    #[error("Invalid Argument: {message}")]
+    InvalidArgument { message: String },
 }
 
 impl ParserError {
@@ -157,12 +201,26 @@ impl ParserError {
             position,
         }
     }
+
+    /// Convenience function to crate a [`InvalidArgument`](ParserError::InvalidArgument).
+    #[inline]
+    pub fn invalid_argument<S: Into<String>>(message: S) -> Self {
+        Self::InvalidArgument {
+            message: message.into(),
+        }
+    }
 }
 
-/// Convenience function to create a `Err([SyntaxError](ParserError::SyntaxError))`.
+/// Convenience function to create an `Err([SyntaxError](ParserError::SyntaxError))`.
 #[inline]
 pub fn syntax_error<T, S: Into<String>>(message: S, position: Position) -> ParserResult<T> {
     Err(ParserError::syntax_error(message, position))
+}
+
+/// Convenience function to crate an `Err([InvalidArgument](ParserError::InvalidArgument))`.
+#[inline]
+pub fn invalid_argument<T, S: Into<String>>(message: S) -> ParserResult<T> {
+    Err(ParserError::invalid_argument(message))
 }
 
 impl<R> From<pest::error::Error<R>> for ParserError
@@ -207,20 +265,29 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn bad_position() {
-        Position::at(0, 0);
+    fn bad_position() -> ParserResult<()> {
+        match Position::at(0, 0) {
+            Position::Unknown => {}
+            position => panic!("Bad position {:?}", position),
+        }
+        Ok(())
     }
 
     #[test]
-    #[should_panic]
-    fn bad_line_and_column() {
-        LineAndColumn::at(0, 0);
+    fn bad_line_and_column() -> ParserResult<()> {
+        match LineAndColumn::try_at(0, 0) {
+            Err(ParserError::InvalidArgument { .. }) => {}
+            result => panic!("Bad result {:?}", result),
+        }
+        Ok(())
     }
 
     #[test]
-    #[should_panic]
-    fn bad_line_and_column_from_pair() {
-        LineAndColumn::from((0, 0));
+    fn bad_line_and_column_from_pair() -> ParserResult<()> {
+        match LineAndColumn::try_from((0, 0)) {
+            Err(ParserError::InvalidArgument { .. }) => {}
+            result => panic!("Bad result {:?}", result),
+        }
+        Ok(())
     }
 }
