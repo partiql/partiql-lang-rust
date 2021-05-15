@@ -21,8 +21,12 @@ pub struct LineAndColumn(pub usize, pub usize);
 
 impl LineAndColumn {
     /// Constructs a [`LineAndColumn`].
+    ///
+    /// Note that this function will panic if `line` or `column` is zero.
     #[inline]
     pub fn at(line: usize, column: usize) -> Self {
+        assert_ne!(0, line);
+        assert_ne!(0, column);
         Self(line, column)
     }
 
@@ -85,6 +89,9 @@ impl LineAndColumn {
 }
 
 impl From<(usize, usize)> for LineAndColumn {
+    /// Constructs a [`LineAndColumn`] from a pair.
+    ///
+    /// This function will panic if the `line` or `column` is zero.
     fn from(line_and_column: (usize, usize)) -> Self {
         let (line, column) = line_and_column;
         Self::at(line, column)
@@ -108,6 +115,8 @@ pub enum Position {
 
 impl Position {
     /// Shorthand for creating a [`Position::At`] variant.
+    ///
+    /// Note that this will panic if `line` or `column` is zero.
     #[inline]
     pub fn at(line: usize, column: usize) -> Self {
         Self::At(LineAndColumn::at(line, column))
@@ -195,5 +204,23 @@ mod tests {
     fn display(#[case] error: ParserError, #[case] expected: &str) {
         let message = format!("{}", error);
         assert_eq!(expected, message);
+    }
+
+    #[test]
+    #[should_panic]
+    fn bad_position() {
+        Position::at(0, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn bad_line_and_column() {
+        LineAndColumn::at(0, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn bad_line_and_column_from_pair() {
+        LineAndColumn::from((0, 0));
     }
 }
