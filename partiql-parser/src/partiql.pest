@@ -14,8 +14,38 @@ Scanner = _{ SOI ~ Token }
 Token = _{
       Keyword
     | String
+    | Number
     | Identifier
 }
+
+//
+// Numeric Literals
+//
+
+Number = ${
+      DecimalExp
+    | Decimal
+    | Integer
+}
+
+DecimalExp = {
+    Decimal ~ ("e" | "E") ~ Integer
+}
+
+Decimal = {
+    Integer? ~ "." ~ Fraction
+}
+
+Fraction = {
+    Digit*
+}
+
+Integer = {
+   Sign? ~ Digit+
+}
+
+Sign = _{ "+" | "-" }
+Digit = _{ '0'..'9' }
 
 //
 // String Literals
@@ -40,7 +70,7 @@ NonQuotedIdentifier = @{
 
 NonQuotedIdentifierStart = _{ "_" | "$" | 'a'..'z' | 'A'..'Z' }
 
-NonQuotedIdentifierCont = _{ NonQuotedIdentifierStart | '0'..'9' }
+NonQuotedIdentifierCont = _{ NonQuotedIdentifierStart | Digit }
 
 QuotedIdentifier = @{ "\"" ~ QuotedIdentifierContent* ~ "\"" }
 

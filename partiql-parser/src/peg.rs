@@ -46,8 +46,11 @@ pub(crate) trait PairExt<'val, R: RuleType> {
     /// Translates the end position of the [`Pair`] into a [`LineAndColumn`].
     fn end(&self) -> ParserResult<LineAndColumn>;
 
-    /// Returns an `Err` with a syntax error from the pair
-    fn syntax_error<T>(&self) -> ParserResult<T>;
+    /// Returns an `Err` with a syntax error from the unexpected pair.
+    fn unexpected<T>(&self) -> ParserResult<T>;
+
+    /// Returns an `Err` with a syntax error from this pair with a message.
+    fn syntax_error<T, S: Into<String>>(&self, message: S) -> ParserResult<T>;
 }
 
 impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
@@ -61,8 +64,12 @@ impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
         self.as_span().end_pos().line_col().try_into()
     }
 
-    fn syntax_error<T>(&self) -> ParserResult<T> {
-        syntax_error(format!("Unexpected rule: {:?}", self), self.start()?.into())
+    fn unexpected<T>(&self) -> ParserResult<T> {
+        self.syntax_error(format!("Unexpected rule: {:?}", self))
+    }
+
+    fn syntax_error<T, S: Into<String>>(&self, message: S) -> ParserResult<T> {
+        syntax_error(message, self.start()?.into())
     }
 }
 
@@ -86,7 +93,7 @@ mod tests {
     #[rstest]
     #[case::simple("select \"🍦\" fRoM \"🚽\" WHERE is_defined", Ok(()))]
     #[case::error(
-        "SELECT SOMETHING FROM 99_RANCH",
+        "SELECT SOMETHING FROM 💩",
         syntax_error("IGNORED MESSAGE", Position::at(1, 23))
     )]
     fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
