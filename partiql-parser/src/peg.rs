@@ -69,7 +69,10 @@ impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
     }
 
     fn syntax_error<T, S: Into<String>>(&self, message: S) -> ParserResult<T> {
-        syntax_error(message, self.start()?.into())
+        let position = self
+            .start()
+            .map_or(Position::Unknown, |location| location.into());
+        syntax_error(message, position)
     }
 }
 

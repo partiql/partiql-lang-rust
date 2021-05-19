@@ -40,6 +40,9 @@ Fraction = {
     Digit*
 }
 
+// XXX this explicitly supports arbitrary zero prefixing in various places
+//     which is part of the SQL grammar and also supported in implementations
+//     like Postgres/SQLite/MySQL/etc.
 Integer = {
    Sign? ~ Digit+
 }
