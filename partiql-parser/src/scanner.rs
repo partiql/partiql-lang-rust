@@ -379,20 +379,20 @@ mod test {
         }};
         // termination case -- no more chunks to process
         (@inner $test_case:ident) => {};
-        // final whitespace without a terminating ',' -- just delegate to the general form
+        // final whitespace chunk without a terminating ',' -- just delegate to the general form
         (@inner $test_case:ident $lit:literal) => {
             scanner_test_case!(@inner $test_case $lit ,)
         };
-        // final whitespace without a terminating ',' -- just delegate to the general form
+        // final token chunk without a terminating ',' -- just delegate to the general form
         (@inner $test_case:ident $lit:literal => $expr:expr) => {
             scanner_test_case!(@inner $test_case $lit => $expr ,)
         };
-        // add whitespace for a chunk and continue processing
+        // add whitespace for a chunk of string and continue...
         (@inner $test_case:ident $lit:literal , $($tail:tt)*) => {
             $test_case.add_text($lit);
             scanner_test_case!(@inner $test_case $($tail)*)
         };
-        // add a token for a chunk associated with some expected content
+        // add a token for a chunk of string associated with some expected content and continue...
         (@inner $test_case:ident $lit:literal => $expr:expr , $($tail:tt)*) => {
             $test_case.add_token($lit, $expr);
             scanner_test_case!(@inner $test_case $($tail)*)
