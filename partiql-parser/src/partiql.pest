@@ -4,266 +4,551 @@ WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
 //      working with Pest and its APIs.
 
 // Entry point for full query parsing
-Query = _{ SOI ~ Keyword+ ~ EOI}
+Query = _{ SOI ~ Token+ ~ EOI}
 
 // Entry point for query "scanning"
 // Note that this is factored this way to support an iteration style API
 // where we can call back into this rule on subsequent input.
-Scanner = _{ SOI ~ Keyword }
+Scanner = _{ SOI ~ Token }
 
-Keyword = { AllKeywords }
-
-AllKeywords = _{
-      SqlKeywords
-    | PartiqlKeywords
+Token = _{
+      Keyword
+    | String
+    | Identifier
 }
 
-SqlKeywords = _{
-      ^"absolute"
-    | ^"action"
-    | ^"add"
-    | ^"all"
-    | ^"allocate"
-    | ^"alter"
-    | ^"and"
-    | ^"any"
-    | ^"are"
-    | ^"as"
-    | ^"asc"
-    | ^"assertion"
-    | ^"at"
-    | ^"authorization"
-    | ^"avg"
-    | ^"begin"
-    | ^"between"
-    | ^"bit"
-    | ^"bit_length"
-    | ^"by"
-    | ^"cascade"
-    | ^"cascaded"
-    | ^"case"
-    | ^"cast"
-    | ^"catalog"
-    | ^"char"
-    | ^"character"
-    | ^"character_length"
-    | ^"char_length"
-    | ^"check"
-    | ^"close"
-    | ^"coalesce"
-    | ^"collate"
-    | ^"collation"
-    | ^"column"
-    | ^"commit"
-    | ^"connect"
-    | ^"connection"
-    | ^"constraint"
-    | ^"constraints"
-    | ^"continue"
-    | ^"convert"
-    | ^"corresponding"
-    | ^"count"
-    | ^"create"
-    | ^"cross"
-    | ^"current"
-    | ^"current_date"
-    | ^"current_time"
-    | ^"current_timestamp"
-    | ^"current_user"
-    | ^"cursor"
-    | ^"date"
-    | ^"deallocate"
-    | ^"dec"
-    | ^"decimal"
-    | ^"declare"
-    | ^"default"
-    | ^"deferrable"
-    | ^"deferred"
-    | ^"delete"
-    | ^"desc"
-    | ^"describe"
-    | ^"descriptor"
-    | ^"diagnostics"
-    | ^"disconnect"
-    | ^"distinct"
-    | ^"domain"
-    | ^"double"
-    | ^"drop"
-    | ^"else"
-    | ^"end"
-    | ^"end-exec"
-    | ^"escape"
-    | ^"except"
-    | ^"exception"
-    | ^"exec"
-    | ^"execute"
-    | ^"exists"
-    | ^"external"
-    | ^"extract"
-    | ^"date_add"
-    | ^"date_diff"
-    | ^"false"
-    | ^"fetch"
-    | ^"first"
-    | ^"float"
-    | ^"for"
-    | ^"foreign"
-    | ^"found"
-    | ^"from"
-    | ^"full"
-    | ^"get"
-    | ^"global"
-    | ^"go"
-    | ^"goto"
-    | ^"grant"
-    | ^"group"
-    | ^"having"
-    | ^"identity"
-    | ^"immediate"
-    | ^"in"
-    | ^"indicator"
-    | ^"initially"
-    | ^"inner"
-    | ^"input"
-    | ^"insensitive"
-    | ^"insert"
-    | ^"int"
-    | ^"integer"
-    | ^"intersect"
-    | ^"interval"
-    | ^"into"
-    | ^"is"
-    | ^"isolation"
-    | ^"join"
-    | ^"key"
-    | ^"language"
-    | ^"last"
-    | ^"left"
-    | ^"level"
-    | ^"like"
-    | ^"local"
-    | ^"lower"
-    | ^"match"
-    | ^"max"
-    | ^"min"
-    | ^"module"
-    | ^"names"
-    | ^"national"
-    | ^"natural"
-    | ^"nchar"
-    | ^"next"
-    | ^"no"
-    | ^"not"
-    | ^"null"
-    | ^"nullif"
-    | ^"numeric"
-    | ^"octet_length"
-    | ^"of"
-    | ^"on"
-    | ^"only"
-    | ^"open"
-    | ^"option"
-    | ^"or"
-    | ^"order"
-    | ^"outer"
-    | ^"output"
-    | ^"overlaps"
-    | ^"pad"
-    | ^"partial"
-    | ^"position"
-    | ^"precision"
-    | ^"prepare"
-    | ^"preserve"
-    | ^"primary"
-    | ^"prior"
-    | ^"privileges"
-    | ^"procedure"
-    | ^"public"
-    | ^"read"
-    | ^"real"
-    | ^"references"
-    | ^"relative"
-    | ^"restrict"
-    | ^"revoke"
-    | ^"right"
-    | ^"rollback"
-    | ^"rows"
-    | ^"schema"
-    | ^"scroll"
-    | ^"section"
-    | ^"select"
-    | ^"session"
-    | ^"session_user"
-    | ^"set"
-    | ^"size"
-    | ^"smallint"
-    | ^"some"
-    | ^"space"
-    | ^"sql"
-    | ^"sqlcode"
-    | ^"sqlerror"
-    | ^"sqlstate"
-    | ^"substring"
-    | ^"sum"
-    | ^"system_user"
-    | ^"table"
-    | ^"temporary"
-    | ^"then"
-    | ^"time"
-    | ^"timestamp"
-    | ^"to"
-    | ^"transaction"
-    | ^"translate"
-    | ^"translation"
-    | ^"trim"
-    | ^"true"
-    | ^"union"
-    | ^"unique"
-    | ^"unknown"
-    | ^"update"
-    | ^"upper"
-    | ^"usage"
-    | ^"user"
-    | ^"using"
-    | ^"value"
-    | ^"values"
-    | ^"varchar"
-    | ^"varying"
-    | ^"view"
-    | ^"when"
-    | ^"whenever"
-    | ^"where"
-    | ^"with"
-    | ^"work"
-    | ^"write"
-    | ^"zone"
+//
+// String Literals
+//
+
+String = @{ "'" ~ StringContent* ~ "'"}
+
+StringContent = {
+      "''"
+    | !"'" ~ ANY
 }
 
-PartiqlKeywords = _{
-      ^"missing"
-    | ^"pivot"
-    | ^"unpivot"
-    | ^"limit"
-    | ^"tuple"
-    | ^"remove"
-    | ^"index"
-    | ^"conflict"
-    | ^"do"
-    | ^"nothing"
-    | ^"returning"
-    | ^"modified"
-    | ^"all"
-    | ^"new"
-    | ^"old"
-    | ^"let"
-    | ^"bool"
-    | ^"boolean"
-    | ^"string"
-    | ^"symbol"
-    | ^"clob"
-    | ^"blob"
-    | ^"struct"
-    | ^"list"
-    | ^"sexp"
-    | ^"bag"
+//
+// Identifiers
+//
+
+Identifier = { NonQuotedIdentifier | QuotedIdentifier }
+
+NonQuotedIdentifier = @{
+    !Keyword ~ NonQuotedIdentifierStart ~ NonQuotedIdentifierCont*
 }
+
+NonQuotedIdentifierStart = _{ "_" | "$" | 'a'..'z' | 'A'..'Z' }
+
+NonQuotedIdentifierCont = _{ NonQuotedIdentifierStart | '0'..'9' }
+
+QuotedIdentifier = @{ "\"" ~ QuotedIdentifierContent* ~ "\"" }
+
+QuotedIdentifierContent = {
+      "\"\""
+    | !"\"" ~ ANY
+}
+
+//
+// Keywords
+//
+
+Keyword = { SqlKeyword | PartiqlKeyword }
+
+SqlKeyword = _{
+      Absolute_
+    | Action_
+    | Add_
+    | All_
+    | Allocate_
+    | Alter_
+    | And_
+    | Any_
+    | Are_
+    | As_
+    | Asc_
+    | Assertion_
+    | At_
+    | Authorization_
+    | Avg_
+    | Begin_
+    | Between_
+    | Bit_
+    | BitLength_
+    | By_
+    | Cascade_
+    | Cascaded_
+    | Case_
+    | Cast_
+    | Catalog_
+    | Char_
+    | Character_
+    | CharacterLength_
+    | CharLength_
+    | Check_
+    | Close_
+    | Coalesce_
+    | Collate_
+    | Collation_
+    | Column_
+    | Commit_
+    | Connect_
+    | Connection_
+    | Constraint_
+    | Constraints_
+    | Continue_
+    | Convert_
+    | Corresponding_
+    | Count_
+    | Create_
+    | Cross_
+    | Current_
+    | CurrentDate_
+    | CurrentTime_
+    | CurrentTimestamp_
+    | CurrentUser_
+    | Cursor_
+    | Date_
+    | Deallocate_
+    | Dec_
+    | Decimal_
+    | Declare_
+    | Default_
+    | Deferrable_
+    | Deferred_
+    | Delete_
+    | Desc_
+    | Describe_
+    | Descriptor_
+    | Diagnostics_
+    | Disconnect_
+    | Distinct_
+    | Domain_
+    | Double_
+    | Drop_
+    | Else_
+    | End_
+    | EndExec_
+    | Escape_
+    | Except_
+    | Exception_
+    | Exec_
+    | Execute_
+    | Exists_
+    | External_
+    | Extract_
+    | DateAdd_
+    | DateDiff_
+    | False_
+    | Fetch_
+    | First_
+    | Float_
+    | For_
+    | Foreign_
+    | Found_
+    | From_
+    | Full_
+    | Get_
+    | Global_
+    | Go_
+    | Goto_
+    | Grant_
+    | Group_
+    | Having_
+    | Identity_
+    | Immediate_
+    | In_
+    | Indicator_
+    | Initially_
+    | Inner_
+    | Input_
+    | Insensitive_
+    | Insert_
+    | Int_
+    | Integer_
+    | Intersect_
+    | Interval_
+    | Into_
+    | Is_
+    | Isolation_
+    | Join_
+    | Key_
+    | Language_
+    | Last_
+    | Left_
+    | Level_
+    | Like_
+    | Local_
+    | Lower_
+    | Match_
+    | Max_
+    | Min_
+    | Module_
+    | Names_
+    | National_
+    | Natural_
+    | Nchar_
+    | Next_
+    | No_
+    | Not_
+    | Null_
+    | Nullif_
+    | Numeric_
+    | OctetLength_
+    | Of_
+    | On_
+    | Only_
+    | Open_
+    | Option_
+    | Or_
+    | Order_
+    | Outer_
+    | Output_
+    | Overlaps_
+    | Pad_
+    | Partial_
+    | Position_
+    | Precision_
+    | Prepare_
+    | Preserve_
+    | Primary_
+    | Prior_
+    | Privileges_
+    | Procedure_
+    | Public_
+    | Read_
+    | Real_
+    | References_
+    | Relative_
+    | Restrict_
+    | Revoke_
+    | Right_
+    | Rollback_
+    | Rows_
+    | Schema_
+    | Scroll_
+    | Section_
+    | Select_
+    | Session_
+    | SessionUser_
+    | Set_
+    | Size_
+    | Smallint_
+    | Some_
+    | Space_
+    | Sql_
+    | Sqlcode_
+    | Sqlerror_
+    | Sqlstate_
+    | Substring_
+    | Sum_
+    | SystemUser_
+    | Table_
+    | Temporary_
+    | Then_
+    | Time_
+    | Timestamp_
+    | To_
+    | Transaction_
+    | Translate_
+    | Translation_
+    | Trim_
+    | True_
+    | Union_
+    | Unique_
+    | Unknown_
+    | Update_
+    | Upper_
+    | Usage_
+    | User_
+    | Using_
+    | Value_
+    | Values_
+    | Varchar_
+    | Varying_
+    | View_
+    | When_
+    | Whenever_
+    | Where_
+    | With_
+    | Work_
+    | Write_
+    | Zone_
+}
+
+PartiqlKeyword = _{
+      Missing_
+    | Pivot_
+    | Unpivot_
+    | Limit_
+    | Tuple_
+    | Remove_
+    | Index_
+    | Conflict_
+    | Do_
+    | Nothing_
+    | Returning_
+    | Modified_
+    | All_
+    | New_
+    | Old_
+    | Let_
+    | Bool_
+    | Boolean_
+    | String_
+    | Symbol_
+    | Clob_
+    | Blob_
+    | Struct_
+    | List_
+    | Sexp_
+    | Bag_
+}
+
+//
+// Individual Keyword Definitions
+//
+
+Absolute_ = { ^"absolute" }
+Action_ = { ^"action" }
+Add_ = { ^"add" }
+All_ = { ^"all" }
+Allocate_ = { ^"allocate" }
+Alter_ = { ^"alter" }
+And_ = { ^"and" }
+Any_ = { ^"any" }
+Are_ = { ^"are" }
+As_ = { ^"as" }
+Asc_ = { ^"asc" }
+Assertion_ = { ^"assertion" }
+At_ = { ^"at" }
+Authorization_ = { ^"authorization" }
+Avg_ = { ^"avg" }
+Begin_ = { ^"begin" }
+Between_ = { ^"between" }
+Bit_ = { ^"bit" }
+BitLength_ = { ^"bit_length" }
+By_ = { ^"by" }
+Cascade_ = { ^"cascade" }
+Cascaded_ = { ^"cascaded" }
+Case_ = { ^"case" }
+Cast_ = { ^"cast" }
+Catalog_ = { ^"catalog" }
+Char_ = { ^"char" }
+Character_ = { ^"character" }
+CharacterLength_ = { ^"character_length" }
+CharLength_ = { ^"char_length" }
+Check_ = { ^"check" }
+Close_ = { ^"close" }
+Coalesce_ = { ^"coalesce" }
+Collate_ = { ^"collate" }
+Collation_ = { ^"collation" }
+Column_ = { ^"column" }
+Commit_ = { ^"commit" }
+Connect_ = { ^"connect" }
+Connection_ = { ^"connection" }
+Constraint_ = { ^"constraint" }
+Constraints_ = { ^"constraints" }
+Continue_ = { ^"continue" }
+Convert_ = { ^"convert" }
+Corresponding_ = { ^"corresponding" }
+Count_ = { ^"count" }
+Create_ = { ^"create" }
+Cross_ = { ^"cross" }
+Current_ = { ^"current" }
+CurrentDate_ = { ^"current_date" }
+CurrentTime_ = { ^"current_time" }
+CurrentTimestamp_ = { ^"current_timestamp" }
+CurrentUser_ = { ^"current_user" }
+Cursor_ = { ^"cursor" }
+Date_ = { ^"date" }
+Deallocate_ = { ^"deallocate" }
+Dec_ = { ^"dec" }
+Decimal_ = { ^"decimal" }
+Declare_ = { ^"declare" }
+Default_ = { ^"default" }
+Deferrable_ = { ^"deferrable" }
+Deferred_ = { ^"deferred" }
+Delete_ = { ^"delete" }
+Desc_ = { ^"desc" }
+Describe_ = { ^"describe" }
+Descriptor_ = { ^"descriptor" }
+Diagnostics_ = { ^"diagnostics" }
+Disconnect_ = { ^"disconnect" }
+Distinct_ = { ^"distinct" }
+Domain_ = { ^"domain" }
+Double_ = { ^"double" }
+Drop_ = { ^"drop" }
+Else_ = { ^"else" }
+End_ = { ^"end" }
+EndExec_ = { ^"end-exec" }
+Escape_ = { ^"escape" }
+Except_ = { ^"except" }
+Exception_ = { ^"exception" }
+Exec_ = { ^"exec" }
+Execute_ = { ^"execute" }
+Exists_ = { ^"exists" }
+External_ = { ^"external" }
+Extract_ = { ^"extract" }
+DateAdd_ = { ^"date_add" }
+DateDiff_ = { ^"date_diff" }
+False_ = { ^"false" }
+Fetch_ = { ^"fetch" }
+First_ = { ^"first" }
+Float_ = { ^"float" }
+For_ = { ^"for" }
+Foreign_ = { ^"foreign" }
+Found_ = { ^"found" }
+From_ = { ^"from" }
+Full_ = { ^"full" }
+Get_ = { ^"get" }
+Global_ = { ^"global" }
+Go_ = { ^"go" }
+Goto_ = { ^"goto" }
+Grant_ = { ^"grant" }
+Group_ = { ^"group" }
+Having_ = { ^"having" }
+Identity_ = { ^"identity" }
+Immediate_ = { ^"immediate" }
+In_ = { ^"in" }
+Indicator_ = { ^"indicator" }
+Initially_ = { ^"initially" }
+Inner_ = { ^"inner" }
+Input_ = { ^"input" }
+Insensitive_ = { ^"insensitive" }
+Insert_ = { ^"insert" }
+Int_ = { ^"int" }
+Integer_ = { ^"integer" }
+Intersect_ = { ^"intersect" }
+Interval_ = { ^"interval" }
+Into_ = { ^"into" }
+Is_ = { ^"is" }
+Isolation_ = { ^"isolation" }
+Join_ = { ^"join" }
+Key_ = { ^"key" }
+Language_ = { ^"language" }
+Last_ = { ^"last" }
+Left_ = { ^"left" }
+Level_ = { ^"level" }
+Like_ = { ^"like" }
+Local_ = { ^"local" }
+Lower_ = { ^"lower" }
+Match_ = { ^"match" }
+Max_ = { ^"max" }
+Min_ = { ^"min" }
+Module_ = { ^"module" }
+Names_ = { ^"names" }
+National_ = { ^"national" }
+Natural_ = { ^"natural" }
+Nchar_ = { ^"nchar" }
+Next_ = { ^"next" }
+No_ = { ^"no" }
+Not_ = { ^"not" }
+Null_ = { ^"null" }
+Nullif_ = { ^"nullif" }
+Numeric_ = { ^"numeric" }
+OctetLength_ = { ^"octet_length" }
+Of_ = { ^"of" }
+On_ = { ^"on" }
+Only_ = { ^"only" }
+Open_ = { ^"open" }
+Option_ = { ^"option" }
+Or_ = { ^"or" }
+Order_ = { ^"order" }
+Outer_ = { ^"outer" }
+Output_ = { ^"output" }
+Overlaps_ = { ^"overlaps" }
+Pad_ = { ^"pad" }
+Partial_ = { ^"partial" }
+Position_ = { ^"position" }
+Precision_ = { ^"precision" }
+Prepare_ = { ^"prepare" }
+Preserve_ = { ^"preserve" }
+Primary_ = { ^"primary" }
+Prior_ = { ^"prior" }
+Privileges_ = { ^"privileges" }
+Procedure_ = { ^"procedure" }
+Public_ = { ^"public" }
+Read_ = { ^"read" }
+Real_ = { ^"real" }
+References_ = { ^"references" }
+Relative_ = { ^"relative" }
+Restrict_ = { ^"restrict" }
+Revoke_ = { ^"revoke" }
+Right_ = { ^"right" }
+Rollback_ = { ^"rollback" }
+Rows_ = { ^"rows" }
+Schema_ = { ^"schema" }
+Scroll_ = { ^"scroll" }
+Section_ = { ^"section" }
+Select_ = { ^"select" }
+Session_ = { ^"session" }
+SessionUser_ = { ^"session_user" }
+Set_ = { ^"set" }
+Size_ = { ^"size" }
+Smallint_ = { ^"smallint" }
+Some_ = { ^"some" }
+Space_ = { ^"space" }
+Sql_ = { ^"sql" }
+Sqlcode_ = { ^"sqlcode" }
+Sqlerror_ = { ^"sqlerror" }
+Sqlstate_ = { ^"sqlstate" }
+Substring_ = { ^"substring" }
+Sum_ = { ^"sum" }
+SystemUser_ = { ^"system_user" }
+Table_ = { ^"table" }
+Temporary_ = { ^"temporary" }
+Then_ = { ^"then" }
+Time_ = { ^"time" }
+Timestamp_ = { ^"timestamp" }
+To_ = { ^"to" }
+Transaction_ = { ^"transaction" }
+Translate_ = { ^"translate" }
+Translation_ = { ^"translation" }
+Trim_ = { ^"trim" }
+True_ = { ^"true" }
+Union_ = { ^"union" }
+Unique_ = { ^"unique" }
+Unknown_ = { ^"unknown" }
+Update_ = { ^"update" }
+Upper_ = { ^"upper" }
+Usage_ = { ^"usage" }
+User_ = { ^"user" }
+Using_ = { ^"using" }
+Value_ = { ^"value" }
+Values_ = { ^"values" }
+Varchar_ = { ^"varchar" }
+Varying_ = { ^"varying" }
+View_ = { ^"view" }
+When_ = { ^"when" }
+Whenever_ = { ^"whenever" }
+Where_ = { ^"where" }
+With_ = { ^"with" }
+Work_ = { ^"work" }
+Write_ = { ^"write" }
+Zone_ = { ^"zone" }
+Missing_ = { ^"missing" }
+Pivot_ = { ^"pivot" }
+Unpivot_ = { ^"unpivot" }
+Limit_ = { ^"limit" }
+Tuple_ = { ^"tuple" }
+Remove_ = { ^"remove" }
+Index_ = { ^"index" }
+Conflict_ = { ^"conflict" }
+Do_ = { ^"do" }
+Nothing_ = { ^"nothing" }
+Returning_ = { ^"returning" }
+Modified_ = { ^"modified" }
+New_ = { ^"new" }
+Old_ = { ^"old" }
+Let_ = { ^"let" }
+Bool_ = { ^"bool" }
+Boolean_ = { ^"boolean" }
+String_ = { ^"string" }
+Symbol_ = { ^"symbol" }
+Clob_ = { ^"clob" }
+Blob_ = { ^"blob" }
+Struct_ = { ^"struct" }
+List_ = { ^"list" }
+Sexp_ = { ^"sexp" }
+Bag_ = { ^"bag" }

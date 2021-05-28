@@ -15,12 +15,13 @@
 //! fn main() -> ParserResult<()> {
 //!     use partiql_parser::scanner::Content::*;
 //!
-//!     let mut scanner = scanner("SELECT FROM");
+//!     let mut scanner = scanner("SELECT '🦄💩'");
 //!     let first = scanner.next_token()?;
 //!
 //!     // get the parsed variant of the token
 //!     match first.content() {
 //!         Keyword(kw) => assert_eq!("SELECT", kw),
+//!         Identifier(_) | StringLiteral(_) => panic!("Didn't get a keyword!"),
 //!     }
 //!     // the entire text of a token can be fetched--which looks the roughly the
 //!     // same for a keyword.
@@ -29,7 +30,8 @@
 //!     let second = scanner.next_token()?;
 //!     // get the parsed variant of the token
 //!     match second.content() {
-//!         Keyword(kw) => assert_eq!("FROM", kw),
+//!         StringLiteral(text) => assert_eq!("🦄💩", text),
+//!         Keyword(_) | Identifier(_) => panic!("Didn't get a string literal!"),
 //!     }
 //!     // the other thing we can do is get line/column information from a token
 //!     assert_eq!(LineAndColumn::try_at(1, 8)?, second.start());
