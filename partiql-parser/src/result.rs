@@ -191,9 +191,9 @@ pub enum ParserError {
     #[error("Invalid Argument: {message}")]
     InvalidArgument { message: String },
 
-    /// Indicates that there is an internal error that isn't SyntaxError nor InvalidArgument.
-    #[error("Illegal State")]
-    IllegalState,
+    /// Indicates that there is an internal error that was not due to user input or API violation.
+    #[error("Illegal State: {message}")]
+    IllegalState { message: String },
 }
 
 impl ParserError {
@@ -213,6 +213,14 @@ impl ParserError {
             message: message.into(),
         }
     }
+
+    /// Convenience function to create a [`IllegalState`](ParserError::IllegalState).
+    #[inline]
+    pub fn illegal_state<S: Into<String>>(message: S) -> Self {
+        Self::IllegalState {
+            message: message.into(),
+        }
+    }
 }
 
 /// Convenience function to create an `Err([SyntaxError](ParserError::SyntaxError))`.
@@ -229,8 +237,8 @@ pub fn invalid_argument<T, S: Into<String>>(message: S) -> ParserResult<T> {
 
 /// Convenience function to create an `Err([IllegalState](ParserError::IllegalState))`.
 #[inline]
-pub fn illegal_state<T>() -> ParserResult<T> {
-    Err(ParserError::IllegalState)
+pub fn illegal_state<T, S: Into<String>>(message: S) -> ParserResult<T> {
+    Err(ParserError::illegal_state(message))
 }
 
 impl<R> From<pest::error::Error<R>> for ParserError

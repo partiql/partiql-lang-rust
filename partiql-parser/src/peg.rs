@@ -33,7 +33,7 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
                 }
                 Ok(pair)
             }
-            None => illegal_state(),
+            None => illegal_state("Expected at one token pair, got nothing!"),
         }
     }
 }
