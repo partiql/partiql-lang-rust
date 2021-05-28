@@ -4,7 +4,8 @@
 //! can be exported for users to consume.
 
 use crate::prelude::*;
-use crate::result::syntax_error;
+// use crate::result::syntax_error;
+use crate::result::{illegal_state, syntax_error};
 use pest::iterators::{Pair, Pairs};
 use pest::{Parser, RuleType};
 use pest_derive::Parser;
@@ -33,10 +34,7 @@ impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
                 }
                 Ok(pair)
             }
-            None => syntax_error(
-                "Expected at one token pair, got nothing!",
-                Position::Unknown,
-            ),
+            None => illegal_state(),
         }
     }
 }

@@ -190,6 +190,10 @@ pub enum ParserError {
     /// Indicates that there is a problem with run-time violation of some API.
     #[error("Invalid Argument: {message}")]
     InvalidArgument { message: String },
+
+    /// Indicates that there is an internal error that isn't SyntaxError nor InvalidArgument.
+    #[error("Illegal State")]
+    IllegalState,
 }
 
 impl ParserError {
@@ -221,6 +225,12 @@ pub fn syntax_error<T, S: Into<String>>(message: S, position: Position) -> Parse
 #[inline]
 pub fn invalid_argument<T, S: Into<String>>(message: S) -> ParserResult<T> {
     Err(ParserError::invalid_argument(message))
+}
+
+/// Convenience function to create an `Err([IllegalState](ParserError::IllegalState))`.
+#[inline]
+pub fn illegal_state<T>() -> ParserResult<T> {
+    Err(ParserError::IllegalState)
 }
 
 impl<R> From<pest::error::Error<R>> for ParserError
