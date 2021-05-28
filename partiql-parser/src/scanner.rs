@@ -9,8 +9,11 @@
 
 use crate::peg::{PairExt, PairsExt, PartiQLParser, Rule};
 use crate::prelude::*;
+use bigdecimal::BigDecimal;
+use num_bigint::BigInt;
+use num_traits::Num;
 use pest::iterators::Pair;
-use pest::Parser;
+use pest::{Parser, RuleType};
 use std::borrow::Cow;
 
 /// The parsed content associated with a [`Token`] that has been scanned.
@@ -18,8 +21,19 @@ use std::borrow::Cow;
 pub enum Content<'val> {
     /// A PartiQL keyword.  Contains the slice for the keyword case folded to upper case.
     Keyword(Cow<'val, str>),
+
     /// An identifier.  Contains the slice for the text of the identifier.
     Identifier(Cow<'val, str>),
+
+    /// An integer literal.  Stores this as an as a [`BigInt`].
+    ///
+    /// Users will likely deal with smaller integers and encode this in execution/compilation
+    /// as `i64` or the like, but the parser need not deal with that detail.
+    IntegerLiteral(BigInt),
+
+    /// A decimal literal.  Contains the parsed [`BigDecimal`] for the literal.
+    DecimalLiteral(BigDecimal),
+
     /// A string literal.  Contains the slice for the content of the literal.
     StringLiteral(Cow<'val, str>),
     // TODO things like literals, punctuation, etc.
@@ -123,6 +137,18 @@ fn normalize_quoted_ident(raw_text: &str) -> Cow<str> {
         .into()
 }
 
+fn parse_num<T, R, E>(pair: Pair<R>) -> ParserResult<T>
+where
+    T: Num<FromStrRadixErr = E>,
+    R: RuleType,
+    E: std::fmt::Display,
+{
+    match T::from_str_radix(pair.as_str(), 10) {
+        Ok(value) => Ok(value),
+        Err(e) => pair.syntax_error(format!("Could not parse number {}: {}", pair.as_str(), e)),
+    }
+}
+
 impl<'val> PartiQLScanner<'val> {
     fn do_next_token(&mut self) -> ParserResult<Token<'val>> {
         // the scanner rule is expected to return a single node
@@ -144,10 +170,20 @@ impl<'val> PartiQLScanner<'val> {
                     Rule::QuotedIdentifier => {
                         Content::Identifier(normalize_quoted_ident(ident_pair.as_str()))
                     }
-                    _ => return ident_pair.syntax_error(),
+                    _ => return ident_pair.unexpected(),
                 }
             }
-            _ => return pair.syntax_error(),
+            Rule::Number => {
+                let number_pair = pair.into_inner().exactly_one()?;
+                match number_pair.as_rule() {
+                    Rule::Integer => Content::IntegerLiteral(parse_num(number_pair)?),
+                    Rule::Decimal | Rule::DecimalExp => {
+                        Content::DecimalLiteral(parse_num(number_pair)?)
+                    }
+                    _ => return number_pair.unexpected(),
+                }
+            }
+            _ => return pair.unexpected(),
         };
 
         Ok(Token {
@@ -292,7 +328,7 @@ mod test {
         ]
     )]
     #[case::bad_identifier(
-        "        99ranch",
+        "        💩",
         vec![
             syntax_error("IGNORED MESSAGE", Position::at(1, 9)),
         ]
@@ -347,6 +383,174 @@ mod test {
                 }
             }),
             syntax_error("IGNORED MESSAGE", Position::at(1, 32)),
+        ]
+    )]
+    #[case::numeric_literals(
+        "1 -0099 1.1 +00055.023100 99.1234e0010",
+        vec![
+            Ok(Token {
+                content: Content::IntegerLiteral(1.into()),
+                start: LineAndColumn::at(1, 1),
+                end: LineAndColumn::at(1, 2),
+                text: "1",
+                remainder: Remainder {
+                    input: " -0099 1.1 +00055.023100 99.1234e0010",
+                    offset: LineAndColumn::at(1, 2)
+                }
+            }),
+            Ok(Token {
+                content: Content::IntegerLiteral(BigInt::from(-99)),
+                start: LineAndColumn::at(1, 3),
+                end: LineAndColumn::at(1, 8),
+                text: "-0099",
+                remainder: Remainder {
+                    input: " 1.1 +00055.023100 99.1234e0010",
+                    offset: LineAndColumn::at(1, 8)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("1.1", 10).unwrap()),
+                start: LineAndColumn::at(1, 9),
+                end: LineAndColumn::at(1, 12),
+                text: "1.1",
+                remainder: Remainder {
+                    input: " +00055.023100 99.1234e0010",
+                    offset: LineAndColumn::at(1, 12)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("55.023100", 10).unwrap()),
+                start: LineAndColumn::at(1, 13),
+                end: LineAndColumn::at(1, 26),
+                text: "+00055.023100",
+                remainder: Remainder {
+                    input: " 99.1234e0010",
+                    offset: LineAndColumn::at(1, 26)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("99.1234e10", 10).unwrap()),
+                start: LineAndColumn::at(1, 27),
+                end: LineAndColumn::at(1, 39),
+                text: "99.1234e0010",
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 39)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 39)),
+        ]
+    )]
+    #[case::numeric_literals_with_pads(
+        "+0005 .0001 -00.0002 000003.004E+001",
+        vec![
+            Ok(Token {
+                content: Content::IntegerLiteral(5.into()),
+                start: LineAndColumn::at(1, 1),
+                end: LineAndColumn::at(1, 6),
+                text: "+0005",
+                remainder: Remainder {
+                    input: " .0001 -00.0002 000003.004E+001",
+                    offset: LineAndColumn::at(1, 6)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0001", 10).unwrap()),
+                start: LineAndColumn::at(1, 7),
+                end: LineAndColumn::at(1, 12),
+                text: ".0001",
+                remainder: Remainder {
+                    input: " -00.0002 000003.004E+001",
+                    offset: LineAndColumn::at(1, 12)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("-0.0002", 10).unwrap()),
+                start: LineAndColumn::at(1, 13),
+                end: LineAndColumn::at(1, 21),
+                text: "-00.0002",
+                remainder: Remainder {
+                    input: " 000003.004E+001",
+                    offset: LineAndColumn::at(1, 21)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("3.004e1", 10).unwrap()),
+                start: LineAndColumn::at(1, 22),
+                end: LineAndColumn::at(1, 37),
+                text: "000003.004E+001",
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 37)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 37)),
+        ]
+    )]
+    #[case::zeroes(
+        "0 000 .0 000.000 .0e0 0.0e000",
+        vec![
+            Ok(Token {
+                content: Content::IntegerLiteral(0.into()),
+                start: LineAndColumn::at(1, 1),
+                end: LineAndColumn::at(1, 2),
+                text: "0",
+                remainder: Remainder {
+                    input: " 000 .0 000.000 .0e0 0.0e000",
+                    offset: LineAndColumn::at(1, 2)
+                }
+            }),
+            Ok(Token {
+                content: Content::IntegerLiteral(0.into()),
+                start: LineAndColumn::at(1, 3),
+                end: LineAndColumn::at(1, 6),
+                text: "000",
+                remainder: Remainder {
+                    input: " .0 000.000 .0e0 0.0e000",
+                    offset: LineAndColumn::at(1, 6)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
+                start: LineAndColumn::at(1, 7),
+                end: LineAndColumn::at(1, 9),
+                text: ".0",
+                remainder: Remainder {
+                    input: " 000.000 .0e0 0.0e000",
+                    offset: LineAndColumn::at(1, 9)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.000", 10).unwrap()),
+                start: LineAndColumn::at(1, 10),
+                end: LineAndColumn::at(1, 17),
+                text: "000.000",
+                remainder: Remainder {
+                    input: " .0e0 0.0e000",
+                    offset: LineAndColumn::at(1, 17)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
+                start: LineAndColumn::at(1, 18),
+                end: LineAndColumn::at(1, 22),
+                text: ".0e0",
+                remainder: Remainder {
+                    input: " 0.0e000",
+                    offset: LineAndColumn::at(1, 22)
+                }
+            }),
+            Ok(Token {
+                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
+                start: LineAndColumn::at(1, 23),
+                end: LineAndColumn::at(1, 30),
+                text: "0.0e000",
+                remainder: Remainder {
+                    input: "",
+                    offset: LineAndColumn::at(1, 30)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 30)),
         ]
     )]
     #[case::select_from(
