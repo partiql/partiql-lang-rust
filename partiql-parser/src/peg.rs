@@ -4,7 +4,6 @@
 //! can be exported for users to consume.
 
 use crate::prelude::*;
-// use crate::result::syntax_error;
 use crate::result::{illegal_state, syntax_error};
 use pest::iterators::{Pair, Pairs};
 use pest::{Parser, RuleType};
