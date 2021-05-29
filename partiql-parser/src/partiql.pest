@@ -1,4 +1,5 @@
 WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
+COMMENT = _{ "--" ~ ANY* }
 
 // TODO implement a full grammar, this is a very primitive version to start
 //      working with Pest and its APIs.
@@ -9,7 +10,7 @@ Query = _{ SOI ~ Token+ ~ EOI}
 // Entry point for query "scanning"
 // Note that this is factored this way to support an iteration style API
 // where we can call back into this rule on subsequent input.
-Scanner = _{ SOI ~ Token }
+Scanner = _{ SOI ~ !COMMENT ~ Token }
 
 Token = _{
       Keyword

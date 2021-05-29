@@ -239,6 +239,40 @@ mod test {
     use rstest::*;
 
     #[rstest]
+    #[case::commented_single_keyword(
+        "  -- SELECT  ",
+        vec![
+            syntax_error("IGNORED MESSAGE", Position::at(1, 14)),
+        ]
+    )]
+    #[rstest]
+    #[case::comment_mid_line(
+        "  SELECT FROM -- WHERE  ",
+        vec![
+            Ok(Token {
+                content: Content::Keyword("SELECT".into()),
+                start: LineAndColumn::at(1, 3),
+                end: LineAndColumn::at(1, 9),
+                text: "SELECT",
+                remainder: Remainder {
+                    input: " FROM -- WHERE  ",
+                    offset: LineAndColumn::at(1, 9)
+                }
+            }),
+            Ok(Token {
+                content: Content::Keyword("FROM".into()),
+                start: LineAndColumn::at(1, 10),
+                end: LineAndColumn::at(1, 14),
+                text: "FROM",
+                remainder: Remainder {
+                    input: " -- WHERE  ",
+                    offset: LineAndColumn::at(1, 14)
+                }
+            }),
+            syntax_error("IGNORED MESSAGE", Position::at(1, 25)),
+        ]
+    )]
+    #[rstest]
     #[case::single_keyword(
         "  SELECT  ",
         vec![
