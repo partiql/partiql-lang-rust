@@ -21,7 +21,87 @@ Token = _{
     | String
     | Number
     | Identifier
+    | Punctuation
 }
+
+//
+// Punctuation
+//
+
+Punctuation = _{
+      Dot_
+    | Star_
+    | Parameter
+    | Operator
+    | Delimiter
+}
+
+// pathing operator and has some special meaning beyond a normal operator
+// (e.g. wildcard paths)
+Dot_ = { "." }
+
+// multiplication operator and wildcard
+Star_ = { "*" }
+
+// parameter variable
+Parameter = @{ QuestionMark_ }
+QuestionMark_ = { "?" }
+
+// punctuation that are operators--does not count keyword operators
+Operator = @{
+      LexicalScope_ 
+    | Plus_
+    | Minus_
+    | Divide_
+    | Modulus_
+    | Less_
+    | LessEq_
+    | Greater_
+    | GreaterEq_
+    | Eq_
+    | NotEq_
+    | Concat_
+}
+
+LexicalScope_ = { "@" }
+Plus_ = { "+" }
+Minus_ = @{ "-" ~ !"-" }
+Divide_ = @{ "/" ~ !"*" }
+Modulus_ = { "%" }
+Less_ = @{ "<" ~ !("<" | "=" | ">") }
+LessEq_ = { "<=" }
+Greater_ = @{ ">" ~ !(">" | "=") }
+GreaterEq_ = { ">=" }
+Eq_ = { "=" }
+NotEq_ = { ("<>" | "!=") }
+Concat_ = { "||" }
+
+// punctuation that delimit things in the grammar
+Delimiter = @ {
+      Comma_
+    | Colon_
+    | SemiColon_
+    | LeftParen_
+    | RightParen_
+    | LeftBracket_
+    | RightBracket_
+    | LeftCurly_
+    | RightCurly_
+    | LeftDoubleAngle_
+    | RightDoubleAngle_
+}
+
+Comma_ = { "," }
+Colon_ = { ":" }
+SemiColon_ = { ";" }
+LeftParen_ = { "(" }
+RightParen_ = { ")" }
+LeftBracket_ = { "[" }
+RightBracket_ = { "]" }
+LeftCurly_ = { "{" }
+RightCurly_ = { "}" }
+LeftDoubleAngle_ = { "<<" }
+RightDoubleAngle_ = { ">>" }
 
 //
 // Numeric Literals
