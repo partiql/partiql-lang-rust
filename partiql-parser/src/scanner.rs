@@ -39,6 +39,31 @@ pub enum Content<'val> {
     // TODO things like literals, punctuation, etc.
 }
 
+/// Convenience constructor for a [`Content::Keyword`].
+pub fn keyword<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
+    Content::Keyword(text.into())
+}
+
+/// Convenience constructor for a [`Content::Identifier`].
+pub fn identifier<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
+    Content::Identifier(text.into())
+}
+
+/// Convenience constructor for a [`Content::IntegerLiteral`].
+pub fn integer_literal<'val, V: Into<BigInt>>(value: V) -> Content<'val> {
+    Content::IntegerLiteral(value.into())
+}
+
+/// Convenience constructor for a [`Content::DecimalLiteral`].
+pub fn decimal_literal<'val, V: Into<BigDecimal>>(value: V) -> Content<'val> {
+    Content::DecimalLiteral(value.into())
+}
+
+/// Convenience constructor for a [`Content::StringLiteral`].
+pub fn string_literal<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
+    Content::StringLiteral(text.into())
+}
+
 /// Internal type to keep track of remaining input and relative line/column information.
 ///
 /// This is used to leverage the PEG to do continuation parsing and calculating the line/offset
@@ -238,371 +263,281 @@ mod test {
     use crate::result::syntax_error;
     use rstest::*;
 
+    /// Convenience for a decimal literal from a string--panics if it cannot parse the text.
+    fn decimal_literal_from_str<'val, S: AsRef<str>>(text: S) -> Content<'val> {
+        decimal_literal(BigDecimal::from_str_radix(text.as_ref(), 10).unwrap())
+    }
+
+    struct ScannerTestCase<'val> {
+        /// The input text to scan over.
+        input: String,
+
+        /// The expected tokens and their ending offsets.
+        ///
+        /// Note that the tokens in here will have an incomplete remainder that
+        /// can be calculated by the test driver before comparison based on the final
+        /// state of the test case.  The ending offset is used to calculate the
+        /// appropriate remainder slice at `finalize` time.
+        tokens_and_offsets: Vec<(Token<'val>, usize)>,
+
+        /// Position of the end of the input.  Used for building up the test case.
+        end: LineAndColumn,
+    }
+
+    impl<'val> ScannerTestCase<'val> {
+        fn new() -> Self {
+            Self {
+                input: String::new(),
+                tokens_and_offsets: Vec::new(),
+                end: LineAndColumn::at(1, 1),
+            }
+        }
+
+        /// Add text that has no token associated with it.  Typically used for whitespace.
+        fn add_text(&mut self, input: &'val str) {
+            let mut remainder = input;
+            let mut line = 1;
+            // count the lines and move the remainder portion
+            while let Some(offset) = remainder.find("\n") {
+                line += 1;
+                remainder = &remainder[offset + 1..];
+            }
+            let col = remainder.chars().count() + 1;
+            let logical_position = LineAndColumn::at(line, col);
+
+            self.input.push_str(input);
+            self.end = logical_position.position_from(self.end);
+        }
+
+        /// Add a token from a parsed content and its associated input text.
+        fn add_token(&mut self, input: &'val str, content: Content<'val>) {
+            let start = self.end;
+            self.add_text(input);
+
+            let incomplete_token = Token {
+                content,
+                start,
+                end: self.end,
+                text: input,
+
+                // this is not complete because we don't have all the input
+                // we could do this backwards, but it is probably not worth the complexity
+                // for a test case, instead we can just derive the expected token when we go
+                // to run the expectations from the then complete information.
+                remainder: Remainder {
+                    input: "",
+                    offset: self.end,
+                },
+            };
+
+            self.tokens_and_offsets
+                .push((incomplete_token, self.input.len()));
+        }
+
+        /// Finalize the input for this case and patch up the the tokens, consuming this
+        /// case and returning the relevant test components.
+        fn expected(&self) -> Vec<ParserResult<Token>> {
+            let mut expected = Vec::new();
+            for (token, end_offset) in self.tokens_and_offsets.iter() {
+                expected.push(Ok(Token {
+                    remainder: Remainder {
+                        input: &self.input.as_str()[*end_offset..],
+                        offset: token.end,
+                    },
+                    ..token.clone()
+                }));
+            }
+            expected.push(syntax_error("IGNORED MESSAGE", self.end.into()));
+            expected
+        }
+    }
+
+    /// Constructs scanner test cases in a less manual way, providing the code to
+    /// keep track of the position information we expect from the scanner.
+    ///
+    /// The test case is constructed by specifying string literals that are expected to be
+    /// whitespace, or string literals that are expected to be tokens, the test case
+    /// writer provides the [`Content`] of the token, and the macro/[`ScannerTestCase`]
+    /// fills in the expected token positions.
+    ///
+    /// Since the macro user is delimiting where they expect the tokens to be delimited,
+    /// this is just doing the trivial book keeping around those chunks of string and
+    /// filling in what otherwise would be very manual line/column counting to generate
+    /// the assertions.
+    macro_rules! scanner_test_case {
+        // entry point -- single string or string => content chunk
+        ($lit:literal $(=> $expr:expr)?) => {
+            // delegate to the general form
+            scanner_test_case!($lit $(=> $expr)* ,)
+        };
+        // entry point -- multiple string or string => content chunks
+        ($lit:literal $(=> $expr:expr)? , $($tail:tt)*) => {{
+            let mut test_case = ScannerTestCase::new();
+            // delegate to the internal builders
+            scanner_test_case!(@inner test_case $lit $(=> $expr)* , $($tail)*);
+            test_case
+        }};
+        // termination case -- no more chunks to process
+        (@inner $test_case:ident) => {};
+        // final whitespace chunk without a terminating ',' -- just delegate to the general form
+        (@inner $test_case:ident $lit:literal) => {
+            scanner_test_case!(@inner $test_case $lit ,)
+        };
+        // final token chunk without a terminating ',' -- just delegate to the general form
+        (@inner $test_case:ident $lit:literal => $expr:expr) => {
+            scanner_test_case!(@inner $test_case $lit => $expr ,)
+        };
+        // add whitespace for a chunk of string and continue...
+        (@inner $test_case:ident $lit:literal , $($tail:tt)*) => {
+            $test_case.add_text($lit);
+            scanner_test_case!(@inner $test_case $($tail)*)
+        };
+        // add a token for a chunk of string associated with some expected content and continue...
+        (@inner $test_case:ident $lit:literal => $expr:expr , $($tail:tt)*) => {
+            $test_case.add_token($lit, $expr);
+            scanner_test_case!(@inner $test_case $($tail)*)
+        };
+    }
+
     #[rstest]
     #[case::single_keyword(
-        "  SELECT  ",
-        vec![
-            Ok(Token {
-                content: Content::Keyword("SELECT".into()),
-                start: LineAndColumn::at(1, 3),
-                end: LineAndColumn::at(1, 9),
-                text: "SELECT",
-                remainder: Remainder {
-                    input: "  ",
-                    offset: LineAndColumn::at(1, 9)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 11)),
+        scanner_test_case![
+            "  ",
+            "SELECT" => keyword("SELECT"),
+            "  "
         ]
     )]
     #[case::some_keywords(
-        "  CASE\tFROM\n \x0B\x0CWHERE",
-        vec![
-            Ok(Token {
-                content: Content::Keyword("CASE".into()),
-                start: LineAndColumn::at(1, 3),
-                end: LineAndColumn::at(1, 7),
-                text: "CASE",
-                remainder: Remainder {
-                    input: "\tFROM\n \x0B\x0CWHERE",
-                    offset: LineAndColumn::at(1, 7)
-                }
-            }),
-            Ok(Token {
-                content: Content::Keyword("FROM".into()),
-                start: LineAndColumn::at(1, 8),
-                end: LineAndColumn::at(1, 12),
-                text: "FROM",
-                remainder: Remainder {
-                    input: "\n \x0B\x0CWHERE",
-                    offset: LineAndColumn::at(1, 12)
-                }
-            }),
-            Ok(Token {
-                content: Content::Keyword("WHERE".into()),
-                start: LineAndColumn::at(2, 4),
-                end: LineAndColumn::at(2, 9),
-                text: "WHERE",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(2, 9)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(2, 9)),
+        scanner_test_case![
+            "  ",
+            "CASE" => keyword("CASE"),
+            "\t\r\r\n",
+            "FROM" => keyword("FROM"),
+            "\n \x0B\x0C",
+            "WHERE" => keyword("WHERE")
         ]
     )]
-    #[case::plain_identifiers(
-        "moo_cow_1999 _1 $$$$",
-        vec![
-            Ok(Token {
-                content: Content::Identifier("moo_cow_1999".into()),
-                start: LineAndColumn::at(1, 1),
-                end: LineAndColumn::at(1, 13),
-                text: "moo_cow_1999",
-                remainder: Remainder {
-                    input: " _1 $$$$",
-                    offset: LineAndColumn::at(1, 13)
-                }
-            }),
-            Ok(Token {
-                content: Content::Identifier("_1".into()),
-                start: LineAndColumn::at(1, 14),
-                end: LineAndColumn::at(1, 16),
-                text: "_1",
-                remainder: Remainder {
-                    input: " $$$$",
-                    offset: LineAndColumn::at(1, 16)
-                }
-            }),
-            Ok(Token {
-                content: Content::Identifier("$$$$".into()),
-                start: LineAndColumn::at(1, 17),
-                end: LineAndColumn::at(1, 21),
-                text: "$$$$",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 21)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 21)),
-        ]
-    )]
-    #[case::bad_identifier(
-        "        💩",
-        vec![
-            syntax_error("IGNORED MESSAGE", Position::at(1, 9)),
+    #[case::some_keywords(
+        scanner_test_case![
+            "moo_cow_1999" => identifier("moo_cow_1999"),
+            " ",
+            "_1" => identifier("_1"),
+            " ",
+            "$$$$" => identifier("$$$$")
         ]
     )]
     #[case::quoted_identifiers(
-        r#"    "moo"   """ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
-        vec![
-            Ok(Token {
-                content: Content::Identifier("moo".into()),
-                start: LineAndColumn::at(1, 5),
-                end: LineAndColumn::at(1, 10),
-                text: r#""moo""#,
-                remainder: Remainder {
-                    input: r#"   """ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
-                    offset: LineAndColumn::at(1, 10)
-                }
-            }),
-            Ok(Token {
-                content: Content::Identifier("\"ʕノ•ᴥ•ʔノ ︵ ┻━┻".into()),
-                start: LineAndColumn::at(1, 13),
-                end: LineAndColumn::at(1, 30),
-                text: r#""""ʕノ•ᴥ•ʔノ ︵ ┻━┻""#,
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 30)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 30)),
+        scanner_test_case![
+            "    ",
+            r#""moo""# => identifier("moo"),
+            "   ",
+            r#""""ʕノ•ᴥ•ʔノ ︵ ┻━┻""# => identifier(r#""ʕノ•ᴥ•ʔノ ︵ ┻━┻"#)
         ]
     )]
     #[case::string_literals(
-        "    'boo'   '''┬─┬''ノ( º _ ºノ)'",
-        vec![
-            Ok(Token {
-                content: Content::StringLiteral("boo".into()),
-                start: LineAndColumn::at(1, 5),
-                end: LineAndColumn::at(1, 10),
-                text: "'boo'",
-                remainder: Remainder {
-                    input: "   '''┬─┬''ノ( º _ ºノ)'",
-                    offset: LineAndColumn::at(1, 10)
-                }
-            }),
-            Ok(Token {
-                content: Content::StringLiteral("'┬─┬'ノ( º _ ºノ)".into()),
-                start: LineAndColumn::at(1, 13),
-                end: LineAndColumn::at(1, 32),
-                text: "'''┬─┬''ノ( º _ ºノ)'",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 32)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 32)),
+        scanner_test_case![
+            "    ",
+            "'boo'" => string_literal("boo"),
+            "   ",
+            "'''┬─┬''ノ( º _ ºノ)'" => string_literal("'┬─┬'ノ( º _ ºノ)")
         ]
     )]
     #[case::numeric_literals(
-        "1 -0099 1.1 +00055.023100 99.1234e0010",
-        vec![
-            Ok(Token {
-                content: Content::IntegerLiteral(1.into()),
-                start: LineAndColumn::at(1, 1),
-                end: LineAndColumn::at(1, 2),
-                text: "1",
-                remainder: Remainder {
-                    input: " -0099 1.1 +00055.023100 99.1234e0010",
-                    offset: LineAndColumn::at(1, 2)
-                }
-            }),
-            Ok(Token {
-                content: Content::IntegerLiteral(BigInt::from(-99)),
-                start: LineAndColumn::at(1, 3),
-                end: LineAndColumn::at(1, 8),
-                text: "-0099",
-                remainder: Remainder {
-                    input: " 1.1 +00055.023100 99.1234e0010",
-                    offset: LineAndColumn::at(1, 8)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("1.1", 10).unwrap()),
-                start: LineAndColumn::at(1, 9),
-                end: LineAndColumn::at(1, 12),
-                text: "1.1",
-                remainder: Remainder {
-                    input: " +00055.023100 99.1234e0010",
-                    offset: LineAndColumn::at(1, 12)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("55.023100", 10).unwrap()),
-                start: LineAndColumn::at(1, 13),
-                end: LineAndColumn::at(1, 26),
-                text: "+00055.023100",
-                remainder: Remainder {
-                    input: " 99.1234e0010",
-                    offset: LineAndColumn::at(1, 26)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("99.1234e10", 10).unwrap()),
-                start: LineAndColumn::at(1, 27),
-                end: LineAndColumn::at(1, 39),
-                text: "99.1234e0010",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 39)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 39)),
+        scanner_test_case![
+            "1" => integer_literal(1),
+            " ",
+            "-0099" => integer_literal(-99),
+            " ",
+            "1.1" => decimal_literal_from_str("1.1"),
+            " ",
+            "+00055.023100" => decimal_literal_from_str("55.023100"),
+            " ",
+            "99.1234e0010" => decimal_literal_from_str("99.1234e10")
         ]
     )]
     #[case::numeric_literals_with_pads(
-        "+0005 .0001 -00.0002 000003.004E+001",
-        vec![
-            Ok(Token {
-                content: Content::IntegerLiteral(5.into()),
-                start: LineAndColumn::at(1, 1),
-                end: LineAndColumn::at(1, 6),
-                text: "+0005",
-                remainder: Remainder {
-                    input: " .0001 -00.0002 000003.004E+001",
-                    offset: LineAndColumn::at(1, 6)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0001", 10).unwrap()),
-                start: LineAndColumn::at(1, 7),
-                end: LineAndColumn::at(1, 12),
-                text: ".0001",
-                remainder: Remainder {
-                    input: " -00.0002 000003.004E+001",
-                    offset: LineAndColumn::at(1, 12)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("-0.0002", 10).unwrap()),
-                start: LineAndColumn::at(1, 13),
-                end: LineAndColumn::at(1, 21),
-                text: "-00.0002",
-                remainder: Remainder {
-                    input: " 000003.004E+001",
-                    offset: LineAndColumn::at(1, 21)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("3.004e1", 10).unwrap()),
-                start: LineAndColumn::at(1, 22),
-                end: LineAndColumn::at(1, 37),
-                text: "000003.004E+001",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 37)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 37)),
+        scanner_test_case![
+            "+0005" => integer_literal(5),
+            " ",
+            ".0001" => decimal_literal_from_str("0.0001"),
+            " ",
+            "-00.0002" => decimal_literal_from_str("-0.0002"),
+            " ",
+            "000003.004E+001" => decimal_literal_from_str("3.004e1")
         ]
     )]
     #[case::zeroes(
-        "0 000 .0 000.000 .0e0 0.0e000",
-        vec![
-            Ok(Token {
-                content: Content::IntegerLiteral(0.into()),
-                start: LineAndColumn::at(1, 1),
-                end: LineAndColumn::at(1, 2),
-                text: "0",
-                remainder: Remainder {
-                    input: " 000 .0 000.000 .0e0 0.0e000",
-                    offset: LineAndColumn::at(1, 2)
-                }
-            }),
-            Ok(Token {
-                content: Content::IntegerLiteral(0.into()),
-                start: LineAndColumn::at(1, 3),
-                end: LineAndColumn::at(1, 6),
-                text: "000",
-                remainder: Remainder {
-                    input: " .0 000.000 .0e0 0.0e000",
-                    offset: LineAndColumn::at(1, 6)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
-                start: LineAndColumn::at(1, 7),
-                end: LineAndColumn::at(1, 9),
-                text: ".0",
-                remainder: Remainder {
-                    input: " 000.000 .0e0 0.0e000",
-                    offset: LineAndColumn::at(1, 9)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.000", 10).unwrap()),
-                start: LineAndColumn::at(1, 10),
-                end: LineAndColumn::at(1, 17),
-                text: "000.000",
-                remainder: Remainder {
-                    input: " .0e0 0.0e000",
-                    offset: LineAndColumn::at(1, 17)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
-                start: LineAndColumn::at(1, 18),
-                end: LineAndColumn::at(1, 22),
-                text: ".0e0",
-                remainder: Remainder {
-                    input: " 0.0e000",
-                    offset: LineAndColumn::at(1, 22)
-                }
-            }),
-            Ok(Token {
-                content: Content::DecimalLiteral(BigDecimal::from_str_radix("0.0", 10).unwrap()),
-                start: LineAndColumn::at(1, 23),
-                end: LineAndColumn::at(1, 30),
-                text: "0.0e000",
-                remainder: Remainder {
-                    input: "",
-                    offset: LineAndColumn::at(1, 30)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 30)),
+        scanner_test_case![
+            "0" => integer_literal(0),
+            " ",
+            "000" => integer_literal(0),
+            " ",
+            ".0" => decimal_literal_from_str("0.0"),
+            " ",
+            "000.000" => decimal_literal_from_str("0.000"),
+            " ",
+            ".0e0" => decimal_literal_from_str("0.0"),
+            " ",
+            "0.0e000" => decimal_literal_from_str("0.0")
         ]
     )]
     #[case::select_from(
-        r#"SelEct '✨✨✨' fROM "┬─┬" "#,
-        vec![
-            Ok(Token {
-                content: Content::Keyword("SELECT".into()),
-                start: LineAndColumn::at(1, 1),
-                end: LineAndColumn::at(1, 7),
-                text: "SelEct",
-                remainder: Remainder {
-                    input: r#" '✨✨✨' fROM "┬─┬" "#,
-                    offset: LineAndColumn::at(1, 7)
-                }
-            }),
-            Ok(Token {
-                content: Content::StringLiteral("✨✨✨".into()),
-                start: LineAndColumn::at(1, 8),
-                end: LineAndColumn::at(1, 13),
-                text: "'✨✨✨'",
-                remainder: Remainder {
-                    input: r#" fROM "┬─┬" "#,
-                    offset: LineAndColumn::at(1, 13)
-                }
-            }),
-            Ok(Token {
-                content: Content::Keyword("FROM".into()),
-                start: LineAndColumn::at(1, 14),
-                end: LineAndColumn::at(1, 18),
-                text: "fROM",
-                remainder: Remainder {
-                    input: r#" "┬─┬" "#,
-                    offset: LineAndColumn::at(1, 18)
-                }
-            }),
-            Ok(Token {
-                content: Content::Identifier("┬─┬".into()),
-                start: LineAndColumn::at(1, 19),
-                end: LineAndColumn::at(1, 24),
-                text: r#""┬─┬""#,
-                remainder: Remainder {
-                    input: " ",
-                    offset: LineAndColumn::at(1, 24)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 25)),
+        scanner_test_case![
+            "SelEct" => keyword("SELECT"),
+            " ",
+            "'✨✨✨'" => string_literal("✨✨✨"),
+            " ",
+            "fROM" => keyword("FROM"),
+            " ",
+            r#""┬─┬""# => identifier("┬─┬"),
+            " "
         ]
     )]
-    fn tokenize(
-        #[case] input: &str,
-        #[case] expecteds: Vec<ParserResult<Token>>,
-    ) -> ParserResult<()> {
+    fn scan(#[case] test_case: ScannerTestCase) -> ParserResult<()> {
+        let mut scanner = scanner(&test_case.input);
+        for expected in test_case.expected() {
+            let actual = scanner.next_token();
+            match (&expected, &actual) {
+                (Ok(expected_tok), Ok(actual_tok)) => {
+                    assert_eq!(expected_tok, actual_tok);
+                    // make sure accessors do what we expect
+                    assert_eq!(expected_tok.content, *actual_tok.content(), "Content NE");
+                    assert_eq!(expected_tok.start, actual_tok.start(), "Start Location NE");
+                    assert_eq!(expected_tok.end, actual_tok.end(), "End Location NE");
+                    assert_eq!(expected_tok.text, actual_tok.text(), "Text NE");
+                    assert_eq!(
+                        expected_tok.remainder.input,
+                        actual_tok.text_after(),
+                        "Remainder NE"
+                    );
+                }
+                (
+                    Err(ParserError::SyntaxError {
+                        position: expected_position,
+                        ..
+                    }),
+                    Err(ParserError::SyntaxError {
+                        position: actual_position,
+                        ..
+                    }),
+                ) => {
+                    // just compare the positions for syntax errors...
+                    assert_eq!(expected_position, actual_position);
+                }
+                _ => panic!("Did not expect: {:?} and {:?}", expected, actual),
+            }
+        }
+        Ok(())
+    }
+
+    #[rstest]
+    #[case::bad_identifier("💩")]
+    fn bad_tokens(#[case] input: &str) -> ParserResult<()> {
+        let expecteds = vec![syntax_error("IGNORED MESSAGE", Position::at(1, 1))];
+        assert_input(input, expecteds)
+    }
+
+    fn assert_input(input: &str, expecteds: Vec<ParserResult<Token>>) -> ParserResult<()> {
         let mut scanner = scanner(input);
         for expected in expecteds {
             let actual = scanner.next_token();
