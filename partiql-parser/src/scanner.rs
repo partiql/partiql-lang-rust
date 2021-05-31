@@ -400,37 +400,60 @@ mod test {
     }
 
     #[rstest]
-    #[case::commented_single_keyword(
-        "  -- SELECT  ",
-        vec![
-            syntax_error("IGNORED MESSAGE", Position::at(1, 14)),
+    #[case::comment_single_keyword(
+        scanner_test_case![
+            "--",
+            "SELECT",
+            " \n ",
         ]
     )]
     #[rstest]
     #[case::comment_mid_line(
-        "  SELECT FROM -- WHERE  ",
-        vec![
-            Ok(Token {
-                content: Content::Keyword("SELECT".into()),
-                start: LineAndColumn::at(1, 3),
-                end: LineAndColumn::at(1, 9),
-                text: "SELECT",
-                remainder: Remainder {
-                    input: " FROM -- WHERE  ",
-                    offset: LineAndColumn::at(1, 9)
-                }
-            }),
-            Ok(Token {
-                content: Content::Keyword("FROM".into()),
-                start: LineAndColumn::at(1, 10),
-                end: LineAndColumn::at(1, 14),
-                text: "FROM",
-                remainder: Remainder {
-                    input: " -- WHERE  ",
-                    offset: LineAndColumn::at(1, 14)
-                }
-            }),
-            syntax_error("IGNORED MESSAGE", Position::at(1, 25)),
+        scanner_test_case![
+            "SELECT" => keyword("SELECT"),
+            "  ",
+            "FROM" => keyword("FROM"),
+            " -- ",
+            "WHERE",
+            " \n ",
+        ]
+    )]
+    #[rstest]
+    #[case::comment_until_eol(
+        scanner_test_case![
+            " -- ",
+            "CASE",
+            "  ",
+            "IN",
+            "  ",
+            "WHERE",
+            " \n ",
+            "SELECT" => keyword("SELECT"),
+        ]
+    )]
+    #[rstest]
+    #[case::comment_block(
+        scanner_test_case![
+            " /* ",
+            "CASE",
+            "  ",
+            "IN",
+            " */ ",
+            "SELECT" => keyword("SELECT"),
+        ]
+    )]
+    #[rstest]
+    #[case::comment_block_nested(
+        scanner_test_case![
+            "employee" => identifier("employee"),
+            " /* ",
+            "CASE",
+            " /* ",
+            "WHERE",
+            " */ ",
+            "employee",
+            " */ ",
+            "IN" => keyword("IN"),
         ]
     )]
     #[rstest]
