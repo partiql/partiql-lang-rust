@@ -400,6 +400,63 @@ mod test {
     }
 
     #[rstest]
+    #[case::comment_single_keyword(
+        scanner_test_case![
+            "--",
+            "SELECT",
+            " \n ",
+        ]
+    )]
+    #[rstest]
+    #[case::comment_mid_line(
+        scanner_test_case![
+            "SELECT" => keyword("SELECT"),
+            "  ",
+            "FROM" => keyword("FROM"),
+            " -- ",
+            "WHERE",
+            " \n ",
+        ]
+    )]
+    #[rstest]
+    #[case::comment_until_eol(
+        scanner_test_case![
+            " -- ",
+            "CASE",
+            "  ",
+            "IN",
+            "  ",
+            "WHERE",
+            " \n ",
+            "SELECT" => keyword("SELECT"),
+        ]
+    )]
+    #[rstest]
+    #[case::comment_block(
+        scanner_test_case![
+            " /* ",
+            "CASE",
+            "  ",
+            "IN",
+            " */ ",
+            "SELECT" => keyword("SELECT"),
+        ]
+    )]
+    #[rstest]
+    #[case::comment_block_nested(
+        scanner_test_case![
+            "employee" => identifier("employee"),
+            " /*\n ",
+            "CASE",
+            " /* ",
+            "WHERE",
+            " \n */ ",
+            "employee",
+            " \n\n*/ ",
+            "IN" => keyword("IN"),
+        ]
+    )]
+    #[rstest]
     #[case::single_keyword(
         scanner_test_case![
             "  ",
@@ -532,6 +589,11 @@ mod test {
 
     #[rstest]
     #[case::bad_identifier("💩")]
+    #[case::unterminated_line_comment("-- DROP")]
+    #[case::unbalanced_block_comment("/*\n\n SELECT /* WHERE */")]
+    #[case::unbalanced_block_comment("/* CASE do WHEN re THEN mi ELSE fa END /*")]
+    #[case::unbalanced_block_comment("/*SELECT /* FROM /* FULL OUTER JOIN */ */ ")]
+    #[case::unbalanced_block_comment("/*/*/*/*/*/*/*/*[ascii art here]*/*/*/*/*/*/*/ ")]
     fn bad_tokens(#[case] input: &str) -> ParserResult<()> {
         let expecteds = vec![syntax_error("IGNORED MESSAGE", Position::at(1, 1))];
         assert_input(input, expecteds)
