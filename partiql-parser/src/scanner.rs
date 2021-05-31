@@ -446,13 +446,13 @@ mod test {
     #[case::comment_block_nested(
         scanner_test_case![
             "employee" => identifier("employee"),
-            " /* ",
+            " /*\n ",
             "CASE",
             " /* ",
             "WHERE",
-            " */ ",
+            " \n */ ",
             "employee",
-            " */ ",
+            " \n\n*/ ",
             "IN" => keyword("IN"),
         ]
     )]
@@ -589,6 +589,11 @@ mod test {
 
     #[rstest]
     #[case::bad_identifier("💩")]
+    #[case::unterminated_line_comment("-- DROP")]
+    #[case::unbalanced_block_comment("/*\n\n SELECT /* WHERE */")]
+    #[case::unbalanced_block_comment("/* CASE do WHEN re THEN mi ELSE fa END /*")]
+    #[case::unbalanced_block_comment("/*SELECT /* FROM /* FULL OUTER JOIN */ */ ")]
+    #[case::unbalanced_block_comment("/*/*/*/*/*/*/*/*[ascii art here]*/*/*/*/*/*/*/ ")]
     fn bad_tokens(#[case] input: &str) -> ParserResult<()> {
         let expecteds = vec![syntax_error("IGNORED MESSAGE", Position::at(1, 1))];
         assert_input(input, expecteds)
