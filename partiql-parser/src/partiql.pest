@@ -2,8 +2,8 @@ WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
 
 COMMENT = _{ LineComment | BlockComment }
 
-BlockComment = { "/*" ~ ( BlockComment | (!"*/" ~ ANY) )* ~ "*/" }
-LineComment = { "--" ~ ( !"\n" ~ ANY )* ~ "\n" }
+BlockComment = { "/*" ~ (BlockComment | (!"*/" ~ ANY))* ~ "*/" }
+LineComment = { "--" ~ (!"\n" ~ ANY )* ~ "\n" }
 
 // TODO implement a full grammar, this is a very primitive version to start
 //      working with Pest and its APIs.
