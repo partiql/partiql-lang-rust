@@ -94,10 +94,77 @@ mod tests {
     use rstest::*;
 
     #[rstest]
-    #[case::simple("select \"🍦\" fRoM \"🚽\" WHERE is_defined", Ok(()))]
+    #[case::null_literal(
+        r#"NULL"#,
+        Ok(())
+    )]
+    #[case::missing_literal(
+        r#"MISSING"#,
+        Ok(())
+    )]
+    #[case::true_literal(
+        r#"NULL"#,
+        Ok(())
+    )]
+    #[case::false_literal(
+        r#"FALSE"#,
+        Ok(())
+    )]
+    #[case::string_literal(
+        r#"'foobar'"#,
+        Ok(())
+    )]
+    #[case::quoted_identifier(
+        r#""foobar""#,
+        Ok(())
+    )]
+    #[case::string_literal(
+        r#"'moobar'"#,
+        Ok(())
+    )]
+    #[case::integer(
+        r#"42"#,
+        Ok(())
+    )]
+    #[case::decimal(
+        r#"3141.59265e-03"#,
+        Ok(())
+    )]
+    #[case::array(
+        r#"[1, 'moo', "some variable", [], 'a', MISSING]"#,
+        Ok(())
+    )]
+    #[case::bag(
+        r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#,
+        Ok(())
+    )]
+    #[case::tuple(
+        r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#,
+        Ok(())
+    )]
+    #[case::select_value(
+        r#"SELECT VALUE 5"#,
+        Ok(())
+    )]
+    #[case::select_value_from(
+        r#"SELECT VALUE 5 FROM some_table"#,
+        Ok(())
+    )]
+    #[case::select_value_from_where(
+        r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
+        Ok(())
+    )]
+    #[case::simple(
+        r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
+        Ok(())
+    )]
     #[case::error(
-        "SELECT SOMETHING FROM 💩",
-        syntax_error("IGNORED MESSAGE", Position::at(1, 23))
+        r#"SELECT value aWeSoMe FROM 💩"#,
+        syntax_error("IGNORED MESSAGE", Position::at(1, 27))
+    )]
+    #[case::error(
+        r#"SELECT value aWeSoMe WHERE FALSE"#,
+        syntax_error("IGNORED MESSAGE", Position::at(1, 22))
     )]
     fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
         let actual = recognize_partiql(input);

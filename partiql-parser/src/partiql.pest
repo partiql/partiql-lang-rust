@@ -2,18 +2,102 @@ WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
 
 COMMENT = _{ LineComment | BlockComment }
 
-BlockComment = { "/*" ~ (BlockComment | (!"*/" ~ ANY))* ~ "*/" }
-LineComment = { "--" ~ (!"\n" ~ ANY )* ~ "\n" }
+BlockComment    = _{ "/*" ~ (BlockComment | (!"*/" ~ ANY))* ~ "*/" }
+LineComment     = _{ "--" ~ (!"\n" ~ ANY )* ~ "\n" }
 
 // TODO implement a full grammar, this is a very primitive version to start
 //      working with Pest and its APIs.
 
-// Entry point for full query parsing
-Query = _{ SOI ~ Token+ ~ EOI}
+//
+// Entry point for full query parsing.
+//
+Query = _{ SOI ~ Expression ~ EOI}
 
-// Entry point for query "scanning"
+//
+// Expressions
+//
+
+Expression = _{
+      SelectExpression
+    | ValueExpression
+}
+
+// TODO finish the SELECT statement
+
+SelectExpression = {
+    Select ~ (From ~ (Where)?)?
+}
+
+Select = _{
+    SelectValue
+}
+
+SelectValue = {
+    Select_ ~ Value_ ~ ValueExpression
+}
+
+// TODO joins
+
+From = {
+    From_ ~ ValueExpression ~ (As_)? ~ (Identifier)?
+}
+
+Where = {
+    Where_ ~ ValueExpression
+}
+
+// TODO all the operators / paths
+
+ValueExpression = {
+      Term
+    | LeftParen_ ~ Expression ~ RightParen_
+}
+
+// TODO fill in all the atoms
+
+Term = _{
+      NullLiteral
+    | BooleanLiteral
+    | String
+    | Number
+    | Identifier
+    | ArrayConstructor
+    | BagConstructor
+    | TupleConstructor
+}
+
+ArrayConstructor = {
+    LeftBracket_ ~ Values? ~ RightBracket_
+}
+
+BagConstructor = {
+    LeftDoubleAngle_ ~ Values? ~ RightDoubleAngle_
+}
+
+Values = _{
+    (ValueExpression ~ (Comma_ ~ ValueExpression)* ~ Comma_?)
+}
+
+TupleConstructor = {
+    LeftCurly_ ~ TupleField ~ (Comma_ ~ TupleField)* ~ Comma_? ~ RightCurly_
+}
+
+TupleField = {
+    ValueExpression ~ Colon_ ~ ValueExpression
+}
+
+//
+// LITERALS
+//
+
+NullLiteral     = @{ Null_ | Missing_ }
+BooleanLiteral  = @{ True_ | False_ }
+
+//
+// Entry point for query "scanning".
 // Note that this is factored this way to support an iteration style API
 // where we can call back into this rule on subsequent input.
+//
 Scanner = _{ SOI ~ Token }
 
 Token = _{
@@ -38,14 +122,14 @@ Punctuation = _{
 
 // pathing operator and has some special meaning beyond a normal operator
 // (e.g. wildcard paths)
-Dot_ = { "." }
+Dot_            = @{ "." }
 
 // multiplication operator and wildcard
-Star_ = { "*" }
+Star_           = @{ "*" }
 
 // parameter variable
-Parameter = @{ QuestionMark_ }
-QuestionMark_ = { "?" }
+Parameter       = @{ QuestionMark_ }
+QuestionMark_   = { "?" }
 
 // punctuation that are operators--does not count keyword operators
 Operator = @{
@@ -63,21 +147,21 @@ Operator = @{
     | Concat_
 }
 
-LexicalScope_ = { "@" }
-Plus_ = { "+" }
-Minus_ = @{ "-" ~ !"-" }
-Divide_ = @{ "/" ~ !"*" }
-Modulus_ = { "%" }
-Less_ = @{ "<" ~ !("<" | "=" | ">") }
-LessEq_ = { "<=" }
-Greater_ = @{ ">" ~ !(">" | "=") }
-GreaterEq_ = { ">=" }
-Eq_ = { "=" }
-NotEq_ = { ("<>" | "!=") }
-Concat_ = { "||" }
+LexicalScope_   = @{ "@" }
+Plus_           = @{ "+" }
+Minus_          = @{ "-" ~ !"-" }
+Divide_         = @{ "/" ~ !"*" }
+Modulus_        = @{ "%" }
+Less_           = @{ "<" ~ !("<" | "=" | ">") }
+LessEq_         = @{ "<=" }
+Greater_        = @{ ">" ~ !(">" | "=") }
+GreaterEq_      = @{ ">=" }
+Eq_             = @{ "=" }
+NotEq_          = @{ ("<>" | "!=") }
+Concat_         = @{ "||" }
 
 // punctuation that delimit things in the grammar
-Delimiter = @ {
+Delimiter = {
       Comma_
     | Colon_
     | SemiColon_
@@ -91,17 +175,17 @@ Delimiter = @ {
     | RightDoubleAngle_
 }
 
-Comma_ = { "," }
-Colon_ = { ":" }
-SemiColon_ = { ";" }
-LeftParen_ = { "(" }
-RightParen_ = { ")" }
-LeftBracket_ = { "[" }
-RightBracket_ = { "]" }
-LeftCurly_ = { "{" }
-RightCurly_ = { "}" }
-LeftDoubleAngle_ = { "<<" }
-RightDoubleAngle_ = { ">>" }
+Comma_              = _{ "," }
+Colon_              = _{ ":" }
+SemiColon_          = _{ ";" }
+LeftParen_          = _{ "(" }
+RightParen_         = _{ ")" }
+LeftBracket_        = _{ "[" }
+RightBracket_       = _{ "]" }
+LeftCurly_          = _{ "{" }
+RightCurly_         = _{ "}" }
+LeftDoubleAngle_    = _{ "<<" }
+RightDoubleAngle_   = _{ ">>" }
 
 //
 // Numeric Literals
@@ -173,11 +257,11 @@ QuotedIdentifierContent = {
 // Keywords
 //
 
-Keyword = @{ 
+Keyword = @{
     (SqlKeyword | PartiqlKeyword) ~ !NonQuotedIdentifierCont
 }
 
-SqlKeyword = _{
+SqlKeyword = {
       Absolute_
     | Action_
     | Add_
@@ -398,7 +482,7 @@ SqlKeyword = _{
     | Zone_
 }
 
-PartiqlKeyword = _{
+PartiqlKeyword = {
       Missing_
     | Pivot_
     | Unpivot_
@@ -431,246 +515,246 @@ PartiqlKeyword = _{
 // Individual Keyword Definitions
 //
 
-Absolute_ = { ^"absolute" }
-Action_ = { ^"action" }
-Add_ = { ^"add" }
-All_ = { ^"all" }
-Allocate_ = { ^"allocate" }
-Alter_ = { ^"alter" }
-And_ = { ^"and" }
-Any_ = { ^"any" }
-Are_ = { ^"are" }
-As_ = { ^"as" }
-Asc_ = { ^"asc" }
-Assertion_ = { ^"assertion" }
-At_ = { ^"at" }
-Authorization_ = { ^"authorization" }
-Avg_ = { ^"avg" }
-Begin_ = { ^"begin" }
-Between_ = { ^"between" }
-Bit_ = { ^"bit" }
-BitLength_ = { ^"bit_length" }
-By_ = { ^"by" }
-Cascade_ = { ^"cascade" }
-Cascaded_ = { ^"cascaded" }
-Case_ = { ^"case" }
-Cast_ = { ^"cast" }
-Catalog_ = { ^"catalog" }
-Char_ = { ^"char" }
-Character_ = { ^"character" }
-CharacterLength_ = { ^"character_length" }
-CharLength_ = { ^"char_length" }
-Check_ = { ^"check" }
-Close_ = { ^"close" }
-Coalesce_ = { ^"coalesce" }
-Collate_ = { ^"collate" }
-Collation_ = { ^"collation" }
-Column_ = { ^"column" }
-Commit_ = { ^"commit" }
-Connect_ = { ^"connect" }
-Connection_ = { ^"connection" }
-Constraint_ = { ^"constraint" }
-Constraints_ = { ^"constraints" }
-Continue_ = { ^"continue" }
-Convert_ = { ^"convert" }
-Corresponding_ = { ^"corresponding" }
-Count_ = { ^"count" }
-Create_ = { ^"create" }
-Cross_ = { ^"cross" }
-Current_ = { ^"current" }
-CurrentDate_ = { ^"current_date" }
-CurrentTime_ = { ^"current_time" }
-CurrentTimestamp_ = { ^"current_timestamp" }
-CurrentUser_ = { ^"current_user" }
-Cursor_ = { ^"cursor" }
-Date_ = { ^"date" }
-Deallocate_ = { ^"deallocate" }
-Dec_ = { ^"dec" }
-Decimal_ = { ^"decimal" }
-Declare_ = { ^"declare" }
-Default_ = { ^"default" }
-Deferrable_ = { ^"deferrable" }
-Deferred_ = { ^"deferred" }
-Delete_ = { ^"delete" }
-Desc_ = { ^"desc" }
-Describe_ = { ^"describe" }
-Descriptor_ = { ^"descriptor" }
-Diagnostics_ = { ^"diagnostics" }
-Disconnect_ = { ^"disconnect" }
-Distinct_ = { ^"distinct" }
-Domain_ = { ^"domain" }
-Double_ = { ^"double" }
-Drop_ = { ^"drop" }
-Else_ = { ^"else" }
-End_ = { ^"end" }
-EndExec_ = { ^"end-exec" }
-Escape_ = { ^"escape" }
-Except_ = { ^"except" }
-Exception_ = { ^"exception" }
-Exec_ = { ^"exec" }
-Execute_ = { ^"execute" }
-Exists_ = { ^"exists" }
-External_ = { ^"external" }
-Extract_ = { ^"extract" }
-DateAdd_ = { ^"date_add" }
-DateDiff_ = { ^"date_diff" }
-False_ = { ^"false" }
-Fetch_ = { ^"fetch" }
-First_ = { ^"first" }
-Float_ = { ^"float" }
-For_ = { ^"for" }
-Foreign_ = { ^"foreign" }
-Found_ = { ^"found" }
-From_ = { ^"from" }
-Full_ = { ^"full" }
-Get_ = { ^"get" }
-Global_ = { ^"global" }
-Go_ = { ^"go" }
-Goto_ = { ^"goto" }
-Grant_ = { ^"grant" }
-Group_ = { ^"group" }
-Having_ = { ^"having" }
-Identity_ = { ^"identity" }
-Immediate_ = { ^"immediate" }
-In_ = { ^"in" }
-Indicator_ = { ^"indicator" }
-Initially_ = { ^"initially" }
-Inner_ = { ^"inner" }
-Input_ = { ^"input" }
-Insensitive_ = { ^"insensitive" }
-Insert_ = { ^"insert" }
-Int_ = { ^"int" }
-Integer_ = { ^"integer" }
-Intersect_ = { ^"intersect" }
-Interval_ = { ^"interval" }
-Into_ = { ^"into" }
-Is_ = { ^"is" }
-Isolation_ = { ^"isolation" }
-Join_ = { ^"join" }
-Key_ = { ^"key" }
-Language_ = { ^"language" }
-Last_ = { ^"last" }
-Left_ = { ^"left" }
-Level_ = { ^"level" }
-Like_ = { ^"like" }
-Local_ = { ^"local" }
-Lower_ = { ^"lower" }
-Match_ = { ^"match" }
-Max_ = { ^"max" }
-Min_ = { ^"min" }
-Module_ = { ^"module" }
-Names_ = { ^"names" }
-National_ = { ^"national" }
-Natural_ = { ^"natural" }
-Nchar_ = { ^"nchar" }
-Next_ = { ^"next" }
-No_ = { ^"no" }
-Not_ = { ^"not" }
-Null_ = { ^"null" }
-Nullif_ = { ^"nullif" }
-Numeric_ = { ^"numeric" }
-OctetLength_ = { ^"octet_length" }
-Of_ = { ^"of" }
-On_ = { ^"on" }
-Only_ = { ^"only" }
-Open_ = { ^"open" }
-Option_ = { ^"option" }
-Or_ = { ^"or" }
-Order_ = { ^"order" }
-Outer_ = { ^"outer" }
-Output_ = { ^"output" }
-Overlaps_ = { ^"overlaps" }
-Pad_ = { ^"pad" }
-Partial_ = { ^"partial" }
-Position_ = { ^"position" }
-Precision_ = { ^"precision" }
-Prepare_ = { ^"prepare" }
-Preserve_ = { ^"preserve" }
-Primary_ = { ^"primary" }
-Prior_ = { ^"prior" }
-Privileges_ = { ^"privileges" }
-Procedure_ = { ^"procedure" }
-Public_ = { ^"public" }
-Read_ = { ^"read" }
-Real_ = { ^"real" }
-References_ = { ^"references" }
-Relative_ = { ^"relative" }
-Restrict_ = { ^"restrict" }
-Revoke_ = { ^"revoke" }
-Right_ = { ^"right" }
-Rollback_ = { ^"rollback" }
-Rows_ = { ^"rows" }
-Schema_ = { ^"schema" }
-Scroll_ = { ^"scroll" }
-Section_ = { ^"section" }
-Select_ = { ^"select" }
-Session_ = { ^"session" }
-SessionUser_ = { ^"session_user" }
-Set_ = { ^"set" }
-Size_ = { ^"size" }
-Smallint_ = { ^"smallint" }
-Some_ = { ^"some" }
-Space_ = { ^"space" }
-Sql_ = { ^"sql" }
-Sqlcode_ = { ^"sqlcode" }
-Sqlerror_ = { ^"sqlerror" }
-Sqlstate_ = { ^"sqlstate" }
-Substring_ = { ^"substring" }
-Sum_ = { ^"sum" }
-SystemUser_ = { ^"system_user" }
-Table_ = { ^"table" }
-Temporary_ = { ^"temporary" }
-Then_ = { ^"then" }
-Time_ = { ^"time" }
-Timestamp_ = { ^"timestamp" }
-To_ = { ^"to" }
-Transaction_ = { ^"transaction" }
-Translate_ = { ^"translate" }
-Translation_ = { ^"translation" }
-Trim_ = { ^"trim" }
-True_ = { ^"true" }
-Union_ = { ^"union" }
-Unique_ = { ^"unique" }
-Unknown_ = { ^"unknown" }
-Update_ = { ^"update" }
-Upper_ = { ^"upper" }
-Usage_ = { ^"usage" }
-User_ = { ^"user" }
-Using_ = { ^"using" }
-Value_ = { ^"value" }
-Values_ = { ^"values" }
-Varchar_ = { ^"varchar" }
-Varying_ = { ^"varying" }
-View_ = { ^"view" }
-When_ = { ^"when" }
-Whenever_ = { ^"whenever" }
-Where_ = { ^"where" }
-With_ = { ^"with" }
-Work_ = { ^"work" }
-Write_ = { ^"write" }
-Zone_ = { ^"zone" }
-Missing_ = { ^"missing" }
-Pivot_ = { ^"pivot" }
-Unpivot_ = { ^"unpivot" }
-Limit_ = { ^"limit" }
-Tuple_ = { ^"tuple" }
-Remove_ = { ^"remove" }
-Index_ = { ^"index" }
-Conflict_ = { ^"conflict" }
-Do_ = { ^"do" }
-Nothing_ = { ^"nothing" }
-Returning_ = { ^"returning" }
-Modified_ = { ^"modified" }
-New_ = { ^"new" }
-Old_ = { ^"old" }
-Let_ = { ^"let" }
-Bool_ = { ^"bool" }
-Boolean_ = { ^"boolean" }
-String_ = { ^"string" }
-Symbol_ = { ^"symbol" }
-Clob_ = { ^"clob" }
-Blob_ = { ^"blob" }
-Struct_ = { ^"struct" }
-List_ = { ^"list" }
-Sexp_ = { ^"sexp" }
-Bag_ = { ^"bag" }
+Absolute_            = _{ ^"absolute" }
+Action_              = _{ ^"action" }
+Add_                 = _{ ^"add" }
+All_                 = _{ ^"all" }
+Allocate_            = _{ ^"allocate" }
+Alter_               = _{ ^"alter" }
+And_                 = _{ ^"and" }
+Any_                 = _{ ^"any" }
+Are_                 = _{ ^"are" }
+As_                  = _{ ^"as" }
+Asc_                 = _{ ^"asc" }
+Assertion_           = _{ ^"assertion" }
+At_                  = _{ ^"at" }
+Authorization_       = _{ ^"authorization" }
+Avg_                 = _{ ^"avg" }
+Begin_               = _{ ^"begin" }
+Between_             = _{ ^"between" }
+Bit_                 = _{ ^"bit" }
+BitLength_           = _{ ^"bit_length" }
+By_                  = _{ ^"by" }
+Cascade_             = _{ ^"cascade" }
+Cascaded_            = _{ ^"cascaded" }
+Case_                = _{ ^"case" }
+Cast_                = _{ ^"cast" }
+Catalog_             = _{ ^"catalog" }
+Char_                = _{ ^"char" }
+Character_           = _{ ^"character" }
+CharacterLength_     = _{ ^"character_length" }
+CharLength_          = _{ ^"char_length" }
+Check_               = _{ ^"check" }
+Close_               = _{ ^"close" }
+Coalesce_            = _{ ^"coalesce" }
+Collate_             = _{ ^"collate" }
+Collation_           = _{ ^"collation" }
+Column_              = _{ ^"column" }
+Commit_              = _{ ^"commit" }
+Connect_             = _{ ^"connect" }
+Connection_          = _{ ^"connection" }
+Constraint_          = _{ ^"constraint" }
+Constraints_         = _{ ^"constraints" }
+Continue_            = _{ ^"continue" }
+Convert_             = _{ ^"convert" }
+Corresponding_       = _{ ^"corresponding" }
+Count_               = _{ ^"count" }
+Create_              = _{ ^"create" }
+Cross_               = _{ ^"cross" }
+Current_             = _{ ^"current" }
+CurrentDate_         = _{ ^"current_date" }
+CurrentTime_         = _{ ^"current_time" }
+CurrentTimestamp_    = _{ ^"current_timestamp" }
+CurrentUser_         = _{ ^"current_user" }
+Cursor_              = _{ ^"cursor" }
+Date_                = _{ ^"date" }
+Deallocate_          = _{ ^"deallocate" }
+Dec_                 = _{ ^"dec" }
+Decimal_             = _{ ^"decimal" }
+Declare_             = _{ ^"declare" }
+Default_             = _{ ^"default" }
+Deferrable_          = _{ ^"deferrable" }
+Deferred_            = _{ ^"deferred" }
+Delete_              = _{ ^"delete" }
+Desc_                = _{ ^"desc" }
+Describe_            = _{ ^"describe" }
+Descriptor_          = _{ ^"descriptor" }
+Diagnostics_         = _{ ^"diagnostics" }
+Disconnect_          = _{ ^"disconnect" }
+Distinct_            = _{ ^"distinct" }
+Domain_              = _{ ^"domain" }
+Double_              = _{ ^"double" }
+Drop_                = _{ ^"drop" }
+Else_                = _{ ^"else" }
+End_                 = _{ ^"end" }
+EndExec_             = _{ ^"end-exec" }
+Escape_              = _{ ^"escape" }
+Except_              = _{ ^"except" }
+Exception_           = _{ ^"exception" }
+Exec_                = _{ ^"exec" }
+Execute_             = _{ ^"execute" }
+Exists_              = _{ ^"exists" }
+External_            = _{ ^"external" }
+Extract_             = _{ ^"extract" }
+DateAdd_             = _{ ^"date_add" }
+DateDiff_            = _{ ^"date_diff" }
+False_               = _{ ^"false" }
+Fetch_               = _{ ^"fetch" }
+First_               = _{ ^"first" }
+Float_               = _{ ^"float" }
+For_                 = _{ ^"for" }
+Foreign_             = _{ ^"foreign" }
+Found_               = _{ ^"found" }
+From_                = _{ ^"from" }
+Full_                = _{ ^"full" }
+Get_                 = _{ ^"get" }
+Global_              = _{ ^"global" }
+Go_                  = _{ ^"go" }
+Goto_                = _{ ^"goto" }
+Grant_               = _{ ^"grant" }
+Group_               = _{ ^"group" }
+Having_              = _{ ^"having" }
+Identity_            = _{ ^"identity" }
+Immediate_           = _{ ^"immediate" }
+In_                  = _{ ^"in" }
+Indicator_           = _{ ^"indicator" }
+Initially_           = _{ ^"initially" }
+Inner_               = _{ ^"inner" }
+Input_               = _{ ^"input" }
+Insensitive_         = _{ ^"insensitive" }
+Insert_              = _{ ^"insert" }
+Int_                 = _{ ^"int" }
+Integer_             = _{ ^"integer" }
+Intersect_           = _{ ^"intersect" }
+Interval_            = _{ ^"interval" }
+Into_                = _{ ^"into" }
+Is_                  = _{ ^"is" }
+Isolation_           = _{ ^"isolation" }
+Join_                = _{ ^"join" }
+Key_                 = _{ ^"key" }
+Language_            = _{ ^"language" }
+Last_                = _{ ^"last" }
+Left_                = _{ ^"left" }
+Level_               = _{ ^"level" }
+Like_                = _{ ^"like" }
+Local_               = _{ ^"local" }
+Lower_               = _{ ^"lower" }
+Match_               = _{ ^"match" }
+Max_                 = _{ ^"max" }
+Min_                 = _{ ^"min" }
+Module_              = _{ ^"module" }
+Names_               = _{ ^"names" }
+National_            = _{ ^"national" }
+Natural_             = _{ ^"natural" }
+Nchar_               = _{ ^"nchar" }
+Next_                = _{ ^"next" }
+No_                  = _{ ^"no" }
+Not_                 = _{ ^"not" }
+Null_                = _{ ^"null" }
+Nullif_              = _{ ^"nullif" }
+Numeric_             = _{ ^"numeric" }
+OctetLength_         = _{ ^"octet_length" }
+Of_                  = _{ ^"of" }
+On_                  = _{ ^"on" }
+Only_                = _{ ^"only" }
+Open_                = _{ ^"open" }
+Option_              = _{ ^"option" }
+Or_                  = _{ ^"or" }
+Order_               = _{ ^"order" }
+Outer_               = _{ ^"outer" }
+Output_              = _{ ^"output" }
+Overlaps_            = _{ ^"overlaps" }
+Pad_                 = _{ ^"pad" }
+Partial_             = _{ ^"partial" }
+Position_            = _{ ^"position" }
+Precision_           = _{ ^"precision" }
+Prepare_             = _{ ^"prepare" }
+Preserve_            = _{ ^"preserve" }
+Primary_             = _{ ^"primary" }
+Prior_               = _{ ^"prior" }
+Privileges_          = _{ ^"privileges" }
+Procedure_           = _{ ^"procedure" }
+Public_              = _{ ^"public" }
+Read_                = _{ ^"read" }
+Real_                = _{ ^"real" }
+References_          = _{ ^"references" }
+Relative_            = _{ ^"relative" }
+Restrict_            = _{ ^"restrict" }
+Revoke_              = _{ ^"revoke" }
+Right_               = _{ ^"right" }
+Rollback_            = _{ ^"rollback" }
+Rows_                = _{ ^"rows" }
+Schema_              = _{ ^"schema" }
+Scroll_              = _{ ^"scroll" }
+Section_             = _{ ^"section" }
+Select_              = _{ ^"select" }
+Session_             = _{ ^"session" }
+SessionUser_         = _{ ^"session_user" }
+Set_                 = _{ ^"set" }
+Size_                = _{ ^"size" }
+Smallint_            = _{ ^"smallint" }
+Some_                = _{ ^"some" }
+Space_               = _{ ^"space" }
+Sql_                 = _{ ^"sql" }
+Sqlcode_             = _{ ^"sqlcode" }
+Sqlerror_            = _{ ^"sqlerror" }
+Sqlstate_            = _{ ^"sqlstate" }
+Substring_           = _{ ^"substring" }
+Sum_                 = _{ ^"sum" }
+SystemUser_          = _{ ^"system_user" }
+Table_               = _{ ^"table" }
+Temporary_           = _{ ^"temporary" }
+Then_                = _{ ^"then" }
+Time_                = _{ ^"time" }
+Timestamp_           = _{ ^"timestamp" }
+To_                  = _{ ^"to" }
+Transaction_         = _{ ^"transaction" }
+Translate_           = _{ ^"translate" }
+Translation_         = _{ ^"translation" }
+Trim_                = _{ ^"trim" }
+True_                = _{ ^"true" }
+Union_               = _{ ^"union" }
+Unique_              = _{ ^"unique" }
+Unknown_             = _{ ^"unknown" }
+Update_              = _{ ^"update" }
+Upper_               = _{ ^"upper" }
+Usage_               = _{ ^"usage" }
+User_                = _{ ^"user" }
+Using_               = _{ ^"using" }
+Value_               = _{ ^"value" }
+Values_              = _{ ^"values" }
+Varchar_             = _{ ^"varchar" }
+Varying_             = _{ ^"varying" }
+View_                = _{ ^"view" }
+When_                = _{ ^"when" }
+Whenever_            = _{ ^"whenever" }
+Where_               = _{ ^"where" }
+With_                = _{ ^"with" }
+Work_                = _{ ^"work" }
+Write_               = _{ ^"write" }
+Zone_                = _{ ^"zone" }
+Missing_             = _{ ^"missing" }
+Pivot_               = _{ ^"pivot" }
+Unpivot_             = _{ ^"unpivot" }
+Limit_               = _{ ^"limit" }
+Tuple_               = _{ ^"tuple" }
+Remove_              = _{ ^"remove" }
+Index_               = _{ ^"index" }
+Conflict_            = _{ ^"conflict" }
+Do_                  = _{ ^"do" }
+Nothing_             = _{ ^"nothing" }
+Returning_           = _{ ^"returning" }
+Modified_            = _{ ^"modified" }
+New_                 = _{ ^"new" }
+Old_                 = _{ ^"old" }
+Let_                 = _{ ^"let" }
+Bool_                = _{ ^"bool" }
+Boolean_             = _{ ^"boolean" }
+String_              = _{ ^"string" }
+Symbol_              = _{ ^"symbol" }
+Clob_                = _{ ^"clob" }
+Blob_                = _{ ^"blob" }
+Struct_              = _{ ^"struct" }
+List_                = _{ ^"list" }
+Sexp_                = _{ ^"sexp" }
+Bag_                 = _{ ^"bag" }
