@@ -117,12 +117,14 @@ DecimalExp = {
     Decimal ~ ("e" | "E") ~ Integer
 }
 
+// XXX `.nnn` and `nnn.` are okay, but `.` on its own definitely is not
 Decimal = {
-    Integer? ~ "." ~ Fraction
+      Integer? ~ "." ~ Fraction
+    | Integer ~ "."
 }
 
 Fraction = {
-    Digit*
+    Digit+
 }
 
 // XXX this explicitly supports arbitrary zero prefixing in various places

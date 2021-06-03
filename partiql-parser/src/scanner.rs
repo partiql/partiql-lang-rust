@@ -573,6 +573,7 @@ mod test {
             "0.0e000" => decimal_literal_from_str("0.0")
         ]
     )]
+    #[case::no_trailing_zeros(scanner_test_case!["1231231." => decimal_literal_from_str("1231231")])]
     #[case::delimiters(
         scanner_test_case![
             "[" => delimiter("["),
@@ -634,6 +635,9 @@ mod test {
             ">" => operator(">"),
         ]
     )]
+    #[case::dot(scanner_test_case!["." => Content::Dot])]
+    #[case::star(scanner_test_case!["*" => Content::Star])]
+    #[case::parameter(scanner_test_case!["?" => Content::Parameter])]
     #[case::comment_no_minus(
         scanner_test_case![
             "-------- a line comment with no minus...\n"
