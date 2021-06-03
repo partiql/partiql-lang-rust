@@ -16,6 +16,8 @@ use pest::iterators::Pair;
 use pest::{Parser, RuleType};
 use std::borrow::Cow;
 
+// TODO turn operator/delimiter into enums of their own (nested or otherwise)
+
 /// The parsed content associated with a [`Token`] that has been scanned.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Content<'val> {
@@ -36,7 +38,22 @@ pub enum Content<'val> {
 
     /// A string literal.  Contains the slice for the content of the literal.
     StringLiteral(Cow<'val, str>),
-    // TODO things like literals, punctuation, etc.
+
+    /// The `.` punctuation
+    Dot,
+
+    /// The `*` operator and wildcard.
+    Star,
+
+    /// The `?` placeholder for a query parameter.
+    Parameter,
+
+    /// An operator represented by punctuation (as opposed to a keyword based operator).
+    /// Contains the slice for the operator.
+    Operator(Cow<'val, str>),
+
+    /// A separator character.  Contains the slice for the delimiter character.
+    Delimiter(Cow<'val, str>),
 }
 
 /// Convenience constructor for a [`Content::Keyword`].
@@ -62,6 +79,16 @@ pub fn decimal_literal<'val, V: Into<BigDecimal>>(value: V) -> Content<'val> {
 /// Convenience constructor for a [`Content::StringLiteral`].
 pub fn string_literal<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
     Content::StringLiteral(text.into())
+}
+
+/// Convenience constructor for a [`Content::Operator`].
+pub fn operator<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
+    Content::Operator(text.into())
+}
+
+/// Convenience constructor for a [`Content::Operator`].
+pub fn delimiter<'val, S: Into<Cow<'val, str>>>(text: S) -> Content<'val> {
+    Content::Delimiter(text.into())
 }
 
 /// Internal type to keep track of remaining input and relative line/column information.
@@ -174,6 +201,14 @@ where
     }
 }
 
+fn normalize_operator(raw_text: &str) -> Cow<str> {
+    match raw_text {
+        "!=" => "<>",
+        _ => raw_text,
+    }
+    .into()
+}
+
 impl<'val> PartiQLScanner<'val> {
     fn do_next_token(&mut self) -> ParserResult<Token<'val>> {
         // the scanner rule is expected to return a single node
@@ -186,14 +221,14 @@ impl<'val> PartiQLScanner<'val> {
         self.remainder = self.remainder.consume(start_off + text.len(), pair.end()?);
 
         let content = match pair.as_rule() {
-            Rule::Keyword => Content::Keyword(text.to_uppercase().into()),
-            Rule::String => Content::StringLiteral(normalize_string_lit(pair.as_str())),
+            Rule::Keyword => keyword(text.to_uppercase()),
+            Rule::String => string_literal(normalize_string_lit(pair.as_str())),
             Rule::Identifier => {
                 let ident_pair = pair.into_inner().exactly_one()?;
                 match ident_pair.as_rule() {
-                    Rule::NonQuotedIdentifier => Content::Identifier(ident_pair.as_str().into()),
+                    Rule::NonQuotedIdentifier => identifier(ident_pair.as_str()),
                     Rule::QuotedIdentifier => {
-                        Content::Identifier(normalize_quoted_ident(ident_pair.as_str()))
+                        identifier(normalize_quoted_ident(ident_pair.as_str()))
                     }
                     _ => return ident_pair.unexpected(),
                 }
@@ -208,6 +243,11 @@ impl<'val> PartiQLScanner<'val> {
                     _ => return number_pair.unexpected(),
                 }
             }
+            Rule::Dot_ => Content::Dot,
+            Rule::Star_ => Content::Star,
+            Rule::Parameter => Content::Parameter,
+            Rule::Operator => operator(normalize_operator(text)),
+            Rule::Delimiter => delimiter(text),
             _ => return pair.unexpected(),
         };
 
@@ -531,6 +571,85 @@ mod test {
             ".0e0" => decimal_literal_from_str("0.0"),
             " ",
             "0.0e000" => decimal_literal_from_str("0.0")
+        ]
+    )]
+    #[case::no_trailing_zeros(scanner_test_case!["1231231." => decimal_literal_from_str("1231231")])]
+    #[case::delimiters(
+        scanner_test_case![
+            "[" => delimiter("["),
+            "]" => delimiter("]"),
+            "(" => delimiter("("),
+            ")" => delimiter(")"),
+            "{" => delimiter("{"),
+            "}" => delimiter("}"),
+            "<<" => delimiter("<<"),
+            ">>" => delimiter(">>"),
+            "," => delimiter(","),
+            ":" => delimiter(":"),
+            ";" => delimiter(";"),
+        ]
+    )]
+    #[case::operators(
+        scanner_test_case![
+            "@" => operator("@"),
+            "+" => operator("+"),
+            "-" => operator("-"),
+            "/" => operator("/"),
+            "%" => operator("%"),
+            "<" => operator("<"),
+            " ",
+            "<=" => operator("<="),
+            ">" => operator(">"),
+            " ",
+            ">=" => operator(">="),
+            "=" => operator("="),
+            "<>" => operator("<>"),
+            "!=" => operator("<>"),
+        ]
+    )]
+    #[case::left_angles(
+        scanner_test_case![
+            "<<" => delimiter("<<"),
+            "<<" => delimiter("<<"),
+            "<" => operator("<"),
+        ]
+    )]
+    #[case::right_angles(
+        scanner_test_case![
+            ">>" => delimiter(">>"),
+            ">>" => delimiter(">>"),
+            ">" => operator(">"),
+        ]
+    )]
+    #[case::balanced_angles(
+        scanner_test_case![
+            "<<" => delimiter("<<"),
+            "<<" => delimiter("<<"),
+            "<>" => operator("<>"),
+            ">>" => delimiter(">>"),
+            ">>" => delimiter(">>"),
+            " ",
+            "<<" => delimiter("<<"),
+            "<=" => operator("<="),
+            ">>" => delimiter(">>"),
+            ">" => operator(">"),
+        ]
+    )]
+    #[case::dot(scanner_test_case!["." => Content::Dot])]
+    #[case::star(scanner_test_case!["*" => Content::Star])]
+    #[case::parameter(scanner_test_case!["?" => Content::Parameter])]
+    #[case::comment_no_minus(
+        scanner_test_case![
+            "-------- a line comment with no minus...\n"
+        ]
+    )]
+    #[case::divide_block_comment(
+        scanner_test_case![
+            "/" => operator("/"),
+            "/" => operator("/"),
+            "/**/",
+            "/" => operator("/"),
+            "/" => operator("/"),
         ]
     )]
     #[case::select_from(
