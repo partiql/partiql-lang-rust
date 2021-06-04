@@ -155,7 +155,7 @@ StringContent = {
 Identifier = { NonQuotedIdentifier | QuotedIdentifier }
 
 NonQuotedIdentifier = @{
-    !Keyword ~ NonQuotedIdentifierStart ~ NonQuotedIdentifierCont*
+    !(Keyword) ~ NonQuotedIdentifierStart ~ NonQuotedIdentifierCont*
 }
 
 NonQuotedIdentifierStart = _{ "_" | "$" | 'a'..'z' | 'A'..'Z' }
@@ -173,7 +173,9 @@ QuotedIdentifierContent = {
 // Keywords
 //
 
-Keyword = { SqlKeyword | PartiqlKeyword }
+Keyword = @{ 
+    (SqlKeyword | PartiqlKeyword) ~ !NonQuotedIdentifierCont
+}
 
 SqlKeyword = _{
       Absolute_

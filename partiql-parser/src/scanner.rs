@@ -509,13 +509,20 @@ mod test {
             "WHERE" => keyword("WHERE")
         ]
     )]
-    #[case::some_keywords(
+    #[case::some_identifiers(
         scanner_test_case![
             "moo_cow_1999" => identifier("moo_cow_1999"),
             " ",
             "_1" => identifier("_1"),
             " ",
             "$$$$" => identifier("$$$$")
+        ]
+    )]
+    #[case::identifiers_with_keywords_in_them(
+        scanner_test_case![
+            "moowhere" => identifier("moowhere"),
+            " ",
+            "selecty" => identifier("selecty"),
         ]
     )]
     #[case::quoted_identifiers(
