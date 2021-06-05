@@ -3,15 +3,15 @@
 //! Contains the [Pest](https://pest.rs) defined parser for PartiQL and a wrapper APIs that
 //! can be exported for users to consume.
 
+mod gen;
+
 use crate::prelude::*;
 use crate::result::{illegal_state, syntax_error};
 use pest::iterators::{Pair, Pairs};
 use pest::{Parser, RuleType};
-use pest_derive::Parser;
 
-#[derive(Parser)]
-#[grammar = "partiql.pest"]
-pub(crate) struct PartiQLParser;
+pub(crate) use gen::PartiQLParser;
+pub(crate) use gen::Rule;
 
 /// Extension methods for working with [`Pairs`].
 pub(crate) trait PairsExt<'val, R: RuleType> {
