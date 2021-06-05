@@ -75,11 +75,11 @@ BagConstructor = {
 }
 
 Values = _{
-    (ValueExpression ~ (Comma_ ~ ValueExpression)* ~ Comma_?)
+    (ValueExpression ~ (Comma_ ~ ValueExpression)*)
 }
 
 TupleConstructor = {
-    LeftCurly_ ~ TupleField ~ (Comma_ ~ TupleField)* ~ Comma_? ~ RightCurly_
+    LeftCurly_ ~ TupleField ~ (Comma_ ~ TupleField)* ~ RightCurly_
 }
 
 TupleField = {
