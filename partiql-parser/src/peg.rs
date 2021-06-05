@@ -138,6 +138,10 @@ mod tests {
         r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#,
         Ok(())
     )]
+    #[case::empty_tuple(
+        r#"{}"#,
+        Ok(())
+    )]
     #[case::tuple(
         r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#,
         Ok(())
@@ -154,15 +158,15 @@ mod tests {
         r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
         Ok(())
     )]
-    #[case::simple(
+    #[case::select_value_from_where_containers(
         r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
         Ok(())
     )]
-    #[case::error(
+    #[case::bad_identifier(
         r#"SELECT value aWeSoMe FROM 💩"#,
         syntax_error("IGNORED MESSAGE", Position::at(1, 27))
     )]
-    #[case::error(
+    #[case::missing_from_with_where(
         r#"SELECT value aWeSoMe WHERE FALSE"#,
         syntax_error("IGNORED MESSAGE", Position::at(1, 22))
     )]

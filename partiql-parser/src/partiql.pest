@@ -79,7 +79,7 @@ Values = _{
 }
 
 TupleConstructor = {
-    LeftCurly_ ~ TupleField ~ (Comma_ ~ TupleField)* ~ RightCurly_
+    LeftCurly_ ~ (TupleField ~ (Comma_ ~ TupleField)*)? ~ RightCurly_
 }
 
 TupleField = {
