@@ -9,29 +9,30 @@
 //! ```
 //! use pestion::*;
 //! use ion_rs::value::*;
+//! use ion_rs::value::reader::*;
 //!
 //! fn main() -> PestionResult<()> {
 //!     // parse a Pest grammar and convert it to Ion element
-//!     let element = r#"a = @{ "a" | "b" ~ "c" }"#.pest_to_element()?;
+//!     let actual = r#"a = @{ "a" | "b" ~ "c" }"#.try_pest_to_element()?;
 //!
-//!     // the grammar is a struct containing a field for each rule
-//!     let a_rule = element
-//!         .as_struct()
-//!         .and_then(|s| s.get("a"))
-//!         .and_then(|r| r.as_struct()).unwrap();
+//!     // here is the equivalent Ion element
+//!     let ion_text = r#"{
+//!         a: {
+//!             type: atomic,
+//!             expression:
+//!                 (choice
+//!                     (string exact "a")
+//!                     (sequence
+//!                         (string exact "b")
+//!                         (string exact "c")
+//!                     )
+//!                 )
+//!         }
+//!     }"#;
+//!     let expected = element_reader().read_one(ion_text.as_bytes())?;
 //!
-//!     // The '@' in the start of the rule means it is atomic
-//!     assert_eq!("atomic", a_rule.get("type").and_then(|t| t.as_str()).unwrap());
-//!
-//!     // the first node in the expression tree is a `choice` operator
-//!     assert_eq!(
-//!         "choice",
-//!         a_rule
-//!             .get("expression")
-//!             .and_then(|e| e.as_sequence())
-//!             .and_then(|s| s.get(0))
-//!             .and_then(|h| h.as_str()).unwrap()
-//!     );
+//!     // these should be equivalent
+//!     assert_eq!(expected, actual);
 //!     
 //!     Ok(())
 //! }
@@ -49,20 +50,35 @@ use ion_rs::value::{Builder, Element};
 use pest::Parser;
 use pest_meta::ast::{Expr, Rule as AstRule, RuleType as AstRuleType, RuleType};
 use pest_meta::parser::{consume_rules, PestParser, Rule};
+use smallvec::{smallvec, SmallVec};
 
-/// Converts a representation of a Pest grammar (or part of a grammar) into Ion [`Element`].
-pub trait PestToElement {
+/// Converts representation of a Pest grammar (or part of a grammar) into Ion [`Element`].
+pub trait TryPestToElement {
     type Element: Element;
 
     /// Converts this into [`Element`] which may imply parsing Pest syntax.
-    fn pest_to_element(&self) -> PestionResult<Self::Element>;
+    ///
+    /// This returns `Err` if the the conversion fails. For example, this can happen if the
+    /// source is not a valid Pest grammar.
+    fn try_pest_to_element(&self) -> PestionResult<Self::Element>;
 }
 
-impl PestToElement for &str {
+/// Infallible conversion of a Pest grammar (or part of a grammar) into Ion [`Element`].
+pub trait PestToElement {
+    type Element: Element;
+
+    /// Converts this into an [`Element`] representation.
+    ///
+    /// This operation cannot fail and therefore it is implied that it represents some
+    /// well formed Pest grammar or component thereof.
+    fn pest_to_element(&self) -> Self::Element;
+}
+
+impl TryPestToElement for &str {
     type Element = OwnedElement;
 
     /// Parses a `str` slice as a Pest grammar and serializes the AST into [`Element`].
-    fn pest_to_element(&self) -> PestionResult<Self::Element> {
+    fn try_pest_to_element(&self) -> PestionResult<Self::Element> {
         let pairs = PestParser::parse(Rule::grammar_rules, *self)?;
         let ast = match consume_rules(pairs) {
             Ok(ast) => ast,
@@ -77,7 +93,7 @@ impl PestToElement for &str {
             }
         };
 
-        ast.pest_to_element()
+        Ok(ast.pest_to_element())
     }
 }
 
@@ -85,14 +101,13 @@ impl PestToElement for Vec<AstRule> {
     type Element = OwnedElement;
 
     /// Converts a body of rules into a `struct` that has a rule for each field.
-    fn pest_to_element(&self) -> PestionResult<Self::Element> {
-        let mut fields = vec![];
-        for rule in self.iter() {
+    fn pest_to_element(&self) -> Self::Element {
+        let fields = self.iter().map(|rule| {
             let rule_name = text_token(rule.name.clone());
-            let rule_value = rule.pest_to_element()?;
-            fields.push((rule_name, rule_value));
-        }
-        Ok(Self::Element::new_struct(fields))
+            let rule_value = rule.pest_to_element();
+            (rule_name, rule_value)
+        });
+        Self::Element::new_struct(fields)
     }
 }
 
@@ -101,12 +116,12 @@ impl PestToElement for AstRule {
 
     /// Converts a Pest Rule into a `struct` that has the field for [`RuleType`] as a symbol
     /// and a field for the [`Expr`].
-    fn pest_to_element(&self) -> PestionResult<Self::Element> {
-        let fields = vec![
-            (text_token("type"), self.ty.pest_to_element()?),
-            (text_token("expression"), self.expr.pest_to_element()?),
-        ];
-        Ok(Self::Element::new_struct(fields))
+    fn pest_to_element(&self) -> Self::Element {
+        let fields = std::array::IntoIter::new([
+            (text_token("type"), self.ty.pest_to_element()),
+            (text_token("expression"), self.expr.pest_to_element()),
+        ]);
+        Self::Element::new_struct(fields)
     }
 }
 
@@ -114,7 +129,7 @@ impl PestToElement for AstRuleType {
     type Element = OwnedElement;
 
     /// Serializes the enum into a symbolic value.
-    fn pest_to_element(&self) -> PestionResult<Self::Element> {
+    fn pest_to_element(&self) -> Self::Element {
         let sym_tok = text_token(match self {
             RuleType::Normal => "normal",
             RuleType::Silent => "silent",
@@ -123,7 +138,7 @@ impl PestToElement for AstRuleType {
             RuleType::NonAtomic => "non_atomic",
         });
 
-        Ok(sym_tok.into())
+        sym_tok.into()
     }
 }
 
@@ -131,86 +146,92 @@ impl PestToElement for Expr {
     type Element = OwnedElement;
 
     /// Generates a `sexp` representation of the rule expression.
-    fn pest_to_element(&self) -> PestionResult<Self::Element> {
+    fn pest_to_element(&self) -> Self::Element {
         use OwnedValue::*;
 
-        let element = Self::Element::new_sexp(match self.clone() {
-            Expr::Str(text) => vec![
+        const STACK_LEN: usize = 4;
+        let values: SmallVec<[_; STACK_LEN]> = match self.clone() {
+            Expr::Str(text) => smallvec![
                 text_token("string").into(),
                 text_token("exact").into(),
                 String(text).into(),
             ],
-            Expr::Insens(text) => vec![
+            Expr::Insens(text) => smallvec![
                 text_token("string").into(),
                 text_token("insensitive").into(),
                 String(text).into(),
             ],
-            Expr::Range(begin, end) => vec![
+            Expr::Range(begin, end) => smallvec![
                 text_token("character_range").into(),
                 String(begin).into(),
                 String(end).into(),
             ],
-            Expr::Ident(name) => vec![text_token("identifier").into(), String(name).into()],
-            Expr::PosPred(expr) => vec![
+            Expr::Ident(name) => smallvec![text_token("identifier").into(), String(name).into()],
+            Expr::PosPred(expr) => smallvec![
                 text_token("predicate").into(),
                 text_token("positive").into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::NegPred(expr) => vec![
+            Expr::NegPred(expr) => smallvec![
                 text_token("predicate").into(),
                 text_token("negative").into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::Seq(left, right) => vec![
+            Expr::Seq(left, right) => smallvec![
                 text_token("sequence").into(),
-                left.pest_to_element()?,
-                right.pest_to_element()?,
+                left.pest_to_element(),
+                right.pest_to_element(),
             ],
-            Expr::Choice(left, right) => vec![
+            Expr::Choice(left, right) => smallvec![
                 text_token("choice").into(),
-                left.pest_to_element()?,
-                right.pest_to_element()?,
+                left.pest_to_element(),
+                right.pest_to_element(),
             ],
-            Expr::Opt(expr) => vec![text_token("optional").into(), expr.pest_to_element()?],
-            Expr::Rep(expr) => vec![
+            Expr::Opt(expr) => {
+                smallvec![text_token("optional").into(), expr.pest_to_element()]
+            }
+            Expr::Rep(expr) => smallvec![
                 text_token("repeat_min").into(),
                 0.into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::RepOnce(expr) => vec![
+            Expr::RepOnce(expr) => smallvec![
                 text_token("repeat_min").into(),
                 1.into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::RepMin(expr, min) => vec![
+            Expr::RepMin(expr, min) => smallvec![
                 text_token("repeat_min").into(),
                 (min as i64).into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::RepMax(expr, max) => vec![
+            Expr::RepMax(expr, max) => smallvec![
                 text_token("repeat_max").into(),
                 (max as i64).into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::RepExact(expr, exact) => vec![
+            Expr::RepExact(expr, exact) => smallvec![
                 text_token("repeat_range").into(),
                 (exact as i64).into(),
                 (exact as i64).into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
-            Expr::RepMinMax(expr, min, max) => vec![
+            Expr::RepMinMax(expr, min, max) => smallvec![
                 text_token("repeat_range").into(),
                 (min as i64).into(),
                 (max as i64).into(),
-                expr.pest_to_element()?,
+                expr.pest_to_element(),
             ],
             // TODO implement these
             Expr::Skip(_) => unimplemented!(),
             Expr::Push(_) => unimplemented!(),
             Expr::PeekSlice(_, _) => unimplemented!(),
-        });
+        };
+        assert!(values.len() <= STACK_LEN);
 
-        Ok(element)
+        let element = Self::Element::new_sexp(values);
+
+        element
     }
 }
 
@@ -403,10 +424,10 @@ mod tests {
     )]
     fn good<T, S>(#[case] input: T, #[case] ion_literal: S) -> PestionResult<()>
     where
-        T: PestToElement<Element = OwnedElement> + Debug,
+        T: TryPestToElement<Element = OwnedElement> + Debug,
         S: AsRef<str>,
     {
-        let actual = input.pest_to_element()?;
+        let actual = input.try_pest_to_element()?;
         let expected = element_reader().read_one(ion_literal.as_ref().as_bytes())?;
 
         const BUF_SIZE: usize = 16 * 1024 * 1024;
@@ -431,8 +452,8 @@ mod tests {
     #[case::empty_rule(r#"a = {}"#)]
     #[case::self_reference(r#"a = { a }"#)]
     #[case::double_rule(r#"a = { "a" }\n a = { "b" }"#)]
-    fn pest_errors<T: PestToElement>(#[case] input: T) -> PestionResult<()> {
-        match input.pest_to_element() {
+    fn pest_errors<T: TryPestToElement>(#[case] input: T) -> PestionResult<()> {
+        match input.try_pest_to_element() {
             Err(PestionError::Pest(_)) => {}
             something => {
                 unreachable!("Got result we did not expect: {:?}", something);
