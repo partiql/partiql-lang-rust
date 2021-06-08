@@ -12,4 +12,4 @@ coverage:
 ignore:
   # Ignore the Pest generated code until we have a better way to test
   # and target coverage for it
-  - "partiql-parser/src/peg.rs"
+  - "partiql-parser/src/peg/gen.rs"
