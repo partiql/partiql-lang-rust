@@ -50,7 +50,8 @@ use ion_rs::value::{Builder, Element};
 use pest::Parser;
 use pest_meta::ast::{Expr, Rule as AstRule, RuleType as AstRuleType, RuleType};
 use pest_meta::parser::{consume_rules, PestParser, Rule};
-use smallvec::{smallvec, SmallVec};
+use std::fs::read_to_string;
+use std::path::Path;
 
 /// Converts representation of a Pest grammar (or part of a grammar) into Ion [`Element`].
 pub trait TryPestToElement {
@@ -74,12 +75,23 @@ pub trait PestToElement {
     fn pest_to_element(&self) -> Self::Element;
 }
 
-impl TryPestToElement for &str {
+impl<T> TryPestToElement for &T
+where
+    T: TryPestToElement + ?Sized,
+{
+    type Element = T::Element;
+
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
+        (*self).try_pest_to_element()
+    }
+}
+
+impl TryPestToElement for str {
     type Element = OwnedElement;
 
-    /// Parses a `str` slice as a Pest grammar and serializes the AST into [`Element`].
+    /// Parses a `str` slice as a Pest grammar.
     fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
-        let pairs = PestParser::parse(Rule::grammar_rules, *self)?;
+        let pairs = PestParser::parse(Rule::grammar_rules, self)?;
         let ast = match consume_rules(pairs) {
             Ok(ast) => ast,
             Err(errors) => {
@@ -94,6 +106,27 @@ impl TryPestToElement for &str {
         };
 
         Ok(ast.pest_to_element())
+    }
+}
+
+impl TryPestToElement for String {
+    type Element = OwnedElement;
+
+    /// Parses a `String` as a Pest grammar.
+    #[inline]
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
+        self.as_str().try_pest_to_element()
+    }
+}
+
+impl TryPestToElement for Path {
+    type Element = OwnedElement;
+
+    /// Reads a file specified by the given path as a Pest Grammar.
+    #[inline]
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
+        let pest_text = read_to_string(self)?;
+        pest_text.try_pest_to_element()
     }
 }
 
@@ -149,74 +182,73 @@ impl PestToElement for Expr {
     fn pest_to_element(&self) -> Self::Element {
         use OwnedValue::*;
 
-        const STACK_LEN: usize = 4;
-        let values: SmallVec<[_; STACK_LEN]> = match self.clone() {
-            Expr::Str(text) => smallvec![
+        let values = match self.clone() {
+            Expr::Str(text) => vec![
                 text_token("string").into(),
                 text_token("exact").into(),
                 String(text).into(),
             ],
-            Expr::Insens(text) => smallvec![
+            Expr::Insens(text) => vec![
                 text_token("string").into(),
                 text_token("insensitive").into(),
                 String(text).into(),
             ],
-            Expr::Range(begin, end) => smallvec![
+            Expr::Range(begin, end) => vec![
                 text_token("character_range").into(),
                 String(begin).into(),
                 String(end).into(),
             ],
-            Expr::Ident(name) => smallvec![text_token("identifier").into(), String(name).into()],
-            Expr::PosPred(expr) => smallvec![
+            Expr::Ident(name) => vec![text_token("identifier").into(), String(name).into()],
+            Expr::PosPred(expr) => vec![
                 text_token("predicate").into(),
                 text_token("positive").into(),
                 expr.pest_to_element(),
             ],
-            Expr::NegPred(expr) => smallvec![
+            Expr::NegPred(expr) => vec![
                 text_token("predicate").into(),
                 text_token("negative").into(),
                 expr.pest_to_element(),
             ],
-            Expr::Seq(left, right) => smallvec![
+            Expr::Seq(left, right) => vec![
                 text_token("sequence").into(),
                 left.pest_to_element(),
                 right.pest_to_element(),
             ],
-            Expr::Choice(left, right) => smallvec![
+            Expr::Choice(left, right) => vec![
                 text_token("choice").into(),
                 left.pest_to_element(),
                 right.pest_to_element(),
             ],
             Expr::Opt(expr) => {
-                smallvec![text_token("optional").into(), expr.pest_to_element()]
+                vec![text_token("optional").into(), expr.pest_to_element()]
             }
-            Expr::Rep(expr) => smallvec![
+            Expr::Rep(expr) => vec![
                 text_token("repeat_min").into(),
                 0.into(),
                 expr.pest_to_element(),
             ],
-            Expr::RepOnce(expr) => smallvec![
+            Expr::RepOnce(expr) => vec![
                 text_token("repeat_min").into(),
                 1.into(),
                 expr.pest_to_element(),
             ],
-            Expr::RepMin(expr, min) => smallvec![
+            Expr::RepMin(expr, min) => vec![
                 text_token("repeat_min").into(),
                 (min as i64).into(),
                 expr.pest_to_element(),
             ],
-            Expr::RepMax(expr, max) => smallvec![
+            Expr::RepMax(expr, max) => vec![
                 text_token("repeat_max").into(),
                 (max as i64).into(),
                 expr.pest_to_element(),
             ],
-            Expr::RepExact(expr, exact) => smallvec![
+            Expr::RepExact(expr, exact) => vec![
                 text_token("repeat_range").into(),
                 (exact as i64).into(),
                 (exact as i64).into(),
                 expr.pest_to_element(),
             ],
-            Expr::RepMinMax(expr, min, max) => smallvec![
+            Expr::RepMinMax(expr, min, max) => vec![
                 text_token("repeat_range").into(),
                 (min as i64).into(),
                 (max as i64).into(),
@@ -227,7 +259,6 @@ impl PestToElement for Expr {
             Expr::Push(_) => unimplemented!(),
             Expr::PeekSlice(_, _) => unimplemented!(),
         };
-        assert!(values.len() <= STACK_LEN);
 
         let element = Self::Element::new_sexp(values);
 
@@ -240,6 +271,7 @@ mod tests {
     use super::*;
     use ion_rs::value::reader::*;
     use ion_rs::value::writer::*;
+    use ion_rs::value::*;
     use rstest::*;
     use std::fmt::Debug;
     use std::str::from_utf8;
@@ -459,6 +491,27 @@ mod tests {
                 unreachable!("Got result we did not expect: {:?}", something);
             }
         }
+        Ok(())
+    }
+
+    /// Simple test case to make sure we can convert the PartiQL grammar
+    #[test]
+    fn convert_partiql() -> PestToIonResult<()> {
+        let grammar_path = Path::new("../partiql-parser/src/peg/partiql.pest");
+        let grammar_element = grammar_path.try_pest_to_element()?;
+        let grammar_struct = grammar_element
+            .as_struct()
+            .expect("top-level value must be struct");
+
+        // some sanity check on the generated Ion--the goal here is not to test the
+        // serialization of the grammar because that can be refactored over time
+
+        // entry point for parser
+        assert!(grammar_struct.get("Query").is_some());
+
+        // entry point for scanner
+        assert!(grammar_struct.get("Scanner").is_some());
+
         Ok(())
     }
 }

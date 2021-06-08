@@ -18,6 +18,10 @@ pub enum PestToIonError {
     #[error("Ion Error: {0}")]
     Ion(#[from] ion_rs::result::IonError),
 
+    /// An I/O error.
+    #[error("I/O Error: {0}")]
+    Io(#[from] std::io::Error),
+
     /// General error from this library.
     #[error("Pest to Ion Error: {0}")]
     Invalid(String),
