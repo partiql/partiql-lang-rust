@@ -1,9 +1,9 @@
 [package]
-name = "pestion"
+name = "pest-ion"
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
 description = "A simple Pest grammar to Ion converter"
-homepage = "https://github.com/partiql/partiql-lang-rust/pestion"
-repository = "https://github.com/partiql/partiql-lang-rust/pestion"
+homepage = "https://github.com/partiql/partiql-lang-rust/pest-ion"
+repository = "https://github.com/partiql/partiql-lang-rust/pest-ion"
 license = "Apache-2.0"
 readme = "README.md"
 keywords = ["parser", "peg", "pest", "ion", "cli"]

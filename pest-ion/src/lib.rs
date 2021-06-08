@@ -7,11 +7,11 @@
 //! The easiest way to convert [Pest] grammars to Ion is from a `str` slice:
 //!
 //! ```
-//! use pestion::*;
+//! use pest_ion::*;
 //! use ion_rs::value::*;
 //! use ion_rs::value::reader::*;
 //!
-//! fn main() -> PestionResult<()> {
+//! fn main() -> PestToIonResult<()> {
 //!     // parse a Pest grammar and convert it to Ion element
 //!     let actual = r#"a = @{ "a" | "b" ~ "c" }"#.try_pest_to_element()?;
 //!
@@ -60,7 +60,7 @@ pub trait TryPestToElement {
     ///
     /// This returns `Err` if the the conversion fails. For example, this can happen if the
     /// source is not a valid Pest grammar.
-    fn try_pest_to_element(&self) -> PestionResult<Self::Element>;
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element>;
 }
 
 /// Infallible conversion of a Pest grammar (or part of a grammar) into Ion [`Element`].
@@ -78,7 +78,7 @@ impl TryPestToElement for &str {
     type Element = OwnedElement;
 
     /// Parses a `str` slice as a Pest grammar and serializes the AST into [`Element`].
-    fn try_pest_to_element(&self) -> PestionResult<Self::Element> {
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
         let pairs = PestParser::parse(Rule::grammar_rules, *self)?;
         let ast = match consume_rules(pairs) {
             Ok(ast) => ast,
@@ -422,7 +422,7 @@ mod tests {
             },
         }"#
     )]
-    fn good<T, S>(#[case] input: T, #[case] ion_literal: S) -> PestionResult<()>
+    fn good<T, S>(#[case] input: T, #[case] ion_literal: S) -> PestToIonResult<()>
     where
         T: TryPestToElement<Element = OwnedElement> + Debug,
         S: AsRef<str>,
@@ -452,9 +452,9 @@ mod tests {
     #[case::empty_rule(r#"a = {}"#)]
     #[case::self_reference(r#"a = { a }"#)]
     #[case::double_rule(r#"a = { "a" }\n a = { "b" }"#)]
-    fn pest_errors<T: TryPestToElement>(#[case] input: T) -> PestionResult<()> {
+    fn pest_errors<T: TryPestToElement>(#[case] input: T) -> PestToIonResult<()> {
         match input.try_pest_to_element() {
-            Err(PestionError::Pest(_)) => {}
+            Err(PestToIonError::Pest(_)) => {}
             something => {
                 unreachable!("Got result we did not expect: {:?}", something);
             }

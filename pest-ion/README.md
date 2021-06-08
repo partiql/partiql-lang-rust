@@ -1,4 +1,4 @@
-# Pestion
+# Pest to Ion
 
 This is a simple tool and library for converting [Pest] grammars to [Ion] data format.
 

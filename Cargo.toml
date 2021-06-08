@@ -6,5 +6,5 @@ members = [
   "partiql-irgen",
   "partiql-parser",
   "partiql-rewriter",
-  "pestion",
+  "pest-ion",
 ]
