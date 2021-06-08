@@ -25,5 +25,14 @@ pest = "~2.1.3"
 pest_meta = "~2.1.3"
 ion-rs = "~0.6.0"
 
+# for pest2ion binary--not sure if this can be modeled separately
+clap = "~2.33.3"
+anyhow = "~1.0.40"
+
 [dev-dependencies]
 rstest = "~0.10.0"
+
+[[bin]]
+name = "pest2ion"
+test = false
+bench = false
