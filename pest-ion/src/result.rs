@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! [`Error`] and [`Result`] types for working with Pest to Ion.
+//! [`Error`](std::error::Error) and [`Result`] types for working with Pest to Ion.
 
 use thiserror::Error;
 
