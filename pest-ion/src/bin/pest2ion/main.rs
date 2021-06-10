@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         .author(crate_authors!())
         .about(crate_description!())
         .arg(
-            Arg::with_name("FILE")
+            Arg::with_name("INPUT_FILE")
                 .help("The input file to parse (defaults to STDIN)")
                 .index(1),
         )
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
         .group(ArgGroup::with_name("format").args(&["text", "binary", "pretty"]))
         .get_matches();
 
-    let elem = if let Some(file_name) = matches.value_of("FILE") {
+    let elem = if let Some(file_name) = matches.value_of("INPUT_FILE") {
         Path::new(file_name).try_pest_to_element()?
     } else {
         // no file argument means read from stdin
