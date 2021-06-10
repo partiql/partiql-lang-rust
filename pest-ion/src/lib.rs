@@ -50,7 +50,9 @@ use ion_rs::value::{Builder, Element};
 use pest::Parser;
 use pest_meta::ast::{Expr, Rule as AstRule, RuleType as AstRuleType, RuleType};
 use pest_meta::parser::{consume_rules, PestParser, Rule};
-use std::fs::read_to_string;
+use std::cell::RefCell;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 /// Converts representation of a Pest grammar (or part of a grammar) into Ion [`Element`].
@@ -125,9 +127,36 @@ impl TryPestToElement for Path {
     /// Reads a file specified by the given path as a Pest Grammar.
     #[inline]
     fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
-        let pest_text = read_to_string(self)?;
-        pest_text.try_pest_to_element()
+        let file = from_read(File::open(self)?);
+        file.try_pest_to_element()
     }
+}
+
+/// Wrapper over an arbitrary [`Read`] that can be converted to `Element`.
+///
+/// [`TryPestToElement`] is designed to work on `&self` which makes sense
+/// for data types like `&str`, but cannot work for [`Read`] without interior mutability.
+struct ReadWrapper<R: Read>(RefCell<R>);
+
+impl<R: Read> TryPestToElement for ReadWrapper<R> {
+    type Element = OwnedElement;
+
+    fn try_pest_to_element(&self) -> PestToIonResult<Self::Element> {
+        let mut read = self.0.borrow_mut();
+        let mut buffer = String::new();
+        read.read_to_string(&mut buffer)?;
+
+        buffer.try_pest_to_element()
+    }
+}
+
+/// Construct a [`TryPestToElement`] from an arbitrary [`Read`].
+///
+/// Note that the lack of specialization and the requirement for interior mutability
+/// for the [`TryPestToElement`] API requires this wrapper as opposed to a blanket
+/// trait implementation.
+pub fn from_read<R: Read>(source: R) -> impl TryPestToElement<Element = OwnedElement> {
+    ReadWrapper(RefCell::new(source))
 }
 
 impl PestToElement for Vec<AstRule> {
