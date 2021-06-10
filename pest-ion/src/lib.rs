@@ -98,7 +98,9 @@ impl TryPestToElement for str {
             Ok(ast) => ast,
             Err(errors) => {
                 return if errors.is_empty() {
-                    invalid("Error converting Pest grammar to AST with no context")
+                    invalid(
+                        "Parser indicated an error happened but didn't return any error messages",
+                    )
                 } else {
                     // TODO deal with more than one error..
                     let err = errors.into_iter().next().unwrap();
