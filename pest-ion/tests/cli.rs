@@ -30,7 +30,7 @@ enum FileMode {
         }
     "#
 )]
-fn simple(
+fn run_it(
     #[case] pest_src: &str,
     #[case] ion_text: &str,
     #[values("", "-t", "-p", "-b")] format_flag: &str,
