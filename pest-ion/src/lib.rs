@@ -206,6 +206,46 @@ impl PestToElement for AstRuleType {
     }
 }
 
+/// Signalling result for the callback in [`flatten`].
+enum ShouldFlatten {
+    /// Indicates that the children of the operand should be flattened recursively.
+    Yes(Box<Expr>, Box<Expr>),
+    /// Indicates that the operand should not be flattened and is transfered back to the caller.
+    No(Box<Expr>),
+}
+
+/// High order function to flatten associative binary nodes in a Pest expression.
+///
+/// Certain nodes like the `choice` and `sequence` nodes are associative
+/// (though not commutative) and can be flattened in to a variadic node instead
+/// of the fixed binary one that the Pest AST has.
+///
+/// The caller is responsible for seeding the vector with the tag (e.g. `choice`).
+///
+/// The `determine_flatten` function parameter returns [`ShouldFlatten::Yes`] when the underlying
+/// binary operator for an operand should be flattened recursively (for its underlying children),
+/// and returns [`ShouldFlatten::No`] when it should not be flattened and the operand is moved
+/// back to the caller to covert to [`Element`] normally.
+fn flatten<F>(
+    sexp_fields: &mut Vec<OwnedElement>,
+    left: Box<Expr>,
+    right: Box<Expr>,
+    determine_flatten: F,
+) where
+    F: Fn(Box<Expr>) -> ShouldFlatten + Copy,
+{
+    for operand in std::array::IntoIter::new([left, right]) {
+        match determine_flatten(operand) {
+            ShouldFlatten::Yes(child_left, child_right) => {
+                flatten(sexp_fields, child_left, child_right, determine_flatten);
+            }
+            ShouldFlatten::No(original) => {
+                sexp_fields.push(original.pest_to_element());
+            }
+        }
+    }
+}
+
 impl PestToElement for Expr {
     type Element = OwnedElement;
 
@@ -240,16 +280,26 @@ impl PestToElement for Expr {
                 text_token("negative").into(),
                 expr.pest_to_element(),
             ],
-            Expr::Seq(left, right) => vec![
-                text_token("sequence").into(),
-                left.pest_to_element(),
-                right.pest_to_element(),
-            ],
-            Expr::Choice(left, right) => vec![
-                text_token("choice").into(),
-                left.pest_to_element(),
-                right.pest_to_element(),
-            ],
+            Expr::Seq(left, right) => {
+                let mut fields = vec![text_token("sequence").into()];
+                flatten(&mut fields, left, right, |operand: Box<_>| match *operand {
+                    Expr::Seq(child_left, child_right) => {
+                        ShouldFlatten::Yes(child_left, child_right)
+                    }
+                    _ => ShouldFlatten::No(operand),
+                });
+                fields
+            }
+            Expr::Choice(left, right) => {
+                let mut fields = vec![text_token("choice").into()];
+                flatten(&mut fields, left, right, |operand: Box<_>| match *operand {
+                    Expr::Choice(child_left, child_right) => {
+                        ShouldFlatten::Yes(child_left, child_right)
+                    }
+                    _ => ShouldFlatten::No(operand),
+                });
+                fields
+            }
             Expr::Opt(expr) => {
                 vec![text_token("optional").into(), expr.pest_to_element()]
             }
@@ -371,10 +421,8 @@ mod tests {
                 type: normal,
                 expression:
                     (sequence
-                        (sequence
-                            (string exact "a")
-                            (string insensitive "b")
-                        )
+                        (string exact "a")
+                        (string insensitive "b")
                         (string exact "c")
                     )
             }
@@ -388,10 +436,8 @@ mod tests {
                 type: normal,
                 expression:
                     (choice
-                        (choice
-                            (string exact "a")
-                            (string insensitive "b")
-                        )
+                        (string exact "a")
+                        (string insensitive "b")
                         (string exact "c")
                     )
             }
@@ -405,23 +451,61 @@ mod tests {
                 type: normal,
                 expression:
                     (choice
-                        (choice
-                            (sequence
-                                (string exact "a")
-                                (string insensitive "b")
-                            )
-                            (sequence
-                                (sequence
-                                    (string exact "c")
-                                    (string insensitive "d")
-                                )
-                                (string exact "e")
-                            )
+                        (sequence
+                            (string exact "a")
+                            (string insensitive "b")
+                        )
+                        (sequence
+                            (string exact "c")
+                            (string insensitive "d")
+                            (string exact "e")
                         )
                         (sequence
                             (string exact "f")
                             (string exact "g")
                         )
+                    )
+            }
+        }"#
+    )]
+    #[case::mix_choice_grouping_1(
+        r#"a = { "a" ~ (^"b" | "c") ~ ^"d" ~ ("e" | "f") ~ "g" }"#,
+        r#"
+        {
+            a: {
+                type: normal,
+                expression:
+                    (sequence
+                        (string exact "a")
+                        (choice
+                            (string insensitive "b")
+                            (string exact "c")
+                        )
+                        (string insensitive "d")
+                        (choice
+                            (string exact "e")
+                            (string exact "f")
+                        )
+                        (string exact "g")
+                    )
+            }
+        }"#
+    )]
+    #[case::all_choice_grouping(
+        r#"a = { "a" | (^"b" | "c") | ^"d" | ("e" | "f") | "g" }"#,
+        r#"
+        {
+            a: {
+                type: normal,
+                expression:
+                    (choice
+                        (string exact "a")
+                        (string insensitive "b")
+                        (string exact "c")
+                        (string insensitive "d")
+                        (string exact "e")
+                        (string exact "f")
+                        (string exact "g")
                     )
             }
         }"#
