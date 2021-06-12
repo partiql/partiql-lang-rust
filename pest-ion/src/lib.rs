@@ -227,7 +227,7 @@ enum ShouldFlatten {
 /// and returns [`ShouldFlatten::No`] when it should not be flattened and the operand is moved
 /// back to the caller to covert to [`Element`] normally.
 fn flatten<F>(
-    sexp_fields: &mut Vec<OwnedElement>,
+    sexp_elements: &mut Vec<OwnedElement>,
     left: Box<Expr>,
     right: Box<Expr>,
     determine_flatten: F,
@@ -237,10 +237,10 @@ fn flatten<F>(
     for operand in std::array::IntoIter::new([left, right]) {
         match determine_flatten(operand) {
             ShouldFlatten::Yes(child_left, child_right) => {
-                flatten(sexp_fields, child_left, child_right, determine_flatten);
+                flatten(sexp_elements, child_left, child_right, determine_flatten);
             }
             ShouldFlatten::No(original) => {
-                sexp_fields.push(original.pest_to_element());
+                sexp_elements.push(original.pest_to_element());
             }
         }
     }
@@ -281,24 +281,34 @@ impl PestToElement for Expr {
                 expr.pest_to_element(),
             ],
             Expr::Seq(left, right) => {
-                let mut fields = vec![text_token("sequence").into()];
-                flatten(&mut fields, left, right, |operand: Box<_>| match *operand {
-                    Expr::Seq(child_left, child_right) => {
-                        ShouldFlatten::Yes(child_left, child_right)
-                    }
-                    _ => ShouldFlatten::No(operand),
-                });
-                fields
+                let mut elements = vec![text_token("sequence").into()];
+                flatten(
+                    &mut elements,
+                    left,
+                    right,
+                    |operand: Box<_>| match *operand {
+                        Expr::Seq(child_left, child_right) => {
+                            ShouldFlatten::Yes(child_left, child_right)
+                        }
+                        _ => ShouldFlatten::No(operand),
+                    },
+                );
+                elements
             }
             Expr::Choice(left, right) => {
-                let mut fields = vec![text_token("choice").into()];
-                flatten(&mut fields, left, right, |operand: Box<_>| match *operand {
-                    Expr::Choice(child_left, child_right) => {
-                        ShouldFlatten::Yes(child_left, child_right)
-                    }
-                    _ => ShouldFlatten::No(operand),
-                });
-                fields
+                let mut elements = vec![text_token("choice").into()];
+                flatten(
+                    &mut elements,
+                    left,
+                    right,
+                    |operand: Box<_>| match *operand {
+                        Expr::Choice(child_left, child_right) => {
+                            ShouldFlatten::Yes(child_left, child_right)
+                        }
+                        _ => ShouldFlatten::No(operand),
+                    },
+                );
+                elements
             }
             Expr::Opt(expr) => {
                 vec![text_token("optional").into(), expr.pest_to_element()]
