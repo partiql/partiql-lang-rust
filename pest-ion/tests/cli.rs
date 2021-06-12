@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use assert_cmd::Command;
+use ion_rs::value::owned::OwnedElement;
 use ion_rs::value::reader::*;
 use rstest::*;
 use std::fs::File;
@@ -16,8 +17,49 @@ enum FileMode {
     Named,
 }
 
+/// Simple wrapper for a CLI test case.
+struct TestCase<S: AsRef<str>> {
+    /// The text of the Pest grammar to test
+    pest_text: S,
+    /// The expected Ion
+    expected_ion: OwnedElement,
+}
+
+impl<S: AsRef<str>> TestCase<S> {}
+
+impl From<(&'static str, &'static str)> for TestCase<&'static str> {
+    /// Simple conversion for static `str` slices into a test acse
+    fn from((pest_text, ion_text): (&'static str, &'static str)) -> Self {
+        let expected_ion = element_reader().read_one(ion_text.as_bytes()).unwrap();
+        Self {
+            pest_text,
+            expected_ion,
+        }
+    }
+}
+
+/// Loads the actual PartiQL grammar to make sure we can parse/serialize it
+/// This is not testing the serialization is actually correct, just that it works through
+/// the CLI.
+fn partiql_test_case() -> TestCase<String> {
+    use pest_ion::*;
+    use std::fs::read_to_string;
+    use std::path::Path;
+
+    let pest_text = read_to_string(Path::new("../partiql-parser/src/peg/partiql.pest"))
+        .expect("Could not load PartiQL grammar");
+    let expected_ion = Path::new("../partiql-parser/src/peg/partiql.pest")
+        .try_pest_to_element()
+        .expect("Could not convert PartiQL grammar to Ion");
+
+    TestCase {
+        pest_text,
+        expected_ion,
+    }
+}
+
 #[rstest]
-#[case::simple(
+#[case::simple((
     r#"
         a = { "a" ~ "b" }
     "#,
@@ -29,14 +71,19 @@ enum FileMode {
             }
         }
     "#
-)]
-fn run_it(
-    #[case] pest_src: &str,
-    #[case] ion_text: &str,
+).into())]
+#[case::partiql(partiql_test_case())]
+fn run_it<S: AsRef<str>>(
+    #[case] test_case: TestCase<S>,
     #[values("", "-t", "-p", "-b")] format_flag: &str,
     #[values(FileMode::Default, FileMode::Named)] input_mode: FileMode,
     #[values(FileMode::Default, FileMode::Named)] output_mode: FileMode,
 ) -> Result<()> {
+    let TestCase {
+        pest_text,
+        expected_ion,
+    } = test_case;
+
     // working space for our tests when they need files
     let temp_dir = TempDir::new()?;
     let input_path = temp_dir.path().join("INPUT.pest");
@@ -59,11 +106,12 @@ fn run_it(
     match input_mode {
         FileMode::Default => {
             // do nothing
+            cmd.write_stdin(pest_text.as_ref());
         }
         FileMode::Named => {
             // dump our test data to input file
             let mut input_file = File::create(&input_path)?;
-            input_file.write(pest_src.as_bytes())?;
+            input_file.write(pest_text.as_ref().as_bytes())?;
             input_file.flush()?;
 
             // make this the input for our driver
@@ -71,9 +119,9 @@ fn run_it(
         }
     };
     println!("{:?}", cmd);
-    let assert = cmd.write_stdin(pest_src).assert();
+    let assert = cmd.assert();
 
-    let actual = match output_mode {
+    let actual_ion = match output_mode {
         FileMode::Default => {
             let output = assert.get_output();
             element_reader().read_one(&output.stdout)?
@@ -85,8 +133,7 @@ fn run_it(
             element_reader().read_one(&output_buffer)?
         }
     };
-    let expected = element_reader().read_one(ion_text.as_bytes())?;
-    assert_eq!(expected, actual);
+    assert_eq!(expected_ion, actual_ion);
 
     assert.success();
 
