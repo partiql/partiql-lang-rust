@@ -25,8 +25,6 @@ struct TestCase<S: AsRef<str>> {
     expected_ion: OwnedElement,
 }
 
-impl<S: AsRef<str>> TestCase<S> {}
-
 impl From<(&'static str, &'static str)> for TestCase<&'static str> {
     /// Simple conversion for static `str` slices into a test acse
     fn from((pest_text, ion_text): (&'static str, &'static str)) -> Self {
