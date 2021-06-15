@@ -26,7 +26,7 @@ struct TestCase<S: AsRef<str>> {
 }
 
 impl From<(&'static str, &'static str)> for TestCase<&'static str> {
-    /// Simple conversion for static `str` slices into a test acse
+    /// Simple conversion for static `str` slices into a test case
     fn from((pest_text, ion_text): (&'static str, &'static str)) -> Self {
         let expected_ion = element_reader().read_one(ion_text.as_bytes()).unwrap();
         Self {
