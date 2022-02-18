@@ -12,8 +12,6 @@ exclude = [
   "**/.git/**",
   "**/.github/**",
 ]
-# 2022 Edition is currently unsupported:
-# https://github.com/m-ou-se/cargo/blob/de839dabe31cc6e6c769fae48e8b08ce404a03b1/src/cargo/core/features.rs#L70
 edition = "2021"
 version = "0.0.0"
 
