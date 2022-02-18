@@ -599,7 +599,7 @@ pub struct OrderingSpec {
 #[derive(Clone, Debug, PartialEq)]
 pub enum OrderingSpecKind {
     Asc,
-    Desc
+    Desc,
 }
 
 /// Indicates scope search order when resolving variables.
@@ -695,7 +695,7 @@ pub struct ConflictAction {
 /// `CONFLICT_ACTION <action>`
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConflictActionKind {
-    DonNothing
+    DonNothing,
 }
 
 /// A data definition operation.
@@ -779,7 +779,7 @@ pub enum ReturningMappingKind {
     ModifiedNew,
     ModifiedOld,
     AllNew,
-    AllOld
+    AllOld,
 }
 
 /// `Ident` can be used for names that need to be looked up with a notion of case-sensitivity.
