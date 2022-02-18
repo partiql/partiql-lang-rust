@@ -1,0 +1,877 @@
+//! An experimental PartiQL abstract syntax tree (AST) module, see the following for motivation:
+//! https://github.com/partiql/partiql-lang-rust/issues/52
+//!
+//! This module contains the structures for the language AST.
+//! Two main entities in the module are [`Item`] and [`ItemKind`]. `Item` represents an AST element
+//! and `ItemKind` represents a concrete type with the data specific to the type of the item.
+
+// Types defined in this module are mostly from the current partiql-ir-generator spec. and comments
+// are excerpts from the spec definition.
+// https://github.com/partiql/partiql-lang-kotlin/blob/4bcfc7f73d3e6e54286bcc03a54d5f6425eec4cc/lang/resources/org/partiql/type-domains/partiql.ion
+
+// TODO Follow-up 'the trait `Hash` is not implemented for `OwnedValue`' with ion-team.
+// TODO Add documentation.
+
+use ion_rs::value::owned::OwnedValue;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Item {
+    pub kind: ItemKind,
+    // We can/require to extend the fields as we get more clarity on the path forward.
+    // Candidate additional fields are `name: Ident`, `span: Span`, `attr: Vec<Attribute>`.
+    // Also targeting on spinning up a parallel discussion with regards to AST versioning
+    // and how it contributes to backward compatibility.
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ItemKind {
+    Query(Query),
+    Dml(Dml),
+    Ddl(Ddl),
+    Exec(Exec),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Query {
+    pub expr: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dml {
+    pub operations: DmlOpList,
+    pub from_clause: FromClause,
+    pub where_clause: Expr,
+    pub returning: Option<ReturningExpr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ddl {
+    pub operations: DdlOp,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Exec {
+    pub procedure_name: SymbolPrimitive,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+}
+
+/// The expressions that can result in values.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExprKind {
+    Missing,
+    Lit(Lit),
+    /// A variable reference
+    Id(Id),
+    /// A parameter, i.e. `?`
+    Param(Param),
+    /// Unary operators
+    Not(Not),
+    Pos(Pos),
+    Neg(Neg),
+    /// Arithmetic operators
+    Plus(Plus),
+    Minus(Minus),
+    Times(Times),
+    Divide(Divide),
+    Modulo(Modulo),
+    Concat(Concat),
+    /// Logical operators
+    And(And),
+    Or(Or),
+    /// Comparison operators
+    Eq(Eq),
+    Ne(Ne),
+    Gt(Gt),
+    Gte(Gte),
+    Lt(Lt),
+    Lte(Lte),
+    Like(Like),
+    Between(Between),
+    In(In),
+    Is(Is),
+    /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
+    SimpleCase(SimpleCase),
+    /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
+    SearchedCase(SearchCase),
+    /// Conpub structors
+    Struct(Struct),
+    Bag(Bag),
+    List(List),
+    Sexp(Sexp),
+    /// Conpub structors for DateTime types
+    Date(Date),
+    LitTime(LitTime),
+    /// Set operators
+    Union(Union),
+    Except(Except),
+    Intersect(Intersect),
+    /// Other expression types
+    Path(Path),
+    Call(Call),
+    CallAgg(CallAgg),
+    Cast(Cast),
+    CanCast(CanCast),
+    CanLossLessCast(CanLossLessCast),
+    NullIf(NullIf),
+    Coalesce(Coalesce),
+
+    /// `SELECT` and its parts.
+    Select(Select),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lit {
+    pub value: OwnedValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Id {
+    pub name: SymbolPrimitive,
+    pub case: CaseSensitivity,
+    pub qualifier: ScopeQualifier,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Param {
+    pub index: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Not {
+    pub expr: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pos {
+    pub expr: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Neg {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plus {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Minus {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Times {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Divide {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Modulo {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Concat {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct And {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Or {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Eq {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ne {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gt {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gte {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lt {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lte {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Like {
+    pub value: Box<Expr>,
+    pub pattern: Box<Expr>,
+    pub escape: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Between {
+    pub value: Box<Expr>,
+    pub from: Box<Expr>,
+    pub to: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct In {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Is {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimpleCase {
+    pub expr: Box<Expr>,
+    pub cases: ExprPairList,
+    pub default: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SearchCase {
+    pub cases: ExprPairList,
+    pub default: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Struct {
+    pub fields: Vec<ExprPair>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bag {
+    pub values: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct List {
+    pub values: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sexp {
+    pub values: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Date {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LitTime {
+    pub value: TimeValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Union {
+    pub setq: SetQuantifier,
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Except {
+    pub setq: SetQuantifier,
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Intersect {
+    pub setq: SetQuantifier,
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Path {
+    pub root: Box<Expr>,
+    pub steps: Vec<PathStep>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Call {
+    pub func_name: SymbolPrimitive,
+    pub args: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallAgg {
+    pub func_name: SymbolPrimitive,
+    args: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cast {
+    pub value: Box<Expr>,
+    pub as_type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanCast {
+    pub value: Box<Expr>,
+    pub as_type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanLossLessCast {
+    pub value: Box<Expr>,
+    pub as_type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NullIf {
+    pub expr1: Box<Expr>,
+    pub expr2: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Coalesce {
+    pub args: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Select {
+    pub setq: Option<SetQuantifier>,
+    pub project: Projection,
+    pub from: FromClause,
+    pub from_let: Option<Let>,
+    pub where_clause: Option<Box<Expr>>,
+    pub group_by: Option<GroupByExpr>,
+    pub having: Option<Box<Expr>>,
+    pub order_by: Option<OrderByExpr>,
+    pub limit: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimeValue {
+    pub hour: i32,
+    pub minute: i32,
+    pub second: i32,
+    pub nano: i32,
+    pub precision: i32,
+    pub with_time_zone: bool,
+    pub tz_minutes: Option<i32>,
+}
+
+/// A "step" within a path expression; that is the components of the expression following the root.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathStep {
+    pub kind: PathStepKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PathStepKind {
+    PathExpr(PathExpr),
+    PathWildCard,
+    PathUnpivot,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathExpr {
+    pub index: Expr,
+    pub case: CaseSensitivity,
+}
+
+/// Is used to determine if variable lookup should be case-sensitive or not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaseSensitivity {
+    pub kind: CaseSensitivityKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CaseSensitivityKind {
+    CaseSensitive,
+    CaseInsensitive,
+}
+
+/// Indicates the type of projection in a SFW query.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Projection {
+    pub kind: ProjectionKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectionKind {
+    ProjectStar,
+    ProjectList(ProjectList),
+    ProjectPivot(ProjectPivot),
+    ProjectValue(ProjectValue),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectList {
+    pub project_items: Vec<ProjectItem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectPivot {
+    pub value: Box<Expr>,
+    pub key: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectValue {
+    pub value: Box<Expr>,
+}
+
+/// An item to be projected in a `SELECT`-list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectItem {
+    pub kind: ProjectItemKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectItemKind {
+    /// For `.*` in SELECT list
+    ProjectAll(ProjectAll),
+    /// For `<expr> [AS <id>]`
+    ProjectExpr(ProjectExpr),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectAll {
+    pub expr: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectExpr {
+    pub expr: Expr,
+    pub as_alias: Option<SymbolPrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Let {
+    /// A list of LET bindings
+    pub let_bindings: Vec<LetBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LetBinding {
+    pub expr: Expr,
+    pub name: SymbolPrimitive,
+}
+
+/// FROM clause of an SFW query
+#[derive(Clone, Debug, PartialEq)]
+pub struct FromClause {
+    pub kind: FromClauseKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FromClauseKind {
+    FromLet(FromLet),
+    /// <from_source> JOIN [INNER | LEFT | RIGHT | FULL] <from_source> ON <expr>
+    Join(Join),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FromLet {
+    pub expr: Box<Expr>,
+    pub kind: FromLetKind,
+    pub as_alias: Option<SymbolPrimitive>,
+    pub at_alias: Option<SymbolPrimitive>,
+    pub by_alias: Option<SymbolPrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Join {
+    pub kind: JoinKind,
+    pub left: Box<FromClause>,
+    pub right: Box<FromClause>,
+    pub predicate: Option<Box<Expr>>,
+}
+
+/// Indicates the type of FromLet, see the following for more details:
+/// https:///github.com/partiql/partiql-lang-kotlin/issues/242
+#[derive(Clone, Debug, PartialEq)]
+pub enum FromLetKind {
+    Scan,
+    Unpivot,
+}
+
+/// Indicates the logical type of join.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+}
+
+/// A generic pair of expressions. Used in the `pub struct`, `searched_case`
+/// and `simple_case` expr variants above.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprPair {
+    pub first: Expr,
+    pub second: Expr,
+}
+
+/// A list of expr_pair. Used in the `pub struct`, `searched_case` and `simple_case`
+/// expr variants above.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprPairList {
+    pub pairs: Vec<ExprPair>,
+}
+
+/// GROUP BY <grouping_strategy> <group_key_list>... [AS <symbol>]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupByExpr {
+    pub strategy: GroupingStrategy,
+    pub key_list: GroupKeyList,
+    pub group_as_alias: Option<SymbolPrimitive>,
+}
+
+/// Desired grouping qualifier:  ALL or PARTIAL.  Note: the `group_` prefix is
+/// needed to avoid naming clashes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupingStrategy {
+    pub kind: GroupingStrategyKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum GroupingStrategyKind {
+    GroupFull,
+    GroupPartial,
+}
+
+/// <group_key>[, <group_key>]...
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupKeyList {
+    pub keys: Vec<GroupKey>,
+}
+
+/// <expr> [AS <symbol>]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupKey {
+    pub expr: Expr,
+    pub as_alias: Option<SymbolPrimitive>,
+}
+
+/// ORDER BY <sort_spec>...
+#[derive(Clone, Debug, PartialEq)]
+pub struct OrderByExpr {
+    pub sort_specs: Vec<SortSpec>,
+}
+
+/// <expr> [ASC | DESC] ?
+#[derive(Clone, Debug, PartialEq)]
+pub struct SortSpec {
+    pub expr: Expr,
+    pub ordering_spec: Option<OrderingSpec>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OrderingSpec {
+    pub kind: OrderingSpecKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum OrderingSpecKind {
+    Asc,
+    Desc
+}
+
+/// Indicates scope search order when resolving variables.
+/// Has no effect except within `FROM` sources.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScopeQualifier {
+    kind: ScopeQualifierKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScopeQualifierKind {
+    /// Use the default search order.
+    Unqualified,
+    /// Skip the globals, first check within FROM sources and resolve starting with the local scope.
+    Qualified,
+}
+
+/// Indicates if a set should be reduced to its distinct elements or not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetQuantifier {
+    pub kind: SetQuantifierKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SetQuantifierKind {
+    All,
+    Distinct,
+}
+
+/// Data Manipulation Operations.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DmlOpList {
+    pub ops: Vec<DmlOp>,
+}
+
+/// A Data Manipulation Operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DmlOp {
+    pub kind: DmlOpKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DmlOpKind {
+    /// `INSERT INTO <expr> <expr>`
+    Insert(Insert),
+    /// `INSERT INTO <expr> VALUE <expr> [AT <expr>]` [ON CONFLICT WHERE <expr> DO NOTHING]`
+    InsertValue(InsertValue),
+    /// `SET <assignment>...`
+    Set(Set),
+    /// `REMOVE <expr>`
+    Remove(Remove),
+    /// DELETE
+    Delete,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Insert {
+    pub target: Expr,
+    pub values: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsertValue {
+    pub target: Expr,
+    pub value: Expr,
+    pub index: Option<Expr>,
+    pub on_conflict: Option<OnConflict>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Set {
+    pub assignment: Assignment,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Remove {
+    pub target: Expr,
+}
+
+/// `ON CONFLICT <expr> <conflict_action>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct OnConflict {
+    pub expr: Expr,
+    pub conflict_action: ConflictAction,
+}
+
+/// `CONFLICT_ACTION <action>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConflictAction {
+    pub kind: ConflictActionKind,
+}
+
+/// `CONFLICT_ACTION <action>`
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConflictActionKind {
+    DonNothing
+}
+
+/// A data definition operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DdlOp {
+    pub kind: DdlOpKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DdlOpKind {
+    /// `CREATE TABLE <symbol>`
+    CreateTable(CreateTable),
+    /// `DROP TABLE <Ident>`
+    DropTable(DropTable),
+    /// `CREATE INDEX ON <Ident> (<expr> [, <expr>]...)`
+    CreateIndex(CreateIndex),
+    /// DROP INDEX <Ident> ON <Ident>
+    /// In Statement, first <Ident> represents keys, second represents table
+    DropIndex(DropIndex),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateTable {
+    pub table_name: SymbolPrimitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropTable {
+    pub table_name: SymbolPrimitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateIndex {
+    pub index_name: Ident,
+    pub fields: Vec<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropIndex {
+    pub table: Ident,
+    pub keys: Ident,
+}
+
+/// `RETURNING (<returning_elem> [, <returning_elem>]...)`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReturningExpr {
+    pub elems: Vec<ReturningElem>,
+}
+
+/// `<returning mapping> (<expr> [, <expr>]...)`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReturningElem {
+    pub mapping: ReturningMapping,
+    pub column: ColumnComponent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColumnComponent {
+    pub kind: ColumnComponentKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ColumnComponentKind {
+    ReturningWildcard,
+    ReturningColumn(ReturningColumn),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReturningColumn {
+    pub expr: Expr,
+}
+
+/// ( MODIFIED | ALL ) ( NEW | OLD )
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReturningMapping {
+    pub kind: ReturningMappingKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReturningMappingKind {
+    ModifiedNew,
+    ModifiedOld,
+    AllNew,
+    AllOld
+}
+
+/// `Ident` can be used for names that need to be looked up with a notion of case-sensitivity.
+
+/// For both `create_index` and `create_table`, there is no notion of case-sensitivity
+/// for table Idents since they are *defining* new Idents.  However, for `drop_index` and
+/// `drop_table` *do* have the notion of case sensitivity since they are referring to existing names.
+/// Idents with case-sensitivity is already modeled with the `id` variant of `expr`,
+/// but there is no way to specify to PIG that we want to only allow a single variant of a sum as
+/// an element of a type.  (Even though in the Kotlin code each varaint is its own type.)  Hence, we
+/// define an `Ident` type above which can be used without opening up an element's domain to
+/// all of `expr`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ident {
+    pub name: SymbolPrimitive,
+    pub case: CaseSensitivity,
+}
+
+/// Represents `<expr> = <expr>` in a DML SET operation.  Note that in this case, `=` is representing
+/// an assignment operation and *not* the equality operator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Assignment {
+    pub target: Expr,
+    pub value: Expr,
+}
+
+/// Represents all possible PartiQL data types.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Type {
+    pub kind: TypeKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypeKind {
+    NullType,
+    BooleanType,
+    SmallIntType,
+    Integer4Type,
+    Integer8Type,
+    IntegerType,
+    FloatType,
+    RealType,
+    DoublePrecisionType,
+    DecimalType,
+    NumericType,
+    TimestampType,
+    CharacterType,
+    CharacterVaryingType,
+    MissingType,
+    StringType,
+    SymbolType,
+    BlobType,
+    ClobType,
+    DateType,
+    TimeType,
+    TimeWithTimeZoneType,
+    StructType,
+    TupleType,
+    ListType,
+    SexpType,
+    BagType,
+    AnyType,
+
+    CustomType(CustomType),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FloatType {
+    precision: Option<LongPrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharacterType {
+    pub length: Option<LongPrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharacterVaryingType {
+    pub length: Option<LongPrimitive>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CustomType {
+    pub name: SymbolPrimitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SymbolPrimitive {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LongPrimitive {
+    pub value: i32,
+}
