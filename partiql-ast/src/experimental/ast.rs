@@ -5,14 +5,14 @@
 //! Two main entities in the module are [`Item`] and [`ItemKind`]. `Item` represents an AST element
 //! and `ItemKind` represents a concrete type with the data specific to the type of the item.
 
-// Types defined in this module are mostly from the current partiql-ir-generator spec. and comments
+// Structures in this module are mostly from the current `partiql-ir-generator` spec. and comments
 // are excerpts from the spec definition.
 // https://github.com/partiql/partiql-lang-kotlin/blob/4bcfc7f73d3e6e54286bcc03a54d5f6425eec4cc/lang/resources/org/partiql/type-domains/partiql.ion
 
-// TODO Follow-up 'the trait `Hash` is not implemented for `OwnedValue`' with ion-team.
 // TODO Add documentation.
+// TODO Add Display formatting.
 
-use ion_rs::value::owned::OwnedValue;
+use rust_decimal::Decimal as RustDecimal;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -25,34 +25,134 @@ pub struct Item {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemKind {
-    Query(Query),
-    Dml(Dml),
+    // Data Definition Language statements
     Ddl(Ddl),
-    Exec(Exec),
+    // Data Modification Language statements
+    Dml(Dml),
+    // Date retrieval statements
+    Query(Query),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ddl {
+    pub op: DdlOp,
+}
+
+/// A data definition operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DdlOp {
+    pub kind: DdlOpKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DdlOpKind {
+    /// `CREATE TABLE <symbol>`
+    CreateTable(CreateTable),
+    /// `DROP TABLE <Ident>`
+    DropTable(DropTable),
+    /// `CREATE INDEX ON <Ident> (<expr> [, <expr>]...)`
+    CreateIndex(CreateIndex),
+    /// DROP INDEX <Ident> ON <Ident>
+    /// In Statement, first <Ident> represents keys, second represents table
+    DropIndex(DropIndex),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateTable {
+    pub table_name: SymbolPrimitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropTable {
+    pub table_name: SymbolPrimitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateIndex {
+    pub index_name: Ident,
+    pub fields: Vec<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropIndex {
+    pub table: Ident,
+    pub keys: Ident,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dml {
+    pub op: DmlOp,
+}
+
+/// A Data Manipulation Operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DmlOp {
+    pub kind: DmlOpKind,
+    pub from_clause: Option<FromClause>,
+    pub where_clause: Option<Expr>,
+    pub returning: Option<ReturningExpr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DmlOpKind {
+    /// `INSERT INTO <expr> <expr>`
+    Insert(Insert),
+    /// `INSERT INTO <expr> VALUE <expr> [AT <expr>]` [ON CONFLICT WHERE <expr> DO NOTHING]`
+    InsertValue(InsertValue),
+    /// `SET <assignment>...`
+    Set(Set),
+    /// `REMOVE <expr>`
+    Remove(Remove),
+    /// DELETE
+    Delete,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Insert {
+    pub target: Expr,
+    pub values: Expr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsertValue {
+    pub target: Expr,
+    pub value: Expr,
+    pub index: Option<Expr>,
+    pub on_conflict: Option<OnConflict>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Set {
+    pub assignment: Assignment,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Remove {
+    pub target: Expr,
+}
+
+/// `ON CONFLICT <expr> <conflict_action>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct OnConflict {
+    pub expr: Expr,
+    pub conflict_action: ConflictAction,
+}
+
+/// `CONFLICT_ACTION <action>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConflictAction {
+    pub kind: ConflictActionKind,
+}
+
+/// `CONFLICT_ACTION <action>`
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConflictActionKind {
+    DonNothing,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {
     pub expr: Expr,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Dml {
-    pub operations: DmlOpList,
-    pub from_clause: FromClause,
-    pub where_clause: Expr,
-    pub returning: Option<ReturningExpr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Ddl {
-    pub operations: DdlOp,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Exec {
-    pub procedure_name: SymbolPrimitive,
-    pub args: Vec<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,8 +165,8 @@ pub struct Expr {
 pub enum ExprKind {
     Missing,
     Lit(Lit),
-    /// A variable reference
-    Id(Id),
+    /// Variable reference
+    VarRef(VarRef),
     /// A parameter, i.e. `?`
     Param(Param),
     /// Unary operators
@@ -98,7 +198,7 @@ pub enum ExprKind {
     SimpleCase(SimpleCase),
     /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
     SearchedCase(SearchCase),
-    /// Conpub structors
+    /// Constructors
     Struct(Struct),
     Bag(Bag),
     List(List),
@@ -112,13 +212,6 @@ pub enum ExprKind {
     Intersect(Intersect),
     /// Other expression types
     Path(Path),
-    Call(Call),
-    CallAgg(CallAgg),
-    Cast(Cast),
-    CanCast(CanCast),
-    CanLossLessCast(CanLossLessCast),
-    NullIf(NullIf),
-    Coalesce(Coalesce),
 
     /// `SELECT` and its parts.
     Select(Select),
@@ -126,11 +219,133 @@ pub enum ExprKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lit {
-    pub value: OwnedValue,
+    pub kind: LitKind,
+}
+
+/// `LitKind` is mostly inspired by SQL-92 Literals standard.
+/// See section 5.3 in the following:
+/// https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt
+#[derive(Clone, Debug, PartialEq)]
+pub enum LitKind {
+    NumericLit(NumericLit),
+    CharStringLit(CharStringLit),
+    NationalCharStringLit(NationalCharStringLit),
+    BitStringLit(BitStringLit),
+    HexStringLit(HexStringLit),
+    DateTimeLit(DateTimeLit),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Id {
+pub struct NumericLit {
+    pub kind: NumericLitKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NumericLitKind {
+    Int16(Int16),
+    Int32(Int32),
+    Int64(Int64),
+    Decimal(Decimal),
+    Numeric(Decimal),
+    Real(Real),
+    Float(Float),
+    Double(Double),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Int8 {
+    pub value: i8,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Int16 {
+    pub value: i16,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Int32 {
+    pub value: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Int64 {
+    pub value: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Decimal {
+    pub value: RustDecimal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Numeric {
+    pub value: RustDecimal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Real {
+    pub value: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Float {
+    pub value: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Double {
+    pub value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CharStringLit {
+    value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NationalCharStringLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BitStringLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HexStringLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DateTimeLit {
+    pub kind: DateTimeLitKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DateTimeLitKind {
+    DateLit(DateLit),
+    TimeLit(TimeLit),
+    TimestampLit(TimestampLit),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DateLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimeLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimestampLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct VarRef {
     pub name: SymbolPrimitive,
     pub case: CaseSensitivity,
     pub qualifier: ScopeQualifier,
@@ -629,116 +844,6 @@ pub enum SetQuantifierKind {
     Distinct,
 }
 
-/// Data Manipulation Operations.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DmlOpList {
-    pub ops: Vec<DmlOp>,
-}
-
-/// A Data Manipulation Operation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DmlOp {
-    pub kind: DmlOpKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DmlOpKind {
-    /// `INSERT INTO <expr> <expr>`
-    Insert(Insert),
-    /// `INSERT INTO <expr> VALUE <expr> [AT <expr>]` [ON CONFLICT WHERE <expr> DO NOTHING]`
-    InsertValue(InsertValue),
-    /// `SET <assignment>...`
-    Set(Set),
-    /// `REMOVE <expr>`
-    Remove(Remove),
-    /// DELETE
-    Delete,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Insert {
-    pub target: Expr,
-    pub values: Expr,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct InsertValue {
-    pub target: Expr,
-    pub value: Expr,
-    pub index: Option<Expr>,
-    pub on_conflict: Option<OnConflict>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Set {
-    pub assignment: Assignment,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Remove {
-    pub target: Expr,
-}
-
-/// `ON CONFLICT <expr> <conflict_action>`
-#[derive(Clone, Debug, PartialEq)]
-pub struct OnConflict {
-    pub expr: Expr,
-    pub conflict_action: ConflictAction,
-}
-
-/// `CONFLICT_ACTION <action>`
-#[derive(Clone, Debug, PartialEq)]
-pub struct ConflictAction {
-    pub kind: ConflictActionKind,
-}
-
-/// `CONFLICT_ACTION <action>`
-#[derive(Clone, Debug, PartialEq)]
-pub enum ConflictActionKind {
-    DonNothing,
-}
-
-/// A data definition operation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DdlOp {
-    pub kind: DdlOpKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DdlOpKind {
-    /// `CREATE TABLE <symbol>`
-    CreateTable(CreateTable),
-    /// `DROP TABLE <Ident>`
-    DropTable(DropTable),
-    /// `CREATE INDEX ON <Ident> (<expr> [, <expr>]...)`
-    CreateIndex(CreateIndex),
-    /// DROP INDEX <Ident> ON <Ident>
-    /// In Statement, first <Ident> represents keys, second represents table
-    DropIndex(DropIndex),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CreateTable {
-    pub table_name: SymbolPrimitive,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DropTable {
-    pub table_name: SymbolPrimitive,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CreateIndex {
-    pub index_name: Ident,
-    pub fields: Vec<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DropIndex {
-    pub table: Ident,
-    pub keys: Ident,
-}
-
 /// `RETURNING (<returning_elem> [, <returning_elem>]...)`
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReturningExpr {
@@ -816,15 +921,13 @@ pub struct Type {
 pub enum TypeKind {
     NullType,
     BooleanType,
-    SmallIntType,
+    Integer2Type,
     Integer4Type,
     Integer8Type,
-    IntegerType,
-    FloatType,
-    RealType,
-    DoublePrecisionType,
     DecimalType,
     NumericType,
+    RealType,
+    DoublePrecisionType,
     TimestampType,
     CharacterType,
     CharacterVaryingType,
@@ -835,7 +938,7 @@ pub enum TypeKind {
     ClobType,
     DateType,
     TimeType,
-    TimeWithTimeZoneType,
+    ZonedTimestampType,
     StructType,
     TupleType,
     ListType,
@@ -844,11 +947,6 @@ pub enum TypeKind {
     AnyType,
 
     CustomType(CustomType),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FloatType {
-    precision: Option<LongPrimitive>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
