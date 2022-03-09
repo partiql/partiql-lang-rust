@@ -229,6 +229,7 @@ pub struct Lit {
 #[derive(Clone, Debug, PartialEq)]
 pub enum LitKind {
     NumericLit(NumericLit),
+    BoolLit(BoolLit),
     CharStringLit(CharStringLit),
     CollectionLit(CollectionLit),
     NationalCharStringLit(NationalCharStringLit),
@@ -299,6 +300,11 @@ pub struct Float {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Double {
     pub value: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoolLit {
+    pub value: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
