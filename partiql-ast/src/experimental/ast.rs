@@ -233,6 +233,8 @@ pub enum LitKind {
     BitStringLit(BitStringLit),
     HexStringLit(HexStringLit),
     DateTimeLit(DateTimeLit),
+    Null,
+    Missing,
 }
 
 #[derive(Clone, Debug, PartialEq)]
