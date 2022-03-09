@@ -299,7 +299,7 @@ pub struct Double {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CharStringLit {
-    value: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
