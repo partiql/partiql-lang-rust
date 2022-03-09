@@ -221,9 +221,11 @@ pub struct Lit {
     pub kind: LitKind,
 }
 
-/// `LitKind` is mostly inspired by SQL-92 Literals standard.
+/// `LitKind` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
 /// See section 5.3 in the following:
 /// https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt
+/// and Section 2 of the following (Figure 1: BNF Grammar for PartiQL Values):
+/// https://partiql.org/assets/PartiQL-Specification.pdf
 #[derive(Clone, Debug, PartialEq)]
 pub enum LitKind {
     NumericLit(NumericLit),
