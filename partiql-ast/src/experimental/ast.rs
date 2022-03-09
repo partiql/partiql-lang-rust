@@ -228,16 +228,16 @@ pub struct Lit {
 /// https://partiql.org/assets/PartiQL-Specification.pdf
 #[derive(Clone, Debug, PartialEq)]
 pub enum LitKind {
+    Null,
+    Missing,
     NumericLit(NumericLit),
     BoolLit(BoolLit),
     CharStringLit(CharStringLit),
-    CollectionLit(CollectionLit),
     NationalCharStringLit(NationalCharStringLit),
     BitStringLit(BitStringLit),
     HexStringLit(HexStringLit),
     DateTimeLit(DateTimeLit),
-    Null,
-    Missing,
+    CollectionLit(CollectionLit),
 }
 
 #[derive(Clone, Debug, PartialEq)]
