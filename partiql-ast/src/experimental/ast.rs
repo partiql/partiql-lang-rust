@@ -163,7 +163,6 @@ pub struct Expr {
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
-    Missing,
     Lit(Lit),
     /// Variable reference
     VarRef(VarRef),
@@ -229,6 +228,7 @@ pub struct Lit {
 pub enum LitKind {
     NumericLit(NumericLit),
     CharStringLit(CharStringLit),
+    CollectionLit(CollectionLit),
     NationalCharStringLit(NationalCharStringLit),
     BitStringLit(BitStringLit),
     HexStringLit(HexStringLit),
@@ -300,6 +300,27 @@ pub struct Double {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CharStringLit {
     value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CollectionLit {
+    pub kind: CollectionLitKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CollectionLitKind {
+    ArrayLit(ArrayLit),
+    BagLit(BagLit),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArrayLit {
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BagLit {
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
