@@ -247,14 +247,14 @@ pub struct NumericLit {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum NumericLitKind {
-    Int16(Int16),
-    Int32(Int32),
-    Int64(Int64),
-    Decimal(Decimal),
-    Numeric(Decimal),
-    Real(Real),
-    Float(Float),
-    Double(Double),
+    Int16Lit(Int16Lit),
+    Int32Lit(Int32Lit),
+    Int64Lit(Int64Lit),
+    DecimalLit(DecimalLit),
+    NumericLit(DecimalLit),
+    RealLit(RealLit),
+    FloatLit(FloatLit),
+    DoubleLit(DoubleLit),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -263,22 +263,22 @@ pub struct Int8 {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Int16 {
+pub struct Int16Lit {
     pub value: i16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Int32 {
+pub struct Int32Lit {
     pub value: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Int64 {
+pub struct Int64Lit {
     pub value: i64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Decimal {
+pub struct DecimalLit {
     pub value: RustDecimal,
 }
 
@@ -288,17 +288,17 @@ pub struct Numeric {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Real {
+pub struct RealLit {
     pub value: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Float {
+pub struct FloatLit {
     pub value: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Double {
+pub struct DoubleLit {
     pub value: f64,
 }
 
