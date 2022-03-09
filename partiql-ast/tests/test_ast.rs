@@ -11,7 +11,7 @@ fn test_ast_init() {
             expr: Expr {
                 kind: ExprKind::Lit(Lit {
                     kind: LitKind::NumericLit(NumericLit {
-                        kind: NumericLitKind::Int32(Int32 { value: 12 }),
+                        kind: NumericLitKind::Int32Lit(Int32Lit { value: 12 }),
                     }),
                 }),
             },
