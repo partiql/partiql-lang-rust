@@ -1,187 +1,317 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! Contains the [Pest](https://pest.rs) defined parser for PartiQL and a wrapper APIs that
-//! can be exported for users to consume.
+//! Provides a parser for the [PartiQL][partiql] query language.
+//!
+//! # Usage
+//!
+//! ```
+//! use partiql_parser::prelude::*;
+//! use partiql_parser::peg_parse;
+//!
+//! fn main() {
+//!     peg_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
+//! }
+//! ```
+//!
+//! [partiql]: https://partiql.org
 
-mod gen;
+use pest::iterators::Pairs;
 
-use crate::prelude::*;
-use crate::result::{illegal_state, syntax_error};
-use pest::iterators::{Pair, Pairs};
-use pest::{Parser, RuleType};
+use crate::result::ParserResult;
 
-pub(crate) use gen::PartiQLParser;
-pub(crate) use gen::Rule;
+use pest::Parser;
+use pest_derive::Parser;
 
-/// Extension methods for working with [`Pairs`].
-pub(crate) trait PairsExt<'val, R: RuleType> {
-    /// Consumes a [`Pairs`] as a singleton, returning an error if there are less or more than
-    /// one [`Pair`].
-    fn exactly_one(self) -> ParserResult<Pair<'val, R>>;
-}
+#[derive(Parser)]
+#[grammar = "peg/partiql.pest"]
+pub(crate) struct PartiQLParser;
 
-impl<'val, R: RuleType> PairsExt<'val, R> for Pairs<'val, R> {
-    fn exactly_one(mut self) -> ParserResult<Pair<'val, R>> {
-        match self.next() {
-            Some(pair) => {
-                // make sure there isn't something more...
-                if let Some(other_pair) = self.next() {
-                    syntax_error(
-                        format!("Expected one token pair, got: {:?}, {:?}", pair, other_pair),
-                        pair.start()?.into(),
-                    )?;
-                }
-                Ok(pair)
-            }
-            None => illegal_state("Expected at least one token pair, got nothing!"),
-        }
-    }
-}
-
-/// Extension methods for working with [`Pair`].
-pub(crate) trait PairExt<'val, R: RuleType> {
-    /// Translates the start position of the [`Pair`] into a [`LineAndColumn`].
-    fn start(&self) -> ParserResult<LineAndColumn>;
-
-    /// Translates the end position of the [`Pair`] into a [`LineAndColumn`].
-    fn end(&self) -> ParserResult<LineAndColumn>;
-
-    /// Returns an `Err` with a syntax error from the unexpected pair.
-    fn unexpected<T>(&self) -> ParserResult<T>;
-
-    /// Returns an `Err` with a syntax error from this pair with a message.
-    fn syntax_error<T, S: Into<String>>(&self, message: S) -> ParserResult<T>;
-}
-
-impl<'val, R: RuleType> PairExt<'val, R> for Pair<'val, R> {
-    #[inline]
-    fn start(&self) -> ParserResult<LineAndColumn> {
-        self.as_span().start_pos().line_col().try_into()
-    }
-
-    #[inline]
-    fn end(&self) -> ParserResult<LineAndColumn> {
-        self.as_span().end_pos().line_col().try_into()
-    }
-
-    fn unexpected<T>(&self) -> ParserResult<T> {
-        self.syntax_error(format!("Unexpected rule: {:?}", self))
-    }
-
-    fn syntax_error<T, S: Into<String>>(&self, message: S) -> ParserResult<T> {
-        let position = self
-            .start()
-            .map_or(Position::Unknown, |location| location.into());
-        syntax_error(message, position)
-    }
-}
-
-/// Recognizer for PartiQL queries.
+/// Parser for PartiQL queries.
 ///
-/// Returns `Ok(())` in the case that the input is valid PartiQL.  Returns `Err([ParserError])`
-/// in the case that the input is not valid PartiQL.
-///
-/// This API will be replaced with one that produces an AST in the future.
-pub fn recognize_partiql(input: &str) -> ParserResult<()> {
-    PartiQLParser::parse(Rule::Query, input)?;
-    Ok(())
+/// Returns `Ok([Pairs<Rule>])` in the case that the input is valid PartiQL.  
+/// Returns `Err([ParserError])` in the case that the input is not valid PartiQL.
+pub fn parse_partiql(input: &str) -> ParserResult<Pairs<Rule>> {
+    Ok(PartiQLParser::parse(Rule::query_full, input)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::syntax_error;
-    use rstest::*;
 
+    macro_rules! parse {
+        ($q:expr) => {{
+            let res = parse_partiql($q);
+            println!("{:#?}", res);
+            match res {
+                Ok(_) => (),
+                _ => assert!(false, "{:?}", res),
+            }
+        }};
+    }
+
+    mod literals {
+        use super::*;
+
+        macro_rules! literal {
+            ($q:expr) => {{
+                let res = PartiQLParser::parse(Rule::literal, $q);
+                println!("{:#?}", res);
+                match res {
+                    Ok(_) => (),
+                    _ => assert!(false, "{:?}", res),
+                }
+            }};
+        }
+        macro_rules! lit_and_parse {
+            ($q:expr) => {{
+                literal!($q);
+                parse!($q);
+            }};
+        }
+
+        #[test]
+        fn null() {
+            lit_and_parse!("NULL")
+        }
+        #[test]
+        fn missing() {
+            lit_and_parse!("MISSING")
+        }
+        #[test]
+        fn true_() {
+            lit_and_parse!("TRUE")
+        }
+        #[test]
+        fn false_() {
+            lit_and_parse!("FALSE")
+        }
+        #[test]
+        fn string() {
+            lit_and_parse!("'foo'");
+            lit_and_parse!("'embe''ded'");
+        }
+        #[test]
+        fn numeric() {
+            lit_and_parse!("42");
+            lit_and_parse!("7.");
+            lit_and_parse!(".00125");
+            lit_and_parse!("5.5");
+            lit_and_parse!("17e2");
+            lit_and_parse!("1.317e-3");
+            lit_and_parse!("3141.59265e-03");
+        }
+        #[test]
+        fn array() {
+            lit_and_parse!(r#"[]"#);
+            lit_and_parse!(r#"[1, 'moo', [], 'a', MISSING]"#);
+        }
+        #[test]
+        fn bag() {
+            lit_and_parse!(r#"<<>>"#);
+            lit_and_parse!(r#"<<1>>"#);
+            lit_and_parse!(r#"<<1,2>>"#);
+            lit_and_parse!(r#"<<1, <<>>, 'boo', 'a'>>"#);
+        }
+        #[test]
+        fn tuple() {
+            lit_and_parse!(r#"{}"#);
+            lit_and_parse!(r#"{'str': 1, 'cow': 'moo', 'a': NULL}"#);
+        }
+    }
+
+    mod non_literal_values {
+        use super::*;
+
+        macro_rules! value {
+            ($q:expr) => {{
+                let res = PartiQLParser::parse(Rule::expr_term, $q);
+                println!("{:#?}", res);
+                match res {
+                    Ok(_) => (),
+                    _ => assert!(false, "{:?}", res),
+                }
+            }};
+        }
+        macro_rules! value_and_parse {
+            ($q:expr) => {{
+                value!($q);
+                parse!($q);
+            }};
+        }
+        #[test]
+        fn identifier() {
+            value_and_parse!("id");
+            value_and_parse!(r#""quoted_id""#);
+        }
+        #[test]
+        fn array() {
+            value_and_parse!(r#"[]"#);
+            value_and_parse!(r#"[1, 'moo', "some variable", [], 'a', MISSING]"#);
+        }
+        #[test]
+        fn bag() {
+            value_and_parse!(r#"<<>>"#);
+            value_and_parse!(r#"<<1>>"#);
+            value_and_parse!(r#"<<1,2>>"#);
+            value_and_parse!(r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#);
+        }
+        #[test]
+        fn tuple() {
+            value_and_parse!(r#"{}"#);
+            value_and_parse!(r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#);
+        }
+    }
+
+    mod expr {
+        use super::*;
+
+        #[test]
+        fn or_simple() {
+            parse!(r#"TRUE OR FALSE"#)
+        }
+
+        #[test]
+        fn or() {
+            parse!(r#"t1.super OR test(t2.name, t1.name)"#)
+        }
+
+        #[test]
+        fn and_simple() {
+            parse!(r#"TRUE and FALSE"#)
+        }
+
+        #[test]
+        fn and() {
+            parse!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#)
+        }
+
+        #[test]
+        fn or_and() {
+            parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+        }
+    }
+
+    mod sfw {
+        use super::*;
+
+        #[test]
+        fn select1() {
+            parse!("SELECT g")
+        }
+
+        #[test]
+        fn select_list() {
+            parse!("SELECT g, k as ck, h")
+        }
+
+        #[test]
+        fn fun_call() {
+            parse!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#)
+        }
+
+        #[test]
+        fn select3() {
+            parse!("SELECT g, k, function('2') as fn_result")
+        }
+
+        #[test]
+        fn group() {
+            parse!("SELECTg FROM data GROUP BY a")
+        }
+
+        #[test]
+        fn group_complex() {
+            parse!("SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g")
+        }
+
+        #[test]
+        fn order_by() {
+            parse!(r#"SELECT a FROM tb ORDER BY PRESERVE"#);
+            parse!(r#"SELECT a FROM tb ORDER BY rk1"#);
+            parse!(r#"SELECT a FROM tb ORDER BY rk1 ASC, rk2 DESC"#);
+        }
+
+        #[test]
+        fn where_simple() {
+            parse!(r#"SELECT a FROM tb WHERE hk = 1"#)
+        }
+
+        #[test]
+        fn where_boolean() {
+            parse!(r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+        }
+
+        #[test]
+        fn limit() {
+            parse!(r#"SELECT * FROM a LIMIT 10"#)
+        }
+
+        #[test]
+        fn offset() {
+            parse!(r#"SELECT * FROM a OFFSET 10"#)
+        }
+
+        #[test]
+        fn limit_offset() {
+            parse!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#)
+        }
+
+        #[test]
+        fn complex() {
+            let q = r#"
+            SELECT (
+                SELECT numRec, data
+                FROM delta_full_transactions.deltas delta,
+                (
+                    SELECT u.id, review, rindex
+                    FROM delta.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
+                ) as data,
+                delta.numRec as numRec
+            )
+            AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
+            "#;
+            parse!(q)
+        }
+    }
+    /*
     #[rstest]
-    #[case::null_literal(
-        r#"NULL"#,
-        Ok(())
-    )]
-    #[case::missing_literal(
-        r#"MISSING"#,
-        Ok(())
-    )]
-    #[case::true_literal(
-        r#"NULL"#,
-        Ok(())
-    )]
-    #[case::false_literal(
-        r#"FALSE"#,
-        Ok(())
-    )]
-    #[case::string_literal(
-        r#"'foobar'"#,
-        Ok(())
-    )]
-    #[case::quoted_identifier(
-        r#""foobar""#,
-        Ok(())
-    )]
-    #[case::string_literal(
-        r#"'moobar'"#,
-        Ok(())
-    )]
-    #[case::integer(
-        r#"42"#,
-        Ok(())
-    )]
-    #[case::decimal(
-        r#"3141.59265e-03"#,
-        Ok(())
-    )]
-    #[case::array(
-        r#"[1, 'moo', "some variable", [], 'a', MISSING]"#,
-        Ok(())
-    )]
-    #[case::bag(
-        r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#,
-        Ok(())
-    )]
-    #[case::empty_tuple(
-        r#"{}"#,
-        Ok(())
-    )]
-    #[case::tuple(
-        r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#,
-        Ok(())
-    )]
+
     #[case::select_value(
-        r#"SELECT VALUE 5"#,
-        Ok(())
+    r#"SELECT VALUE 5"#,
+    Ok(())
     )]
     #[case::select_value_from(
-        r#"SELECT VALUE 5 FROM some_table"#,
-        Ok(())
+    r#"SELECT VALUE 5 FROM some_table"#,
+    Ok(())
     )]
     #[case::select_value_from_where(
-        r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
-        Ok(())
+    r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
+    Ok(())
     )]
     #[case::select_value_from_where_containers(
-        r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
-        Ok(())
+    r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
+    Ok(())
     )]
     #[case::bad_identifier(
-        r#"SELECT value aWeSoMe FROM 💩"#,
-        syntax_error("IGNORED MESSAGE", Position::at(1, 27))
+    r#"SELECT value aWeSoMe FROM 💩"#,
+    syntax_error("IGNORED MESSAGE", Position::at(1, 27))
     )]
     #[case::missing_from_with_where(
-        r#"SELECT value aWeSoMe WHERE FALSE"#,
-        syntax_error("IGNORED MESSAGE", Position::at(1, 22))
+    r#"SELECT value aWeSoMe WHERE FALSE"#,
+    syntax_error("IGNORED MESSAGE", Position::at(1, 22))
     )]
     fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
         let actual = recognize_partiql(input);
         match (expected, actual) {
             (
                 Err(ParserError::SyntaxError {
-                    position: expected_position,
-                    ..
-                }),
+                        position: expected_position,
+                        ..
+                    }),
                 Err(ParserError::SyntaxError {
-                    position: actual_position,
-                    ..
-                }),
+                        position: actual_position,
+                        ..
+                    }),
             ) => {
                 // just compare the positions for syntax errors...
                 assert_eq!(expected_position, actual_position)
@@ -192,4 +322,6 @@ mod tests {
         }
         Ok(())
     }
+
+     */
 }

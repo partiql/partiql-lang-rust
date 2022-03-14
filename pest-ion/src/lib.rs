@@ -632,10 +632,7 @@ mod tests {
         // serialization of the grammar because that can be refactored over time
 
         // entry point for parser
-        assert!(grammar_struct.get("Query").is_some());
-
-        // entry point for scanner
-        assert!(grammar_struct.get("Scanner").is_some());
+        assert!(grammar_struct.get("query_full").is_some());
 
         Ok(())
     }

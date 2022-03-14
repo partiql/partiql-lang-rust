@@ -109,18 +109,16 @@ impl LineAndColumn {
     /// # }
     /// ```
     pub fn position_from(self, location: LineAndColumn) -> Self {
-        match (location, self) {
-            (LineAndColumn(base_line, base_column), LineAndColumn(dest_line, dest_column)) => {
-                let diff_line = dest_line - 1;
-                if diff_line > 0 {
-                    // we're moving lines, adjust the line and take the target column as-is
-                    Self(base_line + diff_line, dest_column)
-                } else {
-                    // same line from base, adjust only the column
-                    let diff_column = dest_column - 1;
-                    Self(base_line, base_column + diff_column)
-                }
-            }
+        let (LineAndColumn(base_line, base_column), LineAndColumn(dest_line, dest_column)) =
+            (location, self);
+        let diff_line = dest_line - 1;
+        if diff_line > 0 {
+            // we're moving lines, adjust the line and take the target column as-is
+            Self(base_line + diff_line, dest_column)
+        } else {
+            // same line from base, adjust only the column
+            let diff_column = dest_column - 1;
+            Self(base_line, base_column + diff_column)
         }
     }
 }
