@@ -202,7 +202,7 @@ pub enum ExprKind {
     Bag(Bag),
     List(List),
     Sexp(Sexp),
-    /// Conpub structors for DateTime types
+    /// Constructors for DateTime types
     Date(Date),
     LitTime(LitTime),
     /// Set operators
@@ -211,6 +211,8 @@ pub enum ExprKind {
     Intersect(Intersect),
     /// Other expression types
     Path(Path),
+    Call(Call),
+    CallAgg(CallAgg),
 
     /// `SELECT` and its parts.
     Select(Select),
@@ -232,6 +234,7 @@ pub enum LitKind {
     Missing,
     NumericLit(NumericLit),
     BoolLit(BoolLit),
+    IonStringLit(IonStringLit),
     CharStringLit(CharStringLit),
     NationalCharStringLit(NationalCharStringLit),
     BitStringLit(BitStringLit),
@@ -305,6 +308,11 @@ pub struct DoubleLit {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoolLit {
     pub value: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IonStringLit {
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -399,7 +407,7 @@ pub struct Pos {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Neg {
-    pub operands: Vec<Box<Expr>>,
+    pub expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -610,13 +618,14 @@ pub struct Coalesce {
 pub struct Select {
     pub setq: Option<SetQuantifier>,
     pub project: Projection,
-    pub from: FromClause,
+    pub from: Option<FromClause>,
     pub from_let: Option<Let>,
     pub where_clause: Option<Box<Expr>>,
-    pub group_by: Option<GroupByExpr>,
+    pub group_by: Option<Box<GroupByExpr>>,
     pub having: Option<Box<Expr>>,
-    pub order_by: Option<OrderByExpr>,
+    pub order_by: Option<Box<OrderByExpr>>,
     pub limit: Option<Box<Expr>>,
+    pub offset: Option<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -755,7 +764,14 @@ pub struct Join {
     pub kind: JoinKind,
     pub left: Box<FromClause>,
     pub right: Box<FromClause>,
-    pub predicate: Option<Box<Expr>>,
+    pub predicate: Option<JoinSpec>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum JoinSpec {
+    On(Box<Expr>),
+    Using(Vec<Path>),
+    Natural,
 }
 
 /// Indicates the type of FromLet, see the following for more details:
@@ -773,14 +789,15 @@ pub enum JoinKind {
     Left,
     Right,
     Full,
+    Cross,
 }
 
 /// A generic pair of expressions. Used in the `pub struct`, `searched_case`
 /// and `simple_case` expr variants above.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExprPair {
-    pub first: Expr,
-    pub second: Expr,
+    pub first: Box<Expr>,
+    pub second: Box<Expr>,
 }
 
 /// A list of expr_pair. Used in the `pub struct`, `searched_case` and `simple_case`
@@ -833,8 +850,9 @@ pub struct OrderByExpr {
 /// <expr> [ASC | DESC] ?
 #[derive(Clone, Debug, PartialEq)]
 pub struct SortSpec {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
     pub ordering_spec: Option<OrderingSpec>,
+    pub null_ordering_spec: Option<NullOrderingSpec>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -848,11 +866,22 @@ pub enum OrderingSpecKind {
     Desc,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct NullOrderingSpec {
+    pub kind: NullOrderingSpecKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NullOrderingSpecKind {
+    First,
+    Last,
+}
+
 /// Indicates scope search order when resolving variables.
 /// Has no effect except within `FROM` sources.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScopeQualifier {
-    kind: ScopeQualifierKind,
+    pub kind: ScopeQualifierKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]
