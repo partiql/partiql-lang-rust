@@ -113,7 +113,7 @@ Projection: ast::ProjectItem = {
 // ------------------------------------------------------------------------------ //
 FromClause: ast::FromClause = {
     "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <from:TableReference> => {
-        // use `reduce` to process thecomma-seperated `TableReference`s
+        // use `reduce` to process the comma-seperated `TableReference`s
         //   as left-associative `CROSS JOIN`s
         froms.push(from);
         froms.into_iter()
