@@ -5,31 +5,42 @@
 //! # Usage
 //!
 //! ```
-//! use partiql_parser::prelude::*;
-//! use partiql_parser::peg_parse;
+//! use partiql_parser::{LalrParseResult, lalr_parse};
 //!
-//!     peg_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
+//!     lalr_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
 //! ```
 //!
 //! [partiql]: https://partiql.org
+use crate::lalr::lexer::{Lexer, LexicalToken};
+use lalrpop_util::ParseError;
+use partiql_ast::experimental::ast;
 
-use pest::iterators::Pairs;
+#[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
+#[allow(clippy::clone_on_copy)]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::vec_box)]
+#[allow(unused_variables)]
+#[allow(dead_code)]
+mod grammar {
+    include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
+}
+//lalrpop_mod!(pub partiql); // synthesized by LALRPOP
+mod lexer;
+mod util;
 
-use crate::result::ParserResult;
+pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, lexer::LexicalError>>;
 
-use pest::Parser;
-use pest_derive::Parser;
+/// Parse a text PartiQL query.
+pub fn parse_partiql(s: &str) -> ParseResult {
+    let lexer = lex_partiql(s);
+    grammar::QueryParser::new().parse(lexer)
+}
 
-#[derive(Parser)]
-#[grammar = "peg/partiql.pest"]
-pub(crate) struct PartiQLParser;
-
-/// Parser for PartiQL queries.
-///
-/// Returns `Ok([Pairs<Rule>])` in the case that the input is valid PartiQL.  
-/// Returns `Err([ParserError])` in the case that the input is not valid PartiQL.
-pub fn parse_partiql(input: &str) -> ParserResult<Pairs<Rule>> {
-    Ok(PartiQLParser::parse(Rule::query_full, input)?)
+/// Lex a text PartiQL query.
+// TODO make private
+#[deprecated(note = "prototypical lexer implementation")]
+pub fn lex_partiql(s: &str) -> impl Iterator<Item = LexicalToken> + '_ {
+    Lexer::new(s)
 }
 
 #[cfg(test)]
@@ -52,7 +63,8 @@ mod tests {
 
         macro_rules! literal {
             ($q:expr) => {{
-                let res = PartiQLParser::parse(Rule::literal, $q);
+                let lexer = lexer::Lexer::new($q);
+                let res = grammar::LiteralParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -71,23 +83,28 @@ mod tests {
         fn null() {
             lit_and_parse!("NULL")
         }
+
         #[test]
         fn missing() {
             lit_and_parse!("MISSING")
         }
+
         #[test]
         fn true_() {
             lit_and_parse!("TRUE")
         }
+
         #[test]
         fn false_() {
             lit_and_parse!("FALSE")
         }
+
         #[test]
         fn string() {
             lit_and_parse!("'foo'");
             lit_and_parse!("'embe''ded'");
         }
+
         #[test]
         fn numeric() {
             lit_and_parse!("42");
@@ -98,22 +115,24 @@ mod tests {
             lit_and_parse!("1.317e-3");
             lit_and_parse!("3141.59265e-03");
         }
+
         #[test]
-        fn array() {
-            lit_and_parse!(r#"[]"#);
-            lit_and_parse!(r#"[1, 'moo', [], 'a', MISSING]"#);
-        }
-        #[test]
-        fn bag() {
-            lit_and_parse!(r#"<<>>"#);
-            lit_and_parse!(r#"<<1>>"#);
-            lit_and_parse!(r#"<<1,2>>"#);
-            lit_and_parse!(r#"<<1, <<>>, 'boo', 'a'>>"#);
-        }
-        #[test]
-        fn tuple() {
-            lit_and_parse!(r#"{}"#);
-            lit_and_parse!(r#"{'str': 1, 'cow': 'moo', 'a': NULL}"#);
+        fn ion() {
+            lit_and_parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo"]` "#);
+            lit_and_parse!(
+                r#" `[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]` "#
+            );
+            lit_and_parse!(
+                r#" `{'a':1, // comment ' "
+                      'b':1} ` "#
+            );
+            lit_and_parse!(
+                r#" `{'a' // comment ' "
+                       :1, /* 
+                               comment 
+                              */
+                      'b':1} ` "#
+            );
         }
     }
 
@@ -122,7 +141,8 @@ mod tests {
 
         macro_rules! value {
             ($q:expr) => {{
-                let res = PartiQLParser::parse(Rule::expr_term, $q);
+                let lexer = lexer::Lexer::new($q);
+                let res = grammar::ExprTermParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -130,6 +150,7 @@ mod tests {
                 }
             }};
         }
+
         macro_rules! value_and_parse {
             ($q:expr) => {{
                 value!($q);
@@ -193,6 +214,11 @@ mod tests {
         use super::*;
 
         #[test]
+        fn selectstar() {
+            parse!("SELECT *")
+        }
+
+        #[test]
         fn select1() {
             parse!("SELECT g")
         }
@@ -214,7 +240,7 @@ mod tests {
 
         #[test]
         fn group() {
-            parse!("SELECTg FROM data GROUP BY a")
+            parse!("SELECT g FROM data GROUP BY a")
         }
 
         #[test]
@@ -259,67 +285,16 @@ mod tests {
             let q = r#"
             SELECT (
                 SELECT numRec, data
-                FROM delta_full_transactions.deltas delta,
+                FROM delta_full_transactions.deltas delta0,
                 (
                     SELECT u.id, review, rindex
-                    FROM delta.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
+                    FROM delta1.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
                 ) as data,
-                delta.numRec as numRec
+                delta2.numRec as numRec
             )
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
             parse!(q)
         }
     }
-    /*
-    #[rstest]
-
-    #[case::select_value(
-    r#"SELECT VALUE 5"#,
-    Ok(())
-    )]
-    #[case::select_value_from(
-    r#"SELECT VALUE 5 FROM some_table"#,
-    Ok(())
-    )]
-    #[case::select_value_from_where(
-    r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
-    Ok(())
-    )]
-    #[case::select_value_from_where_containers(
-    r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
-    Ok(())
-    )]
-    #[case::bad_identifier(
-    r#"SELECT value aWeSoMe FROM 💩"#,
-    syntax_error("IGNORED MESSAGE", Position::at(1, 27))
-    )]
-    #[case::missing_from_with_where(
-    r#"SELECT value aWeSoMe WHERE FALSE"#,
-    syntax_error("IGNORED MESSAGE", Position::at(1, 22))
-    )]
-    fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
-        let actual = recognize_partiql(input);
-        match (expected, actual) {
-            (
-                Err(ParserError::SyntaxError {
-                        position: expected_position,
-                        ..
-                    }),
-                Err(ParserError::SyntaxError {
-                        position: actual_position,
-                        ..
-                    }),
-            ) => {
-                // just compare the positions for syntax errors...
-                assert_eq!(expected_position, actual_position)
-            }
-            (expected, actual) => {
-                assert_eq!(expected, actual);
-            }
-        }
-        Ok(())
-    }
-
-     */
 }

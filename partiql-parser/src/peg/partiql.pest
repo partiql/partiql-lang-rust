@@ -1,760 +1,353 @@
 WHITESPACE = _{ " " | "\t" | "\x0B" | "\x0C" | "\r" | "\n" }
 
-COMMENT = _{ LineComment | BlockComment }
+COMMENT = _{ comment_line | comment_block }
 
-BlockComment    = _{ "/*" ~ (BlockComment | (!"*/" ~ ANY))* ~ "*/" }
-LineComment     = _{ "--" ~ (!"\n" ~ ANY )* ~ "\n" }
+WB = _{ WHITESPACE | COMMENT }
 
-// TODO implement a full grammar, this is a very primitive version to start
-//      working with Pest and its APIs.
+comment_block    = _{ "/*" ~ (comment_block | (!"*/" ~ ANY))* ~ "*/" }
+comment_line     = _{ "--" ~ (!"\n" ~ ANY )* ~ "\n" }
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                     Query                                      //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+query_full = { SOI ~ query ~ EOI }
+query = { sfw_query | expr_query }
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                   SFW Query                                    //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+sfw_query = {
+    /// SQL-style where `Select` precedes `From`
+    with_clause? ~
+    select_clause ~
+    from_clause? ~
+    where_clause? ~
+    group_by_clause? ~
+    having_clause? ~
+    set_op_clause? ~
+    order_by_clause? ~
+    limit_clause? ~
+    offset_clause?
+
+    |
+
+    /// PartiQL-style where `Select` is last
+    with_clause? ~
+    from_clause ~
+    where_clause? ~
+    group_by_clause? ~
+    having_clause? ~
+    set_op_clause? ~
+    order_by_clause? ~
+    limit_clause? ~
+    offset_clause? ~
+    select_clause
+}
+
+// ------------------------------------------------------------------------------ //
+//                                     WITH                                       //
+// ------------------------------------------------------------------------------ //
+with_clause = { "TODO" }
+
+// ------------------------------------------------------------------------------ //
+//                                    SELECT                                      //
+// ------------------------------------------------------------------------------ //
+select_clause = { select_value_clause | pivot_clause | select_sql_clause }
+select_value_clause = { K_select ~ K_value ~ expr_query }
+pivot_clause = { K_pivot ~ expr_query ~ K_at ~ expr_query }
+select_sql_clause =  { K_select ~ out_bindings }
+
+out_bindings = _{ out_binding ~ ("," ~ out_binding )* }
+out_binding = { expr_query ~ (K_as ~ attr_name)? }
+
+// ------------------------------------------------------------------------------ //
+//                                     FROM                                       //
+// ------------------------------------------------------------------------------ //
+from_clause = { K_from ~ table_references }
+table_references = _{ table_reference ~ ("," ~ K_lateral? ~ table_reference )* }
+table_reference = { table_joined | table_unpivot | table_base_reference }
+table_unpivot = { K_unpivot ~ table_base_reference }
+table_base_reference = { expr_query ~ ( correlation_spec )? }
+
+correlation_spec = { K_as? ~ correlation_name ~ ( K_at ~ correlation_name )? }
+correlation_name = { !(reserved_join) ~ !(reserved_clause) ~ identifier }
+
+table_joined = { table_cross_join | table_qualified_join | "(" ~ table_joined ~ ")" }
+table_cross_join = { table_base_reference ~ K_cross ~ K_join ~ K_lateral? ~ table_reference }
+table_qualified_join = {
+      table_base_reference ~ join_type? ~ K_join ~ K_lateral? ~ table_reference ~ join_spec
+    | table_base_reference ~ K_natural ~ join_type? ~ K_join ~ K_lateral? ~ table_reference
+}
+join_type = { K_inner | (join_outer_type ~ K_outer?) }
+join_outer_type = { K_left | K_right | K_full }
+join_spec = {
+      K_on ~ search_condition
+    | K_using ~ "(" ~ path_expr_list ~ ")"
+}
+
+
+// ------------------------------------------------------------------------------ //
+//                                     WHERE                                      //
+// ------------------------------------------------------------------------------ //
+where_clause = { K_where ~ search_condition }
+
+// ------------------------------------------------------------------------------ //
+//                                   GROUP BY                                     //
+// ------------------------------------------------------------------------------ //
+group_by_clause = { K_group ~ (K_all)? ~ K_by ~ out_bindings ~ (K_group ~ K_as ~ attr_name)? }
+
+// ------------------------------------------------------------------------------ //
+//                                    HAVING                                      //
+// ------------------------------------------------------------------------------ //
+having_clause = { K_having ~ search_condition }
+search_condition = { expr_query }
+
+// ------------------------------------------------------------------------------ //
+//                            UNION/INTERSECT/EXCEPT                              //
+// ------------------------------------------------------------------------------ //
+set_op_clause = { "TODO" }
+
+// ------------------------------------------------------------------------------ //
+//                                   ORDER BY                                     //
+// ------------------------------------------------------------------------------ //
+order_by_clause = { K_order ~ K_by ~ ( order_sort_preserve | order_sort_spec_list ) }
+order_sort_preserve = { K_preserve }
+order_sort_spec_list = { order_sort_spec ~ ("," ~ order_sort_spec )* }
+order_sort_spec = { identifier ~ order_by_spec? ~ order_by_null_spec? }
+order_by_spec = { K_asc | K_desc }
+order_by_null_spec = { K_nulls ~ (K_first | K_last) }
+
+// ------------------------------------------------------------------------------ //
+//                                     LIMIT                                      //
+// ------------------------------------------------------------------------------ //
+limit_clause = { K_limit ~ expr_query }
+
+// ------------------------------------------------------------------------------ //
+//                                     OFFSET                                     //
+// ------------------------------------------------------------------------------ //
+offset_clause = { K_offset ~ expr_query }
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                   Expr Query                                   //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+// AND/OR require explicit whitespace around them, so disable implicit whitespace for this rule
+expr_query = {
+        expr_term ~ op_bool ~ expr_query
+      | expr_term  ~ op_infix ~ expr_query
+      | op_prefix ~ expr_query
+      | expr_term
+}
+
+expr_term = {
+      "(" ~ query ~ ")"
+    | expr_function_call
+    | literal
+    | path_expr
+    | expr_tuple
+    | expr_array
+    | expr_bag
+}
+
+expr_tuple = {
+    "{" ~ (expr_query ~ ":" ~ expr_query ~ ("," ~ expr_query ~ ":" ~ expr_query )* )? ~ "}"
+}
+expr_array = { "[" ~ (expr_query ~ ("," ~ expr_query)* )? ~ "]" }
+expr_bag = { "<<" ~ (expr_query ~ ("," ~ expr_query)* )? ~ ">>" }
+
+path_expr = {
+      "*"
+    | identifier ~ "." ~ "*"
+    | identifier ~ "[" ~ "*" ~ "]"
+    | identifier ~ "." ~ path_expr
+    | identifier ~ "[" ~ expr_query ~ "]"
+    | identifier
+}
+path_expr_list = { path_expr ~ ("," ~ path_expr )*}
+
+expr_function_call = { function_name ~ "(" ~ expr_function_args ~ ")" }
+expr_function_args = _{ expr_function_arg ~ ("," ~ expr_function_arg )*  }
+expr_function_arg  = { expr_query }
+
+// Operators
+op_infix = { op_caret | op_math | op_comp }
+op_prefix = _{ op_un_minus | op_un_plus }
+
+op_bool = {
+   !(K_order) ~ (K_and | K_or)
+}
+
+op_math = _{
+      op_multiply | op_divide | op_modulus
+    | op_add | op_subtract
+}
+
+op_comp = _{
+      op_eq | op_neq
+    | op_lt | op_gt | op_lteq | op_gteq
+}
+
+op_un_plus  = { "+" }
+op_un_minus = { "-" }
+
+op_caret    = { "^" }
+op_multiply = { "*" }
+op_divide   = { "/" }
+op_modulus  = { "%" }
+op_add      = { "+" }
+op_subtract = { "-" }
+op_eq       = { "=" | "=="}
+op_neq      = { "<>" | "!=" }
+op_lt       = { "<" }
+op_gt       = { ">" }
+op_lteq     = { "<=" }
+op_gteq     = { ">=" }
 
 //
-// Entry point for full query parsing.
+// TODO
 //
-Query = _{ SOI ~ Expression ~ EOI}
+attr_name = { identifier }
+function_name = { identifier }
 
-//
-// Expressions
-//
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                Literal Values                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
 
-Expression = _{
-      SelectExpression
-    | ValueExpression
+literal = { literal_absent | literal_scalar | literal_tuple | literal_collection }
+
+literal_absent = { K_null | K_missing }
+
+literal_scalar = _{ literal_ion | literal_primitive }
+literal_primitive = _{ literal_string | literal_bool | literal_number /* TODO more literals*/ }
+literal_ion = { "`" ~ ( !"`" ~ ANY)  ~ "`" } // TODO handle ion literals with embedded '`'
+
+literal_tuple = {
+    "{" ~ (literal_string ~ ":" ~ literal ~ ("," ~ literal_string ~ ":" ~ literal )* )? ~ "}"
 }
 
-// TODO finish the SELECT statement
+literal_collection = _{ literal_array | literal_bag }
+literal_array = { "[" ~ (literal ~ ("," ~ literal)* )? ~ "]" }
+literal_bag = { "<<" ~ (literal ~ ("," ~ literal)* )? ~ ">>" }
 
-SelectExpression = {
-    Select ~ (From ~ (Where)?)?
+literal_string = @{ "'" ~ ( "''" | !"'" ~ ANY )* ~ "'"}
+literal_bool = { K_true | K_false }
+literal_number = _{ literal_real | literal_int }
+literal_int = @{  ASCII_DIGIT+ }
+literal_real = @{
+      ASCII_DIGIT+ ~ "." ~ (ASCII_DIGIT+)? ~ ( ^"e" ~ ("+"|"-")? ~ ASCII_DIGIT+ )?
+    | (ASCII_DIGIT+)? ~ "." ~ ASCII_DIGIT+ ~ ( ^"e" ~ ("+"|"-")? ~ ASCII_DIGIT+ )?
+    | ASCII_DIGIT+ ~ ^"e" ~ ("+"|"-")? ~ ASCII_DIGIT+
 }
 
-Select = _{
-    SelectValue
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                 Identifiers                                    //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+identifier = { identifier_unquoted | identifier_quoted }
+
+identifier_unquoted = @{
+    !(reserved_clause) ~ identifier_unquoted_first ~ identifier_unquoted_rest*
 }
+identifier_unquoted_first = _{ "_" | "$" | ASCII_ALPHA }
+identifier_unquoted_rest = _{ identifier_unquoted_first | ASCII_DIGIT }
 
-SelectValue = {
-    Select_ ~ Value_ ~ ValueExpression
-}
-
-// TODO joins
-
-From = {
-    From_ ~ ValueExpression ~ (As_)? ~ (Identifier)?
-}
-
-Where = {
-    Where_ ~ ValueExpression
-}
-
-// TODO all the operators / paths
-
-ValueExpression = {
-      Term
-    | LeftParen_ ~ Expression ~ RightParen_
-}
-
-// TODO fill in all the atoms
-
-Term = _{
-      NullLiteral
-    | BooleanLiteral
-    | String
-    | Number
-    | Identifier
-    | ArrayConstructor
-    | BagConstructor
-    | TupleConstructor
-}
-
-ArrayConstructor = {
-    LeftBracket_ ~ Values? ~ RightBracket_
-}
-
-BagConstructor = {
-    LeftDoubleAngle_ ~ Values? ~ RightDoubleAngle_
-}
-
-Values = _{
-    (ValueExpression ~ (Comma_ ~ ValueExpression)*)
-}
-
-TupleConstructor = {
-    LeftCurly_ ~ (TupleField ~ (Comma_ ~ TupleField)*)? ~ RightCurly_
-}
-
-TupleField = {
-    ValueExpression ~ Colon_ ~ ValueExpression
-}
-
-//
-// LITERALS
-//
-
-NullLiteral     = @{ Null_ | Missing_ }
-BooleanLiteral  = @{ True_ | False_ }
-
-//
-// Entry point for query "scanning".
-// Note that this is factored this way to support an iteration style API
-// where we can call back into this rule on subsequent input.
-//
-Scanner = _{ SOI ~ Token }
-
-Token = _{
-      Keyword
-    | String
-    | Number
-    | Identifier
-    | Punctuation
-}
-
-//
-// Punctuation
-//
-
-Punctuation = _{
-      Dot_
-    | Star_
-    | Parameter
-    | Operator
-    | Delimiter
-}
-
-// pathing operator and has some special meaning beyond a normal operator
-// (e.g. wildcard paths)
-Dot_            = @{ "." }
-
-// multiplication operator and wildcard
-Star_           = @{ "*" }
-
-// parameter variable
-Parameter       = @{ QuestionMark_ }
-QuestionMark_   = { "?" }
-
-// punctuation that are operators--does not count keyword operators
-Operator = @{
-      LexicalScope_ 
-    | Plus_
-    | Minus_
-    | Divide_
-    | Modulus_
-    | Less_
-    | LessEq_
-    | Greater_
-    | GreaterEq_
-    | Eq_
-    | NotEq_
-    | Concat_
-}
-
-LexicalScope_   = @{ "@" }
-Plus_           = @{ "+" }
-Minus_          = @{ "-" ~ !"-" }
-Divide_         = @{ "/" ~ !"*" }
-Modulus_        = @{ "%" }
-Less_           = @{ "<" ~ !("<" | "=" | ">") }
-LessEq_         = @{ "<=" }
-Greater_        = @{ ">" ~ !(">" | "=") }
-GreaterEq_      = @{ ">=" }
-Eq_             = @{ "=" }
-NotEq_          = @{ ("<>" | "!=") }
-Concat_         = @{ "||" }
-
-// punctuation that delimit things in the grammar
-Delimiter = {
-      Comma_
-    | Colon_
-    | SemiColon_
-    | LeftParen_
-    | RightParen_
-    | LeftBracket_
-    | RightBracket_
-    | LeftCurly_
-    | RightCurly_
-    | LeftDoubleAngle_
-    | RightDoubleAngle_
-}
-
-Comma_              = _{ "," }
-Colon_              = _{ ":" }
-SemiColon_          = _{ ";" }
-LeftParen_          = _{ "(" }
-RightParen_         = _{ ")" }
-LeftBracket_        = _{ "[" }
-RightBracket_       = _{ "]" }
-LeftCurly_          = _{ "{" }
-RightCurly_         = _{ "}" }
-LeftDoubleAngle_    = _{ "<<" }
-RightDoubleAngle_   = _{ ">>" }
-
-//
-// Numeric Literals
-//
-
-Number = ${
-      DecimalExp
-    | Decimal
-    | Integer
-}
-
-DecimalExp = {
-    Decimal ~ ("e" | "E") ~ Integer
-}
-
-// XXX `.nnn` and `nnn.` are okay, but `.` on its own definitely is not
-Decimal = {
-      Integer? ~ "." ~ Fraction
-    | Integer ~ "."
-}
-
-Fraction = {
-    Digit+
-}
-
-// XXX this explicitly supports arbitrary zero prefixing in various places
-//     which is part of the SQL grammar and also supported in implementations
-//     like Postgres/SQLite/MySQL/etc.
-Integer = {
-   Sign? ~ Digit+
-}
-
-Sign = _{ "+" | "-" }
-Digit = _{ '0'..'9' }
-
-//
-// String Literals
-//
-
-String = @{ "'" ~ StringContent* ~ "'"}
-
-StringContent = {
-      "''"
-    | !"'" ~ ANY
-}
-
-//
-// Identifiers
-//
-
-Identifier = { NonQuotedIdentifier | QuotedIdentifier }
-
-NonQuotedIdentifier = @{
-    !(Keyword) ~ NonQuotedIdentifierStart ~ NonQuotedIdentifierCont*
-}
-
-NonQuotedIdentifierStart = _{ "_" | "$" | 'a'..'z' | 'A'..'Z' }
-
-NonQuotedIdentifierCont = _{ NonQuotedIdentifierStart | Digit }
-
-QuotedIdentifier = @{ "\"" ~ QuotedIdentifierContent* ~ "\"" }
-
-QuotedIdentifierContent = {
+identifier_quoted = @{ "\"" ~ identifier_quoted_content* ~ "\"" }
+identifier_quoted_content = {
       "\"\""
     | !"\"" ~ ANY
 }
 
-//
-// Keywords
-//
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                   Keywords                                     //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
 
-Keyword = @{
-    (SqlKeyword | PartiqlKeyword) ~ !NonQuotedIdentifierCont
+reserved_clause = @{
+    (reserved_sql_clause | reserved_partiql_clause)
 }
 
-SqlKeyword = {
-      Absolute_
-    | Action_
-    | Add_
-    | All_
-    | Allocate_
-    | Alter_
-    | And_
-    | Any_
-    | Are_
-    | As_
-    | Asc_
-    | Assertion_
-    | At_
-    | Authorization_
-    | Avg_
-    | Begin_
-    | Between_
-    | Bit_
-    | BitLength_
-    | By_
-    | Cascade_
-    | Cascaded_
-    | Case_
-    | Cast_
-    | Catalog_
-    | Char_
-    | Character_
-    | CharacterLength_
-    | CharLength_
-    | Check_
-    | Close_
-    | Coalesce_
-    | Collate_
-    | Collation_
-    | Column_
-    | Commit_
-    | Connect_
-    | Connection_
-    | Constraint_
-    | Constraints_
-    | Continue_
-    | Convert_
-    | Corresponding_
-    | Count_
-    | Create_
-    | Cross_
-    | Current_
-    | CurrentDate_
-    | CurrentTime_
-    | CurrentTimestamp_
-    | CurrentUser_
-    | Cursor_
-    | Date_
-    | Deallocate_
-    | Dec_
-    | Decimal_
-    | Declare_
-    | Default_
-    | Deferrable_
-    | Deferred_
-    | Delete_
-    | Desc_
-    | Describe_
-    | Descriptor_
-    | Diagnostics_
-    | Disconnect_
-    | Distinct_
-    | Domain_
-    | Double_
-    | Drop_
-    | Else_
-    | End_
-    | EndExec_
-    | Escape_
-    | Except_
-    | Exception_
-    | Exec_
-    | Execute_
-    | Exists_
-    | External_
-    | Extract_
-    | DateAdd_
-    | DateDiff_
-    | False_
-    | Fetch_
-    | First_
-    | Float_
-    | For_
-    | Foreign_
-    | Found_
-    | From_
-    | Full_
-    | Get_
-    | Global_
-    | Go_
-    | Goto_
-    | Grant_
-    | Group_
-    | Having_
-    | Identity_
-    | Immediate_
-    | In_
-    | Indicator_
-    | Initially_
-    | Inner_
-    | Input_
-    | Insensitive_
-    | Insert_
-    | Int_
-    | Integer_
-    | Intersect_
-    | Interval_
-    | Into_
-    | Is_
-    | Isolation_
-    | Join_
-    | Key_
-    | Language_
-    | Last_
-    | Left_
-    | Level_
-    | Like_
-    | Local_
-    | Lower_
-    | Match_
-    | Max_
-    | Min_
-    | Module_
-    | Names_
-    | National_
-    | Natural_
-    | Nchar_
-    | Next_
-    | No_
-    | Not_
-    | Null_
-    | Nullif_
-    | Numeric_
-    | OctetLength_
-    | Of_
-    | On_
-    | Only_
-    | Open_
-    | Option_
-    | Or_
-    | Order_
-    | Outer_
-    | Output_
-    | Overlaps_
-    | Pad_
-    | Partial_
-    | Position_
-    | Precision_
-    | Prepare_
-    | Preserve_
-    | Primary_
-    | Prior_
-    | Privileges_
-    | Procedure_
-    | Public_
-    | Read_
-    | Real_
-    | References_
-    | Relative_
-    | Restrict_
-    | Revoke_
-    | Right_
-    | Rollback_
-    | Rows_
-    | Schema_
-    | Scroll_
-    | Section_
-    | Select_
-    | Session_
-    | SessionUser_
-    | Set_
-    | Size_
-    | Smallint_
-    | Some_
-    | Space_
-    | Sql_
-    | Sqlcode_
-    | Sqlerror_
-    | Sqlstate_
-    | Substring_
-    | Sum_
-    | SystemUser_
-    | Table_
-    | Temporary_
-    | Then_
-    | Time_
-    | Timestamp_
-    | To_
-    | Transaction_
-    | Translate_
-    | Translation_
-    | Trim_
-    | True_
-    | Union_
-    | Unique_
-    | Unknown_
-    | Update_
-    | Upper_
-    | Usage_
-    | User_
-    | Using_
-    | Value_
-    | Values_
-    | Varchar_
-    | Varying_
-    | View_
-    | When_
-    | Whenever_
-    | Where_
-    | With_
-    | Work_
-    | Write_
-    | Zone_
+reserved_sql_clause = {
+      K_with
+    | K_select
+    | K_from
+    | K_where
+    | K_group
+    | K_having
+    | K_union
+    | K_intersect
+    | K_except
+    | K_all
+    | K_order
+    | K_by
+    | K_limit
+    | K_offset
 }
 
-PartiqlKeyword = {
-      Missing_
-    | Pivot_
-    | Unpivot_
-    | Limit_
-    | Tuple_
-    | Remove_
-    | Index_
-    | Conflict_
-    | Do_
-    | Nothing_
-    | Returning_
-    | Modified_
-    | All_
-    | New_
-    | Old_
-    | Let_
-    | Bool_
-    | Boolean_
-    | String_
-    | Symbol_
-    | Clob_
-    | Blob_
-    | Struct_
-    | List_
-    | Sexp_
-    | Bag_
+reserved_partiql_clause = {
+        K_pivot
+      | K_unpivot
+      | K_preserve
 }
 
-//
-// Individual Keyword Definitions
-//
+reserved_join = @{
+      K_cross | K_join | K_left | K_right | K_full | K_natural | K_inner | K_outer | K_on | K_using
+}
 
-Absolute_            = _{ ^"absolute" }
-Action_              = _{ ^"action" }
-Add_                 = _{ ^"add" }
-All_                 = _{ ^"all" }
-Allocate_            = _{ ^"allocate" }
-Alter_               = _{ ^"alter" }
-And_                 = _{ ^"and" }
-Any_                 = _{ ^"any" }
-Are_                 = _{ ^"are" }
-As_                  = _{ ^"as" }
-Asc_                 = _{ ^"asc" }
-Assertion_           = _{ ^"assertion" }
-At_                  = _{ ^"at" }
-Authorization_       = _{ ^"authorization" }
-Avg_                 = _{ ^"avg" }
-Begin_               = _{ ^"begin" }
-Between_             = _{ ^"between" }
-Bit_                 = _{ ^"bit" }
-BitLength_           = _{ ^"bit_length" }
-By_                  = _{ ^"by" }
-Cascade_             = _{ ^"cascade" }
-Cascaded_            = _{ ^"cascaded" }
-Case_                = _{ ^"case" }
-Cast_                = _{ ^"cast" }
-Catalog_             = _{ ^"catalog" }
-Char_                = _{ ^"char" }
-Character_           = _{ ^"character" }
-CharacterLength_     = _{ ^"character_length" }
-CharLength_          = _{ ^"char_length" }
-Check_               = _{ ^"check" }
-Close_               = _{ ^"close" }
-Coalesce_            = _{ ^"coalesce" }
-Collate_             = _{ ^"collate" }
-Collation_           = _{ ^"collation" }
-Column_              = _{ ^"column" }
-Commit_              = _{ ^"commit" }
-Connect_             = _{ ^"connect" }
-Connection_          = _{ ^"connection" }
-Constraint_          = _{ ^"constraint" }
-Constraints_         = _{ ^"constraints" }
-Continue_            = _{ ^"continue" }
-Convert_             = _{ ^"convert" }
-Corresponding_       = _{ ^"corresponding" }
-Count_               = _{ ^"count" }
-Create_              = _{ ^"create" }
-Cross_               = _{ ^"cross" }
-Current_             = _{ ^"current" }
-CurrentDate_         = _{ ^"current_date" }
-CurrentTime_         = _{ ^"current_time" }
-CurrentTimestamp_    = _{ ^"current_timestamp" }
-CurrentUser_         = _{ ^"current_user" }
-Cursor_              = _{ ^"cursor" }
-Date_                = _{ ^"date" }
-Deallocate_          = _{ ^"deallocate" }
-Dec_                 = _{ ^"dec" }
-Decimal_             = _{ ^"decimal" }
-Declare_             = _{ ^"declare" }
-Default_             = _{ ^"default" }
-Deferrable_          = _{ ^"deferrable" }
-Deferred_            = _{ ^"deferred" }
-Delete_              = _{ ^"delete" }
-Desc_                = _{ ^"desc" }
-Describe_            = _{ ^"describe" }
-Descriptor_          = _{ ^"descriptor" }
-Diagnostics_         = _{ ^"diagnostics" }
-Disconnect_          = _{ ^"disconnect" }
-Distinct_            = _{ ^"distinct" }
-Domain_              = _{ ^"domain" }
-Double_              = _{ ^"double" }
-Drop_                = _{ ^"drop" }
-Else_                = _{ ^"else" }
-End_                 = _{ ^"end" }
-EndExec_             = _{ ^"end-exec" }
-Escape_              = _{ ^"escape" }
-Except_              = _{ ^"except" }
-Exception_           = _{ ^"exception" }
-Exec_                = _{ ^"exec" }
-Execute_             = _{ ^"execute" }
-Exists_              = _{ ^"exists" }
-External_            = _{ ^"external" }
-Extract_             = _{ ^"extract" }
-DateAdd_             = _{ ^"date_add" }
-DateDiff_            = _{ ^"date_diff" }
-False_               = _{ ^"false" }
-Fetch_               = _{ ^"fetch" }
-First_               = _{ ^"first" }
-Float_               = _{ ^"float" }
-For_                 = _{ ^"for" }
-Foreign_             = _{ ^"foreign" }
-Found_               = _{ ^"found" }
-From_                = _{ ^"from" }
-Full_                = _{ ^"full" }
-Get_                 = _{ ^"get" }
-Global_              = _{ ^"global" }
-Go_                  = _{ ^"go" }
-Goto_                = _{ ^"goto" }
-Grant_               = _{ ^"grant" }
-Group_               = _{ ^"group" }
-Having_              = _{ ^"having" }
-Identity_            = _{ ^"identity" }
-Immediate_           = _{ ^"immediate" }
-In_                  = _{ ^"in" }
-Indicator_           = _{ ^"indicator" }
-Initially_           = _{ ^"initially" }
-Inner_               = _{ ^"inner" }
-Input_               = _{ ^"input" }
-Insensitive_         = _{ ^"insensitive" }
-Insert_              = _{ ^"insert" }
-Int_                 = _{ ^"int" }
-Integer_             = _{ ^"integer" }
-Intersect_           = _{ ^"intersect" }
-Interval_            = _{ ^"interval" }
-Into_                = _{ ^"into" }
-Is_                  = _{ ^"is" }
-Isolation_           = _{ ^"isolation" }
-Join_                = _{ ^"join" }
-Key_                 = _{ ^"key" }
-Language_            = _{ ^"language" }
-Last_                = _{ ^"last" }
-Left_                = _{ ^"left" }
-Level_               = _{ ^"level" }
-Like_                = _{ ^"like" }
-Local_               = _{ ^"local" }
-Lower_               = _{ ^"lower" }
-Match_               = _{ ^"match" }
-Max_                 = _{ ^"max" }
-Min_                 = _{ ^"min" }
-Module_              = _{ ^"module" }
-Names_               = _{ ^"names" }
-National_            = _{ ^"national" }
-Natural_             = _{ ^"natural" }
-Nchar_               = _{ ^"nchar" }
-Next_                = _{ ^"next" }
-No_                  = _{ ^"no" }
-Not_                 = _{ ^"not" }
-Null_                = _{ ^"null" }
-Nullif_              = _{ ^"nullif" }
-Numeric_             = _{ ^"numeric" }
-OctetLength_         = _{ ^"octet_length" }
-Of_                  = _{ ^"of" }
-On_                  = _{ ^"on" }
-Only_                = _{ ^"only" }
-Open_                = _{ ^"open" }
-Option_              = _{ ^"option" }
-Or_                  = _{ ^"or" }
-Order_               = _{ ^"order" }
-Outer_               = _{ ^"outer" }
-Output_              = _{ ^"output" }
-Overlaps_            = _{ ^"overlaps" }
-Pad_                 = _{ ^"pad" }
-Partial_             = _{ ^"partial" }
-Position_            = _{ ^"position" }
-Precision_           = _{ ^"precision" }
-Prepare_             = _{ ^"prepare" }
-Preserve_            = _{ ^"preserve" }
-Primary_             = _{ ^"primary" }
-Prior_               = _{ ^"prior" }
-Privileges_          = _{ ^"privileges" }
-Procedure_           = _{ ^"procedure" }
-Public_              = _{ ^"public" }
-Read_                = _{ ^"read" }
-Real_                = _{ ^"real" }
-References_          = _{ ^"references" }
-Relative_            = _{ ^"relative" }
-Restrict_            = _{ ^"restrict" }
-Revoke_              = _{ ^"revoke" }
-Right_               = _{ ^"right" }
-Rollback_            = _{ ^"rollback" }
-Rows_                = _{ ^"rows" }
-Schema_              = _{ ^"schema" }
-Scroll_              = _{ ^"scroll" }
-Section_             = _{ ^"section" }
-Select_              = _{ ^"select" }
-Session_             = _{ ^"session" }
-SessionUser_         = _{ ^"session_user" }
-Set_                 = _{ ^"set" }
-Size_                = _{ ^"size" }
-Smallint_            = _{ ^"smallint" }
-Some_                = _{ ^"some" }
-Space_               = _{ ^"space" }
-Sql_                 = _{ ^"sql" }
-Sqlcode_             = _{ ^"sqlcode" }
-Sqlerror_            = _{ ^"sqlerror" }
-Sqlstate_            = _{ ^"sqlstate" }
-Substring_           = _{ ^"substring" }
-Sum_                 = _{ ^"sum" }
-SystemUser_          = _{ ^"system_user" }
-Table_               = _{ ^"table" }
-Temporary_           = _{ ^"temporary" }
-Then_                = _{ ^"then" }
-Time_                = _{ ^"time" }
-Timestamp_           = _{ ^"timestamp" }
-To_                  = _{ ^"to" }
-Transaction_         = _{ ^"transaction" }
-Translate_           = _{ ^"translate" }
-Translation_         = _{ ^"translation" }
-Trim_                = _{ ^"trim" }
-True_                = _{ ^"true" }
-Union_               = _{ ^"union" }
-Unique_              = _{ ^"unique" }
-Unknown_             = _{ ^"unknown" }
-Update_              = _{ ^"update" }
-Upper_               = _{ ^"upper" }
-Usage_               = _{ ^"usage" }
-User_                = _{ ^"user" }
-Using_               = _{ ^"using" }
-Value_               = _{ ^"value" }
-Values_              = _{ ^"values" }
-Varchar_             = _{ ^"varchar" }
-Varying_             = _{ ^"varying" }
-View_                = _{ ^"view" }
-When_                = _{ ^"when" }
-Whenever_            = _{ ^"whenever" }
-Where_               = _{ ^"where" }
-With_                = _{ ^"with" }
-Work_                = _{ ^"work" }
-Write_               = _{ ^"write" }
-Zone_                = _{ ^"zone" }
-Missing_             = _{ ^"missing" }
-Pivot_               = _{ ^"pivot" }
-Unpivot_             = _{ ^"unpivot" }
-Limit_               = _{ ^"limit" }
-Tuple_               = _{ ^"tuple" }
-Remove_              = _{ ^"remove" }
-Index_               = _{ ^"index" }
-Conflict_            = _{ ^"conflict" }
-Do_                  = _{ ^"do" }
-Nothing_             = _{ ^"nothing" }
-Returning_           = _{ ^"returning" }
-Modified_            = _{ ^"modified" }
-New_                 = _{ ^"new" }
-Old_                 = _{ ^"old" }
-Let_                 = _{ ^"let" }
-Bool_                = _{ ^"bool" }
-Boolean_             = _{ ^"boolean" }
-String_              = _{ ^"string" }
-Symbol_              = _{ ^"symbol" }
-Clob_                = _{ ^"clob" }
-Blob_                = _{ ^"blob" }
-Struct_              = _{ ^"struct" }
-List_                = _{ ^"list" }
-Sexp_                = _{ ^"sexp" }
-Bag_                 = _{ ^"bag" }
+
+K_all               = _{ ^"all" }
+K_asc               = _{ ^"asc" }
+K_and               = _{ ^"and" }
+K_as                = _{ ^"as" }
+K_at                = _{ ^"at" }
+K_by                = _{ ^"by" }
+K_cross             = _{ ^"cross" }
+K_desc              = _{ ^"desc" }
+K_except            = _{ ^"except" }
+K_false             = _{ ^"false" }
+K_first             = _{ ^"first" }
+K_full              = _{ ^"full" }
+K_from              = _{ ^"from" }
+K_group             = _{ ^"group" }
+K_having            = _{ ^"having" }
+K_inner             = _{ ^"inner" }
+K_intersect         = _{ ^"intersect" }
+K_join              = _{ ^"join" }
+K_last              = _{ ^"last" }
+K_lateral           = _{ ^"lateral" }
+K_left              = _{ ^"left" }
+K_limit             = _{ ^"limit" }
+K_missing           = _{ ^"missing" }
+K_natural           = _{ ^"natural" }
+K_null              = _{ ^"null" }
+K_nulls             = _{ ^"nulls" }
+K_offset            = _{ ^"offset" }
+K_on                = _{ ^"on" }
+K_or                = _{ ^"or" }
+K_order             = _{ ^"order" }
+K_outer             = _{ ^"outer" }
+K_pivot             = _{ ^"pivot" }
+K_preserve          = _{ ^"preserve" }
+K_right             = _{ ^"right" }
+K_select            = _{ ^"select" }
+K_true              = _{ ^"true" }
+K_union             = _{ ^"union" }
+K_unpivot           = _{ ^"unpivot" }
+K_using             = _{ ^"using" }
+K_value             = _{ ^"value" }
+K_where             = _{ ^"where" }
+K_with              = _{ ^"with" }
+

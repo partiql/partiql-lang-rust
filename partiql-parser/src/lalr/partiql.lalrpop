@@ -1,0 +1,707 @@
+use std::str::FromStr;
+
+use crate::lalr::lexer;
+use partiql_ast::experimental::ast;
+
+use crate::lalr::util::{var_ref};
+
+grammar;
+
+pub Query: Box<ast::Expr> = {
+    <ExprQuery>,
+    <sfw:SfwQuery> => Box::new( ast::Expr{ kind: ast::ExprKind::Select(sfw) } )
+}
+
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                   SFW Query                                    //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+pub SfwQuery: ast::Select = {
+    <SfwClauses>, <FwsClauses>
+}
+
+// SQL-style where `Select` precedes `From`
+SfwClauses: ast::Select = {
+    <with:WithClause?>
+    <project:SelectClause>
+    <from:FromClause?>
+    <where_clause:WhereClause?>
+    <group_by:GroupClause?>
+    <having:HavingClause?>
+    <set:SetOpClause?>
+    <order_by:OrderByClause?>
+    <limit:LimitClause?>
+    <offset:OffsetByClause?> => {
+        ast::Select {
+            setq: None,
+            project,
+            from,
+            from_let: None,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            limit,
+            offset,
+        }
+    }
+}
+
+// PartiQL-style where `Select` is last
+FwsClauses: ast::Select = {
+    <with:WithClause?>
+    <from:FromClause>
+    <where_clause:WhereClause?>
+    <group_by:GroupClause?>
+    <having:HavingClause?>
+    <set:SetOpClause?>
+    <order_by:OrderByClause?>
+    <limit:LimitClause?>
+    <offset:OffsetByClause?>
+    <project:SelectClause> => {
+        ast::Select {
+            setq: None,
+            project,
+            from: Some(from),
+            from_let: None,
+            where_clause,
+            group_by,
+            having,
+            order_by,
+            limit,
+            offset,
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------ //
+//                                     WITH                                       //
+// ------------------------------------------------------------------------------ //
+// TODO
+WithClause: () = {}
+
+// ------------------------------------------------------------------------------ //
+//                                    SELECT                                      //
+// ------------------------------------------------------------------------------ //
+SelectClause: ast::Projection = {
+    "SELECT" "*" => ast::Projection{ kind: ast::ProjectionKind::ProjectStar },
+    "SELECT" <project_items:CommaSep<Projection>> => {
+        ast::Projection{ kind: ast::ProjectionKind::ProjectList( ast::ProjectList{ project_items } ) }
+    },
+    "SELECT" "VALUE" <value:ExprQuery> => {
+        ast::Projection{ kind: ast::ProjectionKind::ProjectValue( ast::ProjectValue{ value } ) }
+    },
+    "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> => {
+        ast::Projection{ kind: ast::ProjectionKind::ProjectPivot( ast::ProjectPivot{ value, key } ) }
+    }
+}
+
+Projection: ast::ProjectItem = {
+    <expr:ExprQuery>
+        => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr: *expr, as_alias: None } ) },
+    <expr:ExprQuery> "AS" <ident:"Identifier"> => {
+        let as_alias = Some( ast::SymbolPrimitive{ value:ident} );
+        ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr: *expr, as_alias } ) }
+    },
+
+}
+
+// ------------------------------------------------------------------------------ //
+//                                     FROM                                       //
+// ------------------------------------------------------------------------------ //
+FromClause: ast::FromClause = {
+    "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <from:TableReference> => {
+        // use `reduce` to process the comma-seperated `TableReference`s
+        //   as left-associative `CROSS JOIN`s
+        froms.push(from);
+        froms.into_iter()
+            .reduce(|lfrom, rfrom| {
+                let join = ast::Join {
+                    kind: ast::JoinKind::Cross,
+                    left: Box::new(lfrom),
+                    right: Box::new(rfrom),
+                    predicate: None
+                };
+                ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+            })
+            .unwrap() // safe, because we know there's at least 1 input
+    }
+}
+TableReference: ast::FromClause = {
+    <TableNonJoin>,
+    <TableJoined>
+}
+TableNonJoin: ast::FromClause = {
+    <t:TableBaseReference> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
+    <t:TableUnpivot> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
+}
+TableBaseReference: ast::FromLet = {
+    <e:ExprQuery> => {
+        ast::FromLet {
+            expr: e,
+            kind: ast::FromLetKind::Scan,
+            as_alias: None,
+            at_alias: None,
+            by_alias: None
+        }
+    },
+    <e:ExprQuery> "AS"? <ident_as:"Identifier"> => {
+        ast::FromLet {
+            expr: e,
+            kind: ast::FromLetKind::Scan,
+            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
+            at_alias: None,
+            by_alias: None
+        }
+    },
+    <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
+        ast::FromLet {
+            expr: e,
+            kind: ast::FromLetKind::Scan,
+            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
+            at_alias: Some(ast::SymbolPrimitive{ value: ident_at }),
+            by_alias: None
+        }
+    }
+}
+
+TableUnpivot: ast::FromLet = {
+    "UNPIVOT" <table:TableBaseReference> => {
+        ast::FromLet{ kind: ast::FromLetKind::Unpivot, ..table }
+    }
+}
+TableJoined: ast::FromClause = {
+    <TableCrossJoin>,
+    <TableQualifiedJoin>,
+    "(" <TableJoined> ")",
+}
+TableCrossJoin: ast::FromClause = {
+    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
+    //    a left-associative operator
+    <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> => {
+        let join = ast::Join {
+            kind: ast::JoinKind::Cross,
+            left: Box::new(ltable),
+            right: Box::new(rtable),
+            predicate: None
+        };
+        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+    }
+}
+TableQualifiedJoin: ast::FromClause = {
+    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
+    //    a left-associative operator
+    <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> => {
+        let join = ast::Join {
+            kind: j,
+            left: Box::new(ltable),
+            right: Box::new(rtable),
+            predicate: Some(on),
+        };
+        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+    },
+    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
+    //    a left-associative operator
+    <ltable:TableReference> "NATURAL" <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> => {
+        let join = ast::Join {
+            kind: j,
+            left: Box::new(ltable),
+            right: Box::new(rtable),
+            predicate: Some(ast::JoinSpec::Natural)
+        };
+        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+    }
+}
+#[inline]
+JoinType: ast::JoinKind = {
+    "INNER" => ast::JoinKind::Inner,
+    "LEFT" "OUTER"? => ast::JoinKind::Left,
+    "RIGHT" "OUTER"? => ast::JoinKind::Right,
+    "FULL" "OUTER"? => ast::JoinKind::Full,
+}
+#[inline]
+JoinSpec: ast::JoinSpec = {
+    "ON" <e:ExprQuery> => ast::JoinSpec::On(e),
+    "USING" "(" <paths:CommaSep<PathExpr>> ")" => ast::JoinSpec::Using( paths ),
+}
+
+// ------------------------------------------------------------------------------ //
+//                                     WHERE                                      //
+// ------------------------------------------------------------------------------ //
+WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
+
+// ------------------------------------------------------------------------------ //
+//                                   GROUP BY                                     //
+// ------------------------------------------------------------------------------ //
+GroupClause: Box<ast::GroupByExpr> = {
+    "GROUP" "BY" <strategy: GroupStrategy> <keys:CommaSep<GroupKey>> <group_as_alias:GroupAlias?> => {
+        Box::new(ast::GroupByExpr{
+            strategy,
+            key_list: ast::GroupKeyList{ keys },
+            group_as_alias,
+        })
+    }
+}
+#[inline]
+GroupStrategy: ast::GroupingStrategy = {
+    <all:"ALL"?> => {
+        ast::GroupingStrategy{
+            kind: match all {
+                Some(_) => ast::GroupingStrategyKind::GroupFull,
+                None => ast::GroupingStrategyKind::GroupPartial,
+            }
+        }
+    }
+}
+GroupKey: ast::GroupKey = {
+    <expr:ExprQuery>
+        => ast::GroupKey{ expr: *expr, as_alias: None },
+    <expr:ExprQuery> "AS" <ident:"Identifier">
+        => ast::GroupKey{ expr: *expr, as_alias: Some( ast::SymbolPrimitive{ value:ident} ) },
+}
+#[inline]
+GroupAlias: ast::SymbolPrimitive = {
+    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value: ident }
+}
+
+// ------------------------------------------------------------------------------ //
+//                                    HAVING                                      //
+// ------------------------------------------------------------------------------ //
+HavingClause: Box<ast::Expr> = { "HAVING" <ExprQuery> }
+
+// ------------------------------------------------------------------------------ //
+//                            UNION/INTERSECT/EXCEPT                              //
+// ------------------------------------------------------------------------------ //
+// TODO
+SetOpClause: () = {}
+
+// ------------------------------------------------------------------------------ //
+//                                   ORDER BY                                     //
+// ------------------------------------------------------------------------------ //
+OrderByClause: Box<ast::OrderByExpr> = {
+    "ORDER" "BY" "PRESERVE" => Box::new( ast::OrderByExpr{ sort_specs: vec![] } ),
+    "ORDER" "BY" <sort_specs: CommaSep<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
+}
+OrderSortSpec: ast::SortSpec = {
+    <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?>
+        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }
+}
+#[inline]
+BySpec: ast::OrderingSpec = {
+    "ASC" => ast::OrderingSpec{ kind: ast::OrderingSpecKind::Asc },
+    "DESC" => ast::OrderingSpec{ kind: ast::OrderingSpecKind::Desc },
+}
+#[inline]
+ByNullSpec: ast::NullOrderingSpec = {
+    "NULLS" "FIRST" => ast::NullOrderingSpec{ kind: ast::NullOrderingSpecKind::First },
+    "NULLS" "LAST" => ast::NullOrderingSpec{ kind: ast::NullOrderingSpecKind::Last },
+}
+
+// ------------------------------------------------------------------------------ //
+//                                     LIMIT                                      //
+// ------------------------------------------------------------------------------ //
+LimitClause: Box<ast::Expr> = { "LIMIT" <ExprQuery> }
+
+// ------------------------------------------------------------------------------ //
+//                                     OFFSET                                     //
+// ------------------------------------------------------------------------------ //
+OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                   Expr Query                                   //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+// Note: the `Expr` rules are formulated in a precise way to assure 'natural'
+//    interpretation of mathematical expressions in an LR grammar while attempting
+//    to stay in accordance with SQL interpretations.
+//
+// In particular:
+//    - in order to assure operator precedence, the lowest precedence operators
+//      (i.e., `OR`) are at the top of the recursion tree, and the highest
+//      precedence are at the bottom (i.e., `<PathExpr>`)
+//    - left-associative operators (i.e., '+', '-', '*', '/') are expressed as
+//      left-self-recursive rules, while right-associative operators
+//      (i.e., unary '-', '^) are expressed as right-self-recursive rules
+//
+// In the parsing tutorials and academic literature, you will often see the above
+//     structure in the 'classical expression grammar':
+//                 Expr -> Expr '+' Factor | Expr '-' Factor | Factor
+//                 Factor -> Factor '*' Term | Factor '/' Term | Term
+//                 Term -> number
+//
+// Instead of trying to come up with other synonyms to Expr/Factor/Term, the rules
+//      here are named directly for their numeric level in the precedence table
+//      in the form ExprPrecedence<NN>
+//
+// PartiQL's precedence levels:
+// |-------+-------------------+---------------+------------------------------------|
+// | Level | Operator          | Associativity | Description                        |
+// |-------+-------------------+---------------+------------------------------------|
+// |     1 | <Path Expression> | left          | e.g., `field`,  `binding.field[2]` |
+// |     2 | <Function call>   | left          | e.g., `upper(field_reference)`     |
+// |     3 | + -               | right         | unary plus, unary minus            |
+// |     4 | ^                 | left          | exponentiation                     |
+// |     5 | * / %             | left          | multiplication, division, modulo   |
+// |     6 | + -               | left          | addition, subtraction              |
+// |     7 | BETWEEN IN LIKE   |               | range/set/pattern compare          |
+// |     8 | < > <= >=         |               | comparison operators               |
+// |     9 | = <> !=           |               | equality operators                 |
+// |    10 | IS                |               | IS [NOT] NULL                      |
+// |    11 | NOT               | right         | logical negate                     |
+// |    12 | AND               | left          | logical conjuct                    |
+// |    13 | OR                | left          | logical disjunct                   |
+// |-------+-------------------+---------------+------------------------------------|
+//
+// See https://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
+// See https://en.wikipedia.org/wiki/Order_of_operations#Special_cases
+
+
+pub ExprQuery: Box<ast::Expr> = {
+    <e:ExprPrecedence13> => Box::new(e)
+}
+
+ExprPrecedence13: ast::Expr = {
+    <l:ExprPrecedence13> "OR" <r:ExprPrecedence12> =>
+       ast::Expr{ kind: ast::ExprKind::Or( ast::Or{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence12>,
+}
+
+ExprPrecedence12: ast::Expr = {
+    <l:ExprPrecedence12> "AND" <r:ExprPrecedence11> =>
+       ast::Expr{ kind: ast::ExprKind::And( ast::And{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence11>,
+}
+
+ExprPrecedence11: ast::Expr = {
+    "NOT" <r:ExprPrecedence11> =>
+       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(r) } ) },
+    <ExprPrecedence10>,
+}
+
+ExprPrecedence10: ast::Expr = {
+    <l:ExprPrecedence10> "IS" <r:ExprPrecedence09> =>
+       ast::Expr{ kind: ast::ExprKind::Is( ast::Is{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence10> "IS" "NOT" <r:ExprPrecedence09> => {
+       let is = ast::Expr{ kind: ast::ExprKind::Is( ast::Is{ operands: vec![Box::new(l),Box::new(r)] } ) };
+       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(is) } ) }
+    },
+    <ExprPrecedence09>
+}
+
+ExprPrecedence09: ast::Expr = {
+    <l:ExprPrecedence09> "=" <r:ExprPrecedence08> =>
+       ast::Expr{ kind: ast::ExprKind::Eq( ast::Eq{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence09> "!=" <r:ExprPrecedence08> =>
+       ast::Expr{ kind: ast::ExprKind::Ne( ast::Ne{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence09> "<>" <r:ExprPrecedence08> =>
+       ast::Expr{ kind: ast::ExprKind::Ne( ast::Ne{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence08>,
+}
+
+ExprPrecedence08: ast::Expr = {
+    <l:ExprPrecedence08> "<" <r:ExprPrecedence07> =>
+       ast::Expr{ kind: ast::ExprKind::Lt( ast::Lt{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence08> ">" <r:ExprPrecedence07> =>
+       ast::Expr{ kind: ast::ExprKind::Gt( ast::Gt{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence08> "<=" <r:ExprPrecedence07> =>
+       ast::Expr{ kind: ast::ExprKind::Lte( ast::Lte{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence08> ">=" <r:ExprPrecedence07> =>
+       ast::Expr{ kind: ast::ExprKind::Gte( ast::Gte{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence07>,
+}
+
+ExprPrecedence07: ast::Expr = {
+    <value:ExprPrecedence07> "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> =>
+       ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) } ) },
+    <value:ExprPrecedence07> "NOT" "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> => {
+       let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) } ) };
+       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+    },
+    <value:ExprPrecedence07> "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> =>
+       ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape } ) },
+    <value:ExprPrecedence07> "NOT" "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> => {
+       let between = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape } ) };
+       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+    },
+    <l:ExprPrecedence07> "IN" <r:ExprPrecedence06> =>
+       ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence07> "NOT" "IN" <r:ExprPrecedence06> => {
+       let between = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] } ) };
+       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+    },
+    <ExprPrecedence06>,
+}
+#[inline]
+LikeEscape: Box<ast::Expr> = {
+    "ESCAPE" <e:ExprPrecedence06> => Box::new(e)
+}
+
+ExprPrecedence06: ast::Expr = {
+    <l:ExprPrecedence06> "+" <r:ExprPrecedence05> =>
+       ast::Expr{ kind: ast::ExprKind::Plus( ast::Plus{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence06> "-" <r:ExprPrecedence05> =>
+       ast::Expr{ kind: ast::ExprKind::Minus( ast::Minus{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence05>,
+}
+
+ExprPrecedence05: ast::Expr = {
+    <l:ExprPrecedence05> "*" <r:ExprPrecedence04> =>
+       ast::Expr{ kind: ast::ExprKind::Times( ast::Times{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence05> "/" <r:ExprPrecedence04> =>
+       ast::Expr{ kind: ast::ExprKind::Divide( ast::Divide{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <l:ExprPrecedence05> "%" <r:ExprPrecedence04> =>
+       ast::Expr{ kind: ast::ExprKind::Modulo( ast::Modulo{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence04>,
+}
+
+ExprPrecedence04: ast::Expr = {
+    <l:ExprPrecedence04> "^" <r:ExprPrecedence03> =>
+       ast::Expr{ kind: ast::ExprKind::Exponentiate( ast::Exponentiate{ operands: vec![Box::new(l),Box::new(r)] } ) },
+    <ExprPrecedence03>,
+}
+
+ExprPrecedence03: ast::Expr = {
+    "+" <r:ExprPrecedence02> =>
+       ast::Expr{ kind: ast::ExprKind::Pos( ast::Pos{ expr: Box::new(r) } ) },
+    "-" <r:ExprPrecedence02> =>
+       ast::Expr{ kind: ast::ExprKind::Neg( ast::Neg{ expr: Box::new(r) } ) },
+    <ExprPrecedence02>,
+}
+ExprPrecedence02: ast::Expr = {
+    <call:FunctionCall> => ast::Expr{ kind: ast::ExprKind::Call( call ) },
+    <ExprPrecedence01>,
+}
+ExprPrecedence01: ast::Expr = {<ExprTerm>,}
+
+pub ExprTerm: ast::Expr = {
+    "(" <q:Query> ")" => *q,
+    <lit:Literal> => ast::Expr{ kind: ast::ExprKind::Lit( lit ) },
+    <path:PathExpr> => ast::Expr{ kind: ast::ExprKind::Path( path ) },
+    "{" <fields:CommaTerm<ExprPair>> "}" => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields} ) },
+    "[" <values:CommaTerm<ExprQuery>> "]"=> ast::Expr{ kind: ast::ExprKind::List( ast::List{values} ) },
+    "<<" <values:CommaTerm<ExprQuery>> ">>"=> ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values} ) },
+}
+
+ExprPair: ast::ExprPair = {
+    <first:ExprQuery> ":" <second:ExprQuery> => ast::ExprPair{ first, second },
+}
+
+FunctionCall: ast::Call = {
+    <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name }, args }
+}
+
+
+PathExpr: ast::Path = {
+    <path:PathExpr> "." <ident:"Identifier"> => {
+        let step = ast::PathStep{
+            kind: ast::PathStepKind::PathExpr(
+                ast::PathExpr{
+                    index: ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) },
+                    case: ast::CaseSensitivity{ kind: ast::CaseSensitivityKind::CaseInsensitive }
+                }
+            )
+        };
+
+        let mut steps = path.steps;
+        steps.push(step);
+        ast::Path{ root:path.root, steps }
+    },
+    <ident:"Identifier"> => {
+        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) };
+        ast::Path{ root: Box::new(root), steps: vec![] }
+    },
+    <ident:"AtIdentifier"> => {
+        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, true) ) };
+        ast::Path{ root: Box::new(root), steps: vec![] }
+    },
+}
+
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                Literal Values                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+pub Literal: ast::Lit = {
+    <LiteralAbsent>,
+    <LiteralScalar>,
+    <LiteralIon>,
+    // TODO other literals?
+};
+#[inline]
+LiteralAbsent: ast::Lit = {
+    "NULL" => ast::Lit{ kind: ast::LitKind::Null },
+    "MISSING" => ast::Lit{ kind: ast::LitKind::Missing },
+}
+#[inline]
+LiteralScalar: ast::Lit = {
+    <LiteralString>,
+    <LiteralBool>,
+    <LiteralNumber>
+}
+#[inline]
+LiteralString: ast::Lit = {
+    <s:"String"> => ast::Lit{ kind: ast::LitKind::CharStringLit( ast::CharStringLit{value:s} ) },
+}
+#[inline]
+LiteralBool: ast::Lit = {
+    "TRUE" => ast::Lit{ kind: ast::LitKind::BoolLit( ast::BoolLit{value:true} ) },
+    "FALSE" => ast::Lit{ kind: ast::LitKind::BoolLit( ast::BoolLit{value:false} ) },
+}
+#[inline]
+LiteralNumber: ast::Lit = {
+    // TODO check bounds before parsing?
+    <n:"Int"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::Int64Lit( ast::Int64Lit{ value: n.parse().unwrap() } ) } ) },
+    <r:"Real"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::DecimalLit( ast::DecimalLit{ value: rust_decimal::Decimal::from_str(&r).unwrap()  } ) } ) },
+    <r:"ExpReal"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::DecimalLit( ast::DecimalLit{ value: rust_decimal::Decimal::from_scientific(&r).unwrap()  } ) } ) },
+}
+#[inline]
+LiteralIon: ast::Lit = {
+    <ion:"Ion"> => ast::Lit{ kind: ast::LitKind::IonStringLit( ast::IonStringLit{value:ion} ) },
+}
+
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                  Utilities                                     //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional)
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaTerm<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+// Comma as separator (i.e. "<T>, <T>, <T>")
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaSep<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T> => {
+        v.push(e);
+        v
+    }
+};
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                                    Lexer                                       //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+// The lexer is external; See [`lexer.rs`] for its definition.
+//
+// See also http://lalrpop.github.io/lalrpop/lexer_tutorial/002_writing_custom_lexer.html
+extern {
+    type Location = usize;
+    type Error = lexer::LexicalError;
+
+    enum lexer::Token {
+
+        // Brackets
+        "[" => lexer::Token::OpenSquare,
+        "]" => lexer::Token::CloseSquare,
+        "{" => lexer::Token::OpenCurly,
+        "}" => lexer::Token::CloseCurly,
+        "(" => lexer::Token::OpenParen,
+        ")" => lexer::Token::CloseParen,
+        "<<" => lexer::Token::OpenDblAngle,
+        ">>" => lexer::Token::CloseDblAngle,
+
+        // Punc
+        "," => lexer::Token::Comma,
+        ":" => lexer::Token::Colon,
+        ";" => lexer::Token::Semicolon,
+        "." => lexer::Token::Period,
+        "-" => lexer::Token::Minus,
+        "+" => lexer::Token::Plus,
+        "*" => lexer::Token::Star,
+        "/" => lexer::Token::Slash,
+        "%" => lexer::Token::Percent,
+        "^" => lexer::Token::Caret,
+
+        "=" => lexer::Token::Equal,
+        "==" => lexer::Token::EqualEqual,
+        "!=" => lexer::Token::BangEqual,
+        "<>" => lexer::Token::LessGreater,
+
+        "<" => lexer::Token::LessThan,
+        ">" => lexer::Token::GreaterThan,
+        "<=" => lexer::Token::LessEqual,
+        ">=" => lexer::Token::GreaterEqual,
+
+
+        // Types
+        "Identifier" => lexer::Token::Identifier(<String>),
+        "AtIdentifier" => lexer::Token::AtIdentifier(<String>),
+        "Int" => lexer::Token::Int(<String>),
+        "Real" => lexer::Token::Real(<String>),
+        "ExpReal" => lexer::Token::ExpReal(<String>),
+        "String" => lexer::Token::String(<String>),
+        "Ion" => lexer::Token::Ion(<String>),
+
+        // Keywords
+        "ALL" => lexer::Token::All,
+        "ASC" => lexer::Token::Asc,
+        "AND" => lexer::Token::And,
+        "AS" => lexer::Token::As,
+        "AT" => lexer::Token::At,
+        "BETWEEN" => lexer::Token::Between,
+        "BY" => lexer::Token::By,
+        "CROSS" => lexer::Token::Cross,
+        "DESC" => lexer::Token::Desc,
+        "ESCAPE" => lexer::Token::Escape,
+        "EXCEPT" => lexer::Token::Except,
+        "FALSE" => lexer::Token::False,
+        "FIRST" => lexer::Token::First,
+        "FULL" => lexer::Token::Full,
+        "FROM" => lexer::Token::From,
+        "GROUP" => lexer::Token::Group,
+        "HAVING" => lexer::Token::Having,
+        "IN" => lexer::Token::In,
+        "INNER" => lexer::Token::Inner,
+        "INTERSECT" => lexer::Token::Intersect,
+        "IS" => lexer::Token::Is,
+        "JOIN" => lexer::Token::Join,
+        "LAST" => lexer::Token::Last,
+        "LATERAL" => lexer::Token::Lateral,
+        "LEFT" => lexer::Token::Left,
+        "LIKE" => lexer::Token::Like,
+        "LIMIT" => lexer::Token::Limit,
+        "MISSING" => lexer::Token::Missing,
+        "NATURAL" => lexer::Token::Natural,
+        "NOT" => lexer::Token::Not,
+        "NULL" => lexer::Token::Null,
+        "NULLS" => lexer::Token::Nulls,
+        "OFFSET" => lexer::Token::Offset,
+        "ON" => lexer::Token::On,
+        "OR" => lexer::Token::Or,
+        "ORDER" => lexer::Token::Order,
+        "OUTER" => lexer::Token::Outer,
+        "PIVOT" => lexer::Token::Pivot,
+        "PRESERVE" => lexer::Token::Preserve,
+        "RIGHT" => lexer::Token::Right,
+        "SELECT" => lexer::Token::Select,
+        "TRUE" => lexer::Token::True,
+        "UNION" => lexer::Token::Union,
+        "UNPIVOT" => lexer::Token::Unpivot,
+        "USING" => lexer::Token::Using,
+        "VALUE" => lexer::Token::Value,
+        "WHERE" => lexer::Token::Where,
+        "WITH" => lexer::Token::With,
+    }
+}
