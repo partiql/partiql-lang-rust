@@ -455,11 +455,11 @@ mod tests {
     }
 
     #[test]
-    fn select() {
-        let ion_value = "SELECT g FROM data GROUP BY a";
-        let lexer = Lexer::new(ion_value);
-        let toks: Result<Vec<_>, LexicalError> = lexer.collect();
-        assert!(toks.is_ok());
+    fn select() -> Result<(), LexicalError> {
+        let query = "SELECT g FROM data GROUP BY a";
+        let lexer = Lexer::new(query);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
         assert_eq!(
             vec![
                 Token::Select,
@@ -470,10 +470,37 @@ mod tests {
                 Token::By,
                 Token::Identifier("a".into())
             ],
-            toks.unwrap()
-                .into_iter()
-                .map(|(_s, t, _e)| t)
-                .collect::<Vec<_>>()
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn err_invalid_input() {
+        let query = "SELECT # FROM data GROUP BY a";
+        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        assert!(toks.is_err());
+        match toks.unwrap_err() {
+            LexicalError::InvalidInput((s, t, e)) => {
+                assert_eq!(t, "#");
+                assert_eq!(s, 7);
+                assert_eq!(e, 8);
+            }
+            _ => panic!("Error should be LexicalError::InvalidInput"),
+        }
+    }
+
+    #[test]
+    fn err_unterminated_ion() {
+        let query = r#" ` "fooo` "#;
+        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        assert!(toks.is_err());
+        match toks.unwrap_err() {
+            LexicalError::UnterminatedIonLiteral((s, _t, e)) => {
+                assert_eq!(s, 1);
+                assert_eq!(e, 8);
+            }
+            _ => panic!("Error should be LexicalError::UnterminatedIonLiteral"),
+        }
     }
 }

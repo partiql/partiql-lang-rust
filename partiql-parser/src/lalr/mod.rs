@@ -32,7 +32,7 @@ pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, le
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParseResult {
-    let lexer = Lexer::new(s);
+    let lexer = lex_partiql(s);
     grammar::QueryParser::new().parse(lexer)
 }
 
