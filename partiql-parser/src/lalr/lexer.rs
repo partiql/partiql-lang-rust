@@ -14,23 +14,52 @@ pub(crate) type SpannedResult<Tok, Loc, Error> = Result<Spanned<Tok, Loc>, Error
 #[non_exhaustive]
 pub enum LexicalError {
     /// Generic invalid input; likely an unrecognizable token.
-    #[error("Parse error: invalid input `{:?}`", .0)]
+    #[error("Lexing error: invalid input `{:?}`", .0)]
     InvalidInput(Spanned<String, usize>),
     /// Embedded Ion value is not properly terminated.
-    #[error("Parse error: unterminated ion literal")]
+    #[error("Lexing error: unterminated ion literal")]
     UnterminatedIonLiteral(Spanned<(), usize>),
     /// Any other lexing error.
-    #[error("unknown error")]
+    #[error("Lexing error: unknown error")]
     Unknown,
 }
 
 /// A lexer from PartiQL text strings to [`LexicalToken`]s
 pub(crate) struct Lexer<'a> {
+    /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'a, Token>,
 }
 
 type SpannedString = Spanned<String, usize>;
 pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
+
+#[derive(PartialEq)]
+enum StringStatus {
+    None,
+    Single,
+    Double,
+    Triple,
+}
+
+impl StringStatus {
+    pub fn in_string(&self) -> bool {
+        !self.is_none()
+    }
+    pub fn is_none(&self) -> bool {
+        self == &StringStatus::None
+    }
+    #[allow(unused)]
+    pub fn is_single(&self) -> bool {
+        self == &StringStatus::Single
+    }
+    pub fn is_double(&self) -> bool {
+        self == &StringStatus::Double
+    }
+    #[allow(unused)]
+    pub fn is_triple(&self) -> bool {
+        self == &StringStatus::Double
+    }
+}
 
 impl<'a> Lexer<'a> {
     /// Creates a new lexer over `input` text.
@@ -40,6 +69,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Creates an error token at the specified location
     #[inline]
     fn err_at(
         &self,
@@ -50,6 +80,7 @@ impl<'a> Lexer<'a> {
         Err(err_ctor((start, (), end)))
     }
 
+    /// Creates an error token at the current lexer location
     #[inline]
     fn err_here(&self, err_ctor: fn(SpannedString) -> LexicalError) -> LexicalToken {
         let region = self.lexer.slice().to_owned();
@@ -57,23 +88,21 @@ impl<'a> Lexer<'a> {
         Err(err_ctor((start, region, end)))
     }
 
-    // Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
+    /// Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
     #[inline(always)]
     fn wrap(&mut self, token: Token) -> LexicalToken {
         let Span { start, end } = self.lexer.span();
         Ok((start, token, end))
     }
 
-    // Parses ion literals embedded in backticks (`)
-    // Parses just enough on to make sure not to include a backtick that is inside a string or comment
+    /// Parses ion literals embedded in backticks (`).
+    /// Parses just enough on to make sure not to include a backtick that is inside a string or comment.
     fn ion_string(&mut self) -> LexicalToken {
-        let Span { start, end } = self.lexer.span();
+        let Span { start, .. } = self.lexer.span();
         let remainder: &str = self.lexer.remainder();
 
         let mut rest = remainder.chars();
-        let mut dqs = 0;
-        let mut qs = 0;
-        let mut triple = false;
+        let mut string_status = StringStatus::None;
         'ion_val: loop {
             let curr = rest.next();
             match curr {
@@ -83,67 +112,87 @@ impl<'a> Lexer<'a> {
                 }
                 Some(c) => {
                     match c {
-                        '/' => {
-                            if rest.as_str().starts_with('/') {
-                                'comm: loop {
-                                    match rest.next() {
-                                        None => continue 'ion_val, // error; end of string
-                                        Some('\n') => break 'comm, // end of comment
-                                        _ => continue 'comm,       // more comment to go
+                        '/' if string_status.is_none() => {
+                            match rest.next() {
+                                Some('/') => {
+                                    // We're inside a single lime comment now; consume rest of line
+                                    'ion_comment: loop {
+                                        match rest.next() {
+                                            None => continue 'ion_val,        // error; end of input
+                                            Some('\n') => break 'ion_comment, // end of comment
+                                            _ => continue 'ion_comment,       // more comment to go
+                                        }
                                     }
                                 }
-                            } else if rest.as_str().starts_with('*') {
-                                'mcomm: loop {
-                                    match rest.next() {
-                                        None => continue 'ion_val, // error; end of string
-                                        Some('*') => {
-                                            match rest.next() {
-                                                None => continue 'ion_val, // error; end of string
-                                                Some('/') => break 'mcomm, // end of comment
-                                                _ => continue 'mcomm,      // more comment to go
+                                Some('*') => {
+                                    // We're inside a multi lime comment now; consume until '*/'
+                                    'ion_multiline_comment: loop {
+                                        match rest.next() {
+                                            None => continue 'ion_val, // error; end of input
+                                            Some('*') => {
+                                                match rest.next() {
+                                                    None => continue 'ion_val,                 // error; end of input
+                                                    Some('/') => break 'ion_multiline_comment, // end of comment
+                                                    _ => continue 'ion_multiline_comment, // more comment to go
+                                                }
                                             }
+                                            _ => continue 'ion_multiline_comment, // more comment to go
                                         }
-                                        _ => continue 'mcomm, // more comment to go
                                     }
+                                }
+                                _ => {
+                                    // TODO error?
                                 }
                             }
                         }
                         '\\' => {
-                            if dqs > 0 || qs > 0 {
-                                rest.next(); // Just consume the next char
+                            if string_status.in_string() {
+                                // We're inside a string and just saw a '\'
+                                // interpret the next character as an escape and just consume it
+                                rest.next();
                             } else {
                                 // TODO error?
                             }
                         }
-                        '"' if qs == 0 => {
-                            if dqs == 0 {
-                                dqs += 1;
-                            } else {
-                                dqs -= 1;
+                        '"' if string_status.is_none() => {
+                            string_status = StringStatus::Double;
+                        }
+                        '"' if string_status.is_double() => {
+                            string_status = StringStatus::None;
+                        }
+                        '\'' => {
+                            match string_status {
+                                StringStatus::Double => {
+                                    // nothing to do; `'` is part of a double-quoted string
+                                }
+                                StringStatus::Single => {
+                                    // already in a single-quoted string; terminate it here
+                                    string_status = StringStatus::None;
+                                }
+                                StringStatus::Triple => {
+                                    // already in a triple-quoted string
+                                    if rest.as_str().starts_with("''") {
+                                        // last `'` is followed by 2 more; consume them and terminate string here
+                                        rest.next();
+                                        rest.next();
+                                        string_status = StringStatus::None;
+                                    }
+                                }
+                                StringStatus::None => {
+                                    // not yet in a string. determine whether to enter single or triple
+                                    if rest.as_str().starts_with("''") {
+                                        // last `'` is followed by 2 more; consume them and start triple-quoted string here
+                                        rest.next();
+                                        rest.next();
+                                        string_status = StringStatus::Triple;
+                                    } else {
+                                        // start single-quote string here
+                                        string_status = StringStatus::Single;
+                                    }
+                                }
                             }
                         }
-                        '\'' if dqs == 0 => {
-                            if qs == 0 {
-                                if rest.as_str().starts_with("''") {
-                                    triple = true;
-                                    rest.next();
-                                    rest.next();
-                                    qs = 3;
-                                } else {
-                                    qs = 1;
-                                }
-                            } else {
-                                if triple && rest.as_str().starts_with("''") {
-                                    triple = false;
-                                    rest.next();
-                                    rest.next();
-                                    qs = 0;
-                                } else {
-                                    qs -= 1;
-                                }
-                            }
-                        }
-                        '`' if dqs == 0 && qs == 0 => {
+                        '`' if string_status.is_none() => {
                             let curr_pos = remainder.len() - rest.as_str().len();
                             let contents = &remainder[..curr_pos - 1];
                             self.lexer.bump(curr_pos);
@@ -253,9 +302,9 @@ pub enum Token {
             |lex| lex.slice().trim_matches('"').to_owned())]
     Identifier(String),
 
-    // unquoted identifiers
+    // unquoted @identifiers
     #[regex("@[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice()[1..].to_owned())]
-    // quoted identifiers (quoted with double quotes)
+    // quoted @identifiers (quoted with double quotes)
     #[regex(r#"@"([^"\\]|\\t|\\u|\\n|\\")*""#,
             |lex| lex.slice()[1..].trim_matches('"').to_owned())]
     AtIdentifier(String),
@@ -370,4 +419,47 @@ pub enum Token {
     // Internal use only
     #[token("`")]
     __BackQuote,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ion() {
+        let ion_value = r#" `{'a' // comment ' "
+                       :1, /* 
+                               comment 
+                              */
+                      'b':1}` "#;
+        let mut lexer = Lexer::new(ion_value);
+        if let (_start, Token::Ion(s), _end) = lexer.next().unwrap().unwrap() {
+            assert_eq!(ion_value.trim().trim_matches('`'), s);
+        } else {
+            panic!("Lex failed")
+        }
+    }
+
+    #[test]
+    fn select() {
+        let ion_value = "SELECT g FROM data GROUP BY a";
+        let lexer = Lexer::new(ion_value);
+        let toks: Result<Vec<_>, LexicalError> = lexer.collect();
+        assert!(toks.is_ok());
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::Identifier("g".to_owned()),
+                Token::From,
+                Token::Identifier("data".into()),
+                Token::Group,
+                Token::By,
+                Token::Identifier("a".into())
+            ],
+            toks.unwrap()
+                .into_iter()
+                .map(|(_s, t, _e)| t)
+                .collect::<Vec<_>>()
+        );
+    }
 }
