@@ -178,6 +178,7 @@ pub enum ExprKind {
     Times(Times),
     Divide(Divide),
     Modulo(Modulo),
+    Exponentiate(Exponentiate),
     Concat(Concat),
     /// Logical operators
     And(And),
@@ -432,6 +433,11 @@ pub struct Divide {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Modulo {
+    pub operands: Vec<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Exponentiate {
     pub operands: Vec<Box<Expr>>,
 }
 

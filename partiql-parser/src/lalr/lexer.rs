@@ -272,6 +272,8 @@ pub enum Token {
     EqualEqual,
     #[token("!=")]
     BangEqual,
+    #[token("<>")]
+    LessGreater,
     #[token("<=")]
     LessEqual,
     #[token(">=")]
@@ -292,6 +294,8 @@ pub enum Token {
     Percent,
     #[token("/")]
     Slash,
+    #[token("^")]
+    Caret,
     #[token(".")]
     Period,
 
@@ -339,12 +343,16 @@ pub enum Token {
     As,
     #[regex("(?i:At)")]
     At,
+    #[regex("(?i:Between)")]
+    Between,
     #[regex("(?i:By)")]
     By,
     #[regex("(?i:Cross)")]
     Cross,
     #[regex("(?i:Desc)")]
     Desc,
+    #[regex("(?i:Escape)")]
+    Escape,
     #[regex("(?i:Except)")]
     Except,
     #[regex("(?i:False)")]
@@ -359,8 +367,12 @@ pub enum Token {
     Group,
     #[regex("(?i:Having)")]
     Having,
+    #[regex("(?i:In)")]
+    In,
     #[regex("(?i:Inner)")]
     Inner,
+    #[regex("(?i:Is)")]
+    Is,
     #[regex("(?i:Intersect)")]
     Intersect,
     #[regex("(?i:Join)")]
@@ -371,6 +383,8 @@ pub enum Token {
     Lateral,
     #[regex("(?i:Left)")]
     Left,
+    #[regex("(?i:Like)")]
+    Like,
     #[regex("(?i:Limit)")]
     Limit,
     #[regex("(?i:Missing)")]

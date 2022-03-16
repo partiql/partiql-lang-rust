@@ -15,7 +15,16 @@ use crate::lalr::lexer::{Lexer, LexicalToken};
 use lalrpop_util::ParseError;
 use partiql_ast::experimental::ast;
 
-lalrpop_mod!(pub partiql); // synthesized by LALRPOP
+#[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
+#[allow(clippy::clone_on_copy)]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::vec_box)]
+#[allow(unused_variables)]
+#[allow(dead_code)]
+mod grammar {
+    include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
+}
+//lalrpop_mod!(pub partiql); // synthesized by LALRPOP
 mod lexer;
 mod util;
 
@@ -23,15 +32,15 @@ pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, le
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParseResult {
-    let lexer = lexer::Lexer::new(s);
-    partiql::QueryParser::new().parse(lexer)
+    let lexer = Lexer::new(s);
+    grammar::QueryParser::new().parse(lexer)
 }
 
 /// Lex a text PartiQL query.
 // TODO make private
 #[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql<'a>(s: &'a str) -> impl Iterator<Item = LexicalToken> + 'a {
-    lexer::Lexer::new(s).into_iter()
+pub fn lex_partiql(s: &str) -> impl Iterator<Item = LexicalToken> + '_ {
+    Lexer::new(s)
 }
 
 #[cfg(test)]
@@ -55,7 +64,7 @@ mod tests {
         macro_rules! literal {
             ($q:expr) => {{
                 let lexer = lexer::Lexer::new($q);
-                let res = partiql::LiteralParser::new().parse(lexer);
+                let res = grammar::LiteralParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -118,7 +127,8 @@ mod tests {
                       'b':1} ` "#
             );
             lit_and_parse!(
-                r#" `{'a':1, /* 
+                r#" `{'a' // comment ' "
+                       :1, /* 
                                comment 
                               */
                       'b':1} ` "#
@@ -132,7 +142,7 @@ mod tests {
         macro_rules! value {
             ($q:expr) => {{
                 let lexer = lexer::Lexer::new($q);
-                let res = partiql::ExprTermParser::new().parse(lexer);
+                let res = grammar::ExprTermParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
