@@ -338,7 +338,7 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 //
 // Instead of trying to come up with other synonyms to Expr/Factor/Term, the rules
 //      here are named directly for their numeric level in the precedence table
-//      in the form ExprPrecedenceedence<NN>
+//      in the form ExprPrecedence<NN>
 //
 // PartiQL's precedence levels:
 // |-------+-------------------+---------------+------------------------------------|
