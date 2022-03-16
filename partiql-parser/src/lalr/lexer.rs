@@ -115,7 +115,7 @@ impl<'a> Lexer<'a> {
                         '/' if string_status.is_none() => {
                             match rest.next() {
                                 Some('/') => {
-                                    // We're inside a single lime comment now; consume rest of line
+                                    // We're inside a single line comment now; consume rest of line
                                     'ion_comment: loop {
                                         match rest.next() {
                                             None => continue 'ion_val,        // error; end of input
