@@ -29,7 +29,6 @@ pub(crate) struct Lexer<'a> {
     lexer: logos::Lexer<'a, Token>,
 }
 
-type SpannedToken = Spanned<Token, usize>;
 type SpannedString = Spanned<String, usize>;
 pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
 

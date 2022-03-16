@@ -8,9 +8,7 @@
 //! use partiql_parser::prelude::*;
 //! use partiql_parser::peg_parse;
 //!
-//! fn main() {
 //!     peg_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
-//! }
 //! ```
 //!
 //! [partiql]: https://partiql.org

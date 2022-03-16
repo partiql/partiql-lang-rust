@@ -7,9 +7,7 @@
 //! ```
 //! use partiql_parser::{LalrParseResult, lalr_parse};
 //!
-//! fn main() {
 //!     lalr_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
-//! }
 //! ```
 //!
 //! [partiql]: https://partiql.org
@@ -39,7 +37,6 @@ pub fn lex_partiql<'a>(s: &'a str) -> impl Iterator<Item = LexicalToken> + 'a {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::syntax_error;
 
     macro_rules! parse {
         ($q:expr) => {{
@@ -69,7 +66,7 @@ mod tests {
         macro_rules! lit_and_parse {
             ($q:expr) => {{
                 literal!($q);
-                //parse!($q);
+                parse!($q);
             }};
         }
 
@@ -147,7 +144,7 @@ mod tests {
         macro_rules! value_and_parse {
             ($q:expr) => {{
                 value!($q);
-                //parse!($q);
+                parse!($q);
             }};
         }
         #[test]

@@ -76,7 +76,7 @@ fn main() -> Result<()> {
     } else {
         Box::new(stdout())
     };
-    out.write_all(&out_slice)?;
+    out.write_all(out_slice)?;
 
     Ok(())
 }

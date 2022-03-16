@@ -181,10 +181,10 @@ impl PestToElement for AstRule {
     /// Converts a Pest Rule into a `struct` that has the field for [`RuleType`] as a symbol
     /// and a field for the [`Expr`].
     fn pest_to_element(&self) -> Self::Element {
-        let fields = std::array::IntoIter::new([
+        let fields = [
             (text_token("type"), self.ty.pest_to_element()),
             (text_token("expression"), self.expr.pest_to_element()),
-        ]);
+        ];
         Self::Element::new_struct(fields)
     }
 }
@@ -234,7 +234,7 @@ fn flatten<F>(
 ) where
     F: Fn(Box<Expr>) -> ShouldFlatten + Copy,
 {
-    for operand in std::array::IntoIter::new([left, right]) {
+    for operand in [left, right] {
         match determine_flatten(operand) {
             ShouldFlatten::Yes(child_left, child_right) => {
                 flatten(sexp_elements, child_left, child_right, determine_flatten);
@@ -351,9 +351,7 @@ impl PestToElement for Expr {
             Expr::PeekSlice(_, _) => unimplemented!(),
         };
 
-        let element = Self::Element::new_sexp(values);
-
-        element
+        Self::Element::new_sexp(values)
     }
 }
 

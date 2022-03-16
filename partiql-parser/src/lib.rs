@@ -7,9 +7,6 @@
 //!
 //! [partiql]: https://partiql.org
 
-#[macro_use]
-extern crate lalrpop_util;
-
 pub mod prelude;
 pub mod result;
 
