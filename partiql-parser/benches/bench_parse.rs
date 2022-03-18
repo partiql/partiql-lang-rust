@@ -3,15 +3,15 @@ use partiql_parser::lalr_parse;
 use partiql_parser::logos_lex;
 use partiql_parser::peg_parse;
 use partiql_parser::peg_parse_to_ast;
-use partiql_parser::result::ParserResult;
-use pest::iterators::Pairs;
 
-const Q_STAR: &'static str = "SELECT *";
 
-const Q_GROUP: &'static str =
+
+const Q_STAR: &str = "SELECT *";
+
+const Q_GROUP: &str =
     "SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g";
 
-const Q_COMPLEX: &'static str = r#"
+const Q_COMPLEX: &str = r#"
             SELECT (
                 SELECT numRec, data
                 FROM delta_full_transactions.deltas delta,

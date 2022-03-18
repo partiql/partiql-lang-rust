@@ -4,7 +4,7 @@ use crate::result::ParserResult;
 use itertools::Itertools;
 use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::{
-    FromClause, FromClauseKind, JoinKind, JoinSpec, ProjectItemKind, SymbolPrimitive,
+    FromClause, FromClauseKind, JoinKind, JoinSpec,
 };
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
@@ -23,11 +23,11 @@ pub(crate) fn build_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>
     }
 }
 
-pub(crate) fn build_sfw_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
-    let mut setq = None;
+pub(crate) fn build_sfw_query(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
+    let setq = None;
     let mut project = None;
     let mut from = None;
-    let mut from_let = None;
+    let from_let = None;
     let mut where_clause = None;
     let mut group_by = None;
     let mut having = None;
@@ -68,7 +68,7 @@ pub(crate) fn build_sfw_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::E
     }))
 }
 
-pub(crate) fn build_group_by_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::GroupByExpr>> {
+pub(crate) fn build_group_by_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast::GroupByExpr>> {
     let mut parts: Vec<_> = pairs.rev().collect();
 
     let mut next = parts.pop().unwrap();
@@ -99,18 +99,14 @@ pub(crate) fn build_group_by_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<
         .collect::<ParserResult<Vec<_>>>()?;
     let key_list = ast::GroupKeyList { keys };
 
-    let group_as_alias = if let Some(pair) = parts.pop() {
-        Some(ast::SymbolPrimitive {
+    let group_as_alias = parts.pop().map(|pair| ast::SymbolPrimitive {
             value: pair.as_str().trim_matches('"').to_string(),
-        })
-    } else {
-        None
-    };
+        });
 
     Ok(Box::new(ast::GroupByExpr {
-        strategy: strategy,
-        key_list: key_list,
-        group_as_alias: group_as_alias,
+        strategy,
+        key_list,
+        group_as_alias,
     }))
 }
 
@@ -129,7 +125,7 @@ pub(crate) fn build_order_by_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<
     Ok(Box::new(order_expr))
 }
 
-pub(crate) fn build_order_sort_specs(mut pairs: Pairs<Rule>) -> ParserResult<Vec<ast::SortSpec>> {
+pub(crate) fn build_order_sort_specs(pairs: Pairs<Rule>) -> ParserResult<Vec<ast::SortSpec>> {
     pairs
         .map(|pair| build_order_sort_spec(pair.into_inner()))
         .collect::<ParserResult<Vec<_>>>()
@@ -177,11 +173,11 @@ pub(crate) fn build_offset_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<as
     build_expr_query(pairs.next().unwrap().into_inner())
 }
 
-pub(crate) fn build_where_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
+pub(crate) fn build_where_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
     build_expr_query(pairs)
 }
 
-pub(crate) fn build_having_clause(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
+pub(crate) fn build_having_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
     build_expr_query(pairs)
 }
 
@@ -219,9 +215,9 @@ pub(crate) fn build_select_clause(mut pairs: Pairs<Rule>) -> ParserResult<ast::P
     }
 }
 
-pub(crate) fn build_from_clause(mut pairs: Pairs<Rule>) -> ParserResult<ast::FromClause> {
+pub(crate) fn build_from_clause(pairs: Pairs<Rule>) -> ParserResult<ast::FromClause> {
     let froms: Vec<ast::FromClause> = pairs
-        .map(|pair| build_table_reference(pair))
+        .map(build_table_reference)
         .collect::<ParserResult<Vec<_>>>()?;
 
     let from = froms
@@ -315,7 +311,7 @@ fn build_join_spec(mut pairs: Pairs<Rule>) -> Result<JoinSpec, ParserError> {
     }
 }
 
-fn build_table_join_spec(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
+fn build_table_join_spec(pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
     let mut parts: Vec<_> = pairs.collect();
     let spec = build_join_spec(parts.pop().unwrap().into_inner())?;
     let right = build_table_reference(parts.pop().unwrap())?;
@@ -358,7 +354,7 @@ fn build_table_join_spec(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserErr
     })
 }
 
-fn build_table_natural_join(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
+fn build_table_natural_join(pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
     let mut parts: Vec<_> = pairs.collect();
     let right = build_table_reference(parts.pop().unwrap())?;
     let kind = if parts.len() > 1 {
@@ -414,7 +410,7 @@ fn build_table_cross_join(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserEr
     })
 }
 
-pub(crate) fn build_expr_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
+pub(crate) fn build_expr_query(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
     let mut parts: Vec<_> = pairs
         .map(|pair| {
             let rule = pair.as_rule();
@@ -492,7 +488,7 @@ pub(crate) fn build_expr_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::
     let res = if len == 1 {
         parts.pop().unwrap()
     } else if len == 2 {
-        let (unary, expr) = (parts.pop().unwrap(), parts.pop().unwrap());
+        let (_unary, _expr) = (parts.pop().unwrap(), parts.pop().unwrap());
         todo!()
     } else if len == 3 {
         let (lhs, operator, rhs) = (
@@ -501,8 +497,8 @@ pub(crate) fn build_expr_query(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::
             parts.pop().unwrap(),
         );
         let new_operands = vec![lhs, rhs];
-        let mut op = *operator;
-        let new_op = if let ast::Expr { mut kind } = op {
+        let op = *operator;
+        let new_op = if let ast::Expr { kind } = op {
             match kind {
                 ast::ExprKind::And(ast::And { .. }) => ast::Expr {
                     kind: ast::ExprKind::And(ast::And {
