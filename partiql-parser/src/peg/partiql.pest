@@ -71,18 +71,21 @@ out_binding = { expr_query ~ (K_as ~ attr_name)? }
 // ------------------------------------------------------------------------------ //
 from_clause = { K_from ~ table_references }
 table_references = _{ table_reference ~ ("," ~ K_lateral? ~ table_reference )* }
-table_reference = { table_joined | table_unpivot | table_base_reference }
-table_unpivot = { K_unpivot ~ table_base_reference }
+table_reference = _{ table_joined | table_unpivot | table_base_reference }
+table_unpivot = { K_unpivot ~ expr_query ~ K_as? ~ correlation_name ~ K_at ~ correlation_name }
 table_base_reference = { expr_query ~ ( correlation_spec )? }
 
-correlation_spec = { K_as? ~ correlation_name ~ ( K_at ~ correlation_name )? }
-correlation_name = { !(reserved_join) ~ !(reserved_clause) ~ identifier }
+correlation_spec = _{ K_as? ~ correlation_name }
+correlation_name = _{ !(reserved_join) ~ !(reserved_clause) ~ identifier }
 
 table_joined = { table_cross_join | table_qualified_join | "(" ~ table_joined ~ ")" }
 table_cross_join = { table_base_reference ~ K_cross ~ K_join ~ K_lateral? ~ table_reference }
-table_qualified_join = {
+table_qualified_join = _{ table_natural_join | table_join_spec }
+table_natural_join = {
+      table_base_reference ~ K_natural ~ join_type? ~ K_join ~ K_lateral? ~ table_reference
+}
+table_join_spec = {
       table_base_reference ~ join_type? ~ K_join ~ K_lateral? ~ table_reference ~ join_spec
-    | table_base_reference ~ K_natural ~ join_type? ~ K_join ~ K_lateral? ~ table_reference
 }
 join_type = { K_inner | (join_outer_type ~ K_outer?) }
 join_outer_type = { K_left | K_right | K_full }
@@ -100,13 +103,16 @@ where_clause = { K_where ~ search_condition }
 // ------------------------------------------------------------------------------ //
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
-group_by_clause = { K_group ~ (K_all)? ~ K_by ~ out_bindings ~ (K_group ~ K_as ~ attr_name)? }
+group_by_clause = { K_group ~ group_all? ~ K_by ~ group_out_bindings ~ group_as? }
+group_out_bindings = { out_bindings }
+group_all = {K_all}
+group_as = {K_group ~ K_as ~ attr_name}
 
 // ------------------------------------------------------------------------------ //
 //                                    HAVING                                      //
 // ------------------------------------------------------------------------------ //
 having_clause = { K_having ~ search_condition }
-search_condition = { expr_query }
+search_condition = _{ expr_query }
 
 // ------------------------------------------------------------------------------ //
 //                            UNION/INTERSECT/EXCEPT                              //
@@ -119,7 +125,7 @@ set_op_clause = { "TODO" }
 order_by_clause = { K_order ~ K_by ~ ( order_sort_preserve | order_sort_spec_list ) }
 order_sort_preserve = { K_preserve }
 order_sort_spec_list = { order_sort_spec ~ ("," ~ order_sort_spec )* }
-order_sort_spec = { identifier ~ order_by_spec? ~ order_by_null_spec? }
+order_sort_spec = { expr_query ~ order_by_spec? ~ order_by_null_spec? }
 order_by_spec = { K_asc | K_desc }
 order_by_null_spec = { K_nulls ~ (K_first | K_last) }
 
@@ -175,7 +181,7 @@ path_expr_list = { path_expr ~ ("," ~ path_expr )*}
 
 expr_function_call = { function_name ~ "(" ~ expr_function_args ~ ")" }
 expr_function_args = _{ expr_function_arg ~ ("," ~ expr_function_arg )*  }
-expr_function_arg  = { expr_query }
+expr_function_arg  = _{ expr_query }
 
 // Operators
 op_infix = { op_caret | op_math | op_comp }
@@ -214,8 +220,8 @@ op_gteq     = { ">=" }
 //
 // TODO
 //
-attr_name = { identifier }
-function_name = { identifier }
+attr_name = _{ identifier }
+function_name = _{ identifier }
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //

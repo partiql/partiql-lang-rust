@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use partiql_parser::lalr_parse;
 use partiql_parser::logos_lex;
 use partiql_parser::peg_parse;
+use partiql_parser::peg_parse_to_ast;
 use partiql_parser::result::ParserResult;
 use pest::iterators::Pairs;
 
@@ -30,6 +31,15 @@ fn pest_benchmark(c: &mut Criterion) {
     c.bench_function("peg-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
 
+fn pest_to_ast_benchmark(c: &mut Criterion) {
+    let parse = peg_parse_to_ast;
+    c.bench_function("peg-ast-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("peg-ast-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
+    c.bench_function("peg-ast-complex", |b| {
+        b.iter(|| parse(black_box(Q_COMPLEX)))
+    });
+}
+
 fn logos_benchmark(c: &mut Criterion) {
     let parse = |s| logos_lex(s).count(); // Just use `.count` to consume the lexer iterator
     c.bench_function("logos-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
@@ -44,5 +54,11 @@ fn lalr_benchmark(c: &mut Criterion) {
     c.bench_function("lalr-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
 
-criterion_group!(parse, pest_benchmark, logos_benchmark, lalr_benchmark);
+criterion_group!(
+    parse,
+    pest_benchmark,
+    pest_to_ast_benchmark,
+    logos_benchmark,
+    lalr_benchmark
+);
 criterion_main!(parse);

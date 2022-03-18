@@ -37,6 +37,7 @@ rust_decimal = "~1.22.0"
 lalrpop-util = "~0.19.7"
 logos = "~0.12.0"
 
+itertools = "~0.10.3"
 
 [dev-dependencies]
 rstest = "~0.9.0"
