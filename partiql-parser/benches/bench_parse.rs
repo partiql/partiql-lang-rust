@@ -3,13 +3,11 @@ use partiql_parser::lalr_parse;
 use partiql_parser::logos_lex;
 use partiql_parser::peg_parse;
 use partiql_parser::peg_parse_to_ast;
-
-
+use std::time::Duration;
 
 const Q_STAR: &str = "SELECT *";
 
-const Q_GROUP: &str =
-    "SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g";
+const Q_GROUP: &str = "SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g";
 
 const Q_COMPLEX: &str = r#"
             SELECT (
@@ -54,11 +52,13 @@ fn lalr_benchmark(c: &mut Criterion) {
     c.bench_function("lalr-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
 
-criterion_group!(
-    parse,
-    pest_benchmark,
+criterion_group! {
+    name = parse;
+    config = Criterion::default().measurement_time(Duration::new(10, 0));
+    targets = pest_benchmark,
     pest_to_ast_benchmark,
     logos_benchmark,
     lalr_benchmark
-);
+}
+
 criterion_main!(parse);
