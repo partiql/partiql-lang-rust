@@ -21,7 +21,7 @@ use crate::result::ParserResult;
 mod ast_builder;
 mod grammar;
 
-pub(crate) use crate::peg::ast_builder::{build_query};
+pub(crate) use crate::peg::ast_builder::build_query;
 pub(crate) use crate::peg::grammar::{PartiQLParser, Rule};
 use partiql_ast::experimental::ast;
 

@@ -3,9 +3,7 @@ use crate::prelude::ParserError;
 use crate::result::ParserResult;
 use itertools::Itertools;
 use partiql_ast::experimental::ast;
-use partiql_ast::experimental::ast::{
-    FromClause, FromClauseKind, JoinKind, JoinSpec,
-};
+use partiql_ast::experimental::ast::{FromClause, FromClauseKind, JoinKind, JoinSpec};
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
 
@@ -100,8 +98,8 @@ pub(crate) fn build_group_by_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast:
     let key_list = ast::GroupKeyList { keys };
 
     let group_as_alias = parts.pop().map(|pair| ast::SymbolPrimitive {
-            value: pair.as_str().trim_matches('"').to_string(),
-        });
+        value: pair.as_str().trim_matches('"').to_string(),
+    });
 
     Ok(Box::new(ast::GroupByExpr {
         strategy,
