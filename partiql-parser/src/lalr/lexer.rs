@@ -503,7 +503,6 @@ pub enum Token {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::error::Error;
 
     #[test]
     fn ion_simple() {
