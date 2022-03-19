@@ -440,6 +440,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ion_simple() {
+        let ion_value = r#" `{'a':1,  'b':1}` "#;
+        let mut lexer = Lexer::new(ion_value);
+        if let (_start, Token::Ion(s), _end) = lexer.next().unwrap().unwrap() {
+            assert_eq!(ion_value.trim(), s);
+        } else {
+            panic!("Lex failed")
+        }
+    }
+
+    #[test]
     fn ion() {
         let ion_value = r#" `{'a' // comment ' "
                        :1, /* 
