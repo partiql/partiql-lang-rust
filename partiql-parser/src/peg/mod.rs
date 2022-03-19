@@ -12,17 +12,18 @@
 //! ```
 //!
 //! [partiql]: https://partiql.org
-
+//!
 use pest::iterators::Pairs;
+use pest::Parser;
 
 use crate::result::ParserResult;
 
-use pest::Parser;
-use pest_derive::Parser;
+mod ast_builder;
+mod grammar;
 
-#[derive(Parser)]
-#[grammar = "peg/partiql.pest"]
-pub(crate) struct PartiQLParser;
+pub(crate) use crate::peg::ast_builder::build_query;
+pub(crate) use crate::peg::grammar::{PartiQLParser, Rule};
+use partiql_ast::experimental::ast;
 
 /// Parser for PartiQL queries.
 ///
@@ -32,6 +33,10 @@ pub fn parse_partiql(input: &str) -> ParserResult<Pairs<Rule>> {
     Ok(PartiQLParser::parse(Rule::query_full, input)?)
 }
 
+pub fn parse_partiql_to_ast(input: &str) -> ParserResult<Box<ast::Expr>> {
+    build_query(parse_partiql(input)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,6 +44,16 @@ mod tests {
     macro_rules! parse {
         ($q:expr) => {{
             let res = parse_partiql($q);
+            println!("{:#?}", res);
+            match res {
+                Ok(_) => (),
+                _ => assert!(false, "{:?}", res),
+            }
+        }};
+    }
+    macro_rules! parse_to_ast {
+        ($q:expr) => {{
+            let res = build_query(parse_partiql($q).expect("parse"));
             println!("{:#?}", res);
             match res {
                 Ok(_) => (),
@@ -64,6 +79,7 @@ mod tests {
             ($q:expr) => {{
                 literal!($q);
                 parse!($q);
+                parse_to_ast!($q);
             }};
         }
 
@@ -134,6 +150,7 @@ mod tests {
             ($q:expr) => {{
                 value!($q);
                 parse!($q);
+                parse_to_ast!($q);
             }};
         }
         #[test]
@@ -163,95 +180,111 @@ mod tests {
     mod expr {
         use super::*;
 
+        macro_rules! parse_and_ast {
+            ($q:expr) => {{
+                parse!($q);
+                parse_to_ast!($q);
+            }};
+        }
+
         #[test]
         fn or_simple() {
-            parse!(r#"TRUE OR FALSE"#)
+            parse_and_ast!(r#"TRUE OR FALSE"#)
         }
 
         #[test]
         fn or() {
-            parse!(r#"t1.super OR test(t2.name, t1.name)"#)
+            parse_and_ast!(r#"t1.super OR test(t2.name, t1.name)"#)
         }
 
         #[test]
         fn and_simple() {
-            parse!(r#"TRUE and FALSE"#)
+            parse_and_ast!(r#"TRUE and FALSE"#)
         }
 
         #[test]
         fn and() {
-            parse!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse_and_ast!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#)
         }
 
         #[test]
         fn or_and() {
-            parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse_and_ast!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
         }
     }
 
     mod sfw {
         use super::*;
 
+        macro_rules! parse_and_ast {
+            ($q:expr) => {{
+                parse!($q);
+                parse_to_ast!($q);
+            }};
+        }
+
         #[test]
         fn select1() {
-            parse!("SELECT g")
+            parse_and_ast!("SELECT g")
         }
 
         #[test]
         fn select_list() {
-            parse!("SELECT g, k as ck, h")
+            parse_and_ast!("SELECT g, k as ck, h")
         }
 
         #[test]
         fn fun_call() {
-            parse!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#)
+            parse_and_ast!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#)
         }
 
         #[test]
         fn select3() {
-            parse!("SELECT g, k, function('2') as fn_result")
+            parse_and_ast!("SELECT g, k, function('2') as fn_result")
         }
 
         #[test]
         fn group() {
-            parse!("SELECTg FROM data GROUP BY a")
+            parse_and_ast!("SELECTg FROM data GROUP BY a")
         }
 
         #[test]
         fn group_complex() {
-            parse!("SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g")
+            parse_and_ast!("SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g")
         }
 
         #[test]
         fn order_by() {
-            parse!(r#"SELECT a FROM tb ORDER BY PRESERVE"#);
-            parse!(r#"SELECT a FROM tb ORDER BY rk1"#);
-            parse!(r#"SELECT a FROM tb ORDER BY rk1 ASC, rk2 DESC"#);
+            parse_and_ast!(r#"SELECT a FROM tb ORDER BY PRESERVE"#);
+            parse_and_ast!(r#"SELECT a FROM tb ORDER BY rk1"#);
+            parse_and_ast!(r#"SELECT a FROM tb ORDER BY rk1 ASC, rk2 DESC"#);
         }
 
         #[test]
         fn where_simple() {
-            parse!(r#"SELECT a FROM tb WHERE hk = 1"#)
+            parse_and_ast!(r#"SELECT a FROM tb WHERE hk = 1"#)
         }
 
         #[test]
         fn where_boolean() {
-            parse!(r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse_and_ast!(
+                r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#
+            )
         }
 
         #[test]
         fn limit() {
-            parse!(r#"SELECT * FROM a LIMIT 10"#)
+            parse_and_ast!(r#"SELECT * FROM a LIMIT 10"#)
         }
 
         #[test]
         fn offset() {
-            parse!(r#"SELECT * FROM a OFFSET 10"#)
+            parse_and_ast!(r#"SELECT * FROM a OFFSET 10"#)
         }
 
         #[test]
         fn limit_offset() {
-            parse!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#)
+            parse_and_ast!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#)
         }
 
         #[test]
@@ -268,58 +301,7 @@ mod tests {
             )
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
-            parse!(q)
+            parse_and_ast!(q)
         }
     }
-    /*
-    #[rstest]
-
-    #[case::select_value(
-    r#"SELECT VALUE 5"#,
-    Ok(())
-    )]
-    #[case::select_value_from(
-    r#"SELECT VALUE 5 FROM some_table"#,
-    Ok(())
-    )]
-    #[case::select_value_from_where(
-    r#"SELECT VALUE 5 FROM some_table WHERE TRUE"#,
-    Ok(())
-    )]
-    #[case::select_value_from_where_containers(
-    r#"select Value {'age': 6, 'ice_cream': "🍦"} fRoM <<'🚽'>> WHERE is_amazing"#,
-    Ok(())
-    )]
-    #[case::bad_identifier(
-    r#"SELECT value aWeSoMe FROM 💩"#,
-    syntax_error("IGNORED MESSAGE", Position::at(1, 27))
-    )]
-    #[case::missing_from_with_where(
-    r#"SELECT value aWeSoMe WHERE FALSE"#,
-    syntax_error("IGNORED MESSAGE", Position::at(1, 22))
-    )]
-    fn recognize(#[case] input: &str, #[case] expected: ParserResult<()>) -> ParserResult<()> {
-        let actual = recognize_partiql(input);
-        match (expected, actual) {
-            (
-                Err(ParserError::SyntaxError {
-                        position: expected_position,
-                        ..
-                    }),
-                Err(ParserError::SyntaxError {
-                        position: actual_position,
-                        ..
-                    }),
-            ) => {
-                // just compare the positions for syntax errors...
-                assert_eq!(expected_position, actual_position)
-            }
-            (expected, actual) => {
-                assert_eq!(expected, actual);
-            }
-        }
-        Ok(())
-    }
-
-     */
 }

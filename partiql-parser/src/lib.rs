@@ -18,3 +18,4 @@ pub use lalr::lex_partiql as logos_lex;
 pub use lalr::parse_partiql as lalr_parse;
 pub use lalr::ParseResult as LalrParseResult;
 pub use peg::parse_partiql as peg_parse;
+pub use peg::parse_partiql_to_ast as peg_parse_to_ast;
