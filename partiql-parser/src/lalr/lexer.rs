@@ -19,9 +19,192 @@ pub enum LexicalError {
     /// Embedded Ion value is not properly terminated.
     #[error("Lexing error: unterminated ion literal")]
     UnterminatedIonLiteral(Spanned<(), usize>),
+    /// Comment is not properly terminated.
+    #[error("Lexing error: unterminated comment")]
+    UnterminatedComment(Spanned<(), usize>),
     /// Any other lexing error.
     #[error("Lexing error: unknown error")]
     Unknown,
+}
+
+type CommentToken = SpannedResult<String, usize, LexicalError>;
+
+#[derive(Logos, Debug, Clone, PartialEq, Eq)]
+enum Comment {
+    #[error]
+    #[regex(r"[^/*]+", logos::skip)]
+    Any,
+    #[token("*/")]
+    End,
+    #[token("/*")]
+    Start,
+}
+
+/// A lexer for block comments (enclosed between '/*' & '*/')
+pub(crate) struct CommentLexer<'a> {
+    /// Wrap a logos-generated lexer
+    lexer: logos::Lexer<'a, Comment>,
+    nested_block: bool,
+}
+
+impl<'a> CommentLexer<'a> {
+    /// Creates a new lexer over `input` text.
+    pub fn new(input: &'a str) -> Self {
+        CommentLexer {
+            lexer: Comment::lexer(input),
+            nested_block: false,
+        }
+    }
+
+    fn create(lexer: logos::Lexer<'a, Comment>) -> Self {
+        CommentLexer {
+            lexer,
+            nested_block: false,
+        }
+    }
+
+    fn exit(self) -> logos::Lexer<'a, Comment> {
+        self.lexer
+    }
+
+    fn with_nested_block(mut self) -> Self {
+        self.nested_block = true;
+        self
+    }
+
+    /// Parses a single (possibly nested) block comment and returns it
+    fn next(&mut self) -> Option<CommentToken> {
+        let Span { start, .. } = self.lexer.span();
+        let mut nesting = 1;
+        let nesting_inc = if self.nested_block { 1 } else { 0 };
+        'comment: loop {
+            match self.lexer.next() {
+                Some(Comment::Any) => continue,
+                Some(Comment::Start) => nesting += nesting_inc,
+                Some(Comment::End) => {
+                    nesting -= 1;
+                    if nesting == 0 {
+                        break 'comment;
+                    }
+                }
+                None => {
+                    let Span { end, .. } = self.lexer.span();
+                    let comment = (start, (), end);
+                    return Some(Err(LexicalError::UnterminatedComment(comment)));
+                }
+            }
+        }
+        let Span { end, .. } = self.lexer.span();
+        let comment = self.lexer.source()[start..end].to_owned();
+
+        Some(Ok((start, comment, end)))
+    }
+}
+
+impl<'a> Iterator for CommentLexer<'a> {
+    type Item = CommentToken;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+type IonToken = SpannedResult<String, usize, LexicalError>;
+
+#[derive(Logos, Debug, Clone, PartialEq)]
+pub enum EmbeddedIon {
+    #[error]
+    #[regex(r#"([^/*'"`])+"#, logos::skip)]
+    Any,
+
+    #[token("`")]
+    Embed,
+
+    #[regex(r"//[^\n]*")]
+    CommentLine,
+    #[token("/*")]
+    CommentBlock,
+
+    #[regex(r#""([^"\\]|\\t|\\u|\\")*""#)]
+    String,
+    #[regex(r#"'([^'\\]|\\t|\\u|\\')*'"#)]
+    Symbol,
+    #[token("'''")]
+    LongString,
+}
+
+/// A Lexer for ion literals embedded in backticks (`).
+/// Parses just enough on to make sure not to include a backtick that is inside a string or comment.
+pub(crate) struct EmbeddedIonLexer<'a> {
+    /// Wrap a logos-generated lexer
+    lexer: logos::Lexer<'a, EmbeddedIon>,
+}
+
+impl<'a> EmbeddedIonLexer<'a> {
+    /// Creates a new lexer over `input` text.
+    pub fn new(input: &'a str) -> Self {
+        EmbeddedIonLexer {
+            lexer: EmbeddedIon::lexer(input),
+        }
+    }
+
+    fn create(lexer: logos::Lexer<'a, EmbeddedIon>) -> Self {
+        EmbeddedIonLexer { lexer }
+    }
+
+    fn exit(self) -> logos::Lexer<'a, EmbeddedIon> {
+        self.lexer
+    }
+
+    /// Parses a single (possibly nested) block comment and returns it
+    fn next(&mut self) -> Option<IonToken> {
+        let Span { start, .. } = self.lexer.span();
+        'ion_value: loop {
+            let next_tok = self.lexer.next();
+            match next_tok {
+                Some(EmbeddedIon::Embed) => {
+                    break 'ion_value;
+                }
+                Some(EmbeddedIon::CommentBlock) => {
+                    let mut comment_lexer = CommentLexer::create(self.lexer.to_owned().morph());
+                    let _ = comment_lexer.next();
+                    self.lexer = comment_lexer.exit().morph::<EmbeddedIon>();
+                }
+                Some(EmbeddedIon::LongString) => {
+                    'triple_quote: loop {
+                        let next_tok = self.lexer.next();
+                        match next_tok {
+                            Some(EmbeddedIon::LongString) => break 'triple_quote,
+                            Some(_) => (), // just consume all other tokens
+                            None => continue 'ion_value,
+                        }
+                    }
+                }
+                Some(_) => {
+                    // just consume all other tokens
+                }
+                None => {
+                    let Span { end, .. } = self.lexer.span();
+                    let comment = (start, (), end);
+                    return Some(Err(LexicalError::UnterminatedIonLiteral(comment)));
+                }
+            }
+        }
+        let Span { end, .. } = self.lexer.span();
+        let comment = self.lexer.source()[start..end].to_owned();
+
+        Some(Ok((start, comment, end)))
+    }
+}
+
+impl<'a> Iterator for EmbeddedIonLexer<'a> {
+    type Item = IonToken;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
 }
 
 /// A lexer from PartiQL text strings to [`LexicalToken`]s
@@ -32,34 +215,6 @@ pub(crate) struct Lexer<'a> {
 
 type SpannedString = Spanned<String, usize>;
 pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
-
-#[derive(PartialEq)]
-enum StringStatus {
-    None,
-    Single,
-    Double,
-    Triple,
-}
-
-impl StringStatus {
-    pub fn in_string(&self) -> bool {
-        !self.is_none()
-    }
-    pub fn is_none(&self) -> bool {
-        self == &StringStatus::None
-    }
-    #[allow(unused)]
-    pub fn is_single(&self) -> bool {
-        self == &StringStatus::Single
-    }
-    pub fn is_double(&self) -> bool {
-        self == &StringStatus::Double
-    }
-    #[allow(unused)]
-    pub fn is_triple(&self) -> bool {
-        self == &StringStatus::Double
-    }
-}
 
 impl<'a> Lexer<'a> {
     /// Creates a new lexer over `input` text.
@@ -95,124 +250,30 @@ impl<'a> Lexer<'a> {
         Ok((start, token, end))
     }
 
-    /// Parses ion literals embedded in backticks (`).
-    /// Parses just enough on to make sure not to include a backtick that is inside a string or comment.
-    fn ion_string(&mut self) -> LexicalToken {
-        let Span { start, .. } = self.lexer.span();
-        let remainder: &str = self.lexer.remainder();
-
-        let mut rest = remainder.chars();
-        let mut string_status = StringStatus::None;
-        'ion_val: loop {
-            let curr = rest.next();
-            match curr {
-                None => {
-                    let curr_pos = remainder.len() - rest.as_str().len();
-                    return self.err_at(start, curr_pos, LexicalError::UnterminatedIonLiteral);
-                }
-                Some(c) => {
-                    match c {
-                        '/' if string_status.is_none() => {
-                            match rest.next() {
-                                Some('/') => {
-                                    // We're inside a single line comment now; consume rest of line
-                                    'ion_comment: loop {
-                                        match rest.next() {
-                                            None => continue 'ion_val,        // error; end of input
-                                            Some('\n') => break 'ion_comment, // end of comment
-                                            _ => continue 'ion_comment,       // more comment to go
-                                        }
-                                    }
-                                }
-                                Some('*') => {
-                                    // We're inside a multi lime comment now; consume until '*/'
-                                    'ion_multiline_comment: loop {
-                                        match rest.next() {
-                                            None => continue 'ion_val, // error; end of input
-                                            Some('*') => {
-                                                match rest.next() {
-                                                    None => continue 'ion_val,                 // error; end of input
-                                                    Some('/') => break 'ion_multiline_comment, // end of comment
-                                                    _ => continue 'ion_multiline_comment, // more comment to go
-                                                }
-                                            }
-                                            _ => continue 'ion_multiline_comment, // more comment to go
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    // TODO error?
-                                }
-                            }
-                        }
-                        '\\' => {
-                            if string_status.in_string() {
-                                // We're inside a string and just saw a '\'
-                                // interpret the next character as an escape and just consume it
-                                rest.next();
-                            } else {
-                                // TODO error?
-                            }
-                        }
-                        '"' if string_status.is_none() => {
-                            string_status = StringStatus::Double;
-                        }
-                        '"' if string_status.is_double() => {
-                            string_status = StringStatus::None;
-                        }
-                        '\'' => {
-                            match string_status {
-                                StringStatus::Double => {
-                                    // nothing to do; `'` is part of a double-quoted string
-                                }
-                                StringStatus::Single => {
-                                    // already in a single-quoted string; terminate it here
-                                    string_status = StringStatus::None;
-                                }
-                                StringStatus::Triple => {
-                                    // already in a triple-quoted string
-                                    if rest.as_str().starts_with("''") {
-                                        // last `'` is followed by 2 more; consume them and terminate string here
-                                        rest.next();
-                                        rest.next();
-                                        string_status = StringStatus::None;
-                                    }
-                                }
-                                StringStatus::None => {
-                                    // not yet in a string. determine whether to enter single or triple
-                                    if rest.as_str().starts_with("''") {
-                                        // last `'` is followed by 2 more; consume them and start triple-quoted string here
-                                        rest.next();
-                                        rest.next();
-                                        string_status = StringStatus::Triple;
-                                    } else {
-                                        // start single-quote string here
-                                        string_status = StringStatus::Single;
-                                    }
-                                }
-                            }
-                        }
-                        '`' if string_status.is_none() => {
-                            let curr_pos = remainder.len() - rest.as_str().len();
-                            let contents = &remainder[..curr_pos - 1];
-                            self.lexer.bump(curr_pos);
-                            return Ok((start, Token::Ion(contents.to_owned()), curr_pos));
-                        }
-                        _ => (),
-                    }
-                }
-            }
-        }
-    }
-
     /// Advances the iterator and returns the next [`LexicalToken`] or [`None`] when input is exhausted.
     fn next(&mut self) -> Option<LexicalToken> {
         match self.lexer.next() {
             None => None,
             Some(token) => match token {
                 Token::Error => Some(self.err_here(LexicalError::InvalidInput)),
-                // TODO: use logos::Lexer.morph to actually lex ion?
-                Token::__BackQuote => Some(self.ion_string()),
+
+                Token::EmbeddedIonQuote => {
+                    let mut ion_lexer = EmbeddedIonLexer::create(self.lexer.to_owned().morph());
+                    let ion_tok = ion_lexer.next();
+                    self.lexer = ion_lexer.exit().morph::<Token>();
+
+                    ion_tok.map(|tok| tok.map(|(s, ion, e)| (s, Token::Ion(ion), e)))
+                }
+
+                Token::CommentBlockStart => {
+                    let mut comment_lexer =
+                        CommentLexer::create(self.lexer.to_owned().morph()).with_nested_block();
+                    let comment_tok = comment_lexer.next();
+                    self.lexer = comment_lexer.exit().morph::<Token>();
+
+                    comment_tok.map(|tok| tok.map(|(s, c, e)| (s, Token::CommentBlock(c), e)))
+                }
+
                 _ => Some(self.wrap(token)),
             },
         }
@@ -242,6 +303,12 @@ pub enum Token {
     // or any other matches we wish to skip.
     #[regex(r"[ \t\n\f]+", logos::skip)]
     Error,
+
+    #[regex(r"--[^\n]*", |lex| lex.slice().to_owned())]
+    CommentLine(String),
+    #[token("/*")]
+    CommentBlockStart,
+    CommentBlock(String),
 
     // Brackets
     #[token("[")]
@@ -330,6 +397,8 @@ pub enum Token {
             |lex| lex.slice().trim_matches('\'').to_owned())]
     String(String),
 
+    #[token("`")]
+    EmbeddedIonQuote,
     Ion(String),
 
     // Keywords
@@ -429,15 +498,12 @@ pub enum Token {
     Where,
     #[regex("(?i:With)")]
     With,
-
-    // Internal use only
-    #[token("`")]
-    __BackQuote,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
     fn ion_simple() {
@@ -459,7 +525,7 @@ mod tests {
                       'b':1}` "#;
         let mut lexer = Lexer::new(ion_value);
         if let (_start, Token::Ion(s), _end) = lexer.next().unwrap().unwrap() {
-            assert_eq!(ion_value.trim().trim_matches('`'), s);
+            assert_eq!(ion_value.trim(), s);
         } else {
             panic!("Lex failed")
         }
@@ -487,6 +553,40 @@ mod tests {
     }
 
     #[test]
+    fn select_comment_line() -> Result<(), LexicalError> {
+        let query = "SELECT --comment\ng";
+        let lexer = Lexer::new(query);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::CommentLine("--comment".to_owned()),
+                Token::Identifier("g".to_owned()),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn select_comment_block() -> Result<(), LexicalError> {
+        let query = "SELECT /*comment*/ g";
+        let lexer = Lexer::new(query);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::CommentBlock("/*comment*/".to_owned()),
+                Token::Identifier("g".to_owned()),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn err_invalid_input() {
         let query = "SELECT # FROM data GROUP BY a";
         let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
@@ -506,10 +606,26 @@ mod tests {
         let query = r#" ` "fooo` "#;
         let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
         assert!(toks.is_err());
-        match toks.unwrap_err() {
-            LexicalError::UnterminatedIonLiteral((s, _t, e)) => {
-                assert_eq!(s, 1);
-                assert_eq!(e, 8);
+        match &toks.unwrap_err() {
+            error @ LexicalError::UnterminatedIonLiteral((s, _t, e)) => {
+                assert_eq!(s, &1);
+                assert_eq!(e, &10);
+                assert_eq!(error.to_string(), "Lexing error: unterminated ion literal");
+            }
+            _ => panic!("Error should be LexicalError::UnterminatedIonLiteral"),
+        }
+    }
+
+    #[test]
+    fn err_unterminated_comment() {
+        let query = r#" /*12345678"#;
+        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        assert!(toks.is_err());
+        match &toks.unwrap_err() {
+            error @ LexicalError::UnterminatedComment((s, _t, e)) => {
+                assert_eq!(s, &1);
+                assert_eq!(e, &11);
+                assert_eq!(error.to_string(), "Lexing error: unterminated comment");
             }
             _ => panic!("Error should be LexicalError::UnterminatedIonLiteral"),
         }
