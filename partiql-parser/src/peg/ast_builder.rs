@@ -89,10 +89,7 @@ pub(crate) fn build_group_by_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast:
             let as_alias = parts.next().map(|pair| ast::SymbolPrimitive {
                 value: pair.as_str().trim_matches('"').to_string(),
             });
-            expr.map(|expr| ast::GroupKey {
-                expr,
-                as_alias,
-            })
+            expr.map(|expr| ast::GroupKey { expr, as_alias })
         })
         .collect::<ParserResult<Vec<_>>>()?;
     let key_list = ast::GroupKeyList { keys };

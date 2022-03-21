@@ -14,7 +14,7 @@ fn test_ast_init() {
                         kind: NumericLitKind::Int32Lit(Int32Lit { value: 12 }),
                     }),
                 }),
-            })
+            }),
         }),
     };
 
