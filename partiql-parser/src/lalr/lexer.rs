@@ -1,4 +1,5 @@
 use logos::{Logos, Span};
+use std::cmp::max;
 use thiserror::Error;
 
 /// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
@@ -14,7 +15,7 @@ pub(crate) type SpannedResult<Tok, Loc, Error> = Result<Spanned<Tok, Loc>, Error
 #[non_exhaustive]
 pub enum LexicalError {
     /// Generic invalid input; likely an unrecognizable token.
-    #[error("Lexing error: invalid input `{:?}`", .0)]
+    #[error("Lexing error: invalid input `{}`", _0.1)]
     InvalidInput(Spanned<String, usize>),
     /// Embedded Ion value is not properly terminated.
     #[error("Lexing error: unterminated ion literal")]
@@ -24,7 +25,7 @@ pub enum LexicalError {
     UnterminatedComment(Spanned<(), usize>),
     /// Any other lexing error.
     #[error("Lexing error: unknown error")]
-    Unknown,
+    Unknown(Spanned<(), usize>),
 }
 
 type CommentToken = SpannedResult<String, usize, LexicalError>;
@@ -44,53 +45,53 @@ enum Comment {
 pub(crate) struct CommentLexer<'a> {
     /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'a, Comment>,
-    nested_block: bool,
+    comment_nesting: bool,
 }
 
 impl<'a> CommentLexer<'a> {
-    /// Creates a new lexer over `input` text.
+    /// Creates a new block comment lexer over `input` text.
+    /// Nested comment parsing is *off* by default; see [`with_nesting`] to enable nesting.
     pub fn new(input: &'a str) -> Self {
         CommentLexer {
             lexer: Comment::lexer(input),
-            nested_block: false,
+            comment_nesting: false,
         }
     }
 
-    fn create(lexer: logos::Lexer<'a, Comment>) -> Self {
-        CommentLexer {
-            lexer,
-            nested_block: false,
-        }
-    }
-
-    fn exit(self) -> logos::Lexer<'a, Comment> {
-        self.lexer
-    }
-
-    fn with_nested_block(mut self) -> Self {
-        self.nested_block = true;
+    /// Toggles *on* the parsing of nested comments
+    fn with_nesting(mut self) -> Self {
+        self.comment_nesting = true;
         self
     }
 
     /// Parses a single (possibly nested) block comment and returns it
     fn next(&mut self) -> Option<CommentToken> {
         let Span { start, .. } = self.lexer.span();
-        let mut nesting = 1;
-        let nesting_inc = if self.nested_block { 1 } else { 0 };
+        let mut nesting = 0;
+        let nesting_inc = if self.comment_nesting { 1 } else { 0 };
         'comment: loop {
             match self.lexer.next() {
                 Some(Comment::Any) => continue,
-                Some(Comment::Start) => nesting += nesting_inc,
+                Some(Comment::Start) => nesting = max(1, nesting + nesting_inc),
                 Some(Comment::End) => {
+                    if nesting == 0 {
+                        let Span { end, .. } = self.lexer.span();
+                        let comment = (start, (), end);
+                        return Some(Err(LexicalError::Unknown(comment)));
+                    }
                     nesting -= 1;
                     if nesting == 0 {
                         break 'comment;
                     }
                 }
                 None => {
-                    let Span { end, .. } = self.lexer.span();
-                    let comment = (start, (), end);
-                    return Some(Err(LexicalError::UnterminatedComment(comment)));
+                    return if nesting != 0 {
+                        let Span { end, .. } = self.lexer.span();
+                        let comment = (start, (), end);
+                        Some(Err(LexicalError::UnterminatedComment(comment)))
+                    } else {
+                        None
+                    }
                 }
             }
         }
@@ -142,59 +143,66 @@ pub(crate) struct EmbeddedIonLexer<'a> {
 }
 
 impl<'a> EmbeddedIonLexer<'a> {
-    /// Creates a new lexer over `input` text.
+    /// Creates a new embedded ion lexer over `input` text.
     pub fn new(input: &'a str) -> Self {
         EmbeddedIonLexer {
             lexer: EmbeddedIon::lexer(input),
         }
     }
 
-    fn create(lexer: logos::Lexer<'a, EmbeddedIon>) -> Self {
-        EmbeddedIonLexer { lexer }
-    }
-
-    fn exit(self) -> logos::Lexer<'a, EmbeddedIon> {
-        self.lexer
-    }
-
-    /// Parses a single (possibly nested) block comment and returns it
+    /// Parses a single embedded ion value, quoted between backticks (`), and returns it
     fn next(&mut self) -> Option<IonToken> {
-        let Span { start, .. } = self.lexer.span();
-        'ion_value: loop {
-            let next_tok = self.lexer.next();
-            match next_tok {
-                Some(EmbeddedIon::Embed) => {
-                    break 'ion_value;
-                }
-                Some(EmbeddedIon::CommentBlock) => {
-                    let mut comment_lexer = CommentLexer::create(self.lexer.to_owned().morph());
-                    let _ = comment_lexer.next();
-                    self.lexer = comment_lexer.exit().morph::<EmbeddedIon>();
-                }
-                Some(EmbeddedIon::LongString) => {
-                    'triple_quote: loop {
-                        let next_tok = self.lexer.next();
-                        match next_tok {
-                            Some(EmbeddedIon::LongString) => break 'triple_quote,
-                            Some(_) => (), // just consume all other tokens
-                            None => continue 'ion_value,
+        let next_token = self.lexer.next();
+        match next_token {
+            Some(EmbeddedIon::Embed) => {
+                let Span { start, .. } = self.lexer.span();
+                'ion_value: loop {
+                    let next_tok = self.lexer.next();
+                    match next_tok {
+                        Some(EmbeddedIon::Embed) => {
+                            break 'ion_value;
+                        }
+                        Some(EmbeddedIon::CommentBlock) => {
+                            let embed_span = self.lexer.span();
+                            let remaining = &self.lexer.source()[embed_span.start..];
+                            let mut comment_lexer = CommentLexer::new(remaining);
+                            match comment_lexer.next() {
+                                Some(Ok((s, _c, e))) => self.lexer.bump(e - s - embed_span.len()),
+                                Some(Err(LexicalError::UnterminatedComment((_s, v, e)))) => {
+                                    let loc = (embed_span.start, v, e);
+                                    return Some(Err(LexicalError::UnterminatedComment(loc)));
+                                }
+                                err @ Some(Err(_)) => return err,
+                                None => todo!(),
+                            }
+                        }
+                        Some(EmbeddedIon::LongString) => {
+                            'triple_quote: loop {
+                                let next_tok = self.lexer.next();
+                                match next_tok {
+                                    Some(EmbeddedIon::LongString) => break 'triple_quote,
+                                    Some(_) => (), // just consume all other tokens
+                                    None => continue 'ion_value,
+                                }
+                            }
+                        }
+                        Some(_) => {
+                            // just consume all other tokens
+                        }
+                        None => {
+                            let Span { end, .. } = self.lexer.span();
+                            let comment = (start, (), end);
+                            return Some(Err(LexicalError::UnterminatedIonLiteral(comment)));
                         }
                     }
                 }
-                Some(_) => {
-                    // just consume all other tokens
-                }
-                None => {
-                    let Span { end, .. } = self.lexer.span();
-                    let comment = (start, (), end);
-                    return Some(Err(LexicalError::UnterminatedIonLiteral(comment)));
-                }
-            }
-        }
-        let Span { end, .. } = self.lexer.span();
-        let comment = self.lexer.source()[start..end].to_owned();
+                let Span { end, .. } = self.lexer.span();
+                let ion_value = self.lexer.source()[start..end].to_owned();
 
-        Some(Ok((start, comment, end)))
+                Some(Ok((start, ion_value, end)))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -217,22 +225,11 @@ type SpannedString = Spanned<String, usize>;
 pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
 
 impl<'a> Lexer<'a> {
-    /// Creates a new lexer over `input` text.
+    /// Creates a new PartiQL lexer over `input` text.
     pub fn new(input: &'a str) -> Self {
         Lexer {
             lexer: Token::lexer(input),
         }
-    }
-
-    /// Creates an error token at the specified location
-    #[inline]
-    fn err_at(
-        &self,
-        start: usize,
-        end: usize,
-        err_ctor: fn(Spanned<(), usize>) -> LexicalError,
-    ) -> LexicalToken {
-        Err(err_ctor((start, (), end)))
     }
 
     /// Creates an error token at the current lexer location
@@ -258,20 +255,35 @@ impl<'a> Lexer<'a> {
                 Token::Error => Some(self.err_here(LexicalError::InvalidInput)),
 
                 Token::EmbeddedIonQuote => {
-                    let mut ion_lexer = EmbeddedIonLexer::create(self.lexer.to_owned().morph());
-                    let ion_tok = ion_lexer.next();
-                    self.lexer = ion_lexer.exit().morph::<Token>();
-
-                    ion_tok.map(|tok| tok.map(|(s, ion, e)| (s, Token::Ion(ion), e)))
+                    let embed_span = self.lexer.span();
+                    let remaining = &self.lexer.source()[embed_span.start..];
+                    let mut ion_lexer = EmbeddedIonLexer::new(remaining);
+                    ion_lexer.next().map(|res| match res {
+                        Ok((s, ion, e)) => {
+                            self.lexer.bump(e - s - embed_span.len());
+                            Ok((embed_span.start, Token::Ion(ion), e))
+                        }
+                        Err(LexicalError::UnterminatedIonLiteral((_s, v, e))) => Err(
+                            LexicalError::UnterminatedIonLiteral((embed_span.start, v, e)),
+                        ),
+                        Err(e) => Err(e),
+                    })
                 }
 
                 Token::CommentBlockStart => {
-                    let mut comment_lexer =
-                        CommentLexer::create(self.lexer.to_owned().morph()).with_nested_block();
-                    let comment_tok = comment_lexer.next();
-                    self.lexer = comment_lexer.exit().morph::<Token>();
-
-                    comment_tok.map(|tok| tok.map(|(s, c, e)| (s, Token::CommentBlock(c), e)))
+                    let embed_span = self.lexer.span();
+                    let remaining = &self.lexer.source()[embed_span.start..];
+                    let mut comment_lexer = CommentLexer::new(remaining).with_nesting();
+                    comment_lexer.next().map(|res| match res {
+                        Ok((s, comment, e)) => {
+                            self.lexer.bump(e - s - embed_span.len());
+                            Ok((embed_span.start, Token::CommentBlock(comment), e))
+                        }
+                        Err(LexicalError::UnterminatedComment((_s, v, e))) => {
+                            Err(LexicalError::UnterminatedComment((embed_span.start, v, e)))
+                        }
+                        Err(e) => Err(e),
+                    })
                 }
 
                 _ => Some(self.wrap(token)),
@@ -508,11 +520,14 @@ mod tests {
     fn ion_simple() {
         let ion_value = r#" `{'a':1,  'b':1}` "#;
         let mut lexer = Lexer::new(ion_value);
-        if let (_start, Token::Ion(s), _end) = lexer.next().unwrap().unwrap() {
-            assert_eq!(ion_value.trim(), s);
-        } else {
-            panic!("Lex failed")
-        }
+
+        let tok = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, (1, Token::Ion(ion_str), 17) if ion_str == ion_value.trim()));
+
+        assert_eq!(
+            EmbeddedIonLexer::new(ion_value.trim()).into_iter().count(),
+            1
+        );
     }
 
     #[test]
@@ -523,11 +538,34 @@ mod tests {
                               */
                       'b':1}` "#;
         let mut lexer = Lexer::new(ion_value);
-        if let (_start, Token::Ion(s), _end) = lexer.next().unwrap().unwrap() {
-            assert_eq!(ion_value.trim(), s);
-        } else {
-            panic!("Lex failed")
-        }
+
+        let tok = lexer.next().unwrap().unwrap();
+        assert!(matches!(tok, (1, Token::Ion(ion_str), 154) if ion_str == ion_value.trim()));
+
+        assert_eq!(
+            EmbeddedIonLexer::new(ion_value.trim()).into_iter().count(),
+            1
+        );
+    }
+
+    #[test]
+    fn nested_comments() {
+        let comments = r##"/*  
+                                    /*  / * * * /
+                                    /*  ' " ''' ` 
+                                    */  text
+                                    */  1 2 3 4 5 6,7,8,9 10.112^5
+                                    */"##;
+
+        let nested_lex = CommentLexer::new(comments).with_nesting();
+        assert_eq!(nested_lex.into_iter().count(), 1);
+
+        let nonnested_lex = CommentLexer::new(comments);
+        let toks: Result<Vec<_>, LexicalError> = nonnested_lex.collect();
+        assert!(toks.is_err());
+        let error = toks.unwrap_err();
+        assert!(matches!(error, LexicalError::Unknown((142, (), 189))));
+        assert_eq!(error.to_string(), "Lexing error: unknown error");
     }
 
     #[test]
@@ -590,14 +628,9 @@ mod tests {
         let query = "SELECT # FROM data GROUP BY a";
         let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
         assert!(toks.is_err());
-        match toks.unwrap_err() {
-            LexicalError::InvalidInput((s, t, e)) => {
-                assert_eq!(t, "#");
-                assert_eq!(s, 7);
-                assert_eq!(e, 8);
-            }
-            _ => panic!("Error should be LexicalError::InvalidInput"),
-        }
+        let error = toks.unwrap_err();
+        assert_eq!(error.to_string(), r##"Lexing error: invalid input `#`"##);
+        assert!(matches!(error, LexicalError::InvalidInput((7, s, 8)) if s == "#"));
     }
 
     #[test]
@@ -605,14 +638,12 @@ mod tests {
         let query = r#" ` "fooo` "#;
         let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
         assert!(toks.is_err());
-        match &toks.unwrap_err() {
-            error @ LexicalError::UnterminatedIonLiteral((s, _t, e)) => {
-                assert_eq!(s, &1);
-                assert_eq!(e, &10);
-                assert_eq!(error.to_string(), "Lexing error: unterminated ion literal");
-            }
-            _ => panic!("Error should be LexicalError::UnterminatedIonLiteral"),
-        }
+        let error = toks.unwrap_err();
+        assert!(matches!(
+            error,
+            LexicalError::UnterminatedIonLiteral((1, (), 9))
+        ));
+        assert_eq!(error.to_string(), "Lexing error: unterminated ion literal");
     }
 
     #[test]
@@ -620,13 +651,24 @@ mod tests {
         let query = r#" /*12345678"#;
         let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
         assert!(toks.is_err());
-        match &toks.unwrap_err() {
-            error @ LexicalError::UnterminatedComment((s, _t, e)) => {
-                assert_eq!(s, &1);
-                assert_eq!(e, &11);
-                assert_eq!(error.to_string(), "Lexing error: unterminated comment");
-            }
-            _ => panic!("Error should be LexicalError::UnterminatedIonLiteral"),
-        }
+        let error = toks.unwrap_err();
+        assert!(matches!(
+            error,
+            LexicalError::UnterminatedComment((1, (), 10))
+        ));
+        assert_eq!(error.to_string(), "Lexing error: unterminated comment");
+    }
+
+    #[test]
+    fn err_unterminated_ion_comment() {
+        let query = r#" `/*12345678`"#;
+        let toks: Result<Vec<_>, LexicalError> = EmbeddedIonLexer::new(query).collect();
+        assert!(toks.is_err());
+        let error = toks.unwrap_err();
+        assert!(matches!(
+            error,
+            LexicalError::UnterminatedComment((2, (), 11))
+        ));
+        assert_eq!(error.to_string(), "Lexing error: unterminated comment");
     }
 }
