@@ -70,7 +70,7 @@ pub struct DropTable {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CreateIndex {
     pub index_name: Ident,
-    pub fields: Vec<Expr>,
+    pub fields: Vec<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -89,7 +89,7 @@ pub struct Dml {
 pub struct DmlOp {
     pub kind: DmlOpKind,
     pub from_clause: Option<FromClause>,
-    pub where_clause: Option<Expr>,
+    pub where_clause: Option<Box<Expr>>,
     pub returning: Option<ReturningExpr>,
 }
 
@@ -109,15 +109,15 @@ pub enum DmlOpKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Insert {
-    pub target: Expr,
-    pub values: Expr,
+    pub target: Box<Expr>,
+    pub values: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InsertValue {
-    pub target: Expr,
-    pub value: Expr,
-    pub index: Option<Expr>,
+    pub target: Box<Expr>,
+    pub value: Box<Expr>,
+    pub index: Option<Box<Expr>>,
     pub on_conflict: Option<OnConflict>,
 }
 
@@ -128,13 +128,13 @@ pub struct Set {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Remove {
-    pub target: Expr,
+    pub target: Box<Expr>,
 }
 
 /// `ON CONFLICT <expr> <conflict_action>`
 #[derive(Clone, Debug, PartialEq)]
 pub struct OnConflict {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
     pub conflict_action: ConflictAction,
 }
 
@@ -152,7 +152,7 @@ pub enum ConflictActionKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -588,7 +588,7 @@ pub struct Call {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallAgg {
     pub func_name: SymbolPrimitive,
-    args: Vec<Box<Expr>>,
+    args: Vec<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -660,7 +660,7 @@ pub enum PathStepKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathExpr {
-    pub index: Expr,
+    pub index: Box<Expr>,
     pub case: CaseSensitivity,
 }
 
@@ -722,12 +722,12 @@ pub enum ProjectItemKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectAll {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectExpr {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
     pub as_alias: Option<SymbolPrimitive>,
 }
 
@@ -739,7 +739,7 @@ pub struct Let {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LetBinding {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
     pub name: SymbolPrimitive,
 }
 
@@ -843,7 +843,7 @@ pub struct GroupKeyList {
 /// <expr> [AS <symbol>]
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupKey {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
     pub as_alias: Option<SymbolPrimitive>,
 }
 
@@ -936,7 +936,7 @@ pub enum ColumnComponentKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReturningColumn {
-    pub expr: Expr,
+    pub expr: Box<Expr>,
 }
 
 /// ( MODIFIED | ALL ) ( NEW | OLD )
@@ -973,8 +973,8 @@ pub struct Ident {
 /// an assignment operation and *not* the equality operator.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignment {
-    pub target: Expr,
-    pub value: Expr,
+    pub target: Box<Expr>,
+    pub value: Box<Expr>,
 }
 
 /// Represents all possible PartiQL data types.
