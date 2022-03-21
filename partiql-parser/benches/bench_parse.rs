@@ -7,6 +7,8 @@ use std::time::Duration;
 
 const Q_STAR: &str = "SELECT *";
 
+const Q_ION: &str = "SELECT a FROM `{'a':1,  'b':1}`";
+
 const Q_GROUP: &str = "SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g";
 
 const Q_COMPLEX: &str = r#"
@@ -25,6 +27,7 @@ const Q_COMPLEX: &str = r#"
 fn pest_benchmark(c: &mut Criterion) {
     let parse = peg_parse;
     c.bench_function("peg-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("peg-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("peg-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
     c.bench_function("peg-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
@@ -32,6 +35,7 @@ fn pest_benchmark(c: &mut Criterion) {
 fn pest_to_ast_benchmark(c: &mut Criterion) {
     let parse = peg_parse_to_ast;
     c.bench_function("peg-ast-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("peg-ast-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("peg-ast-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
     c.bench_function("peg-ast-complex", |b| {
         b.iter(|| parse(black_box(Q_COMPLEX)))
@@ -41,6 +45,7 @@ fn pest_to_ast_benchmark(c: &mut Criterion) {
 fn logos_benchmark(c: &mut Criterion) {
     let parse = |s| logos_lex(s).count(); // Just use `.count` to consume the lexer iterator
     c.bench_function("logos-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("logos-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("logos-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
     c.bench_function("logos-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
@@ -48,6 +53,7 @@ fn logos_benchmark(c: &mut Criterion) {
 fn lalr_benchmark(c: &mut Criterion) {
     let parse = lalr_parse;
     c.bench_function("lalr-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("lalr-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("lalr-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
     c.bench_function("lalr-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
