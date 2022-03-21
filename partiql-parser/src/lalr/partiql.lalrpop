@@ -100,10 +100,10 @@ SelectClause: ast::Projection = {
 
 Projection: ast::ProjectItem = {
     <expr:ExprQuery>
-        => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr: *expr, as_alias: None } ) },
+        => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ) },
     <expr:ExprQuery> "AS" <ident:"Identifier"> => {
         let as_alias = Some( ast::SymbolPrimitive{ value:ident} );
-        ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr: *expr, as_alias } ) }
+        ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ) }
     },
 
 }
@@ -260,9 +260,9 @@ GroupStrategy: ast::GroupingStrategy = {
 }
 GroupKey: ast::GroupKey = {
     <expr:ExprQuery>
-        => ast::GroupKey{ expr: *expr, as_alias: None },
+        => ast::GroupKey{ expr, as_alias: None },
     <expr:ExprQuery> "AS" <ident:"Identifier">
-        => ast::GroupKey{ expr: *expr, as_alias: Some( ast::SymbolPrimitive{ value:ident} ) },
+        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident} ) },
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
@@ -504,7 +504,7 @@ PathExpr: ast::Path = {
         let step = ast::PathStep{
             kind: ast::PathStepKind::PathExpr(
                 ast::PathExpr{
-                    index: ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) },
+                    index: Box::new(ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) }),
                     case: ast::CaseSensitivity{ kind: ast::CaseSensitivityKind::CaseInsensitive }
                 }
             )

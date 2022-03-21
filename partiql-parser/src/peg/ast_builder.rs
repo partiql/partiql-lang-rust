@@ -90,7 +90,7 @@ pub(crate) fn build_group_by_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast:
                 value: pair.as_str().trim_matches('"').to_string(),
             });
             expr.map(|expr| ast::GroupKey {
-                expr: *expr,
+                expr,
                 as_alias,
             })
         })
@@ -197,7 +197,7 @@ pub(crate) fn build_select_clause(mut pairs: Pairs<Rule>) -> ParserResult<ast::P
                         });
                         expr.map(|expr| ast::ProjectItem {
                             kind: ast::ProjectItemKind::ProjectExpr(ast::ProjectExpr {
-                                expr: *expr,
+                                expr,
                                 as_alias,
                             }),
                         })
