@@ -11,8 +11,8 @@
 
 // TODO Add documentation.
 
-use std::fmt;
 use rust_decimal::Decimal as RustDecimal;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
