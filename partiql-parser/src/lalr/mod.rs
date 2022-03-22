@@ -212,6 +212,7 @@ mod tests {
 
     mod sfw {
         use super::*;
+        use crate::lalr::lexer::Token;
 
         #[test]
         fn selectstar() {
@@ -295,6 +296,20 @@ mod tests {
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
             parse!(q)
+        }
+
+        #[test]
+        fn improper_at() {
+            let res = parse_partiql(r#"SELECT * FROM a AS a AT b"#);
+            assert!(res.is_err());
+            let error = res.unwrap_err();
+            assert!(matches!(
+                error,
+                lalrpop_util::ParseError::UnrecognizedToken {
+                    token: (21, Token::At, 23),
+                    ..
+                }
+            ));
         }
     }
 }

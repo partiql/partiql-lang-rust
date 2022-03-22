@@ -155,23 +155,21 @@ TableBaseReference: ast::FromLet = {
             at_alias: None,
             by_alias: None
         }
-    },
-    <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
-        ast::FromLet {
-            expr: e,
-            kind: ast::FromLetKind::Scan,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
-            at_alias: Some(ast::SymbolPrimitive{ value: ident_at }),
-            by_alias: None
-        }
     }
 }
 
 TableUnpivot: ast::FromLet = {
-    "UNPIVOT" <table:TableBaseReference> => {
-        ast::FromLet{ kind: ast::FromLetKind::Unpivot, ..table }
+    "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
+        ast::FromLet {
+            expr: e,
+            kind: ast::FromLetKind::Unpivot,
+            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
+            at_alias: Some(ast::SymbolPrimitive{ value: ident_at }),
+            by_alias: None,
+        }
     }
 }
+
 TableJoined: ast::FromClause = {
     <TableCrossJoin>,
     <TableQualifiedJoin>,
