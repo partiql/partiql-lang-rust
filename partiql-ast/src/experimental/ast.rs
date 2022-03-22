@@ -588,7 +588,7 @@ pub struct Call {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallAgg {
     pub func_name: SymbolPrimitive,
-    args: Vec<Expr>,
+    pub args: Vec<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
