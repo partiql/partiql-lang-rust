@@ -24,7 +24,7 @@ pub struct Item {
 }
 
 impl fmt::Display for Item {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Use Debug formatting for now
         write!(f, "{:?}", self.kind)
     }
