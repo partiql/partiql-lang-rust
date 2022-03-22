@@ -11,7 +11,7 @@
 //! ```
 //!
 //! [partiql]: https://partiql.org
-use crate::lalr::lexer::{Lexer, LexicalToken};
+use crate::lalr::lexer::{LexicalToken, PartiqlLexer};
 use lalrpop_util::ParseError;
 use partiql_ast::experimental::ast;
 
@@ -28,19 +28,23 @@ mod grammar {
 mod lexer;
 mod util;
 
+pub use lexer::LineOffsetTracker;
+
 pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, lexer::LexicalError>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParseResult {
-    let lexer = lex_partiql(s);
+    let mut offsets = LineOffsetTracker::default();
+    let lexer = PartiqlLexer::new(s, &mut offsets);
     grammar::QueryParser::new().parse(lexer)
 }
 
 /// Lex a text PartiQL query.
 // TODO make private
 #[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql(s: &str) -> impl Iterator<Item = LexicalToken> + '_ {
-    Lexer::new(s)
+pub fn lex_partiql(s: &str) -> Vec<LexicalToken> {
+    let mut counter = LineOffsetTracker::default();
+    PartiqlLexer::new(s, &mut counter).collect()
 }
 
 #[cfg(test)]
@@ -63,7 +67,8 @@ mod tests {
 
         macro_rules! literal {
             ($q:expr) => {{
-                let lexer = lexer::Lexer::new($q);
+                let mut offsets = LineOffsetTracker::default();
+                let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
                 let res = grammar::LiteralParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {
@@ -141,7 +146,8 @@ mod tests {
 
         macro_rules! value {
             ($q:expr) => {{
-                let lexer = lexer::Lexer::new($q);
+                let mut offsets = LineOffsetTracker::default();
+                let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
                 let res = grammar::ExprTermParser::new().parse(lexer);
                 println!("{:#?}", res);
                 match res {

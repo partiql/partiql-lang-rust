@@ -1,6 +1,63 @@
+use crate::result::LineAndColumn;
+use itertools::Itertools;
 use logos::{Logos, Span};
+use smallvec::SmallVec;
 use std::cmp::max;
+use std::ops::Range;
 use thiserror::Error;
+
+/// Keeps track of source offsets of newlines for the purposes of later calculating
+/// line and column information
+///
+///
+/// ## Example
+///
+/// ```rust
+/// use partiql_parser::result::LineAndColumn;
+/// use partiql_parser::LineOffsetTracker;
+///
+/// let mut tracker = LineOffsetTracker::default();
+/// tracker.record(5..6);
+/// tracker.record(15..16);
+/// tracker.record(25..26);
+///
+/// // We added 3 newlines, so there should be 4 lines of source
+/// assert_eq!(tracker.lines(), 4);
+/// assert_eq!(tracker.at(0), LineAndColumn::at(1,1));
+/// assert_eq!(tracker.at(6), LineAndColumn::at(2,1));
+/// assert_eq!(tracker.at(400), LineAndColumn::at(4,375));
+/// ```
+#[derive(Default)]
+pub struct LineOffsetTracker {
+    newlines: SmallVec<[usize; 8]>,
+}
+
+impl LineOffsetTracker {
+    /// Record a newline at `span` in the source
+    #[inline(always)]
+    pub fn record(&mut self, span: Range<usize>) {
+        self.newlines.push(span.start);
+    }
+
+    /// Calculate the number of lines of source seen so far.
+    #[inline(always)]
+    pub fn lines(&self) -> usize {
+        self.newlines.len() + 1
+    }
+
+    /// Convert a source offset into a [`LineAndColumn`]
+    #[inline]
+    pub fn at(&self, offset: usize) -> LineAndColumn {
+        match self.newlines.iter().find_position(|&loc| loc > &offset) {
+            None => match self.newlines.last() {
+                None => LineAndColumn::at(1, offset + 1),
+                Some(line_offset) => LineAndColumn::at(self.lines(), offset - line_offset),
+            },
+            Some((0, _)) => LineAndColumn::at(1, offset + 1),
+            Some((pos, _)) => LineAndColumn::at(pos + 1, offset - self.newlines[pos - 1]),
+        }
+    }
+}
 
 /// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
 pub(crate) type Spanned<Tok, Loc> = (Loc, Tok, Loc);
@@ -31,9 +88,11 @@ pub enum LexicalError {
 type CommentToken = SpannedResult<String, usize, LexicalError>;
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
+#[logos(extras = &'s mut LineOffsetTracker)]
 enum Comment {
     #[error]
-    #[regex(r"[^/*]+", logos::skip)]
+    #[regex(r"[^/*\n]+", logos::skip)]
+    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Any,
     #[token("*/")]
     End,
@@ -51,9 +110,9 @@ pub(crate) struct CommentLexer<'a> {
 impl<'a> CommentLexer<'a> {
     /// Creates a new block comment lexer over `input` text.
     /// Nested comment parsing is *off* by default; see [`with_nesting`] to enable nesting.
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
         CommentLexer {
-            lexer: Comment::lexer(input),
+            lexer: Comment::lexer_with_extras(input, counter),
             comment_nesting: false,
         }
     }
@@ -114,9 +173,11 @@ impl<'a> Iterator for CommentLexer<'a> {
 type IonToken = SpannedResult<String, usize, LexicalError>;
 
 #[derive(Logos, Debug, Clone, PartialEq)]
+#[logos(extras = &'s mut LineOffsetTracker)]
 pub enum EmbeddedIon {
     #[error]
-    #[regex(r#"([^/*'"`])+"#, logos::skip)]
+    #[regex(r#"([^/*'"`\n])+"#, logos::skip)]
+    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Any,
 
     #[token("`")]
@@ -144,9 +205,9 @@ pub(crate) struct EmbeddedIonLexer<'a> {
 
 impl<'a> EmbeddedIonLexer<'a> {
     /// Creates a new embedded ion lexer over `input` text.
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
         EmbeddedIonLexer {
-            lexer: EmbeddedIon::lexer(input),
+            lexer: EmbeddedIon::lexer_with_extras(input, counter),
         }
     }
 
@@ -165,7 +226,7 @@ impl<'a> EmbeddedIonLexer<'a> {
                         Some(EmbeddedIon::CommentBlock) => {
                             let embed_span = self.lexer.span();
                             let remaining = &self.lexer.source()[embed_span.start..];
-                            let mut comment_lexer = CommentLexer::new(remaining);
+                            let mut comment_lexer = CommentLexer::new(remaining, self.lexer.extras);
                             match comment_lexer.next() {
                                 Some(Ok((s, _c, e))) => self.lexer.bump(e - s - embed_span.len()),
                                 Some(Err(LexicalError::UnterminatedComment((_s, v, e)))) => {
@@ -216,7 +277,7 @@ impl<'a> Iterator for EmbeddedIonLexer<'a> {
 }
 
 /// A lexer from PartiQL text strings to [`LexicalToken`]s
-pub(crate) struct Lexer<'a> {
+pub(crate) struct PartiqlLexer<'a> {
     /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'a, Token>,
 }
@@ -224,11 +285,11 @@ pub(crate) struct Lexer<'a> {
 type SpannedString = Spanned<String, usize>;
 pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
 
-impl<'a> Lexer<'a> {
+impl<'a> PartiqlLexer<'a> {
     /// Creates a new PartiQL lexer over `input` text.
-    pub fn new(input: &'a str) -> Self {
-        Lexer {
-            lexer: Token::lexer(input),
+    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
+        PartiqlLexer {
+            lexer: Token::lexer_with_extras(input, counter),
         }
     }
 
@@ -257,7 +318,7 @@ impl<'a> Lexer<'a> {
                 Token::EmbeddedIonQuote => {
                     let embed_span = self.lexer.span();
                     let remaining = &self.lexer.source()[embed_span.start..];
-                    let mut ion_lexer = EmbeddedIonLexer::new(remaining);
+                    let mut ion_lexer = EmbeddedIonLexer::new(remaining, self.lexer.extras);
                     ion_lexer.next().map(|res| match res {
                         Ok((s, ion, e)) => {
                             self.lexer.bump(e - s - embed_span.len());
@@ -273,7 +334,8 @@ impl<'a> Lexer<'a> {
                 Token::CommentBlockStart => {
                     let embed_span = self.lexer.span();
                     let remaining = &self.lexer.source()[embed_span.start..];
-                    let mut comment_lexer = CommentLexer::new(remaining).with_nesting();
+                    let mut comment_lexer =
+                        CommentLexer::new(remaining, self.lexer.extras).with_nesting();
                     comment_lexer.next().map(|res| match res {
                         Ok((s, comment, e)) => {
                             self.lexer.bump(e - s - embed_span.len());
@@ -292,7 +354,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl<'a> Iterator for PartiqlLexer<'a> {
     type Item = LexicalToken;
 
     #[inline(always)]
@@ -306,6 +368,7 @@ impl<'a> Iterator for Lexer<'a> {
 /// # Note
 /// Tokens with names beginning with `__` are used internally and not meant to be used outside lexing.
 #[derive(Logos, Debug, Clone, PartialEq)]
+#[logos(extras = &'s mut LineOffsetTracker)]
 // TODO make pub(crate) ?
 pub enum Token {
     // Logos requires one token variant to handle errors,
@@ -313,7 +376,8 @@ pub enum Token {
     #[error]
     // We can also use this variant to define whitespace,
     // or any other matches we wish to skip.
-    #[regex(r"[ \t\n\f]+", logos::skip)]
+    #[regex(r"[ \t\f]+", logos::skip)]
+    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Error,
 
     #[regex(r"--[^\n]*", |lex| lex.slice().to_owned())]
@@ -519,15 +583,20 @@ mod tests {
     #[test]
     fn ion_simple() {
         let ion_value = r#" `{'a':1,  'b':1}` "#;
-        let mut lexer = Lexer::new(ion_value);
+        let mut offset_tracker = LineOffsetTracker::default();
+        let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(matches!(tok, (1, Token::Ion(ion_str), 17) if ion_str == ion_value.trim()));
 
+        let mut offset_tracker = LineOffsetTracker::default();
         assert_eq!(
-            EmbeddedIonLexer::new(ion_value.trim()).into_iter().count(),
+            EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker)
+                .into_iter()
+                .count(),
             1
         );
+        assert_eq!(offset_tracker.lines(), 1);
     }
 
     #[test]
@@ -537,15 +606,21 @@ mod tests {
                                comment 
                               */
                       'b':1}` "#;
-        let mut lexer = Lexer::new(ion_value);
+        let mut offset_tracker = LineOffsetTracker::default();
+        let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(matches!(tok, (1, Token::Ion(ion_str), 154) if ion_str == ion_value.trim()));
+        assert_eq!(offset_tracker.lines(), 5);
 
+        let mut offset_tracker = LineOffsetTracker::default();
         assert_eq!(
-            EmbeddedIonLexer::new(ion_value.trim()).into_iter().count(),
+            EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker)
+                .into_iter()
+                .count(),
             1
         );
+        assert_eq!(offset_tracker.lines(), 5);
     }
 
     #[test]
@@ -557,10 +632,13 @@ mod tests {
                                     */  1 2 3 4 5 6,7,8,9 10.112^5
                                     */"##;
 
-        let nested_lex = CommentLexer::new(comments).with_nesting();
+        let mut offset_tracker = LineOffsetTracker::default();
+        let nested_lex = CommentLexer::new(comments, &mut offset_tracker).with_nesting();
         assert_eq!(nested_lex.into_iter().count(), 1);
+        assert_eq!(offset_tracker.lines(), 6);
 
-        let nonnested_lex = CommentLexer::new(comments);
+        let mut offset_tracker = LineOffsetTracker::default();
+        let nonnested_lex = CommentLexer::new(comments, &mut offset_tracker);
         let toks: Result<Vec<_>, LexicalError> = nonnested_lex.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
@@ -570,8 +648,9 @@ mod tests {
 
     #[test]
     fn select() -> Result<(), LexicalError> {
-        let query = "SELECT g FROM data GROUP BY a";
-        let lexer = Lexer::new(query);
+        let query = "SELECT g\nFROM data\nGROUP BY a";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
         assert_eq!(
@@ -586,13 +665,20 @@ mod tests {
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
+
+        assert_eq!(offset_tracker.lines(), 3);
+        assert_eq!(offset_tracker.at(0), LineAndColumn::at(1, 1));
+        assert_eq!(offset_tracker.at(9), LineAndColumn::at(2, 1));
+        assert_eq!(offset_tracker.at(19), LineAndColumn::at(3, 1));
+
         Ok(())
     }
 
     #[test]
     fn select_comment_line() -> Result<(), LexicalError> {
         let query = "SELECT --comment\ng";
-        let lexer = Lexer::new(query);
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
         assert_eq!(
@@ -603,13 +689,15 @@ mod tests {
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
+        assert_eq!(offset_tracker.lines(), 2);
         Ok(())
     }
 
     #[test]
     fn select_comment_block() -> Result<(), LexicalError> {
         let query = "SELECT /*comment*/ g";
-        let lexer = Lexer::new(query);
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
         assert_eq!(
@@ -620,23 +708,30 @@ mod tests {
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
+        assert_eq!(offset_tracker.lines(), 1);
         Ok(())
     }
 
     #[test]
     fn err_invalid_input() {
         let query = "SELECT # FROM data GROUP BY a";
-        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        let mut offset_tracker = LineOffsetTracker::default();
+        let toks: Result<Vec<_>, LexicalError> =
+            PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert_eq!(error.to_string(), r##"Lexing error: invalid input `#`"##);
         assert!(matches!(error, LexicalError::InvalidInput((7, s, 8)) if s == "#"));
+        assert_eq!(offset_tracker.lines(), 1);
+        assert_eq!(offset_tracker.at(7), LineAndColumn::at(1, 8));
     }
 
     #[test]
     fn err_unterminated_ion() {
         let query = r#" ` "fooo` "#;
-        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        let mut offset_tracker = LineOffsetTracker::default();
+        let toks: Result<Vec<_>, LexicalError> =
+            PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
@@ -644,12 +739,15 @@ mod tests {
             LexicalError::UnterminatedIonLiteral((1, (), 9))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated ion literal");
+        assert_eq!(offset_tracker.at(1), LineAndColumn::at(1, 2));
     }
 
     #[test]
     fn err_unterminated_comment() {
         let query = r#" /*12345678"#;
-        let toks: Result<Vec<_>, LexicalError> = Lexer::new(query).collect();
+        let mut offset_tracker = LineOffsetTracker::default();
+        let toks: Result<Vec<_>, LexicalError> =
+            PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
@@ -657,12 +755,15 @@ mod tests {
             LexicalError::UnterminatedComment((1, (), 10))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated comment");
+        assert_eq!(offset_tracker.at(1), LineAndColumn::at(1, 2));
     }
 
     #[test]
     fn err_unterminated_ion_comment() {
         let query = r#" `/*12345678`"#;
-        let toks: Result<Vec<_>, LexicalError> = EmbeddedIonLexer::new(query).collect();
+        let mut offset_tracker = LineOffsetTracker::default();
+        let toks: Result<Vec<_>, LexicalError> =
+            EmbeddedIonLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
@@ -670,5 +771,6 @@ mod tests {
             LexicalError::UnterminatedComment((2, (), 11))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated comment");
+        assert_eq!(offset_tracker.at(2), LineAndColumn::at(1, 3));
     }
 }

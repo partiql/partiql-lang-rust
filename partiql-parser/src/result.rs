@@ -23,7 +23,7 @@ pub struct LineAndColumn(usize, usize);
 impl LineAndColumn {
     /// Constructs at [`LineAndColumn`] without verifying 1-position invariant.
     #[inline]
-    pub(crate) fn at(line: usize, column: usize) -> Self {
+    pub fn at(line: usize, column: usize) -> Self {
         assert_ne!(0, line);
         assert_ne!(0, column);
         Self(line, column)
