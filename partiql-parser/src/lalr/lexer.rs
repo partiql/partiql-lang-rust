@@ -1,5 +1,5 @@
 use crate::result::LineAndColumn;
-use itertools::Itertools;
+
 use logos::{Logos, Span};
 use smallvec::{smallvec, SmallVec};
 use std::cmp::max;
@@ -56,20 +56,19 @@ impl LineOffsetTracker {
     /// Calculates the byte offset span ([`Range`]) of a line.
     ///
     /// `num` is the line number (1-indexed) for which to  calculate the span
+    /// `max` is the largest value allowable in the returned [`Range's end`](core::ops::Range)
     ///
     /// # Panics
     ///
     /// This function will panic if `num` is not within the number of lines
     /// of source seen (i.e. 1 <= `num` <= self.num_lines()`).
     #[inline(always)]
-    fn line_span_from_line_num(&self, num: usize) -> Range<usize> {
+    fn line_span_from_line_num(&self, num: usize, max: usize) -> Range<usize> {
         assert!(1 <= num);
         assert!(num <= self.num_lines());
-        if num >= self.num_lines() {
-            self.line_starts[num - 1]..usize::MAX
-        } else {
-            self.line_starts[num - 1]..self.line_starts[num]
-        }
+        let start = self.line_starts[num - 1];
+        let end = *self.line_starts.get(num).unwrap_or(&max).min(&max);
+        start..end
     }
 
     /// Calculates the line number (1-indexed) in which a byte offset is contained.
@@ -83,8 +82,7 @@ impl LineOffsetTracker {
         }
     }
 
-    /// Convert a source offset into a
-    /// Calculates a [`LineAndColumn`] for a byte offset into a given `&str`
+    /// Calculates a [`LineAndColumn`] for a byte offset from the given `&str`
     ///
     /// `source` is source `&str` into which the byte offset applies
     /// `offset` is the byte offset for which to find the [`LineAndColumn`]
@@ -100,7 +98,7 @@ impl LineOffsetTracker {
             LineAndColumn::at(1, 1)
         } else {
             let line_num = self.line_num_from_byte_offset(offset);
-            let line_span = self.line_span_from_line_num(line_num);
+            let line_span = self.line_span_from_line_num(line_num, source.len());
             let column_num = source[line_span.start..=offset].chars().count();
             LineAndColumn::at(line_num, column_num)
         }
@@ -731,6 +729,13 @@ mod tests {
         assert_eq!(offset_tracker.at(query, 9), LineAndColumn::at(2, 1));
         assert_eq!(offset_tracker.at(query, 19), LineAndColumn::at(3, 1));
 
+        let offset_r_a = query.rfind('a').unwrap();
+        let offset_r_n = query.rfind('\n').unwrap();
+        assert_eq!(
+            offset_tracker.at(query, query.len() - 1),
+            LineAndColumn::at(3, offset_r_a - offset_r_n)
+        );
+
         Ok(())
     }
 
@@ -767,6 +772,28 @@ mod tests {
         assert_eq!(offset_tracker.at(query, offset_g), LineAndColumn::at(5, 1));
 
         Ok(())
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_offset_overflow() {
+        let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        lexer.count();
+
+        offset_tracker.at(query, query.len());
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_offset_into_codepoint() {
+        let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        lexer.count();
+
+        offset_tracker.at(query, 1);
     }
 
     #[test]
