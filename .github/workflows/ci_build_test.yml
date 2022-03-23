@@ -48,7 +48,7 @@ jobs:
           args: --verbose -- --check
       # `clippy-check` will run `cargo clippy` on new pull requests. Due to a limitation in GitHub
       # permissions, the behavior of the Action is different depending on the source of the PR. If the
-      # PR comes from the ion-rust project itself, any suggestions will be added to the PR as comments.
+      # PR comes from the partiql-lang-rust project itself, any suggestions will be added to the PR as comments.
       # If the PR comes from a fork, any suggestions will be added to the Action's STDOUT for review.
       # For details, see: https://github.com/actions-rs/clippy-check/issues/2
       - name: Install Clippy
