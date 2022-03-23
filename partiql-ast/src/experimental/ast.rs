@@ -10,9 +10,9 @@
 // https://github.com/partiql/partiql-lang-kotlin/blob/4bcfc7f73d3e6e54286bcc03a54d5f6425eec4cc/lang/resources/org/partiql/type-domains/partiql.ion
 
 // TODO Add documentation.
-// TODO Add Display formatting.
 
 use rust_decimal::Decimal as RustDecimal;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -21,6 +21,13 @@ pub struct Item {
     // Candidate additional fields are `name: Ident`, `span: Span`, `attr: Vec<Attribute>`.
     // Also targeting on spinning up a parallel discussion with regards to AST versioning
     // and how it contributes to backward compatibility.
+}
+
+impl fmt::Display for Item {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Use Debug formatting for now
+        write!(f, "{:?}", self.kind)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
