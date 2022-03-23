@@ -1,7 +1,7 @@
 use crate::result::LineAndColumn;
 use itertools::Itertools;
 use logos::{Logos, Span};
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use std::cmp::max;
 use std::ops::Range;
 use thiserror::Error;
@@ -16,45 +16,93 @@ use thiserror::Error;
 /// use partiql_parser::result::LineAndColumn;
 /// use partiql_parser::LineOffsetTracker;
 ///
+/// let source = "12345\n789012345\n789012345\n789012345";
 /// let mut tracker = LineOffsetTracker::default();
 /// tracker.record(5..6);
 /// tracker.record(15..16);
 /// tracker.record(25..26);
 ///
 /// // We added 3 newlines, so there should be 4 lines of source
-/// assert_eq!(tracker.lines(), 4);
-/// assert_eq!(tracker.at(0), LineAndColumn::at(1,1));
-/// assert_eq!(tracker.at(6), LineAndColumn::at(2,1));
-/// assert_eq!(tracker.at(400), LineAndColumn::at(4,375));
+/// assert_eq!(tracker.num_lines(), 4);
+/// assert_eq!(tracker.at(source, 0), LineAndColumn::at(1,1));
+/// assert_eq!(tracker.at(source, 6), LineAndColumn::at(2,1));
+/// assert_eq!(tracker.at(source, 30), LineAndColumn::at(4,5));
 /// ```
-#[derive(Default)]
 pub struct LineOffsetTracker {
-    newlines: SmallVec<[usize; 8]>,
+    line_starts: SmallVec<[usize; 8]>,
+}
+
+impl Default for LineOffsetTracker {
+    fn default() -> Self {
+        LineOffsetTracker {
+            line_starts: smallvec![0], // line 1 starts at offset `0`
+        }
+    }
 }
 
 impl LineOffsetTracker {
     /// Record a newline at `span` in the source
     #[inline(always)]
     pub fn record(&mut self, span: Range<usize>) {
-        self.newlines.push(span.start);
+        self.line_starts.push(span.end);
     }
 
     /// Calculate the number of lines of source seen so far.
     #[inline(always)]
-    pub fn lines(&self) -> usize {
-        self.newlines.len() + 1
+    pub fn num_lines(&self) -> usize {
+        self.line_starts.len()
     }
 
-    /// Convert a source offset into a [`LineAndColumn`]
+    /// Calculates the byte offset span ([`Range`]) of a line.
+    ///
+    /// `num` is the line number (1-indexed) for which to  calculate the span
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if `num` is not within the number of lines
+    /// of source seen (i.e. 1 <= `num` <= self.num_lines()`).
+    #[inline(always)]
+    fn line_span_from_line_num(&self, num: usize) -> Range<usize> {
+        assert!(1 <= num);
+        assert!(num <= self.num_lines());
+        if num >= self.num_lines() {
+            self.line_starts[num - 1]..usize::MAX
+        } else {
+            self.line_starts[num - 1]..self.line_starts[num]
+        }
+    }
+
+    /// Calculates the line number (1-indexed) in which a byte offset is contained.
+    ///
+    /// `offset` is the byte offset
+    #[inline(always)]
+    fn line_num_from_byte_offset(&self, offset: usize) -> usize {
+        match self.line_starts.binary_search(&offset) {
+            Err(i) => i,
+            Ok(i) => i + 1,
+        }
+    }
+
+    /// Convert a source offset into a
+    /// Calculates a [`LineAndColumn`] for a byte offset into a given `&str`
+    ///
+    /// `source` is source `&str` into which the byte offset applies
+    /// `offset` is the byte offset for which to find the [`LineAndColumn`]
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if:
+    ///  - `offset` is larger than the byte length of `source`, or
+    ///  - `offset` falls inside a unicode codepoint
     #[inline]
-    pub fn at(&self, offset: usize) -> LineAndColumn {
-        match self.newlines.iter().find_position(|&loc| loc > &offset) {
-            None => match self.newlines.last() {
-                None => LineAndColumn::at(1, offset + 1),
-                Some(line_offset) => LineAndColumn::at(self.lines(), offset - line_offset),
-            },
-            Some((0, _)) => LineAndColumn::at(1, offset + 1),
-            Some((pos, _)) => LineAndColumn::at(pos + 1, offset - self.newlines[pos - 1]),
+    pub fn at(&self, source: &str, offset: usize) -> LineAndColumn {
+        if offset == 0 {
+            LineAndColumn::at(1, 1)
+        } else {
+            let line_num = self.line_num_from_byte_offset(offset);
+            let line_span = self.line_span_from_line_num(line_num);
+            let column_num = source[line_span.start..=offset].chars().count();
+            LineAndColumn::at(line_num, column_num)
         }
     }
 }
@@ -91,8 +139,13 @@ type CommentToken = SpannedResult<String, usize, LexicalError>;
 #[logos(extras = &'s mut LineOffsetTracker)]
 enum Comment {
     #[error]
-    #[regex(r"[^/*\n]+", logos::skip)]
-    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
+    // Skip stuff that won't interfere with comment detection
+    #[regex(r"[^/*\r\n\u0085\u2028\u2029]+", logos::skip)]
+    // Skip newlines, but record their position.
+    // For line break recommendations,
+    //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
+    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029", 
+        |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Any,
     #[token("*/")]
     End,
@@ -176,8 +229,13 @@ type IonToken = SpannedResult<String, usize, LexicalError>;
 #[logos(extras = &'s mut LineOffsetTracker)]
 pub enum EmbeddedIon {
     #[error]
-    #[regex(r#"([^/*'"`\n])+"#, logos::skip)]
-    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
+    // Skip stuff that doesn't interfere with comment or string detection
+    #[regex(r#"[^/*'"`\r\n\u0085\u2028\u2029]+"#, logos::skip)]
+    // Skip newlines, but record their position.
+    // For line break recommendations,
+    //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
+    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029",
+        |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Any,
 
     #[token("`")]
@@ -371,13 +429,14 @@ impl<'a> Iterator for PartiqlLexer<'a> {
 #[logos(extras = &'s mut LineOffsetTracker)]
 // TODO make pub(crate) ?
 pub enum Token {
-    // Logos requires one token variant to handle errors,
-    // it can be named anything you wish.
     #[error]
-    // We can also use this variant to define whitespace,
-    // or any other matches we wish to skip.
+    // Skip whitespace
     #[regex(r"[ \t\f]+", logos::skip)]
-    #[regex(r"[\n]", |lex| {lex.extras.record(lex.span()); logos::Skip})]
+    // Skip newlines, but record their position.
+    // For line break recommendations,
+    //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
+    #[regex(r"([\r]?[\n])|\u{0085}|\u{2028}|\u{2029}",
+        callback = |lex| {lex.extras.record(lex.span()); logos::Skip})]
     Error,
 
     #[regex(r"--[^\n]*", |lex| lex.slice().to_owned())]
@@ -596,7 +655,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(offset_tracker.lines(), 1);
+        assert_eq!(offset_tracker.num_lines(), 1);
     }
 
     #[test]
@@ -611,7 +670,7 @@ mod tests {
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(matches!(tok, (1, Token::Ion(ion_str), 154) if ion_str == ion_value.trim()));
-        assert_eq!(offset_tracker.lines(), 5);
+        assert_eq!(offset_tracker.num_lines(), 5);
 
         let mut offset_tracker = LineOffsetTracker::default();
         assert_eq!(
@@ -620,7 +679,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(offset_tracker.lines(), 5);
+        assert_eq!(offset_tracker.num_lines(), 5);
     }
 
     #[test]
@@ -635,7 +694,7 @@ mod tests {
         let mut offset_tracker = LineOffsetTracker::default();
         let nested_lex = CommentLexer::new(comments, &mut offset_tracker).with_nesting();
         assert_eq!(nested_lex.into_iter().count(), 1);
-        assert_eq!(offset_tracker.lines(), 6);
+        assert_eq!(offset_tracker.num_lines(), 6);
 
         let mut offset_tracker = LineOffsetTracker::default();
         let nonnested_lex = CommentLexer::new(comments, &mut offset_tracker);
@@ -658,18 +717,54 @@ mod tests {
                 Token::Select,
                 Token::Identifier("g".to_owned()),
                 Token::From,
-                Token::Identifier("data".into()),
+                Token::Identifier("data".to_owned()),
                 Token::Group,
                 Token::By,
-                Token::Identifier("a".into())
+                Token::Identifier("a".to_owned())
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
 
-        assert_eq!(offset_tracker.lines(), 3);
-        assert_eq!(offset_tracker.at(0), LineAndColumn::at(1, 1));
-        assert_eq!(offset_tracker.at(9), LineAndColumn::at(2, 1));
-        assert_eq!(offset_tracker.at(19), LineAndColumn::at(3, 1));
+        assert_eq!(offset_tracker.num_lines(), 3);
+        assert_eq!(offset_tracker.at(query, 0), LineAndColumn::at(1, 1));
+        assert_eq!(offset_tracker.at(query, 1), LineAndColumn::at(1, 2));
+        assert_eq!(offset_tracker.at(query, 9), LineAndColumn::at(2, 1));
+        assert_eq!(offset_tracker.at(query, 19), LineAndColumn::at(3, 1));
+
+        Ok(())
+    }
+
+    #[test]
+    fn select_unicode() -> Result<(), LexicalError> {
+        let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::Identifier("🐈".to_owned()),
+                Token::From,
+                Token::Identifier("❤ℝ".to_owned()),
+                Token::Group,
+                Token::By,
+                Token::Identifier("🧸".to_owned())
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+
+        assert_eq!(offset_tracker.num_lines(), 5);
+        assert_eq!(offset_tracker.at(query, 0), LineAndColumn::at(1, 1));
+
+        let offset_s = query.find('S').unwrap();
+        assert_eq!(offset_tracker.at(query, offset_s), LineAndColumn::at(2, 1));
+
+        let offset_f = query.find('F').unwrap();
+        assert_eq!(offset_tracker.at(query, offset_f), LineAndColumn::at(3, 1));
+
+        let offset_g = query.find('G').unwrap();
+        assert_eq!(offset_tracker.at(query, offset_g), LineAndColumn::at(5, 1));
 
         Ok(())
     }
@@ -689,7 +784,7 @@ mod tests {
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
-        assert_eq!(offset_tracker.lines(), 2);
+        assert_eq!(offset_tracker.num_lines(), 2);
         Ok(())
     }
 
@@ -708,7 +803,7 @@ mod tests {
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
-        assert_eq!(offset_tracker.lines(), 1);
+        assert_eq!(offset_tracker.num_lines(), 1);
         Ok(())
     }
 
@@ -722,8 +817,8 @@ mod tests {
         let error = toks.unwrap_err();
         assert_eq!(error.to_string(), r##"Lexing error: invalid input `#`"##);
         assert!(matches!(error, LexicalError::InvalidInput((7, s, 8)) if s == "#"));
-        assert_eq!(offset_tracker.lines(), 1);
-        assert_eq!(offset_tracker.at(7), LineAndColumn::at(1, 8));
+        assert_eq!(offset_tracker.num_lines(), 1);
+        assert_eq!(offset_tracker.at(query, 7), LineAndColumn::at(1, 8));
     }
 
     #[test]
@@ -739,7 +834,7 @@ mod tests {
             LexicalError::UnterminatedIonLiteral((1, (), 9))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated ion literal");
-        assert_eq!(offset_tracker.at(1), LineAndColumn::at(1, 2));
+        assert_eq!(offset_tracker.at(query, 1), LineAndColumn::at(1, 2));
     }
 
     #[test]
@@ -755,7 +850,7 @@ mod tests {
             LexicalError::UnterminatedComment((1, (), 10))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated comment");
-        assert_eq!(offset_tracker.at(1), LineAndColumn::at(1, 2));
+        assert_eq!(offset_tracker.at(query, 1), LineAndColumn::at(1, 2));
     }
 
     #[test]
@@ -771,6 +866,6 @@ mod tests {
             LexicalError::UnterminatedComment((2, (), 11))
         ));
         assert_eq!(error.to_string(), "Lexing error: unterminated comment");
-        assert_eq!(offset_tracker.at(2), LineAndColumn::at(1, 3));
+        assert_eq!(offset_tracker.at(query, 2), LineAndColumn::at(1, 3));
     }
 }
