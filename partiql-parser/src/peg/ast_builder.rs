@@ -492,8 +492,8 @@ pub(crate) fn build_expr_query(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr
             parts.pop().unwrap(),
         );
         let new_operands = vec![lhs, rhs];
-        let op = *operator;
-        let new_op = if let ast::Expr { kind } = op {
+        let ast::Expr { kind } = *operator;
+        let new_op = {
             match kind {
                 ast::ExprKind::And(ast::And { .. }) => ast::Expr {
                     kind: ast::ExprKind::And(ast::And {
@@ -518,8 +518,6 @@ pub(crate) fn build_expr_query(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr
                 },
                 _ => todo!("Unhandled operator kind [{:?}]", kind),
             }
-        } else {
-            todo!("Unhandled operator [{:?}]", op)
         };
         Box::new(new_op)
     } else {
