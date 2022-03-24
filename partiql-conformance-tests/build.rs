@@ -71,7 +71,8 @@ fn to_full_file_name(prefix: &str, ion_file: &Path) -> String {
 /// Converts the scope to a String that is passed through codegen's default formatter
 fn scope_to_formatted_string(scope: Scope) -> String {
     let mut dest_str = String::new();
-    scope.fmt(&mut Formatter::new(&mut dest_str))
+    scope
+        .fmt(&mut Formatter::new(&mut dest_str))
         .unwrap_or_else(|error| panic!("Failure during scope formatting: {:?}", error));
     dest_str
 }
