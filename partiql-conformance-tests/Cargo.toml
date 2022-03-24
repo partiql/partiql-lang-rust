@@ -1,0 +1,27 @@
+[package]
+name = "partiql-conformance-tests"
+authors = ["PartiQL Team <partiql-team@amazon.com>"]
+description = "PartiQL conformance test runner"
+homepage = "https://github.com/partiql/partiql-lang-rust"
+repository = "https://github.com/partiql/partiql-lang-rust"
+license = "Apache-2.0"
+readme = "../README.md"
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
+version = "0.0.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+walkdir = "2.3"
+ion-rs = "0.6.0"
+codegen = "0.1.3"
+partiql-parser = { path = "../partiql-parser" }
+
+[dependencies]
+partiql-parser = { path = "../partiql-parser" }
