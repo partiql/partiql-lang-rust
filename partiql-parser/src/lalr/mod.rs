@@ -29,11 +29,13 @@ mod grammar {
 mod lexer;
 mod util;
 
+use crate::location::ByteOffset;
 pub use lexer::LexicalError;
 pub use lexer::LineOffsetTracker;
 
-pub type ParseResult =
-    Result<Box<ast::Expr>, ParseError<usize, lexer::Token, (usize, lexer::LexicalError, usize)>>;
+pub type LexerError = (ByteOffset, lexer::LexicalError, ByteOffset);
+pub type LalrpopError = ParseError<ByteOffset, lexer::Token, LexerError>;
+pub type ParseResult = Result<Box<ast::Expr>, LalrpopError>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParseResult {
@@ -315,7 +317,7 @@ mod tests {
             assert!(matches!(
                 error,
                 lalrpop_util::ParseError::UnrecognizedToken {
-                    token: (21, Token::At, 23),
+                    token: (ByteOffset(21), Token::At, ByteOffset(23)),
                     ..
                 }
             ));

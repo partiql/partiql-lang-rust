@@ -1,4 +1,4 @@
-use crate::location::{BytePos, LineAndColumn};
+use crate::location::{ByteOffset, LineAndCharPosition, LineAndColumn, LineOffset};
 
 use logos::{Logos, Span};
 use smallvec::{smallvec, SmallVec};
@@ -14,7 +14,7 @@ use thiserror::Error;
 /// ## Example
 ///
 /// ```rust
-/// use partiql_parser::location::LineAndColumn;
+/// use partiql_parser::location::LineAndCharPosition;
 /// use partiql_parser::LineOffsetTracker;
 ///
 /// let source = "12345\n789012345\n789012345\n789012345";
@@ -25,18 +25,18 @@ use thiserror::Error;
 ///
 /// // We added 3 newlines, so there should be 4 lines of source
 /// assert_eq!(tracker.num_lines(), 4);
-/// assert_eq!(tracker.at(source, 0), LineAndColumn::new(1,1).unwrap());
-/// assert_eq!(tracker.at(source, 6), LineAndColumn::new(2,1).unwrap());
-/// assert_eq!(tracker.at(source, 30), LineAndColumn::new(4,5).unwrap());
+/// assert_eq!(tracker.at(source, 0), LineAndCharPosition::new(0,0));
+/// assert_eq!(tracker.at(source, 6), LineAndCharPosition::new(1,0));
+/// assert_eq!(tracker.at(source, 30), LineAndCharPosition::new(3,4));
 /// ```
 pub struct LineOffsetTracker {
-    line_starts: SmallVec<[BytePos; 16]>,
+    line_starts: SmallVec<[ByteOffset; 16]>,
 }
 
 impl Default for LineOffsetTracker {
     fn default() -> Self {
         LineOffsetTracker {
-            line_starts: smallvec![BytePos(0)], // line 1 starts at offset `0`
+            line_starts: smallvec![ByteOffset(0)], // line 1 starts at offset `0`
         }
     }
 }
@@ -56,42 +56,35 @@ impl LineOffsetTracker {
 
     /// Calculates the byte offset span ([`Range`]) of a line.
     ///
-    /// `num` is the line number (1-indexed) for which to  calculate the span
+    /// `num` is the line number (0-indexed) for which to  calculate the span
     /// `max` is the largest value allowable in the returned [`Range's end`](core::ops::Range)
-    ///
-    /// # Panics
-    ///
-    /// This function will panic if `num` is not within the number of lines
-    /// of source seen (i.e. 1 <= `num` <= self.num_lines()`).
     #[inline(always)]
-    fn line_span_from_line_num(&self, num: usize, max: usize) -> Range<usize> {
-        assert!(1 <= num);
-        assert!(num <= self.num_lines());
-        let start = self.line_starts[num - 1].to_usize();
+    fn byte_span_from_line_num(&self, num: LineOffset, max: ByteOffset) -> Range<ByteOffset> {
+        let start = self.line_starts[num.to_usize()];
         let end = self
             .line_starts
-            .get(num)
-            .map(BytePos::to_usize)
-            .unwrap_or(max)
-            .min(max);
-        start..end
+            .get((num + 1).to_usize())
+            .unwrap_or(&max)
+            .min(&max);
+        start..*end
     }
 
-    /// Calculates the line number (1-indexed) in which a byte offset is contained.
+    /// Calculates the line number (0-indexed) in which a byte offset is contained.
     ///
     /// `offset` is the byte offset
     #[inline(always)]
-    fn line_num_from_byte_offset(&self, offset: usize) -> usize {
+    fn line_num_from_byte_offset(&self, offset: usize) -> LineOffset {
         match self.line_starts.binary_search(&offset.into()) {
-            Err(i) => i,
-            Ok(i) => i + 1,
+            Err(i) => i - 1,
+            Ok(i) => i,
         }
+        .into()
     }
 
-    /// Calculates a [`LineAndColumn`] for a byte offset from the given `&str`
+    /// Calculates a [`LineAndCharPosition`] for a byte offset from the given `&str`
     ///
     /// `source` is source `&str` into which the byte offset applies
-    /// `offset` is the byte offset for which to find the [`LineAndColumn`]
+    /// `offset` is the byte offset for which to find the [`LineAndCharPosition`]
     ///
     /// # Panics
     ///
@@ -99,19 +92,15 @@ impl LineOffsetTracker {
     ///  - `offset` is larger than the byte length of `source`, or
     ///  - `offset` falls inside a unicode codepoint
     #[inline]
-    pub fn at(&self, source: &str, offset: usize) -> LineAndColumn {
+    pub fn at(&self, source: &str, offset: usize) -> LineAndCharPosition {
         if offset == 0 {
-            // SAFETY: `1` is always non-zero
-            unsafe { LineAndColumn::new_unchecked(1, 1) }
+            LineAndCharPosition::new(0, 0)
         } else {
             let line_num = self.line_num_from_byte_offset(offset);
-            let line_span = self.line_span_from_line_num(line_num, source.len());
-            let column_num = source[line_span.start..=offset].chars().count();
+            let line_span = self.byte_span_from_line_num(line_num, source.len().into());
+            let column_num = source[line_span.start.to_usize()..=offset].chars().count();
 
-            // SAFETY: line_num is always nonzero, see `line_num_from_byte_offset`
-            // SAFETY: column_num is always nonzero
-            //  `source[line_span.start..=offset]` is at least 1 char, else the slice would panic
-            unsafe { LineAndColumn::new_unchecked(line_num, column_num) }
+            LineAndCharPosition::new(line_num.to_usize(), column_num - 1)
         }
     }
 }
@@ -142,7 +131,7 @@ pub enum LexicalError {
     Unknown,
 }
 
-type CommentToken = SpannedResult<String, usize, LexicalError>;
+type CommentToken = SpannedResult<String, ByteOffset, LexicalError>;
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
 #[logos(extras = &'s mut LineOffsetTracker)]
@@ -197,7 +186,7 @@ impl<'a> CommentLexer<'a> {
                 Some(Comment::End) => {
                     if nesting == 0 {
                         let Span { end, .. } = self.lexer.span();
-                        return Some(Err((start, LexicalError::Unknown, end)));
+                        return Some(Err((start.into(), LexicalError::Unknown, end.into())));
                     }
                     nesting -= 1;
                     if nesting == 0 {
@@ -207,7 +196,11 @@ impl<'a> CommentLexer<'a> {
                 None => {
                     return if nesting != 0 {
                         let Span { end, .. } = self.lexer.span();
-                        Some(Err((start, LexicalError::UnterminatedComment, end)))
+                        Some(Err((
+                            start.into(),
+                            LexicalError::UnterminatedComment,
+                            end.into(),
+                        )))
                     } else {
                         None
                     }
@@ -217,7 +210,7 @@ impl<'a> CommentLexer<'a> {
         let Span { end, .. } = self.lexer.span();
         let comment = self.lexer.source()[start..end].to_owned();
 
-        Some(Ok((start, comment, end)))
+        Some(Ok((start.into(), comment, end.into())))
     }
 }
 
@@ -230,7 +223,7 @@ impl<'a> Iterator for CommentLexer<'a> {
     }
 }
 
-type IonToken = SpannedResult<String, usize, LexicalError>;
+type IonToken = SpannedResult<String, ByteOffset, LexicalError>;
 
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(extras = &'s mut LineOffsetTracker)]
@@ -293,9 +286,11 @@ impl<'a> EmbeddedIonLexer<'a> {
                             let remaining = &self.lexer.source()[embed_span.start..];
                             let mut comment_lexer = CommentLexer::new(remaining, self.lexer.extras);
                             match comment_lexer.next() {
-                                Some(Ok((s, _c, e))) => self.lexer.bump(e - s - embed_span.len()),
+                                Some(Ok((s, _c, e))) => {
+                                    self.lexer.bump((e - s).to_usize() - embed_span.len())
+                                }
                                 Some(Err((_s, err, e))) => {
-                                    return Some(Err((embed_span.start, err, e)));
+                                    return Some(Err((embed_span.start.into(), err, e)));
                                 }
                                 None => unreachable!(),
                             }
@@ -315,14 +310,18 @@ impl<'a> EmbeddedIonLexer<'a> {
                         }
                         None => {
                             let Span { end, .. } = self.lexer.span();
-                            return Some(Err((start, LexicalError::UnterminatedIonLiteral, end)));
+                            return Some(Err((
+                                start.into(),
+                                LexicalError::UnterminatedIonLiteral,
+                                end.into(),
+                            )));
                         }
                     }
                 }
                 let Span { end, .. } = self.lexer.span();
                 let ion_value = self.lexer.source()[start..end].to_owned();
 
-                Some(Ok((start, ion_value, end)))
+                Some(Ok((start.into(), ion_value, end.into())))
             }
             _ => None,
         }
@@ -344,7 +343,7 @@ pub(crate) struct PartiqlLexer<'a> {
     lexer: logos::Lexer<'a, Token>,
 }
 
-pub(crate) type LexicalToken = SpannedResult<Token, usize, LexicalError>;
+pub(crate) type LexicalToken = SpannedResult<Token, ByteOffset, LexicalError>;
 
 impl<'a> PartiqlLexer<'a> {
     /// Creates a new PartiQL lexer over `input` text.
@@ -359,14 +358,14 @@ impl<'a> PartiqlLexer<'a> {
     fn err_here(&self, err_ctor: fn(String) -> LexicalError) -> LexicalToken {
         let region = self.lexer.slice().to_owned();
         let Span { start, end } = self.lexer.span();
-        Err((start, err_ctor(region), end))
+        Err((start.into(), err_ctor(region), end.into()))
     }
 
     /// Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
     #[inline(always)]
     fn wrap(&mut self, token: Token) -> LexicalToken {
         let Span { start, end } = self.lexer.span();
-        Ok((start, token, end))
+        Ok((start.into(), token, end.into()))
     }
 
     /// Advances the iterator and returns the next [`LexicalToken`] or [`None`] when input is exhausted.
@@ -382,10 +381,10 @@ impl<'a> PartiqlLexer<'a> {
                     let mut ion_lexer = EmbeddedIonLexer::new(remaining, self.lexer.extras);
                     ion_lexer.next().map(|res| match res {
                         Ok((s, ion, e)) => {
-                            self.lexer.bump(e - s - embed_span.len());
-                            Ok((embed_span.start, Token::Ion(ion), e))
+                            self.lexer.bump((e - s).to_usize() - embed_span.len());
+                            Ok((embed_span.start.into(), Token::Ion(ion), e))
                         }
-                        Err((_s, err, e)) => Err((embed_span.start, err, e)),
+                        Err((_s, err, e)) => Err((embed_span.start.into(), err, e)),
                     })
                 }
 
@@ -396,10 +395,10 @@ impl<'a> PartiqlLexer<'a> {
                         CommentLexer::new(remaining, self.lexer.extras).with_nesting();
                     comment_lexer.next().map(|res| match res {
                         Ok((s, comment, e)) => {
-                            self.lexer.bump(e - s - embed_span.len());
-                            Ok((embed_span.start, Token::CommentBlock(comment), e))
+                            self.lexer.bump((e - s).to_usize() - embed_span.len());
+                            Ok((embed_span.start.into(), Token::CommentBlock(comment), e))
                         }
-                        Err((_s, err, e)) => Err((embed_span.start, err, e)),
+                        Err((_s, err, e)) => Err((embed_span.start.into(), err, e)),
                     })
                 }
 
@@ -643,7 +642,9 @@ mod tests {
         let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
-        assert!(matches!(tok, (1, Token::Ion(ion_str), 17) if ion_str == ion_value.trim()));
+        assert!(
+            matches!(tok, (ByteOffset(1), Token::Ion(ion_str), ByteOffset(17)) if ion_str == ion_value.trim())
+        );
 
         let mut offset_tracker = LineOffsetTracker::default();
         assert_eq!(
@@ -666,7 +667,9 @@ mod tests {
         let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
-        assert!(matches!(tok, (1, Token::Ion(ion_str), 154) if ion_str == ion_value.trim()));
+        assert!(
+            matches!(tok, (ByteOffset(1), Token::Ion(ion_str), ByteOffset(154)) if ion_str == ion_value.trim())
+        );
         assert_eq!(offset_tracker.num_lines(), 5);
 
         let mut offset_tracker = LineOffsetTracker::default();
@@ -695,15 +698,18 @@ mod tests {
 
         let mut offset_tracker = LineOffsetTracker::default();
         let nonnested_lex = CommentLexer::new(comments, &mut offset_tracker);
-        let toks: Result<Vec<_>, Spanned<LexicalError, usize>> = nonnested_lex.collect();
+        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> = nonnested_lex.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
-        assert!(matches!(error, (142, LexicalError::Unknown, 189)));
+        assert!(matches!(
+            error,
+            (ByteOffset(142), LexicalError::Unknown, ByteOffset(189))
+        ));
         assert_eq!(error.1.to_string(), "Lexing error: unknown error");
     }
 
     #[test]
-    fn select() -> Result<(), Spanned<LexicalError, usize>> {
+    fn select() -> Result<(), Spanned<LexicalError, ByteOffset>> {
         let query = "SELECT g\nFROM data\nGROUP BY a";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -724,26 +730,26 @@ mod tests {
 
         assert_eq!(offset_tracker.num_lines(), 3);
         assert_eq!(
-            offset_tracker.at(query, 0),
+            LineAndColumn::from(offset_tracker.at(query, 0)),
             LineAndColumn::new(1, 1).unwrap()
         );
         assert_eq!(
-            offset_tracker.at(query, 1),
+            LineAndColumn::from(offset_tracker.at(query, 1)),
             LineAndColumn::new(1, 2).unwrap()
         );
         assert_eq!(
-            offset_tracker.at(query, 9),
+            LineAndColumn::from(offset_tracker.at(query, 9)),
             LineAndColumn::new(2, 1).unwrap()
         );
         assert_eq!(
-            offset_tracker.at(query, 19),
+            LineAndColumn::from(offset_tracker.at(query, 19)),
             LineAndColumn::new(3, 1).unwrap()
         );
 
         let offset_r_a = query.rfind('a').unwrap();
         let offset_r_n = query.rfind('\n').unwrap();
         assert_eq!(
-            offset_tracker.at(query, query.len() - 1),
+            LineAndColumn::from(offset_tracker.at(query, query.len() - 1)),
             LineAndColumn::new(3, offset_r_a - offset_r_n).unwrap()
         );
 
@@ -751,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn select_unicode() -> Result<(), Spanned<LexicalError, usize>> {
+    fn select_unicode() -> Result<(), Spanned<LexicalError, ByteOffset>> {
         let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -772,25 +778,25 @@ mod tests {
 
         assert_eq!(offset_tracker.num_lines(), 5);
         assert_eq!(
-            offset_tracker.at(query, 0),
+            LineAndColumn::from(offset_tracker.at(query, 0)),
             LineAndColumn::new(1, 1).unwrap()
         );
 
         let offset_s = query.find('S').unwrap();
         assert_eq!(
-            offset_tracker.at(query, offset_s),
+            LineAndColumn::from(offset_tracker.at(query, offset_s)),
             LineAndColumn::new(2, 1).unwrap()
         );
 
         let offset_f = query.find('F').unwrap();
         assert_eq!(
-            offset_tracker.at(query, offset_f),
+            LineAndColumn::from(offset_tracker.at(query, offset_f)),
             LineAndColumn::new(3, 1).unwrap()
         );
 
         let offset_g = query.find('G').unwrap();
         assert_eq!(
-            offset_tracker.at(query, offset_g),
+            LineAndColumn::from(offset_tracker.at(query, offset_g)),
             LineAndColumn::new(5, 1).unwrap()
         );
 
@@ -820,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn select_comment_line() -> Result<(), Spanned<LexicalError, usize>> {
+    fn select_comment_line() -> Result<(), Spanned<LexicalError, ByteOffset>> {
         let query = "SELECT --comment\n@g from @\"foo\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -841,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn select_comment_block() -> Result<(), Spanned<LexicalError, usize>> {
+    fn select_comment_block() -> Result<(), Spanned<LexicalError, ByteOffset>> {
         let query = "SELECT /*comment*/ g";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -863,15 +869,17 @@ mod tests {
     fn err_invalid_input() {
         let query = "SELECT # FROM data GROUP BY a";
         let mut offset_tracker = LineOffsetTracker::default();
-        let toks: Result<Vec<_>, Spanned<LexicalError, usize>> =
+        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> =
             PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert_eq!(error.1.to_string(), r##"Lexing error: invalid input `#`"##);
-        assert!(matches!(error, (7, LexicalError::InvalidInput(s), 8) if s == "#"));
+        assert!(
+            matches!(error, (ByteOffset(7), LexicalError::InvalidInput(s), ByteOffset(8)) if s == "#")
+        );
         assert_eq!(offset_tracker.num_lines(), 1);
         assert_eq!(
-            offset_tracker.at(query, 7),
+            LineAndColumn::from(offset_tracker.at(query, 7)),
             LineAndColumn::new(1, 8).unwrap()
         );
     }
@@ -880,20 +888,24 @@ mod tests {
     fn err_unterminated_ion() {
         let query = r#" ` "fooo` "#;
         let mut offset_tracker = LineOffsetTracker::default();
-        let toks: Result<Vec<_>, Spanned<LexicalError, usize>> =
+        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> =
             PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
             error,
-            (1, LexicalError::UnterminatedIonLiteral, 9)
+            (
+                ByteOffset(1),
+                LexicalError::UnterminatedIonLiteral,
+                ByteOffset(9)
+            )
         ));
         assert_eq!(
             error.1.to_string(),
             "Lexing error: unterminated ion literal"
         );
         assert_eq!(
-            offset_tracker.at(query, 1),
+            LineAndColumn::from(offset_tracker.at(query, 1)),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -902,14 +914,21 @@ mod tests {
     fn err_unterminated_comment() {
         let query = r#" /*12345678"#;
         let mut offset_tracker = LineOffsetTracker::default();
-        let toks: Result<Vec<_>, Spanned<LexicalError, usize>> =
+        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> =
             PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
-        assert!(matches!(error, (1, LexicalError::UnterminatedComment, 10)));
+        assert!(matches!(
+            error,
+            (
+                ByteOffset(1),
+                LexicalError::UnterminatedComment,
+                ByteOffset(10)
+            )
+        ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
-            offset_tracker.at(query, 1),
+            LineAndColumn::from(offset_tracker.at(query, 1)),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -918,14 +937,21 @@ mod tests {
     fn err_unterminated_ion_comment() {
         let query = r#" `/*12345678`"#;
         let mut offset_tracker = LineOffsetTracker::default();
-        let toks: Result<Vec<_>, Spanned<LexicalError, usize>> =
+        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> =
             EmbeddedIonLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
-        assert!(matches!(error, (2, LexicalError::UnterminatedComment, 11)));
+        assert!(matches!(
+            error,
+            (
+                ByteOffset(2),
+                LexicalError::UnterminatedComment,
+                ByteOffset(11)
+            )
+        ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
-            offset_tracker.at(query, 2),
+            LineAndColumn::from(offset_tracker.at(query, 2)),
             LineAndColumn::new(1, 3).unwrap()
         );
     }

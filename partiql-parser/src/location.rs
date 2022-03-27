@@ -16,11 +16,25 @@ macro_rules! impl_pos {
                 Self(self.0 + rhs.0)
             }
         }
+        impl Add<$primitive> for $pos_type {
+            type Output = Self;
+
+            fn add(self, rhs: $primitive) -> Self::Output {
+                Self(self.0 + rhs)
+            }
+        }
         impl Sub for $pos_type {
             type Output = Self;
 
             fn sub(self, rhs: Self) -> Self::Output {
                 Self(self.0 - rhs.0)
+            }
+        }
+        impl Sub<$primitive> for $pos_type {
+            type Output = Self;
+
+            fn sub(self, rhs: $primitive) -> Self::Output {
+                Self(self.0 - rhs)
             }
         }
         impl $pos_type {
@@ -42,40 +56,55 @@ macro_rules! impl_pos {
     };
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct BytePos(pub u16);
-impl_pos!(BytePos, u16);
+/// A 0-indexed byte offset, relative to some other position.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct ByteOffset(pub u16);
+impl_pos!(ByteOffset, u16);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct LinePos(pub u16);
-impl_pos!(LinePos, u16);
+/// A 0-indexed line offset, relative to some other position.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct LineOffset(pub u16);
+impl_pos!(LineOffset, u16);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct CharPos(pub u16);
-impl_pos!(CharPos, u16);
+/// A 0-indexed char offset, relative to some other position.
+///
+/// This value represents the number of unicode codepoints seen, so will differ
+/// from [`ByteOffset`] for a given location in a &str if the string contains
+/// non-ASCII unicode characters
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct CharOffset(pub u16);
+impl_pos!(CharOffset, u16);
 
+/// A 0-indexed byte absolute position (i.e., relative to the start of a &str)
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct ByteOffset(pub BytePos);
+pub struct BytePosition(pub ByteOffset);
 
+/// A 0-indexed line & char absolute position (i.e., relative to the start of a &str)
+///
+/// ## Example
+/// ```
+/// # use partiql_parser::location::LineAndCharPosition;
+/// println!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0));
+/// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct LineAndColOffset {
-    pub line: LinePos,
-    pub char: CharPos,
+pub struct LineAndCharPosition {
+    pub line: LineOffset,
+    pub char: CharOffset,
 }
-impl LineAndColOffset {
-    /// Constructs at [`LineAndColOffset`]
+impl LineAndCharPosition {
+    /// Constructs at [`LineAndCharPosition`]
     #[inline]
     pub fn new(line: usize, char: usize) -> Self {
         Self {
-            line: LinePos::from_usize(line),
-            char: CharPos::from_usize(char),
+            line: LineOffset::from_usize(line),
+            char: CharOffset::from_usize(char),
         }
     }
 }
 
-/// A line and column location.
+/// A line and column location intended for usage in errors/warnings/lints/etc.
 ///
-/// This value is one-based, as that is how most people think of lines and columns.
+/// Both line and column are 1-indexed, as that is how most people think of lines and columns.
 ///
 /// ## Example
 /// ```
@@ -89,7 +118,7 @@ pub struct LineAndColumn {
 }
 
 impl LineAndColumn {
-    /// Constructs at [`LineAndColumn`], verifying 1-position invariant.
+    /// Constructs at [`LineAndColumn`] if non-zero-index invariants, else [`None`]
     #[inline]
     pub fn new(line: usize, column: usize) -> Option<Self> {
         Some(Self {
@@ -113,8 +142,8 @@ impl LineAndColumn {
     }
 }
 
-impl From<LineAndColOffset> for LineAndColumn {
-    fn from(LineAndColOffset { line, char }: LineAndColOffset) -> Self {
+impl From<LineAndCharPosition> for LineAndColumn {
+    fn from(LineAndCharPosition { line, char }: LineAndCharPosition) -> Self {
         let line = line.to_usize() + 1;
         let column = char.to_usize() + 1;
         // SAFETY: +1 is added to each of line and char after upcasting from a smaller integer
@@ -130,32 +159,25 @@ impl fmt::Display for LineAndColumn {
 
 /// A possible position in the source.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub enum Position {
-    /// Variant indicating that there *is no* known location in source for some context.
-    Unknown,
-    /// Variant indicating that there *is* a known location in source for some context.
-    At(LineAndColumn),
-}
+pub struct Position(Option<LineAndColumn>);
 
 impl From<Option<LineAndColumn>> for Position {
     fn from(loc: Option<LineAndColumn>) -> Self {
-        loc.map_or_else(|| Position::Unknown, LineAndColumn::into)
+        Position(loc)
     }
 }
 
 impl From<LineAndColumn> for Position {
     fn from(loc: LineAndColumn) -> Self {
-        Position::At(loc)
+        Some(loc).into()
     }
 }
 
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Position::Unknown => write!(f, "unknown position"),
-            Position::At(location) => {
-                write!(f, "{}", location)
-            }
+        match self.0 {
+            None => write!(f, "unknown position"),
+            Some(location) => write!(f, "{}", location),
         }
     }
 }
@@ -166,41 +188,41 @@ mod tests {
     use std::num::NonZeroUsize;
 
     #[test]
-    fn bytepos() {
-        let bp1 = BytePos(5);
-        let bp2 = BytePos::from_usize(15);
+    fn byteoff() {
+        let bp1 = ByteOffset(5);
+        let bp2 = ByteOffset::from_usize(15);
 
         assert_eq!(20, (bp1 + bp2).to_usize());
-        assert_eq!(BytePos(10), bp2 - 5.into());
+        assert_eq!(ByteOffset(10), (bp2 - 5).into());
     }
 
     #[test]
-    fn linepos() {
-        let lp1 = LinePos(5);
-        let lp2 = LinePos::from_usize(15);
+    fn lineoff() {
+        let lp1 = LineOffset(5);
+        let lp2 = LineOffset::from_usize(15);
 
         assert_eq!(20, (lp1 + lp2).to_usize());
-        assert_eq!(LinePos(10), lp2 - 5.into());
+        assert_eq!(LineOffset(10), (lp2 - 5).into());
     }
 
     #[test]
-    fn charpos() {
-        let cp1 = CharPos(5);
-        let cp2 = CharPos::from_usize(15);
+    fn charoff() {
+        let cp1 = CharOffset(5);
+        let cp2 = CharOffset::from_usize(15);
 
         assert_eq!(20, (cp1 + cp2).to_usize());
-        assert_eq!(CharPos(10), cp2 - 5.into());
+        assert_eq!(CharOffset(10), (cp2 - 5).into());
     }
 
     #[test]
-    fn offset() {
-        assert_eq!(ByteOffset(BytePos(5)), ByteOffset(5.into()));
+    fn positions() {
+        assert_eq!(BytePosition(ByteOffset(5)), BytePosition(5.into()));
 
-        let loc = LineAndColOffset::new(13, 42);
+        let loc = LineAndCharPosition::new(13, 42);
         assert_eq!(
-            LineAndColOffset {
-                line: LinePos(13),
-                char: CharPos(42)
+            LineAndCharPosition {
+                line: LineOffset(13),
+                char: CharOffset(42)
             },
             loc
         );
@@ -216,17 +238,17 @@ mod tests {
 
     #[test]
     fn position() {
-        assert_eq!(Position::Unknown, None.into());
-        assert_eq!(Position::Unknown, LineAndColumn::new(0, 0).into());
+        assert_eq!(Position(None), None.into());
+        assert_eq!(Position(None), LineAndColumn::new(0, 0).into());
         let lac = LineAndColumn {
             line: unsafe { NonZeroUsize::new_unchecked(5) },
             column: unsafe { NonZeroUsize::new_unchecked(6) },
         };
-        assert_eq!(Position::At(lac), LineAndColumn::new(5, 6).into());
-        assert_eq!("unknown position", format!("{}", Position::Unknown));
+        assert_eq!(Position(Some(lac)), LineAndColumn::new(5, 6).into());
+        assert_eq!("unknown position", format!("{}", Position(None)));
         assert_eq!(
             "line 4, column 5",
-            format!("{}", Position::At(LineAndColOffset::new(3, 4).into()))
+            format!("{}", Position(Some(LineAndCharPosition::new(3, 4).into())))
         );
     }
 }
