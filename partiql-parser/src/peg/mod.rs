@@ -5,7 +5,6 @@
 //! # Usage
 //!
 //! ```
-//! use partiql_parser::prelude::*;
 //! use partiql_parser::peg_parse;
 //!
 //!     peg_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
@@ -13,14 +12,17 @@
 //!
 //! [partiql]: https://partiql.org
 //!
+use pest::error::{ErrorVariant, LineColLocation};
 use pest::iterators::Pairs;
 use pest::Parser;
+use std::fmt;
 
-use crate::result::ParserResult;
+use crate::result::{ParserError, ParserResult};
 
 mod ast_builder;
 mod grammar;
 
+use crate::location::LineAndColumn;
 pub(crate) use crate::peg::ast_builder::build_query;
 pub(crate) use crate::peg::grammar::{PartiQLParser, Rule};
 use partiql_ast::experimental::ast;
@@ -35,6 +37,26 @@ pub fn parse_partiql(input: &str) -> ParserResult<Pairs<Rule>> {
 
 pub fn parse_partiql_to_ast(input: &str) -> ParserResult<Box<ast::Expr>> {
     build_query(parse_partiql(input)?)
+}
+
+impl<R> From<pest::error::Error<R>> for ParserError
+where
+    R: fmt::Debug,
+{
+    fn from(error: pest::error::Error<R>) -> Self {
+        // obtain the line/column information from the Pest error
+        let (line, column) = match error.line_col {
+            LineColLocation::Pos((line, column)) => (line, column),
+            LineColLocation::Span((line, column), _) => (line, column),
+        };
+        let position = LineAndColumn::new(line, column).into();
+        let message = match error.variant {
+            // TODO extract a better error message
+            ErrorVariant::ParsingError { positives, .. } => format!("Expected {:?}", positives),
+            ErrorVariant::CustomError { message } => message,
+        };
+        ParserError::SyntaxError { message, position }
+    }
 }
 
 #[cfg(test)]

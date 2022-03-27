@@ -7,7 +7,7 @@
 //!
 //! [partiql]: https://partiql.org
 
-pub mod prelude;
+pub mod location;
 pub mod result;
 
 mod peg;
@@ -16,6 +16,7 @@ mod lalr;
 
 pub use lalr::lex_partiql as logos_lex;
 pub use lalr::parse_partiql as lalr_parse;
+pub use lalr::LexicalError;
 pub use lalr::LineOffsetTracker;
 pub use lalr::ParseResult as LalrParseResult;
 pub use peg::parse_partiql as peg_parse;

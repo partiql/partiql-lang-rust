@@ -17,6 +17,7 @@ use partiql_ast::experimental::ast;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
+#[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::vec_box)]
 #[allow(unused_variables)]
@@ -24,13 +25,15 @@ use partiql_ast::experimental::ast;
 mod grammar {
     include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
 }
-//lalrpop_mod!(pub partiql); // synthesized by LALRPOP
+
 mod lexer;
 mod util;
 
+pub use lexer::LexicalError;
 pub use lexer::LineOffsetTracker;
 
-pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, lexer::LexicalError>>;
+pub type ParseResult =
+    Result<Box<ast::Expr>, ParseError<usize, lexer::Token, (usize, lexer::LexicalError, usize)>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParseResult {
