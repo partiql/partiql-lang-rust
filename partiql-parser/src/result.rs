@@ -2,9 +2,10 @@
 
 //! [`Error`] and [`Result`] types for parsing PartiQL.
 
-use crate::location::Position;
+use crate::location::{ByteOffset, Position};
 
-use crate::LexicalError;
+use crate::lalr::{Spanned, Token};
+use crate::LexError;
 use thiserror::Error;
 
 /// General [`Result`] type for the PartiQL parser.
@@ -17,11 +18,17 @@ pub enum ParserError {
     #[error("Syntax Error: {message} ({position})")]
     SyntaxError { message: String, position: Position },
 
-    #[error("{cause} ({position})")]
-    LexicalError {
-        cause: LexicalError,
-        position: Position,
+    /// There was a token that was ot expected
+    // TODO how to report location in errors
+    #[error("Unexpected token [{:?}] at [TODO]", token.1)]
+    UnexpectedToken {
+        /// The unexpected token of type `T` with a span given by the two `L` values.
+        token: Spanned<Token, ByteOffset>,
+        // TODO expected: ...,
     },
+
+    #[error("{cause} ({position})")]
+    LexicalError { cause: LexError, position: Position },
 
     /// Indicates that there is an internal error that was not due to user input or API violation.
     #[error("Illegal State: {message}")]

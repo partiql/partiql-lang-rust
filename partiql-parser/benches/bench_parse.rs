@@ -43,7 +43,7 @@ fn pest_to_ast_benchmark(c: &mut Criterion) {
 }
 
 fn logos_benchmark(c: &mut Criterion) {
-    let parse = |s| logos_lex(s).len(); // Just use `.len` to consume the lexer iterator
+    let parse = logos_lex;
     c.bench_function("logos-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
     c.bench_function("logos-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("logos-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
