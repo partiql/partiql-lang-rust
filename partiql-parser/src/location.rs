@@ -57,6 +57,9 @@ macro_rules! impl_pos {
 }
 
 /// A 0-indexed byte offset, relative to some other position.
+///
+/// This type is small (u16 currently) to allow it to be included in ASTs and other
+/// data structures.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct ByteOffset(pub u16);
 impl_pos!(ByteOffset, u16);
@@ -76,6 +79,9 @@ pub struct CharOffset(pub u16);
 impl_pos!(CharOffset, u16);
 
 /// A 0-indexed byte absolute position (i.e., relative to the start of a &str)
+///
+/// This type is small (u16 currently) to allow it to be included in ASTs and other
+/// data structures.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct BytePosition(pub ByteOffset);
 
@@ -193,7 +199,7 @@ mod tests {
         let bp2 = ByteOffset::from_usize(15);
 
         assert_eq!(20, (bp1 + bp2).to_usize());
-        assert_eq!(ByteOffset(10), (bp2 - 5).into());
+        assert_eq!(ByteOffset(10), bp2 - 5);
     }
 
     #[test]
@@ -202,7 +208,7 @@ mod tests {
         let lp2 = LineOffset::from_usize(15);
 
         assert_eq!(20, (lp1 + lp2).to_usize());
-        assert_eq!(LineOffset(10), (lp2 - 5).into());
+        assert_eq!(LineOffset(10), lp2 - 5);
     }
 
     #[test]
@@ -211,7 +217,7 @@ mod tests {
         let cp2 = CharOffset::from_usize(15);
 
         assert_eq!(20, (cp1 + cp2).to_usize());
-        assert_eq!(CharOffset(10), (cp2 - 5).into());
+        assert_eq!(CharOffset(10), cp2 - 5);
     }
 
     #[test]

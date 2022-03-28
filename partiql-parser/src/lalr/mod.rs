@@ -11,7 +11,7 @@
 //! ```
 //!
 //! [partiql]: https://partiql.org
-use crate::lalr::lexer::{LexicalToken, PartiqlLexer};
+use crate::lalr::lexer::{PartiqlLexer, PartiqlToken};
 use lalrpop_util::ParseError;
 use partiql_ast::experimental::ast;
 
@@ -47,7 +47,7 @@ pub fn parse_partiql(s: &str) -> ParseResult {
 /// Lex a text PartiQL query.
 // TODO make private
 #[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql(s: &str) -> Vec<LexicalToken> {
+pub fn lex_partiql(s: &str) -> Vec<PartiqlToken> {
     let mut counter = LineOffsetTracker::default();
     PartiqlLexer::new(s, &mut counter).collect()
 }
