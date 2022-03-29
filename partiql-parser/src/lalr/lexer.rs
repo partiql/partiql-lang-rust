@@ -133,6 +133,10 @@ pub enum LexError {
 }
 
 /// A block comment string (e.g. `"/* comment here */"`) with [`ByteOffset`] span relative to lexed source.
+///
+/// Note:
+/// - The returned string includes the comment start (`/*`) and end (`*/`) tokens.
+/// - The returned ByteOffset span includes the comment start (`/*`) and end (`*/`) tokens.
 type CommentStringResult = SpannedResult<String, ByteOffset, LexError>;
 
 /// Tokens used to parse block comment
@@ -226,8 +230,13 @@ impl<'a> Iterator for CommentLexer<'a> {
     }
 }
 
-/// An embedded Ion string (e.g. `\`[{a: 1}, {b: 2}]\``) with [`ByteOffset`] span
+/// An embedded Ion string (e.g. `[{a: 1}, {b: 2}]`) with [`ByteOffset`] span
 /// relative to lexed source.
+///
+///  Note:
+/// - The lexer parses the embedded ion value enclosed in backticks.
+/// - The returned string *does not* include the backticks
+/// - The returned ByteOffset span *does* include the backticks
 type EmbeddedIonStringResult = SpannedResult<String, ByteOffset, LexError>;
 
 /// Tokens used to parse Ion literals embedded in backticks (\`)
@@ -326,7 +335,8 @@ impl<'a> EmbeddedIonLexer<'a> {
                     }
                 }
                 let Span { end, .. } = self.lexer.span();
-                let ion_value = self.lexer.source()[start..end].to_owned();
+                let (str_start, str_end) = (start + 1, end - 1);
+                let ion_value = self.lexer.source()[str_start..str_end].to_owned();
 
                 Some(Ok((start.into(), ion_value, end.into())))
             }
@@ -389,7 +399,7 @@ impl<'a> PartiqlLexer<'a> {
                     ion_lexer.next().map(|res| match res {
                         Ok((s, ion, e)) => {
                             self.lexer.bump((e - s).to_usize() - embed_span.len());
-                            Ok((embed_span.start.into(), Token::Ion(ion), e))
+                            Ok((embed_span.end.into(), Token::Ion(ion), e - 1))
                         }
                         Err((_s, err, e)) => Err((embed_span.start.into(), err, e)),
                     })
@@ -651,16 +661,12 @@ mod tests {
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(
-            matches!(tok, (ByteOffset(1), Token::Ion(ion_str), ByteOffset(17)) if ion_str == ion_value.trim())
+            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(16)) if ion_str == ion_value.trim().trim_matches('`'))
         );
 
         let mut offset_tracker = LineOffsetTracker::default();
-        assert_eq!(
-            EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker)
-                .into_iter()
-                .count(),
-            1
-        );
+        let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
+        assert_eq!(ion_lexer.into_iter().count(), 1);
         assert_eq!(offset_tracker.num_lines(), 1);
     }
 
@@ -676,17 +682,13 @@ mod tests {
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(
-            matches!(tok, (ByteOffset(1), Token::Ion(ion_str), ByteOffset(154)) if ion_str == ion_value.trim())
+            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(153)) if ion_str == ion_value.trim().trim_matches('`'))
         );
         assert_eq!(offset_tracker.num_lines(), 5);
 
         let mut offset_tracker = LineOffsetTracker::default();
-        assert_eq!(
-            EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker)
-                .into_iter()
-                .count(),
-            1
-        );
+        let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
+        assert_eq!(ion_lexer.into_iter().count(), 1);
         assert_eq!(offset_tracker.num_lines(), 5);
     }
 
