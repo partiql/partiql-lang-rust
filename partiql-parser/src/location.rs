@@ -58,16 +58,16 @@ macro_rules! impl_pos {
 
 /// A 0-indexed byte offset, relative to some other position.
 ///
-/// This type is small (u16 currently) to allow it to be included in ASTs and other
+/// This type is small (u32 currently) to allow it to be included in ASTs and other
 /// data structures.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct ByteOffset(pub u16);
-impl_pos!(ByteOffset, u16);
+pub struct ByteOffset(pub u32);
+impl_pos!(ByteOffset, u32);
 
 /// A 0-indexed line offset, relative to some other position.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct LineOffset(pub u16);
-impl_pos!(LineOffset, u16);
+pub struct LineOffset(pub u32);
+impl_pos!(LineOffset, u32);
 
 /// A 0-indexed char offset, relative to some other position.
 ///
@@ -75,8 +75,8 @@ impl_pos!(LineOffset, u16);
 /// from [`ByteOffset`] for a given location in a &str if the string contains
 /// non-ASCII unicode characters
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct CharOffset(pub u16);
-impl_pos!(CharOffset, u16);
+pub struct CharOffset(pub u32);
+impl_pos!(CharOffset, u32);
 
 /// A 0-indexed byte absolute position (i.e., relative to the start of a &str)
 ///
