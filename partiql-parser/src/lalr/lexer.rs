@@ -1,4 +1,4 @@
-use crate::location::{ByteOffset, LineAndCharPosition, LineOffset};
+use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 
 use logos::{Logos, Span};
 use smallvec::{smallvec, SmallVec};
@@ -25,9 +25,9 @@ use thiserror::Error;
 ///
 /// // We added 3 newlines, so there should be 4 lines of source
 /// assert_eq!(tracker.num_lines(), 4);
-/// assert_eq!(tracker.at(source, ByteOffset(0)), LineAndCharPosition::new(0,0));
-/// assert_eq!(tracker.at(source, ByteOffset(6)), LineAndCharPosition::new(1,0));
-/// assert_eq!(tracker.at(source, ByteOffset(30)), LineAndCharPosition::new(3,4));
+/// assert_eq!(tracker.at(source, ByteOffset(0).into()), LineAndCharPosition::new(0,0));
+/// assert_eq!(tracker.at(source, ByteOffset(6).into()), LineAndCharPosition::new(1,0));
+/// assert_eq!(tracker.at(source, ByteOffset(30).into()), LineAndCharPosition::new(3,4));
 /// ```
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
@@ -92,7 +92,7 @@ impl LineOffsetTracker {
     ///  - `offset` is larger than the byte length of `source`, or
     ///  - `offset` falls inside a unicode codepoint
     #[inline]
-    pub fn at(&self, source: &str, offset: ByteOffset) -> LineAndCharPosition {
+    pub fn at(&self, source: &str, BytePosition(offset): BytePosition) -> LineAndCharPosition {
         if let ByteOffset(0) = offset {
             LineAndCharPosition::new(0, 0)
         } else {
@@ -759,7 +759,7 @@ mod tests {
         let offset_r_a = query.rfind('a').unwrap();
         let offset_r_n = query.rfind('\n').unwrap();
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, ByteOffset::from(query.len()) - 1)),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(query.len() - 1))),
             LineAndColumn::new(3, offset_r_a - offset_r_n).unwrap()
         );
 
@@ -832,7 +832,7 @@ mod tests {
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         lexer.count();
 
-        offset_tracker.at(query, ByteOffset(1));
+        offset_tracker.at(query, ByteOffset(1).into());
     }
 
     #[test]
@@ -915,7 +915,7 @@ mod tests {
             "Lexing error: unterminated ion literal"
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 1.into())),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1))),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -934,7 +934,7 @@ mod tests {
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 1.into())),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1))),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -953,7 +953,7 @@ mod tests {
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 2.into())),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(2))),
             LineAndColumn::new(1, 3).unwrap()
         );
     }

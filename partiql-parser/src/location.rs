@@ -85,6 +85,18 @@ impl_pos!(CharOffset, u32);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct BytePosition(pub ByteOffset);
 
+impl From<ByteOffset> for BytePosition {
+    fn from(offset: ByteOffset) -> Self {
+        Self(offset)
+    }
+}
+
+impl From<usize> for BytePosition {
+    fn from(offset: usize) -> Self {
+        Self(offset.into())
+    }
+}
+
 /// A 0-indexed line & char absolute position (i.e., relative to the start of a &str)
 ///
 /// ## Example
