@@ -4,6 +4,7 @@ use crate::lalr::lexer;
 use partiql_ast::experimental::ast;
 
 use crate::lalr::util::{var_ref};
+use crate::location::ByteOffset;
 
 grammar;
 
@@ -97,7 +98,7 @@ SelectClause: ast::Projection = {
         ast::Projection{ kind: ast::ProjectionKind::ProjectPivot( ast::ProjectPivot{ value, key } ) }
     }
 }
-
+#[inline]
 Projection: ast::ProjectItem = {
     <expr:ExprQuery>
         => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ) },
@@ -137,6 +138,8 @@ TableNonJoin: ast::FromClause = {
     <t:TableBaseReference> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
     <t:TableUnpivot> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
 }
+
+#[inline]
 TableBaseReference: ast::FromLet = {
     <e:ExprQuery> => {
         ast::FromLet {
@@ -158,6 +161,7 @@ TableBaseReference: ast::FromLet = {
     }
 }
 
+#[inline]
 TableUnpivot: ast::FromLet = {
     "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
         ast::FromLet {
@@ -175,6 +179,8 @@ TableJoined: ast::FromClause = {
     <TableQualifiedJoin>,
     "(" <TableJoined> ")",
 }
+
+#[inline]
 TableCrossJoin: ast::FromClause = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
@@ -189,6 +195,8 @@ TableCrossJoin: ast::FromClause = {
         ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
     }
 }
+
+#[inline]
 TableQualifiedJoin: ast::FromClause = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
@@ -256,6 +264,7 @@ GroupStrategy: ast::GroupingStrategy = {
         }
     }
 }
+#[inline]
 GroupKey: ast::GroupKey = {
     <expr:ExprQuery>
         => ast::GroupKey{ expr, as_alias: None },
@@ -285,6 +294,7 @@ OrderByClause: Box<ast::OrderByExpr> = {
     "ORDER" "BY" "PRESERVE" => Box::new( ast::OrderByExpr{ sort_specs: vec![] } ),
     "ORDER" "BY" <sort_specs: CommaSep<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
 }
+#[inline]
 OrderSortSpec: ast::SortSpec = {
     <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?>
         => ast::SortSpec { expr, ordering_spec, null_ordering_spec }
@@ -466,16 +476,20 @@ ExprPrecedence04: ast::Expr = {
 }
 
 ExprPrecedence03: ast::Expr = {
-    "+" <r:ExprPrecedence02> =>
+    "+" <r:ExprPrecedence03> =>
        ast::Expr{ kind: ast::ExprKind::Pos( ast::Pos{ expr: Box::new(r) } ) },
-    "-" <r:ExprPrecedence02> =>
+    "-" <r:ExprPrecedence03> =>
        ast::Expr{ kind: ast::ExprKind::Neg( ast::Neg{ expr: Box::new(r) } ) },
     <ExprPrecedence02>,
 }
+
+#[inline]
 ExprPrecedence02: ast::Expr = {
     <call:FunctionCall> => ast::Expr{ kind: ast::ExprKind::Call( call ) },
     <ExprPrecedence01>,
 }
+
+#[inline]
 ExprPrecedence01: ast::Expr = {<ExprTerm>,}
 
 pub ExprTerm: ast::Expr = {
@@ -491,11 +505,11 @@ ExprPair: ast::ExprPair = {
     <first:ExprQuery> ":" <second:ExprQuery> => ast::ExprPair{ first, second },
 }
 
+#[inline]
 FunctionCall: ast::Call = {
     <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name }, args }
 }
-
 
 PathExpr: ast::Path = {
     <path:PathExpr> "." <ident:"Identifier"> => {
@@ -605,8 +619,8 @@ CommaSep<T>: Vec<T> = {
 //
 // See also http://lalrpop.github.io/lalrpop/lexer_tutorial/002_writing_custom_lexer.html
 extern {
-    type Location = usize;
-    type Error = lexer::LexicalError;
+    type Location = ByteOffset;
+    type Error = (ByteOffset, lexer::LexError, ByteOffset);
 
     enum lexer::Token {
 

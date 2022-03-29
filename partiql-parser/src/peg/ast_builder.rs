@@ -1,5 +1,5 @@
 use crate::peg::grammar::Rule;
-use crate::prelude::ParserError;
+use crate::result::ParserError;
 use crate::result::ParserResult;
 use itertools::Itertools;
 use partiql_ast::experimental::ast;

@@ -5,18 +5,19 @@
 //! # Usage
 //!
 //! ```
-//! use partiql_parser::{LalrParseResult, lalr_parse};
+//! use partiql_parser::{LalrParserResult, lalr_parse};
 //!
 //!     lalr_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
 //! ```
 //!
 //! [partiql]: https://partiql.org
-use crate::lalr::lexer::{LexicalToken, PartiqlLexer};
+use crate::lalr::lexer::PartiqlLexer;
 use lalrpop_util::ParseError;
 use partiql_ast::experimental::ast;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
+#[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::vec_box)]
 #[allow(unused_variables)]
@@ -24,32 +25,76 @@ use partiql_ast::experimental::ast;
 mod grammar {
     include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
 }
-//lalrpop_mod!(pub partiql); // synthesized by LALRPOP
+
 mod lexer;
 mod util;
 
+use crate::location::ByteOffset;
+use crate::result::ParserError;
+pub use lexer::LexError;
 pub use lexer::LineOffsetTracker;
+pub use lexer::Spanned;
+pub use lexer::Token;
 
-pub type ParseResult = Result<Box<ast::Expr>, ParseError<usize, lexer::Token, lexer::LexicalError>>;
+type LexerError = (ByteOffset, lexer::LexError, ByteOffset);
+type LalrpopError = ParseError<ByteOffset, lexer::Token, LexerError>;
+pub type ParserResult = Result<Box<ast::Expr>, ParserError>;
 
 /// Parse a text PartiQL query.
-pub fn parse_partiql(s: &str) -> ParseResult {
+pub fn parse_partiql(s: &str) -> ParserResult {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PartiqlLexer::new(s, &mut offsets);
-    grammar::QueryParser::new().parse(lexer)
+    Ok(grammar::QueryParser::new().parse(lexer)?)
+}
+
+impl From<lalrpop_util::ParseError<ByteOffset, lexer::Token, LexerError>> for ParserError {
+    #[inline]
+    fn from(error: LalrpopError) -> Self {
+        match error {
+            lalrpop_util::ParseError::UnrecognizedToken { token, expected: _ } => {
+                ParserError::UnexpectedToken { token }
+            }
+            _ => todo!(),
+        }
+    }
 }
 
 /// Lex a text PartiQL query.
 // TODO make private
 #[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql(s: &str) -> Vec<LexicalToken> {
+pub fn lex_partiql(
+    s: &str,
+) -> Result<Vec<Spanned<Token, ByteOffset>>, Spanned<LexError, ByteOffset>> {
     let mut counter = LineOffsetTracker::default();
-    PartiqlLexer::new(s, &mut counter).collect()
+    PartiqlLexer::new(s, &mut counter).collect::<Result<Vec<_>, _>>()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod lex {
+        use super::*;
+
+        #[test]
+        fn offset() {
+            let lexed = lex_partiql(r#"SELECT * FROM a OFFSET 10"#);
+            assert!(lexed.is_ok());
+            let lexed = lexed.unwrap();
+
+            assert_eq!(
+                vec![
+                    Token::Select,
+                    Token::Star,
+                    Token::From,
+                    Token::Identifier("a".to_owned()),
+                    Token::Offset,
+                    Token::Int("10".to_owned()),
+                ],
+                lexed.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+            );
+        }
+    }
 
     macro_rules! parse {
         ($q:expr) => {{
@@ -309,10 +354,11 @@ mod tests {
             let res = parse_partiql(r#"SELECT * FROM a AS a AT b"#);
             assert!(res.is_err());
             let error = res.unwrap_err();
+            assert_eq!("Unexpected token [At] at [TODO]", error.to_string());
             assert!(matches!(
                 error,
-                lalrpop_util::ParseError::UnrecognizedToken {
-                    token: (21, Token::At, 23),
+                ParserError::UnexpectedToken {
+                    token: (ByteOffset(21), Token::At, ByteOffset(23)),
                     ..
                 }
             ));
