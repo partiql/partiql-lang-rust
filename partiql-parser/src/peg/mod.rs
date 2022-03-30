@@ -39,7 +39,7 @@ pub fn parse_partiql_to_ast(input: &str) -> ParserResult<Box<ast::Expr>> {
     build_query(parse_partiql(input)?)
 }
 
-impl<R> From<pest::error::Error<R>> for ParserError
+impl<R> From<pest::error::Error<R>> for ParserError<'static>
 where
     R: fmt::Debug,
 {

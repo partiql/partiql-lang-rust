@@ -18,6 +18,7 @@ use partiql_ast::experimental::ast;
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
 #[allow(clippy::type_complexity)]
+#[allow(clippy::needless_lifetimes)]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::vec_box)]
 #[allow(unused_variables)]
@@ -37,19 +38,19 @@ pub use lexer::Spanned;
 pub use lexer::Token;
 
 type LexerError = (ByteOffset, lexer::LexError, ByteOffset);
-type LalrpopError = ParseError<ByteOffset, lexer::Token, LexerError>;
-pub type ParserResult = Result<Box<ast::Expr>, ParserError>;
+type LalrpopError<'input> = ParseError<ByteOffset, lexer::Token<'input>, LexerError>;
+pub type ParserResult<'input> = Result<Box<ast::Expr>, ParserError<'input>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParserResult {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PartiqlLexer::new(s, &mut offsets);
-    Ok(grammar::QueryParser::new().parse(lexer)?)
+    Ok(grammar::QueryParser::new().parse(s, lexer)?)
 }
 
-impl From<lalrpop_util::ParseError<ByteOffset, lexer::Token, LexerError>> for ParserError {
+impl<'input> From<LalrpopError<'input>> for ParserError<'input> {
     #[inline]
-    fn from(error: LalrpopError) -> Self {
+    fn from(error: LalrpopError<'input>) -> Self {
         match error {
             lalrpop_util::ParseError::UnrecognizedToken { token, expected: _ } => {
                 ParserError::UnexpectedToken { token }
@@ -87,9 +88,9 @@ mod tests {
                     Token::Select,
                     Token::Star,
                     Token::From,
-                    Token::Identifier("a".to_owned()),
+                    Token::Identifier("a"),
                     Token::Offset,
-                    Token::Int("10".to_owned()),
+                    Token::Int("10"),
                 ],
                 lexed.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
             );
@@ -114,7 +115,7 @@ mod tests {
             ($q:expr) => {{
                 let mut offsets = LineOffsetTracker::default();
                 let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::LiteralParser::new().parse(lexer);
+                let res = grammar::LiteralParser::new().parse($q, lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -193,7 +194,7 @@ mod tests {
             ($q:expr) => {{
                 let mut offsets = LineOffsetTracker::default();
                 let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::ExprTermParser::new().parse(lexer);
+                let res = grammar::ExprTermParser::new().parse($q, lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
