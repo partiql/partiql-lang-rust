@@ -506,16 +506,16 @@ FunctionCall: ast::Call = {
 PathExpr: ast::Path = {
     <path:PathExpr> "." <ident:"Identifier"> => {
         let step = ast::PathStep::PathExpr(
-                ast::PathExpr{
-                    index: Box::new(ast::Expr{
-                        kind: ast::ExprKind::VarRef(ast::VarRef {
-                            name: ast::SymbolPrimitive { value: ident.to_owned() },
-                            case: ast::CaseSensitivity::CaseInsensitive,
-                            qualifier: ast::ScopeQualifier::Unqualified
-                        }),
+            ast::PathExpr{
+                index: Box::new(ast::Expr{
+                    kind: ast::ExprKind::VarRef(ast::VarRef {
+                        name: ast::SymbolPrimitive { value: ident.to_owned() },
+                        case: ast::CaseSensitivity::CaseInsensitive,
+                        qualifier: ast::ScopeQualifier::Unqualified
                     }),
-                    case: ast::CaseSensitivity::CaseInsensitive,
-                });
+                }),
+                case: ast::CaseSensitivity::CaseInsensitive,
+            });
 
         let mut steps = path.steps;
         steps.push(step);
