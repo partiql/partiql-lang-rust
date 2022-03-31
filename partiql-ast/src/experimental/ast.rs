@@ -595,6 +595,7 @@ pub enum FromClause {
     FromLet(FromLet),
     /// <from_source> JOIN [INNER | LEFT | RIGHT | FULL] <from_source> ON <expr>
     Join(Join),
+    Error,
 }
 
 #[derive(Clone, Debug, PartialEq)]

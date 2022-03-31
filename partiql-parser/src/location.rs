@@ -175,31 +175,6 @@ impl fmt::Display for LineAndColumn {
     }
 }
 
-/// A possible position in the source.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct Position(Option<LineAndColumn>);
-
-impl From<Option<LineAndColumn>> for Position {
-    fn from(loc: Option<LineAndColumn>) -> Self {
-        Position(loc)
-    }
-}
-
-impl From<LineAndColumn> for Position {
-    fn from(loc: LineAndColumn) -> Self {
-        Some(loc).into()
-    }
-}
-
-impl fmt::Display for Position {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            None => write!(f, "unknown position"),
-            Some(location) => write!(f, "{}", location),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,21 +227,5 @@ mod tests {
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
         assert_eq!("line 14, column 43", format!("{}", display))
-    }
-
-    #[test]
-    fn position() {
-        assert_eq!(Position(None), None.into());
-        assert_eq!(Position(None), LineAndColumn::new(0, 0).into());
-        let lac = LineAndColumn {
-            line: unsafe { NonZeroUsize::new_unchecked(5) },
-            column: unsafe { NonZeroUsize::new_unchecked(6) },
-        };
-        assert_eq!(Position(Some(lac)), LineAndColumn::new(5, 6).into());
-        assert_eq!("unknown position", format!("{}", Position(None)));
-        assert_eq!(
-            "line 4, column 5",
-            format!("{}", Position(Some(LineAndCharPosition::new(3, 4).into())))
-        );
     }
 }
