@@ -147,13 +147,7 @@ pub struct OnConflict {
 
 /// `CONFLICT_ACTION <action>`
 #[derive(Clone, Debug, PartialEq)]
-pub struct ConflictAction {
-    pub kind: ConflictActionKind,
-}
-
-/// `CONFLICT_ACTION <action>`
-#[derive(Clone, Debug, PartialEq)]
-pub enum ConflictActionKind {
+pub enum ConflictAction {
     DonNothing,
 }
 
@@ -530,12 +524,7 @@ pub struct TimeValue {
 
 /// A "step" within a path expression; that is the components of the expression following the root.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PathStep {
-    pub kind: PathStepKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum PathStepKind {
+pub enum PathStep {
     PathExpr(PathExpr),
     PathWildCard,
     PathUnpivot,
@@ -549,39 +538,18 @@ pub struct PathExpr {
 
 /// Is used to determine if variable lookup should be case-sensitive or not.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CaseSensitivity {
-    pub kind: CaseSensitivityKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CaseSensitivityKind {
+pub enum CaseSensitivity {
     CaseSensitive,
     CaseInsensitive,
 }
 
 /// Indicates the type of projection in a SFW query.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Projection {
-    pub kind: ProjectionKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProjectionKind {
+pub enum Projection {
     ProjectStar,
-    ProjectList(ProjectList),
-    ProjectPivot(ProjectPivot),
-    ProjectValue(ProjectValue),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectList {
-    pub project_items: Vec<ProjectItem>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectPivot {
-    pub value: Box<Expr>,
-    pub key: Box<Expr>,
+    ProjectList(Vec<ProjectItem>),
+    ProjectPivot { key: Box<Expr>, value: Box<Expr> },
+    ProjectValue(Box<Expr>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -591,12 +559,7 @@ pub struct ProjectValue {
 
 /// An item to be projected in a `SELECT`-list.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProjectItem {
-    pub kind: ProjectItemKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ProjectItemKind {
+pub enum ProjectItem {
     /// For `.*` in SELECT list
     ProjectAll(ProjectAll),
     /// For `<expr> [AS <id>]`
@@ -628,12 +591,7 @@ pub struct LetBinding {
 
 /// FROM clause of an SFW query
 #[derive(Clone, Debug, PartialEq)]
-pub struct FromClause {
-    pub kind: FromClauseKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum FromClauseKind {
+pub enum FromClause {
     FromLet(FromLet),
     /// <from_source> JOIN [INNER | LEFT | RIGHT | FULL] <from_source> ON <expr>
     Join(Join),
@@ -707,12 +665,7 @@ pub struct GroupByExpr {
 /// Desired grouping qualifier:  ALL or PARTIAL.  Note: the `group_` prefix is
 /// needed to avoid naming clashes.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GroupingStrategy {
-    pub kind: GroupingStrategyKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum GroupingStrategyKind {
+pub enum GroupingStrategy {
     GroupFull,
     GroupPartial,
 }
@@ -745,23 +698,13 @@ pub struct SortSpec {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct OrderingSpec {
-    pub kind: OrderingSpecKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum OrderingSpecKind {
+pub enum OrderingSpec {
     Asc,
     Desc,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NullOrderingSpec {
-    pub kind: NullOrderingSpecKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum NullOrderingSpecKind {
+pub enum NullOrderingSpec {
     First,
     Last,
 }
@@ -769,12 +712,7 @@ pub enum NullOrderingSpecKind {
 /// Indicates scope search order when resolving variables.
 /// Has no effect except within `FROM` sources.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ScopeQualifier {
-    pub kind: ScopeQualifierKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ScopeQualifierKind {
+pub enum ScopeQualifier {
     /// Use the default search order.
     Unqualified,
     /// Skip the globals, first check within FROM sources and resolve starting with the local scope.
@@ -783,12 +721,7 @@ pub enum ScopeQualifierKind {
 
 /// Indicates if a set should be reduced to its distinct elements or not.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SetQuantifier {
-    pub kind: SetQuantifierKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum SetQuantifierKind {
+pub enum SetQuantifier {
     All,
     Distinct,
 }
@@ -807,12 +740,7 @@ pub struct ReturningElem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ColumnComponent {
-    pub kind: ColumnComponentKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ColumnComponentKind {
+pub enum ColumnComponent {
     ReturningWildcard,
     ReturningColumn(ReturningColumn),
 }
@@ -824,12 +752,7 @@ pub struct ReturningColumn {
 
 /// ( MODIFIED | ALL ) ( NEW | OLD )
 #[derive(Clone, Debug, PartialEq)]
-pub struct ReturningMapping {
-    pub kind: ReturningMappingKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ReturningMappingKind {
+pub enum ReturningMapping {
     ModifiedNew,
     ModifiedOld,
     AllNew,
@@ -862,12 +785,7 @@ pub struct Assignment {
 
 /// Represents all possible PartiQL data types.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Type {
-    pub kind: TypeKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum TypeKind {
+pub enum Type {
     NullType,
     BooleanType,
     Integer2Type,

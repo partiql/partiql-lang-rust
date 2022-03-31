@@ -3,7 +3,7 @@ use crate::result::ParserError;
 use crate::result::ParserResult;
 use itertools::Itertools;
 use partiql_ast::experimental::ast;
-use partiql_ast::experimental::ast::{FromClause, FromClauseKind, JoinKind, JoinSpec, Lit};
+use partiql_ast::experimental::ast::{FromClause, JoinKind, JoinSpec, Lit};
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
 
@@ -72,13 +72,9 @@ pub(crate) fn build_group_by_clause(pairs: Pairs<Rule>) -> ParserResult<Box<ast:
     let mut next = parts.pop().unwrap();
     let strategy = if let Rule::group_all = next.as_rule() {
         next = parts.pop().unwrap();
-        ast::GroupingStrategy {
-            kind: ast::GroupingStrategyKind::GroupFull,
-        }
+        ast::GroupingStrategy::GroupFull
     } else {
-        ast::GroupingStrategy {
-            kind: ast::GroupingStrategyKind::GroupPartial,
-        }
+        ast::GroupingStrategy::GroupPartial
     };
 
     let keys = next
@@ -135,19 +131,19 @@ pub(crate) fn build_order_sort_spec(mut pairs: Pairs<Rule>) -> ParserResult<ast:
         match pair.as_rule() {
             Rule::order_by_spec => {
                 let kind = if pair.as_str().to_lowercase() == "asc" {
-                    ast::OrderingSpecKind::Asc
+                    ast::OrderingSpec::Asc
                 } else {
-                    ast::OrderingSpecKind::Desc
+                    ast::OrderingSpec::Desc
                 };
-                ordering_spec = Some(ast::OrderingSpec { kind })
+                ordering_spec = Some(kind)
             }
             Rule::order_by_null_spec => {
                 let kind = if pair.as_str().to_lowercase().contains("first") {
-                    ast::NullOrderingSpecKind::First
+                    ast::NullOrderingSpec::First
                 } else {
-                    ast::NullOrderingSpecKind::Last
+                    ast::NullOrderingSpec::Last
                 };
-                null_ordering_spec = Some(ast::NullOrderingSpec { kind })
+                null_ordering_spec = Some(kind)
             }
             _ => todo!("Unhandled rule [{:?}]", pair.as_rule()),
         }
@@ -192,19 +188,14 @@ pub(crate) fn build_select_clause(mut pairs: Pairs<Rule>) -> ParserResult<ast::P
                         let as_alias = parts.next().map(|pair| ast::SymbolPrimitive {
                             value: pair.as_str().trim_matches('"').to_string(),
                         });
-                        expr.map(|expr| ast::ProjectItem {
-                            kind: ast::ProjectItemKind::ProjectExpr(ast::ProjectExpr {
-                                expr,
-                                as_alias,
-                            }),
+                        expr.map(|expr| {
+                            ast::ProjectItem::ProjectExpr(ast::ProjectExpr { expr, as_alias })
                         })
                     }
                     _ => todo!("Unhandled rule [{:?}]", rule),
                 })
                 .collect::<ParserResult<Vec<_>>>()?;
-            Ok(ast::Projection {
-                kind: ast::ProjectionKind::ProjectList(ast::ProjectList { project_items }),
-            })
+            Ok(ast::Projection::ProjectList(project_items))
         }
         _ => todo!("Unhandled rule [{:?}]", rule),
     }
@@ -224,9 +215,7 @@ pub(crate) fn build_from_clause(pairs: Pairs<Rule>) -> ParserResult<ast::FromCla
                 right: Box::new(rfrom),
                 predicate: None,
             };
-            ast::FromClause {
-                kind: ast::FromClauseKind::Join(join),
-            }
+            ast::FromClause::Join(join)
         })
         .unwrap(); // safe, because we know there's at least 1 input
     Ok(from)
@@ -251,14 +240,14 @@ fn build_table_unpivot(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserError
     let at_alias = pairs.next().map(|pair| ast::SymbolPrimitive {
         value: pair.as_str().trim_matches('"').to_string(),
     });
-    expr.map(|expr| ast::FromClause {
-        kind: FromClauseKind::FromLet(ast::FromLet {
+    expr.map(|expr| {
+        ast::FromClause::FromLet(ast::FromLet {
             kind: ast::FromLetKind::Unpivot,
             expr,
             as_alias,
             at_alias,
             by_alias: None,
-        }),
+        })
     })
 }
 
@@ -267,14 +256,14 @@ fn build_table_base_reference(mut pairs: Pairs<Rule>) -> Result<FromClause, Pars
     let as_alias = pairs.next().map(|pair| ast::SymbolPrimitive {
         value: pair.as_str().trim_matches('"').to_string(),
     });
-    expr.map(|expr| ast::FromClause {
-        kind: FromClauseKind::FromLet(ast::FromLet {
+    expr.map(|expr| {
+        ast::FromClause::FromLet(ast::FromLet {
             kind: ast::FromLetKind::Scan,
             expr,
             as_alias,
             at_alias: None,
             by_alias: None,
-        }),
+        })
     })
 }
 
@@ -339,14 +328,12 @@ fn build_table_join_spec(pairs: Pairs<Rule>) -> Result<FromClause, ParserError> 
     };
     let left = build_table_base_reference(parts.pop().unwrap().into_inner())?;
 
-    Ok(ast::FromClause {
-        kind: FromClauseKind::Join(ast::Join {
-            kind,
-            left: Box::new(left),
-            right: Box::new(right),
-            predicate: Some(spec),
-        }),
-    })
+    Ok(ast::FromClause::Join(ast::Join {
+        kind,
+        left: Box::new(left),
+        right: Box::new(right),
+        predicate: Some(spec),
+    }))
 }
 
 fn build_table_natural_join(pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
@@ -381,28 +368,24 @@ fn build_table_natural_join(pairs: Pairs<Rule>) -> Result<FromClause, ParserErro
     };
     let left = build_table_base_reference(parts.pop().unwrap().into_inner())?;
 
-    Ok(ast::FromClause {
-        kind: FromClauseKind::Join(ast::Join {
-            kind,
-            left: Box::new(left),
-            right: Box::new(right),
-            predicate: None,
-        }),
-    })
+    Ok(ast::FromClause::Join(ast::Join {
+        kind,
+        left: Box::new(left),
+        right: Box::new(right),
+        predicate: None,
+    }))
 }
 
 fn build_table_cross_join(mut pairs: Pairs<Rule>) -> Result<FromClause, ParserError> {
     let left = build_table_base_reference(pairs.next().unwrap().into_inner())?;
     let right = build_table_reference(pairs.next().unwrap())?;
 
-    Ok(ast::FromClause {
-        kind: FromClauseKind::Join(ast::Join {
-            kind: ast::JoinKind::Cross,
-            left: Box::new(left),
-            right: Box::new(right),
-            predicate: None,
-        }),
-    })
+    Ok(ast::FromClause::Join(ast::Join {
+        kind: ast::JoinKind::Cross,
+        left: Box::new(left),
+        right: Box::new(right),
+        predicate: None,
+    }))
 }
 
 pub(crate) fn build_expr_query(pairs: Pairs<Rule>) -> ParserResult<Box<ast::Expr>> {
@@ -608,12 +591,8 @@ pub(crate) fn build_path_expr(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::E
                         name: ast::SymbolPrimitive {
                             value: pair.as_str().trim_matches('"').to_string(),
                         },
-                        case: ast::CaseSensitivity {
-                            kind: ast::CaseSensitivityKind::CaseInsensitive,
-                        },
-                        qualifier: ast::ScopeQualifier {
-                            kind: ast::ScopeQualifierKind::Unqualified,
-                        },
+                        case: ast::CaseSensitivity::CaseInsensitive,
+                        qualifier: ast::ScopeQualifier::Unqualified,
                     }),
                 };
                 Ok(Box::new(ast::Expr {
@@ -631,12 +610,8 @@ pub(crate) fn build_path_expr(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::E
                 name: ast::SymbolPrimitive {
                     value: "*".to_string(),
                 },
-                case: ast::CaseSensitivity {
-                    kind: ast::CaseSensitivityKind::CaseInsensitive,
-                },
-                qualifier: ast::ScopeQualifier {
-                    kind: ast::ScopeQualifierKind::Unqualified,
-                },
+                case: ast::CaseSensitivity::CaseInsensitive,
+                qualifier: ast::ScopeQualifier::Unqualified,
             }),
         };
         Ok(Box::new(ast::Expr {

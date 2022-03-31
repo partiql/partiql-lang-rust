@@ -3,7 +3,6 @@ use std::str::FromStr;
 use crate::lalr::lexer;
 use partiql_ast::experimental::ast;
 
-use crate::lalr::util::{var_ref};
 use crate::location::ByteOffset;
 
 grammar<'input>(input: &'input str);
@@ -12,7 +11,6 @@ pub Query: Box<ast::Expr> = {
     <ExprQuery>,
     <sfw:SfwQuery> => Box::new( ast::Expr{ kind: ast::ExprKind::Select(sfw) } )
 }
-
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -87,26 +85,22 @@ WithClause: () = {}
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::Projection = {
-    "SELECT" "*" => ast::Projection{ kind: ast::ProjectionKind::ProjectStar },
-    "SELECT" <project_items:CommaSep<Projection>> => {
-        ast::Projection{ kind: ast::ProjectionKind::ProjectList( ast::ProjectList{ project_items } ) }
-    },
-    "SELECT" "VALUE" <value:ExprQuery> => {
-        ast::Projection{ kind: ast::ProjectionKind::ProjectValue( ast::ProjectValue{ value } ) }
-    },
+    "SELECT" "*" => ast::Projection::ProjectStar,
+    "SELECT" <project_items:CommaSep<Projection>> => ast::Projection::ProjectList(project_items),
+    "SELECT" "VALUE" <value:ExprQuery> => ast::Projection::ProjectValue(value),
     "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> => {
-        ast::Projection{ kind: ast::ProjectionKind::ProjectPivot( ast::ProjectPivot{ value, key } ) }
-    }
+        ast::Projection::ProjectPivot { key, value }
+    },
 }
+
 #[inline]
 Projection: ast::ProjectItem = {
     <expr:ExprQuery>
-        => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ) },
+        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ),
     <expr:ExprQuery> "AS" <ident:"Identifier"> => {
         let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
-        ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ) }
+        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } )
     },
-
 }
 
 // ------------------------------------------------------------------------------ //
@@ -125,7 +119,7 @@ FromClause: ast::FromClause = {
                     right: Box::new(rfrom),
                     predicate: None
                 };
-                ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+                ast::FromClause::Join( join )
             })
             .unwrap() // safe, because we know there's at least 1 input
     }
@@ -135,8 +129,8 @@ TableReference: ast::FromClause = {
     <TableJoined>
 }
 TableNonJoin: ast::FromClause = {
-    <t:TableBaseReference> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
-    <t:TableUnpivot> => ast::FromClause{ kind: ast::FromClauseKind::FromLet( t ) },
+    <t:TableBaseReference> => ast::FromClause::FromLet( t ),
+    <t:TableUnpivot> => ast::FromClause::FromLet( t ),
 }
 
 #[inline]
@@ -192,7 +186,7 @@ TableCrossJoin: ast::FromClause = {
             right: Box::new(rtable),
             predicate: None
         };
-        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+        ast::FromClause::Join( join )
     }
 }
 
@@ -208,7 +202,7 @@ TableQualifiedJoin: ast::FromClause = {
             right: Box::new(rtable),
             predicate: Some(on),
         };
-        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+        ast::FromClause::Join( join )
     },
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
@@ -220,7 +214,7 @@ TableQualifiedJoin: ast::FromClause = {
             right: Box::new(rtable),
             predicate: Some(ast::JoinSpec::Natural)
         };
-        ast::FromClause{ kind: ast::FromClauseKind::Join( join ) }
+        ast::FromClause::Join( join )
     }
 }
 #[inline]
@@ -256,11 +250,9 @@ GroupClause: Box<ast::GroupByExpr> = {
 #[inline]
 GroupStrategy: ast::GroupingStrategy = {
     <all:"ALL"?> => {
-        ast::GroupingStrategy{
-            kind: match all {
-                Some(_) => ast::GroupingStrategyKind::GroupFull,
-                None => ast::GroupingStrategyKind::GroupPartial,
-            }
+        match all {
+            Some(_) => ast::GroupingStrategy::GroupFull,
+            None => ast::GroupingStrategy::GroupPartial,
         }
     }
 }
@@ -273,7 +265,7 @@ GroupKey: ast::GroupKey = {
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
-    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value: ident.to_owned() }
+    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value:ident.to_owned() }
 }
 
 // ------------------------------------------------------------------------------ //
@@ -301,13 +293,13 @@ OrderSortSpec: ast::SortSpec = {
 }
 #[inline]
 BySpec: ast::OrderingSpec = {
-    "ASC" => ast::OrderingSpec{ kind: ast::OrderingSpecKind::Asc },
-    "DESC" => ast::OrderingSpec{ kind: ast::OrderingSpecKind::Desc },
+    "ASC" => ast::OrderingSpec::Asc,
+    "DESC" => ast::OrderingSpec::Desc,
 }
 #[inline]
 ByNullSpec: ast::NullOrderingSpec = {
-    "NULLS" "FIRST" => ast::NullOrderingSpec{ kind: ast::NullOrderingSpecKind::First },
-    "NULLS" "LAST" => ast::NullOrderingSpec{ kind: ast::NullOrderingSpecKind::Last },
+    "NULLS" "FIRST" => ast::NullOrderingSpec::First,
+    "NULLS" "LAST" => ast::NullOrderingSpec::Last,
 }
 
 // ------------------------------------------------------------------------------ //
@@ -513,25 +505,40 @@ FunctionCall: ast::Call = {
 
 PathExpr: ast::Path = {
     <path:PathExpr> "." <ident:"Identifier"> => {
-        let step = ast::PathStep{
-            kind: ast::PathStepKind::PathExpr(
+        let step = ast::PathStep::PathExpr(
                 ast::PathExpr{
-                    index: Box::new(ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, false) ) }),
-                    case: ast::CaseSensitivity{ kind: ast::CaseSensitivityKind::CaseInsensitive }
-                }
-            )
-        };
+                    index: Box::new(ast::Expr{
+                        kind: ast::ExprKind::VarRef(ast::VarRef {
+                            name: ast::SymbolPrimitive { value: ident.to_owned() },
+                            case: ast::CaseSensitivity::CaseInsensitive,
+                            qualifier: ast::ScopeQualifier::Unqualified
+                        }),
+                    }),
+                    case: ast::CaseSensitivity::CaseInsensitive,
+                });
 
         let mut steps = path.steps;
         steps.push(step);
         ast::Path{ root:path.root, steps }
     },
     <ident:"Identifier"> => {
-        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, false) ) };
+        let root = ast::Expr{
+            kind: ast::ExprKind::VarRef(ast::VarRef {
+                name: ast::SymbolPrimitive { value: ident.to_owned() },
+                case: ast::CaseSensitivity::CaseInsensitive,
+                qualifier: ast::ScopeQualifier::Unqualified
+            }),
+        };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
     <ident:"AtIdentifier"> => {
-        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, true) ) };
+        let root = ast::Expr{
+            kind: ast::ExprKind::VarRef(ast::VarRef {
+                name: ast::SymbolPrimitive { value: ident.to_owned() },
+                case: ast::CaseSensitivity::CaseInsensitive,
+                qualifier: ast::ScopeQualifier::Qualified
+            }),
+        };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
 }
