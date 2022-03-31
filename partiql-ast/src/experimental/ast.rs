@@ -148,7 +148,7 @@ pub struct OnConflict {
 /// `CONFLICT_ACTION <action>`
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConflictAction {
-    DonNothing,
+    DoNothing,
 }
 
 #[derive(Clone, Debug, PartialEq)]
