@@ -549,10 +549,11 @@ pub Literal: ast::Lit = {
     <LiteralIon>,
     // TODO other literals?
 };
+
 #[inline]
 LiteralAbsent: ast::Lit = {
-    "NULL" => ast::Lit{ kind: ast::LitKind::Null },
-    "MISSING" => ast::Lit{ kind: ast::LitKind::Missing },
+    "NULL" => ast::Lit::Null,
+    "MISSING" => ast::Lit::Missing,
 }
 #[inline]
 LiteralScalar: ast::Lit = {
@@ -562,23 +563,23 @@ LiteralScalar: ast::Lit = {
 }
 #[inline]
 LiteralString: ast::Lit = {
-    <s:"String"> => ast::Lit{ kind: ast::LitKind::CharStringLit( ast::CharStringLit{value:s.to_owned()} ) },
+    <s:"String"> => ast::Lit::CharStringLit(s.to_owned()),
 }
 #[inline]
 LiteralBool: ast::Lit = {
-    "TRUE" => ast::Lit{ kind: ast::LitKind::BoolLit( ast::BoolLit{value:true} ) },
-    "FALSE" => ast::Lit{ kind: ast::LitKind::BoolLit( ast::BoolLit{value:false} ) },
+    "TRUE" => ast::Lit::BoolLit(true),
+    "FALSE" => ast::Lit::BoolLit(false),
 }
 #[inline]
 LiteralNumber: ast::Lit = {
     // TODO check bounds before parsing?
-    <n:"Int"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::Int64Lit( ast::Int64Lit{ value: n.parse().unwrap() } ) } ) },
-    <r:"Real"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::DecimalLit( ast::DecimalLit{ value: rust_decimal::Decimal::from_str(&r).unwrap()  } ) } ) },
-    <r:"ExpReal"> => ast::Lit{ kind: ast::LitKind::NumericLit( ast::NumericLit{ kind: ast::NumericLitKind::DecimalLit( ast::DecimalLit{ value: rust_decimal::Decimal::from_scientific(&r).unwrap()  } ) } ) },
+    <n:"Int"> => ast::Lit::Int64Lit(n.parse().unwrap()),
+    <r:"Real"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_str(&r).unwrap()),
+    <r:"ExpReal"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_scientific(&r).unwrap()),
 }
 #[inline]
 LiteralIon: ast::Lit = {
-    <ion:"Ion"> => ast::Lit{ kind: ast::LitKind::IonStringLit( ast::IonStringLit{value:ion.to_owned()} ) },
+    <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
 
 

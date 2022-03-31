@@ -9,11 +9,7 @@ fn test_ast_init() {
     let _i = Item {
         kind: ItemKind::Query(Query {
             expr: Box::new(Expr {
-                kind: ExprKind::Lit(Lit {
-                    kind: LitKind::NumericLit(NumericLit {
-                        kind: NumericLitKind::Int32Lit(Int32Lit { value: 12 }),
-                    }),
-                }),
+                kind: ExprKind::Lit(Lit::Int32Lit(23)),
             }),
         }),
     };

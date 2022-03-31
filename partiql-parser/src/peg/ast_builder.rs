@@ -3,7 +3,7 @@ use crate::result::ParserError;
 use crate::result::ParserResult;
 use itertools::Itertools;
 use partiql_ast::experimental::ast;
-use partiql_ast::experimental::ast::{FromClause, FromClauseKind, JoinKind, JoinSpec};
+use partiql_ast::experimental::ast::{FromClause, FromClauseKind, JoinKind, JoinSpec, Lit};
 use pest::iterators::{Pair, Pairs};
 use std::str::FromStr;
 
@@ -652,11 +652,7 @@ pub(crate) fn build_literal(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Exp
     fn build_string(lit: Pair<Rule>) -> ast::Expr {
         let litstr = lit.as_str();
         ast::Expr {
-            kind: ast::ExprKind::Lit(ast::Lit {
-                kind: ast::LitKind::CharStringLit(ast::CharStringLit {
-                    value: litstr[1..litstr.len() - 1].to_string(),
-                }),
-            }),
+            kind: ast::ExprKind::Lit(Lit::CharStringLit(litstr[1..litstr.len() - 1].to_string())),
         }
     }
 
@@ -665,15 +661,11 @@ pub(crate) fn build_literal(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Exp
         Rule::literal_absent => {
             if lit.as_str().to_lowercase() == "null" {
                 ast::Expr {
-                    kind: ast::ExprKind::Lit(ast::Lit {
-                        kind: ast::LitKind::Null,
-                    }),
+                    kind: ast::ExprKind::Lit(Lit::Null),
                 }
             } else {
                 ast::Expr {
-                    kind: ast::ExprKind::Lit(ast::Lit {
-                        kind: ast::LitKind::Missing,
-                    }),
+                    kind: ast::ExprKind::Lit(Lit::Missing),
                 }
             }
         }
@@ -682,9 +674,7 @@ pub(crate) fn build_literal(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Exp
         Rule::literal_bool => {
             let value = lit.as_str().to_lowercase() == "true";
             ast::Expr {
-                kind: ast::ExprKind::Lit(ast::Lit {
-                    kind: ast::LitKind::BoolLit(ast::BoolLit { value }),
-                }),
+                kind: ast::ExprKind::Lit(Lit::BoolLit(value)),
             }
         }
         Rule::literal_real => {
@@ -696,21 +686,13 @@ pub(crate) fn build_literal(mut pairs: Pairs<Rule>) -> ParserResult<Box<ast::Exp
                 todo!()
             };
             ast::Expr {
-                kind: ast::ExprKind::Lit(ast::Lit {
-                    kind: ast::LitKind::NumericLit(ast::NumericLit {
-                        kind: ast::NumericLitKind::DecimalLit(ast::DecimalLit { value }),
-                    }),
-                }),
+                kind: ast::ExprKind::Lit(Lit::DecimalLit(value)),
             }
         }
         Rule::literal_int => {
             let value: i64 = lit.as_str().parse().unwrap();
             ast::Expr {
-                kind: ast::ExprKind::Lit(ast::Lit {
-                    kind: ast::LitKind::NumericLit(ast::NumericLit {
-                        kind: ast::NumericLitKind::Int64Lit(ast::Int64Lit { value }),
-                    }),
-                }),
+                kind: ast::ExprKind::Lit(Lit::Int64Lit(value)),
             }
         }
         Rule::literal_tuple => {
