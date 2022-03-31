@@ -19,9 +19,9 @@ use thiserror::Error;
 ///
 /// let source = "12345\n789012345\n789012345\n789012345";
 /// let mut tracker = LineOffsetTracker::default();
-/// tracker.record(5..6);
-/// tracker.record(15..16);
-/// tracker.record(25..26);
+/// tracker.record(6.into());
+/// tracker.record(16.into());
+/// tracker.record(26.into());
 ///
 /// // We added 3 newlines, so there should be 4 lines of source
 /// assert_eq!(tracker.num_lines(), 4);
@@ -44,8 +44,17 @@ impl Default for LineOffsetTracker {
 impl LineOffsetTracker {
     /// Record a newline at `span` in the source
     #[inline(always)]
-    pub fn record(&mut self, span: Range<usize>) {
-        self.line_starts.push(span.end.into());
+    pub fn record(&mut self, line_start: ByteOffset) {
+        self.line_starts.push(line_start);
+    }
+
+    /// Append the line starts from another [`LineOffsetTracker`] to this one, adding `offset` to each.
+    #[inline(always)]
+    pub fn append(&mut self, other: &LineOffsetTracker, offset: ByteOffset) {
+        // skip the first offset in `other`; it is the `0` added by `LineOffsetTracker::default()`
+        for start in &other.line_starts[1..] {
+            self.record(offset + *start);
+        }
     }
 
     /// Calculate the number of lines of source seen so far.
@@ -137,21 +146,20 @@ pub enum LexError {
 /// Note:
 /// - The returned string includes the comment start (`/*`) and end (`*/`) tokens.
 /// - The returned ByteOffset span includes the comment start (`/*`) and end (`*/`) tokens.
-type CommentStringResult = SpannedResult<String, ByteOffset, LexError>;
+type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError>;
 
 /// Tokens used to parse block comment
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
-#[logos(extras = &'s mut LineOffsetTracker)]
 enum CommentToken {
     #[error]
     // Skip stuff that won't interfere with comment detection
     #[regex(r"[^/*\r\n\u0085\u2028\u2029]+", logos::skip)]
+    Any,
     // Skip newlines, but record their position.
     // For line break recommendations,
     //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
-    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029", 
-        |lex| {lex.extras.record(lex.span()); logos::Skip})]
-    Any,
+    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029")]
+    Newline,
     #[token("*/")]
     End,
     #[token("/*")]
@@ -159,19 +167,21 @@ enum CommentToken {
 }
 
 /// A lexer for block comments (enclosed between '/*' & '*/') that returns the parsed [`CommentString`]
-struct CommentLexer<'a> {
+struct CommentLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
-    lexer: logos::Lexer<'a, CommentToken>,
+    lexer: logos::Lexer<'input, CommentToken>,
     comment_nesting: bool,
+    tracker: &'tracker mut LineOffsetTracker,
 }
 
-impl<'a> CommentLexer<'a> {
+impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
     /// Creates a new block comment lexer over `input` text.
     /// Nested comment parsing is *off* by default; see [`with_nesting`] to enable nesting.
-    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
+    pub fn new(input: &'input str, tracker: &'tracker mut LineOffsetTracker) -> Self {
         CommentLexer {
-            lexer: CommentToken::lexer_with_extras(input, counter),
+            lexer: CommentToken::lexer(input),
             comment_nesting: false,
+            tracker,
         }
     }
 
@@ -182,13 +192,16 @@ impl<'a> CommentLexer<'a> {
     }
 
     /// Parses a single (possibly nested) block comment and returns it
-    fn next(&mut self) -> Option<CommentStringResult> {
+    fn next(&mut self) -> Option<CommentStringResult<'input>> {
         let Span { start, .. } = self.lexer.span();
         let mut nesting = 0;
         let nesting_inc = if self.comment_nesting { 1 } else { 0 };
         'comment: loop {
             match self.lexer.next() {
                 Some(CommentToken::Any) => continue,
+                Some(CommentToken::Newline) => {
+                    self.tracker.record(self.lexer.span().end.into());
+                }
                 Some(CommentToken::Start) => nesting = max(1, nesting + nesting_inc),
                 Some(CommentToken::End) => {
                     if nesting == 0 {
@@ -215,14 +228,14 @@ impl<'a> CommentLexer<'a> {
             }
         }
         let Span { end, .. } = self.lexer.span();
-        let comment = self.lexer.source()[start..end].to_owned();
+        let comment = &self.lexer.source()[start..end];
 
         Some(Ok((start.into(), comment, end.into())))
     }
 }
 
-impl<'a> Iterator for CommentLexer<'a> {
-    type Item = CommentStringResult;
+impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
+    type Item = CommentStringResult<'input>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -237,21 +250,21 @@ impl<'a> Iterator for CommentLexer<'a> {
 /// - The lexer parses the embedded ion value enclosed in backticks.
 /// - The returned string *does not* include the backticks
 /// - The returned ByteOffset span *does* include the backticks
-type EmbeddedIonStringResult = SpannedResult<String, ByteOffset, LexError>;
+type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError>;
 
 /// Tokens used to parse Ion literals embedded in backticks (\`)
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(extras = &'s mut LineOffsetTracker)]
 enum EmbeddedIonToken {
     #[error]
     // Skip stuff that doesn't interfere with comment or string detection
     #[regex(r#"[^/*'"`\r\n\u0085\u2028\u2029]+"#, logos::skip)]
+    Any,
+
     // Skip newlines, but record their position.
     // For line break recommendations,
     //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
-    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029",
-        |lex| {lex.extras.record(lex.span()); logos::Skip})]
-    Any,
+    #[regex(r"(([\r])?[\n])|\u0085|\u2028|\u2029")]
+    Newline,
 
     #[token("`")]
     Embed,
@@ -272,21 +285,23 @@ enum EmbeddedIonToken {
 /// A Lexer for Ion literals embedded in backticks (\`) that returns the parsed [`EmbeddedIonString`]
 ///
 /// Parses just enough Ion to make sure not to include a backtick that is inside a string or comment.
-struct EmbeddedIonLexer<'a> {
+struct EmbeddedIonLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
-    lexer: logos::Lexer<'a, EmbeddedIonToken>,
+    lexer: logos::Lexer<'input, EmbeddedIonToken>,
+    tracker: &'tracker mut LineOffsetTracker,
 }
 
-impl<'a> EmbeddedIonLexer<'a> {
+impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
     /// Creates a new embedded ion lexer over `input` text.
-    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
+    pub fn new(input: &'input str, tracker: &'tracker mut LineOffsetTracker) -> Self {
         EmbeddedIonLexer {
-            lexer: EmbeddedIonToken::lexer_with_extras(input, counter),
+            lexer: EmbeddedIonToken::lexer(input),
+            tracker,
         }
     }
 
     /// Parses a single embedded ion value, quoted between backticks (`), and returns it
-    fn next(&mut self) -> Option<EmbeddedIonStringResult> {
+    fn next(&mut self) -> Option<EmbeddedIonStringResult<'input>> {
         let next_token = self.lexer.next();
         match next_token {
             Some(EmbeddedIonToken::Embed) => {
@@ -294,19 +309,25 @@ impl<'a> EmbeddedIonLexer<'a> {
                 'ion_value: loop {
                     let next_tok = self.lexer.next();
                     match next_tok {
+                        Some(EmbeddedIonToken::Newline) => {
+                            self.tracker.record(self.lexer.span().end.into());
+                        }
                         Some(EmbeddedIonToken::Embed) => {
                             break 'ion_value;
                         }
                         Some(EmbeddedIonToken::CommentBlock) => {
-                            let embed_span = self.lexer.span();
-                            let remaining = &self.lexer.source()[embed_span.start..];
-                            let mut comment_lexer = CommentLexer::new(remaining, self.lexer.extras);
+                            let embed = self.lexer.span();
+                            let remaining = &self.lexer.source()[embed.start..];
+                            let mut comment_tracker = LineOffsetTracker::default();
+                            let mut comment_lexer =
+                                CommentLexer::new(remaining, &mut comment_tracker);
                             match comment_lexer.next() {
                                 Some(Ok((s, _c, e))) => {
-                                    self.lexer.bump((e - s).to_usize() - embed_span.len())
+                                    self.tracker.append(&comment_tracker, embed.start.into());
+                                    self.lexer.bump((e - s).to_usize() - embed.len())
                                 }
                                 Some(Err((_s, err, e))) => {
-                                    return Some(Err((embed_span.start.into(), err, e)));
+                                    return Some(Err((embed.start.into(), err, e)));
                                 }
                                 None => unreachable!(),
                             }
@@ -336,7 +357,7 @@ impl<'a> EmbeddedIonLexer<'a> {
                 }
                 let Span { end, .. } = self.lexer.span();
                 let (str_start, str_end) = (start + 1, end - 1);
-                let ion_value = self.lexer.source()[str_start..str_end].to_owned();
+                let ion_value = &self.lexer.source()[str_start..str_end];
 
                 Some(Ok((start.into(), ion_value, end.into())))
             }
@@ -345,8 +366,8 @@ impl<'a> EmbeddedIonLexer<'a> {
     }
 }
 
-impl<'a> Iterator for EmbeddedIonLexer<'a> {
-    type Item = EmbeddedIonStringResult;
+impl<'input, 'tracker> Iterator for EmbeddedIonLexer<'input, 'tracker> {
+    type Item = EmbeddedIonStringResult<'input>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -355,24 +376,26 @@ impl<'a> Iterator for EmbeddedIonLexer<'a> {
 }
 
 /// A lexer from PartiQL text strings to [`LexicalToken`]s
-pub(crate) struct PartiqlLexer<'a> {
+pub(crate) struct PartiqlLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
-    lexer: logos::Lexer<'a, Token>,
+    lexer: logos::Lexer<'input, Token<'input>>,
+    tracker: &'tracker mut LineOffsetTracker,
 }
 
-pub(crate) type LexResult = SpannedResult<Token, ByteOffset, LexError>;
+pub(crate) type LexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexError>;
 
-impl<'a> PartiqlLexer<'a> {
+impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
     /// Creates a new PartiQL lexer over `input` text.
-    pub fn new(input: &'a str, counter: &'a mut LineOffsetTracker) -> Self {
+    pub fn new(input: &'input str, tracker: &'tracker mut LineOffsetTracker) -> Self {
         PartiqlLexer {
-            lexer: Token::lexer_with_extras(input, counter),
+            lexer: Token::lexer(input),
+            tracker,
         }
     }
 
     /// Creates an error token at the current lexer location
     #[inline]
-    fn err_here(&self, err_ctor: fn(String) -> LexError) -> LexResult {
+    fn err_here(&self, err_ctor: fn(String) -> LexError) -> LexResult<'input> {
         let region = self.lexer.slice().to_owned();
         let Span { start, end } = self.lexer.span();
         Err((start.into(), err_ctor(region), end.into()))
@@ -380,53 +403,70 @@ impl<'a> PartiqlLexer<'a> {
 
     /// Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
     #[inline(always)]
-    fn wrap(&mut self, token: Token) -> LexResult {
+    fn wrap(&mut self, token: Token<'input>) -> LexResult<'input> {
         let Span { start, end } = self.lexer.span();
         Ok((start.into(), token, end.into()))
     }
 
     /// Advances the iterator and returns the next [`LexicalToken`] or [`None`] when input is exhausted.
-    fn next(&mut self) -> Option<LexResult> {
-        match self.lexer.next() {
-            None => None,
-            Some(token) => match token {
-                Token::Error => Some(self.err_here(LexError::InvalidInput)),
+    fn next(&mut self) -> Option<LexResult<'input>> {
+        'next_tok: loop {
+            return match self.lexer.next() {
+                None => None,
+                Some(token) => match token {
+                    Token::Error => Some(self.err_here(LexError::InvalidInput)),
 
-                Token::EmbeddedIonQuote => {
-                    let embed_span = self.lexer.span();
-                    let remaining = &self.lexer.source()[embed_span.start..];
-                    let mut ion_lexer = EmbeddedIonLexer::new(remaining, self.lexer.extras);
-                    ion_lexer.next().map(|res| match res {
-                        Ok((s, ion, e)) => {
-                            self.lexer.bump((e - s).to_usize() - embed_span.len());
-                            Ok((embed_span.end.into(), Token::Ion(ion), e - 1))
-                        }
-                        Err((_s, err, e)) => Err((embed_span.start.into(), err, e)),
-                    })
-                }
+                    Token::Newline => {
+                        self.tracker.record(self.lexer.span().end.into());
+                        // Newlines shouldn't generate an externally visible token
+                        continue 'next_tok;
+                    }
 
-                Token::CommentBlockStart => {
-                    let embed_span = self.lexer.span();
-                    let remaining = &self.lexer.source()[embed_span.start..];
-                    let mut comment_lexer =
-                        CommentLexer::new(remaining, self.lexer.extras).with_nesting();
-                    comment_lexer.next().map(|res| match res {
-                        Ok((s, comment, e)) => {
-                            self.lexer.bump((e - s).to_usize() - embed_span.len());
-                            Ok((embed_span.start.into(), Token::CommentBlock(comment), e))
-                        }
-                        Err((_s, err, e)) => Err((embed_span.start.into(), err, e)),
-                    })
-                }
+                    Token::EmbeddedIonQuote => self.parse_embedded_ion(),
 
-                _ => Some(self.wrap(token)),
-            },
+                    Token::CommentBlockStart => self.parse_block_comment(),
+
+                    _ => Some(self.wrap(token)),
+                },
+            };
         }
+    }
+
+    /// Uses [`CommentLexer`] to parse a block comment
+    fn parse_block_comment(&mut self) -> Option<LexResult<'input>> {
+        let embed = self.lexer.span();
+        let remaining = &self.lexer.source()[embed.start..];
+        let mut comment_tracker = LineOffsetTracker::default();
+        let mut comment_lexer = CommentLexer::new(remaining, &mut comment_tracker).with_nesting();
+        comment_lexer.next().map(|res| match res {
+            Ok((s, comment, e)) => {
+                self.tracker.append(&comment_tracker, embed.start.into());
+                self.lexer.bump((e - s).to_usize() - embed.len());
+                Ok((embed.start.into(), Token::CommentBlock(comment), e))
+            }
+            Err((_s, err, e)) => Err((embed.start.into(), err, e)),
+        })
+    }
+
+    /// Uses [`EmbeddedIonLexer`] to parse an embedded ion value
+    fn parse_embedded_ion(&mut self) -> Option<LexResult<'input>> {
+        let embed = self.lexer.span();
+        let remaining = &self.lexer.source()[embed.start..];
+        let mut ion_tracker = LineOffsetTracker::default();
+        let mut ion_lexer = EmbeddedIonLexer::new(remaining, &mut ion_tracker);
+        ion_lexer.next().map(|res| match res {
+            Ok((s, ion, e)) => {
+                self.tracker.append(&ion_tracker, embed.start.into());
+                self.lexer.bump((e - s).to_usize() - embed.len());
+                Ok((embed.end.into(), Token::Ion(ion), e - 1))
+            }
+            Err((_s, err, e)) => Err((embed.start.into(), err, e)),
+        })
     }
 }
 
-impl<'a> Iterator for PartiqlLexer<'a> {
-    type Item = LexResult;
+impl<'input, 'tracker> Iterator for PartiqlLexer<'input, 'tracker> {
+    type Item = LexResult<'input>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -439,24 +479,24 @@ impl<'a> Iterator for PartiqlLexer<'a> {
 /// # Note
 /// Tokens with names beginning with `__` are used internally and not meant to be used outside lexing.
 #[derive(Logos, Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
-#[logos(extras = &'s mut LineOffsetTracker)]
 // TODO make pub(crate) ?
-pub enum Token {
+pub enum Token<'input> {
     #[error]
     // Skip whitespace
     #[regex(r"[ \t\f]+", logos::skip)]
+    Error,
+
     // Skip newlines, but record their position.
     // For line break recommendations,
     //   see https://www.unicode.org/standard/reports/tr13/tr13-5.html
-    #[regex(r"([\r]?[\n])|\u{0085}|\u{2028}|\u{2029}",
-        callback = |lex| {lex.extras.record(lex.span()); logos::Skip})]
-    Error,
+    #[regex(r"([\r]?[\n])|\u{0085}|\u{2028}|\u{2029}")]
+    Newline,
 
-    #[regex(r"--[^\n]*", |lex| lex.slice().to_owned())]
-    CommentLine(String),
+    #[regex(r"--[^\n]*", |lex| lex.slice())]
+    CommentLine(&'input str),
     #[token("/*")]
     CommentBlockStart,
-    CommentBlock(String),
+    CommentBlock(&'input str),
 
     // Brackets
     #[token("[")]
@@ -515,39 +555,39 @@ pub enum Token {
     Period,
 
     // unquoted identifiers
-    #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice().to_owned())]
+    #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice())]
     // quoted identifiers (quoted with double quotes)
     #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#,
-            |lex| lex.slice().trim_matches('"').to_owned())]
-    Identifier(String),
+            |lex| lex.slice().trim_matches('"'))]
+    Identifier(&'input str),
 
     // unquoted @identifiers
-    #[regex("@[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice()[1..].to_owned())]
+    #[regex("@[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| &lex.slice()[1..])]
     // quoted @identifiers (quoted with double quotes)
     #[regex(r#"@"([^"\\]|\\t|\\u|\\n|\\")*""#,
-            |lex| lex.slice()[1..].trim_matches('"').to_owned())]
-    AtIdentifier(String),
+            |lex| lex.slice()[1..].trim_matches('"'))]
+    AtIdentifier(&'input str),
 
-    #[regex("[0-9]+", |lex| lex.slice().to_owned())]
-    Int(String),
+    #[regex("[0-9]+", |lex| lex.slice())]
+    Int(&'input str),
 
-    #[regex("[0-9]+\\.[0-9]*([eE][-+]?[0-9]+)", |lex| lex.slice().to_owned())]
-    #[regex("\\.[0-9]+([eE][-+]?[0-9]+)", |lex| lex.slice().to_owned())]
-    #[regex("[0-9]+[eE][-+]?[0-9]+", |lex| lex.slice().to_owned())]
-    ExpReal(String),
+    #[regex("[0-9]+\\.[0-9]*([eE][-+]?[0-9]+)", |lex| lex.slice())]
+    #[regex("\\.[0-9]+([eE][-+]?[0-9]+)", |lex| lex.slice())]
+    #[regex("[0-9]+[eE][-+]?[0-9]+", |lex| lex.slice())]
+    ExpReal(&'input str),
 
-    #[regex("[0-9]+\\.[0-9]*", |lex| lex.slice().to_owned())]
-    #[regex("\\.[0-9]+", |lex| lex.slice().to_owned())]
-    Real(String),
+    #[regex("[0-9]+\\.[0-9]*", |lex| lex.slice())]
+    #[regex("\\.[0-9]+", |lex| lex.slice())]
+    Real(&'input str),
 
     // strings are single-quoted in SQL/PartiQL
     #[regex(r#"'([^'\\]|\\t|\\u|\\n|\\'|(?:''))*'"#,
-            |lex| lex.slice().trim_matches('\'').to_owned())]
-    String(String),
+            |lex| lex.slice().trim_matches('\''))]
+    String(&'input str),
 
     #[token("`")]
     EmbeddedIonQuote,
-    Ion(String),
+    Ion(&'input str),
 
     // Keywords
     #[regex("(?i:All)")]
@@ -655,40 +695,42 @@ mod tests {
 
     #[test]
     fn ion_simple() {
-        let ion_value = r#" `{'a':1,  'b':1}` "#;
-        let mut offset_tracker = LineOffsetTracker::default();
-        let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
-
-        let tok = lexer.next().unwrap().unwrap();
-        assert!(
-            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(16)) if ion_str == ion_value.trim().trim_matches('`'))
-        );
+        let ion_value = r#" `{'input':1,  'b':1}` "#;
 
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
         assert_eq!(ion_lexer.into_iter().count(), 1);
         assert_eq!(offset_tracker.num_lines(), 1);
-    }
 
-    #[test]
-    fn ion() {
-        let ion_value = r#" `{'a' // comment ' "
-                       :1, /* 
-                               comment 
-                              */
-                      'b':1}` "#;
         let mut offset_tracker = LineOffsetTracker::default();
         let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(
-            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(153)) if ion_str == ion_value.trim().trim_matches('`'))
+            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(20)) if ion_str == ion_value.trim().trim_matches('`'))
         );
-        assert_eq!(offset_tracker.num_lines(), 5);
+    }
+
+    #[test]
+    fn ion() {
+        let ion_value = r#" `{'input' // comment ' "
+                       :1, /* 
+                               comment 
+                              */
+                      'b':1}` "#;
 
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
         assert_eq!(ion_lexer.into_iter().count(), 1);
+        assert_eq!(offset_tracker.num_lines(), 5);
+
+        let mut offset_tracker = LineOffsetTracker::default();
+        let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
+
+        let tok = lexer.next().unwrap().unwrap();
+        assert!(
+            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(157)) if ion_str == ion_value.trim().trim_matches('`'))
+        );
         assert_eq!(offset_tracker.num_lines(), 5);
     }
 
@@ -728,12 +770,12 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::Identifier("g".to_owned()),
+                Token::Identifier("g"),
                 Token::From,
-                Token::Identifier("data".to_owned()),
+                Token::Identifier("data"),
                 Token::Group,
                 Token::By,
-                Token::Identifier("a".to_owned())
+                Token::Identifier("a")
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -776,12 +818,12 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::Identifier("🐈".to_owned()),
+                Token::Identifier("🐈"),
                 Token::From,
-                Token::Identifier("❤ℝ".to_owned()),
+                Token::Identifier("❤ℝ"),
                 Token::Group,
                 Token::By,
-                Token::Identifier("🧸".to_owned())
+                Token::Identifier("🧸")
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -845,10 +887,10 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::CommentLine("--comment".to_owned()),
-                Token::AtIdentifier("g".to_owned()),
+                Token::CommentLine("--comment"),
+                Token::AtIdentifier("g"),
                 Token::From,
-                Token::AtIdentifier("foo".to_owned()),
+                Token::AtIdentifier("foo"),
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -866,8 +908,8 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::CommentBlock("/*comment*/".to_owned()),
-                Token::Identifier("g".to_owned()),
+                Token::CommentBlock("/*comment*/"),
+                Token::Identifier("g"),
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -943,8 +985,8 @@ mod tests {
     fn err_unterminated_ion_comment() {
         let query = r#" `/*12345678`"#;
         let mut offset_tracker = LineOffsetTracker::default();
-        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> =
-            EmbeddedIonLexer::new(query, &mut offset_tracker).collect();
+        let ion_lexer = EmbeddedIonLexer::new(query, &mut offset_tracker);
+        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> = ion_lexer.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(

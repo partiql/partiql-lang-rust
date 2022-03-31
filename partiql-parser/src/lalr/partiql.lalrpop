@@ -6,7 +6,7 @@ use partiql_ast::experimental::ast;
 use crate::lalr::util::{var_ref};
 use crate::location::ByteOffset;
 
-grammar;
+grammar<'input>(input: &'input str);
 
 pub Query: Box<ast::Expr> = {
     <ExprQuery>,
@@ -103,7 +103,7 @@ Projection: ast::ProjectItem = {
     <expr:ExprQuery>
         => ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ) },
     <expr:ExprQuery> "AS" <ident:"Identifier"> => {
-        let as_alias = Some( ast::SymbolPrimitive{ value:ident} );
+        let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
         ast::ProjectItem{ kind: ast::ProjectItemKind::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ) }
     },
 
@@ -154,7 +154,7 @@ TableBaseReference: ast::FromLet = {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
+            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
             at_alias: None,
             by_alias: None
         }
@@ -167,8 +167,8 @@ TableUnpivot: ast::FromLet = {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as }),
-            at_alias: Some(ast::SymbolPrimitive{ value: ident_at }),
+            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
+            at_alias: Some(ast::SymbolPrimitive{ value: ident_at.to_owned() }),
             by_alias: None,
         }
     }
@@ -269,11 +269,11 @@ GroupKey: ast::GroupKey = {
     <expr:ExprQuery>
         => ast::GroupKey{ expr, as_alias: None },
     <expr:ExprQuery> "AS" <ident:"Identifier">
-        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident} ) },
+        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) },
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
-    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value: ident }
+    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value: ident.to_owned() }
 }
 
 // ------------------------------------------------------------------------------ //
@@ -508,7 +508,7 @@ ExprPair: ast::ExprPair = {
 #[inline]
 FunctionCall: ast::Call = {
     <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name }, args }
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args }
 }
 
 PathExpr: ast::Path = {
@@ -516,7 +516,7 @@ PathExpr: ast::Path = {
         let step = ast::PathStep{
             kind: ast::PathStepKind::PathExpr(
                 ast::PathExpr{
-                    index: Box::new(ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) }),
+                    index: Box::new(ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, false) ) }),
                     case: ast::CaseSensitivity{ kind: ast::CaseSensitivityKind::CaseInsensitive }
                 }
             )
@@ -527,11 +527,11 @@ PathExpr: ast::Path = {
         ast::Path{ root:path.root, steps }
     },
     <ident:"Identifier"> => {
-        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, false) ) };
+        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, false) ) };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
     <ident:"AtIdentifier"> => {
-        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident, false, true) ) };
+        let root = ast::Expr{ kind: ast::ExprKind::VarRef( var_ref(ident.to_owned(), false, true) ) };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
 }
@@ -562,7 +562,7 @@ LiteralScalar: ast::Lit = {
 }
 #[inline]
 LiteralString: ast::Lit = {
-    <s:"String"> => ast::Lit{ kind: ast::LitKind::CharStringLit( ast::CharStringLit{value:s} ) },
+    <s:"String"> => ast::Lit{ kind: ast::LitKind::CharStringLit( ast::CharStringLit{value:s.to_owned()} ) },
 }
 #[inline]
 LiteralBool: ast::Lit = {
@@ -578,7 +578,7 @@ LiteralNumber: ast::Lit = {
 }
 #[inline]
 LiteralIon: ast::Lit = {
-    <ion:"Ion"> => ast::Lit{ kind: ast::LitKind::IonStringLit( ast::IonStringLit{value:ion} ) },
+    <ion:"Ion"> => ast::Lit{ kind: ast::LitKind::IonStringLit( ast::IonStringLit{value:ion.to_owned()} ) },
 }
 
 
@@ -622,7 +622,7 @@ extern {
     type Location = ByteOffset;
     type Error = (ByteOffset, lexer::LexError, ByteOffset);
 
-    enum lexer::Token {
+    enum lexer::Token<'input> {
 
         // Brackets
         "[" => lexer::Token::OpenSquare,
@@ -658,13 +658,13 @@ extern {
 
 
         // Types
-        "Identifier" => lexer::Token::Identifier(<String>),
-        "AtIdentifier" => lexer::Token::AtIdentifier(<String>),
-        "Int" => lexer::Token::Int(<String>),
-        "Real" => lexer::Token::Real(<String>),
-        "ExpReal" => lexer::Token::ExpReal(<String>),
-        "String" => lexer::Token::String(<String>),
-        "Ion" => lexer::Token::Ion(<String>),
+        "Identifier" => lexer::Token::Identifier(<&'input str>),
+        "AtIdentifier" => lexer::Token::AtIdentifier(<&'input str>),
+        "Int" => lexer::Token::Int(<&'input str>),
+        "Real" => lexer::Token::Real(<&'input str>),
+        "ExpReal" => lexer::Token::ExpReal(<&'input str>),
+        "String" => lexer::Token::String(<&'input str>),
+        "Ion" => lexer::Token::Ion(<&'input str>),
 
         // Keywords
         "ALL" => lexer::Token::All,

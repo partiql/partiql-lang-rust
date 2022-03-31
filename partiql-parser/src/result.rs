@@ -9,11 +9,11 @@ use crate::LexError;
 use thiserror::Error;
 
 /// General [`Result`] type for the PartiQL parser.
-pub type ParserResult<T> = Result<T, ParserError>;
+pub type ParserResult<'input, T> = Result<T, ParserError<'input>>;
 
 /// Errors from the PartiQL parser.
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ParserError {
+pub enum ParserError<'input> {
     /// Indicates that there was a problem with syntax.
     #[error("Syntax Error: {message} ({position})")]
     SyntaxError { message: String, position: Position },
@@ -23,7 +23,7 @@ pub enum ParserError {
     #[error("Unexpected token [{:?}] at [TODO]", token.1)]
     UnexpectedToken {
         /// The unexpected token of type `T` with a span given by the two `L` values.
-        token: Spanned<Token, ByteOffset>,
+        token: Spanned<Token<'input>, ByteOffset>,
         // TODO expected: ...,
     },
 
