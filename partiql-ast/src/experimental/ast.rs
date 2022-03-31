@@ -226,169 +226,45 @@ pub enum ExprKind {
     Select(Select),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Lit {
-    pub kind: LitKind,
-}
-
-/// `LitKind` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
+/// `Lit` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
 /// See section 5.3 in the following:
 /// https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt
 /// and Section 2 of the following (Figure 1: BNF Grammar for PartiQL Values):
 /// https://partiql.org/assets/PartiQL-Specification.pdf
 #[derive(Clone, Debug, PartialEq)]
-pub enum LitKind {
+pub enum Lit {
     Null,
     Missing,
-    NumericLit(NumericLit),
-    BoolLit(BoolLit),
-    IonStringLit(IonStringLit),
-    CharStringLit(CharStringLit),
-    NationalCharStringLit(NationalCharStringLit),
-    BitStringLit(BitStringLit),
-    HexStringLit(HexStringLit),
+    Int8Lit(i8),
+    Int16Lit(i16),
+    Int32Lit(i32),
+    Int64Lit(i64),
+    DecimalLit(RustDecimal),
+    NumericLit(RustDecimal),
+    RealLit(f32),
+    FloatLit(f32),
+    DoubleLit(f64),
+    BoolLit(bool),
+    IonStringLit(String),
+    CharStringLit(String),
+    NationalCharStringLit(String),
+    BitStringLit(String),
+    HexStringLit(String),
     DateTimeLit(DateTimeLit),
     CollectionLit(CollectionLit),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NumericLit {
-    pub kind: NumericLitKind,
+pub enum CollectionLit {
+    ArrayLit(String),
+    BagLit(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum NumericLitKind {
-    Int16Lit(Int16Lit),
-    Int32Lit(Int32Lit),
-    Int64Lit(Int64Lit),
-    DecimalLit(DecimalLit),
-    NumericLit(DecimalLit),
-    RealLit(RealLit),
-    FloatLit(FloatLit),
-    DoubleLit(DoubleLit),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Int8 {
-    pub value: i8,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Int16Lit {
-    pub value: i16,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Int32Lit {
-    pub value: i32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Int64Lit {
-    pub value: i64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DecimalLit {
-    pub value: RustDecimal,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Numeric {
-    pub value: RustDecimal,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RealLit {
-    pub value: f32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FloatLit {
-    pub value: f32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DoubleLit {
-    pub value: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoolLit {
-    pub value: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct IonStringLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CharStringLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CollectionLit {
-    pub kind: CollectionLitKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CollectionLitKind {
-    ArrayLit(ArrayLit),
-    BagLit(BagLit),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArrayLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BagLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct NationalCharStringLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct BitStringLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct HexStringLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DateTimeLit {
-    pub kind: DateTimeLitKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DateTimeLitKind {
-    DateLit(DateLit),
-    TimeLit(TimeLit),
-    TimestampLit(TimestampLit),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DateLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TimeLit {
-    pub value: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct TimestampLit {
-    pub value: String,
+pub enum DateTimeLit {
+    DateLit(String),
+    TimeLit(String),
+    TimestampLit(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
