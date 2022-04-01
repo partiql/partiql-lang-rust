@@ -10,8 +10,6 @@
 pub mod location;
 pub mod result;
 
-mod peg;
-
 mod lalr;
 
 pub use lalr::lex_partiql as logos_lex;
@@ -19,5 +17,3 @@ pub use lalr::parse_partiql as lalr_parse;
 pub use lalr::LexError;
 pub use lalr::LineOffsetTracker;
 pub use lalr::ParserResult as LalrParserResult;
-pub use peg::parse_partiql as peg_parse;
-pub use peg::parse_partiql_to_ast as peg_parse_to_ast;

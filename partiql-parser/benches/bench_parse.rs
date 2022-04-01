@@ -1,8 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use partiql_parser::lalr_parse;
 use partiql_parser::logos_lex;
-use partiql_parser::peg_parse;
-use partiql_parser::peg_parse_to_ast;
 use std::time::Duration;
 
 const Q_STAR: &str = "SELECT *";
@@ -24,24 +22,6 @@ const Q_COMPLEX: &str = r#"
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
 
-fn pest_benchmark(c: &mut Criterion) {
-    let parse = peg_parse;
-    c.bench_function("peg-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
-    c.bench_function("peg-ion", |b| b.iter(|| parse(black_box(Q_ION))));
-    c.bench_function("peg-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
-    c.bench_function("peg-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
-}
-
-fn pest_to_ast_benchmark(c: &mut Criterion) {
-    let parse = peg_parse_to_ast;
-    c.bench_function("peg-ast-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
-    c.bench_function("peg-ast-ion", |b| b.iter(|| parse(black_box(Q_ION))));
-    c.bench_function("peg-ast-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
-    c.bench_function("peg-ast-complex", |b| {
-        b.iter(|| parse(black_box(Q_COMPLEX)))
-    });
-}
-
 fn logos_benchmark(c: &mut Criterion) {
     let parse = logos_lex;
     c.bench_function("logos-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
@@ -61,10 +41,7 @@ fn lalr_benchmark(c: &mut Criterion) {
 criterion_group! {
     name = parse;
     config = Criterion::default().measurement_time(Duration::new(10, 0));
-    targets = pest_benchmark,
-    pest_to_ast_benchmark,
-    logos_benchmark,
-    lalr_benchmark
+    targets = logos_benchmark, lalr_benchmark
 }
 
 criterion_main!(parse);
