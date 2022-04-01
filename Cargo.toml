@@ -5,6 +5,7 @@ members = [
   "partiql-ast",
   "partiql-eval",
   "partiql-irgen",
+  "partiql-macros",
   "partiql-parser",
   "partiql-rewriter",
   "pest-ion",

@@ -22,6 +22,8 @@ path = "src/lib.rs"
 
 [dependencies]
 rust_decimal = "~1.22.0"
+partiql-macros = { path = "../partiql-macros" }
 
 [dev-dependencies]
 rstest = "~0.12.0"
+

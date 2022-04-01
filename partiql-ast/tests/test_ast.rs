@@ -1,5 +1,6 @@
 mod common;
 
+use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::*;
 
 #[test]
@@ -13,6 +14,9 @@ fn test_ast_init() {
             }),
         }),
     };
+
+    let p = ast::SymbolPrimitive { value: "hello".to_string() };
+    p.new();
 
     // TODO Add assertion once we have tree traversals
 }

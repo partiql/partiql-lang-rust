@@ -14,34 +14,33 @@
 use std::collections::HashMap;
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
+use partiql_macros::AstNodeBuilder;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct Span {
-    begin: ByteOffset,
-    end: ByteOffset,
+    begin: String,
+    end: String,
 }
 
 pub struct AstNode<T> {
     node: T,
-    span: Span,
+    span: Option<Span>,
     meta: Option<NodeMetaData<'static>>,
 }
 
-pub trait<T> AstNodeBuilder<T>: Sized {
-    fn
+type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
+
+pub enum NodeMetaDataValue {
+    String(String)
 }
 
-pub(crate) type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
-
-pub(crate) enum NodeMetaDataValue {
-    String(String),
-    Int32(i32),
-    Bool(bool),
-}
-
-pub(crate) trait AstNodeBuilder: Sized {
-    fn with_line_and_col(Self, begin: ByteOffset, end: ByteOffset) -> Spanned<Self> {
-
+pub trait AstNodeBuilder: Sized {
+    fn new(self) -> AstNode<Self> {
+        AstNode {
+            node: self,
+            span: None,
+            meta: None,
+        }
     }
 }
 
@@ -71,7 +70,7 @@ pub enum ItemKind {
     Query(Query),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
 pub struct Ddl {
     pub op: DdlOp,
 }
@@ -481,7 +480,7 @@ pub struct Intersect {
     pub operands: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
 pub struct Path {
     pub root: Box<Expr>,
     pub steps: Vec<PathStep>,
@@ -862,7 +861,7 @@ pub struct CustomType {
     pub name: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
 pub struct SymbolPrimitive {
     pub value: String,
 }
