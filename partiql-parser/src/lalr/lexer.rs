@@ -126,10 +126,10 @@ pub(crate) type SpannedResult<Tok, Loc, Broke> = Result<Spanned<Tok, Loc>, Spann
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum LexError {
+pub enum LexError<'input> {
     /// Generic invalid input; likely an unrecognizable token.
     #[error("Lexing error: invalid input `{}`", .0)]
-    InvalidInput(String),
+    InvalidInput(&'input str),
     /// Embedded Ion value is not properly terminated.
     #[error("Lexing error: unterminated ion literal")]
     UnterminatedIonLiteral,
@@ -146,7 +146,7 @@ pub enum LexError {
 /// Note:
 /// - The returned string includes the comment start (`/*`) and end (`*/`) tokens.
 /// - The returned ByteOffset span includes the comment start (`/*`) and end (`*/`) tokens.
-type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError>;
+type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse block comment
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
@@ -252,7 +252,7 @@ impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
 /// - The lexer parses the embedded ion value enclosed in backticks.
 /// - The returned string *does not* include the backticks
 /// - The returned ByteOffset span *does* include the backticks
-type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError>;
+type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse Ion literals embedded in backticks (\`)
 #[derive(Logos, Debug, Clone, PartialEq)]
@@ -385,12 +385,12 @@ pub(crate) struct PartiqlLexer<'input, 'tracker> {
     tracker: &'tracker mut LineOffsetTracker,
 }
 
-pub(crate) type LexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexError>;
-pub(crate) type LexResult2<'input> =
+type InternalLexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexError<'input>>;
+pub(crate) type LexResult<'input> =
     Result<Spanned<Token<'input>, ByteOffset>, ParserError<'input, BytePosition>>;
 
-impl<'input> From<Spanned<LexError, ByteOffset>> for ParserError<'input, BytePosition> {
-    fn from(res: Spanned<LexError, ByteOffset>) -> Self {
+impl<'input> From<Spanned<LexError<'input>, ByteOffset>> for ParserError<'input, BytePosition> {
+    fn from(res: Spanned<LexError<'input>, ByteOffset>) -> Self {
         let (start, cause, end) = res;
         ParserError::LexicalError(LexicalError {
             inner: cause,
@@ -411,21 +411,21 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
 
     /// Creates an error token at the current lexer location
     #[inline]
-    fn err_here(&self, err_ctor: fn(String) -> LexError) -> LexResult<'input> {
-        let region = self.lexer.slice().to_owned();
+    fn err_here(&self, err_ctor: fn(&'input str) -> LexError<'input>) -> InternalLexResult<'input> {
+        let region = self.lexer.slice();
         let Span { start, end } = self.lexer.span();
         Err((start.into(), err_ctor(region), end.into()))
     }
 
     /// Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
     #[inline(always)]
-    fn wrap(&mut self, token: Token<'input>) -> LexResult<'input> {
+    fn wrap(&mut self, token: Token<'input>) -> InternalLexResult<'input> {
         let Span { start, end } = self.lexer.span();
         Ok((start.into(), token, end.into()))
     }
 
     /// Advances the iterator and returns the next [`LexicalToken`] or [`None`] when input is exhausted.
-    fn next(&mut self) -> Option<LexResult<'input>> {
+    fn next(&mut self) -> Option<InternalLexResult<'input>> {
         'next_tok: loop {
             return match self.lexer.next() {
                 None => None,
@@ -449,7 +449,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
     }
 
     /// Uses [`CommentLexer`] to parse a block comment
-    fn parse_block_comment(&mut self) -> Option<LexResult<'input>> {
+    fn parse_block_comment(&mut self) -> Option<InternalLexResult<'input>> {
         let embed = self.lexer.span();
         let remaining = &self.lexer.source()[embed.start..];
         let mut comment_tracker = LineOffsetTracker::default();
@@ -465,7 +465,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
     }
 
     /// Uses [`EmbeddedIonLexer`] to parse an embedded ion value
-    fn parse_embedded_ion(&mut self) -> Option<LexResult<'input>> {
+    fn parse_embedded_ion(&mut self) -> Option<InternalLexResult<'input>> {
         let embed = self.lexer.span();
         let remaining = &self.lexer.source()[embed.start..];
         let mut ion_tracker = LineOffsetTracker::default();
@@ -482,7 +482,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
 }
 
 impl<'input, 'tracker> Iterator for PartiqlLexer<'input, 'tracker> {
-    type Item = LexResult2<'input>;
+    type Item = LexResult<'input>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {

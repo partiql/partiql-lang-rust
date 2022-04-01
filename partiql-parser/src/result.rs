@@ -28,7 +28,7 @@ where
 
     /// There was an error lexing the input
     #[error("{} at [{:?}]", _0.inner, _0.location)]
-    LexicalError(LexicalError<Loc>),
+    LexicalError(LexicalError<'input, Loc>),
 
     /// Indicates that there is an internal error that was not due to user input or API violation.
     #[error("Illegal State: {0}")]
@@ -54,7 +54,7 @@ where
     }
 }
 
-pub type LexicalError<L> = Located<LexError, L>;
+pub type LexicalError<'input, L> = Located<LexError<'input>, L>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnexpectedTokenData<'input> {
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn lexical_error() {
         let e1 = ParserError::LexicalError(Located {
-            inner: LexError::InvalidInput("🤷".to_string()),
+            inner: LexError::InvalidInput("🤷"),
             location: CharOffset::from(66_000)..CharOffset::from(66_003),
         });
 
