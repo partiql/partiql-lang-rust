@@ -585,8 +585,8 @@ LiteralBool: ast::Lit = {
 LiteralNumber: ast::Lit = {
     // TODO check bounds before parsing?
     <n:"Int"> => ast::Lit::Int64Lit(n.parse().unwrap()),
-    <r:"Real"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_str(&r).unwrap()),
-    <r:"ExpReal"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_scientific(&r).unwrap()),
+    <r:"Real"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_str(r).unwrap()),
+    <r:"ExpReal"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_scientific(r).unwrap()),
 }
 #[inline]
 LiteralIon: ast::Lit = {

@@ -3,9 +3,9 @@
 //! Types representing positions, spans, locations, etc of parsed PartiQL text.
 
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Range, Sub};
 
 macro_rules! impl_pos {
     ($pos_type:ident, $primitive:ty) => {
@@ -175,10 +175,100 @@ impl fmt::Display for LineAndColumn {
     }
 }
 
+/// A wrapper type that holds an `inner` value and a `location` for it
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Located<T, Loc: Debug> {
+    // TODO this should be `Loc: Display`
+    /// The item that has a location attached
+    pub inner: T,
+    /// The location of the error
+    pub location: Range<Loc>,
+}
+
+/// Trait adding a `to_located` method to ease construction of [`Located`] from its inner value.
+///
+///
+/// ## Example
+///
+/// ```rust
+/// use partiql_parser::location::{Located, ToLocated};
+/// assert_eq!("blah".to_string().to_located(5..10),
+///             Located{inner: "blah".to_string(), location: 5..10});
+/// ```
+pub trait ToLocated<Loc: Debug>: Sized {
+    /// Create a [`Located`] from its inner value.
+    fn to_located(self, location: Range<Loc>) -> Located<Self, Loc> {
+        let inner = self;
+        Located { inner, location }
+    }
+}
+
+impl<T, Loc: Debug> ToLocated<Loc> for T {}
+
+impl<T, Loc: Debug> Located<T, Loc> {
+    /// Maps an `Located<T, Loc>` to `Located<T, Loc2>` by applying a function to the contained
+    /// location and moving the contained `inner`
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use partiql_parser::location::{Located, ToLocated};
+    /// assert_eq!("blah".to_string().to_located(5..10).map_loc(|l| l+5),
+    ///             Located{inner: "blah".to_string(), location: 10..15});
+    /// ```
+    pub fn map_loc<F, Loc2>(self, tx: F) -> Located<T, Loc2>
+    where
+        Loc2: Debug,
+        F: Fn(Loc) -> Loc2,
+    {
+        let Located { inner, location } = self;
+        let location = Range {
+            start: tx(location.start),
+            end: tx(location.end),
+        };
+        Located { inner, location }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::num::NonZeroUsize;
+
+    use crate::location::Located;
+    use crate::location::{ByteOffset, BytePosition};
+
+    #[test]
+    fn located() {
+        let l1: Located<String, ByteOffset> =
+            "test".to_string().to_located(ByteOffset(0)..ByteOffset(42));
+
+        assert_eq!(l1.inner, "test");
+        assert_eq!(l1.location.start.0, 0);
+        assert_eq!(l1.location.end.0, 42);
+
+        let l1c = l1.clone();
+        assert!(matches!(
+            l1c,
+            Located {
+                inner: s,
+                location: std::ops::Range {
+                    start:ByteOffset(0),
+                    end: ByteOffset(42)
+                }
+            } if s == "test"
+        ));
+
+        let l2 = l1.map_loc(BytePosition);
+
+        assert!(matches!(
+            l2.location,
+            std::ops::Range {
+                start: BytePosition(ByteOffset(0)),
+                end: BytePosition(ByteOffset(42))
+            }
+        ));
+    }
 
     #[test]
     fn byteoff() {
@@ -186,7 +276,9 @@ mod tests {
         let bp2 = ByteOffset::from_usize(15);
 
         assert_eq!(20, (bp1 + bp2).to_usize());
+        assert_eq!(10, (bp2 - bp1).to_usize());
         assert_eq!(ByteOffset(10), bp2 - 5);
+        assert_eq!(ByteOffset(20), bp2 + 5);
     }
 
     #[test]
@@ -195,7 +287,9 @@ mod tests {
         let lp2 = LineOffset::from_usize(15);
 
         assert_eq!(20, (lp1 + lp2).to_usize());
+        assert_eq!(10, (lp2 - lp1).to_usize());
         assert_eq!(LineOffset(10), lp2 - 5);
+        assert_eq!(LineOffset(20), lp2 + 5);
     }
 
     #[test]
@@ -204,12 +298,16 @@ mod tests {
         let cp2 = CharOffset::from_usize(15);
 
         assert_eq!(20, (cp1 + cp2).to_usize());
+        assert_eq!(10, (cp2 - cp1).to_usize());
         assert_eq!(CharOffset(10), cp2 - 5);
+        assert_eq!(CharOffset(20), cp2 + 5);
     }
 
     #[test]
     fn positions() {
-        assert_eq!(BytePosition(ByteOffset(5)), BytePosition(5.into()));
+        assert_eq!(BytePosition(ByteOffset(15)), BytePosition(15.into()));
+        assert_eq!(BytePosition(ByteOffset(5)), ByteOffset(5).into());
+        assert_eq!(BytePosition(ByteOffset(25)), 25.into());
 
         let loc = LineAndCharPosition::new(13, 42);
         assert_eq!(
@@ -226,6 +324,7 @@ mod tests {
 
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
+        assert_eq!(display, LineAndColumn::new(14, 43).unwrap());
         assert_eq!("line 14, column 43", format!("{}", display))
     }
 }

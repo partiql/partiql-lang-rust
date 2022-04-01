@@ -396,6 +396,15 @@ mod tests {
 
         #[test]
         fn improper_at() {
+            let res = parse_partiql(r#"SELECT * FROM a AS a CROSS JOIN c AS c AT q"#);
+            assert!(res.is_err());
+            let errors = res.unwrap_err();
+            assert_eq!(1, errors.len());
+            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(39) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(41) }]", errors[0].to_string());
+        }
+
+        #[test]
+        fn improper_at_multi() {
             let res = parse_partiql(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
             assert!(res.is_err());
             let errors = res.unwrap_err();

@@ -3,9 +3,9 @@
 //! [`Error`] and [`Result`] types for parsing PartiQL.
 
 use std::fmt::Debug;
-use std::ops::Range;
 
 use crate::lalr::Token;
+use crate::location::Located;
 use crate::LexError;
 use thiserror::Error;
 
@@ -35,10 +35,11 @@ where
     IllegalState(String),
 }
 
-impl<'input, Loc> ParserError<'input, Loc>
+impl<'input, Loc: Debug> ParserError<'input, Loc>
 where
     Loc: Debug, // TODO this should be `Loc: Display`
 {
+    /// Maps an `ParserError<Loc>` to `ParserError<Loc2>` by applying a function to each variant
     pub fn map_loc<F, Loc2>(self, tx: F) -> ParserError<'input, Loc2>
     where
         Loc2: Debug, // TODO this should be `Loc2: Display`
@@ -49,48 +50,6 @@ where
             ParserError::UnexpectedToken(l) => ParserError::UnexpectedToken(l.map_loc(tx)),
             ParserError::LexicalError(l) => ParserError::LexicalError(l.map_loc(tx)),
             ParserError::IllegalState(s) => ParserError::IllegalState(s),
-        }
-    }
-}
-
-/// A wrapper type that holds an `inner` value and a `location` for it
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Located<T, Loc: Debug> {
-    // TODO this should be `Loc: Display`
-    /// The item that has a location attached
-    pub inner: T,
-    /// The location of the error
-    pub location: Range<Loc>,
-}
-
-pub(crate) trait ToLocated<Loc: Debug>: Sized {
-    fn located(self, location: Range<Loc>) -> Located<Self, Loc> {
-        Located {
-            inner: self,
-            location,
-        }
-    }
-}
-
-impl<T, Loc: Debug> ToLocated<Loc> for T {}
-
-impl<T, Loc: Debug> Located<T, Loc> {
-    pub fn map_loc<F, Loc2>(self, tx: F) -> Located<T, Loc2>
-    where
-        Loc2: Debug,
-        F: Fn(Loc) -> Loc2,
-    {
-        let Located {
-            inner: cause,
-            location,
-        } = self;
-        let location = Range {
-            start: tx(location.start),
-            end: tx(location.end),
-        };
-        Located {
-            inner: cause,
-            location,
         }
     }
 }
@@ -106,4 +65,62 @@ pub struct UnexpectedTokenData<'input> {
 pub type UnexpectedToken<'input, L> = Located<UnexpectedTokenData<'input>, L>;
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::lalr::Token;
+    use crate::location::{ByteOffset, BytePosition, CharOffset, Located, ToLocated};
+    use crate::LexError;
+
+    #[test]
+    fn syntax_error() {
+        let e1 = ParserError::SyntaxError(
+            "oops"
+                .to_string()
+                .to_located(ByteOffset::from(255)..512.into()),
+        );
+
+        let e2 = e1.map_loc(BytePosition);
+        assert_eq!(
+            e2.to_string(),
+            "Syntax Error: oops at [BytePosition(ByteOffset(255))..BytePosition(ByteOffset(512))]"
+        )
+    }
+
+    #[test]
+    fn unexpected_token() {
+        let e1 = ParserError::UnexpectedToken(
+            UnexpectedTokenData {
+                token: Token::Slash,
+            }
+            .to_located(0.into()..ByteOffset::from(1)),
+        );
+
+        let e2 = e1.map_loc(BytePosition);
+        assert_eq!(
+            e2.to_string(),
+            "Unexpected token [Slash] at [BytePosition(ByteOffset(0))..BytePosition(ByteOffset(1))]"
+        )
+    }
+
+    #[test]
+    fn lexical_error() {
+        let e1 = ParserError::LexicalError(Located {
+            inner: LexError::InvalidInput("🤷".to_string()),
+            location: CharOffset::from(66_000)..CharOffset::from(66_003),
+        });
+
+        let e2 = e1.map_loc(|offset| offset.0);
+        assert_eq!(
+            e2.to_string(),
+            "Lexing error: invalid input `🤷` at [66000..66003]"
+        )
+    }
+
+    #[test]
+    fn illegal_state() {
+        let e1 = ParserError::IllegalState("uh oh".to_string());
+
+        let e2 = e1.map_loc(BytePosition);
+        assert_eq!(e2.to_string(), "Illegal State: uh oh")
+    }
+}
