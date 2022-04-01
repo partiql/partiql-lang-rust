@@ -28,7 +28,6 @@ mod grammar {
 }
 
 mod lexer;
-mod util;
 
 use crate::location::ByteOffset;
 use crate::result::ParserError;
