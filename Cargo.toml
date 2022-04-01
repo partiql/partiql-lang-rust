@@ -3,9 +3,9 @@
 members = [
   "partiql",
   "partiql-ast",
+  "partiql-core",
   "partiql-eval",
   "partiql-irgen",
-  "partiql-macros",
   "partiql-parser",
   "partiql-rewriter",
   "pest-ion",

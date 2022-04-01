@@ -14,28 +14,49 @@
 use std::collections::HashMap;
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
-use partiql_macros::AstNodeBuilder;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub(crate) struct Span {
-    begin: String,
-    end: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub begin: String,
+    pub end: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct AstNode<T> {
-    node: T,
-    span: Option<Span>,
-    meta: Option<NodeMetaData<'static>>,
+    pub node: T,
+    pub span: Option<Span>,
+    pub meta: Option<NodeMetaData<'static>>,
 }
 
-type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
+pub type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeMetaDataValue {
-    String(String)
+    String(String),
+    Bool(bool)
 }
 
-pub trait AstNodeBuilder: Sized {
-    fn new(self) -> AstNode<Self> {
+impl<T: Clone> AstNode<T> {
+    pub fn with_span(&mut self, begin: String, end: String) -> &mut Self {
+        self.span = Some(Span {
+            begin,
+            end
+        });
+        self
+    }
+
+    pub fn with_meta(&mut self, meta: NodeMetaData<'static>) -> &mut Self {
+        self.meta = Some(meta);
+        self
+    }
+
+    pub fn build(&self) -> Self {
+        self.clone()
+    }
+}
+
+pub trait ToAstNode: Sized {
+    fn to_node(self) -> AstNode<Self> {
         AstNode {
             node: self,
             span: None,
@@ -43,6 +64,8 @@ pub trait AstNodeBuilder: Sized {
         }
     }
 }
+
+impl<T> ToAstNode for T {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -70,7 +93,7 @@ pub enum ItemKind {
     Query(Query),
 }
 
-#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ddl {
     pub op: DdlOp,
 }
@@ -480,7 +503,7 @@ pub struct Intersect {
     pub operands: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Path {
     pub root: Box<Expr>,
     pub steps: Vec<PathStep>,
@@ -861,7 +884,7 @@ pub struct CustomType {
     pub name: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq, AstNodeBuilder)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SymbolPrimitive {
     pub value: String,
 }

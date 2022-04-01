@@ -29,7 +29,7 @@ mod grammar {
 
 mod lexer;
 
-use crate::location::ByteOffset;
+use partiql_core::location::ByteOffset;
 use crate::result::ParserError;
 pub use lexer::LexError;
 pub use lexer::LineOffsetTracker;

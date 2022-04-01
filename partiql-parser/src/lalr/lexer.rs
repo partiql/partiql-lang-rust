@@ -1,4 +1,4 @@
-use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
+use partiql_core::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 
 use logos::{Logos, Span};
 use smallvec::{smallvec, SmallVec};

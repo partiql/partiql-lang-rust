@@ -22,7 +22,7 @@ use crate::result::{ParserError, ParserResult};
 mod ast_builder;
 mod grammar;
 
-use crate::location::LineAndColumn;
+use partiql_core::location::LineAndColumn;
 pub(crate) use crate::peg::ast_builder::build_query;
 pub(crate) use crate::peg::grammar::{PartiQLParser, Rule};
 use partiql_ast::experimental::ast;

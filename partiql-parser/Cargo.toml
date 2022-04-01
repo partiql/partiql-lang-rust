@@ -23,6 +23,7 @@ lalrpop = "~0.19.7"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast" }
+partiql-core = { path = "../partiql-core" }
 
 pest = "~2.1.3"
 pest_derive = "~2.1.0"

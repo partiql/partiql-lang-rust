@@ -2,7 +2,7 @@
 
 //! [`Error`] and [`Result`] types for parsing PartiQL.
 
-use crate::location::{ByteOffset, Position};
+use partiql_core::location::{ByteOffset, Position};
 
 use crate::lalr::{Spanned, Token};
 use crate::LexError;
