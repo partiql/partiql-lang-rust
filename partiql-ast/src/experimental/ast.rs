@@ -11,8 +11,39 @@
 
 // TODO Add documentation.
 
+use std::collections::HashMap;
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub(crate) struct Span {
+    begin: ByteOffset,
+    end: ByteOffset,
+}
+
+pub struct AstNode<T> {
+    node: T,
+    span: Span,
+    meta: Option<NodeMetaData<'static>>,
+}
+
+pub trait<T> AstNodeBuilder<T>: Sized {
+    fn
+}
+
+pub(crate) type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
+
+pub(crate) enum NodeMetaDataValue {
+    String(String),
+    Int32(i32),
+    Bool(bool),
+}
+
+pub(crate) trait AstNodeBuilder: Sized {
+    fn with_line_and_col(Self, begin: ByteOffset, end: ByteOffset) -> Spanned<Self> {
+
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
