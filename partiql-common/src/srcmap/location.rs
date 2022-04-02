@@ -3,9 +3,9 @@
 //! Types representing positions, spans, locations, etc of parsed PartiQL text.
 
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
-use std::ops::{Add, Sub};
+use std::ops::{Add, Range, Sub};
 
 macro_rules! impl_pos {
     ($pos_type:ident, $primitive:ty) => {
@@ -175,28 +175,59 @@ impl fmt::Display for LineAndColumn {
     }
 }
 
-/// A possible position in the source.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct Position(Option<LineAndColumn>);
+/// A wrapper type that holds an `inner` value and a `location` for it
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Located<T, Loc: Debug> {
+    // TODO this should be `Loc: Display`
+    /// The item that has a location attached
+    pub inner: T,
+    /// The location of the error
+    pub location: Range<Loc>,
+}
 
-impl From<Option<LineAndColumn>> for Position {
-    fn from(loc: Option<LineAndColumn>) -> Self {
-        Position(loc)
+/// Trait adding a `to_located` method to ease construction of [`Located`] from its inner value.
+///
+/// ## Example
+///
+/// ```rust
+/// use partiql_parser::location::{Located, ToLocated};
+/// assert_eq!("blah".to_string().to_located(5..10),
+///             Located{inner: "blah".to_string(), location: 5..10});
+/// ```
+pub trait ToLocated<Loc: Debug>: Sized {
+    /// Create a [`Located`] from its inner value.
+    fn to_located(self, location: Range<Loc>) -> Located<Self, Loc> {
+        let inner = self;
+        Located { inner, location }
     }
 }
 
-impl From<LineAndColumn> for Position {
-    fn from(loc: LineAndColumn) -> Self {
-        Some(loc).into()
-    }
-}
+// "Blanket" impl of `ToLocated` for all `T`
+// See https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
+impl<T, Loc: Debug> ToLocated<Loc> for T {}
 
-impl fmt::Display for Position {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            None => write!(f, "unknown position"),
-            Some(location) => write!(f, "{}", location),
-        }
+impl<T, Loc: Debug> Located<T, Loc> {
+    /// Maps an `Located<T, Loc>` to `Located<T, Loc2>` by applying a function to the contained
+    /// location and moving the contained `inner`
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use partiql_parser::location::{Located, ToLocated};
+    /// assert_eq!("blah".to_string().to_located(5..10).map_loc(|l| l+5),
+    ///             Located{inner: "blah".to_string(), location: 10..15});
+    /// ```
+    pub fn map_loc<F, Loc2>(self, tx: F) -> Located<T, Loc2>
+    where
+        Loc2: Debug,
+        F: Fn(Loc) -> Loc2,
+    {
+        let Located { inner, location } = self;
+        let location = Range {
+            start: tx(location.start),
+            end: tx(location.end),
+        };
+        Located { inner, location }
     }
 }
 
@@ -205,36 +236,79 @@ mod tests {
     use super::*;
     use std::num::NonZeroUsize;
 
+    use crate::srcmap::location::Located;
+    use crate::srcmap::location::{ByteOffset, BytePosition};
+
+    #[test]
+    fn located() {
+        let l1: Located<String, ByteOffset> =
+            "test".to_string().to_located(ByteOffset(0)..ByteOffset(42));
+
+        assert_eq!(l1.inner, "test");
+        assert_eq!(l1.location.start.0, 0);
+        assert_eq!(l1.location.end.0, 42);
+
+        let l1c = l1.clone();
+        assert!(matches!(
+            l1c,
+            Located {
+                inner: s,
+                location: std::ops::Range {
+                    start:ByteOffset(0),
+                    end: ByteOffset(42)
+                }
+            } if s == "test"
+        ));
+
+        let l2 = l1.map_loc(BytePosition);
+
+        assert!(matches!(
+            l2.location,
+            std::ops::Range {
+                start: BytePosition(ByteOffset(0)),
+                end: BytePosition(ByteOffset(42))
+            }
+        ));
+    }
+
     #[test]
     fn byteoff() {
-        let bp1 = ByteOffset(5);
-        let bp2 = ByteOffset::from_usize(15);
+        let offset1 = ByteOffset(5);
+        let offset2 = ByteOffset::from_usize(15);
 
-        assert_eq!(20, (bp1 + bp2).to_usize());
-        assert_eq!(ByteOffset(10), bp2 - 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(ByteOffset(10), offset2 - 5);
+        assert_eq!(ByteOffset(20), offset2 + 5);
     }
 
     #[test]
     fn lineoff() {
-        let lp1 = LineOffset(5);
-        let lp2 = LineOffset::from_usize(15);
+        let offset1 = LineOffset(5);
+        let offset2 = LineOffset::from_usize(15);
 
-        assert_eq!(20, (lp1 + lp2).to_usize());
-        assert_eq!(LineOffset(10), lp2 - 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(LineOffset(10), offset2 - 5);
+        assert_eq!(LineOffset(20), offset2 + 5);
     }
 
     #[test]
     fn charoff() {
-        let cp1 = CharOffset(5);
-        let cp2 = CharOffset::from_usize(15);
+        let offset1 = CharOffset(5);
+        let offset2 = CharOffset::from_usize(15);
 
-        assert_eq!(20, (cp1 + cp2).to_usize());
-        assert_eq!(CharOffset(10), cp2 - 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(CharOffset(10), offset2 - 5);
+        assert_eq!(CharOffset(20), offset2 + 5);
     }
 
     #[test]
     fn positions() {
-        assert_eq!(BytePosition(ByteOffset(5)), BytePosition(5.into()));
+        assert_eq!(BytePosition(ByteOffset(15)), BytePosition(15.into()));
+        assert_eq!(BytePosition(ByteOffset(5)), ByteOffset(5).into());
+        assert_eq!(BytePosition(ByteOffset(25)), 25.into());
 
         let loc = LineAndCharPosition::new(13, 42);
         assert_eq!(
@@ -251,22 +325,7 @@ mod tests {
 
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
+        assert_eq!(display, LineAndColumn::new(14, 43).unwrap());
         assert_eq!("line 14, column 43", format!("{}", display))
-    }
-
-    #[test]
-    fn position() {
-        assert_eq!(Position(None), None.into());
-        assert_eq!(Position(None), LineAndColumn::new(0, 0).into());
-        let lac = LineAndColumn {
-            line: unsafe { NonZeroUsize::new_unchecked(5) },
-            column: unsafe { NonZeroUsize::new_unchecked(6) },
-        };
-        assert_eq!(Position(Some(lac)), LineAndColumn::new(5, 6).into());
-        assert_eq!("unknown position", format!("{}", Position(None)));
-        assert_eq!(
-            "line 4, column 5",
-            format!("{}", Position(Some(LineAndCharPosition::new(3, 4).into())))
-        );
     }
 }

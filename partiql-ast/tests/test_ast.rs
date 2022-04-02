@@ -2,7 +2,7 @@ mod common;
 
 use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::*;
-use partiql_core::location::BytePosition;
+use partiql_common::srcmap::location::BytePosition;
 
 #[test]
 fn test_ast_init() {
@@ -16,21 +16,73 @@ fn test_ast_init() {
         }),
     };
 
-    let p = ast::SymbolPrimitive {
-        value: "hello".to_string()
-    };
-    let m = NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))]);
-    let n = p
-        .to_node()
-        .with_span(BytePosition::from(12), BytePosition::from(1))
-        .with_meta(m)
-        .build();
+    let span_only = ast::SymbolPrimitive {
+        value: "symbol1".to_string(),
+    }
+    .to_node()
+    .span(Span {
+        begin: BytePosition::from(12),
+        end: BytePosition::from(1),
+    })
+    .build()
+    .expect("Could not retrieve ast node");
+
     assert_eq!(
         Some(Span {
-            begin: "1".to_string(),
-            end: "2".to_string()}),
-        n.span
+            begin: BytePosition::from(12),
+            end: BytePosition::from(1),
+        }),
+        span_only.span
     );
-    assert_eq!(Some(NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))])),
-               n.meta);
+
+    let meta_only = ast::SymbolPrimitive {
+        value: "symbol2".to_string(),
+    }
+    .to_node()
+    .meta(NodeMetaData::from([(
+        "test",
+        NodeMetaDataValue::Bool(true),
+    )]))
+    .build()
+    .expect("Could not retrieve ast node");
+
+    assert_eq!(
+        Some(NodeMetaData::from([(
+            "test",
+            NodeMetaDataValue::Bool(true),
+        )])),
+        meta_only.meta
+    );
+
+    let all_fields = ast::SymbolPrimitive {
+        value: "symbol3".to_string(),
+    }
+    .to_node()
+    .span(Span {
+        begin: BytePosition::from(12),
+        end: BytePosition::from(1),
+    })
+    .meta(NodeMetaData::from([(
+        "test",
+        NodeMetaDataValue::Bool(true),
+    )]))
+    .build()
+    .expect("Could not retrieve ast node");
+
+    assert_eq!(
+        AstNode {
+            node: SymbolPrimitive {
+                value: "symbol3".to_string()
+            },
+            span: Some(Span {
+                begin: BytePosition::from(12),
+                end: BytePosition::from(1),
+            }),
+            meta: Some(NodeMetaData::from([(
+                "test",
+                NodeMetaDataValue::Bool(true),
+            )])),
+        },
+        all_fields
+    );
 }

@@ -21,8 +21,10 @@ version = "0.0.0"
 path = "src/lib.rs"
 
 [dependencies]
+partiql-common = { path = "../partiql-common" }
+
+derive_builder = "~0.11.1"
 rust_decimal = "~1.22.0"
-partiql-core = { path = "../partiql-core" }
 
 [dev-dependencies]
 rstest = "~0.12.0"
