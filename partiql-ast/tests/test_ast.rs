@@ -2,6 +2,7 @@ mod common;
 
 use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::*;
+use partiql_core::location::BytePosition;
 
 #[test]
 fn test_ast_init() {
@@ -15,13 +16,21 @@ fn test_ast_init() {
         }),
     };
 
-    let p = ast::SymbolPrimitive { value: "hello".to_string() };
+    let p = ast::SymbolPrimitive {
+        value: "hello".to_string()
+    };
     let m = NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))]);
-    let n = p.to_node()
-        .with_span("1".to_string(), "2".to_string())
+    let n = p
+        .to_node()
+        .with_span(BytePosition::from(12), BytePosition::from(1))
         .with_meta(m)
         .build();
-    assert_eq!(Some(Span { begin: "1".to_string(), end: "2".to_string()}), n.span);
+    assert_eq!(
+        Some(Span {
+            begin: "1".to_string(),
+            end: "2".to_string()}),
+        n.span
+    );
     assert_eq!(Some(NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))])),
                n.meta);
 }

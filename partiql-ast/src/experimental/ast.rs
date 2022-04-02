@@ -11,14 +11,15 @@
 
 // TODO Add documentation.
 
-use std::collections::HashMap;
 use rust_decimal::Decimal as RustDecimal;
+use std::collections::HashMap;
 use std::fmt;
+use partiql_core::location::BytePosition;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
-    pub begin: String,
-    pub end: String,
+    pub begin: BytePosition,
+    pub end: BytePosition,
 }
 
 #[derive(Clone, Debug)]
@@ -33,15 +34,12 @@ pub type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeMetaDataValue {
     String(String),
-    Bool(bool)
+    Bool(bool),
 }
 
 impl<T: Clone> AstNode<T> {
-    pub fn with_span(&mut self, begin: String, end: String) -> &mut Self {
-        self.span = Some(Span {
-            begin,
-            end
-        });
+    pub fn with_span(&mut self, begin: BytePosition, end: BytePosition) -> &mut Self {
+        self.span = Some(Span { begin, end });
         self
     }
 
