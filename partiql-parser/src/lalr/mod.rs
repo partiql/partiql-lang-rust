@@ -12,7 +12,7 @@
 //!
 //! [partiql]: https://partiql.org
 use crate::lalr::lexer::PartiqlLexer;
-use lalrpop_util::ParseError;
+use lalrpop_util::{ErrorRecovery, ParseError};
 use partiql_ast::experimental::ast;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
@@ -29,31 +29,74 @@ mod grammar {
 
 mod lexer;
 
-use crate::location::ByteOffset;
-use crate::result::ParserError;
+use crate::location::{ByteOffset, BytePosition, LineAndCharPosition};
+use crate::result::{ParserError, UnexpectedToken, UnexpectedTokenData};
 pub use lexer::LexError;
 pub use lexer::LineOffsetTracker;
 pub use lexer::Spanned;
 pub use lexer::Token;
 
-type LexerError = (ByteOffset, lexer::LexError, ByteOffset);
-type LalrpopError<'input> = ParseError<ByteOffset, lexer::Token<'input>, LexerError>;
-pub type ParserResult<'input> = Result<Box<ast::Expr>, ParserError<'input>>;
+type LalrpopError<'input> =
+    ParseError<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
+type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
+type LalrpopErrorRecovery<'input> =
+    ErrorRecovery<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
+
+pub type ParserResult<'input> =
+    Result<Box<ast::Expr>, Vec<ParserError<'input, LineAndCharPosition>>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParserResult {
     let mut offsets = LineOffsetTracker::default();
+    let mut errors: Vec<LalrpopErrorRecovery> = vec![];
     let lexer = PartiqlLexer::new(s, &mut offsets);
-    Ok(grammar::QueryParser::new().parse(s, lexer)?)
+
+    let parsed: LalrpopResult = grammar::QueryParser::new().parse(s, &mut errors, lexer);
+
+    fn map_error<'input>(
+        s: &'input str,
+        offsets: &LineOffsetTracker,
+        e: LalrpopError<'input>,
+    ) -> ParserError<'input, LineAndCharPosition> {
+        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc))
+    }
+
+    let mut parser_errors: Vec<_> = errors
+        .into_iter()
+        // TODO do something with error_recovery.dropped_tokens?
+        .map(|e| map_error(s, &offsets, e.error))
+        .collect();
+
+    match (parsed, parser_errors.is_empty()) {
+        (Ok(ast), true) => Ok(ast),
+        (Ok(_), false) => Err(parser_errors),
+        (Err(e), true) => Err(vec![map_error(s, &offsets, e)]),
+        (Err(e), false) => {
+            parser_errors.push(map_error(s, &offsets, e));
+            Err(parser_errors)
+        }
+    }
 }
 
-impl<'input> From<LalrpopError<'input>> for ParserError<'input> {
+impl<'input> From<LalrpopErrorRecovery<'input>> for ParserError<'input, BytePosition> {
+    fn from(error_recovery: LalrpopErrorRecovery<'input>) -> Self {
+        // TODO do something with error_recovery.dropped_tokens?
+        error_recovery.error.into()
+    }
+}
+impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
     #[inline]
     fn from(error: LalrpopError<'input>) -> Self {
         match error {
-            lalrpop_util::ParseError::UnrecognizedToken { token, expected: _ } => {
-                ParserError::UnexpectedToken { token }
-            }
+            // TODO do something with UnrecognizedToken.expected
+            lalrpop_util::ParseError::UnrecognizedToken {
+                token: (start, token, end),
+                expected: _,
+            } => ParserError::UnexpectedToken(UnexpectedToken {
+                inner: UnexpectedTokenData { token },
+                location: start.into()..end.into(),
+            }),
+            lalrpop_util::ParseError::User { error } => error,
             _ => todo!(),
         }
     }
@@ -62,9 +105,9 @@ impl<'input> From<LalrpopError<'input>> for ParserError<'input> {
 /// Lex a text PartiQL query.
 // TODO make private
 #[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql(
-    s: &str,
-) -> Result<Vec<Spanned<Token, ByteOffset>>, Spanned<LexError, ByteOffset>> {
+pub fn lex_partiql<'input>(
+    s: &'input str,
+) -> Result<Vec<Spanned<Token, ByteOffset>>, ParserError<'input, BytePosition>> {
     let mut counter = LineOffsetTracker::default();
     PartiqlLexer::new(s, &mut counter).collect::<Result<Vec<_>, _>>()
 }
@@ -113,8 +156,9 @@ mod tests {
         macro_rules! literal {
             ($q:expr) => {{
                 let mut offsets = LineOffsetTracker::default();
+                let mut errors = vec![];
                 let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::LiteralParser::new().parse($q, lexer);
+                let res = grammar::LiteralParser::new().parse($q, &mut errors, lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -192,8 +236,9 @@ mod tests {
         macro_rules! value {
             ($q:expr) => {{
                 let mut offsets = LineOffsetTracker::default();
+                let mut errors = vec![];
                 let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::ExprTermParser::new().parse($q, lexer);
+                let res = grammar::ExprTermParser::new().parse($q, &mut errors, lexer);
                 println!("{:#?}", res);
                 match res {
                     Ok(_) => (),
@@ -263,7 +308,7 @@ mod tests {
 
     mod sfw {
         use super::*;
-        use crate::lalr::lexer::Token;
+        use crate::location::{CharOffset, LineOffset};
 
         #[test]
         fn selectstar() {
@@ -351,16 +396,56 @@ mod tests {
 
         #[test]
         fn improper_at() {
-            let res = parse_partiql(r#"SELECT * FROM a AS a AT b"#);
+            let res = parse_partiql(r#"SELECT * FROM a AS a CROSS JOIN c AS c AT q"#);
             assert!(res.is_err());
-            let error = res.unwrap_err();
-            assert_eq!("Unexpected token [At] at [TODO]", error.to_string());
+            let errors = res.unwrap_err();
+            assert_eq!(1, errors.len());
+            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(39) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(41) }]", errors[0].to_string());
+        }
+
+        #[test]
+        fn improper_at_multi() {
+            let res = parse_partiql(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
+            assert!(res.is_err());
+            let errors = res.unwrap_err();
+            assert_eq!(2, errors.len());
+            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(21) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(23) }]", errors[0].to_string());
+            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(44) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(46) }]", errors[1].to_string());
             assert!(matches!(
-                error,
-                ParserError::UnexpectedToken {
-                    token: (ByteOffset(21), Token::At, ByteOffset(23)),
-                    ..
-                }
+                errors[0],
+                ParserError::UnexpectedToken(UnexpectedToken {
+                    inner: UnexpectedTokenData {
+                        token: lexer::Token::At
+                    },
+                    location: std::ops::Range {
+                        start: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(21)
+                        },
+                        end: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(23)
+                        },
+                    },
+                })
+            ));
+            assert!(matches!(
+                errors[1],
+                ParserError::UnexpectedToken(UnexpectedToken {
+                    inner: UnexpectedTokenData {
+                        token: lexer::Token::At
+                    },
+                    location: std::ops::Range {
+                        start: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(44)
+                        },
+                        end: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(46)
+                        },
+                    },
+                })
             ));
         }
     }
