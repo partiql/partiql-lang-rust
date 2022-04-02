@@ -187,7 +187,6 @@ pub struct Located<T, Loc: Debug> {
 
 /// Trait adding a `to_located` method to ease construction of [`Located`] from its inner value.
 ///
-///
 /// ## Example
 ///
 /// ```rust
@@ -203,6 +202,8 @@ pub trait ToLocated<Loc: Debug>: Sized {
     }
 }
 
+// "Blanket" impl of `ToLocated` for all `T`
+// See https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
 impl<T, Loc: Debug> ToLocated<Loc> for T {}
 
 impl<T, Loc: Debug> Located<T, Loc> {
@@ -272,35 +273,35 @@ mod tests {
 
     #[test]
     fn byteoff() {
-        let bp1 = ByteOffset(5);
-        let bp2 = ByteOffset::from_usize(15);
+        let offset1 = ByteOffset(5);
+        let offset2 = ByteOffset::from_usize(15);
 
-        assert_eq!(20, (bp1 + bp2).to_usize());
-        assert_eq!(10, (bp2 - bp1).to_usize());
-        assert_eq!(ByteOffset(10), bp2 - 5);
-        assert_eq!(ByteOffset(20), bp2 + 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(ByteOffset(10), offset2 - 5);
+        assert_eq!(ByteOffset(20), offset2 + 5);
     }
 
     #[test]
     fn lineoff() {
-        let lp1 = LineOffset(5);
-        let lp2 = LineOffset::from_usize(15);
+        let offset1 = LineOffset(5);
+        let offset2 = LineOffset::from_usize(15);
 
-        assert_eq!(20, (lp1 + lp2).to_usize());
-        assert_eq!(10, (lp2 - lp1).to_usize());
-        assert_eq!(LineOffset(10), lp2 - 5);
-        assert_eq!(LineOffset(20), lp2 + 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(LineOffset(10), offset2 - 5);
+        assert_eq!(LineOffset(20), offset2 + 5);
     }
 
     #[test]
     fn charoff() {
-        let cp1 = CharOffset(5);
-        let cp2 = CharOffset::from_usize(15);
+        let offset1 = CharOffset(5);
+        let offset2 = CharOffset::from_usize(15);
 
-        assert_eq!(20, (cp1 + cp2).to_usize());
-        assert_eq!(10, (cp2 - cp1).to_usize());
-        assert_eq!(CharOffset(10), cp2 - 5);
-        assert_eq!(CharOffset(20), cp2 + 5);
+        assert_eq!(20, (offset1 + offset2).to_usize());
+        assert_eq!(10, (offset2 - offset1).to_usize());
+        assert_eq!(CharOffset(10), offset2 - 5);
+        assert_eq!(CharOffset(20), offset2 + 5);
     }
 
     #[test]
