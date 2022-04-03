@@ -13,7 +13,6 @@
 
 use partiql_source_map::location::BytePosition;
 use rust_decimal::Decimal as RustDecimal;
-use std::collections::HashMap;
 use std::fmt;
 
 /// Provides the required methods for AstNode conversations.
