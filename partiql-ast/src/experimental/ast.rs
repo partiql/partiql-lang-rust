@@ -36,13 +36,9 @@ pub trait ToAstNode {
     ///         begin: BytePosition::from(12),
     ///             end: BytePosition::from(1),
     ///     })
-    ///     .meta(NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))]))
     ///     .build()
     ///     .expect("Could not retrieve ast node");
     /// ```
-    ///
-    /// As [AstNode] implements Builder pattern, optional struct fields can get skipped
-    /// when building the node.
     fn to_node(self) -> AstNodeBuilder<Self>
     where
         Self: Clone,
@@ -63,8 +59,6 @@ pub struct AstNode<T> {
     pub node: T,
     #[builder(setter(strip_option), default)]
     pub span: Option<Span>,
-    #[builder(setter(strip_option), default)]
-    pub meta: Option<NodeMetaData<'static>>,
 }
 
 /// Represents the beginning and the end of a `Span` in the source code
@@ -72,17 +66,6 @@ pub struct AstNode<T> {
 pub struct Span {
     pub begin: BytePosition,
     pub end: BytePosition,
-}
-
-pub type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NodeMetaDataValue {
-    String(String),
-    Bool(bool),
-    Int32(i32),
-    Usize(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
