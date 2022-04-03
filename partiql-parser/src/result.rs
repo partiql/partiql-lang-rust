@@ -6,7 +6,7 @@ use std::fmt::Debug;
 
 use crate::lalr::Token;
 use crate::LexError;
-use partiql_common::srcmap::location::Located;
+use partiql_source_map::location::Located;
 use thiserror::Error;
 
 /// General [`Result`] type for the PartiQL parser.
@@ -69,7 +69,7 @@ mod tests {
     use super::*;
     use crate::lalr::Token;
     use crate::LexError;
-    use partiql_common::srcmap::location::{
+    use partiql_source_map::location::{
         ByteOffset, BytePosition, CharOffset, Located, ToLocated,
     };
 

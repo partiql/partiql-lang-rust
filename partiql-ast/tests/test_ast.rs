@@ -2,7 +2,7 @@ mod common;
 
 use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::*;
-use partiql_common::srcmap::location::BytePosition;
+use partiql_source_map::location::BytePosition;
 
 #[test]
 fn test_ast_init() {
