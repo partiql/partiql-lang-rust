@@ -11,16 +11,85 @@
 
 // TODO Add documentation.
 
+use partiql_common::srcmap::location::BytePosition;
 use rust_decimal::Decimal as RustDecimal;
+use std::collections::HashMap;
 use std::fmt;
+
+/// Provides the required methods for AstNode conversations.
+pub trait ToAstNode {
+    /// Wraps the `self` to an [AstNode] and returns an `AstNodeBuilder` for
+    /// further [AstNode] construction.
+    /// ## Example:
+    /// ```
+    /// use partiql_ast::experimental::ast::{
+    ///     NodeMetaData, NodeMetaDataValue, Span, SymbolPrimitive, ToAstNode
+    /// };
+    /// use partiql_common::srcmap::location::BytePosition;
+    /// let p = SymbolPrimitive {
+    ///     value: "symbol2".to_string()
+    ///  };
+    ///
+    /// let node = p
+    ///     .to_node()
+    ///     .span(Span {
+    ///         begin: BytePosition::from(12),
+    ///             end: BytePosition::from(1),
+    ///     })
+    ///     .meta(NodeMetaData::from([("test", NodeMetaDataValue::Bool(true))]))
+    ///     .build()
+    ///     .expect("Could not retrieve ast node");
+    /// ```
+    ///
+    /// As [AstNode] implements Builder pattern, optional struct fields can get skipped
+    /// when building the node.
+    fn to_node(self) -> AstNodeBuilder<Self>
+    where
+        Self: Clone,
+    {
+        AstNodeBuilder::default().node(self).clone()
+    }
+}
+
+/// Implements [ToAstNode] for all types within this crate, read further [here][1].
+/// [1]: https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
+impl<T> ToAstNode for T {}
+
+/// Represents an AST node. [AstNode] uses [derive_builder][1] to expose a Builder
+/// for creating the node. See [ToAstNode] for more details on the usage.
+/// [1]: https://crates.io/crates/derive_builder
+#[derive(Builder, Clone, Eq, PartialEq, Debug)]
+pub struct AstNode<T> {
+    pub node: T,
+    #[builder(setter(strip_option), default)]
+    pub span: Option<Span>,
+    #[builder(setter(strip_option), default)]
+    pub meta: Option<NodeMetaData<'static>>,
+}
+
+/// Represents the beginning and the end of a `Span` in the source code
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub begin: BytePosition,
+    pub end: BytePosition,
+}
+
+pub type NodeMetaData<'a> = HashMap<&'a str, NodeMetaDataValue>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NodeMetaDataValue {
+    String(String),
+    Bool(bool),
+    Int32(i32),
+    Usize(usize),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub kind: ItemKind,
     // We can/require to extend the fields as we get more clarity on the path forward.
     // Candidate additional fields are `name: Ident`, `span: Span`, `attr: Vec<Attribute>`.
-    // Also targeting on spinning up a parallel discussion with regards to AST versioning
-    // and how it contributes to backward compatibility.
 }
 
 impl fmt::Display for Item {

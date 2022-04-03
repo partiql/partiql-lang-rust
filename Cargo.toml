@@ -3,6 +3,7 @@
 members = [
   "partiql",
   "partiql-ast",
+  "partiql-common",
   "partiql-eval",
   "partiql-irgen",
   "partiql-parser",

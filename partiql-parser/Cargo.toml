@@ -23,6 +23,7 @@ lalrpop = "~0.19.7"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast" }
+partiql-common = { path = "../partiql-common" }
 
 thiserror = "~1.0.24"
 

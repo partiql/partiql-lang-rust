@@ -5,8 +5,8 @@
 use std::fmt::Debug;
 
 use crate::lalr::Token;
-use crate::location::Located;
 use crate::LexError;
+use partiql_common::srcmap::location::Located;
 use thiserror::Error;
 
 /// General [`Result`] type for the PartiQL parser.
@@ -68,8 +68,10 @@ pub type UnexpectedToken<'input, L> = Located<UnexpectedTokenData<'input>, L>;
 mod tests {
     use super::*;
     use crate::lalr::Token;
-    use crate::location::{ByteOffset, BytePosition, CharOffset, Located, ToLocated};
     use crate::LexError;
+    use partiql_common::srcmap::location::{
+        ByteOffset, BytePosition, CharOffset, Located, ToLocated,
+    };
 
     #[test]
     fn syntax_error() {
