@@ -1,31 +1,20 @@
 [package]
-name = "partiql-ast"
+name = "partiql-common"
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
-description = "PartiQL AST"
+description = "PartiQL Common"
 homepage = "https://github.com/partiql/partiql-lang-rust"
 repository = "https://github.com/partiql/partiql-lang-rust"
 license = "Apache-2.0"
 readme = "../README.md"
 keywords = ["sql", "ast", "query", "compilers", "interpreters"]
-categories = ["database", "compilers", "ast-implementations"]
+categories = ["database", "compilers"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
+    "**/.git/**",
+    "**/.github/**",
 ]
 edition = "2021"
 version = "0.0.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-path = "src/lib.rs"
-
 [dependencies]
-partiql-common = { path = "../partiql-common" }
-
-derive_builder = "~0.11.1"
-rust_decimal = "~1.22.0"
-
-[dev-dependencies]
-rstest = "~0.12.0"
-

@@ -7,7 +7,7 @@
 //!
 //! [partiql]: https://partiql.org
 
-pub mod location;
+// pub mod location;
 pub mod result;
 
 mod lalr;

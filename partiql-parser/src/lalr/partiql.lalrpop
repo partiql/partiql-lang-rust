@@ -4,7 +4,7 @@ use lalrpop_util::ErrorRecovery;
 use partiql_ast::experimental::ast;
 
 use crate::lalr::lexer;
-use crate::location::{ByteOffset, BytePosition};
+use partiql_common::srcmap::location::{ByteOffset, BytePosition};
 use crate::result::ParserError;
 
 grammar<'input, 'err>(input: &'input str,
