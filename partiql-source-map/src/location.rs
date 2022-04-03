@@ -101,7 +101,7 @@ impl From<usize> for BytePosition {
 ///
 /// ## Example
 /// ```
-/// # use partiql_common::srcmap::location::LineAndCharPosition;
+/// # use partiql_source_map::location::LineAndCharPosition;
 /// println!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0));
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -126,7 +126,7 @@ impl LineAndCharPosition {
 ///
 /// ## Example
 /// ```
-/// # use partiql_common::srcmap::location::LineAndColumn;
+/// # use partiql_source_map::location::LineAndColumn;
 /// println!("Beginning of a document: {}", LineAndColumn::new(1, 1).unwrap());
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -190,7 +190,7 @@ pub struct Located<T, Loc: Debug> {
 /// ## Example
 ///
 /// ```rust
-/// use partiql_common::srcmap::location::{Located, ToLocated};
+/// use partiql_source_map::location::{Located, ToLocated};
 /// assert_eq!("blah".to_string().to_located(5..10),
 ///             Located{inner: "blah".to_string(), location: 5..10});
 /// ```
@@ -213,7 +213,7 @@ impl<T, Loc: Debug> Located<T, Loc> {
     /// ## Example
     ///
     /// ```rust
-    /// use partiql_common::srcmap::location::{Located, ToLocated};
+    /// use partiql_source_map::location::{Located, ToLocated};
     /// assert_eq!("blah".to_string().to_located(5..10).map_loc(|l| l+5),
     ///             Located{inner: "blah".to_string(), location: 10..15});
     /// ```
@@ -236,8 +236,8 @@ mod tests {
     use super::*;
     use std::num::NonZeroUsize;
 
-    use crate::srcmap::location::Located;
-    use crate::srcmap::location::{ByteOffset, BytePosition};
+    use crate::location::Located;
+    use crate::location::{ByteOffset, BytePosition};
 
     #[test]
     fn located() {
