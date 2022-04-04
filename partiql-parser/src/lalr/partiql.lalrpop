@@ -130,7 +130,6 @@ FromClause: ast::FromClause = {
 TableReference: ast::FromClause = {
     <TableNonJoin>,
     <TableJoined>,
-    ! => { errors.push(<>); ast::FromClause::Error },
 }
 TableNonJoin: ast::FromClause = {
     <t:TableBaseReference> => ast::FromClause::FromLet( t ),
@@ -620,6 +619,7 @@ pub ExprTerm: ast::Expr = {
     "{" <fields:CommaTerm<ExprPair>> "}" => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields} ) },
     "[" <values:CommaTerm<ExprQuery>> "]"=> ast::Expr{ kind: ast::ExprKind::List( ast::List{values} ) },
     "<<" <values:CommaTerm<ExprQuery>> ">>"=> ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values} ) },
+    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
 ExprPair: ast::ExprPair = {

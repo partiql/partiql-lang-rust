@@ -3,7 +3,7 @@
 //! Types representing positions, spans, locations, etc of parsed PartiQL text.
 
 use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroUsize;
 use std::ops::{Add, Range, Sub};
 
@@ -97,6 +97,13 @@ impl From<usize> for BytePosition {
     }
 }
 
+impl fmt::Display for BytePosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let BytePosition(ByteOffset(n)) = self;
+        write!(f, "b{}", n)
+    }
+}
+
 /// A 0-indexed line & char absolute position (i.e., relative to the start of a &str)
 ///
 /// ## Example
@@ -109,6 +116,7 @@ pub struct LineAndCharPosition {
     pub line: LineOffset,
     pub char: CharOffset,
 }
+
 impl LineAndCharPosition {
     /// Constructs at [`LineAndCharPosition`]
     #[inline]
@@ -171,18 +179,50 @@ impl From<LineAndCharPosition> for LineAndColumn {
 
 impl fmt::Display for LineAndColumn {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}, column {}", self.line, self.column)
+        write!(f, "{}:{}", self.line, self.column)
+    }
+}
+/// A range with an inclusive start and exclusive end.
+///
+/// Basically, a [`Range`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Location<Loc: Display> {
+    /// The start the range (inclusive).
+    pub start: Loc,
+    /// The end of the range (exclusive).
+    pub end: Loc,
+}
+
+impl<Loc> fmt::Display for Location<Loc>
+where
+    Loc: Display,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        self.start.fmt(f)?;
+        write!(f, "..")?;
+        self.end.fmt(f)?;
+        write!(f, ")")?;
+        Ok(())
+    }
+}
+
+impl<Loc> From<Range<Loc>> for Location<Loc>
+where
+    Loc: Display,
+{
+    fn from(Range { start, end }: Range<Loc>) -> Self {
+        Location { start, end }
     }
 }
 
 /// A wrapper type that holds an `inner` value and a `location` for it
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Located<T, Loc: Debug> {
-    // TODO this should be `Loc: Display`
+pub struct Located<T, Loc: Display> {
     /// The item that has a location attached
     pub inner: T,
     /// The location of the error
-    pub location: Range<Loc>,
+    pub location: Location<Loc>,
 }
 
 /// Trait adding a `to_located` method to ease construction of [`Located`] from its inner value.
@@ -190,44 +230,57 @@ pub struct Located<T, Loc: Debug> {
 /// ## Example
 ///
 /// ```rust
-/// use partiql_source_map::location::{Located, ToLocated};
-/// assert_eq!("blah".to_string().to_located(5..10),
-///             Located{inner: "blah".to_string(), location: 5..10});
+/// # use partiql_source_map::location::{ByteOffset, BytePosition, Located, ToLocated};
+/// assert_eq!("blah".to_string().to_located(BytePosition::from(5)..BytePosition::from(10)),
+///             Located{
+///                 inner: "blah".to_string(),
+///                 location:  (BytePosition(ByteOffset(5))..BytePosition(ByteOffset(10))).into()
+///             });
 /// ```
-pub trait ToLocated<Loc: Debug>: Sized {
+pub trait ToLocated<Loc: Display>: Sized {
     /// Create a [`Located`] from its inner value.
-    fn to_located(self, location: Range<Loc>) -> Located<Self, Loc> {
-        let inner = self;
-        Located { inner, location }
+    fn to_located<IntoLoc>(self, location: IntoLoc) -> Located<Self, Loc>
+    where
+        IntoLoc: Into<Location<Loc>>,
+    {
+        Located {
+            inner: self,
+            location: location.into(),
+        }
     }
 }
 
 // "Blanket" impl of `ToLocated` for all `T`
 // See https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
-impl<T, Loc: Debug> ToLocated<Loc> for T {}
+impl<T, Loc: Display> ToLocated<Loc> for T {}
 
-impl<T, Loc: Debug> Located<T, Loc> {
+impl<T, Loc: Display> Located<T, Loc> {
     /// Maps an `Located<T, Loc>` to `Located<T, Loc2>` by applying a function to the contained
     /// location and moving the contained `inner`
     ///
     /// ## Example
     ///
     /// ```rust
-    /// use partiql_source_map::location::{Located, ToLocated};
-    /// assert_eq!("blah".to_string().to_located(5..10).map_loc(|l| l+5),
-    ///             Located{inner: "blah".to_string(), location: 10..15});
+    /// # use partiql_source_map::location::{ByteOffset, BytePosition, Located, ToLocated};
+    /// assert_eq!("blah".to_string()
+    ///                 .to_located(BytePosition::from(5)..BytePosition::from(10))
+    ///                 .map_loc(|BytePosition(o)| BytePosition(o+5)),
+    ///             Located{
+    ///                 inner: "blah".to_string(),
+    ///                 location: (BytePosition(ByteOffset(10))..BytePosition(ByteOffset(15))).into()
+    ///             });
     /// ```
-    pub fn map_loc<F, Loc2>(self, tx: F) -> Located<T, Loc2>
+    pub fn map_loc<F, Loc2>(self, mut tx: F) -> Located<T, Loc2>
     where
-        Loc2: Debug,
-        F: Fn(Loc) -> Loc2,
+        Loc2: Display,
+        F: FnMut(Loc) -> Loc2,
     {
         let Located { inner, location } = self;
         let location = Range {
             start: tx(location.start),
             end: tx(location.end),
         };
-        Located { inner, location }
+        inner.to_located(location)
     }
 }
 
@@ -236,35 +289,35 @@ mod tests {
     use super::*;
     use std::num::NonZeroUsize;
 
-    use crate::location::Located;
-    use crate::location::{ByteOffset, BytePosition};
+    use crate::location::{ByteOffset, BytePosition, Located, Location};
 
     #[test]
     fn located() {
-        let l1: Located<String, ByteOffset> =
-            "test".to_string().to_located(ByteOffset(0)..ByteOffset(42));
+        let l1: Located<String, BytePosition> = "test"
+            .to_string()
+            .to_located(ByteOffset(0).into()..ByteOffset(42).into());
 
         assert_eq!(l1.inner, "test");
-        assert_eq!(l1.location.start.0, 0);
-        assert_eq!(l1.location.end.0, 42);
+        assert_eq!(l1.location.start.0 .0, 0);
+        assert_eq!(l1.location.end.0 .0, 42);
 
         let l1c = l1.clone();
         assert!(matches!(
             l1c,
             Located {
                 inner: s,
-                location: std::ops::Range {
-                    start:ByteOffset(0),
-                    end: ByteOffset(42)
+                location: Location {
+                    start:BytePosition(ByteOffset(0)),
+                    end: BytePosition(ByteOffset(42))
                 }
             } if s == "test"
         ));
 
-        let l2 = l1.map_loc(BytePosition);
+        let l2 = l1.map_loc(|x| x);
 
         assert!(matches!(
             l2.location,
-            std::ops::Range {
+            Location {
                 start: BytePosition(ByteOffset(0)),
                 end: BytePosition(ByteOffset(42))
             }
@@ -326,6 +379,6 @@ mod tests {
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
         assert_eq!(display, LineAndColumn::new(14, 43).unwrap());
-        assert_eq!("line 14, column 43", format!("{}", display))
+        assert_eq!("14:43", format!("{}", display))
     }
 }

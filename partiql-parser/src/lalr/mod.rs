@@ -5,9 +5,9 @@
 //! # Usage
 //!
 //! ```
-//! use partiql_parser::{LalrParserResult, lalr_parse};
+//! use partiql_parser::{ParserResult, parse_partiql};
 //!
-//!     lalr_parse("SELECT g FROM data GROUP BY a").expect("successful parse");
+//!     parse_partiql("SELECT g FROM data GROUP BY a").expect("successful parse");
 //! ```
 //!
 //! [partiql]: https://partiql.org
@@ -29,12 +29,9 @@ mod grammar {
 
 mod lexer;
 
-use crate::result::{ParserError, UnexpectedToken, UnexpectedTokenData};
-pub use lexer::LexError;
-pub use lexer::LineOffsetTracker;
-pub use lexer::Spanned;
-pub use lexer::Token;
-use partiql_source_map::location::{ByteOffset, BytePosition, LineAndCharPosition};
+use crate::result::{ParserError, UnexpectedTokenData};
+use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
 
 type LalrpopError<'input> =
     ParseError<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
@@ -42,8 +39,8 @@ type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     ErrorRecovery<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
 
-pub type ParserResult<'input> =
-    Result<Box<ast::Expr>, Vec<ParserError<'input, LineAndCharPosition>>>;
+/// General [`Result`] type for the PartiQL parser.
+pub type ParserResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input, LineAndColumn>>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParserResult {
@@ -53,26 +50,35 @@ pub fn parse_partiql(s: &str) -> ParserResult {
 
     let parsed: LalrpopResult = grammar::QueryParser::new().parse(s, &mut errors, lexer);
 
+    process_errors(s, &offsets, parsed, errors)
+}
+
+pub fn process_errors<'input, T>(
+    s: &'input str,
+    offsets: &LineOffsetTracker,
+    result: Result<T, LalrpopError<'input>>,
+    errors: Vec<LalrpopErrorRecovery<'input>>,
+) -> Result<T, Vec<ParserError<'input, LineAndColumn>>> {
     fn map_error<'input>(
         s: &'input str,
         offsets: &LineOffsetTracker,
         e: LalrpopError<'input>,
-    ) -> ParserError<'input, LineAndCharPosition> {
-        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc))
+    ) -> ParserError<'input, LineAndColumn> {
+        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).into())
     }
 
     let mut parser_errors: Vec<_> = errors
         .into_iter()
         // TODO do something with error_recovery.dropped_tokens?
-        .map(|e| map_error(s, &offsets, e.error))
+        .map(|e| map_error(s, offsets, e.error))
         .collect();
 
-    match (parsed, parser_errors.is_empty()) {
+    match (result, parser_errors.is_empty()) {
         (Ok(ast), true) => Ok(ast),
         (Ok(_), false) => Err(parser_errors),
-        (Err(e), true) => Err(vec![map_error(s, &offsets, e)]),
+        (Err(e), true) => Err(vec![map_error(s, offsets, e)]),
         (Err(e), false) => {
-            parser_errors.push(map_error(s, &offsets, e));
+            parser_errors.push(map_error(s, offsets, e));
             Err(parser_errors)
         }
     }
@@ -92,52 +98,40 @@ impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
             lalrpop_util::ParseError::UnrecognizedToken {
                 token: (start, token, end),
                 expected: _,
-            } => ParserError::UnexpectedToken(UnexpectedToken {
-                inner: UnexpectedTokenData { token },
-                location: start.into()..end.into(),
-            }),
+            } => ParserError::UnexpectedToken(
+                UnexpectedTokenData {
+                    token: token.to_string().into(),
+                }
+                .to_located(start.into()..end.into()),
+            ),
+
+            lalrpop_util::ParseError::InvalidToken { location } => {
+                ParserError::UnknownParseError(location.into())
+            }
+
+            // TODO do something with UnrecognizedEOF.expected
+            lalrpop_util::ParseError::UnrecognizedEOF {
+                location,
+                expected: _,
+            } => ParserError::UnexpectedEndOfInput(location.into()),
+
+            lalrpop_util::ParseError::ExtraToken {
+                token: (start, token, end),
+            } => ParserError::UnexpectedToken(
+                UnexpectedTokenData {
+                    token: token.to_string().into(),
+                }
+                .to_located(start.into()..end.into()),
+            ),
+
             lalrpop_util::ParseError::User { error } => error,
-            _ => todo!(),
         }
     }
-}
-
-/// Lex a text PartiQL query.
-// TODO make private
-#[deprecated(note = "prototypical lexer implementation")]
-pub fn lex_partiql<'input>(
-    s: &'input str,
-) -> Result<Vec<Spanned<Token, ByteOffset>>, ParserError<'input, BytePosition>> {
-    let mut counter = LineOffsetTracker::default();
-    PartiqlLexer::new(s, &mut counter).collect::<Result<Vec<_>, _>>()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod lex {
-        use super::*;
-
-        #[test]
-        fn offset() {
-            let lexed = lex_partiql(r#"SELECT * FROM a OFFSET 10"#);
-            assert!(lexed.is_ok());
-            let lexed = lexed.unwrap();
-
-            assert_eq!(
-                vec![
-                    Token::Select,
-                    Token::Star,
-                    Token::From,
-                    Token::Identifier("a"),
-                    Token::Offset,
-                    Token::Int("10"),
-                ],
-                lexed.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
-            );
-        }
-    }
 
     macro_rules! parse {
         ($q:expr) => {{
@@ -308,7 +302,6 @@ mod tests {
 
     mod sfw {
         use super::*;
-        use partiql_source_map::location::{CharOffset, LineOffset};
 
         #[test]
         fn selectstar() {
@@ -393,6 +386,13 @@ mod tests {
             "#;
             parse!(q)
         }
+    }
+
+    mod errors {
+        use super::*;
+        use crate::result::{UnexpectedToken, UnexpectedTokenData};
+        use partiql_source_map::location::{CharOffset, LineAndCharPosition, LineOffset, Location};
+        use std::borrow::Cow;
 
         #[test]
         fn improper_at() {
@@ -400,7 +400,10 @@ mod tests {
             assert!(res.is_err());
             let errors = res.unwrap_err();
             assert_eq!(1, errors.len());
-            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(39) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(41) }]", errors[0].to_string());
+            assert_eq!(
+                "Unexpected token `AT` at `(1:40..1:42)`",
+                errors[0].to_string()
+            );
         }
 
         #[test]
@@ -409,44 +412,72 @@ mod tests {
             assert!(res.is_err());
             let errors = res.unwrap_err();
             assert_eq!(2, errors.len());
-            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(21) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(23) }]", errors[0].to_string());
-            assert_eq!("Unexpected token [At] at [LineAndCharPosition { line: LineOffset(0), char: CharOffset(44) }..LineAndCharPosition { line: LineOffset(0), char: CharOffset(46) }]", errors[1].to_string());
-            assert!(matches!(
+            assert_eq!(
+                "Unexpected token `AT` at `(1:22..1:24)`",
+                errors[0].to_string()
+            );
+            assert_eq!(
+                "Unexpected token `AT` at `(1:45..1:47)`",
+                errors[1].to_string()
+            );
+            assert_eq!(
                 errors[0],
                 ParserError::UnexpectedToken(UnexpectedToken {
                     inner: UnexpectedTokenData {
-                        token: lexer::Token::At
+                        token: Cow::from("AT")
                     },
-                    location: std::ops::Range {
+                    location: Location {
                         start: LineAndCharPosition {
                             line: LineOffset(0),
                             char: CharOffset(21)
-                        },
+                        }
+                        .into(),
                         end: LineAndCharPosition {
                             line: LineOffset(0),
                             char: CharOffset(23)
-                        },
+                        }
+                        .into(),
                     },
                 })
-            ));
-            assert!(matches!(
+            );
+            assert_eq!(
                 errors[1],
                 ParserError::UnexpectedToken(UnexpectedToken {
                     inner: UnexpectedTokenData {
-                        token: lexer::Token::At
+                        token: Cow::from("AT")
                     },
-                    location: std::ops::Range {
+                    location: Location {
                         start: LineAndCharPosition {
                             line: LineOffset(0),
                             char: CharOffset(44)
-                        },
+                        }
+                        .into(),
                         end: LineAndCharPosition {
                             line: LineOffset(0),
                             char: CharOffset(46)
-                        },
+                        }
+                        .into(),
                     },
                 })
-            ));
+            );
+        }
+
+        #[test]
+        fn eof() {
+            let res = parse_partiql(r#"SELECT"#);
+            assert!(res.is_err());
+            let errors = res.unwrap_err();
+            assert_eq!(1, errors.len());
+            assert_eq!(
+                errors[0],
+                ParserError::UnexpectedEndOfInput(
+                    LineAndCharPosition {
+                        line: 0.into(),
+                        char: 6.into(),
+                    }
+                    .into()
+                )
+            );
         }
     }
 }
