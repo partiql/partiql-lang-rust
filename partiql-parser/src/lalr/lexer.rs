@@ -1,4 +1,4 @@
-use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
+use partiql_source_map::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 
 use logos::{Logos, Span};
 use smallvec::{smallvec, SmallVec};
@@ -15,7 +15,7 @@ use thiserror::Error;
 /// ## Example
 ///
 /// ```rust
-/// use partiql_parser::location::{ByteOffset, LineAndCharPosition};
+/// use partiql_source_map::location::{ByteOffset, LineAndCharPosition};
 /// use partiql_parser::LineOffsetTracker;
 ///
 /// let source = "12345\n789012345\n789012345\n789012345";
@@ -707,7 +707,7 @@ pub enum Token<'input> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::location::LineAndColumn;
+    use partiql_source_map::location::LineAndColumn;
 
     #[test]
     fn ion_simple() {

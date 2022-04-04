@@ -11,16 +11,66 @@
 
 // TODO Add documentation.
 
+use partiql_source_map::location::BytePosition;
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
+
+/// Provides the required methods for AstNode conversations.
+pub trait ToAstNode {
+    /// Wraps the `self` to an [AstNode] and returns an `AstNodeBuilder` for
+    /// further [AstNode] construction.
+    /// ## Example:
+    /// ```
+    /// use partiql_ast::experimental::ast::{Span, SymbolPrimitive, ToAstNode};
+    /// use partiql_source_map::location::BytePosition;
+    ///
+    /// let p = SymbolPrimitive {
+    ///     value: "symbol2".to_string()
+    ///  };
+    ///
+    /// let node = p
+    ///     .to_node()
+    ///     .span(Span {
+    ///         begin: BytePosition::from(12),
+    ///             end: BytePosition::from(1),
+    ///     })
+    ///     .build()
+    ///     .expect("Could not retrieve ast node");
+    /// ```
+    fn to_node(self) -> AstNodeBuilder<Self>
+    where
+        Self: Clone,
+    {
+        AstNodeBuilder::default().node(self).clone()
+    }
+}
+
+/// Implements [ToAstNode] for all types within this crate, read further [here][1].
+/// [1]: https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
+impl<T> ToAstNode for T {}
+
+/// Represents an AST node. [AstNode] uses [derive_builder][1] to expose a Builder
+/// for creating the node. See [ToAstNode] for more details on the usage.
+/// [1]: https://crates.io/crates/derive_builder
+#[derive(Builder, Clone, Eq, PartialEq, Debug)]
+pub struct AstNode<T> {
+    pub node: T,
+    #[builder(setter(strip_option), default)]
+    pub span: Option<Span>,
+}
+
+/// Represents the beginning and the end of a `Span` in the source code
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub begin: BytePosition,
+    pub end: BytePosition,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub kind: ItemKind,
     // We can/require to extend the fields as we get more clarity on the path forward.
     // Candidate additional fields are `name: Ident`, `span: Span`, `attr: Vec<Attribute>`.
-    // Also targeting on spinning up a parallel discussion with regards to AST versioning
-    // and how it contributes to backward compatibility.
 }
 
 impl fmt::Display for Item {
@@ -169,28 +219,11 @@ pub enum ExprKind {
     VarRef(VarRef),
     /// A parameter, i.e. `?`
     Param(Param),
+    /// Binary operator
+    BinOp(BinOp),
     /// Unary operators
-    Not(Not),
-    Pos(Pos),
-    Neg(Neg),
-    /// Arithmetic operators
-    Plus(Plus),
-    Minus(Minus),
-    Times(Times),
-    Divide(Divide),
-    Modulo(Modulo),
-    Exponentiate(Exponentiate),
-    Concat(Concat),
-    /// Logical operators
-    And(And),
-    Or(Or),
+    UniOp(UniOp),
     /// Comparison operators
-    Eq(Eq),
-    Ne(Ne),
-    Gt(Gt),
-    Gte(Gte),
-    Lt(Lt),
-    Lte(Lte),
     Like(Like),
     Between(Between),
     In(In),
@@ -274,93 +307,46 @@ pub struct Param {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Not {
+pub struct BinOp {
+    pub kind: BinOpKind,
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BinOpKind {
+    // Arithmetic
+    Add,
+    Div,
+    Exp,
+    Mod,
+    Mul,
+    Neg,
+    // Logical
+    And,
+    Or,
+    // String
+    Concat,
+    // Comparison
+    Eq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    Ne,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UniOp {
+    pub kind: UniOpKind,
     pub expr: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Pos {
-    pub expr: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Neg {
-    pub expr: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Plus {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Minus {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Times {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Divide {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Modulo {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Exponentiate {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Concat {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct And {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Or {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Eq {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Ne {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Gt {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Gte {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Lt {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Lte {
-    pub operands: Vec<Box<Expr>>,
+pub enum UniOpKind {
+    Pos,
+    Neg,
+    Not,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -4,7 +4,7 @@ use lalrpop_util::ErrorRecovery;
 use partiql_ast::experimental::ast;
 
 use crate::lalr::lexer;
-use crate::location::{ByteOffset, BytePosition};
+use partiql_source_map::location::{ByteOffset, BytePosition};
 use crate::result::ParserError;
 
 grammar<'input, 'err>(input: &'input str,
@@ -373,19 +373,36 @@ pub ExprQuery: Box<ast::Expr> = {
 
 ExprPrecedence13: ast::Expr = {
     <l:ExprPrecedence13> "OR" <r:ExprPrecedence12> =>
-       ast::Expr{ kind: ast::ExprKind::Or( ast::Or{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Or,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence12>,
 }
 
 ExprPrecedence12: ast::Expr = {
     <l:ExprPrecedence12> "AND" <r:ExprPrecedence11> =>
-       ast::Expr{ kind: ast::ExprKind::And( ast::And{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::And,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence11>,
 }
 
 ExprPrecedence11: ast::Expr = {
     "NOT" <r:ExprPrecedence11> =>
-       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(r) } ) },
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(r),
+           }
+       )},
     <ExprPrecedence10>,
 }
 
@@ -394,30 +411,77 @@ ExprPrecedence10: ast::Expr = {
        ast::Expr{ kind: ast::ExprKind::Is( ast::Is{ operands: vec![Box::new(l),Box::new(r)] } ) },
     <l:ExprPrecedence10> "IS" "NOT" <r:ExprPrecedence09> => {
        let is = ast::Expr{ kind: ast::ExprKind::Is( ast::Is{ operands: vec![Box::new(l),Box::new(r)] } ) };
-       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(is) } ) }
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(is),
+           }
+       )}
     },
     <ExprPrecedence09>
 }
 
 ExprPrecedence09: ast::Expr = {
     <l:ExprPrecedence09> "=" <r:ExprPrecedence08> =>
-       ast::Expr{ kind: ast::ExprKind::Eq( ast::Eq{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Eq,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence09> "!=" <r:ExprPrecedence08> =>
-       ast::Expr{ kind: ast::ExprKind::Ne( ast::Ne{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Ne,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence09> "<>" <r:ExprPrecedence08> =>
-       ast::Expr{ kind: ast::ExprKind::Ne( ast::Ne{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Ne,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence08>,
 }
 
 ExprPrecedence08: ast::Expr = {
     <l:ExprPrecedence08> "<" <r:ExprPrecedence07> =>
-       ast::Expr{ kind: ast::ExprKind::Lt( ast::Lt{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence08> ">" <r:ExprPrecedence07> =>
-       ast::Expr{ kind: ast::ExprKind::Gt( ast::Gt{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence08> "<=" <r:ExprPrecedence07> =>
-       ast::Expr{ kind: ast::ExprKind::Lte( ast::Lte{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lte,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence08> ">=" <r:ExprPrecedence07> =>
-       ast::Expr{ kind: ast::ExprKind::Gte( ast::Gte{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gte,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence07>,
 }
 
@@ -426,19 +490,34 @@ ExprPrecedence07: ast::Expr = {
        ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) } ) },
     <value:ExprPrecedence07> "NOT" "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> => {
        let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) } ) };
-       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(between),
+           }
+       )}
     },
     <value:ExprPrecedence07> "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> =>
        ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape } ) },
     <value:ExprPrecedence07> "NOT" "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> => {
        let between = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape } ) };
-       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(between),
+           }
+       )}
     },
     <l:ExprPrecedence07> "IN" <r:ExprPrecedence06> =>
        ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] } ) },
     <l:ExprPrecedence07> "NOT" "IN" <r:ExprPrecedence06> => {
        let between = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] } ) };
-       ast::Expr{ kind: ast::ExprKind::Not( ast::Not{ expr: Box::new(between) } ) }
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Not,
+               expr: Box::new(between),
+           }
+       )}
     },
     <ExprPrecedence06>,
 }
@@ -449,33 +528,79 @@ LikeEscape: Box<ast::Expr> = {
 
 ExprPrecedence06: ast::Expr = {
     <l:ExprPrecedence06> "+" <r:ExprPrecedence05> =>
-       ast::Expr{ kind: ast::ExprKind::Plus( ast::Plus{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Add,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence06> "-" <r:ExprPrecedence05> =>
-       ast::Expr{ kind: ast::ExprKind::Minus( ast::Minus{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Neg,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence05>,
 }
 
 ExprPrecedence05: ast::Expr = {
     <l:ExprPrecedence05> "*" <r:ExprPrecedence04> =>
-       ast::Expr{ kind: ast::ExprKind::Times( ast::Times{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Mul,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence05> "/" <r:ExprPrecedence04> =>
-       ast::Expr{ kind: ast::ExprKind::Divide( ast::Divide{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Div,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <l:ExprPrecedence05> "%" <r:ExprPrecedence04> =>
-       ast::Expr{ kind: ast::ExprKind::Modulo( ast::Modulo{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Mod,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence04>,
 }
 
 ExprPrecedence04: ast::Expr = {
     <l:ExprPrecedence04> "^" <r:ExprPrecedence03> =>
-       ast::Expr{ kind: ast::ExprKind::Exponentiate( ast::Exponentiate{ operands: vec![Box::new(l),Box::new(r)] } ) },
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Exp,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }
+       )},
     <ExprPrecedence03>,
 }
 
 ExprPrecedence03: ast::Expr = {
     "+" <r:ExprPrecedence03> =>
-       ast::Expr{ kind: ast::ExprKind::Pos( ast::Pos{ expr: Box::new(r) } ) },
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Pos,
+               expr: Box::new(r),
+           }
+       )},
     "-" <r:ExprPrecedence03> =>
-       ast::Expr{ kind: ast::ExprKind::Neg( ast::Neg{ expr: Box::new(r) } ) },
+       ast::Expr{ kind: ast::ExprKind::UniOp(
+           ast::UniOp {
+               kind: ast::UniOpKind::Neg,
+               expr: Box::new(r),
+           }
+       )},
     <ExprPrecedence02>,
 }
 

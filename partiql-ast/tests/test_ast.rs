@@ -1,6 +1,8 @@
 mod common;
 
+use partiql_ast::experimental::ast;
 use partiql_ast::experimental::ast::*;
+use partiql_source_map::location::BytePosition;
 
 #[test]
 fn test_ast_init() {
@@ -14,5 +16,22 @@ fn test_ast_init() {
         }),
     };
 
-    // TODO Add assertion once we have tree traversals
+    let span_only = ast::SymbolPrimitive {
+        value: "symbol1".to_string(),
+    }
+    .to_node()
+    .span(Span {
+        begin: BytePosition::from(12),
+        end: BytePosition::from(1),
+    })
+    .build()
+    .expect("Could not retrieve ast node");
+
+    assert_eq!(
+        Some(Span {
+            begin: BytePosition::from(12),
+            end: BytePosition::from(1),
+        }),
+        span_only.span
+    );
 }

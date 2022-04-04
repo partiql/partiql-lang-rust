@@ -23,6 +23,7 @@ lalrpop = "~0.19.7"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast" }
+partiql-source-map = { path = "../partiql-source-map" }
 
 thiserror = "~1.0.24"
 

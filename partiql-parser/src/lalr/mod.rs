@@ -29,12 +29,12 @@ mod grammar {
 
 mod lexer;
 
-use crate::location::{ByteOffset, BytePosition, LineAndCharPosition};
 use crate::result::{ParserError, UnexpectedToken, UnexpectedTokenData};
 pub use lexer::LexError;
 pub use lexer::LineOffsetTracker;
 pub use lexer::Spanned;
 pub use lexer::Token;
+use partiql_source_map::location::{ByteOffset, BytePosition, LineAndCharPosition};
 
 type LalrpopError<'input> =
     ParseError<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
@@ -308,7 +308,7 @@ mod tests {
 
     mod sfw {
         use super::*;
-        use crate::location::{CharOffset, LineOffset};
+        use partiql_source_map::location::{CharOffset, LineOffset};
 
         #[test]
         fn selectstar() {
