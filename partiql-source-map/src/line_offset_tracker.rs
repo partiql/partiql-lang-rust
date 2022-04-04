@@ -20,9 +20,10 @@ use std::ops::Range;
 ///
 /// // We added 3 newlines, so there should be 4 lines of source
 /// assert_eq!(tracker.num_lines(), 4);
-/// assert_eq!(tracker.at(source, ByteOffset(0).into()), LineAndCharPosition::new(0,0));
-/// assert_eq!(tracker.at(source, ByteOffset(6).into()), LineAndCharPosition::new(1,0));
-/// assert_eq!(tracker.at(source, ByteOffset(30).into()), LineAndCharPosition::new(3,4));
+/// assert_eq!(tracker.at(source, ByteOffset(0).into()), Some(LineAndCharPosition::new(0,0)));
+/// assert_eq!(tracker.at(source, ByteOffset(6).into()), Some(LineAndCharPosition::new(1,0)));
+/// assert_eq!(tracker.at(source, ByteOffset(30).into()), Some(LineAndCharPosition::new(3,4)));
+/// assert_eq!(tracker.at(source, ByteOffset(300).into()), None);
 /// ```
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
@@ -90,30 +91,140 @@ impl LineOffsetTracker {
     /// `source` is source `&str` into which the byte offset applies
     /// `offset` is the byte offset for which to find the [`LineAndCharPosition`]
     ///
-    /// If `offset` is larger than `source.len()`, then a position one beyond the
-    /// last character is returned.
+    /// If `offset` is larger than `source.len()`, then [`None`] is returned
     ///
     /// # Panics
     ///
     /// This function will panic if:
     ///  - `offset` falls inside a unicode codepoint
-    pub fn at(&self, source: &str, BytePosition(offset): BytePosition) -> LineAndCharPosition {
+    pub fn at(
+        &self,
+        source: &str,
+        BytePosition(offset): BytePosition,
+    ) -> Option<LineAndCharPosition> {
+        let full_len = source.len() as u32;
         match offset {
-            ByteOffset(0) => LineAndCharPosition::new(0, 0),
-            ByteOffset(n) if n >= source.len() as u32 => {
-                let LineAndCharPosition { line, char } =
-                    self.at(source, BytePosition((source.len() - 1).into()));
-                let char = char + 1;
-                LineAndCharPosition { line, char }
-            }
+            ByteOffset(0) => Some(LineAndCharPosition::new(0, 0)),
+            ByteOffset(n) if n >= full_len => None,
             _ => {
                 let line_num = self.line_num_from_byte_offset(offset);
                 let line_span = self.byte_span_from_line_num(line_num, source.len().into());
-                let span = line_span.start.to_usize()..=offset.to_usize();
-                let column_num = source[span].chars().count();
+                let limit = (offset - line_span.start).0 as usize;
+                let line = &source[line_span.start.0 as usize..line_span.end.0 as usize];
+                let column_num = line.char_indices().take_while(|(i, _)| i < &limit).count();
 
-                LineAndCharPosition::new(line_num.to_usize(), column_num - 1)
+                Some(LineAndCharPosition::new(line_num.to_usize(), column_num))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tracker_from_str(s: &str) -> LineOffsetTracker {
+        let mut tracker = LineOffsetTracker::default();
+        let mut start = 0;
+        while let Some(l) = s[start..].find('\n') {
+            let span = (start + l)..(start + l + 1);
+            tracker.record(span.end.into());
+            start += l + 1;
+        }
+        tracker
+    }
+
+    #[test]
+    fn simple() {
+        let s = "01\n345";
+        let tracker = tracker_from_str(s);
+
+        assert_eq!(tracker.num_lines(), 2);
+
+        assert_eq!(&s[0..1], "0");
+        assert_eq!(
+            tracker.at(s, 0.into()).unwrap(),
+            LineAndCharPosition::new(0, 0)
+        );
+        assert_eq!(&s[1..2], "1");
+        assert_eq!(
+            tracker.at(s, 1.into()).unwrap(),
+            LineAndCharPosition::new(0, 1)
+        );
+        assert_eq!(&s[2..3], "\n");
+        assert_eq!(
+            tracker.at(s, 2.into()).unwrap(),
+            LineAndCharPosition::new(0, 2)
+        );
+        assert_eq!(&s[3..4], "3");
+        assert_eq!(
+            tracker.at(s, 3.into()).unwrap(),
+            LineAndCharPosition::new(1, 0)
+        );
+        assert_eq!(&s[4..5], "4");
+        assert_eq!(
+            tracker.at(s, 4.into()).unwrap(),
+            LineAndCharPosition::new(1, 1)
+        );
+        assert_eq!(&s[5..6], "5");
+        assert_eq!(
+            tracker.at(s, 5.into()).unwrap(),
+            LineAndCharPosition::new(1, 2)
+        );
+        assert_eq!(s.len(), 6);
+        assert_eq!(tracker.at(s, 6.into()), None);
+        assert_eq!(tracker.at(s, 7.into()), None);
+    }
+
+    #[test]
+    fn complex() {
+        let s = "0123456789\n0123456789\n012345\n012345\n🤷\n\n";
+        let tracker = tracker_from_str(s);
+
+        assert_eq!(tracker.num_lines(), 7);
+
+        // boundaries
+        assert_eq!(
+            tracker.at(s, 0.into()).unwrap(),
+            LineAndCharPosition::new(0, 0)
+        );
+        assert_eq!(tracker.at(s, s.len().into()), None);
+        assert_eq!(tracker.at(s, (s.len() + 1).into()), None);
+
+        //lines
+        let idx = s.find('2').unwrap();
+        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(
+            tracker.at(s, idx.into()).unwrap(),
+            LineAndCharPosition::new(0, 2)
+        );
+
+        let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
+        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(
+            tracker.at(s, idx.into()).unwrap(),
+            LineAndCharPosition::new(1, 2)
+        );
+
+        let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
+        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(
+            tracker.at(s, idx.into()).unwrap(),
+            LineAndCharPosition::new(2, 2)
+        );
+
+        let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
+        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(
+            tracker.at(s, idx.into()).unwrap(),
+            LineAndCharPosition::new(3, 2)
+        );
+
+        let idx = s.find('🤷').unwrap();
+        assert_eq!(&s[idx..idx + '🤷'.len_utf8()], "🤷");
+        assert_eq!(
+            tracker.at(s, idx.into()).unwrap(),
+            LineAndCharPosition::new(4, 0)
+        );
     }
 }

@@ -29,7 +29,7 @@ pub enum LexicalError<'input> {
     Unknown,
 }
 
-/// Errors in the syntactic structer of a PartiQL query.
+/// Errors in the syntactic structure of a PartiQL query.
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.

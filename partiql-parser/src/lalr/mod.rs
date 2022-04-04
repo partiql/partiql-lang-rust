@@ -53,7 +53,7 @@ pub fn parse_partiql(s: &str) -> ParserResult {
     process_errors(s, &offsets, parsed, errors)
 }
 
-pub fn process_errors<'input, T>(
+fn process_errors<'input, T>(
     s: &'input str,
     offsets: &LineOffsetTracker,
     result: Result<T, LalrpopError<'input>>,

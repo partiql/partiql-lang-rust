@@ -362,6 +362,8 @@ mod tests {
         assert_eq!(BytePosition(ByteOffset(15)), BytePosition(15.into()));
         assert_eq!(BytePosition(ByteOffset(5)), ByteOffset(5).into());
         assert_eq!(BytePosition(ByteOffset(25)), 25.into());
+        assert_eq!("b25", format!("{}", BytePosition(ByteOffset(25))));
+        assert_eq!("b25", BytePosition(ByteOffset(25)).to_string());
 
         let loc = LineAndCharPosition::new(13, 42);
         assert_eq!(
@@ -379,6 +381,7 @@ mod tests {
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
         assert_eq!(display, LineAndColumn::new(14, 43).unwrap());
-        assert_eq!("14:43", format!("{}", display))
+        assert_eq!("14:43", format!("{}", display));
+        assert_eq!("14:43", display.to_string());
     }
 }

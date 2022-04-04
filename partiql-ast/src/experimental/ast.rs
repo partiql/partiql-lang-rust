@@ -252,6 +252,7 @@ pub enum ExprKind {
     /// `SELECT` and its parts.
     Select(Select),
 
+    /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
     Error,
 }
 
