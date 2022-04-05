@@ -3,6 +3,7 @@
 members = [
   "partiql",
   "partiql-ast",
+  "partiql-conformance-test-generator",
   "partiql-conformance-tests",
   "partiql-source-map",
   "partiql-eval",

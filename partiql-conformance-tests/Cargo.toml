@@ -21,7 +21,7 @@ edition = "2021"
 walkdir = "2.3"
 ion-rs = "0.6.0"
 codegen = "0.1.3"
-partiql-parser = { path = "../partiql-parser" }
+partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator" }
 
 [dependencies]
 partiql-parser = { path = "../partiql-parser" }
