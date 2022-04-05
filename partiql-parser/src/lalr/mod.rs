@@ -64,7 +64,7 @@ fn process_errors<'input, T>(
         offsets: &LineOffsetTracker,
         e: LalrpopError<'input>,
     ) -> ParserError<'input, LineAndColumn> {
-        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).into())
+        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).unwrap().into())
     }
 
     let mut parser_errors: Vec<_> = errors
@@ -110,10 +110,9 @@ impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
             }
 
             // TODO do something with UnrecognizedEOF.expected
-            lalrpop_util::ParseError::UnrecognizedEOF {
-                location,
-                expected: _,
-            } => ParserError::UnexpectedEndOfInput(location.into()),
+            lalrpop_util::ParseError::UnrecognizedEOF { expected: _, .. } => {
+                ParserError::UnexpectedEndOfInput
+            }
 
             lalrpop_util::ParseError::ExtraToken {
                 token: (start, token, end),
@@ -468,16 +467,7 @@ mod tests {
             assert!(res.is_err());
             let errors = res.unwrap_err();
             assert_eq!(1, errors.len());
-            assert_eq!(
-                errors[0],
-                ParserError::UnexpectedEndOfInput(
-                    LineAndCharPosition {
-                        line: 0.into(),
-                        char: 6.into(),
-                    }
-                    .into()
-                )
-            );
+            assert_eq!(errors[0], ParserError::UnexpectedEndOfInput);
         }
     }
 }

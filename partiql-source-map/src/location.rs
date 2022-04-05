@@ -300,6 +300,7 @@ mod tests {
         assert_eq!(l1.inner, "test");
         assert_eq!(l1.location.start.0 .0, 0);
         assert_eq!(l1.location.end.0 .0, 42);
+        assert_eq!(l1.location.to_string(), "(b0..b42)");
 
         let l1c = l1.clone();
         assert!(matches!(

@@ -679,10 +679,8 @@ impl<'input> fmt::Display for Token<'input> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-    use partiql_source_map::location::{
-        CharOffset, LineAndCharPosition, LineAndColumn, LineOffset, Located, Location,
-    };
+    use partiql_source_map::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
+    use partiql_source_map::location::{LineAndColumn, Located, Location};
 
     #[test]
     fn ion_simple() {
@@ -773,26 +771,30 @@ mod tests {
 
         assert_eq!(offset_tracker.num_lines(), 3);
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 0.into())),
+            LineAndColumn::from(offset_tracker.at(query, 0.into()).unwrap()),
             LineAndColumn::new(1, 1).unwrap()
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 1.into())),
+            LineAndColumn::from(offset_tracker.at(query, 1.into()).unwrap()),
             LineAndColumn::new(1, 2).unwrap()
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 9.into())),
+            LineAndColumn::from(offset_tracker.at(query, 9.into()).unwrap()),
             LineAndColumn::new(2, 1).unwrap()
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 19.into())),
+            LineAndColumn::from(offset_tracker.at(query, 19.into()).unwrap()),
             LineAndColumn::new(3, 1).unwrap()
         );
 
         let offset_r_a = query.rfind('a').unwrap();
         let offset_r_n = query.rfind('\n').unwrap();
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(query.len() - 1))),
+            LineAndColumn::from(
+                offset_tracker
+                    .at(query, BytePosition::from(query.len() - 1))
+                    .unwrap()
+            ),
             LineAndColumn::new(3, offset_r_a - offset_r_n).unwrap()
         );
 
@@ -821,25 +823,25 @@ mod tests {
 
         assert_eq!(offset_tracker.num_lines(), 5);
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 0.into())),
+            LineAndColumn::from(offset_tracker.at(query, 0.into()).unwrap()),
             LineAndColumn::new(1, 1).unwrap()
         );
 
         let offset_s = query.find('S').unwrap();
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, offset_s.into())),
+            LineAndColumn::from(offset_tracker.at(query, offset_s.into()).unwrap()),
             LineAndColumn::new(2, 1).unwrap()
         );
 
         let offset_f = query.find('F').unwrap();
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, offset_f.into())),
+            LineAndColumn::from(offset_tracker.at(query, offset_f.into()).unwrap()),
             LineAndColumn::new(3, 1).unwrap()
         );
 
         let offset_g = query.find('G').unwrap();
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, offset_g.into())),
+            LineAndColumn::from(offset_tracker.at(query, offset_g.into()).unwrap()),
             LineAndColumn::new(5, 1).unwrap()
         );
 
@@ -854,24 +856,20 @@ mod tests {
         lexer.count();
 
         let overflow = offset_tracker.at(query, ByteOffset(query.len() as u32).into());
-        assert!(matches!(
-            overflow,
-            LineAndCharPosition {
-                line: LineOffset(4),
-                char: CharOffset(10),
-            }
-        ));
+        assert!(matches!(overflow, Err(LineOffsetError::EndOfInput)));
     }
 
     #[test]
-    #[should_panic]
-    fn panic_offset_into_codepoint() {
+    fn offset_into_codepoint() {
         let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         lexer.count();
 
-        offset_tracker.at(query, ByteOffset(1).into());
+        assert_eq!(
+            offset_tracker.at(query, ByteOffset(1).into()),
+            Err(LineOffsetError::InsideUnicodeCodepoint)
+        );
     }
 
     #[test]
@@ -932,7 +930,7 @@ mod tests {
             }) if s == "#"));
         assert_eq!(offset_tracker.num_lines(), 1);
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, 7.into())),
+            LineAndColumn::from(offset_tracker.at(query, 7.into()).unwrap()),
             LineAndColumn::new(1, 8).unwrap()
         );
     }
@@ -960,7 +958,7 @@ mod tests {
             "Lexing error: unterminated ion literal at `(b1..b9)`"
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1))),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1)).unwrap()),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -987,7 +985,7 @@ mod tests {
             "Lexing error: unterminated comment at `(b1..b10)`"
         );
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1))),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1)).unwrap()),
             LineAndColumn::new(1, 2).unwrap()
         );
     }
@@ -1010,7 +1008,7 @@ mod tests {
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(2))),
+            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(2)).unwrap()),
             LineAndColumn::new(1, 3).unwrap()
         );
     }
