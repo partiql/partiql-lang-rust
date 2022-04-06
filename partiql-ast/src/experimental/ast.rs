@@ -251,6 +251,9 @@ pub enum ExprKind {
 
     /// `SELECT` and its parts.
     Select(Select),
+
+    /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
+    Error,
 }
 
 /// `Lit` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
@@ -581,7 +584,6 @@ pub enum FromClause {
     FromLet(FromLet),
     /// <from_source> JOIN [INNER | LEFT | RIGHT | FULL] <from_source> ON <expr>
     Join(Join),
-    Error,
 }
 
 #[derive(Clone, Debug, PartialEq)]

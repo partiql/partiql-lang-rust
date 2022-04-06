@@ -7,12 +7,13 @@
 //!
 //! [partiql]: https://partiql.org
 
-pub mod result;
-
 mod lalr;
+mod result;
 
-pub use lalr::lex_partiql as logos_lex;
-pub use lalr::parse_partiql as lalr_parse;
-pub use lalr::LexError;
-pub use lalr::LineOffsetTracker;
-pub use lalr::ParserResult as LalrParserResult;
+use partiql_source_map::location::LineAndColumn;
+
+pub type LexicalError<'input> = crate::result::LexicalError<'input>;
+pub type ParserError<'input> = crate::result::ParserError<'input, LineAndColumn>;
+pub use lalr::ParserResult;
+
+pub use lalr::parse_partiql;
