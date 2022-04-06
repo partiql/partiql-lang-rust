@@ -586,7 +586,7 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Newline => write!(f, "\\n"),
             Token::CommentLine(_) => write!(f, "--"),
             Token::CommentBlockStart => write!(f, "/*"),
-            Token::CommentBlock(_) => write!(f, "/*"),
+            Token::CommentBlock(_) => write!(f, "/**/"),
             Token::OpenSquare => write!(f, "["),
             Token::CloseSquare => write!(f, "]"),
             Token::OpenCurly => write!(f, "{{"),
@@ -681,6 +681,47 @@ mod tests {
     use super::*;
     use partiql_source_map::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
     use partiql_source_map::location::{LineAndColumn, Located, Location};
+
+    use itertools::Itertools;
+
+    #[test]
+    fn display() -> Result<(), ParserError<'static, BytePosition>> {
+        let symbols = "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . : --foo /*block*/";
+        let primitives = "ident @ident";
+        let keywords =
+            "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
+             On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
+             Intersect Is Inner In Having Group From Full First False Except Escape Desc \
+             Cross By Between At As And Asc All";
+        let symbols = symbols.split(' ').chain(primitives.split(' '));
+        let keywords = keywords.split(' ');
+
+        let text = symbols.interleave(keywords).join("\n");
+        let s = text.as_str();
+
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(s, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>().unwrap();
+
+        #[rustfmt::skip]
+        let expected = vec![
+            "(", "WITH", "[", "WHERE", "{", "VALUE", "}", "USING", "]", "UNPIVOT",
+            ")", "UNION", "<<", "TRUE", ">>", "SELECT", ";", "RIGHT", ",", "PRESERVE", "<",
+            "PIVOT", ">", "OUTER", "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET",
+            "=", "NULLS", "==", "NULL", "-", "NOT", "+", "NATURAL", "*", "MISSING", "%",
+            "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", ":", "LAST", "--", "JOIN",
+            "/**/", "INTERSECT", "<IDENTIFIER>", "IS", "<@IDENTIFIER>", "INNER", "IN",
+            "HAVING", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC",
+            "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL"
+        ];
+        let displayed = toks
+            .into_iter()
+            .map(|(_s, t, _e)| t.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(expected, displayed);
+
+        Ok(())
+    }
 
     #[test]
     fn ion_simple() {
