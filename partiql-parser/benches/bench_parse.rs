@@ -23,10 +23,10 @@ const Q_COMPLEX: &str = r#"
 
 fn parse_bench(c: &mut Criterion) {
     let parse = parse_partiql;
-    c.bench_function("lalr-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
-    c.bench_function("lalr-ion", |b| b.iter(|| parse(black_box(Q_ION))));
-    c.bench_function("lalr-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
-    c.bench_function("lalr-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
+    c.bench_function("parse-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
+    c.bench_function("parse-ion", |b| b.iter(|| parse(black_box(Q_ION))));
+    c.bench_function("parse-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
+    c.bench_function("parse-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
 }
 
 criterion_group! {

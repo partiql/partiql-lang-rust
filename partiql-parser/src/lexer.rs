@@ -6,7 +6,7 @@ use std::cmp::max;
 use std::fmt;
 use std::fmt::Formatter;
 
-use crate::result::{LexicalError, ParserError};
+use crate::result::{LexError, ParseError};
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 
 /// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
@@ -19,7 +19,7 @@ pub(crate) type SpannedResult<Tok, Loc, Broke> = Result<Spanned<Tok, Loc>, Spann
 /// Note:
 /// - The returned string includes the comment start (`/*`) and end (`*/`) tokens.
 /// - The returned ByteOffset span includes the comment start (`/*`) and end (`*/`) tokens.
-type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexicalError<'input>>;
+type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse block comment
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
@@ -81,7 +81,7 @@ impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
                 Some(CommentToken::End) => {
                     if nesting == 0 {
                         let Span { end, .. } = self.lexer.span();
-                        return Some(Err((start.into(), LexicalError::Unknown, end.into())));
+                        return Some(Err((start.into(), LexError::Unknown, end.into())));
                     }
                     nesting -= 1;
                     if nesting == 0 {
@@ -93,7 +93,7 @@ impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
                         let Span { end, .. } = self.lexer.span();
                         Some(Err((
                             start.into(),
-                            LexicalError::UnterminatedComment,
+                            LexError::UnterminatedComment,
                             end.into(),
                         )))
                     } else {
@@ -125,7 +125,7 @@ impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
 /// - The lexer parses the embedded ion value enclosed in backticks.
 /// - The returned string *does not* include the backticks
 /// - The returned ByteOffset span *does* include the backticks
-type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexicalError<'input>>;
+type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse Ion literals embedded in backticks (\`)
 #[derive(Logos, Debug, Clone, PartialEq)]
@@ -225,7 +225,7 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
                             let Span { end, .. } = self.lexer.span();
                             return Some(Err((
                                 start.into(),
-                                LexicalError::UnterminatedIonLiteral,
+                                LexError::UnterminatedIonLiteral,
                                 end.into(),
                             )));
                         }
@@ -258,14 +258,14 @@ pub(crate) struct PartiqlLexer<'input, 'tracker> {
     tracker: &'tracker mut LineOffsetTracker,
 }
 
-type InternalLexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexicalError<'input>>;
+type InternalLexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexError<'input>>;
 pub(crate) type LexResult<'input> =
-    Result<Spanned<Token<'input>, ByteOffset>, ParserError<'input, BytePosition>>;
+    Result<Spanned<Token<'input>, ByteOffset>, ParseError<'input, BytePosition>>;
 
-impl<'input> From<Spanned<LexicalError<'input>, ByteOffset>> for ParserError<'input, BytePosition> {
-    fn from(res: Spanned<LexicalError<'input>, ByteOffset>) -> Self {
+impl<'input> From<Spanned<LexError<'input>, ByteOffset>> for ParseError<'input, BytePosition> {
+    fn from(res: Spanned<LexError<'input>, ByteOffset>) -> Self {
         let (start, cause, end) = res;
-        ParserError::LexicalError(
+        ParseError::LexicalError(
             cause.to_located(BytePosition::from(start)..BytePosition::from(end)),
         )
     }
@@ -285,7 +285,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
     #[inline]
     fn err_here(
         &self,
-        err_ctor: fn(Cow<'input, str>) -> LexicalError<'input>,
+        err_ctor: fn(Cow<'input, str>) -> LexError<'input>,
     ) -> InternalLexResult<'input> {
         let region = self.lexer.slice();
         let Span { start, end } = self.lexer.span();
@@ -305,7 +305,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
             return match self.lexer.next() {
                 None => None,
                 Some(token) => match token {
-                    Token::Error => Some(self.err_here(LexicalError::InvalidInput)),
+                    Token::Error => Some(self.err_here(LexError::InvalidInput)),
 
                     Token::Newline => {
                         self.tracker.record(self.lexer.span().end.into());
@@ -685,7 +685,7 @@ mod tests {
     use itertools::Itertools;
 
     #[test]
-    fn display() -> Result<(), ParserError<'static, BytePosition>> {
+    fn display() -> Result<(), ParseError<'static, BytePosition>> {
         let symbols = "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . : --foo /*block*/";
         let primitives = "ident @ident";
         let keywords =
@@ -780,18 +780,18 @@ mod tests {
 
         let mut offset_tracker = LineOffsetTracker::default();
         let nonnested_lex = CommentLexer::new(comments, &mut offset_tracker);
-        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> = nonnested_lex.collect();
+        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> = nonnested_lex.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
             error,
-            (ByteOffset(142), LexicalError::Unknown, ByteOffset(189))
+            (ByteOffset(142), LexError::Unknown, ByteOffset(189))
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unknown error");
     }
 
     #[test]
-    fn select() -> Result<(), ParserError<'static, BytePosition>> {
+    fn select() -> Result<(), ParseError<'static, BytePosition>> {
         let query = "SELECT g\nFROM data\nGROUP BY a";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -843,7 +843,7 @@ mod tests {
     }
 
     #[test]
-    fn select_unicode() -> Result<(), ParserError<'static, BytePosition>> {
+    fn select_unicode() -> Result<(), ParseError<'static, BytePosition>> {
         let query = "\u{2028}SELECT \"🐈\"\r\nFROM \"❤\u{211D}\"\u{2029}\u{0085}GROUP BY \"🧸\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -914,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn select_comment_line() -> Result<(), ParserError<'static, BytePosition>> {
+    fn select_comment_line() -> Result<(), ParseError<'static, BytePosition>> {
         let query = "SELECT --comment\n@g from @\"foo\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -935,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    fn select_comment_block() -> Result<(), ParserError<'static, BytePosition>> {
+    fn select_comment_block() -> Result<(), ParseError<'static, BytePosition>> {
         let query = "SELECT /*comment*/ g";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
@@ -965,8 +965,8 @@ mod tests {
             r##"Lexing error: invalid input `#` at `(b7..b8)`"##
         );
         assert!(matches!(error,
-            ParserError::LexicalError(Located {
-                inner: LexicalError::InvalidInput(s),
+            ParseError::LexicalError(Located {
+                inner: LexError::InvalidInput(s),
                 location: Location{start: BytePosition(ByteOffset(7)), end: BytePosition(ByteOffset(8))}
             }) if s == "#"));
         assert_eq!(offset_tracker.num_lines(), 1);
@@ -986,8 +986,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            ParserError::LexicalError(Located {
-                inner: LexicalError::UnterminatedIonLiteral,
+            ParseError::LexicalError(Located {
+                inner: LexError::UnterminatedIonLiteral,
                 location: Location {
                     start: BytePosition(ByteOffset(1)),
                     end: BytePosition(ByteOffset(9))
@@ -1013,8 +1013,8 @@ mod tests {
         let error = toks.unwrap_err();
         assert!(matches!(
             error,
-            ParserError::LexicalError(Located {
-                inner: LexicalError::UnterminatedComment,
+            ParseError::LexicalError(Located {
+                inner: LexError::UnterminatedComment,
                 location: Location {
                     start: BytePosition(ByteOffset(1)),
                     end: BytePosition(ByteOffset(10))
@@ -1036,16 +1036,12 @@ mod tests {
         let query = r#" `/*12345678`"#;
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(query, &mut offset_tracker);
-        let toks: Result<Vec<_>, Spanned<LexicalError, ByteOffset>> = ion_lexer.collect();
+        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> = ion_lexer.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
             error,
-            (
-                ByteOffset(2),
-                LexicalError::UnterminatedComment,
-                ByteOffset(11)
-            )
+            (ByteOffset(2), LexError::UnterminatedComment, ByteOffset(11))
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(
