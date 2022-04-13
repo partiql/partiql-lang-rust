@@ -5,8 +5,18 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
-use partiql_source_map::location::Located;
+use partiql_ast::experimental::ast;
+use partiql_source_map::location::{LineAndColumn, Located};
 use thiserror::Error;
+
+/// [`Error`] type for errors in the lexical structure for the PartiQL parser.
+pub type LexicalError<'input> = crate::result::LexError<'input>;
+
+/// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
+pub type ParserError<'input> = crate::result::ParseError<'input, LineAndColumn>;
+
+/// General [`Result`] type for the PartiQL parser.
+pub type ParserResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input>>>;
 
 /// Errors in the lexical structure of a PartiQL query.
 ///
@@ -14,7 +24,7 @@ use thiserror::Error;
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum LexicalError<'input> {
+pub enum LexError<'input> {
     /// Generic invalid input; likely an unrecognizable token.
     #[error("Lexing error: invalid input `{}`", .0)]
     InvalidInput(Cow<'input, str>),
@@ -35,7 +45,7 @@ pub enum LexicalError<'input> {
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum ParserError<'input, Loc>
+pub enum ParseError<'input, Loc>
 where
     Loc: Display,
 {
@@ -57,32 +67,11 @@ where
 
     /// There was an error lexing the input
     #[error("{} at `{}`", _0.inner, _0.location)]
-    LexicalError(Located<LexicalError<'input>, Loc>),
+    LexicalError(Located<LexError<'input>, Loc>),
 
     /// Indicates that there is an internal error that was not due to user input or API violation.
     #[error("Illegal State: {0}")]
     IllegalState(String),
-}
-
-impl<'input, Loc: Debug> ParserError<'input, Loc>
-where
-    Loc: Display,
-{
-    /// Maps an `ParserError<Loc>` to `ParserError<Loc2>` by applying a function to each variant
-    pub fn map_loc<F, Loc2>(self, tx: F) -> ParserError<'input, Loc2>
-    where
-        Loc2: Display,
-        F: FnMut(Loc) -> Loc2,
-    {
-        match self {
-            ParserError::SyntaxError(l) => ParserError::SyntaxError(l.map_loc(tx)),
-            ParserError::UnexpectedEndOfInput => ParserError::UnexpectedEndOfInput,
-            ParserError::UnexpectedToken(l) => ParserError::UnexpectedToken(l.map_loc(tx)),
-            ParserError::LexicalError(l) => ParserError::LexicalError(l.map_loc(tx)),
-            ParserError::IllegalState(s) => ParserError::IllegalState(s),
-            _ => ParserError::IllegalState("Unhandled internal error".to_string()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -93,6 +82,27 @@ pub struct UnexpectedTokenData<'input> {
 }
 pub type UnexpectedToken<'input, L> = Located<UnexpectedTokenData<'input>, L>;
 
+impl<'input, Loc: Debug> ParseError<'input, Loc>
+where
+    Loc: Display,
+{
+    /// Maps an `ParserError<Loc>` to `ParserError<Loc2>` by applying a function to each variant
+    pub fn map_loc<F, Loc2>(self, tx: F) -> ParseError<'input, Loc2>
+    where
+        Loc2: Display,
+        F: FnMut(Loc) -> Loc2,
+    {
+        match self {
+            ParseError::SyntaxError(l) => ParseError::SyntaxError(l.map_loc(tx)),
+            ParseError::UnexpectedEndOfInput => ParseError::UnexpectedEndOfInput,
+            ParseError::UnexpectedToken(l) => ParseError::UnexpectedToken(l.map_loc(tx)),
+            ParseError::LexicalError(l) => ParseError::LexicalError(l.map_loc(tx)),
+            ParseError::IllegalState(s) => ParseError::IllegalState(s),
+            _ => ParseError::IllegalState("Unhandled internal error".to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +111,7 @@ mod tests {
 
     #[test]
     fn syntax_error() {
-        let e1 = ParserError::SyntaxError("oops".to_string().to_located(
+        let e1 = ParseError::SyntaxError("oops".to_string().to_located(
             BytePosition::from(ByteOffset::from(255))..BytePosition::from(ByteOffset::from(512)),
         ));
 
@@ -111,7 +121,7 @@ mod tests {
 
     #[test]
     fn unexpected_token() {
-        let e1 = ParserError::UnexpectedToken(
+        let e1 = ParseError::UnexpectedToken(
             UnexpectedTokenData { token: "/".into() }
                 .to_located(BytePosition(0.into())..ByteOffset::from(1).into()),
         );
@@ -122,9 +132,9 @@ mod tests {
 
     #[test]
     fn lexical_error() {
-        let lex = LexicalError::InvalidInput("🤷".into())
+        let lex = LexError::InvalidInput("🤷".into())
             .to_located(LineAndColumn::new(1, 1).unwrap()..LineAndColumn::new(5, 5).unwrap());
-        let e1 = ParserError::LexicalError(lex);
+        let e1 = ParseError::LexicalError(lex);
 
         let e2 = e1.map_loc(|LineAndColumn { line, column }| LineAndColumn {
             line,
@@ -138,7 +148,7 @@ mod tests {
 
     #[test]
     fn illegal_state() {
-        let e1: ParserError<BytePosition> = ParserError::IllegalState("uh oh".to_string());
+        let e1: ParseError<BytePosition> = ParseError::IllegalState("uh oh".to_string());
 
         let e2 = e1.map_loc(|x| x);
         assert_eq!(e2.to_string(), "Illegal State: uh oh")

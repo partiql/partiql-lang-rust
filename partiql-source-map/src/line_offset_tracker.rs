@@ -1,3 +1,5 @@
+//! [`LineOffsetTracker`] and related types for mapping locations in source `str`s.
+
 use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;

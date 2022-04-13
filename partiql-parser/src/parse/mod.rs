@@ -1,19 +1,14 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! Provides a parser for the [PartiQL][partiql] query language.
-//!
-//! # Usage
-//!
-//! ```
-//! use partiql_parser::{ParserResult, parse_partiql};
-//!
-//!     parse_partiql("SELECT g FROM data GROUP BY a").expect("successful parse");
-//! ```
-//!
-//! [partiql]: https://partiql.org
-use crate::lalr::lexer::PartiqlLexer;
-use lalrpop_util::{ErrorRecovery, ParseError};
+//! Provides the [`parse_partiql`] function to parse a PartiQL query.
+
+use crate::lexer;
+use crate::lexer::PartiqlLexer;
+use crate::result::{ParseError, ParserResult, UnexpectedTokenData};
+use lalrpop_util as lpop;
 use partiql_ast::experimental::ast;
+use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
@@ -27,20 +22,11 @@ mod grammar {
     include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
 }
 
-mod lexer;
-
-use crate::result::{ParserError, UnexpectedTokenData};
-use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
-
 type LalrpopError<'input> =
-    ParseError<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
+    lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
-    ErrorRecovery<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>;
-
-/// General [`Result`] type for the PartiQL parser.
-pub type ParserResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input, LineAndColumn>>>;
+    lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
 /// Parse a text PartiQL query.
 pub fn parse_partiql(s: &str) -> ParserResult {
@@ -58,13 +44,13 @@ fn process_errors<'input, T>(
     offsets: &LineOffsetTracker,
     result: Result<T, LalrpopError<'input>>,
     errors: Vec<LalrpopErrorRecovery<'input>>,
-) -> Result<T, Vec<ParserError<'input, LineAndColumn>>> {
+) -> Result<T, Vec<ParseError<'input, LineAndColumn>>> {
     fn map_error<'input>(
         s: &'input str,
         offsets: &LineOffsetTracker,
         e: LalrpopError<'input>,
-    ) -> ParserError<'input, LineAndColumn> {
-        ParserError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).unwrap().into())
+    ) -> ParseError<'input, LineAndColumn> {
+        ParseError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).unwrap().into())
     }
 
     let mut parser_errors: Vec<_> = errors
@@ -84,13 +70,13 @@ fn process_errors<'input, T>(
     }
 }
 
-impl<'input> From<LalrpopErrorRecovery<'input>> for ParserError<'input, BytePosition> {
+impl<'input> From<LalrpopErrorRecovery<'input>> for ParseError<'input, BytePosition> {
     fn from(error_recovery: LalrpopErrorRecovery<'input>) -> Self {
         // TODO do something with error_recovery.dropped_tokens?
         error_recovery.error.into()
     }
 }
-impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
+impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
     #[inline]
     fn from(error: LalrpopError<'input>) -> Self {
         match error {
@@ -98,7 +84,7 @@ impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
             lalrpop_util::ParseError::UnrecognizedToken {
                 token: (start, token, end),
                 expected: _,
-            } => ParserError::UnexpectedToken(
+            } => ParseError::UnexpectedToken(
                 UnexpectedTokenData {
                     token: token.to_string().into(),
                 }
@@ -106,17 +92,17 @@ impl<'input> From<LalrpopError<'input>> for ParserError<'input, BytePosition> {
             ),
 
             lalrpop_util::ParseError::InvalidToken { location } => {
-                ParserError::UnknownParseError(location.into())
+                ParseError::UnknownParseError(location.into())
             }
 
             // TODO do something with UnrecognizedEOF.expected
             lalrpop_util::ParseError::UnrecognizedEOF { expected: _, .. } => {
-                ParserError::UnexpectedEndOfInput
+                ParseError::UnexpectedEndOfInput
             }
 
             lalrpop_util::ParseError::ExtraToken {
                 token: (start, token, end),
-            } => ParserError::UnexpectedToken(
+            } => ParseError::UnexpectedToken(
                 UnexpectedTokenData {
                     token: token.to_string().into(),
                 }
@@ -421,7 +407,7 @@ mod tests {
             );
             assert_eq!(
                 errors[0],
-                ParserError::UnexpectedToken(UnexpectedToken {
+                ParseError::UnexpectedToken(UnexpectedToken {
                     inner: UnexpectedTokenData {
                         token: Cow::from("AT")
                     },
@@ -441,7 +427,7 @@ mod tests {
             );
             assert_eq!(
                 errors[1],
-                ParserError::UnexpectedToken(UnexpectedToken {
+                ParseError::UnexpectedToken(UnexpectedToken {
                     inner: UnexpectedTokenData {
                         token: Cow::from("AT")
                     },
@@ -467,7 +453,7 @@ mod tests {
             assert!(res.is_err());
             let errors = res.unwrap_err();
             assert_eq!(1, errors.len());
-            assert_eq!(errors[0], ParserError::UnexpectedEndOfInput);
+            assert_eq!(errors[0], ParseError::UnexpectedEndOfInput);
         }
     }
 }

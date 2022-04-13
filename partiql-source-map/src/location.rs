@@ -38,11 +38,13 @@ macro_rules! impl_pos {
             }
         }
         impl $pos_type {
+            /// Constructs from a `usize`
             #[inline(always)]
             pub fn from_usize(n: usize) -> Self {
                 Self(n as $primitive)
             }
 
+            /// Converts to a `usize`
             #[inline(always)]
             pub fn to_usize(&self) -> usize {
                 self.0 as usize
@@ -80,7 +82,7 @@ impl_pos!(CharOffset, u32);
 
 /// A 0-indexed byte absolute position (i.e., relative to the start of a &str)
 ///
-/// This type is small (u16 currently) to allow it to be included in ASTs and other
+/// This type is small (u32 currently) to allow it to be included in ASTs and other
 /// data structures.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct BytePosition(pub ByteOffset);
@@ -109,11 +111,14 @@ impl fmt::Display for BytePosition {
 /// ## Example
 /// ```
 /// # use partiql_source_map::location::LineAndCharPosition;
-/// println!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0));
+/// assert_eq!("Beginning of &str: LineAndCharPosition { line: LineOffset(0), char: CharOffset(0) }",
+///             format!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0)));
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct LineAndCharPosition {
+    /// The 0-indexed line absolute position (i.e., relative to the start of a &str)
     pub line: LineOffset,
+    /// The 0-indexed character absolute position (i.e., relative to the start of a &str)
     pub char: CharOffset,
 }
 
@@ -128,18 +133,20 @@ impl LineAndCharPosition {
     }
 }
 
-/// A line and column location intended for usage in errors/warnings/lints/etc.
+/// A 1-indexed line and column location intended for usage in errors/warnings/lints/etc.
 ///
 /// Both line and column are 1-indexed, as that is how most people think of lines and columns.
 ///
 /// ## Example
 /// ```
 /// # use partiql_source_map::location::LineAndColumn;
-/// println!("Beginning of a document: {}", LineAndColumn::new(1, 1).unwrap());
+/// assert_eq!("Beginning of &str: 1:1",format!("Beginning of &str: {}", LineAndColumn::new(1, 1).unwrap()));
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct LineAndColumn {
+    /// The 1-indexed line absolute position (i.e., relative to the start of a &str)
     pub line: NonZeroUsize,
+    /// The 1-indexed character absolute position (i.e., relative to the start of a &str)
     pub column: NonZeroUsize,
 }
 

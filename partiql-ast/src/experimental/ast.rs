@@ -1,5 +1,5 @@
 //! An experimental PartiQL abstract syntax tree (AST) module, see the following for motivation:
-//! https://github.com/partiql/partiql-lang-rust/issues/52
+//! <https://github.com/partiql/partiql-lang-rust/issues/52>
 //!
 //! This module contains the structures for the language AST.
 //! Two main entities in the module are [`Item`] and [`ItemKind`]. `Item` represents an AST element
@@ -46,11 +46,13 @@ pub trait ToAstNode {
 }
 
 /// Implements [ToAstNode] for all types within this crate, read further [here][1].
+///
 /// [1]: https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
 impl<T> ToAstNode for T {}
 
 /// Represents an AST node. [AstNode] uses [derive_builder][1] to expose a Builder
 /// for creating the node. See [ToAstNode] for more details on the usage.
+///
 /// [1]: https://crates.io/crates/derive_builder
 #[derive(Builder, Clone, Eq, PartialEq, Debug)]
 pub struct AstNode<T> {
@@ -258,9 +260,9 @@ pub enum ExprKind {
 
 /// `Lit` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
 /// See section 5.3 in the following:
-/// https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt
+/// <https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt>
 /// and Section 2 of the following (Figure 1: BNF Grammar for PartiQL Values):
-/// https://partiql.org/assets/PartiQL-Specification.pdf
+/// <https://partiql.org/assets/PartiQL-Specification.pdf>
 #[derive(Clone, Debug, PartialEq)]
 pub enum Lit {
     Null,
@@ -582,7 +584,7 @@ pub struct LetBinding {
 #[derive(Clone, Debug, PartialEq)]
 pub enum FromClause {
     FromLet(FromLet),
-    /// <from_source> JOIN [INNER | LEFT | RIGHT | FULL] <from_source> ON <expr>
+    /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(Join),
 }
 
@@ -643,7 +645,7 @@ pub struct ExprPairList {
     pub pairs: Vec<ExprPair>,
 }
 
-/// GROUP BY <grouping_strategy> <group_key_list>... [AS <symbol>]
+/// GROUP BY <grouping_strategy> <group_key_list>... \[AS <symbol>\]
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupByExpr {
     pub strategy: GroupingStrategy,

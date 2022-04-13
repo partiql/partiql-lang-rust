@@ -1,14 +1,16 @@
-use std::str::FromStr;
+use crate::parse::lexer;
+use crate::result::ParseError;
+
 use lalrpop_util::ErrorRecovery;
+use std::str::FromStr;
 
 use partiql_ast::experimental::ast;
 
-use crate::lalr::lexer;
 use partiql_source_map::location::{ByteOffset, BytePosition};
-use crate::result::ParserError;
+
 
 grammar<'input, 'err>(input: &'input str,
-                      errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParserError<'input, BytePosition>>>);
+                      errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>>);
 
 pub Query: Box<ast::Expr> = {
     <ExprQuery>,
@@ -757,7 +759,7 @@ CommaSep<T>: Vec<T> = {
 // See also http://lalrpop.github.io/lalrpop/lexer_tutorial/002_writing_custom_lexer.html
 extern {
     type Location = ByteOffset;
-    type Error = ParserError<'input, BytePosition>;
+    type Error = ParseError<'input, BytePosition>;
 
     enum lexer::Token<'input> {
 
