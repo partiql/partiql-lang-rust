@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
-use partiql_ast::experimental::ast;
+use partiql_ast::ast;
 use partiql_source_map::location::{LineAndColumn, Located};
 use thiserror::Error;
 

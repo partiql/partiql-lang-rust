@@ -1,15 +1,11 @@
-//! An experimental PartiQL abstract syntax tree (AST) module, see the following for motivation:
-//! <https://github.com/partiql/partiql-lang-rust/issues/52>
+//! A PartiQL abstract syntax tree (AST).
 //!
 //! This module contains the structures for the language AST.
 //! Two main entities in the module are [`Item`] and [`ItemKind`]. `Item` represents an AST element
 //! and `ItemKind` represents a concrete type with the data specific to the type of the item.
 
-// Structures in this module are mostly from the current `partiql-ir-generator` spec. and comments
-// are excerpts from the spec definition.
-// https://github.com/partiql/partiql-lang-kotlin/blob/4bcfc7f73d3e6e54286bcc03a54d5f6425eec4cc/lang/resources/org/partiql/type-domains/partiql.ion
-
-// TODO Add documentation.
+// As more changes to this AST are expected, unless explicitly advised, using the structures exposed
+// in this crate directly is not recommended.
 
 use partiql_source_map::location::BytePosition;
 use rust_decimal::Decimal as RustDecimal;
@@ -21,7 +17,7 @@ pub trait ToAstNode {
     /// further [AstNode] construction.
     /// ## Example:
     /// ```
-    /// use partiql_ast::experimental::ast::{Span, SymbolPrimitive, ToAstNode};
+    /// use partiql_ast::ast::{Span, SymbolPrimitive, ToAstNode};
     /// use partiql_source_map::location::BytePosition;
     ///
     /// let p = SymbolPrimitive {

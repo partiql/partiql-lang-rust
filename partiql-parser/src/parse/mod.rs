@@ -6,7 +6,7 @@ use crate::lexer;
 use crate::lexer::PartiqlLexer;
 use crate::result::{ParseError, ParserResult, UnexpectedTokenData};
 use lalrpop_util as lpop;
-use partiql_ast::experimental::ast;
+use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
 

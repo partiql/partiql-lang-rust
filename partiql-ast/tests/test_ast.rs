@@ -1,7 +1,7 @@
 mod common;
 
-use partiql_ast::experimental::ast;
-use partiql_ast::experimental::ast::*;
+use partiql_ast::ast;
+use partiql_ast::ast::*;
 use partiql_source_map::location::BytePosition;
 
 #[test]
