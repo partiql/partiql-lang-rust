@@ -1,4 +1,7 @@
 /// Conformance test document containing namespaces and/or tests
+/// TODO: once test ISL is defined in `partiql-tests` (https://github.com/partiql/partiql-tests/issues/3),
+///  add link to ISL. Also, when `ion-schema-rust` supports schema code generation based on .isl,
+///  replace these objects.
 pub struct TestDocument {
     pub(crate) namespaces: Namespaces,
     pub(crate) test_cases: TestCases,
