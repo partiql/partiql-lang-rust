@@ -20,7 +20,8 @@ fn main() -> io::Result<()> {
 
         let test_document = ion_data_to_test_document(all_ion_data);
         let test_generator = Generator { test_document };
-        let scope = test_generator.generate_scope();
+        let mut scope = test_generator.generate_scope().to_string();
+        scope.push_str("\n");
 
         let dest_path_non_escaped = Path::new("tests").join(file.with_extension(""));
         let dest_path_escaped: PathBuf = dest_path_non_escaped
@@ -33,7 +34,7 @@ fn main() -> io::Result<()> {
         std::fs::create_dir_all(dest_dir).expect("recursively created directory");
         File::create(dest_path)
             .expect("File creation failed")
-            .write_all(scope.to_string().as_bytes())
+            .write_all(scope.as_bytes())
             .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
     }
 
