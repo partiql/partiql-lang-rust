@@ -1,3 +1,4 @@
+pub mod generator;
 mod schema;
 pub mod util;
 
@@ -182,11 +183,6 @@ fn parse_assertions(assertions: &Vec<&OwnedElement>) -> ParseAssertions {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-
     // TODO: add tests checking the conversions between Ion and test schema structs
+    //  https://github.com/partiql/partiql-lang-rust/issues/100
 }

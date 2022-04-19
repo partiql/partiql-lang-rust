@@ -1,5 +1,8 @@
 use inflector::Inflector;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::fs;
+use std::fs::File;
+use std::io::Write;
 use std::ops::Add;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -46,6 +49,38 @@ pub fn all_ion_files_in(dir: &str) -> walkdir::Result<Vec<PathBuf>> {
             Err(e) => Some(Err(e)),
         })
         .collect()
+}
+
+/// Creates a `mod.rs` file for the given `dir` with all the subdirectories and file names in the
+/// directory. Also recursively generates `mod.rs` files for all of `dir`'s subdirectories. Requires
+/// `dir` to be a directory.
+pub fn dir_to_mods(dir: &Path) {
+    assert!(dir.is_dir());
+    let mut modules_in_dir: Vec<OsString> = Vec::new();
+    for entry in fs::read_dir(dir).expect("read dir") {
+        let entry = entry.expect("dir entry");
+        let entry_file_type = entry.file_type().expect("file type");
+
+        if entry_file_type.is_file() {
+            let file_name = entry.file_name();
+            if file_name == "mod.rs" {
+                continue;
+            }
+        }
+
+        modules_in_dir.push(entry.path().file_stem().expect("file stem").to_os_string());
+
+        if entry_file_type.is_dir() {
+            dir_to_mods(&entry.path())
+        }
+    }
+    let mod_rs_path = dir.join(Path::new("mod.rs"));
+    let mut mod_rs_file = File::create(mod_rs_path).expect("mod.rs create failed");
+    for module in modules_in_dir {
+        mod_rs_file
+            .write_all(format!("mod {};\n", module.to_str().expect("to str")).as_bytes())
+            .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
+    }
 }
 
 #[cfg(test)]

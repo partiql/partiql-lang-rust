@@ -1,5 +1,17 @@
 [package]
 name = "partiql-conformance-test-generator"
+authors = ["PartiQL Team <partiql-team@amazon.com>"]
+description = "PartiQL conformance test generator"
+homepage = "https://github.com/partiql/partiql-lang-rust"
+repository = "https://github.com/partiql/partiql-lang-rust"
+license = "Apache-2.0"
+readme = "../README.md"
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
 version = "0.0.0"
 edition = "2021"
 

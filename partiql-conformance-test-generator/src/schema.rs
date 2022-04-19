@@ -1,6 +1,3 @@
-use crate::schema::TestCaseKind::Parse;
-use codegen::{Function, Module, Scope};
-
 /// Conformance test document containing namespaces and/or tests
 pub struct TestDocument {
     pub(crate) namespaces: Namespaces,
@@ -37,66 +34,9 @@ pub struct ParseTestCase {
     pub(crate) parse_assertions: ParseAssertions,
 }
 
+/// Indicates whether a parsing test passes (`ParsePass`) without errors or fails (`ParseFail`) with
+/// a parsing-related error
 pub enum ParseAssertions {
     ParsePass,
     ParseFail,
-}
-
-impl TestDocument {
-    /// Converts a `TestDocument` into a `Scope`
-    pub fn generate_scope(&self) -> Scope {
-        let mut scope = Scope::new();
-        for namespace in &self.namespaces {
-            scope.push_module(namespace.generate_mod());
-        }
-        for test in &self.test_cases {
-            scope.push_fn(test.generate_test_fn());
-        }
-        scope
-    }
-}
-
-impl Namespace {
-    /// Converts a `Namespace` into a `Module`
-    fn generate_mod(&self) -> Module {
-        let mut module = Module::new(&*self.name);
-        for ns in &self.namespaces {
-            module.push_module(ns.generate_mod());
-        }
-        for test in &self.test_cases {
-            module.push_fn(test.generate_test_fn());
-        }
-        module
-    }
-}
-
-impl TestCase {
-    /// Converts a test case into a testing `Function`
-    fn generate_test_fn(&self) -> Function {
-        match &self.test_kind {
-            Parse(ParseTestCase { parse_assertions }) => {
-                let mut test_fn: Function = Function::new(&self.test_name);
-                test_fn.attr("test").line(format!(
-                    "let parse_result = partiql_parser::lalr_parse(\"{}\");",
-                    &self.statement
-                ));
-                match parse_assertions {
-                    ParseAssertions::ParsePass => test_fn.line("assert!(parse_result.is_ok());"),
-                    ParseAssertions::ParseFail => test_fn.line("assert!(parse_result.is_err());"),
-                };
-                test_fn
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-
-    // TODO: add tests checking the conversions between test structs and CodeGen functions
 }
