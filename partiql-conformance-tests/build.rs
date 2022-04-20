@@ -11,6 +11,13 @@ use std::{fs, io};
 fn main() -> io::Result<()> {
     println!("cargo:rerun-if-changed=partiql-tests/*");
 
+    let tests_dir = "tests/";
+    let tests_path = Path::new(tests_dir);
+
+    if tests_path.exists() {
+        fs::remove_dir_all("tests/").expect("removal of tests/ before test generation");
+    }
+
     let file_dir = "partiql-tests";
     let all_files = all_ion_files_in(file_dir).expect("test files");
 
@@ -38,6 +45,6 @@ fn main() -> io::Result<()> {
             .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
     }
 
-    dir_to_mods(Path::new("tests/"));
+    dir_to_mods(tests_path);
     Ok(())
 }

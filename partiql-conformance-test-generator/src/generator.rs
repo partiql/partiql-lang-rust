@@ -44,7 +44,7 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
         Parse(ParseTestCase { parse_assertions }) => {
             let mut test_fn: Function = Function::new(&test_case.test_name);
             test_fn.attr("test").line(format!(
-                "let parse_result = partiql_parser::parse_partiql(\"{}\");",
+                "let parse_result = partiql_parser::parse_partiql(r#\"{}\"#);",
                 &test_case.statement
             ));
             match parse_assertions {
