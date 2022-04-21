@@ -20,6 +20,21 @@ Due to the lack of namespacing in [crates.io][crates], we have published `0.0.0`
 we will need.  A crate with a version `0.1.0` or higher, should have real, albeit potentially very experimental and/or
 early implementations.
 
+## Development
+This project uses a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) to pull in 
+[partiql-tests](https://github.com/partiql/partiql-tests). The easiest way to pull everything in is to clone the 
+repository recursively:
+
+```bash
+$ git clone --recursive https://github.com/partiql/partiql-lang-rust.git
+```
+
+You can also initialize the submodules as follows:
+
+```bash
+$ git submodule update --init --recursive
+```
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
