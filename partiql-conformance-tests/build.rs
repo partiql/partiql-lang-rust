@@ -9,11 +9,12 @@ use std::{fs, io};
 
 /// TODO: once APIs are more stable, include documentation on what this build script is doing
 fn main() -> io::Result<()> {
-    println!("cargo:rerun-if-changed=partiql-tests/*");
+    println!("cargo:rerun-if-changed=partiql-tests");
 
     let tests_dir = "tests/";
     let tests_path = Path::new(tests_dir);
 
+    // TODO: consider first moving directory and deleting once test generation is successful
     if tests_path.exists() {
         fs::remove_dir_all("tests/").expect("removal of tests/ before test generation");
     }

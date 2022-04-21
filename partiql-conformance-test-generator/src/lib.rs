@@ -13,6 +13,7 @@ use ion_rs::IonType;
 use std::collections::HashSet;
 use std::ops::Add;
 
+// TODO: move these test data parsing functions to own file
 /// Converts a vector of Ion data into a `TestDocument`, which can be composed of `Namespace`s
 /// and `TestCase`s. `Namespace`s must be provided as IonLists while `TestCase`s must be provided
 /// as IonStructs. Other Ion types will result in a panic.
