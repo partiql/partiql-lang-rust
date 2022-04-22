@@ -15,6 +15,7 @@ use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLo
 #[allow(clippy::type_complexity)]
 #[allow(clippy::needless_lifetimes)]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::ptr_arg)]
 #[allow(clippy::vec_box)]
 #[allow(unused_variables)]
 #[allow(dead_code)]
