@@ -7,18 +7,20 @@
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
 // in this crate directly is not recommended.
 
-use partiql_source_map::location::BytePosition;
+use partiql_source_map::location::{ByteOffset, BytePosition, Location};
 use rust_decimal::Decimal as RustDecimal;
 use std::fmt;
+use std::fmt::Display;
+use std::ops::Range;
 
 /// Provides the required methods for AstNode conversations.
-pub trait ToAstNode {
+pub trait ToAstNode: Sized {
     /// Wraps the `self` to an [AstNode] and returns an `AstNodeBuilder` for
     /// further [AstNode] construction.
     /// ## Example:
     /// ```
-    /// use partiql_ast::ast::{Span, SymbolPrimitive, ToAstNode};
-    /// use partiql_source_map::location::BytePosition;
+    /// use partiql_ast::ast::{SymbolPrimitive, ToAstNode};
+    /// use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
     ///
     /// let p = SymbolPrimitive {
     ///     value: "symbol2".to_string()
@@ -26,18 +28,30 @@ pub trait ToAstNode {
     ///
     /// let node = p
     ///     .to_node()
-    ///     .span(Span {
-    ///         begin: BytePosition::from(12),
-    ///             end: BytePosition::from(1),
-    ///     })
+    ///     .location((BytePosition::from(12)..BytePosition::from(1)).into())
     ///     .build()
     ///     .expect("Could not retrieve ast node");
     /// ```
-    fn to_node(self) -> AstNodeBuilder<Self>
+    fn to_node(self) -> AstNodeBuilder<Self, BytePosition>
     where
         Self: Clone,
     {
         AstNodeBuilder::default().node(self).clone()
+    }
+
+    fn to_ast<Loc, IntoLoc>(self, location: IntoLoc) -> AstNode<Self, Loc>
+    where
+        Loc: Display,
+        IntoLoc: Into<Location<Loc>>,
+    {
+        AstNode {
+            node: self,
+            location: Some(location.into()),
+        }
+    }
+
+    fn ast(self, Range { start, end }: Range<ByteOffset>) -> AstNode<Self, BytePosition> {
+        self.to_ast(start.into()..end.into())
     }
 }
 
@@ -51,17 +65,10 @@ impl<T> ToAstNode for T {}
 ///
 /// [1]: https://crates.io/crates/derive_builder
 #[derive(Builder, Clone, Eq, PartialEq, Debug)]
-pub struct AstNode<T> {
+pub struct AstNode<T, Loc: Display> {
     pub node: T,
     #[builder(setter(strip_option), default)]
-    pub span: Option<Span>,
-}
-
-/// Represents the beginning and the end of a `Span` in the source code
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Span {
-    pub begin: BytePosition,
-    pub end: BytePosition,
+    pub location: Option<Location<Loc>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -209,32 +216,44 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
+type AstBPos<T> = AstNode<T, BytePosition>;
+
+type LitAst = AstBPos<Lit>;
+type StructAst = AstBPos<Struct>;
+type BagAst = AstBPos<Bag>;
+type ListAst = AstBPos<List>;
+type SexpAst = AstBPos<Sexp>;
+type BinOpAst = AstBPos<BinOp>;
+type UniOpAst = AstBPos<UniOp>;
+type LikeAst = AstBPos<Like>;
+type BetweenAst = AstBPos<Between>;
+type InAst = AstBPos<In>;
+
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
-    Lit(Lit),
+    Lit(LitAst),
     /// Variable reference
     VarRef(VarRef),
     /// A parameter, i.e. `?`
     Param(Param),
     /// Binary operator
-    BinOp(BinOp),
+    BinOp(BinOpAst),
     /// Unary operators
-    UniOp(UniOp),
+    UniOp(UniOpAst),
     /// Comparison operators
-    Like(Like),
-    Between(Between),
-    In(In),
-    Is(Is),
+    Like(LikeAst),
+    Between(BetweenAst),
+    In(InAst),
     /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
     SimpleCase(SimpleCase),
     /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
     SearchedCase(SearchCase),
     /// Constructors
-    Struct(Struct),
-    Bag(Bag),
-    List(List),
-    Sexp(Sexp),
+    Struct(StructAst),
+    Bag(BagAst),
+    List(ListAst),
+    Sexp(SexpAst),
     /// Constructors for DateTime types
     Date(Date),
     LitTime(LitTime),
@@ -335,6 +354,7 @@ pub enum BinOpKind {
     Lt,
     Lte,
     Ne,
+    Is,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -366,11 +386,6 @@ pub struct Between {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct In {
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Is {
     pub operands: Vec<Box<Expr>>,
 }
 

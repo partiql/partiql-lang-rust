@@ -2,7 +2,7 @@ mod common;
 
 use partiql_ast::ast;
 use partiql_ast::ast::*;
-use partiql_source_map::location::BytePosition;
+use partiql_source_map::location::{BytePosition, Location};
 
 #[test]
 fn test_ast_init() {
@@ -11,7 +11,7 @@ fn test_ast_init() {
     let _i = Item {
         kind: ItemKind::Query(Query {
             expr: Box::new(Expr {
-                kind: ExprKind::Lit(Lit::Int32Lit(23)),
+                kind: ExprKind::Lit(Lit::Int32Lit(23).to_ast(BytePosition::from(1)..12.into())),
             }),
         }),
     };
@@ -20,18 +20,18 @@ fn test_ast_init() {
         value: "symbol1".to_string(),
     }
     .to_node()
-    .span(Span {
-        begin: BytePosition::from(12),
+    .location(Location {
+        start: BytePosition::from(12),
         end: BytePosition::from(1),
     })
     .build()
     .expect("Could not retrieve ast node");
 
     assert_eq!(
-        Some(Span {
-            begin: BytePosition::from(12),
+        Some(Location {
+            start: BytePosition::from(12),
             end: BytePosition::from(1),
         }),
-        span_only.span
+        span_only.location
     );
 }
