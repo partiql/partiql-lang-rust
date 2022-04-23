@@ -112,7 +112,7 @@ impl LineOffsetTracker {
         let full_len = source.len() as u32;
         match offset {
             ByteOffset(0) => Ok(LineAndCharPosition::new(0, 0)),
-            ByteOffset(n) if n >= full_len => Err(LineOffsetError::EndOfInput),
+            ByteOffset(n) if n > full_len => Err(LineOffsetError::EndOfInput),
             _ => {
                 let line_num = self.line_num_from_byte_offset(offset);
                 let line_span = self.byte_span_from_line_num(line_num, source.len().into());
@@ -124,6 +124,10 @@ impl LineOffsetTracker {
                     .find(|(_i, (idx, _char))| idx == &limit);
 
                 match column_num {
+                    None if limit == line.len() => Ok(LineAndCharPosition::new(
+                        line_num.to_usize(),
+                        line.char_indices().count(),
+                    )),
                     None => Err(LineOffsetError::InsideUnicodeCodepoint),
                     Some((column_num, (_idx, _char))) => {
                         Ok(LineAndCharPosition::new(line_num.to_usize(), column_num))
@@ -147,6 +151,23 @@ mod tests {
             start += l + 1;
         }
         tracker
+    }
+
+    #[test]
+    fn single() {
+        let s = "1";
+        let tracker = tracker_from_str(s);
+
+        assert_eq!(tracker.num_lines(), 1);
+        assert_eq!(&s[0..1], "1");
+        assert_eq!(
+            tracker.at(s, 0.into()).unwrap(),
+            LineAndCharPosition::new(0, 0)
+        );
+        assert_eq!(
+            tracker.at(s, 1.into()).unwrap(),
+            LineAndCharPosition::new(0, 1)
+        );
     }
 
     #[test]
@@ -187,7 +208,10 @@ mod tests {
             LineAndCharPosition::new(1, 2)
         );
         assert_eq!(s.len(), 6);
-        assert_eq!(tracker.at(s, 6.into()), Err(LineOffsetError::EndOfInput));
+        assert_eq!(
+            tracker.at(s, 6.into()).unwrap(),
+            LineAndCharPosition::new(1, 3)
+        );
         assert_eq!(tracker.at(s, 7.into()), Err(LineOffsetError::EndOfInput));
     }
 
@@ -236,8 +260,8 @@ mod tests {
             LineAndCharPosition::new(0, 0)
         );
         assert_eq!(
-            tracker.at(s, s.len().into()),
-            Err(LineOffsetError::EndOfInput)
+            tracker.at(s, s.len().into()).unwrap(),
+            LineAndCharPosition::new(6, 0)
         );
         assert_eq!(
             tracker.at(s, (s.len() + 1).into()),

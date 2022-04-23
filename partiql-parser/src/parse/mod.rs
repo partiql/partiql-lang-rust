@@ -376,8 +376,10 @@ mod tests {
 
     mod errors {
         use super::*;
-        use crate::result::{UnexpectedToken, UnexpectedTokenData};
-        use partiql_source_map::location::{CharOffset, LineAndCharPosition, LineOffset, Location};
+        use crate::result::{LexicalError, UnexpectedToken, UnexpectedTokenData};
+        use partiql_source_map::location::{
+            CharOffset, LineAndCharPosition, LineOffset, Located, Location,
+        };
         use std::borrow::Cow;
 
         #[test]
@@ -455,6 +457,53 @@ mod tests {
             let errors = res.unwrap_err();
             assert_eq!(1, errors.len());
             assert_eq!(errors[0], ParseError::UnexpectedEndOfInput);
+        }
+
+        #[test]
+        fn unterminated_ion_unicode() {
+            let q = r#"/`܋"#;
+            let res = parse_partiql(q);
+            assert!(res.is_err());
+            let errors = res.unwrap_err();
+            assert_eq!(2, errors.len());
+            assert_eq!(
+                errors[0],
+                ParseError::UnexpectedToken(UnexpectedToken {
+                    inner: UnexpectedTokenData {
+                        token: Cow::from("/")
+                    },
+                    location: Location {
+                        start: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(0)
+                        }
+                        .into(),
+                        end: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(1)
+                        }
+                        .into(),
+                    },
+                })
+            );
+            assert_eq!(
+                errors[1],
+                ParseError::LexicalError(Located {
+                    inner: LexicalError::UnterminatedIonLiteral,
+                    location: Location {
+                        start: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(1)
+                        }
+                        .into(),
+                        end: LineAndCharPosition {
+                            line: LineOffset(0),
+                            char: CharOffset(3)
+                        }
+                        .into(),
+                    },
+                })
+            );
         }
     }
 }

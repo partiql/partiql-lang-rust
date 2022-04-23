@@ -5,5 +5,5 @@ OR c <> 15
 OR d != 18
 AND e <= 25
 AND f >= 35
-OR q LIKE "%foo%"
+OR q LIKE '%_foo%'
 AND r BETWEEN 7 AND 9

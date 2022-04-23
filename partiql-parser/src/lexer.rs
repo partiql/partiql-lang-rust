@@ -202,8 +202,9 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
                                     self.tracker.append(&comment_tracker, embed.start.into());
                                     self.lexer.bump((e - s).to_usize() - embed.len())
                                 }
-                                Some(Err((_s, err, e))) => {
-                                    return Some(Err((embed.start.into(), err, e)));
+                                Some(Err((s, err, e))) => {
+                                    let offset: ByteOffset = embed.start.into();
+                                    return Some(Err((s + offset, err, e + offset)));
                                 }
                                 None => unreachable!(),
                             }
@@ -331,11 +332,17 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         let mut comment_lexer = CommentLexer::new(remaining, &mut comment_tracker).with_nesting();
         comment_lexer.next().map(|res| match res {
             Ok((s, comment, e)) => {
+                let val_len = e - s;
+                let val_start = embed.start.into(); // embed end is 1 past the starting '/*'
+                let val_end = val_start + val_len;
                 self.tracker.append(&comment_tracker, embed.start.into());
-                self.lexer.bump((e - s).to_usize() - embed.len());
-                Ok((embed.start.into(), Token::CommentBlock(comment), e))
+                self.lexer.bump(val_len.to_usize() - embed.len());
+                Ok((val_start, Token::CommentBlock(comment), val_end))
             }
-            Err((_s, err, e)) => Err((embed.start.into(), err, e)),
+            Err((s, err, e)) => {
+                let offset: ByteOffset = embed.start.into();
+                Err((s + offset, err, e + offset))
+            }
         })
     }
 
@@ -347,11 +354,17 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         let mut ion_lexer = EmbeddedIonLexer::new(remaining, &mut ion_tracker);
         ion_lexer.next().map(|res| match res {
             Ok((s, ion, e)) => {
+                let val_len = e - s;
+                let val_start = embed.end.into(); // embed end is 1 past the starting '`'
+                let val_end = val_start + val_len - 2; // sub 2 to remove surrounding '`'
                 self.tracker.append(&ion_tracker, embed.start.into());
-                self.lexer.bump((e - s).to_usize() - embed.len());
-                Ok((embed.end.into(), Token::Ion(ion), e - 1))
+                self.lexer.bump(val_len.to_usize() - embed.len());
+                Ok((val_start, Token::Ion(ion), val_end))
             }
-            Err((_s, err, e)) => Err((embed.start.into(), err, e)),
+            Err((s, err, e)) => {
+                let offset: ByteOffset = embed.start.into();
+                Err((s + offset, err, e + offset))
+            }
         })
     }
 }
@@ -680,7 +693,9 @@ impl<'input> fmt::Display for Token<'input> {
 mod tests {
     use super::*;
     use partiql_source_map::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
-    use partiql_source_map::location::{LineAndColumn, Located, Location};
+    use partiql_source_map::location::{
+        CharOffset, LineAndCharPosition, LineAndColumn, LineOffset, Located, Location,
+    };
 
     use itertools::Itertools;
 
@@ -725,7 +740,7 @@ mod tests {
 
     #[test]
     fn ion_simple() {
-        let ion_value = r#" `{'input':1,  'b':1}` "#;
+        let ion_value = r#"    `{'input':1,  'b':1}`--comment "#;
 
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
@@ -737,7 +752,11 @@ mod tests {
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(
-            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(20)) if ion_str == ion_value.trim().trim_matches('`'))
+            matches!(tok, (ByteOffset(5), Token::Ion(ion_str), ByteOffset(24)) if ion_str == "{'input':1,  'b':1}")
+        );
+        let tok = lexer.next().unwrap().unwrap();
+        assert!(
+            matches!(tok, (ByteOffset(25), Token::CommentLine(cmt_str), ByteOffset(35)) if cmt_str == "--comment ")
         );
     }
 
@@ -759,7 +778,7 @@ mod tests {
 
         let tok = lexer.next().unwrap().unwrap();
         assert!(
-            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(157)) if ion_str == ion_value.trim().trim_matches('`'))
+            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(158)) if ion_str == ion_value.trim().trim_matches('`'))
         );
         assert_eq!(offset_tracker.num_lines(), 5);
     }
@@ -896,7 +915,16 @@ mod tests {
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         lexer.count();
 
-        let overflow = offset_tracker.at(query, ByteOffset(query.len() as u32).into());
+        let last = offset_tracker.at(query, ByteOffset(query.len() as u32).into());
+        assert!(matches!(
+            last,
+            Ok(LineAndCharPosition {
+                line: LineOffset(4),
+                char: CharOffset(10)
+            })
+        ));
+
+        let overflow = offset_tracker.at(query, ByteOffset(1 + query.len() as u32).into());
         assert!(matches!(overflow, Err(LineOffsetError::EndOfInput)));
     }
 
@@ -990,13 +1018,13 @@ mod tests {
                 inner: LexError::UnterminatedIonLiteral,
                 location: Location {
                     start: BytePosition(ByteOffset(1)),
-                    end: BytePosition(ByteOffset(9))
+                    end: BytePosition(ByteOffset(10))
                 }
             })
         ));
         assert_eq!(
             error.to_string(),
-            "Lexing error: unterminated ion literal at `(b1..b9)`"
+            "Lexing error: unterminated ion literal at `(b1..b10)`"
         );
         assert_eq!(
             LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1)).unwrap()),
@@ -1017,13 +1045,13 @@ mod tests {
                 inner: LexError::UnterminatedComment,
                 location: Location {
                     start: BytePosition(ByteOffset(1)),
-                    end: BytePosition(ByteOffset(10))
+                    end: BytePosition(ByteOffset(11))
                 }
             })
         ));
         assert_eq!(
             error.to_string(),
-            "Lexing error: unterminated comment at `(b1..b10)`"
+            "Lexing error: unterminated comment at `(b1..b11)`"
         );
         assert_eq!(
             LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1)).unwrap()),
@@ -1041,7 +1069,7 @@ mod tests {
         let error = toks.unwrap_err();
         assert!(matches!(
             error,
-            (ByteOffset(2), LexError::UnterminatedComment, ByteOffset(11))
+            (ByteOffset(2), LexError::UnterminatedComment, ByteOffset(13))
         ));
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
         assert_eq!(

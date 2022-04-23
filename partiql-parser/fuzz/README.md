@@ -24,7 +24,8 @@ See also the cargo-fuzz [setup instructions][setup].
 
 ## Fuzz Testing
 
-First, seed the fuzzing corpus with some PartiQL queries:
+
+From the `partiql-parser` directory, first seed the fuzzing corpus with some PartiQL queries:
 
 ```shell
 mkdir -p fuzz/corpus/fuzz_parse_string
@@ -49,13 +50,21 @@ cargo +nightly fuzz run --jobs 4 fuzz_parse_string -- -dict=fuzz/inputs/keywords
 
 ### Finding a Crash
 
+If fuzzing uncovers an input string that causes a crash, execution will stop, and the crashing input string will be
+written to a new file in the `fuzz/artifacts` directory. From there, you can copy the offending input to a `#[test]`
+in order to determine the root cause and debug. However, it's probably better to create a new test case once the cause
+of the crash is determined that minimizes the test input and is understandable.
+
 ### Fuzz Code Coverage
+
+If you want to examine coverage of the fuzz test, you'll need the following components:
 
 ```shell
 rustup component add --toolchain nightly llvm-tools-preview rust-src
 ```
 
-Generate coverage data:
+Coverage information can be generated (each test in the `corpus` folder will be run once with coverage and the overall
+coverage merged - this can take a while) with:
 
 ```shell
 cargo fuzz coverage fuzz_parse_string
