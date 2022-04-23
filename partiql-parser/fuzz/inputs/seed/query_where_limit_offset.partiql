@@ -1,0 +1,6 @@
+SELECT a
+FROM tb
+WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id
+ORDER BY rk1 ASC, rk2 DESC
+LIMIT 10
+OFFSET 2

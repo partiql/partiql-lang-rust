@@ -1,0 +1,1 @@
+SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g
