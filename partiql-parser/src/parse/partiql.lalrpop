@@ -15,7 +15,7 @@ grammar<'input, 'err>(input: &'input str,
 
 pub Query: Box<ast::Expr> = {
     <ExprQuery>,
-    <sfw:SfwQuery> => Box::new( ast::Expr{ kind: ast::ExprKind::Select(sfw) } )
+    <lo:@L> <sfw:SfwQuery> <hi:@R> => Box::new( ast::Expr{ kind: ast::ExprKind::Select(sfw.ast(lo..hi)) } )
 }
 
 // ------------------------------------------------------------------------------ //
@@ -620,7 +620,7 @@ ExprPrecedence03: ast::Expr = {
 
 #[inline]
 ExprPrecedence02: ast::Expr = {
-    <call:FunctionCall> => ast::Expr{ kind: ast::ExprKind::Call( call ) },
+    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
     <ExprPrecedence01>,
 }
 
@@ -630,7 +630,7 @@ ExprPrecedence01: ast::Expr = {<ExprTerm>,}
 pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
-    <path:PathExpr> => ast::Expr{ kind: ast::ExprKind::Path( path ) },
+    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
     <lo:@L> "{" <fields:CommaTerm<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
     <lo:@L> "[" <values:CommaTerm<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
     <lo:@L> "<<" <values:CommaTerm<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
@@ -648,7 +648,7 @@ FunctionCall: ast::Call = {
 }
 
 PathExpr: ast::Path = {
-    <path:PathExpr> "." <ident:"Identifier"> => {
+    <lo:@L> <path:PathExpr> "." <ident:"Identifier"> <hi:@R> => {
         let step = ast::PathStep::PathExpr(
             ast::PathExpr{
                 index: Box::new(ast::Expr{
@@ -656,7 +656,7 @@ PathExpr: ast::Path = {
                         name: ast::SymbolPrimitive { value: ident.to_owned() },
                         case: ast::CaseSensitivity::CaseInsensitive,
                         qualifier: ast::ScopeQualifier::Unqualified
-                    }),
+                    }.ast(lo..hi)),
                 }),
                 case: ast::CaseSensitivity::CaseInsensitive,
             });
@@ -665,23 +665,23 @@ PathExpr: ast::Path = {
         steps.push(step);
         ast::Path{ root:path.root, steps }
     },
-    <ident:"Identifier"> => {
+    <lo:@L> <ident:"Identifier"> <hi:@R> => {
         let root = ast::Expr{
             kind: ast::ExprKind::VarRef(ast::VarRef {
                 name: ast::SymbolPrimitive { value: ident.to_owned() },
                 case: ast::CaseSensitivity::CaseInsensitive,
                 qualifier: ast::ScopeQualifier::Unqualified
-            }),
+            }.ast(lo..hi)),
         };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
-    <ident:"AtIdentifier"> => {
+    <lo:@L> <ident:"AtIdentifier"> <hi:@R> => {
         let root = ast::Expr{
             kind: ast::ExprKind::VarRef(ast::VarRef {
                 name: ast::SymbolPrimitive { value: ident.to_owned() },
                 case: ast::CaseSensitivity::CaseInsensitive,
                 qualifier: ast::ScopeQualifier::Qualified
-            }),
+            }.ast(lo..hi)),
         };
         ast::Path{ root: Box::new(root), steps: vec![] }
     },

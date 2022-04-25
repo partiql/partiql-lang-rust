@@ -216,27 +216,39 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
-type AstBPos<T> = AstNode<T, BytePosition>;
+/// Represents an AST Node of type T with BytePosition Location
+type AstBytePos<T> = AstNode<T, BytePosition>;
 
-type LitAst = AstBPos<Lit>;
-type StructAst = AstBPos<Struct>;
-type BagAst = AstBPos<Bag>;
-type ListAst = AstBPos<List>;
-type SexpAst = AstBPos<Sexp>;
-type BinOpAst = AstBPos<BinOp>;
-type UniOpAst = AstBPos<UniOp>;
-type LikeAst = AstBPos<Like>;
-type BetweenAst = AstBPos<Between>;
-type InAst = AstBPos<In>;
+type LitAst = AstBytePos<Lit>;
+type VarRefAst = AstBytePos<VarRef>;
+type ParamAst = AstBytePos<VarRef>;
+type StructAst = AstBytePos<Struct>;
+type BagAst = AstBytePos<Bag>;
+type ListAst = AstBytePos<List>;
+type SexpAst = AstBytePos<Sexp>;
+type BinOpAst = AstBytePos<BinOp>;
+type UniOpAst = AstBytePos<UniOp>;
+type LikeAst = AstBytePos<Like>;
+type BetweenAst = AstBytePos<Between>;
+type InAst = AstBytePos<In>;
+type SimpleCaseAst = AstBytePos<SimpleCase>;
+type SearchCaseAst = AstBytePos<SearchCase>;
+type UnionAst = AstBytePos<Union>;
+type ExceptAst = AstBytePos<Except>;
+type IntersectAst = AstBytePos<Intersect>;
+type PathAst = AstBytePos<Path>;
+type CallAst = AstBytePos<Call>;
+type CallAggAst = AstBytePos<CallAgg>;
+type SelectAst = AstBytePos<Select>;
 
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExprKind {
     Lit(LitAst),
     /// Variable reference
-    VarRef(VarRef),
+    VarRef(VarRefAst),
     /// A parameter, i.e. `?`
-    Param(Param),
+    Param(ParamAst),
     /// Binary operator
     BinOp(BinOpAst),
     /// Unary operators
@@ -246,28 +258,25 @@ pub enum ExprKind {
     Between(BetweenAst),
     In(InAst),
     /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
-    SimpleCase(SimpleCase),
+    SimpleCase(SimpleCaseAst),
     /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
-    SearchedCase(SearchCase),
+    SearchedCase(SearchCaseAst),
     /// Constructors
     Struct(StructAst),
     Bag(BagAst),
     List(ListAst),
     Sexp(SexpAst),
-    /// Constructors for DateTime types
-    Date(Date),
-    LitTime(LitTime),
     /// Set operators
-    Union(Union),
-    Except(Except),
-    Intersect(Intersect),
+    Union(UnionAst),
+    Except(ExceptAst),
+    Intersect(IntersectAst),
     /// Other expression types
-    Path(Path),
-    Call(Call),
-    CallAgg(CallAgg),
+    Path(PathAst),
+    Call(CallAst),
+    CallAgg(CallAggAst),
 
     /// `SELECT` and its parts.
-    Select(Select),
+    Select(SelectAst),
 
     /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
     Error,
@@ -392,13 +401,13 @@ pub struct In {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimpleCase {
     pub expr: Box<Expr>,
-    pub cases: ExprPairList,
+    pub cases: Vec<ExprPair>,
     pub default: Option<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchCase {
-    pub cases: ExprPairList,
+    pub cases: Vec<ExprPair>,
     pub default: Option<Box<Expr>>,
 }
 
@@ -647,13 +656,6 @@ pub enum JoinKind {
 pub struct ExprPair {
     pub first: Box<Expr>,
     pub second: Box<Expr>,
-}
-
-/// A list of expr_pair. Used in the `pub struct`, `searched_case` and `simple_case`
-/// expr variants above.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ExprPairList {
-    pub pairs: Vec<ExprPair>,
 }
 
 /// GROUP BY <grouping_strategy> <group_key_list>... \[AS <symbol>\]
