@@ -16,7 +16,7 @@ fn main() -> io::Result<()> {
 
     // TODO: consider first moving directory and deleting once test generation is successful
     if tests_path.exists() {
-        fs::remove_dir_all("tests/").expect("removal of tests/ before test generation");
+        fs::remove_dir_all(tests_dir).expect("removal of tests/ before test generation");
     }
 
     let file_dir = "partiql-tests";
@@ -46,6 +46,12 @@ fn main() -> io::Result<()> {
             .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
     }
 
-    dir_to_mods(tests_path);
+    let sub_tests_dir = "partiql_tests";
+    let sub_tests_path = Path::new(sub_tests_dir);
+    dir_to_mods( &tests_path.join(sub_tests_path));
+    File::create(&tests_path.join("mod.rs"))
+        .expect("mod.rs created in root test folder")
+        .write_all(format!("#[cfg(feature = \"conformance_test\")]\nmod {};\n", sub_tests_dir).as_bytes())
+        .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
     Ok(())
 }

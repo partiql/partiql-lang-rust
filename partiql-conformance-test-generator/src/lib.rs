@@ -172,7 +172,7 @@ fn parse_assertions(assertions: &Vec<&OwnedElement>) -> ParseAssertions {
                 let r_as_str = r.as_str().expect("as_str()");
                 return match r_as_str {
                     "ParseOk" => ParseAssertions::ParsePass,
-                    "ParserError" => ParseAssertions::ParseFail,
+                    "ParseError" => ParseAssertions::ParseFail,
                     _ => panic!("Unexpected parse result {}", r_as_str),
                 };
             }
