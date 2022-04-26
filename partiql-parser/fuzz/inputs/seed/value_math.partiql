@@ -1,0 +1,9 @@
+3141.59265e-03 + 1.317e-3 * 17e2 / 7. % 42 - (5.5 + 1^10) < 10
+AND a > 4
+AND b == 7
+OR c <> 15
+OR d != 18
+AND e <= 25
+AND f >= 35
+OR q LIKE '%_foo%'
+AND r BETWEEN 7 AND 9

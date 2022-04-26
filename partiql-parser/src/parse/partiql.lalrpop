@@ -1,13 +1,15 @@
 use crate::parse::lexer;
 use crate::result::ParseError;
 
-use lalrpop_util::ErrorRecovery;
+use lalrpop_util as lpop;
+
+use lpop::ErrorRecovery;
 use std::str::FromStr;
 
 use partiql_ast::ast;
 use partiql_ast::ast::ToAstNode;
 
-use partiql_source_map::location::{ByteOffset, BytePosition};
+use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 
 
 grammar<'input, 'err>(input: &'input str,
@@ -724,9 +726,31 @@ LiteralBool: ast::Lit = {
 #[inline]
 LiteralNumber: ast::Lit = {
     // TODO check bounds before parsing?
-    <n:"Int"> => ast::Lit::Int64Lit(n.parse().unwrap()),
-    <r:"Real"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_str(r).unwrap()),
-    <r:"ExpReal"> => ast::Lit::DecimalLit(rust_decimal::Decimal::from_scientific(r).unwrap()),
+
+    <lo:@L> <n:"Int"> <hi:@R> =>? {
+        n.parse()
+	        .map(|n| ast::Lit::Int64Lit(n))
+		    .map_err(|_| lpop::ParseError::User{
+	     	    error: ParseError::SyntaxError(
+		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+	         })
+    },
+    <lo:@L> <r:"Real"> <hi:@R> =>? {
+        rust_decimal::Decimal::from_str(r)
+	        .map(|n| ast::Lit::DecimalLit(n))
+		    .map_err(|_| lpop::ParseError::User{
+	     	    error: ParseError::SyntaxError(
+		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+	         })
+    },
+    <lo:@L> <r:"ExpReal"> <hi:@R> =>? {
+        rust_decimal::Decimal::from_scientific(r)
+	        .map(|n| ast::Lit::DecimalLit(n))
+		    .map_err(|_| lpop::ParseError::User{
+	     	    error: ParseError::SyntaxError(
+		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+	         })
+    },
 }
 #[inline]
 LiteralIon: ast::Lit = {

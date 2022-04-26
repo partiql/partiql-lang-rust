@@ -1,0 +1,27 @@
+[package]
+name = "partiql-parser-fuzz"
+version = "0.0.0"
+authors = ["PartiQL Team <partiql-team@amazon.com>"]
+description = "PartiQL Parser Fuzz Tests"
+publish = false
+edition = "2021"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.partiql-parser]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_parse_string"
+path = "fuzz_targets/fuzz_parse_string.rs"
+test = false
+doc = false

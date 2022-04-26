@@ -1,0 +1,12 @@
+SELECT (
+    SELECT totalCount, data
+    FROM changes.deltas delta,
+    (
+        SELECT u.id, attachment, aindex
+        FROM delta.data as u CROSS JOIN UNPIVOT u.attachments as attachment AT aindex
+    ) as data,
+    delta.totalCount as totalCount
+    WHERE totalCount > 5
+    ORDER BY totalCount DESC
+)
+AS deltas FROM input_changes changes
