@@ -48,10 +48,16 @@ fn main() -> io::Result<()> {
 
     let sub_tests_dir = "partiql_tests";
     let sub_tests_path = Path::new(sub_tests_dir);
-    dir_to_mods( &tests_path.join(sub_tests_path));
+    dir_to_mods(&tests_path.join(sub_tests_path));
     File::create(&tests_path.join("mod.rs"))
         .expect("mod.rs created in root test folder")
-        .write_all(format!("#[cfg(feature = \"conformance_test\")]\nmod {};\n", sub_tests_dir).as_bytes())
+        .write_all(
+            format!(
+                "#[cfg(feature = \"conformance_test\")]\n#[rustfmt::skip]\nmod {};\n",
+                sub_tests_dir
+            )
+            .as_bytes(),
+        )
         .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
     Ok(())
 }
