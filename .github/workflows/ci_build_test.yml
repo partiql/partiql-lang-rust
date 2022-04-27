@@ -36,11 +36,21 @@ jobs:
         with:
           command: build
           args: --verbose --workspace
-      - name: Cargo Test
+      - name: Cargo Test excluding conformance tests
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --verbose --workspace
+      # Currently just runs the conformance tests and won't fail the build for a conformance test failure (more details
+      # on the 'continue-on-error' workflow syntax can be found here:
+      # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idcontinue-on-error
+      # Further conformance report generation will be part of https://github.com/partiql/partiql-lang-rust/issues/79.
+      - name: Cargo Test of the conformance tests (can fail)
+        uses: actions-rs/cargo@v1
+        continue-on-error: true
+        with:
+          command: test
+          args: --verbose --package partiql-conformance-tests --features "conformance_test"
       - name: Rustfmt Check
         uses: actions-rs/cargo@v1
         with:
