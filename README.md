@@ -35,6 +35,23 @@ You can also initialize the submodules as follows:
 $ git submodule update --init --recursive
 ```
 
+## Running the conformance tests
+Running `cargo test` from the `partiql-lang-rust` root will not run the conformance tests by default.
+
+To run all the tests (including conformance tests), you will need to run `cargo test` with the "conformance_test" `--features` flag:
+
+```shell
+cargo test --features "conformance_test"
+```
+
+Or to run just the conformance tests:
+
+```shell
+cargo test --package partiql-conformance-tests --features "conformance_test"
+```
+
+More details on running individual tests can be found in the `partiql-conformance-tests` crate [README](partiql-conformance-tests/README.md).
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
