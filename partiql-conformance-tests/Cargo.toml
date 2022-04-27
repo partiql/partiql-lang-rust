@@ -25,3 +25,6 @@ partiql-conformance-test-generator = { path = "../partiql-conformance-test-gener
 
 [dependencies]
 partiql-parser = { path = "../partiql-parser" }
+
+[features]
+conformance_test=[]

@@ -79,7 +79,7 @@ pub fn dir_to_mods(dir: &Path) {
     for module in modules_in_dir {
         mod_rs_file
             .write_all(format!("mod {};\n", module.to_str().expect("to str")).as_bytes())
-            .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
+            .expect("Failure when writing to file");
     }
 }
 

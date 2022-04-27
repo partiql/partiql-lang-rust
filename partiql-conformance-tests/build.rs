@@ -5,6 +5,7 @@ use partiql_conformance_test_generator::util::{all_ion_files_in, dir_to_mods, St
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::{fs, io};
 
 /// TODO: once APIs are more stable, include documentation on what this build script is doing
@@ -16,7 +17,7 @@ fn main() -> io::Result<()> {
 
     // TODO: consider first moving directory and deleting once test generation is successful
     if tests_path.exists() {
-        fs::remove_dir_all("tests/").expect("removal of tests/ before test generation");
+        fs::remove_dir_all(tests_dir).expect("removal of tests/ before test generation");
     }
 
     let file_dir = "partiql-tests";
@@ -28,8 +29,7 @@ fn main() -> io::Result<()> {
 
         let test_document = ion_data_to_test_document(all_ion_data);
         let test_generator = Generator { test_document };
-        let mut scope = test_generator.generate_scope().to_string();
-        scope.push_str("\n");
+        let scope = test_generator.generate_scope().to_string();
 
         let dest_path_non_escaped = Path::new("tests").join(file.with_extension(""));
         let dest_path_escaped: PathBuf = dest_path_non_escaped
@@ -43,9 +43,30 @@ fn main() -> io::Result<()> {
         File::create(dest_path)
             .expect("File creation failed")
             .write_all(scope.as_bytes())
-            .unwrap_or_else(|error| panic!("Failure when writing to file: {:?}", error));
+            .expect("Failure when writing to file");
     }
 
-    dir_to_mods(tests_path);
+    let sub_tests_dir = "partiql_tests";
+    let sub_tests_path = Path::new(sub_tests_dir);
+    dir_to_mods(&tests_path.join(sub_tests_path));
+    // Creates the top-level mod.rs file in the tests/ directory and adds the "conformance_test"
+    // flag to this mod
+    File::create(&tests_path.join("mod.rs"))
+        .expect("mod.rs created in root test folder")
+        .write_all(
+            format!(
+                "#[cfg(feature = \"conformance_test\")]\nmod {};\n",
+                sub_tests_dir
+            )
+            .as_bytes(),
+        )
+        .expect("Failure when writing to file");
+
+    Command::new("cargo")
+        .arg("fmt")
+        .arg("--verbose")
+        .arg("--")
+        .spawn()
+        .expect("cargo fmt of tests/ failed");
     Ok(())
 }
