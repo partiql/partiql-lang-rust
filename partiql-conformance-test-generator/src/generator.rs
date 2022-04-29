@@ -43,13 +43,14 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
     match &test_case.test_kind {
         Parse(ParseTestCase { parse_assertions }) => {
             let mut test_fn: Function = Function::new(&test_case.test_name);
-            test_fn.attr("test").line(format!(
-                "let parse_result = partiql_parser::parse_partiql(r#\"{}\"#);",
-                &test_case.statement
-            ));
+            test_fn.attr("test");
+            test_fn.line(format!("let query = r#\"{}\"#;", &test_case.statement));
+            test_fn.line("let res = partiql_parser::parse_partiql(query);");
             match parse_assertions {
-                ParseAssertions::ParsePass => test_fn.line("assert!(parse_result.is_ok());"),
-                ParseAssertions::ParseFail => test_fn.line("assert!(parse_result.is_err());"),
+                ParseAssertions::ParsePass => test_fn
+                    .line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", query, res);"#),
+                ParseAssertions::ParseFail => test_fn
+                    .line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", query, res);"#),
             };
             test_fn
         }
