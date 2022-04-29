@@ -669,8 +669,14 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args }
+    <func_name:"Identifier"> "(" ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
+     <func_name:"Identifier"> "(" "*" ")" =>
+         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
+    <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) },
+    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSep<ExprQuery>> ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) }
 }
 
 PathExpr: ast::Path = {
@@ -901,6 +907,7 @@ extern {
         "BY" => lexer::Token::By,
         "CROSS" => lexer::Token::Cross,
         "DESC" => lexer::Token::Desc,
+        "DISTINCT" => lexer::Token::Distinct,
         "ESCAPE" => lexer::Token::Escape,
         "EXCEPT" => lexer::Token::Except,
         "FALSE" => lexer::Token::False,

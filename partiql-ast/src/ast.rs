@@ -481,13 +481,13 @@ pub struct Path {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub func_name: SymbolPrimitive,
-    pub args: Vec<Box<Expr>>,
+    pub args: Option<Vec<Box<Expr>>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallAgg {
     pub func_name: SymbolPrimitive,
-    pub args: Vec<Box<Expr>>,
+    pub args: Option<Vec<Box<Expr>>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
