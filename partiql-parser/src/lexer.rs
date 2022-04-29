@@ -512,6 +512,8 @@ pub enum Token<'input> {
     Cross,
     #[regex("(?i:Desc)")]
     Desc,
+    #[regex("(?i:Distinct)")]
+    Distinct,
     #[regex("(?i:Escape)")]
     Escape,
     #[regex("(?i:Except)")]
@@ -644,6 +646,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::By
             | Token::Cross
             | Token::Desc
+            | Token::Distinct
             | Token::Escape
             | Token::Except
             | Token::False
