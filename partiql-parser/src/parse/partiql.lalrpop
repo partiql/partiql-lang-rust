@@ -247,7 +247,7 @@ WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
 GroupClause: Box<ast::GroupByExpr> = {
-    "GROUP" "BY" <strategy: GroupStrategy> <keys:CommaSep<GroupKey>> <group_as_alias:GroupAlias?> => {
+    "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSep<GroupKey>> <group_as_alias:GroupAlias?> => {
         Box::new(ast::GroupByExpr{
             strategy,
             key_list: ast::GroupKeyList{ keys },
@@ -257,10 +257,11 @@ GroupClause: Box<ast::GroupByExpr> = {
 }
 #[inline]
 GroupStrategy: ast::GroupingStrategy = {
-    <all:"ALL"?> => {
-        match all {
-            Some(_) => ast::GroupingStrategy::GroupFull,
-            None => ast::GroupingStrategy::GroupPartial,
+    "ALL" => ast::GroupingStrategy::GroupFull,
+    <partial:"PARTIAL"?> => {
+        match partial {
+            Some(_) => ast::GroupingStrategy::GroupPartial,
+            None => ast::GroupingStrategy::GroupFull,
         }
     }
 }
@@ -880,6 +881,7 @@ extern {
         "OR" => lexer::Token::Or,
         "ORDER" => lexer::Token::Order,
         "OUTER" => lexer::Token::Outer,
+        "PARTIAL" => lexer::Token::Partial,
         "PIVOT" => lexer::Token::Pivot,
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,

@@ -568,6 +568,8 @@ pub enum Token<'input> {
     Order,
     #[regex("(?i:Outer)")]
     Outer,
+    #[regex("(?i:Partial)")]
+    Partial,
     #[regex("(?i:Pivot)")]
     Pivot,
     #[regex("(?i:Preserve)")]
@@ -672,6 +674,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Or
             | Token::Order
             | Token::Outer
+            | Token::Partial
             | Token::Pivot
             | Token::Preserve
             | Token::Right
