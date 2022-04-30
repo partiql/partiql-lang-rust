@@ -457,6 +457,8 @@ pub enum Token<'input> {
     Caret,
     #[token(".")]
     Period,
+    #[token("||")]
+    DblPipe,
 
     // unquoted identifiers
     #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice())]
@@ -626,14 +628,15 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
-            Token::Identifier(_) => write!(f, "<IDENTIFIER>"),
-            Token::AtIdentifier(_) => write!(f, "<@IDENTIFIER>"),
-            Token::Int(_) => write!(f, "<INT>"),
-            Token::ExpReal(_) => write!(f, "<REAL>"),
-            Token::Real(_) => write!(f, "<REAL>"),
-            Token::String(_) => write!(f, "<STRING>"),
+            Token::DblPipe => write!(f, "||"),
+            Token::Identifier(id) => write!(f, "<{}:IDENT>", id),
+            Token::AtIdentifier(id) => write!(f, "<{}:@IDENT>", id),
+            Token::Int(txt) => write!(f, "<{}:INT>", txt),
+            Token::ExpReal(txt) => write!(f, "<{}:REAL>", txt),
+            Token::Real(txt) => write!(f, "<{}:REAL>", txt),
+            Token::String(txt) => write!(f, "<{}:STRING>", txt),
             Token::EmbeddedIonQuote => write!(f, "<ION>"),
-            Token::Ion(_) => write!(f, "<ION>"),
+            Token::Ion(txt) => write!(f, "<{}:ION>", txt),
 
             Token::All
             | Token::Asc
@@ -701,8 +704,9 @@ mod tests {
 
     #[test]
     fn display() -> Result<(), ParseError<'static, BytePosition>> {
-        let symbols = "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . : --foo /*block*/";
-        let primitives = "ident @ident";
+        let symbols =
+            "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . || : --foo /*block*/";
+        let primitives = "ident @atident";
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
@@ -724,8 +728,8 @@ mod tests {
             ")", "UNION", "<<", "TRUE", ">>", "SELECT", ";", "RIGHT", ",", "PRESERVE", "<",
             "PIVOT", ">", "OUTER", "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET",
             "=", "NULLS", "==", "NULL", "-", "NOT", "+", "NATURAL", "*", "MISSING", "%",
-            "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", ":", "LAST", "--", "JOIN",
-            "/**/", "INTERSECT", "<IDENTIFIER>", "IS", "<@IDENTIFIER>", "INNER", "IN",
+            "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
+            "--", "INTERSECT", "/**/", "IS", "<ident:IDENT>", "INNER", "<atident:@IDENT>", "IN",
             "HAVING", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC",
             "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL"
         ];
