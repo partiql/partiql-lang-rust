@@ -242,6 +242,9 @@ mod tests {
         fn array() {
             value_and_parse!(r#"[]"#);
             value_and_parse!(r#"[1, 'moo', "some variable", [], 'a', MISSING]"#);
+            // In the interest of compatibility to SQL, PartiQL also allows array constructors to be
+            // denoted with parentheses instead of brackets, when there are at least two elements in the array
+            value_and_parse!(r#"(1, 'moo', "some variable", [], 'a', MISSING)"#);
         }
         #[test]
         fn bag() {
