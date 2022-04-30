@@ -217,29 +217,40 @@ pub struct Expr {
 }
 
 /// Represents an AST Node of type T with BytePosition Location
-type AstBytePos<T> = AstNode<T, BytePosition>;
+pub type AstBytePos<T> = AstNode<T, BytePosition>;
 
-type LitAst = AstBytePos<Lit>;
-type VarRefAst = AstBytePos<VarRef>;
-type ParamAst = AstBytePos<VarRef>;
-type StructAst = AstBytePos<Struct>;
-type BagAst = AstBytePos<Bag>;
-type ListAst = AstBytePos<List>;
-type SexpAst = AstBytePos<Sexp>;
-type BinOpAst = AstBytePos<BinOp>;
-type UniOpAst = AstBytePos<UniOp>;
-type LikeAst = AstBytePos<Like>;
-type BetweenAst = AstBytePos<Between>;
-type InAst = AstBytePos<In>;
-type SimpleCaseAst = AstBytePos<SimpleCase>;
-type SearchCaseAst = AstBytePos<SearchCase>;
-type UnionAst = AstBytePos<Union>;
-type ExceptAst = AstBytePos<Except>;
-type IntersectAst = AstBytePos<Intersect>;
-type PathAst = AstBytePos<Path>;
-type CallAst = AstBytePos<Call>;
-type CallAggAst = AstBytePos<CallAgg>;
-type SelectAst = AstBytePos<Select>;
+pub type LitAst = AstBytePos<Lit>;
+pub type VarRefAst = AstBytePos<VarRef>;
+pub type ParamAst = AstBytePos<VarRef>;
+pub type StructAst = AstBytePos<Struct>;
+pub type BagAst = AstBytePos<Bag>;
+pub type ListAst = AstBytePos<List>;
+pub type SexpAst = AstBytePos<Sexp>;
+pub type BinOpAst = AstBytePos<BinOp>;
+pub type UniOpAst = AstBytePos<UniOp>;
+pub type LikeAst = AstBytePos<Like>;
+pub type BetweenAst = AstBytePos<Between>;
+pub type InAst = AstBytePos<In>;
+pub type SimpleCaseAst = AstBytePos<SimpleCase>;
+pub type SearchCaseAst = AstBytePos<SearchCase>;
+pub type UnionAst = AstBytePos<Union>;
+pub type ExceptAst = AstBytePos<Except>;
+pub type IntersectAst = AstBytePos<Intersect>;
+pub type PathAst = AstBytePos<Path>;
+pub type CallAst = AstBytePos<Call>;
+pub type CallAggAst = AstBytePos<CallAgg>;
+pub type SelectAst = AstBytePos<Select>;
+pub type ProjectionAst = AstBytePos<Projection>;
+pub type ProjectItemAst = AstBytePos<ProjectItem>;
+pub type FromClauseAst = AstBytePos<FromClause>;
+pub type FromLetAst = AstBytePos<FromLet>;
+pub type JoinAst = AstBytePos<Join>;
+pub type JoinSpecAst = AstBytePos<JoinSpec>;
+pub type LetAst = AstBytePos<Let>;
+pub type GroupByExprAst = AstBytePos<GroupByExpr>;
+pub type GroupKeyAst = AstBytePos<GroupKey>;
+pub type OrderByExprAst = AstBytePos<OrderByExpr>;
+pub type SortSpecAst = AstBytePos<SortSpec>;
 
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
@@ -511,13 +522,13 @@ pub struct Coalesce {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Select {
     pub setq: Option<SetQuantifier>,
-    pub project: Projection,
-    pub from: Option<FromClause>,
-    pub from_let: Option<Let>,
+    pub project: ProjectionAst,
+    pub from: Option<FromClauseAst>,
+    pub from_let: Option<LetAst>,
     pub where_clause: Option<Box<Expr>>,
-    pub group_by: Option<Box<GroupByExpr>>,
+    pub group_by: Option<Box<GroupByExprAst>>,
     pub having: Option<Box<Expr>>,
-    pub order_by: Option<Box<OrderByExpr>>,
+    pub order_by: Option<Box<OrderByExprAst>>,
     pub limit: Option<Box<Expr>>,
     pub offset: Option<Box<Expr>>,
 }
@@ -558,14 +569,9 @@ pub enum CaseSensitivity {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Projection {
     ProjectStar,
-    ProjectList(Vec<ProjectItem>),
+    ProjectList(Vec<ProjectItemAst>),
     ProjectPivot { key: Box<Expr>, value: Box<Expr> },
     ProjectValue(Box<Expr>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectValue {
-    pub value: Box<Expr>,
 }
 
 /// An item to be projected in a `SELECT`-list.
@@ -603,9 +609,9 @@ pub struct LetBinding {
 /// FROM clause of an SFW query
 #[derive(Clone, Debug, PartialEq)]
 pub enum FromClause {
-    FromLet(FromLet),
+    FromLet(FromLetAst),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
-    Join(Join),
+    Join(JoinAst),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -620,9 +626,9 @@ pub struct FromLet {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Join {
     pub kind: JoinKind,
-    pub left: Box<FromClause>,
-    pub right: Box<FromClause>,
-    pub predicate: Option<JoinSpec>,
+    pub left: Box<FromClauseAst>,
+    pub right: Box<FromClauseAst>,
+    pub predicate: Option<JoinSpecAst>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -677,7 +683,7 @@ pub enum GroupingStrategy {
 /// <group_key>[, <group_key>]...
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupKeyList {
-    pub keys: Vec<GroupKey>,
+    pub keys: Vec<GroupKeyAst>,
 }
 
 /// <expr> [AS <symbol>]
@@ -690,7 +696,7 @@ pub struct GroupKey {
 /// ORDER BY <sort_spec>...
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderByExpr {
-    pub sort_specs: Vec<SortSpec>,
+    pub sort_specs: Vec<SortSpecAst>,
 }
 
 /// <expr> [ASC | DESC] ?

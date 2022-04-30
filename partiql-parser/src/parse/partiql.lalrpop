@@ -9,7 +9,7 @@ use std::str::FromStr;
 use partiql_ast::ast;
 use partiql_ast::ast::ToAstNode;
 
-use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
+use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
 
 grammar<'input, 'err>(input: &'input str,
@@ -92,138 +92,147 @@ WithClause: () = {}
 // ------------------------------------------------------------------------------ //
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
-SelectClause: ast::Projection = {
-    "SELECT" "*" => ast::Projection::ProjectStar,
-    "SELECT" <project_items:CommaSepPlus<Projection>> => ast::Projection::ProjectList(project_items),
-    "SELECT" "VALUE" <value:ExprQuery> => ast::Projection::ProjectValue(value),
-    "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> => {
-        ast::Projection::ProjectPivot { key, value }
+SelectClause: ast::ProjectionAst = {
+    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection::ProjectStar.ast(lo..hi),
+    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection::ProjectList(project_items).ast(lo..hi),
+    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection::ProjectValue(value).ast(lo..hi),
+    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => {
+        ast::Projection::ProjectPivot { key, value }.ast(lo..hi)
     },
 }
 
 #[inline]
-Projection: ast::ProjectItem = {
-    <expr:ExprQuery>
-        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ),
-    <expr:ExprQuery> "AS"? <ident:"Identifier"> => {
+Projection: ast::ProjectItemAst = {
+    <lo:@L> <expr:ExprQuery> <hi:@R>
+        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ).ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS"? <ident:"Identifier"> <hi:@R> => {
         let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
-        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } )
+        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ).ast(lo..hi)
     },
 }
 
 // ------------------------------------------------------------------------------ //
 //                                     FROM                                       //
 // ------------------------------------------------------------------------------ //
-FromClause: ast::FromClause = {
-    "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <from:TableReference> => {
+FromClause: ast::FromClauseAst = {
+    <lo:@L> "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <last:TableReference> <hi:@R> => {
+        let total: Location<BytePosition> = Location::from(lo.into()..hi.into());
+	
         // use `reduce` to process the comma-seperated `TableReference`s
         //   as left-associative `CROSS JOIN`s
-        froms.push(from);
+        froms.push(last);
         froms.into_iter()
             .reduce(|lfrom, rfrom| {
+	            let start = lfrom.location.as_ref().unwrap_or(&total).start.0.clone();
+                let end = rfrom.location.as_ref().unwrap_or(&total).end.0.clone();
+                let range = start..end;
                 let join = ast::Join {
                     kind: ast::JoinKind::Cross,
                     left: Box::new(lfrom),
                     right: Box::new(rfrom),
                     predicate: None
                 };
-                ast::FromClause::Join( join )
+                ast::FromClause::Join( join.ast(range.clone()) ).ast(range)
             })
             .unwrap() // safe, because we know there's at least 1 input
     }
 }
-TableReference: ast::FromClause = {
+TableReference: ast::FromClauseAst = {
     <TableNonJoin>,
     <TableJoined>,
 }
-TableNonJoin: ast::FromClause = {
-    <t:TableBaseReference> => ast::FromClause::FromLet( t ),
-    <t:TableUnpivot> => ast::FromClause::FromLet( t ),
+TableNonJoin: ast::FromClauseAst = {
+    <lo:@L> <t:TableBaseReference> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
+    <lo:@L> <t:TableUnpivot> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
 }
 
 #[inline]
-TableBaseReference: ast::FromLet = {
-    <e:ExprQuery> => {
+TableBaseReference: ast::FromLetAst = {
+    <lo:@L> <e:ExprQuery> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: None,
             at_alias: None,
             by_alias: None
-        }
+        }.ast(lo..hi)
     },
-    <e:ExprQuery> "AS"? <ident_as:"Identifier"> => {
+    <lo:@L> <e:ExprQuery> "AS"? <ident_as:"Identifier"> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
             at_alias: None,
             by_alias: None
-        }
+        }.ast(lo..hi)
     }
 }
 
 #[inline]
-TableUnpivot: ast::FromLet = {
-    "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
+TableUnpivot: ast::FromLetAst = {
+    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
             as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
             at_alias: Some(ast::SymbolPrimitive{ value: ident_at.to_owned() }),
             by_alias: None,
-        }
+        }.ast(lo..hi)
     }
 }
 
-TableJoined: ast::FromClause = {
+TableJoined: ast::FromClauseAst = {
     <TableCrossJoin>,
     <TableQualifiedJoin>,
     "(" <TableJoined> ")",
 }
 
 #[inline]
-TableCrossJoin: ast::FromClause = {
+TableCrossJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> => {
+    <lo:@L> <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
         let join = ast::Join {
             kind: ast::JoinKind::Cross,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: None
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     }
 }
 
 #[inline]
-TableQualifiedJoin: ast::FromClause = {
+TableQualifiedJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(on),
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     },
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> "NATURAL" <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> => {
+    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
-            predicate: Some(ast::JoinSpec::Natural)
+            predicate: Some(spec)
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     }
+}
+#[inline]
+JoinSpecNatural: ast::JoinSpecAst = {
+    <lo:@L> "NATURAL" <hi:@R> => ast::JoinSpec::Natural.ast(lo..hi)
 }
 #[inline]
 JoinType: ast::JoinKind = {
@@ -233,9 +242,9 @@ JoinType: ast::JoinKind = {
     "FULL" "OUTER"? => ast::JoinKind::Full,
 }
 #[inline]
-JoinSpec: ast::JoinSpec = {
-    "ON" <e:ExprQuery> => ast::JoinSpec::On(e),
-    "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" => ast::JoinSpec::Using( paths ),
+JoinSpec: ast::JoinSpecAst = {
+    <lo:@L> "ON" <e:ExprQuery> <hi:@R> => ast::JoinSpec::On(e).ast(lo..hi),
+    <lo:@L> "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" <hi:@R> => ast::JoinSpec::Using( paths ).ast(lo..hi),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -246,13 +255,13 @@ WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
 // ------------------------------------------------------------------------------ //
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
-GroupClause: Box<ast::GroupByExpr> = {
-    "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> => {
+GroupClause: Box<ast::GroupByExprAst> = {
+    <lo:@L> "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> <hi:@R> => {
         Box::new(ast::GroupByExpr{
             strategy,
             key_list: ast::GroupKeyList{ keys },
             group_as_alias,
-        })
+        }.ast(lo..hi))
     }
 }
 #[inline]
@@ -266,11 +275,11 @@ GroupStrategy: ast::GroupingStrategy = {
     }
 }
 #[inline]
-GroupKey: ast::GroupKey = {
-    <expr:ExprQuery>
-        => ast::GroupKey{ expr, as_alias: None },
-    <expr:ExprQuery> "AS" <ident:"Identifier">
-        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) },
+GroupKey: ast::GroupKeyAst = {
+    <lo:@L> <expr:ExprQuery> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: None }.ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS" <ident:"Identifier"> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) }.ast(lo..hi),
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
@@ -291,14 +300,14 @@ SetOpClause: () = {}
 // ------------------------------------------------------------------------------ //
 //                                   ORDER BY                                     //
 // ------------------------------------------------------------------------------ //
-OrderByClause: Box<ast::OrderByExpr> = {
-    "ORDER" "BY" "PRESERVE" => Box::new( ast::OrderByExpr{ sort_specs: vec![] } ),
-    "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
+OrderByClause: Box<ast::OrderByExprAst> = {
+    <lo:@L> "ORDER" "BY" "PRESERVE" <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs: vec![] }.ast(lo..hi) ),
+    <lo:@L> "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs }.ast(lo..hi) ),
 }
 #[inline]
-OrderSortSpec: ast::SortSpec = {
-    <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?>
-        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }
+OrderSortSpec: ast::SortSpecAst = {
+    <lo:@L> <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?> <hi:@R>
+        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }.ast(lo..hi)
 }
 #[inline]
 BySpec: ast::OrderingSpec = {
