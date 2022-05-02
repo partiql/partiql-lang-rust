@@ -105,7 +105,7 @@ SelectClause: ast::Projection = {
 Projection: ast::ProjectItem = {
     <expr:ExprQuery>
         => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ),
-    <expr:ExprQuery> "AS" <ident:"Identifier"> => {
+    <expr:ExprQuery> "AS"? <ident:"Identifier"> => {
         let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
         ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } )
     },
@@ -359,13 +359,14 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 // |     4 | ^                 | left          | exponentiation                     |
 // |     5 | * / %             | left          | multiplication, division, modulo   |
 // |     6 | + -               | left          | addition, subtraction              |
-// |     7 | BETWEEN IN LIKE   |               | range/set/pattern compare          |
-// |     8 | < > <= >=         |               | comparison operators               |
-// |     9 | = <> !=           |               | equality operators                 |
-// |    10 | IS                |               | IS [NOT] NULL                      |
-// |    11 | NOT               | right         | logical negate                     |
-// |    12 | AND               | left          | logical conjuct                    |
-// |    13 | OR                | left          | logical disjunct                   |
+// |     7 | <other>           | left          | other operators, e.g., `||`
+// |     8 | BETWEEN IN LIKE   |               | range/set/pattern compare          |
+// |     9 | < > <= >=         |               | comparison operators               |
+// |    10 | = <> !=           |               | equality operators                 |
+// |    11 | IS                |               | IS [NOT] NULL                      |
+// |    12 | NOT               | right         | logical negate                     |
+// |    13 | AND               | left          | logical conjuct                    |
+// |    14 | OR                | left          | logical disjunct                   |
 // |-------+-------------------+---------------+------------------------------------|
 //
 // See https://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
@@ -373,14 +374,26 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 
 
 pub ExprQuery: Box<ast::Expr> = {
-    <e:ExprPrecedence13> => Box::new(e)
+    <e:ExprPrecedence14> => Box::new(e)
 }
 
-ExprPrecedence13: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence13> "OR" <r:ExprPrecedence12> <hi:@R> =>
+ExprPrecedence14: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence14> "OR" <r:ExprPrecedence13> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Or,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence13>,
+}
+
+ExprPrecedence13: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence13> "AND" <r:ExprPrecedence12> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::And,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -389,30 +402,18 @@ ExprPrecedence13: ast::Expr = {
 }
 
 ExprPrecedence12: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence12> "AND" <r:ExprPrecedence11> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::And,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence11>,
-}
-
-ExprPrecedence11: ast::Expr = {
-    <lo:@L> "NOT" <r:ExprPrecedence11> <hi:@R> =>
+    <lo:@L> "NOT" <r:ExprPrecedence12> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(r),
            }.ast(lo..hi)
        )},
-    <ExprPrecedence10>,
+    <ExprPrecedence11>,
 }
 
-ExprPrecedence10: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence10> "IS" <r:ExprPrecedence09> <hi:@R> =>
+ExprPrecedence11: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence11> "IS" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -420,7 +421,7 @@ ExprPrecedence10: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence10> "IS" "NOT" <r:ExprPrecedence09> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence11> "IS" "NOT" <r:ExprPrecedence10> <hi:@R> => {
        let is =  ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -435,11 +436,11 @@ ExprPrecedence10: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence09>
+    <ExprPrecedence10>
 }
 
-ExprPrecedence09: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence09> "=" <r:ExprPrecedence08> <hi:@R> =>
+ExprPrecedence10: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence10> "=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Eq,
@@ -447,7 +448,7 @@ ExprPrecedence09: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence09> "!=" <r:ExprPrecedence08> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence10> "!=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
@@ -455,10 +456,46 @@ ExprPrecedence09: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence09> "<>" <r:ExprPrecedence08> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence10> "<>" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence09>,
+}
+
+ExprPrecedence09: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence08> "<" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> ">" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> "<=" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lte,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> ">=" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gte,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -467,45 +504,9 @@ ExprPrecedence09: ast::Expr = {
 }
 
 ExprPrecedence08: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence08> "<" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> "<=" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">=" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence07>,
-}
-
-ExprPrecedence07: ast::Expr = {
-    <lo:@L> <value:ExprPrecedence07> "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence08> "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence07> "NOT" "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> <hi:@R> => {
+    <lo:@L> <value:ExprPrecedence08> "NOT" "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> => {
        let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -514,9 +515,9 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <value:ExprPrecedence07> "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence08> "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence07> "NOT" "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> <hi:@R>  => {
+    <lo:@L> <value:ExprPrecedence08> "NOT" "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R>  => {
        let like = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -525,9 +526,9 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <l:ExprPrecedence07> "IN" <r:ExprPrecedence06> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence08> "IN" <r:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) },
-    <lo:@L> <l:ExprPrecedence07> "NOT" "IN" <r:ExprPrecedence06> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence08> "NOT" "IN" <r:ExprPrecedence07> <hi:@R> => {
        let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -536,11 +537,23 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence06>,
+    <ExprPrecedence07>,
 }
 #[inline]
 LikeEscape: Box<ast::Expr> = {
-    "ESCAPE" <e:ExprPrecedence06> => Box::new(e)
+    "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
+}
+
+ExprPrecedence07: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence07> "||" <r:ExprPrecedence06> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Concat,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence06>,
 }
 
 ExprPrecedence06: ast::Expr = {
@@ -822,6 +835,7 @@ extern {
         "/" => lexer::Token::Slash,
         "%" => lexer::Token::Percent,
         "^" => lexer::Token::Caret,
+        "||" => lexer::Token::DblPipe,
 
         "=" => lexer::Token::Equal,
         "==" => lexer::Token::EqualEqual,

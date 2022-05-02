@@ -284,6 +284,11 @@ mod tests {
         fn or_and() {
             parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
         }
+
+        #[test]
+        fn infix() {
+            parse!(r#"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'"#)
+        }
     }
 
     mod sfw {
