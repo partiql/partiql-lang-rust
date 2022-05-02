@@ -94,7 +94,7 @@ WithClause: () = {}
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::Projection = {
     "SELECT" "*" => ast::Projection::ProjectStar,
-    "SELECT" <project_items:CommaSep<Projection>> => ast::Projection::ProjectList(project_items),
+    "SELECT" <project_items:CommaSepPlus<Projection>> => ast::Projection::ProjectList(project_items),
     "SELECT" "VALUE" <value:ExprQuery> => ast::Projection::ProjectValue(value),
     "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> => {
         ast::Projection::ProjectPivot { key, value }
@@ -235,7 +235,7 @@ JoinType: ast::JoinKind = {
 #[inline]
 JoinSpec: ast::JoinSpec = {
     "ON" <e:ExprQuery> => ast::JoinSpec::On(e),
-    "USING" "(" <paths:CommaSep<PathExpr>> ")" => ast::JoinSpec::Using( paths ),
+    "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" => ast::JoinSpec::Using( paths ),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -247,7 +247,7 @@ WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
 GroupClause: Box<ast::GroupByExpr> = {
-    "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSep<GroupKey>> <group_as_alias:GroupAlias?> => {
+    "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> => {
         Box::new(ast::GroupByExpr{
             strategy,
             key_list: ast::GroupKeyList{ keys },
@@ -293,7 +293,7 @@ SetOpClause: () = {}
 // ------------------------------------------------------------------------------ //
 OrderByClause: Box<ast::OrderByExpr> = {
     "ORDER" "BY" "PRESERVE" => Box::new( ast::OrderByExpr{ sort_specs: vec![] } ),
-    "ORDER" "BY" <sort_specs: CommaSep<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
+    "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
 }
 #[inline]
 OrderSortSpec: ast::SortSpec = {
@@ -647,9 +647,10 @@ pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <lo:@L> "{" <fields:CommaTerm<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
-    <lo:@L> "[" <values:CommaTerm<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "<<" <values:CommaTerm<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
@@ -659,7 +660,7 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
+    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args }
 }
 
@@ -778,9 +779,9 @@ LiteralIon: ast::Lit = {
 //                                                                                //
 // ------------------------------------------------------------------------------ //
 
-// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional)
+// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional); may be empty
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
-CommaTerm<T>: Vec<T> = {
+CommaTermStar<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
         Some(e) => {
@@ -790,9 +791,33 @@ CommaTerm<T>: Vec<T> = {
     }
 };
 
-// Comma as separator (i.e. "<T>, <T>, <T>")
+// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional); at least 1 arg
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
-CommaSep<T>: Vec<T> = {
+CommaTermPlus<T>: Vec<T> = {
+    <mut v:(<T> ",")+> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+// Comma as separator (i.e. "<T>, <T>, <T>"); may be empty
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaSepStar<T>: Vec<T> = {
+    <e:T?> <mut v:("," <T>)*> => match e {
+         None => vec![],
+         Some(e) => {
+             v.insert(0,e);
+             v
+        }
+    }
+};
+
+// Comma as separator (i.e. "<T>, <T>, <T>"); at least 1 arg
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaSepPlus<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T> => {
         v.push(e);
         v
