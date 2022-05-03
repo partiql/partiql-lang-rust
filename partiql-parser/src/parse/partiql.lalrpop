@@ -42,7 +42,6 @@ SfwClauses: ast::Select = {
     <limit:LimitClause?>
     <offset:OffsetByClause?> => {
         ast::Select {
-            setq: None,
             project,
             from,
             from_let: None,
@@ -69,7 +68,6 @@ FwsClauses: ast::Select = {
     <offset:OffsetByClause?>
     <project:SelectClause> => {
         ast::Select {
-            setq: None,
             project,
             from: Some(from),
             from_let: None,
@@ -93,12 +91,35 @@ WithClause: () = {}
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::ProjectionAst = {
-    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection::ProjectStar.ast(lo..hi),
-    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection::ProjectList(project_items).ast(lo..hi),
-    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection::ProjectValue(value).ast(lo..hi),
-    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => {
-        ast::Projection::ProjectPivot { key, value }.ast(lo..hi)
-    },
+    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectStar,
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectList(project_items),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectValue(value),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" "*" <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectStar,
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectList(project_items),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectValue(value),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectPivot { key, value },
+        setq: None
+    }.ast(lo..hi)
+>>>>>>> 3cf2308 (Make Projection w/ SetQuantifier parsable)
 }
 
 #[inline]
@@ -670,13 +691,17 @@ ExprPair: ast::ExprPair = {
 #[inline]
 FunctionCall: ast::Call = {
     <func_name:"Identifier"> "(" ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
      <func_name:"Identifier"> "(" "*" ")" =>
-         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
-    <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) },
-    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSep<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) }
+         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
+    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args, setq: None },
+    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call{
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            setq: Some(ast::SetQuantifier::Distinct),
+            args,
+        }
 }
 
 PathExpr: ast::Path = {
