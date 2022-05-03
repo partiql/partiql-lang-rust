@@ -156,10 +156,12 @@ FromClause: ast::FromClauseAst = {
             .unwrap() // safe, because we know there's at least 1 input
     }
 }
+
 TableReference: ast::FromClauseAst = {
     <TableNonJoin>,
     <TableJoined>,
 }
+
 TableNonJoin: ast::FromClauseAst = {
     <lo:@L> <t:TableBaseReference> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
     <lo:@L> <t:TableUnpivot> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
