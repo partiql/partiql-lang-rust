@@ -9,7 +9,7 @@ use std::str::FromStr;
 use partiql_ast::ast;
 use partiql_ast::ast::ToAstNode;
 
-use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
+use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
 
 grammar<'input, 'err>(input: &'input str,
@@ -42,7 +42,6 @@ SfwClauses: ast::Select = {
     <limit:LimitClause?>
     <offset:OffsetByClause?> => {
         ast::Select {
-            setq: None,
             project,
             from,
             from_let: None,
@@ -69,7 +68,6 @@ FwsClauses: ast::Select = {
     <offset:OffsetByClause?>
     <project:SelectClause> => {
         ast::Select {
-            setq: None,
             project,
             from: Some(from),
             from_let: None,
@@ -92,138 +90,169 @@ WithClause: () = {}
 // ------------------------------------------------------------------------------ //
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
-SelectClause: ast::Projection = {
-    "SELECT" "*" => ast::Projection::ProjectStar,
-    "SELECT" <project_items:CommaSep<Projection>> => ast::Projection::ProjectList(project_items),
-    "SELECT" "VALUE" <value:ExprQuery> => ast::Projection::ProjectValue(value),
-    "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> => {
-        ast::Projection::ProjectPivot { key, value }
-    },
+SelectClause: ast::ProjectionAst = {
+    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectStar,
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectList(project_items),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectValue(value),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" "*" <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectStar,
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectList(project_items),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" "DISTINCT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectValue(value),
+        setq: Some(ast::SetQuantifier::All)
+    }.ast(lo..hi),
+    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectPivot { key, value },
+        setq: None
+    }.ast(lo..hi)
 }
 
 #[inline]
-Projection: ast::ProjectItem = {
-    <expr:ExprQuery>
-        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ),
-    <expr:ExprQuery> "AS" <ident:"Identifier"> => {
+Projection: ast::ProjectItemAst = {
+    <lo:@L> <expr:ExprQuery> <hi:@R>
+        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ).ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS"? <ident:"Identifier"> <hi:@R> => {
         let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
-        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } )
+        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ).ast(lo..hi)
     },
 }
 
 // ------------------------------------------------------------------------------ //
 //                                     FROM                                       //
 // ------------------------------------------------------------------------------ //
-FromClause: ast::FromClause = {
-    "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <from:TableReference> => {
+FromClause: ast::FromClauseAst = {
+    <lo:@L> "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <last:TableReference> <hi:@R> => {
+        let total: Location<BytePosition> = Location::from(lo.into()..hi.into());
+	
         // use `reduce` to process the comma-seperated `TableReference`s
         //   as left-associative `CROSS JOIN`s
-        froms.push(from);
+        froms.push(last);
         froms.into_iter()
             .reduce(|lfrom, rfrom| {
+	            let start = lfrom.location.as_ref().unwrap_or(&total).start.0.clone();
+                let end = rfrom.location.as_ref().unwrap_or(&total).end.0.clone();
+                let range = start..end;
                 let join = ast::Join {
                     kind: ast::JoinKind::Cross,
                     left: Box::new(lfrom),
                     right: Box::new(rfrom),
                     predicate: None
                 };
-                ast::FromClause::Join( join )
+                ast::FromClause::Join( join.ast(range.clone()) ).ast(range)
             })
             .unwrap() // safe, because we know there's at least 1 input
     }
 }
-TableReference: ast::FromClause = {
+TableReference: ast::FromClauseAst = {
     <TableNonJoin>,
     <TableJoined>,
 }
-TableNonJoin: ast::FromClause = {
-    <t:TableBaseReference> => ast::FromClause::FromLet( t ),
-    <t:TableUnpivot> => ast::FromClause::FromLet( t ),
+TableNonJoin: ast::FromClauseAst = {
+    <lo:@L> <t:TableBaseReference> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
+    <lo:@L> <t:TableUnpivot> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
 }
 
 #[inline]
-TableBaseReference: ast::FromLet = {
-    <e:ExprQuery> => {
+TableBaseReference: ast::FromLetAst = {
+    <lo:@L> <e:ExprQuery> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: None,
             at_alias: None,
             by_alias: None
-        }
+        }.ast(lo..hi)
     },
-    <e:ExprQuery> "AS"? <ident_as:"Identifier"> => {
+    <lo:@L> <e:ExprQuery> "AS"? <ident_as:"Identifier"> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
             at_alias: None,
             by_alias: None
-        }
+        }.ast(lo..hi)
     }
 }
 
 #[inline]
-TableUnpivot: ast::FromLet = {
-    "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> => {
+TableUnpivot: ast::FromLetAst = {
+    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
             as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
             at_alias: Some(ast::SymbolPrimitive{ value: ident_at.to_owned() }),
             by_alias: None,
-        }
+        }.ast(lo..hi)
     }
 }
 
-TableJoined: ast::FromClause = {
+TableJoined: ast::FromClauseAst = {
     <TableCrossJoin>,
     <TableQualifiedJoin>,
     "(" <TableJoined> ")",
 }
 
 #[inline]
-TableCrossJoin: ast::FromClause = {
+TableCrossJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> => {
+    <lo:@L> <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
         let join = ast::Join {
             kind: ast::JoinKind::Cross,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: None
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     }
 }
 
 #[inline]
-TableQualifiedJoin: ast::FromClause = {
+TableQualifiedJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(on),
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     },
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <ltable:TableReference> "NATURAL" <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> => {
+    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
-            predicate: Some(ast::JoinSpec::Natural)
+            predicate: Some(spec)
         };
-        ast::FromClause::Join( join )
+        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     }
+}
+#[inline]
+JoinSpecNatural: ast::JoinSpecAst = {
+    <lo:@L> "NATURAL" <hi:@R> => ast::JoinSpec::Natural.ast(lo..hi)
 }
 #[inline]
 JoinType: ast::JoinKind = {
@@ -233,9 +262,9 @@ JoinType: ast::JoinKind = {
     "FULL" "OUTER"? => ast::JoinKind::Full,
 }
 #[inline]
-JoinSpec: ast::JoinSpec = {
-    "ON" <e:ExprQuery> => ast::JoinSpec::On(e),
-    "USING" "(" <paths:CommaSep<PathExpr>> ")" => ast::JoinSpec::Using( paths ),
+JoinSpec: ast::JoinSpecAst = {
+    <lo:@L> "ON" <e:ExprQuery> <hi:@R> => ast::JoinSpec::On(e).ast(lo..hi),
+    <lo:@L> "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" <hi:@R> => ast::JoinSpec::Using( paths ).ast(lo..hi),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -246,30 +275,31 @@ WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
 // ------------------------------------------------------------------------------ //
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
-GroupClause: Box<ast::GroupByExpr> = {
-    "GROUP" "BY" <strategy: GroupStrategy> <keys:CommaSep<GroupKey>> <group_as_alias:GroupAlias?> => {
+GroupClause: Box<ast::GroupByExprAst> = {
+    <lo:@L> "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> <hi:@R> => {
         Box::new(ast::GroupByExpr{
             strategy,
             key_list: ast::GroupKeyList{ keys },
             group_as_alias,
-        })
+        }.ast(lo..hi))
     }
 }
 #[inline]
 GroupStrategy: ast::GroupingStrategy = {
-    <all:"ALL"?> => {
-        match all {
-            Some(_) => ast::GroupingStrategy::GroupFull,
-            None => ast::GroupingStrategy::GroupPartial,
+    "ALL" => ast::GroupingStrategy::GroupFull,
+    <partial:"PARTIAL"?> => {
+        match partial {
+            Some(_) => ast::GroupingStrategy::GroupPartial,
+            None => ast::GroupingStrategy::GroupFull,
         }
     }
 }
 #[inline]
-GroupKey: ast::GroupKey = {
-    <expr:ExprQuery>
-        => ast::GroupKey{ expr, as_alias: None },
-    <expr:ExprQuery> "AS" <ident:"Identifier">
-        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) },
+GroupKey: ast::GroupKeyAst = {
+    <lo:@L> <expr:ExprQuery> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: None }.ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS" <ident:"Identifier"> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) }.ast(lo..hi),
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
@@ -290,14 +320,14 @@ SetOpClause: () = {}
 // ------------------------------------------------------------------------------ //
 //                                   ORDER BY                                     //
 // ------------------------------------------------------------------------------ //
-OrderByClause: Box<ast::OrderByExpr> = {
-    "ORDER" "BY" "PRESERVE" => Box::new( ast::OrderByExpr{ sort_specs: vec![] } ),
-    "ORDER" "BY" <sort_specs: CommaSep<OrderSortSpec>> => Box::new( ast::OrderByExpr{ sort_specs } ),
+OrderByClause: Box<ast::OrderByExprAst> = {
+    <lo:@L> "ORDER" "BY" "PRESERVE" <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs: vec![] }.ast(lo..hi) ),
+    <lo:@L> "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs }.ast(lo..hi) ),
 }
 #[inline]
-OrderSortSpec: ast::SortSpec = {
-    <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?>
-        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }
+OrderSortSpec: ast::SortSpecAst = {
+    <lo:@L> <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?> <hi:@R>
+        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }.ast(lo..hi)
 }
 #[inline]
 BySpec: ast::OrderingSpec = {
@@ -358,13 +388,14 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 // |     4 | ^                 | left          | exponentiation                     |
 // |     5 | * / %             | left          | multiplication, division, modulo   |
 // |     6 | + -               | left          | addition, subtraction              |
-// |     7 | BETWEEN IN LIKE   |               | range/set/pattern compare          |
-// |     8 | < > <= >=         |               | comparison operators               |
-// |     9 | = <> !=           |               | equality operators                 |
-// |    10 | IS                |               | IS [NOT] NULL                      |
-// |    11 | NOT               | right         | logical negate                     |
-// |    12 | AND               | left          | logical conjuct                    |
-// |    13 | OR                | left          | logical disjunct                   |
+// |     7 | <other>           | left          | other operators, e.g., `||`
+// |     8 | BETWEEN IN LIKE   |               | range/set/pattern compare          |
+// |     9 | < > <= >=         |               | comparison operators               |
+// |    10 | = <> !=           |               | equality operators                 |
+// |    11 | IS                |               | IS [NOT] NULL                      |
+// |    12 | NOT               | right         | logical negate                     |
+// |    13 | AND               | left          | logical conjuct                    |
+// |    14 | OR                | left          | logical disjunct                   |
 // |-------+-------------------+---------------+------------------------------------|
 //
 // See https://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
@@ -372,14 +403,26 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 
 
 pub ExprQuery: Box<ast::Expr> = {
-    <e:ExprPrecedence13> => Box::new(e)
+    <e:ExprPrecedence14> => Box::new(e)
 }
 
-ExprPrecedence13: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence13> "OR" <r:ExprPrecedence12> <hi:@R> =>
+ExprPrecedence14: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence14> "OR" <r:ExprPrecedence13> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Or,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence13>,
+}
+
+ExprPrecedence13: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence13> "AND" <r:ExprPrecedence12> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::And,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -388,30 +431,18 @@ ExprPrecedence13: ast::Expr = {
 }
 
 ExprPrecedence12: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence12> "AND" <r:ExprPrecedence11> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::And,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence11>,
-}
-
-ExprPrecedence11: ast::Expr = {
-    <lo:@L> "NOT" <r:ExprPrecedence11> <hi:@R> =>
+    <lo:@L> "NOT" <r:ExprPrecedence12> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(r),
            }.ast(lo..hi)
        )},
-    <ExprPrecedence10>,
+    <ExprPrecedence11>,
 }
 
-ExprPrecedence10: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence10> "IS" <r:ExprPrecedence09> <hi:@R> =>
+ExprPrecedence11: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence11> "IS" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -419,7 +450,7 @@ ExprPrecedence10: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence10> "IS" "NOT" <r:ExprPrecedence09> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence11> "IS" "NOT" <r:ExprPrecedence10> <hi:@R> => {
        let is =  ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -434,11 +465,11 @@ ExprPrecedence10: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence09>
+    <ExprPrecedence10>
 }
 
-ExprPrecedence09: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence09> "=" <r:ExprPrecedence08> <hi:@R> =>
+ExprPrecedence10: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence10> "=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Eq,
@@ -446,7 +477,7 @@ ExprPrecedence09: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence09> "!=" <r:ExprPrecedence08> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence10> "!=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
@@ -454,10 +485,46 @@ ExprPrecedence09: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence09> "<>" <r:ExprPrecedence08> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence10> "<>" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence09>,
+}
+
+ExprPrecedence09: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence08> "<" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> ">" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> "<=" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lte,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence08> ">=" <r:ExprPrecedence08> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gte,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -466,45 +533,9 @@ ExprPrecedence09: ast::Expr = {
 }
 
 ExprPrecedence08: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence08> "<" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> "<=" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">=" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence07>,
-}
-
-ExprPrecedence07: ast::Expr = {
-    <lo:@L> <value:ExprPrecedence07> "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence08> "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence07> "NOT" "BETWEEN" <from:ExprPrecedence06> "AND" <to:ExprPrecedence06> <hi:@R> => {
+    <lo:@L> <value:ExprPrecedence08> "NOT" "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> => {
        let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -513,9 +544,9 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <value:ExprPrecedence07> "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence08> "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence07> "NOT" "LIKE" <pattern:ExprPrecedence06> <escape:LikeEscape?> <hi:@R>  => {
+    <lo:@L> <value:ExprPrecedence08> "NOT" "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R>  => {
        let like = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -524,9 +555,9 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <l:ExprPrecedence07> "IN" <r:ExprPrecedence06> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence08> "IN" <r:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) },
-    <lo:@L> <l:ExprPrecedence07> "NOT" "IN" <r:ExprPrecedence06> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence08> "NOT" "IN" <r:ExprPrecedence07> <hi:@R> => {
        let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -535,11 +566,23 @@ ExprPrecedence07: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence06>,
+    <ExprPrecedence07>,
 }
 #[inline]
 LikeEscape: Box<ast::Expr> = {
-    "ESCAPE" <e:ExprPrecedence06> => Box::new(e)
+    "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
+}
+
+ExprPrecedence07: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence07> "||" <r:ExprPrecedence06> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Concat,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence06>,
 }
 
 ExprPrecedence06: ast::Expr = {
@@ -633,9 +676,10 @@ pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <lo:@L> "{" <fields:CommaTerm<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
-    <lo:@L> "[" <values:CommaTerm<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "<<" <values:CommaTerm<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
@@ -646,13 +690,17 @@ ExprPair: ast::ExprPair = {
 #[inline]
 FunctionCall: ast::Call = {
     <func_name:"Identifier"> "(" ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
      <func_name:"Identifier"> "(" "*" ")" =>
-         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: None },
-    <func_name:"Identifier"> "("  <args:CommaSep<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) },
-    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSep<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Some(args) }
+         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
+    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args, setq: None },
+    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call{
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            setq: Some(ast::SetQuantifier::Distinct),
+            args,
+        }
 }
 
 PathExpr: ast::Path = {
@@ -770,9 +818,9 @@ LiteralIon: ast::Lit = {
 //                                                                                //
 // ------------------------------------------------------------------------------ //
 
-// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional)
+// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional); may be empty
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
-CommaTerm<T>: Vec<T> = {
+CommaTermStar<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T?> => match e {
         None => v,
         Some(e) => {
@@ -782,9 +830,33 @@ CommaTerm<T>: Vec<T> = {
     }
 };
 
-// Comma as separator (i.e. "<T>, <T>, <T>")
+// Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional); at least 1 arg
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
-CommaSep<T>: Vec<T> = {
+CommaTermPlus<T>: Vec<T> = {
+    <mut v:(<T> ",")+> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+// Comma as separator (i.e. "<T>, <T>, <T>"); may be empty
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaSepStar<T>: Vec<T> = {
+    <e:T?> <mut v:("," <T>)*> => match e {
+         None => vec![],
+         Some(e) => {
+             v.insert(0,e);
+             v
+        }
+    }
+};
+
+// Comma as separator (i.e. "<T>, <T>, <T>"); at least 1 arg
+// This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
+CommaSepPlus<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T> => {
         v.push(e);
         v
@@ -827,6 +899,7 @@ extern {
         "/" => lexer::Token::Slash,
         "%" => lexer::Token::Percent,
         "^" => lexer::Token::Caret,
+        "||" => lexer::Token::DblPipe,
 
         "=" => lexer::Token::Equal,
         "==" => lexer::Token::EqualEqual,
@@ -887,6 +960,7 @@ extern {
         "OR" => lexer::Token::Or,
         "ORDER" => lexer::Token::Order,
         "OUTER" => lexer::Token::Outer,
+        "PARTIAL" => lexer::Token::Partial,
         "PIVOT" => lexer::Token::Pivot,
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
