@@ -31,7 +31,7 @@ fn parse_bench(c: &mut Criterion) {
 
 criterion_group! {
     name = parse;
-    config = Criterion::default().measurement_time(Duration::new(10, 0));
+    config = Criterion::default();
     targets = parse_bench
 }
 
