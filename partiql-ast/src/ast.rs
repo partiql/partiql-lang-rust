@@ -481,12 +481,14 @@ pub struct Path {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub func_name: SymbolPrimitive,
+    pub setq: Option<SetQuantifier>,
     pub args: Vec<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallAgg {
     pub func_name: SymbolPrimitive,
+    pub setq: Option<SetQuantifier>,
     pub args: Vec<Box<Expr>>,
 }
 
@@ -521,7 +523,6 @@ pub struct Coalesce {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Select {
-    pub setq: Option<SetQuantifier>,
     pub project: ProjectionAst,
     pub from: Option<FromClauseAst>,
     pub from_let: Option<LetAst>,
@@ -565,9 +566,15 @@ pub enum CaseSensitivity {
     CaseInsensitive,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Projection {
+    pub kind: ProjectionKind,
+    pub setq: Option<SetQuantifier>,
+}
+
 /// Indicates the type of projection in a SFW query.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Projection {
+pub enum ProjectionKind {
     ProjectStar,
     ProjectList(Vec<ProjectItemAst>),
     ProjectPivot { key: Box<Expr>, value: Box<Expr> },

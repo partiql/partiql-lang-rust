@@ -42,7 +42,6 @@ SfwClauses: ast::Select = {
     <limit:LimitClause?>
     <offset:OffsetByClause?> => {
         ast::Select {
-            setq: None,
             project,
             from,
             from_let: None,
@@ -69,7 +68,6 @@ FwsClauses: ast::Select = {
     <offset:OffsetByClause?>
     <project:SelectClause> => {
         ast::Select {
-            setq: None,
             project,
             from: Some(from),
             from_let: None,
@@ -93,12 +91,33 @@ WithClause: () = {}
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::ProjectionAst = {
-    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection::ProjectStar.ast(lo..hi),
-    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection::ProjectList(project_items).ast(lo..hi),
-    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection::ProjectValue(value).ast(lo..hi),
-    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => {
-        ast::Projection::ProjectPivot { key, value }.ast(lo..hi)
-    },
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "*" <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectStar,
+        setq: Some(strategy)
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectList(project_items),
+        setq: Some(strategy),
+    }.ast(lo..hi),
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectValue(value),
+        setq: Some(strategy),
+    }.ast(lo..hi),
+    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => ast::Projection {
+        kind: ast::ProjectionKind::ProjectPivot { key, value },
+        setq: None
+    }.ast(lo..hi),
+}
+
+#[inline]
+SetQuantifierStrategy: ast::SetQuantifier = {
+    "ALL" => ast::SetQuantifier::All,
+    <distinct: "DISTINCT"?> => {
+        match distinct {
+            Some(_) => ast::SetQuantifier::Distinct,
+            None => ast::SetQuantifier::All,
+        }
+    }
 }
 
 #[inline]
@@ -669,8 +688,24 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args }
+    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> ")" =>
+        ast::Call {
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            args: Vec::new(),
+            setq: Some(strategy)
+        },
+     <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
+         ast::Call {
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            args: Vec::new(),
+            setq: Some(strategy)
+         },
+    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call {
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            args,
+            setq: Some(strategy)
+        },
 }
 
 PathExpr: ast::Path = {
@@ -901,6 +936,7 @@ extern {
         "BY" => lexer::Token::By,
         "CROSS" => lexer::Token::Cross,
         "DESC" => lexer::Token::Desc,
+        "DISTINCT" => lexer::Token::Distinct,
         "ESCAPE" => lexer::Token::Escape,
         "EXCEPT" => lexer::Token::Except,
         "FALSE" => lexer::Token::False,
