@@ -91,35 +91,33 @@ WithClause: () = {}
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::ProjectionAst = {
-    <lo:@L> "SELECT" "*" <hi:@R> => ast::Projection {
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "*" <hi:@R> => ast::Projection {
         kind: ast::ProjectionKind::ProjectStar,
-        setq: Some(ast::SetQuantifier::All)
+        setq: Some(strategy)
     }.ast(lo..hi),
-    <lo:@L> "SELECT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
         kind: ast::ProjectionKind::ProjectList(project_items),
-        setq: Some(ast::SetQuantifier::All)
+        setq: Some(strategy),
     }.ast(lo..hi),
-    <lo:@L> "SELECT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
         kind: ast::ProjectionKind::ProjectValue(value),
-        setq: Some(ast::SetQuantifier::All)
-    }.ast(lo..hi),
-    <lo:@L> "SELECT" "DISTINCT" "*" <hi:@R> => ast::Projection {
-        kind: ast::ProjectionKind::ProjectStar,
-        setq: Some(ast::SetQuantifier::All)
-    }.ast(lo..hi),
-    <lo:@L> "SELECT" "DISTINCT" <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
-        kind: ast::ProjectionKind::ProjectList(project_items),
-        setq: Some(ast::SetQuantifier::All)
-    }.ast(lo..hi),
-    <lo:@L> "SELECT" "DISTINCT" "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
-        kind: ast::ProjectionKind::ProjectValue(value),
-        setq: Some(ast::SetQuantifier::All)
+        setq: Some(strategy),
     }.ast(lo..hi),
     <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => ast::Projection {
         kind: ast::ProjectionKind::ProjectPivot { key, value },
         setq: None
-    }.ast(lo..hi)
->>>>>>> 3cf2308 (Make Projection w/ SetQuantifier parsable)
+    }.ast(lo..hi),
+}
+
+#[inline]
+SetQuantifierStrategy: ast::SetQuantifier = {
+    "ALL" => ast::SetQuantifier::All,
+    <distinct: "DISTINCT"?> => {
+        match distinct {
+            Some(_) => ast::SetQuantifier::Distinct,
+            None => ast::SetQuantifier::All,
+        }
+    }
 }
 
 #[inline]
@@ -690,18 +688,24 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "(" ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
-     <func_name:"Identifier"> "(" "*" ")" =>
-         ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args: Vec::new(), setq: None },
-    <func_name:"Identifier"> "("  <args:CommaSepPlus<ExprQuery>> ")" =>
-        ast::Call{ func_name: ast::SymbolPrimitive{ value: func_name.to_owned() }, args, setq: None },
-    <func_name:"Identifier"> "(" "DISTINCT" <args:CommaSepPlus<ExprQuery>> ")" =>
-        ast::Call{
+    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> ")" =>
+        ast::Call {
             func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
-            setq: Some(ast::SetQuantifier::Distinct),
+            args: Vec::new(),
+            setq: Some(strategy)
+        },
+     <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
+         ast::Call {
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            args: Vec::new(),
+            setq: Some(strategy)
+         },
+    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
+        ast::Call {
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
             args,
-        }
+            setq: Some(strategy)
+        },
 }
 
 PathExpr: ast::Path = {
