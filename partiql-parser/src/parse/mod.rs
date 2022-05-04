@@ -3,9 +3,10 @@
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
 use crate::lexer;
-use crate::lexer::PartiqlLexer;
+use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
 use crate::result::{ParseError, ParserResult, UnexpectedTokenData};
 use lalrpop_util as lpop;
+use lazy_static::lazy_static;
 use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
@@ -29,11 +30,15 @@ type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
-/// Parse a text PartiQL query.
+lazy_static! {
+    static ref BUILT_INS: FnExprSet<'static> = built_ins();
+}
+
+/// Parse PartiQL query text.
 pub fn parse_partiql(s: &str) -> ParserResult {
     let mut offsets = LineOffsetTracker::default();
     let mut errors: Vec<LalrpopErrorRecovery> = vec![];
-    let lexer = PartiqlLexer::new(s, &mut offsets);
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &*BUILT_INS);
 
     let parsed: LalrpopResult = grammar::QueryParser::new().parse(s, &mut errors, lexer);
 
@@ -77,6 +82,7 @@ impl<'input> From<LalrpopErrorRecovery<'input>> for ParseError<'input, BytePosit
         error_recovery.error.into()
     }
 }
+
 impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
     #[inline]
     fn from(error: LalrpopError<'input>) -> Self {
@@ -130,77 +136,58 @@ mod tests {
         }};
     }
 
+    // TODO DATE <date string>
+    // TODO TIME <time string>
+    // TODO TIMESTAMP <timestamp string>
     mod literals {
         use super::*;
 
-        macro_rules! literal {
-            ($q:expr) => {{
-                let mut offsets = LineOffsetTracker::default();
-                let mut errors = vec![];
-                let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::LiteralParser::new().parse($q, &mut errors, lexer);
-                println!("{:#?}", res);
-                match res {
-                    Ok(_) => (),
-                    _ => assert!(false, "{:?}", res),
-                }
-            }};
-        }
-        macro_rules! lit_and_parse {
-            ($q:expr) => {{
-                literal!($q);
-                parse!($q);
-            }};
-        }
-
         #[test]
         fn null() {
-            lit_and_parse!("NULL")
+            parse!("NULL");
         }
 
         #[test]
         fn missing() {
-            lit_and_parse!("MISSING")
+            parse!("MISSING");
         }
 
         #[test]
         fn true_() {
-            lit_and_parse!("TRUE")
+            parse!("TRUE");
         }
 
         #[test]
         fn false_() {
-            lit_and_parse!("FALSE")
+            parse!("FALSE");
         }
 
         #[test]
         fn string() {
-            lit_and_parse!("'foo'");
-            lit_and_parse!("'embe''ded'");
+            parse!("'foo'");
+            parse!("'embe''ded'");
         }
 
         #[test]
         fn numeric() {
-            lit_and_parse!("42");
-            lit_and_parse!("7.");
-            lit_and_parse!(".00125");
-            lit_and_parse!("5.5");
-            lit_and_parse!("17e2");
-            lit_and_parse!("1.317e-3");
-            lit_and_parse!("3141.59265e-03");
+            parse!("42");
+            parse!("7.");
+            parse!(".00125");
+            parse!("5.5");
+            parse!("17e2");
+            parse!("1.317e-3");
+            parse!("3141.59265e-03");
         }
 
         #[test]
         fn ion() {
-            lit_and_parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo"]` "#);
-            lit_and_parse!(
-                r#" `[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]` "#
-            );
-            lit_and_parse!(
+            parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo"]` "#);
+            parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]` "#);
+            parse!(
                 r#" `{'a':1, // comment ' "
                       'b':1} ` "#
             );
-            lit_and_parse!(
+            parse!(
                 r#" `{'a' // comment ' "
                        :1, /* 
                                comment 
@@ -213,50 +200,30 @@ mod tests {
     mod non_literal_values {
         use super::*;
 
-        macro_rules! value {
-            ($q:expr) => {{
-                let mut offsets = LineOffsetTracker::default();
-                let mut errors = vec![];
-                let lexer = lexer::PartiqlLexer::new($q, &mut offsets);
-                let res = grammar::ExprTermParser::new().parse($q, &mut errors, lexer);
-                println!("{:#?}", res);
-                match res {
-                    Ok(_) => (),
-                    _ => assert!(false, "{:?}", res),
-                }
-            }};
-        }
-
-        macro_rules! value_and_parse {
-            ($q:expr) => {{
-                value!($q);
-                parse!($q);
-            }};
-        }
         #[test]
         fn identifier() {
-            value_and_parse!("id");
-            value_and_parse!(r#""quoted_id""#);
+            parse!("id");
+            parse!(r#""quoted_id""#);
         }
         #[test]
         fn array() {
-            value_and_parse!(r#"[]"#);
-            value_and_parse!(r#"[1, 'moo', "some variable", [], 'a', MISSING]"#);
+            parse!(r#"[]"#);
+            parse!(r#"[1, 'moo', "some variable", [], 'a', MISSING]"#);
             // In the interest of compatibility to SQL, PartiQL also allows array constructors to be
             // denoted with parentheses instead of brackets, when there are at least two elements in the array
-            value_and_parse!(r#"(1, 'moo', "some variable", [], 'a', MISSING)"#);
+            parse!(r#"(1, 'moo', "some variable", [], 'a', MISSING)"#);
         }
         #[test]
         fn bag() {
-            value_and_parse!(r#"<<>>"#);
-            value_and_parse!(r#"<<1>>"#);
-            value_and_parse!(r#"<<1,2>>"#);
-            value_and_parse!(r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#);
+            parse!(r#"<<>>"#);
+            parse!(r#"<<1>>"#);
+            parse!(r#"<<1,2>>"#);
+            parse!(r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#);
         }
         #[test]
         fn tuple() {
-            value_and_parse!(r#"{}"#);
-            value_and_parse!(r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#);
+            parse!(r#"{}"#);
+            parse!(r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#);
         }
     }
 
@@ -291,6 +258,17 @@ mod tests {
         #[test]
         fn infix() {
             parse!(r#"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'"#);
+        }
+
+        #[test]
+        fn expr_in() {
+            parse!(r#"a in (1,2,3,4)"#);
+            parse!(r#"a in [1,2,3,4]"#);
+        }
+
+        #[test]
+        fn expr_between() {
+            parse!(r#"a between 2 and 3"#);
         }
     }
 
@@ -526,6 +504,65 @@ mod tests {
         #[should_panic]
         fn searched_case_failure() {
             parse!(r#"CASE hello WHEN id IS NOT NULL THEN SELECT * FROM data ELSE 1 END"#);
+        }
+    }
+
+    mod nonuniform {
+        use super::*;
+
+        #[test]
+        fn position() {
+            parse!(r#"position('oB' in 'FooBar')"#);
+        }
+
+        #[test]
+        fn substring() {
+            parse!(r#"substring('FooBar' from 2 for 3)"#);
+            parse!(r#"substring('FooBar' from 2)"#);
+            parse!(r#"substring('FooBar' for 3)"#);
+        }
+
+        #[test]
+        fn trim() {
+            parse!(r#"trim(LEADING 'Foo' from 'FooBar')"#);
+            parse!(r#"trim(leading from '   Bar')"#);
+            parse!(r#"trim(TrAiLiNg 'Bar' from 'FooBar')"#);
+            parse!(r#"trim(TRAILING from 'Bar   ')"#);
+            parse!(r#"trim(BOTH 'Foo' from 'FooBarBar')"#);
+            parse!(r#"trim(botH from '   Bar   ')"#);
+            parse!(r#"trim(from '   Bar   ')"#);
+        }
+
+        #[test]
+        fn cast() {
+            parse!(r#"CAST(9 AS b)"#);
+            parse!(r#"CAST(a AS VARCHAR)"#);
+            parse!(r#"CAST(a AS VARCHAR(20))"#);
+            parse!(r#"CAST( TRUE AS INTEGER)"#);
+            parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
+        }
+
+        #[test]
+        fn extract() {
+            parse!(r#"extract(day from a)"#);
+            parse!(r#"extract(hour from a)"#);
+            parse!(r#"extract(minute from a)"#);
+            parse!(r#"extract(second from a)"#);
+        }
+
+        #[test]
+        fn agg() {
+            parse!(r#"count(a)"#);
+            parse!(r#"count(distinct a)"#);
+            parse!(r#"count(all a)"#);
+            parse!(r#"count(*)"#);
+        }
+
+        #[test]
+        fn composed() {
+            parse!(
+                r#"cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))"#
+            );
         }
     }
 

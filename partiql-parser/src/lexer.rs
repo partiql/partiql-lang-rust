@@ -2,7 +2,9 @@ use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use std::borrow::Cow;
 
 use logos::{Logos, Span};
+
 use std::cmp::max;
+
 use std::fmt;
 use std::fmt::Formatter;
 
@@ -67,7 +69,7 @@ impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
     }
 
     /// Parses a single (possibly nested) block comment and returns it
-    fn next(&mut self) -> Option<CommentStringResult<'input>> {
+    fn next_internal(&mut self) -> Option<CommentStringResult<'input>> {
         let Span { start, .. } = self.lexer.span();
         let mut nesting = 0;
         let nesting_inc = if self.comment_nesting { 1 } else { 0 };
@@ -114,7 +116,7 @@ impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next()
+        self.next_internal()
     }
 }
 
@@ -177,7 +179,7 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
     }
 
     /// Parses a single embedded ion value, quoted between backticks (`), and returns it
-    fn next(&mut self) -> Option<EmbeddedIonStringResult<'input>> {
+    fn next_internal(&mut self) -> Option<EmbeddedIonStringResult<'input>> {
         let next_token = self.lexer.next();
         match next_token {
             Some(EmbeddedIonToken::Embed) => {
@@ -197,7 +199,7 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
                             let mut comment_tracker = LineOffsetTracker::default();
                             let mut comment_lexer =
                                 CommentLexer::new(remaining, &mut comment_tracker);
-                            match comment_lexer.next() {
+                            match comment_lexer.next_internal() {
                                 Some(Ok((s, _c, e))) => {
                                     self.tracker.append(&comment_tracker, embed.start.into());
                                     self.lexer.bump((e - s).to_usize() - embed.len())
@@ -248,18 +250,19 @@ impl<'input, 'tracker> Iterator for EmbeddedIonLexer<'input, 'tracker> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next()
+        self.next_internal()
     }
 }
 
-/// A lexer from PartiQL text strings to [`LexicalToken`]s
+/// A lexer from PartiQL text strings to [`Token`]s
 pub(crate) struct PartiqlLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'input, Token<'input>>,
     tracker: &'tracker mut LineOffsetTracker,
 }
 
-type InternalLexResult<'input> = SpannedResult<Token<'input>, ByteOffset, LexError<'input>>;
+pub(crate) type InternalLexResult<'input> =
+    SpannedResult<Token<'input>, ByteOffset, LexError<'input>>;
 pub(crate) type LexResult<'input> =
     Result<Spanned<Token<'input>, ByteOffset>, ParseError<'input, BytePosition>>;
 
@@ -293,15 +296,20 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         Err((start.into(), err_ctor(region.into()), end.into()))
     }
 
-    /// Wraps a [`Token`] into a [`LexicalToken`] at the current position of the lexer.
+    pub fn slice(&self) -> &'input str {
+        self.lexer.slice()
+    }
+
+    /// Wraps a [`Token`] into a [`Token`] at the current position of the lexer.
     #[inline(always)]
     fn wrap(&mut self, token: Token<'input>) -> InternalLexResult<'input> {
         let Span { start, end } = self.lexer.span();
         Ok((start.into(), token, end.into()))
     }
 
-    /// Advances the iterator and returns the next [`LexicalToken`] or [`None`] when input is exhausted.
-    fn next(&mut self) -> Option<InternalLexResult<'input>> {
+    /// Advances the iterator and returns the next [`Token`] or [`None`] when input is exhausted.
+    #[inline]
+    pub(crate) fn next_internal(&mut self) -> Option<InternalLexResult<'input>> {
         'next_tok: loop {
             return match self.lexer.next() {
                 None => None,
@@ -330,7 +338,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         let remaining = &self.lexer.source()[embed.start..];
         let mut comment_tracker = LineOffsetTracker::default();
         let mut comment_lexer = CommentLexer::new(remaining, &mut comment_tracker).with_nesting();
-        comment_lexer.next().map(|res| match res {
+        comment_lexer.next_internal().map(|res| match res {
             Ok((s, comment, e)) => {
                 let val_len = e - s;
                 let val_start = embed.start.into(); // embed end is 1 past the starting '/*'
@@ -352,7 +360,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         let remaining = &self.lexer.source()[embed.start..];
         let mut ion_tracker = LineOffsetTracker::default();
         let mut ion_lexer = EmbeddedIonLexer::new(remaining, &mut ion_tracker);
-        ion_lexer.next().map(|res| match res {
+        ion_lexer.next_internal().map(|res| match res {
             Ok((s, ion, e)) => {
                 let val_len = e - s;
                 let val_start = embed.end.into(); // embed end is 1 past the starting '`'
@@ -374,7 +382,7 @@ impl<'input, 'tracker> Iterator for PartiqlLexer<'input, 'tracker> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next().map(|res| res.map_err(|e| e.into()))
+        self.next_internal().map(|res| res.map_err(|e| e.into()))
     }
 }
 
@@ -534,6 +542,8 @@ pub enum Token<'input> {
     False,
     #[regex("(?i:First)")]
     First,
+    #[regex("(?i:For)")]
+    For,
     #[regex("(?i:Full)")]
     Full,
     #[regex("(?i:From)")]
@@ -614,6 +624,65 @@ pub enum Token<'input> {
     With,
 }
 
+impl<'input> Token<'input> {
+    pub fn is_keyword(&self) -> bool {
+        matches!(
+            self,
+            Token::All
+                | Token::Asc
+                | Token::And
+                | Token::As
+                | Token::At
+                | Token::Between
+                | Token::By
+                | Token::Cross
+                | Token::Desc
+                | Token::Distinct
+                | Token::Escape
+                | Token::Except
+                | Token::First
+                | Token::For
+                | Token::Full
+                | Token::From
+                | Token::Group
+                | Token::Having
+                | Token::In
+                | Token::Inner
+                | Token::Is
+                | Token::Intersect
+                | Token::Join
+                | Token::Last
+                | Token::Lateral
+                | Token::Left
+                | Token::Like
+                | Token::Limit
+                | Token::Missing
+                | Token::Natural
+                | Token::Not
+                | Token::Null
+                | Token::Nulls
+                | Token::Offset
+                | Token::On
+                | Token::Or
+                | Token::Order
+                | Token::Outer
+                | Token::Partial
+                | Token::Pivot
+                | Token::Preserve
+                | Token::Right
+                | Token::Select
+                | Token::Then
+                | Token::Union
+                | Token::Unpivot
+                | Token::Using
+                | Token::Value
+                | Token::Values
+                | Token::Where
+                | Token::With
+        )
+    }
+}
+
 impl<'input> fmt::Display for Token<'input> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -677,6 +746,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Except
             | Token::False
             | Token::First
+            | Token::For
             | Token::Full
             | Token::From
             | Token::Group
@@ -740,7 +810,7 @@ mod tests {
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
-             Intersect Is Inner In Having Group From Full First False Except Escape Desc \
+             Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
              Cross By Between At As And Asc All Values Case When Then Else End";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
@@ -761,7 +831,7 @@ mod tests {
             "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
             "--", "INTERSECT", "/**/","IS", "<unquoted_ident:UNQUOTED_IDENT>", "INNER",
             "<quoted_ident:QUOTED_IDENT>", "IN", "<unquoted_atident:UNQUOTED_ATIDENT>", "HAVING",
-            "<quoted_atident:QUOTED_ATIDENT>", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT",
+            "<quoted_atident:QUOTED_ATIDENT>", "GROUP", "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT",
             "ESCAPE", "DESC", "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
             "CASE", "WHEN", "THEN", "ELSE", "END",
         ];
@@ -854,17 +924,29 @@ mod tests {
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
+        let mut pre_offset_tracker = LineOffsetTracker::default();
+        let pre_lexer = PartiqlLexer::new(query, &mut pre_offset_tracker);
+        let pre_toks: Vec<_> = pre_lexer.collect::<Result<_, _>>()?;
+
+        let expected_toks = vec![
+            Token::Select,
+            Token::UnquotedIdent("g"),
+            Token::From,
+            Token::QuotedIdent("data"),
+            Token::Group,
+            Token::By,
+            Token::UnquotedIdent("a"),
+        ];
         assert_eq!(
-            vec![
-                Token::Select,
-                Token::UnquotedIdent("g"),
-                Token::From,
-                Token::QuotedIdent("data"),
-                Token::Group,
-                Token::By,
-                Token::UnquotedIdent("a")
-            ],
+            expected_toks,
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            expected_toks,
+            pre_toks
+                .into_iter()
+                .map(|(_s, t, _e)| t)
+                .collect::<Vec<_>>()
         );
 
         assert_eq!(offset_tracker.num_lines(), 3);
