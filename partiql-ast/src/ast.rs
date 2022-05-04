@@ -64,12 +64,20 @@ impl<T> ToAstNode for T {}
 /// for creating the node. See [ToAstNode] for more details on the usage.
 ///
 /// [1]: https://crates.io/crates/derive_builder
-#[derive(Builder, Clone, Eq, PartialEq, Debug)]
+#[derive(Builder, Clone, Debug)]
 pub struct AstNode<T, Loc: Display> {
     pub node: T,
     #[builder(setter(strip_option), default)]
     pub location: Option<Location<Loc>>,
 }
+
+impl<T: PartialEq, Loc: Display> PartialEq for AstNode<T, Loc> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
+
+impl<T: Eq, Loc: Display> Eq for AstNode<T, Loc> {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
@@ -207,11 +215,6 @@ pub enum ConflictAction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Query {
-    pub expr: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct Expr {
     pub kind: ExprKind,
 }
@@ -233,9 +236,7 @@ pub type BetweenAst = AstBytePos<Between>;
 pub type InAst = AstBytePos<In>;
 pub type SimpleCaseAst = AstBytePos<SimpleCase>;
 pub type SearchCaseAst = AstBytePos<SearchCase>;
-pub type UnionAst = AstBytePos<Union>;
-pub type ExceptAst = AstBytePos<Except>;
-pub type IntersectAst = AstBytePos<Intersect>;
+pub type SetExprAst = AstBytePos<SetExpr>;
 pub type PathAst = AstBytePos<Path>;
 pub type CallAst = AstBytePos<Call>;
 pub type CallAggAst = AstBytePos<CallAgg>;
@@ -251,6 +252,38 @@ pub type GroupByExprAst = AstBytePos<GroupByExpr>;
 pub type GroupKeyAst = AstBytePos<GroupKey>;
 pub type OrderByExprAst = AstBytePos<OrderByExpr>;
 pub type SortSpecAst = AstBytePos<SortSpec>;
+pub type QueryAst = AstBytePos<Query>;
+pub type QuerySetAst = AstBytePos<QuerySet>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Query {
+    pub set: QuerySetAst,
+    pub order_by: Option<Box<OrderByExprAst>>,
+    pub limit: Option<Box<Expr>>,
+    pub offset: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum QuerySet {
+    SetOp(Box<SetExprAst>),
+    Select(Box<SelectAst>),
+    Expr(Box<Expr>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetExpr {
+    pub setop: SetOperator,
+    pub setq: SetQuantifier,
+    pub lhs: Box<QuerySetAst>,
+    pub rhs: Box<QuerySetAst>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SetOperator {
+    Union,
+    Except,
+    Intersect,
+}
 
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
@@ -277,17 +310,13 @@ pub enum ExprKind {
     Bag(BagAst),
     List(ListAst),
     Sexp(SexpAst),
-    /// Set operators
-    Union(UnionAst),
-    Except(ExceptAst),
-    Intersect(IntersectAst),
     /// Other expression types
     Path(PathAst),
     Call(CallAst),
     CallAgg(CallAggAst),
 
-    /// `SELECT` and its parts.
-    Select(SelectAst),
+    /// Query, e.g. `UNION` | `EXCEPT` | `INTERSECT` | `SELECT` and their parts.
+    Query(QueryAst),
 
     /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
     Error,
@@ -455,24 +484,6 @@ pub struct LitTime {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Union {
-    pub setq: SetQuantifier,
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Except {
-    pub setq: SetQuantifier,
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Intersect {
-    pub setq: SetQuantifier,
-    pub operands: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct Path {
     pub root: Box<Expr>,
     pub steps: Vec<PathStep>,
@@ -529,9 +540,6 @@ pub struct Select {
     pub where_clause: Option<Box<Expr>>,
     pub group_by: Option<Box<GroupByExprAst>>,
     pub having: Option<Box<Expr>>,
-    pub order_by: Option<Box<OrderByExprAst>>,
-    pub limit: Option<Box<Expr>>,
-    pub offset: Option<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

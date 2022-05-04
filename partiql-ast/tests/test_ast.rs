@@ -10,9 +10,13 @@ fn test_ast_init() {
 
     let _i = Item {
         kind: ItemKind::Query(Query {
-            expr: Box::new(Expr {
+            set: QuerySet::Expr(Box::new(Expr {
                 kind: ExprKind::Lit(Lit::Int32Lit(23).to_ast(BytePosition::from(1)..12.into())),
-            }),
+            }))
+            .to_ast(BytePosition::from(1)..12.into()),
+            offset: None,
+            order_by: None,
+            limit: None,
         }),
     };
 
