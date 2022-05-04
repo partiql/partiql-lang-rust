@@ -15,9 +15,82 @@ use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated
 grammar<'input, 'err>(input: &'input str,
                       errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>>);
 
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                            UNION/INTERSECT/EXCEPT                              //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+// Note: the Set operation rules are formulated in a precise way to assure 'natural'
+//    interpretation of set operations in an LR grammar while attempting
+//    to stay in accordance with SQL interpretations.
+//
+// In particular:
+//    - in order to assure operator precedence, the lowest precedence operators
+//      (i.e., `UNION` & `EXCEPT`) are at the top of the recursion tree, and the highest
+//      precedence are at the bottom (i.e., `INTERSECT`)
+//    - all set operations are left-associative and are thus expressed as left-self-recursive rules
+
 pub Query: Box<ast::Expr> = {
-    <ExprQuery>,
-    <lo:@L> <sfw:SfwQuery> <hi:@R> => Box::new( ast::Expr{ kind: ast::ExprKind::Select(sfw.ast(lo..hi)) } )
+    <lo:@L>
+    <set:QuerySetPrec02>
+    <order_by:OrderByClause?>
+    <limit:LimitClause?>
+    <offset:OffsetByClause?>
+    <hi:@R> => {
+        Box::new(ast::Expr {
+            kind: ast::ExprKind::Query(
+                ast::Query { set, order_by, limit, offset, } .ast(lo..hi),
+            ),
+        })
+    }
+}
+
+QuerySetPrec02: ast::QuerySetAst = {
+    <lo:@L> <lhs:QuerySetPrec02> <setop:SetOpUnionExcept> <setq:SetQuantifier> <rhs:QuerySetPrec01> <hi:@R> => {
+        ast::QuerySet::SetOp(Box::new(ast::SetExpr { setop, setq, lhs: Box::new(lhs), rhs: Box::new(rhs)}.ast(lo..hi))).ast(lo..hi)
+	},
+    <QuerySetPrec01>
+}
+
+QuerySetPrec01: ast::QuerySetAst = {
+    <lo:@L> <lhs:QuerySetPrec01> <setop:SetOpIntersect> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+        ast::QuerySet::SetOp(Box::new(ast::SetExpr { setop, setq, lhs: Box::new(lhs), rhs: Box::new(rhs)}.ast(lo..hi))).ast(lo..hi)
+	},
+    <SingleQuery>
+}
+
+#[inline]
+SetOpUnionExcept: ast::SetOperator = {
+    "UNION" => ast::SetOperator::Union,
+    "EXCEPT" => ast::SetOperator::Except,
+}
+
+#[inline]
+SetOpIntersect: ast::SetOperator = {
+    "INTERSECT" => ast::SetOperator::Intersect
+}
+
+#[inline]
+SetQuantifier: ast::SetQuantifier = {
+    "DISTINCT" => ast::SetQuantifier::Distinct,
+    "ALL"? => ast::SetQuantifier::All,
+}
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                            ExprQuery or SFW Query                              //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+pub SingleQuery: ast::QuerySetAst = {
+    <lo:@L> <expr:ExprQuery> <hi:@R> => {
+        match *expr {
+           ast::Expr{ kind: ast::ExprKind::Query(ast::QueryAst{ node: ast::Query{set, order_by:None, limit:None, offset:None} , .. })} => set,
+           _ => ast::QuerySet::Expr( expr ).ast(lo..hi),
+        }
+    },
+    <lo:@L> <sfw:SfwQuery> <hi:@R> => ast::QuerySet::Select( Box::new(sfw) ).ast(lo..hi),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -25,22 +98,21 @@ pub Query: Box<ast::Expr> = {
 //                                   SFW Query                                    //
 //                                                                                //
 // ------------------------------------------------------------------------------ //
-pub SfwQuery: ast::Select = {
-    <SfwClauses>, <FwsClauses>
+pub SfwQuery: ast::SelectAst = {
+    <SfwClauses>,
+    <FwsClauses>
 }
 
 // SQL-style where `Select` precedes `From`
-SfwClauses: ast::Select = {
+SfwClauses: ast::SelectAst = {
+    <lo:@L>
     <with:WithClause?>
     <project:SelectClause>
     <from:FromClause?>
     <where_clause:WhereClause?>
     <group_by:GroupClause?>
     <having:HavingClause?>
-    <set:SetOpClause?>
-    <order_by:OrderByClause?>
-    <limit:LimitClause?>
-    <offset:OffsetByClause?> => {
+    <hi:@R> => {
         ast::Select {
             project,
             from,
@@ -48,25 +120,20 @@ SfwClauses: ast::Select = {
             where_clause,
             group_by,
             having,
-            order_by,
-            limit,
-            offset,
-        }
+        }.ast(lo..hi)
     }
 }
 
 // PartiQL-style where `Select` is last
-FwsClauses: ast::Select = {
+FwsClauses: ast::SelectAst = {
+    <lo:@L>
     <with:WithClause?>
     <from:FromClause>
     <where_clause:WhereClause?>
     <group_by:GroupClause?>
     <having:HavingClause?>
-    <set:SetOpClause?>
-    <order_by:OrderByClause?>
-    <limit:LimitClause?>
-    <offset:OffsetByClause?>
-    <project:SelectClause> => {
+    <project:SelectClause>
+    <hi:@R> => {
         ast::Select {
             project,
             from: Some(from),
@@ -74,10 +141,7 @@ FwsClauses: ast::Select = {
             where_clause,
             group_by,
             having,
-            order_by,
-            limit,
-            offset,
-        }
+        }.ast(lo..hi)
     }
 }
 
@@ -311,12 +375,6 @@ GroupAlias: ast::SymbolPrimitive = {
 //                                    HAVING                                      //
 // ------------------------------------------------------------------------------ //
 HavingClause: Box<ast::Expr> = { "HAVING" <ExprQuery> }
-
-// ------------------------------------------------------------------------------ //
-//                            UNION/INTERSECT/EXCEPT                              //
-// ------------------------------------------------------------------------------ //
-// TODO
-SetOpClause: () = {}
 
 // ------------------------------------------------------------------------------ //
 //                                   ORDER BY                                     //

@@ -124,8 +124,8 @@ mod tests {
             let res = parse_partiql($q);
             println!("{:#?}", res);
             match res {
-                Ok(_) => (),
-                _ => assert!(false, "{:?}", res),
+                Ok(ast) => ast,
+                _ => panic!("{:?}", res),
             }
         }};
     }
@@ -265,32 +265,32 @@ mod tests {
 
         #[test]
         fn or_simple() {
-            parse!(r#"TRUE OR FALSE"#)
+            parse!(r#"TRUE OR FALSE"#);
         }
 
         #[test]
         fn or() {
-            parse!(r#"t1.super OR test(t2.name, t1.name)"#)
+            parse!(r#"t1.super OR test(t2.name, t1.name)"#);
         }
 
         #[test]
         fn and_simple() {
-            parse!(r#"TRUE and FALSE"#)
+            parse!(r#"TRUE and FALSE"#);
         }
 
         #[test]
         fn and() {
-            parse!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#);
         }
 
         #[test]
         fn or_and() {
-            parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#);
         }
 
         #[test]
         fn infix() {
-            parse!(r#"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'"#)
+            parse!(r#"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'"#);
         }
     }
 
@@ -299,37 +299,37 @@ mod tests {
 
         #[test]
         fn selectstar() {
-            parse!("SELECT *")
+            parse!("SELECT *");
         }
 
         #[test]
         fn select1() {
-            parse!("SELECT g")
+            parse!("SELECT g");
         }
 
         #[test]
         fn select_list() {
-            parse!("SELECT g, k as ck, h")
+            parse!("SELECT g, k as ck, h");
         }
 
         #[test]
         fn fun_call() {
-            parse!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#)
+            parse!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#);
         }
 
         #[test]
         fn select3() {
-            parse!("SELECT g, k, function('2') as fn_result")
+            parse!("SELECT g, k, function('2') as fn_result");
         }
 
         #[test]
         fn group() {
-            parse!("SELECT g FROM data GROUP BY a")
+            parse!("SELECT g FROM data GROUP BY a");
         }
 
         #[test]
         fn group_complex() {
-            parse!("SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g")
+            parse!("SELECT g FROM data GROUP BY a AS x, b + c AS y, foo(d) AS z GROUP AS g");
         }
 
         #[test]
@@ -341,27 +341,29 @@ mod tests {
 
         #[test]
         fn where_simple() {
-            parse!(r#"SELECT a FROM tb WHERE hk = 1"#)
+            parse!(r#"SELECT a FROM tb WHERE hk = 1"#);
         }
 
         #[test]
         fn where_boolean() {
-            parse!(r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#)
+            parse!(
+                r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#
+            );
         }
 
         #[test]
         fn limit() {
-            parse!(r#"SELECT * FROM a LIMIT 10"#)
+            parse!(r#"SELECT * FROM a LIMIT 10"#);
         }
 
         #[test]
         fn offset() {
-            parse!(r#"SELECT * FROM a OFFSET 10"#)
+            parse!(r#"SELECT * FROM a OFFSET 10"#);
         }
 
         #[test]
         fn limit_offset() {
-            parse!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#)
+            parse!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#);
         }
 
         #[test]
@@ -378,7 +380,44 @@ mod tests {
             )
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
-            parse!(q)
+            parse!(q);
+        }
+    }
+
+    mod set_ops {
+        use super::*;
+
+        #[test]
+        fn set_ops() {
+            parse!(
+                r#"(SELECT * FROM a LIMIT 10 OFFSET 2) UNION SELECT * FROM b INTERSECT c EXCEPT SELECT * FROM d"#
+            );
+        }
+
+        #[test]
+        fn union_prec() {
+            let l = parse!(r#"a union b union c"#);
+            let r = parse!(r#"(a union b) union c"#);
+            assert_eq!(l, r);
+        }
+
+        #[test]
+        fn intersec_prec() {
+            let l = parse!(r#"a union b intersect c"#);
+            let r = parse!(r#"a union (b intersect c)"#);
+            assert_eq!(l, r);
+        }
+
+        #[test]
+        fn limit() {
+            let l = parse!(r#"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"#);
+            let r =
+                parse!(r#"(SELECT a FROM b UNION SELECT x FROM y) ORDER BY a LIMIT 10 OFFSET 5"#);
+            assert_eq!(l, r);
+            let r2 =
+                parse!(r#"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"#);
+            assert_ne!(l, r2);
+            assert_ne!(r, r2);
         }
     }
 
