@@ -384,6 +384,15 @@ mod tests {
         }
     }
 
+    mod values {
+        use super::*;
+
+        #[test]
+        fn values() {
+            parse!("VALUES ('A', `5e0`), ('B', 3.0), ('X', 9.0)");
+        }
+    }
+
     mod set_ops {
         use super::*;
 

@@ -91,6 +91,16 @@ pub SingleQuery: ast::QuerySetAst = {
         }
     },
     <lo:@L> <sfw:SfwQuery> <hi:@R> => ast::QuerySet::Select( Box::new(sfw) ).ast(lo..hi),
+    <lo:@L> <values:Values> <hi:@R> => values,
+}
+
+Values: ast::QuerySetAst = {
+    <lo:@L> "VALUES" <rows:CommaSepPlus<ValueRow>> <hi:@R> => ast::QuerySet::Values( rows ).ast(lo..hi)
+}
+
+#[inline]
+ValueRow: Box<ast::Expr> = {
+    <array:ExprTermArrayParens> => Box::new(array)
 }
 
 // ------------------------------------------------------------------------------ //
@@ -735,11 +745,34 @@ pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
-    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+    <ExprTermArray>,
+    <ExprTermBag>,
+    <ExprTermTuple>,
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
+}
+
+#[inline]
+ExprTermArray: ast::Expr = {
+    <ExprTermArrayBrackets>,
+    <ExprTermArrayParens>
+}
+#[inline]
+ExprTermArrayBrackets: ast::Expr = {
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) }
+}
+#[inline]
+ExprTermArrayParens: ast::Expr = {
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+}
+
+#[inline]
+ExprTermBag: ast::Expr = {
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+}
+
+#[inline]
+ExprTermTuple: ast::Expr = {
+    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) }
 }
 
 ExprPair: ast::ExprPair = {
@@ -1035,6 +1068,7 @@ extern {
         "UNPIVOT" => lexer::Token::Unpivot,
         "USING" => lexer::Token::Using,
         "VALUE" => lexer::Token::Value,
+        "VALUES" => lexer::Token::Values,
         "WHERE" => lexer::Token::Where,
         "WITH" => lexer::Token::With,
     }

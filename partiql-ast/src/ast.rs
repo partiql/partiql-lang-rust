@@ -268,6 +268,7 @@ pub enum QuerySet {
     SetOp(Box<SetExprAst>),
     Select(Box<SelectAst>),
     Expr(Box<Expr>),
+    Values(Vec<Box<Expr>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
