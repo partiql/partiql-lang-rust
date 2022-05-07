@@ -592,6 +592,8 @@ pub enum Token<'input> {
     Using,
     #[regex("(?i:Value)")]
     Value,
+    #[regex("(?i:Values)")]
+    Values,
     #[regex("(?i:Where)")]
     Where,
     #[regex("(?i:With)")]
@@ -690,6 +692,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Unpivot
             | Token::Using
             | Token::Value
+            | Token::Values
             | Token::Where
             | Token::With => {
                 write!(f, "{}", format!("{:?}", self).to_uppercase())
@@ -717,7 +720,7 @@ mod tests {
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From Full First False Except Escape Desc \
-             Cross By Between At As And Asc All";
+             Cross By Between At As And Asc All Values";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -737,7 +740,7 @@ mod tests {
             "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
             "--", "INTERSECT", "/**/", "IS", "<ident:IDENT>", "INNER", "<atident:@IDENT>", "IN",
             "HAVING", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC",
-            "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL"
+            "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES"
         ];
         let displayed = toks
             .into_iter()
