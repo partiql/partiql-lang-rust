@@ -222,39 +222,39 @@ pub struct Expr {
 /// Represents an AST Node of type T with BytePosition Location
 pub type AstBytePos<T> = AstNode<T, BytePosition>;
 
-pub type LitAst = AstBytePos<Lit>;
-pub type VarRefAst = AstBytePos<VarRef>;
-pub type ParamAst = AstBytePos<VarRef>;
-pub type StructAst = AstBytePos<Struct>;
 pub type BagAst = AstBytePos<Bag>;
-pub type ListAst = AstBytePos<List>;
-pub type SexpAst = AstBytePos<Sexp>;
-pub type BinOpAst = AstBytePos<BinOp>;
-pub type UniOpAst = AstBytePos<UniOp>;
-pub type LikeAst = AstBytePos<Like>;
 pub type BetweenAst = AstBytePos<Between>;
-pub type InAst = AstBytePos<In>;
-pub type SimpleCaseAst = AstBytePos<SimpleCase>;
-pub type SearchedCaseAst = AstBytePos<SearchedCase>;
-pub type CaseAst = AstBytePos<Case>;
-pub type SetExprAst = AstBytePos<SetExpr>;
-pub type PathAst = AstBytePos<Path>;
-pub type CallAst = AstBytePos<Call>;
+pub type BinOpAst = AstBytePos<BinOp>;
 pub type CallAggAst = AstBytePos<CallAgg>;
-pub type SelectAst = AstBytePos<Select>;
-pub type ProjectionAst = AstBytePos<Projection>;
-pub type ProjectItemAst = AstBytePos<ProjectItem>;
+pub type CallAst = AstBytePos<Call>;
+pub type CaseAst = AstBytePos<Case>;
 pub type FromClauseAst = AstBytePos<FromClause>;
 pub type FromLetAst = AstBytePos<FromLet>;
+pub type GroupByExprAst = AstBytePos<GroupByExpr>;
+pub type GroupKeyAst = AstBytePos<GroupKey>;
+pub type InAst = AstBytePos<In>;
 pub type JoinAst = AstBytePos<Join>;
 pub type JoinSpecAst = AstBytePos<JoinSpec>;
 pub type LetAst = AstBytePos<Let>;
-pub type GroupByExprAst = AstBytePos<GroupByExpr>;
-pub type GroupKeyAst = AstBytePos<GroupKey>;
+pub type LikeAst = AstBytePos<Like>;
+pub type ListAst = AstBytePos<List>;
+pub type LitAst = AstBytePos<Lit>;
 pub type OrderByExprAst = AstBytePos<OrderByExpr>;
-pub type SortSpecAst = AstBytePos<SortSpec>;
+pub type ParamAst = AstBytePos<VarRef>;
+pub type PathAst = AstBytePos<Path>;
+pub type ProjectItemAst = AstBytePos<ProjectItem>;
+pub type ProjectionAst = AstBytePos<Projection>;
 pub type QueryAst = AstBytePos<Query>;
 pub type QuerySetAst = AstBytePos<QuerySet>;
+pub type SearchedCaseAst = AstBytePos<SearchedCase>;
+pub type SelectAst = AstBytePos<Select>;
+pub type SetExprAst = AstBytePos<SetExpr>;
+pub type SexpAst = AstBytePos<Sexp>;
+pub type SimpleCaseAst = AstBytePos<SimpleCase>;
+pub type SortSpecAst = AstBytePos<SortSpec>;
+pub type StructAst = AstBytePos<Struct>;
+pub type UniOpAst = AstBytePos<UniOp>;
+pub type VarRefAst = AstBytePos<VarRef>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Query {
