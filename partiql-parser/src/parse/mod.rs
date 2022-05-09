@@ -461,6 +461,12 @@ mod tests {
             parse!(r#"CASE WHEN id IS 1 THEN 2 WHEN titanId IS 2 THEN 3 ELSE 1 END"#);
             parse!(r#"CASE hello WHEN id IS NOT NULL THEN (SELECT * FROM data) ELSE 1 END"#);
         }
+
+        #[test]
+        #[should_panic]
+        fn searched_case_failure() {
+            parse!(r#"CASE hello WHEN id IS NOT NULL THEN SELECT * FROM data ELSE 1 END"#);
+        }
     }
 
     mod errors {
