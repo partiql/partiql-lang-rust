@@ -382,14 +382,36 @@ mod tests {
             "#;
             parse!(q);
         }
-    }
-
-    mod values {
-        use super::*;
 
         #[test]
-        fn values() {
-            parse!("VALUES ('A', `5e0`), ('B', 3.0), ('X', 9.0)");
+        fn select_with_case() {
+            parse!(r#"SELECT a WHERE CASE WHEN x <> 0 THEN y/x > 1.5 ELSE false END"#);
+            parse!(
+                r#"SELECT a,
+                    CASE WHEN a=1 THEN 'one'
+                         WHEN a=2 THEN 'two'
+                         ELSE 'other'
+                    END
+                    FROM test"#
+            );
+
+            parse!(
+                r#"SELECT VALUE
+                    {
+                        'locationType': R.LocationType,
+                        'Location': (
+                            CASE WHEN id IS NOT NULL THEN
+                                (SELECT VALUE (CASE WHEN R.LocationType = 'z' THEN n ELSE d END)
+                                FROM R.Scope AS scope WHERE scope.name = id)
+                            ELSE
+                                (SELECT VALUE (CASE WHEN R.LocationType = 'z' THEN n ELSE d END)
+                                FROM R.Scope AS scope WHERE scope.name = someZone)
+                            END
+                        ),
+                        'marketType' : MarketInfo.marketType,
+                    }
+                    FROM UNPIVOT R.returnValueMap.success AS "list" AT symb"#
+            );
         }
     }
 
@@ -427,6 +449,17 @@ mod tests {
                 parse!(r#"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"#);
             assert_ne!(l, r2);
             assert_ne!(r, r2);
+        }
+    }
+
+    mod case_expr {
+        use super::*;
+
+        #[test]
+        fn searched_case() {
+            parse!(r#"CASE WHEN TRUE THEN 2 END"#);
+            parse!(r#"CASE WHEN id IS 1 THEN 2 WHEN titanId IS 2 THEN 3 ELSE 1 END"#);
+            parse!(r#"CASE hello WHEN id IS NOT NULL THEN (SELECT * FROM data) ELSE 1 END"#);
         }
     }
 

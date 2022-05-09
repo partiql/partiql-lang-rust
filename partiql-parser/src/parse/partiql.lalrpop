@@ -91,16 +91,6 @@ pub SingleQuery: ast::QuerySetAst = {
         }
     },
     <lo:@L> <sfw:SfwQuery> <hi:@R> => ast::QuerySet::Select( Box::new(sfw) ).ast(lo..hi),
-    <lo:@L> <values:Values> <hi:@R> => values,
-}
-
-Values: ast::QuerySetAst = {
-    <lo:@L> "VALUES" <rows:CommaSepPlus<ValueRow>> <hi:@R> => ast::QuerySet::Values( rows ).ast(lo..hi)
-}
-
-#[inline]
-ValueRow: Box<ast::Expr> = {
-    <array:ExprTermArrayParens> => Box::new(array)
 }
 
 // ------------------------------------------------------------------------------ //
@@ -739,43 +729,64 @@ ExprPrecedence02: ast::Expr = {
 }
 
 #[inline]
-ExprPrecedence01: ast::Expr = {<ExprTerm>,}
+ExprPrecedence01: ast::Expr = {
+    <casexpr:CaseExpr> => ast::Expr {
+        kind: ast::ExprKind::Case(casexpr)
+    },
+    <ExprTerm>,
+};
+
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                               Case Expression                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+// Implements parsing for CASE expressions.
+//
+// Searched Case Example:
+// CASE WHEN titanId IS 1 THEN 2 WHEN titanId IS 2 THEN 3 ELSE 1 END
+//
+// Simple Case Example:
+// CASE hello WHEN titanId IS NOT NULL THEN (SELECT * FROM data) ELSE 1 END
+
+CaseExpr: ast::CaseAst = {
+    <lo:@L> "CASE" <expr:ExprQuery?> <cases:ExprPairWhenThen+> <elsexpr:ElseClause?> "END" <hi:@R> => {
+        match expr {
+            None => ast::Case {
+                kind: ast::CaseKind::SearchedCase(
+                    ast::SearchedCase { cases: Vec::new(), default: elsexpr }
+                )
+            }.ast(lo..hi),
+            Some(expr) => ast::Case {
+                kind: ast::CaseKind::SimpleCase(
+                    ast::SimpleCase { expr, cases: Vec::new(), default: elsexpr }
+                )
+            }.ast(lo..hi)
+        }
+    }
+};
+
+ElseClause: Box<ast::Expr> = {
+  "ELSE" <e:ExprQuery> => Box::new(*e)
+};
+
+ExprPairWhenThen: ast::ExprPair = {
+    <lo:@L> "WHEN" <first:ExprQuery> "THEN" <second:ExprQuery> <hi:@R> => ast::ExprPair { first, second },
+};
 
 pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <ExprTermArray>,
-    <ExprTermBag>,
-    <ExprTermTuple>,
+    <lo:@L> "{" <fields:CommaTermStar<ExprPairFromColon>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
-#[inline]
-ExprTermArray: ast::Expr = {
-    <ExprTermArrayBrackets>,
-    <ExprTermArrayParens>
-}
-#[inline]
-ExprTermArrayBrackets: ast::Expr = {
-    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) }
-}
-#[inline]
-ExprTermArrayParens: ast::Expr = {
-    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-}
-
-#[inline]
-ExprTermBag: ast::Expr = {
-    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
-}
-
-#[inline]
-ExprTermTuple: ast::Expr = {
-    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) }
-}
-
-ExprPair: ast::ExprPair = {
+ExprPairFromColon: ast::ExprPair = {
     <lo:@L> <first:ExprQuery> ":" <second:ExprQuery> <hi:@R> => ast::ExprPair{ first, second },
 }
 
@@ -840,7 +851,6 @@ PathExpr: ast::Path = {
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
 }
-
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -908,7 +918,6 @@ LiteralNumber: ast::Lit = {
 LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
-
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -1027,9 +1036,12 @@ extern {
         "AT" => lexer::Token::At,
         "BETWEEN" => lexer::Token::Between,
         "BY" => lexer::Token::By,
+        "CASE" => lexer::Token::Case,
         "CROSS" => lexer::Token::Cross,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
+        "ELSE" => lexer::Token::Else,
+        "END" => lexer::Token::End,
         "ESCAPE" => lexer::Token::Escape,
         "EXCEPT" => lexer::Token::Except,
         "FALSE" => lexer::Token::False,
@@ -1063,12 +1075,13 @@ extern {
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
+        "THEN" => lexer::Token::Then,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,
         "USING" => lexer::Token::Using,
         "VALUE" => lexer::Token::Value,
-        "VALUES" => lexer::Token::Values,
+        "WHEN" => lexer::Token::When,
         "WHERE" => lexer::Token::Where,
         "WITH" => lexer::Token::With,
     }

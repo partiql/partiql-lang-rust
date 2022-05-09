@@ -235,7 +235,8 @@ pub type LikeAst = AstBytePos<Like>;
 pub type BetweenAst = AstBytePos<Between>;
 pub type InAst = AstBytePos<In>;
 pub type SimpleCaseAst = AstBytePos<SimpleCase>;
-pub type SearchCaseAst = AstBytePos<SearchCase>;
+pub type SearchedCaseAst = AstBytePos<SearchedCase>;
+pub type CaseAst = AstBytePos<Case>;
 pub type SetExprAst = AstBytePos<SetExpr>;
 pub type PathAst = AstBytePos<Path>;
 pub type CallAst = AstBytePos<Call>;
@@ -302,10 +303,7 @@ pub enum ExprKind {
     Like(LikeAst),
     Between(BetweenAst),
     In(InAst),
-    /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
-    SimpleCase(SimpleCaseAst),
-    /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
-    SearchedCase(SearchCaseAst),
+    Case(CaseAst),
     /// Constructors
     Struct(StructAst),
     Bag(BagAst),
@@ -440,6 +438,19 @@ pub struct In {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Case {
+    pub kind: CaseKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CaseKind {
+    /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
+    SimpleCase(SimpleCase),
+    /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
+    SearchedCase(SearchedCase),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SimpleCase {
     pub expr: Box<Expr>,
     pub cases: Vec<ExprPair>,
@@ -447,7 +458,7 @@ pub struct SimpleCase {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SearchCase {
+pub struct SearchedCase {
     pub cases: Vec<ExprPair>,
     pub default: Option<Box<Expr>>,
 }
