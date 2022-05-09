@@ -91,6 +91,16 @@ pub SingleQuery: ast::QuerySetAst = {
         }
     },
     <lo:@L> <sfw:SfwQuery> <hi:@R> => ast::QuerySet::Select( Box::new(sfw) ).ast(lo..hi),
+    <lo:@L> <values:Values> <hi:@R> => values,
+}
+
+Values: ast::QuerySetAst = {
+    <lo:@L> "VALUES" <rows:CommaSepPlus<ValueRow>> <hi:@R> => ast::QuerySet::Values( rows ).ast(lo..hi)
+}
+
+#[inline]
+ValueRow: Box<ast::Expr> = {
+    <array:ExprTermArrayParens> => Box::new(array)
 }
 
 // ------------------------------------------------------------------------------ //
@@ -200,7 +210,7 @@ Projection: ast::ProjectItemAst = {
 FromClause: ast::FromClauseAst = {
     <lo:@L> "FROM" <mut froms:(<TableReference> "," "LATERAL"?)*> <last:TableReference> <hi:@R> => {
         let total: Location<BytePosition> = Location::from(lo.into()..hi.into());
-	
+
         // use `reduce` to process the comma-seperated `TableReference`s
         //   as left-associative `CROSS JOIN`s
         froms.push(last);
@@ -736,7 +746,6 @@ ExprPrecedence01: ast::Expr = {
     <ExprTerm>,
 };
 
-
 // ------------------------------------------------------------------------------ //
 //                                                                                //
 //                               Case Expression                                  //
@@ -757,18 +766,17 @@ ExprPrecedence01: ast::Expr = {
 // the following:
 // <subquery> ::= <left paren> <query expression> <right paren>
 
-
 CaseExpr: ast::CaseAst = {
     <lo:@L> "CASE" <expr:ExprQuery?> <cases:ExprPairWhenThen+> <elsexpr:ElseClause?> "END" <hi:@R> => {
         match expr {
             None => ast::Case {
                 kind: ast::CaseKind::SearchedCase(
-                    ast::SearchedCase { cases: Vec::new(), default: elsexpr }
+                    ast::SearchedCase { cases, default: elsexpr }
                 )
             }.ast(lo..hi),
             Some(expr) => ast::Case {
                 kind: ast::CaseKind::SimpleCase(
-                    ast::SimpleCase { expr, cases: Vec::new(), default: elsexpr }
+                    ast::SimpleCase { expr, cases, default: elsexpr }
                 )
             }.ast(lo..hi)
         }
@@ -787,14 +795,37 @@ pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <lo:@L> "{" <fields:CommaTermStar<ExprPairFromColon>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) },
-    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
-    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+    <ExprTermArray>,
+    <ExprTermBag>,
+    <ExprTermTuple>,
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
-ExprPairFromColon: ast::ExprPair = {
+#[inline]
+ExprTermArray: ast::Expr = {
+    <ExprTermArrayBrackets>,
+    <ExprTermArrayParens>
+}
+#[inline]
+ExprTermArrayBrackets: ast::Expr = {
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) }
+}
+#[inline]
+ExprTermArrayParens: ast::Expr = {
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+}
+
+#[inline]
+ExprTermBag: ast::Expr = {
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+}
+
+#[inline]
+ExprTermTuple: ast::Expr = {
+    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) }
+}
+
+ExprPair: ast::ExprPair = {
     <lo:@L> <first:ExprQuery> ":" <second:ExprQuery> <hi:@R> => ast::ExprPair{ first, second },
 }
 
@@ -859,6 +890,7 @@ PathExpr: ast::Path = {
         ast::Path{ root: Box::new(root), steps: vec![] }
     },
 }
+
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -926,6 +958,7 @@ LiteralNumber: ast::Lit = {
 LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
+
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -1089,6 +1122,7 @@ extern {
         "UNPIVOT" => lexer::Token::Unpivot,
         "USING" => lexer::Token::Using,
         "VALUE" => lexer::Token::Value,
+        "VALUES" => lexer::Token::Values,
         "WHEN" => lexer::Token::When,
         "WHERE" => lexer::Token::Where,
         "WITH" => lexer::Token::With,
