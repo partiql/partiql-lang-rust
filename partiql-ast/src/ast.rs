@@ -870,7 +870,7 @@ pub struct CustomType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SymbolPrimitive {
     pub value: String,
-    // Quoted denotes a symbol in double quotes. e.g. "date"
+    // E.g. "date"
     pub dbl_quoted: bool,
 }
 
