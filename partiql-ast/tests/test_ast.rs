@@ -22,6 +22,7 @@ fn test_ast_init() {
 
     let span_only = ast::SymbolPrimitive {
         value: "symbol1".to_string(),
+        dbl_quoted: false,
     }
     .to_node()
     .location(Location {

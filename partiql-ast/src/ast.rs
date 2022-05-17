@@ -23,7 +23,8 @@ pub trait ToAstNode: Sized {
     /// use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
     ///
     /// let p = SymbolPrimitive {
-    ///     value: "symbol2".to_string()
+    ///     value: "symbol2".to_string(),
+    ///     dbl_quoted: false
     ///  };
     ///
     /// let node = p
@@ -576,7 +577,6 @@ pub enum PathStep {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathExpr {
     pub index: Box<Expr>,
-    pub case: CaseSensitivity,
 }
 
 /// Is used to determine if variable lookup should be case-sensitive or not.
@@ -871,6 +871,8 @@ pub struct CustomType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SymbolPrimitive {
     pub value: String,
+    // E.g. "date"
+    pub dbl_quoted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

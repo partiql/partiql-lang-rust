@@ -198,9 +198,8 @@ SetQuantifierStrategy: ast::SetQuantifier = {
 Projection: ast::ProjectItemAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
         => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ).ast(lo..hi),
-    <lo:@L> <expr:ExprQuery> "AS"? <ident:"Identifier"> <hi:@R> => {
-        let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
-        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ).ast(lo..hi)
+    <lo:@L> <expr:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
+        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: Some(as_alias) } ).ast(lo..hi)
     },
 }
 
@@ -252,11 +251,11 @@ TableBaseReference: ast::FromLetAst = {
             by_alias: None
         }.ast(lo..hi)
     },
-    <lo:@L> <e:ExprQuery> "AS"? <ident_as:"Identifier"> <hi:@R> => {
+    <lo:@L> <e:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
+            as_alias: Some(as_alias),
             at_alias: None,
             by_alias: None
         }.ast(lo..hi)
@@ -265,12 +264,12 @@ TableBaseReference: ast::FromLetAst = {
 
 #[inline]
 TableUnpivot: ast::FromLetAst = {
-    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> <hi:@R> => {
+    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:SymbolPrimitive> "AT" <ident_at:SymbolPrimitive> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
-            at_alias: Some(ast::SymbolPrimitive{ value: ident_at.to_owned() }),
+            as_alias: Some(ident_as),
+            at_alias: Some(ident_at),
             by_alias: None,
         }.ast(lo..hi)
     }
@@ -373,12 +372,12 @@ GroupStrategy: ast::GroupingStrategy = {
 GroupKey: ast::GroupKeyAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
         => ast::GroupKey{ expr, as_alias: None }.ast(lo..hi),
-    <lo:@L> <expr:ExprQuery> "AS" <ident:"Identifier"> <hi:@R>
-        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) }.ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS" <as_alias:SymbolPrimitive> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: Some(as_alias) }.ast(lo..hi),
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
-    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value:ident.to_owned() }
+    "GROUP" "AS" <SymbolPrimitive>
 }
 
 // ------------------------------------------------------------------------------ //
@@ -734,8 +733,8 @@ ExprPrecedence03: ast::Expr = {
 
 #[inline]
 ExprPrecedence02: ast::Expr = {
-    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
     <ExprPrecedence01>,
+    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr { kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
 }
 
 #[inline]
@@ -743,8 +742,18 @@ ExprPrecedence01: ast::Expr = {
     <casexpr:CaseExpr> => ast::Expr {
         kind: ast::ExprKind::Case(casexpr)
     },
+    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
     <ExprTerm>,
 };
+
+pub ExprTerm: ast::Expr = {
+    "(" <q:Query> ")" => *q,
+    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
+    <ExprTermTuple>,
+    <ExprTermArray>,
+    <ExprTermBag>,
+    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
+}
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -791,16 +800,6 @@ ExprPairWhenThen: ast::ExprPair = {
     <lo:@L> "WHEN" <first:ExprQuery> "THEN" <second:ExprQuery> <hi:@R> => ast::ExprPair { first, second },
 };
 
-pub ExprTerm: ast::Expr = {
-    "(" <q:Query> ")" => *q,
-    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
-    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <ExprTermArray>,
-    <ExprTermBag>,
-    <ExprTermTuple>,
-    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
-}
-
 #[inline]
 ExprTermArray: ast::Expr = {
     <ExprTermArrayBrackets>,
@@ -831,65 +830,165 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> ")" =>
+    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
             args: Vec::new(),
             setq: Some(strategy)
         },
-     <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
+     <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
          ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
             args: Vec::new(),
             setq: Some(strategy)
          },
-    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
+    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
             args,
             setq: Some(strategy)
         },
 }
 
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                               Path Navigation                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+// Implementation of Path Navigation as specified by PartiQL Specification Section 4:
+// https://partiql.org/assets/PartiQL-Specification.pdf
+//
+// Examples:
+// a.b
+// a.*
+// a.[*]
+// a[*]
+// a.b.c
+// "a".b
+// "a"."b"
+// { 'a': 1, 'b': 2 }.a
+// [1, 2][1]
+// foo(x, y).a
+// (SELECT a from en).b
+//
+// See the path expression conformance tests under `partiql-tests` for more examples.
 PathExpr: ast::Path = {
-    <lo:@L> <path:PathExpr> "." <ident:"Identifier"> <hi:@R> => {
+    <path:PathExpr>  "." <v:PathExprVarRef> => {
         let step = ast::PathStep::PathExpr(
             ast::PathExpr{
-                index: Box::new(ast::Expr{
-                    kind: ast::ExprKind::VarRef(ast::VarRef {
-                        name: ast::SymbolPrimitive { value: ident.to_owned() },
-                        case: ast::CaseSensitivity::CaseInsensitive,
-                        qualifier: ast::ScopeQualifier::Unqualified
-                    }.ast(lo..hi)),
-                }),
-                case: ast::CaseSensitivity::CaseInsensitive,
+                index: Box::new(v),
             });
 
         let mut steps = path.steps;
         steps.push(step);
         ast::Path{ root:path.root, steps }
     },
-    <lo:@L> <ident:"Identifier"> <hi:@R> => {
-        let root = ast::Expr{
-            kind: ast::ExprKind::VarRef(ast::VarRef {
-                name: ast::SymbolPrimitive { value: ident.to_owned() },
-                case: ast::CaseSensitivity::CaseInsensitive,
-                qualifier: ast::ScopeQualifier::Unqualified
-            }.ast(lo..hi)),
-        };
-        ast::Path{ root: Box::new(root), steps: vec![] }
+    <lo:@L> <path:PathExpr>  "[" "*" "]" <hi:@R> => {
+         let step = ast::PathStep::PathWildCard;
+
+         let mut steps = path.steps;
+         steps.push(step);
+         ast::Path{ root:path.root, steps }
     },
-    <lo:@L> <ident:"AtIdentifier"> <hi:@R> => {
-        let root = ast::Expr{
-            kind: ast::ExprKind::VarRef(ast::VarRef {
-                name: ast::SymbolPrimitive { value: ident.to_owned() },
-                case: ast::CaseSensitivity::CaseInsensitive,
-                qualifier: ast::ScopeQualifier::Qualified
-            }.ast(lo..hi)),
-        };
-        ast::Path{ root: Box::new(root), steps: vec![] }
+    <lo:@L> <path:PathExpr>  "." "*" <hi:@R> => {
+         let step = ast::PathStep::PathUnpivot;
+
+         let mut steps = path.steps;
+         steps.push(step);
+         ast::Path{ root:path.root, steps }
+    },
+    // TODO Add path expression with CAST E.g. {'attr': 1, 'b':2}[CAST('at' || 'tr' AS STRING)]
+    // once https://github.com/partiql/partiql-lang-rust/pull/122 is merged
+    <lo:@L> <path:PathExpr> "[" <expr:ExprQuery> "]" <hi:@R> => {
+        let step = ast::PathStep::PathExpr(
+            ast::PathExpr{
+                index: Box::new(*expr),
+            });
+
+        let mut steps = path.steps;
+        steps.push(step);
+        ast::Path{ root:path.root, steps }
+    },
+    "(" <q:Query> ")" "." <v:PathExprVarRef>  => {
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
+        ast::Path{ root: q, steps: vec![step] }
+    },
+    "(" <q:Query> ")" "." "*"  => {
+        let step = ast::PathStep::PathUnpivot;
+        ast::Path{ root: q, steps: vec![step] }
+    },
+    <lo:@L> <call:FunctionCall> "." <v:PathExprVarRef> <hi:@R> => {
+        let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
+        ast::Path{ root: Box::new(root), steps: vec![step] }
+    },
+    <PathExprTermWithDot<ExprTermTuple>>,
+    <PathExprTermWithDot<ExprTermArray>>,
+    "(" <q:Query> ")" "[" <expr:ExprQuery> "]"  => {
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
+        ast::Path{ root: q, steps: vec![step] }
+    },
+    "(" <q:Query> ")" "[" "*" "]"  => {
+        let step = ast::PathStep::PathWildCard;
+        ast::Path{ root: q, steps: vec![step] }
+    },
+    <PathExprTermInBrackets<ExprTermTuple>>,
+    <PathExprTermInBrackets<ExprTermArray>>,
+    <v:VarRefExpr> => {
+        ast::Path{ root: Box::new(v), steps: vec![] }
     },
 }
+
+PathExprVarRef: ast::Expr = {
+    <lo:@L> <ident:"String"> <hi:@R> => ast::Expr {
+      kind: ast::ExprKind::VarRef(ast::VarRef {
+          name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+          case: ast::CaseSensitivity::CaseInsensitive,
+          qualifier: ast::ScopeQualifier::Unqualified
+      }.ast(lo..hi)),
+    },
+    <VarRefExpr>,
+}
+
+VarRefExpr: ast::Expr = {
+    <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+    <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr {
+      kind: ast::ExprKind::VarRef(ast::VarRef {
+          name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: true },
+          case: ast::CaseSensitivity::CaseSensitive,
+          qualifier: ast::ScopeQualifier::Unqualified
+      }.ast(lo..hi)),
+    },
+};
+
+PathExprTermInBrackets<T>: ast::Path = {
+    <e:T> "[" <expr:ExprQuery> "]" => {
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
+        ast::Path{ root: Box::new(e), steps: vec![step] }
+    },
+    <e:T> "[" "*" "]" => {
+        let step = ast::PathStep::PathWildCard;
+        ast::Path{ root: Box::new(e), steps: vec![step] }
+    }
+}
+
+PathExprTermWithDot<T>: ast::Path = {
+    <e:T> "." <v:PathExprVarRef> => {
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
+        ast::Path{ root: Box::new(e), steps: vec![step] }
+    },
+    <e:T> "." "*" => {
+        let step = ast::PathStep::PathUnpivot;
+        ast::Path{ root: Box::new(e), steps: vec![step] }
+    },
+}
+
 
 
 // ------------------------------------------------------------------------------ //
@@ -959,7 +1058,6 @@ LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
 
-
 // ------------------------------------------------------------------------------ //
 //                                                                                //
 //                                  Utilities                                     //
@@ -1009,6 +1107,17 @@ CommaSepPlus<T>: Vec<T> = {
         v.push(e);
         v
     }
+};
+
+SymbolPrimitive: ast::SymbolPrimitive = {
+    <ident:"UnquotedIdent"> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        dbl_quoted: false,
+    },
+    <ident:"QuotedIdent"> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        dbl_quoted: true,
+    },
 };
 
 // ------------------------------------------------------------------------------ //
@@ -1061,7 +1170,8 @@ extern {
 
 
         // Types
-        "Identifier" => lexer::Token::Identifier(<&'input str>),
+        "UnquotedIdent" => lexer::Token::UnquotedIdent(<&'input str>),
+        "QuotedIdent" => lexer::Token::QuotedIdent(<&'input str>),
         "AtIdentifier" => lexer::Token::AtIdentifier(<&'input str>),
         "Int" => lexer::Token::Int(<&'input str>),
         "Real" => lexer::Token::Real(<&'input str>),
