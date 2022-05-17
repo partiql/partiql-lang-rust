@@ -741,7 +741,7 @@ ExprPrecedence01: ast::Expr = {
     <casexpr:CaseExpr> => ast::Expr {
         kind: ast::ExprKind::Case(casexpr)
     },
-    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
+    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr { kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
     <ExprTerm>,
 };
 
@@ -846,6 +846,11 @@ FunctionCall: ast::Call = {
         },
 }
 
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                               Path Navigation                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
 // Implementation of Path Navigation as specified by PartiQL Specification Section 4:
 // https://partiql.org/assets/PartiQL-Specification.pdf
 //
@@ -857,7 +862,7 @@ FunctionCall: ast::Call = {
 // a.b.c
 // "a".b
 // "a"."b"
-// { 'a': 1, 'b': 2}.a
+// { 'a': 1, 'b': 2 }.a
 // [1, 2][1]
 // foo(x, y).a
 // (SELECT a from en).b
@@ -913,6 +918,13 @@ PathExpr: ast::Path = {
          steps.push(step);
          ast::Path{ root:path.root, steps }
     },
+    <lo:@L> <path:PathExpr>  "." "*" <hi:@R> => {
+         let step = ast::PathStep::PathUnpivot;
+
+         let mut steps = path.steps;
+         steps.push(step);
+         ast::Path{ root:path.root, steps }
+    },
     // TODO Add path expression with CAST E.g. {'attr': 1, 'b':2}[CAST('at' || 'tr' AS STRING)]
     // once https://github.com/partiql/partiql-lang-rust/pull/122 is merged
     <lo:@L> <path:PathExpr>  "[" <expr:ExprQuery> "]" <hi:@R> => {
@@ -924,13 +936,6 @@ PathExpr: ast::Path = {
         let mut steps = path.steps;
         steps.push(step);
         ast::Path{ root:path.root, steps }
-    },
-    <lo:@L> <path:PathExpr>  "." "*" <hi:@R> => {
-         let step = ast::PathStep::PathUnpivot;
-
-         let mut steps = path.steps;
-         steps.push(step);
-         ast::Path{ root:path.root, steps }
     },
     <v:VarRefExpr> => {
         ast::Path{ root: Box::new(v), steps: vec![] }
