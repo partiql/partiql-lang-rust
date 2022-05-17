@@ -576,7 +576,6 @@ pub enum PathStep {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathExpr {
     pub index: Box<Expr>,
-    pub case: CaseSensitivity,
 }
 
 /// Is used to determine if variable lookup should be case-sensitive or not.
@@ -871,6 +870,8 @@ pub struct CustomType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SymbolPrimitive {
     pub value: String,
+    // Quoted denotes a symbol in double quotes. e.g. "date"
+    pub dbl_quoted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

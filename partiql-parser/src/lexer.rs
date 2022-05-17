@@ -462,10 +462,12 @@ pub enum Token<'input> {
 
     // unquoted identifiers
     #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice())]
+    UnquotedIdent(&'input str),
+
     // quoted identifiers (quoted with double quotes)
     #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#,
             |lex| lex.slice().trim_matches('"'))]
-    Identifier(&'input str),
+    QuotedIdent(&'input str),
 
     // unquoted @identifiers
     #[regex("@[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| &lex.slice()[1..])]
@@ -645,7 +647,8 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
             Token::DblPipe => write!(f, "||"),
-            Token::Identifier(id) => write!(f, "<{}:IDENT>", id),
+            Token::UnquotedIdent(id) => write!(f, "<{}:UNQUOTED_IDENT>", id),
+            Token::QuotedIdent(id) => write!(f, "<{}:QUOTED_IDENT>", id),
             Token::AtIdentifier(id) => write!(f, "<{}:@IDENT>", id),
             Token::Int(txt) => write!(f, "<{}:INT>", txt),
             Token::ExpReal(txt) => write!(f, "<{}:REAL>", txt),
@@ -753,7 +756,8 @@ mod tests {
             "PIVOT", ">", "OUTER", "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET",
             "=", "NULLS", "==", "NULL", "-", "NOT", "+", "NATURAL", "*", "MISSING", "%",
             "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
-            "--", "INTERSECT", "/**/", "IS", "<ident:IDENT>", "INNER", "<atident:@IDENT>", "IN",
+            "--", "INTERSECT", "/**/", "IS", "<quoted_ident:QUOTED_IDENT>",
+            "<unquoted_ident:UNQUOTED_IDENT>", "INNER", "<atident:@IDENT>", "IN",
             "HAVING", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC",
             "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE", "WHEN",
             "THEN", "ELSE", "END",
@@ -840,7 +844,9 @@ mod tests {
 
     #[test]
     fn select() -> Result<(), ParseError<'static, BytePosition>> {
-        let query = "SELECT g\nFROM data\nGROUP BY a";
+        let query = r#"SELECT g
+            FROM "data"
+            GROUP BY a"#;
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
@@ -848,12 +854,12 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::Identifier("g"),
+                Token::UnquotedIdent("g"),
                 Token::From,
-                Token::Identifier("data"),
+                Token::QuotedIdent("data"),
                 Token::Group,
                 Token::By,
-                Token::Identifier("a")
+                Token::UnquotedIdent("a")
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -900,12 +906,12 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::Identifier("🐈"),
+                Token::UnquotedIdent("🐈"),
                 Token::From,
-                Token::Identifier("❤ℝ"),
+                Token::UnquotedIdent("❤ℝ"),
                 Token::Group,
                 Token::By,
-                Token::Identifier("🧸")
+                Token::UnquotedIdent("🧸")
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
@@ -1002,7 +1008,7 @@ mod tests {
             vec![
                 Token::Select,
                 Token::CommentBlock("/*comment*/"),
-                Token::Identifier("g"),
+                Token::UnquotedIdent("g"),
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
