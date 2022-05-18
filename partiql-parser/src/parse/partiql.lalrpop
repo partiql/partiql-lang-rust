@@ -747,12 +747,16 @@ ExprPrecedence01: ast::Expr = {
 };
 
 pub ExprTerm: ast::Expr = {
-    "(" <q:Query> ")" => *q,
+    <ExprTermNonLiteral>,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
+    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
+}
+
+ExprTermNonLiteral: ast::Expr = {
+    "(" <q:Query> ")" => *q,
     <ExprTermArray>,
     <ExprTermBag>,
     <ExprTermTuple>,
-    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
 // ------------------------------------------------------------------------------ //
@@ -909,14 +913,6 @@ PathExpr: ast::Path = {
         steps.push(step);
         ast::Path{ root:path.root, steps }
     },
-    "(" <q:Query> ")" "." <v:PathExprVarRef>  => {
-        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
-        ast::Path{ root: q, steps: vec![step] }
-    },
-    "(" <q:Query> ")" "." "*"  => {
-        let step = ast::PathStep::PathUnpivot;
-        ast::Path{ root: q, steps: vec![step] }
-    },
     <lo:@L> <call:FunctionCall> "." <v:PathExprVarRef> <hi:@R> => {
         let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
         let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
@@ -926,16 +922,6 @@ PathExpr: ast::Path = {
         let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
         let step = ast::PathStep::PathUnpivot;
         ast::Path{ root: Box::new(root), steps: vec![step] }
-    },
-    <PathExprTermWithDot<ExprTermArray>>,
-    <PathExprTermWithDot<ExprTermTuple>>,
-    "(" <q:Query> ")" "[" <expr:ExprQuery> "]"  => {
-        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
-        ast::Path{ root: q, steps: vec![step] }
-    },
-    "(" <q:Query> ")" "[" "*" "]"  => {
-        let step = ast::PathStep::PathWildCard;
-        ast::Path{ root: q, steps: vec![step] }
     },
     <lo:@L> <call:FunctionCall> "[" "*" "]" <hi:@R> => {
         let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
@@ -947,8 +933,8 @@ PathExpr: ast::Path = {
         let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
         ast::Path{ root: Box::new(root), steps: vec![step] }
     },
-    <PathExprTermInBrackets<ExprTermArray>>,
-    <PathExprTermInBrackets<ExprTermTuple>>,
+    <PathExprTermWithDot<ExprTermNonLiteral>>,
+    <PathExprTermInBrackets<ExprTermNonLiteral>>,
     <v:VarRefExpr> => {
         ast::Path{ root: Box::new(v), steps: vec![] }
     },
