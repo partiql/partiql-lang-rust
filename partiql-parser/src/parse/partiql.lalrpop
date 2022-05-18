@@ -749,9 +749,9 @@ ExprPrecedence01: ast::Expr = {
 pub ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
-    <ExprTermTuple>,
     <ExprTermArray>,
     <ExprTermBag>,
+    <ExprTermTuple>,
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
@@ -871,7 +871,7 @@ FunctionCall: ast::Call = {
 // foo(x, y).a
 // (SELECT a from en).b
 //
-// See the path expression conformance tests under `partiql-tests` for more examples.
+// See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathExpr: ast::Path = {
     <path:PathExpr>  "." <v:PathExprVarRef> => {
         let step = ast::PathStep::PathExpr(
@@ -988,7 +988,6 @@ PathExprTermWithDot<T>: ast::Path = {
         ast::Path{ root: Box::new(e), steps: vec![step] }
     },
 }
-
 
 
 // ------------------------------------------------------------------------------ //

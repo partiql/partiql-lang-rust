@@ -338,7 +338,6 @@ mod tests {
             parse!(r#"a.b.['item']"#);
             parse!(r#"a.b.[*]"#);
         }
-
     }
 
     mod sfw {
