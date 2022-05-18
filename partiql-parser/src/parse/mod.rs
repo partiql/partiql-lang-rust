@@ -333,9 +333,20 @@ mod tests {
         }
 
         #[test]
+        fn function_call() {
+            parse!(r#"foo(x, y).a"#);
+            parse!(r#"foo(x, y).*"#);
+            parse!(r#"foo(x, y)[*]"#);
+            parse!(r#"foo(x, y)[5]"#);
+            parse!(r#"foo(x, y).a.*"#);
+        }
+
+        #[test]
         #[should_panic]
         fn erroneous() {
             parse!(r#"a.b.['item']"#);
+            parse!(r#"a.b.{'a': 1, 'b': 2}.a"#);
+            parse!(r#"a.b.[1, 2, 3][2]"#);
             parse!(r#"a.b.[*]"#);
         }
     }

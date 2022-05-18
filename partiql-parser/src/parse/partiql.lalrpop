@@ -922,8 +922,13 @@ PathExpr: ast::Path = {
         let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(v),});
         ast::Path{ root: Box::new(root), steps: vec![step] }
     },
-    <PathExprTermWithDot<ExprTermTuple>>,
+    <lo:@L> <call:FunctionCall> "." "*" <hi:@R> => {
+        let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
+        let step = ast::PathStep::PathUnpivot;
+        ast::Path{ root: Box::new(root), steps: vec![step] }
+    },
     <PathExprTermWithDot<ExprTermArray>>,
+    <PathExprTermWithDot<ExprTermTuple>>,
     "(" <q:Query> ")" "[" <expr:ExprQuery> "]"  => {
         let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
         ast::Path{ root: q, steps: vec![step] }
@@ -932,8 +937,18 @@ PathExpr: ast::Path = {
         let step = ast::PathStep::PathWildCard;
         ast::Path{ root: q, steps: vec![step] }
     },
-    <PathExprTermInBrackets<ExprTermTuple>>,
+    <lo:@L> <call:FunctionCall> "[" "*" "]" <hi:@R> => {
+        let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
+        let step = ast::PathStep::PathWildCard;
+        ast::Path{ root: Box::new(root), steps: vec![step] }
+    },
+    <lo:@L> <call:FunctionCall> "[" <expr:ExprQuery> "]" <hi:@R> => {
+        let root = ast::Expr { kind: ast::ExprKind::Call( call.ast(lo..hi) ) };
+        let step = ast::PathStep::PathExpr(ast::PathExpr { index: Box::new(*expr),});
+        ast::Path{ root: Box::new(root), steps: vec![step] }
+    },
     <PathExprTermInBrackets<ExprTermArray>>,
+    <PathExprTermInBrackets<ExprTermTuple>>,
     <v:VarRefExpr> => {
         ast::Path{ root: Box::new(v), steps: vec![] }
     },
