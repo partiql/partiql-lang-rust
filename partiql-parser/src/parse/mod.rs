@@ -303,6 +303,7 @@ mod tests {
             parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
             parse!(r#"a.b.*"#);
             parse!(r#"a.b[*]"#);
+            parse!(r#"@a.b[*]"#);
             parse!(r#"tables.items[*].product.*.nest"#);
         }
 
