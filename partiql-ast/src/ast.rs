@@ -871,8 +871,8 @@ pub struct CustomType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SymbolPrimitive {
     pub value: String,
-    // E.g. "date"
-    pub dbl_quoted: bool,
+    // Optional because string literal symbols don't have case sensitivity
+    pub case: Option<CaseSensitivity>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

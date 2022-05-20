@@ -859,19 +859,28 @@ ExprPair: ast::ExprPair = {
 FunctionCall: ast::Call = {
     <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args: Vec::new(),
             setq: Some(strategy)
         },
      <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
          ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args: Vec::new(),
             setq: Some(strategy)
          },
     <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned(), dbl_quoted: false },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args,
             setq: Some(strategy)
         },
@@ -952,9 +961,9 @@ PathSteps: Vec<ast::PathStep> = {
 }
 
 PathExprVarRef: ast::Expr = {
-    <lo:@L> <ident:"String"> <hi:@R> => ast::Expr {
+    <lo:@L> <s:"String"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+            name: ast::SymbolPrimitive { value: s.to_owned(), case: None },
             case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
@@ -965,28 +974,28 @@ PathExprVarRef: ast::Expr = {
 VarRefExpr: ast::Expr = {
     <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
     <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: true },
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
             case: ast::CaseSensitivity::CaseSensitive,
             qualifier: ast::ScopeQualifier::Unqualified
       }.ast(lo..hi)),
     },
     <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: true },
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
             case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
@@ -1114,11 +1123,11 @@ CommaSepPlus<T>: Vec<T> = {
 SymbolPrimitive: ast::SymbolPrimitive = {
     <ident:"UnquotedIdent"> => ast::SymbolPrimitive {
         value: ident.to_owned(),
-        dbl_quoted: false,
+        case: Some(ast::CaseSensitivity::CaseInsensitive),
     },
     <ident:"QuotedIdent"> => ast::SymbolPrimitive {
         value: ident.to_owned(),
-        dbl_quoted: true,
+        case: Some(ast::CaseSensitivity::CaseSensitive),
     },
 };
 
