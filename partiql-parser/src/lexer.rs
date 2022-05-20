@@ -471,10 +471,12 @@ pub enum Token<'input> {
 
     // unquoted @identifiers
     #[regex("@[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| &lex.slice()[1..])]
+    UnquotedAtIdentifier(&'input str),
+
     // quoted @identifiers (quoted with double quotes)
     #[regex(r#"@"([^"\\]|\\t|\\u|\\n|\\")*""#,
             |lex| lex.slice()[1..].trim_matches('"'))]
-    AtIdentifier(&'input str),
+    QuotedAtIdentifier(&'input str),
 
     #[regex("[0-9]+", |lex| lex.slice())]
     Int(&'input str),
@@ -649,7 +651,8 @@ impl<'input> fmt::Display for Token<'input> {
             Token::DblPipe => write!(f, "||"),
             Token::UnquotedIdent(id) => write!(f, "<{}:UNQUOTED_IDENT>", id),
             Token::QuotedIdent(id) => write!(f, "<{}:QUOTED_IDENT>", id),
-            Token::AtIdentifier(id) => write!(f, "<{}:@IDENT>", id),
+            Token::UnquotedAtIdentifier(id) => write!(f, "<{}:UNQUOTED_ATIDENT>", id),
+            Token::QuotedAtIdentifier(id) => write!(f, "<{}:QUOTED_ATIDENT>", id),
             Token::Int(txt) => write!(f, "<{}:INT>", txt),
             Token::ExpReal(txt) => write!(f, "<{}:REAL>", txt),
             Token::Real(txt) => write!(f, "<{}:REAL>", txt),
@@ -733,7 +736,7 @@ mod tests {
     fn display() -> Result<(), ParseError<'static, BytePosition>> {
         let symbols =
             "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . || : --foo /*block*/";
-        let primitives = "unquoted_ident quoted_ident @atident";
+        let primitives = r#"unquoted_ident "quoted_ident" @unquoted_atident @"quoted_atident""#;
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
@@ -756,10 +759,11 @@ mod tests {
             "PIVOT", ">", "OUTER", "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET",
             "=", "NULLS", "==", "NULL", "-", "NOT", "+", "NATURAL", "*", "MISSING", "%",
             "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
-            "--", "INTERSECT", "/**/", "IS", "<unquoted_ident:UNQUOTED_IDENT>", "INNER",
-            "<quoted_ident:UNQUOTED_IDENT>", "IN", "<atident:@IDENT>", "HAVING", "GROUP", "FROM",
-            "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "BY", "BETWEEN", "AT",
-            "AS", "AND", "ASC", "ALL", "VALUES", "CASE", "WHEN", "THEN", "ELSE", "END",
+            "--", "INTERSECT", "/**/","IS", "<unquoted_ident:UNQUOTED_IDENT>", "INNER",
+            "<quoted_ident:QUOTED_IDENT>", "IN", "<unquoted_atident:UNQUOTED_ATIDENT>", "HAVING",
+            "<quoted_atident:QUOTED_ATIDENT>", "GROUP", "FROM", "FULL", "FIRST", "FALSE", "EXCEPT",
+            "ESCAPE", "DESC", "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
+            "CASE", "WHEN", "THEN", "ELSE", "END",
         ];
         let displayed = toks
             .into_iter()
@@ -986,9 +990,9 @@ mod tests {
             vec![
                 Token::Select,
                 Token::CommentLine("--comment"),
-                Token::AtIdentifier("g"),
+                Token::UnquotedAtIdentifier("g"),
                 Token::From,
-                Token::AtIdentifier("foo"),
+                Token::QuotedAtIdentifier("foo"),
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );

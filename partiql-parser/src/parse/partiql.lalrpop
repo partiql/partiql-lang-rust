@@ -977,9 +977,16 @@ VarRefExpr: ast::Expr = {
             qualifier: ast::ScopeQualifier::Unqualified
       }.ast(lo..hi)),
     },
-    <lo:@L> <ident:"AtIdentifier"> <hi:@R> => ast::Expr {
+    <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: false },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+    <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), dbl_quoted: true },
             case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
@@ -1167,7 +1174,8 @@ extern {
         // Types
         "UnquotedIdent" => lexer::Token::UnquotedIdent(<&'input str>),
         "QuotedIdent" => lexer::Token::QuotedIdent(<&'input str>),
-        "AtIdentifier" => lexer::Token::AtIdentifier(<&'input str>),
+        "UnquotedAtIdentifier" => lexer::Token::UnquotedAtIdentifier(<&'input str>),
+        "QuotedAtIdentifier" => lexer::Token::QuotedAtIdentifier(<&'input str>),
         "Int" => lexer::Token::Int(<&'input str>),
         "Real" => lexer::Token::Real(<&'input str>),
         "ExpReal" => lexer::Token::ExpReal(<&'input str>),
