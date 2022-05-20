@@ -19,12 +19,14 @@ pub trait ToAstNode: Sized {
     /// further [AstNode] construction.
     /// ## Example:
     /// ```
+    /// use partiql_ast::ast;
     /// use partiql_ast::ast::{SymbolPrimitive, ToAstNode};
+    /// use partiql_ast::ast::CaseSensitivity::CaseInsensitive;
     /// use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
     ///
     /// let p = SymbolPrimitive {
     ///     value: "symbol2".to_string(),
-    ///     dbl_quoted: false
+    ///     case: Some(ast::CaseSensitivity::CaseInsensitive)
     ///  };
     ///
     /// let node = p
