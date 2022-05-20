@@ -25,6 +25,8 @@ partiql-conformance-test-generator = { path = "../partiql-conformance-test-gener
 
 [dependencies]
 partiql-parser = { path = "../partiql-parser" }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [features]
 conformance_test=[]
