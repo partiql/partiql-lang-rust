@@ -149,7 +149,7 @@ jobs:
           body="${body//$'\n'/'%0A'}"
           body="${body//$'\r'/'%0D'}"
           echo "::set-output name=body::$body"
-      # Create or update (if previous comment exists) with comparison markdown report
+      # Create or update (if previous comment exists) with comparison markdown version of report
       - name: Create or update comment
         uses: peter-evans/create-or-update-comment@v2
         if: github.event_name == 'pull_request'
