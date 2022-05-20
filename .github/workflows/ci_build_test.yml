@@ -91,6 +91,8 @@ jobs:
     steps:
       # Pull down the cached `partiql-lang-rust` build
       - uses: actions/checkout@v2
+        with:
+          submodules: recursive
       - name: Rust Toolchain
         uses: actions-rs/toolchain@v1
         with:
