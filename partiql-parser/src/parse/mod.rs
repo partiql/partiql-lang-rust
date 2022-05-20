@@ -294,6 +294,66 @@ mod tests {
         }
     }
 
+    mod pathexpr {
+        use super::*;
+
+        #[test]
+        fn nested() {
+            parse!(r#"a.b"#);
+            parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
+            parse!(r#"a.b.*"#);
+            parse!(r#"a.b[*]"#);
+            parse!(r#"@a.b[*]"#);
+            parse!(r#"@"a".b[*]"#);
+            parse!(r#"tables.items[*].product.*.nest"#);
+        }
+
+        #[test]
+        fn tuple() {
+            parse!(r#"{'a':1 , 'data': 2}.a"#);
+            parse!(r#"{'a':1 , 'data': 2}.'a'"#);
+            parse!(r#"{'A':1 , 'data': 2}."A""#);
+            parse!(r#"{'A':1 , 'data': 2}['a']"#);
+            parse!(r#"{'attr': 1, 'b':2}[v || w]"#);
+            parse!(r#"{'a':1, 'b':2}.*"#);
+        }
+
+        #[test]
+        fn array() {
+            parse!(r#"[1,2,3][0]"#);
+            parse!(r#"[1,2,3][1 + 1]"#);
+            parse!(r#"[1,2,3][*]"#);
+        }
+
+        #[test]
+        fn query() {
+            parse!(r#"(SELECT a FROM table).a"#);
+            parse!(r#"(SELECT a FROM table).'a'"#);
+            parse!(r#"(SELECT a FROM table)."a""#);
+            parse!(r#"(SELECT a FROM table)['a']"#);
+            parse!(r#"(SELECT a FROM table).*"#);
+            parse!(r#"(SELECT a FROM table)[*]"#);
+        }
+
+        #[test]
+        fn function_call() {
+            parse!(r#"foo(x, y).a"#);
+            parse!(r#"foo(x, y).*"#);
+            parse!(r#"foo(x, y)[*]"#);
+            parse!(r#"foo(x, y)[5]"#);
+            parse!(r#"foo(x, y).a.*"#);
+        }
+
+        #[test]
+        #[should_panic]
+        fn erroneous() {
+            parse!(r#"a.b.['item']"#);
+            parse!(r#"a.b.{'a': 1, 'b': 2}.a"#);
+            parse!(r#"a.b.[1, 2, 3][2]"#);
+            parse!(r#"a.b.[*]"#);
+        }
+    }
+
     mod sfw {
         use super::*;
 

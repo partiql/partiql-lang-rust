@@ -83,7 +83,7 @@ SetQuantifier: ast::SetQuantifier = {
 //                            ExprQuery or SFW Query                              //
 //                                                                                //
 // ------------------------------------------------------------------------------ //
-pub SingleQuery: ast::QuerySetAst = {
+SingleQuery: ast::QuerySetAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R> => {
         match *expr {
            ast::Expr{ kind: ast::ExprKind::Query(ast::QueryAst{ node: ast::Query{set, order_by:None, limit:None, offset:None} , .. })} => set,
@@ -108,7 +108,7 @@ ValueRow: Box<ast::Expr> = {
 //                                   SFW Query                                    //
 //                                                                                //
 // ------------------------------------------------------------------------------ //
-pub SfwQuery: ast::SelectAst = {
+SfwQuery: ast::SelectAst = {
     <SfwClauses>,
     <FwsClauses>
 }
@@ -198,9 +198,8 @@ SetQuantifierStrategy: ast::SetQuantifier = {
 Projection: ast::ProjectItemAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
         => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ).ast(lo..hi),
-    <lo:@L> <expr:ExprQuery> "AS"? <ident:"Identifier"> <hi:@R> => {
-        let as_alias = Some( ast::SymbolPrimitive{ value:ident.to_owned()} );
-        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias } ).ast(lo..hi)
+    <lo:@L> <expr:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
+        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: Some(as_alias) } ).ast(lo..hi)
     },
 }
 
@@ -252,11 +251,11 @@ TableBaseReference: ast::FromLetAst = {
             by_alias: None
         }.ast(lo..hi)
     },
-    <lo:@L> <e:ExprQuery> "AS"? <ident_as:"Identifier"> <hi:@R> => {
+    <lo:@L> <e:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
+            as_alias: Some(as_alias),
             at_alias: None,
             by_alias: None
         }.ast(lo..hi)
@@ -265,12 +264,12 @@ TableBaseReference: ast::FromLetAst = {
 
 #[inline]
 TableUnpivot: ast::FromLetAst = {
-    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:"Identifier"> "AT" <ident_at:"Identifier"> <hi:@R> => {
+    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:SymbolPrimitive> "AT" <ident_at:SymbolPrimitive> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
-            as_alias: Some(ast::SymbolPrimitive{ value: ident_as.to_owned() }),
-            at_alias: Some(ast::SymbolPrimitive{ value: ident_at.to_owned() }),
+            as_alias: Some(ident_as),
+            at_alias: Some(ident_at),
             by_alias: None,
         }.ast(lo..hi)
     }
@@ -373,12 +372,12 @@ GroupStrategy: ast::GroupingStrategy = {
 GroupKey: ast::GroupKeyAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
         => ast::GroupKey{ expr, as_alias: None }.ast(lo..hi),
-    <lo:@L> <expr:ExprQuery> "AS" <ident:"Identifier"> <hi:@R>
-        => ast::GroupKey{ expr, as_alias: Some( ast::SymbolPrimitive{ value:ident.to_owned()} ) }.ast(lo..hi),
+    <lo:@L> <expr:ExprQuery> "AS" <as_alias:SymbolPrimitive> <hi:@R>
+        => ast::GroupKey{ expr, as_alias: Some(as_alias) }.ast(lo..hi),
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
-    "GROUP" "AS" <ident:"Identifier"> => ast::SymbolPrimitive{ value:ident.to_owned() }
+    "GROUP" "AS" <SymbolPrimitive>
 }
 
 // ------------------------------------------------------------------------------ //
@@ -471,15 +470,27 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 // See https://en.wikipedia.org/wiki/Order_of_operations#Special_cases
 
 
-pub ExprQuery: Box<ast::Expr> = {
-    <e:ExprPrecedence14> => Box::new(e)
+ExprQuery: Box<ast::Expr> = {
+    <e:ExprPrecedence15> => Box::new(e)
 }
 
-ExprPrecedence14: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence14> "OR" <r:ExprPrecedence13> <hi:@R> =>
+ExprPrecedence15: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence15> "OR" <r:ExprPrecedence14> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Or,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence14>,
+}
+
+ExprPrecedence14: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence14> "AND" <r:ExprPrecedence13> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::And,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -488,30 +499,18 @@ ExprPrecedence14: ast::Expr = {
 }
 
 ExprPrecedence13: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence13> "AND" <r:ExprPrecedence12> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::And,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence12>,
-}
-
-ExprPrecedence12: ast::Expr = {
-    <lo:@L> "NOT" <r:ExprPrecedence12> <hi:@R> =>
+    <lo:@L> "NOT" <r:ExprPrecedence13> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(r),
            }.ast(lo..hi)
        )},
-    <ExprPrecedence11>,
+    <ExprPrecedence12>,
 }
 
-ExprPrecedence11: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence11> "IS" <r:ExprPrecedence10> <hi:@R> =>
+ExprPrecedence12: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence12> "IS" <r:ExprPrecedence11> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -519,7 +518,7 @@ ExprPrecedence11: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence11> "IS" "NOT" <r:ExprPrecedence10> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <r:ExprPrecedence11> <hi:@R> => {
        let is =  ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Is,
@@ -534,11 +533,11 @@ ExprPrecedence11: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence10>
+    <ExprPrecedence11>
 }
 
-ExprPrecedence10: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence10> "=" <r:ExprPrecedence09> <hi:@R> =>
+ExprPrecedence11: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence11> "=" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Eq,
@@ -546,7 +545,7 @@ ExprPrecedence10: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence10> "!=" <r:ExprPrecedence09> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence11> "!=" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
@@ -554,10 +553,46 @@ ExprPrecedence10: ast::Expr = {
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence10> "<>" <r:ExprPrecedence09> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence11> "<>" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Ne,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence10>,
+}
+
+ExprPrecedence10: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence09> "<" <r:ExprPrecedence09> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence09> ">" <r:ExprPrecedence09> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gt,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence09> "<=" <r:ExprPrecedence09> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Lte,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence09> ">=" <r:ExprPrecedence09> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Gte,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -566,45 +601,9 @@ ExprPrecedence10: ast::Expr = {
 }
 
 ExprPrecedence09: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence08> "<" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> "<=" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Lte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence08> ">=" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Gte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence08>,
-}
-
-ExprPrecedence08: ast::Expr = {
-    <lo:@L> <value:ExprPrecedence08> "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence09> "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence08> "NOT" "BETWEEN" <from:ExprPrecedence07> "AND" <to:ExprPrecedence07> <hi:@R> => {
+    <lo:@L> <value:ExprPrecedence09> "NOT" "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> => {
        let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -613,9 +612,9 @@ ExprPrecedence08: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <value:ExprPrecedence08> "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R> =>
+    <lo:@L> <value:ExprPrecedence09> "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) },
-    <lo:@L> <value:ExprPrecedence08> "NOT" "LIKE" <pattern:ExprPrecedence07> <escape:LikeEscape?> <hi:@R>  => {
+    <lo:@L> <value:ExprPrecedence09> "NOT" "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R>  => {
        let like = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -624,9 +623,9 @@ ExprPrecedence08: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <lo:@L> <l:ExprPrecedence08> "IN" <r:ExprPrecedence07> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence09> "IN" <r:ExprPrecedence08> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) },
-    <lo:@L> <l:ExprPrecedence08> "NOT" "IN" <r:ExprPrecedence07> <hi:@R> => {
+    <lo:@L> <l:ExprPrecedence09> "NOT" "IN" <r:ExprPrecedence08> <hi:@R> => {
        let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
@@ -635,18 +634,38 @@ ExprPrecedence08: ast::Expr = {
            }.ast(lo..hi)
        )}
     },
-    <ExprPrecedence07>,
+    <ExprPrecedence08>,
 }
 #[inline]
 LikeEscape: Box<ast::Expr> = {
     "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
 }
 
-ExprPrecedence07: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence07> "||" <r:ExprPrecedence06> <hi:@R> =>
+ExprPrecedence08: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence08> "||" <r:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
                kind: ast::BinOpKind::Concat,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <ExprPrecedence07>,
+}
+
+ExprPrecedence07: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence07> "+" <r:ExprPrecedence06> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Add,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence07> "-" <r:ExprPrecedence06> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Neg,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -655,18 +674,26 @@ ExprPrecedence07: ast::Expr = {
 }
 
 ExprPrecedence06: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence06> "+" <r:ExprPrecedence05> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence06> "*" <r:ExprPrecedence05> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
-               kind: ast::BinOpKind::Add,
+               kind: ast::BinOpKind::Mul,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> <l:ExprPrecedence06> "-" <r:ExprPrecedence05> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence06> "/" <r:ExprPrecedence05> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
-               kind: ast::BinOpKind::Neg,
+               kind: ast::BinOpKind::Div,
+               lhs: Box::new(l),
+               rhs: Box::new(r),
+           }.ast(lo..hi)
+       )},
+    <lo:@L> <l:ExprPrecedence06> "%" <r:ExprPrecedence05> <hi:@R> =>
+       ast::Expr{ kind: ast::ExprKind::BinOp(
+           ast::BinOp {
+               kind: ast::BinOpKind::Mod,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -675,26 +702,10 @@ ExprPrecedence06: ast::Expr = {
 }
 
 ExprPrecedence05: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence05> "*" <r:ExprPrecedence04> <hi:@R> =>
+    <lo:@L> <l:ExprPrecedence05> "^" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
            ast::BinOp {
-               kind: ast::BinOpKind::Mul,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence05> "/" <r:ExprPrecedence04> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Div,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <lo:@L> <l:ExprPrecedence05> "%" <r:ExprPrecedence04> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Mod,
+               kind: ast::BinOpKind::Exp,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }.ast(lo..hi)
@@ -703,48 +714,73 @@ ExprPrecedence05: ast::Expr = {
 }
 
 ExprPrecedence04: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence04> "^" <r:ExprPrecedence03> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
-               kind: ast::BinOpKind::Exp,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
-           }.ast(lo..hi)
-       )},
-    <ExprPrecedence03>,
-}
-
-ExprPrecedence03: ast::Expr = {
-    <lo:@L> "+" <r:ExprPrecedence03> <hi:@R> =>
+    <lo:@L> "+" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Pos,
                expr: Box::new(r),
            }.ast(lo..hi)
        )},
-    <lo:@L> "-" <r:ExprPrecedence03> <hi:@R> =>
+    <lo:@L> "-" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Neg,
                expr: Box::new(r),
            }.ast(lo..hi)
        )},
-    <ExprPrecedence02>,
+    <ExprPrecedence03>,
 }
 
 #[inline]
+ExprPrecedence03: ast::Expr = {
+    <casexpr:CaseExpr> => ast::Expr {
+        kind: ast::ExprKind::Case(casexpr)
+    },
+    <ExprPrecedence02>,
+}
+
+PathExpr: ast::Path = {
+    <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l), steps },
+    <l:ExprPrecedence01> "." "*" => ast::Path {
+        root:Box::new(l), steps:vec![ast::PathStep::PathUnpivot]
+     },
+    <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
+        root:Box::new(l), steps:vec![ast::PathStep::PathWildCard]
+    },
+    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" => {
+         let step = ast::PathStep::PathExpr(
+             ast::PathExpr{
+                 index: Box::new(*expr),
+             });
+
+        ast::Path {
+            root:Box::new(l), steps:vec![step]
+        }
+    },
+};
+
 ExprPrecedence02: ast::Expr = {
-    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
+     <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::Path( expr.ast(lo..hi) )
+      },
     <ExprPrecedence01>,
 }
 
 #[inline]
 ExprPrecedence01: ast::Expr = {
-    <casexpr:CaseExpr> => ast::Expr {
-        kind: ast::ExprKind::Case(casexpr)
-    },
+    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
     <ExprTerm>,
 };
+
+pub ExprTerm: ast::Expr = {
+    "(" <q:Query> ")" => *q,
+    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
+    <VarRefExpr>,
+    <ExprTermArray>,
+    <ExprTermBag>,
+    <ExprTermTuple>,
+    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
+}
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -791,16 +827,6 @@ ExprPairWhenThen: ast::ExprPair = {
     <lo:@L> "WHEN" <first:ExprQuery> "THEN" <second:ExprQuery> <hi:@R> => ast::ExprPair { first, second },
 };
 
-pub ExprTerm: ast::Expr = {
-    "(" <q:Query> ")" => *q,
-    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
-    <lo:@L> <path:PathExpr> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Path( path.ast(lo..hi) ) },
-    <ExprTermArray>,
-    <ExprTermBag>,
-    <ExprTermTuple>,
-    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
-}
-
 #[inline]
 ExprTermArray: ast::Expr = {
     <ExprTermArrayBrackets>,
@@ -831,66 +857,150 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> ")" =>
+    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args: Vec::new(),
             setq: Some(strategy)
         },
-     <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
+     <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
          ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args: Vec::new(),
             setq: Some(strategy)
          },
-    <func_name:"Identifier"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
+    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
         ast::Call {
-            func_name: ast::SymbolPrimitive{ value: func_name.to_owned() },
+            func_name: ast::SymbolPrimitive {
+                value: func_name.to_owned(),
+                case: Some(ast::CaseSensitivity::CaseInsensitive)
+            },
             args,
             setq: Some(strategy)
         },
 }
 
-PathExpr: ast::Path = {
-    <lo:@L> <path:PathExpr> "." <ident:"Identifier"> <hi:@R> => {
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                               Path Navigation                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+// Implementation of Path Navigation as specified by PartiQL Specification Section 4:
+// https://partiql.org/assets/PartiQL-Specification.pdf
+//
+// Examples:
+// a.b
+// a.*
+// a.[*]
+// a[*]
+// a.b.c
+// "a".b
+// "a"."b"
+// { 'a': 1, 'b': 2 }.a
+// [1, 2][1]
+// foo(x, y).a
+// (SELECT a from en).b
+//
+// See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
+PathSteps: Vec<ast::PathStep> = {
+    <path:PathSteps> "." <v:PathExprVarRef> => {
         let step = ast::PathStep::PathExpr(
             ast::PathExpr{
-                index: Box::new(ast::Expr{
-                    kind: ast::ExprKind::VarRef(ast::VarRef {
-                        name: ast::SymbolPrimitive { value: ident.to_owned() },
-                        case: ast::CaseSensitivity::CaseInsensitive,
-                        qualifier: ast::ScopeQualifier::Unqualified
-                    }.ast(lo..hi)),
-                }),
-                case: ast::CaseSensitivity::CaseInsensitive,
+                index: Box::new(v),
             });
 
-        let mut steps = path.steps;
+        let mut steps = path;
         steps.push(step);
-        ast::Path{ root:path.root, steps }
+        steps
+        // ast::Path{ root:path.root, steps }
     },
-    <lo:@L> <ident:"Identifier"> <hi:@R> => {
-        let root = ast::Expr{
-            kind: ast::ExprKind::VarRef(ast::VarRef {
-                name: ast::SymbolPrimitive { value: ident.to_owned() },
-                case: ast::CaseSensitivity::CaseInsensitive,
-                qualifier: ast::ScopeQualifier::Unqualified
-            }.ast(lo..hi)),
-        };
-        ast::Path{ root: Box::new(root), steps: vec![] }
+    <lo:@L> <path:PathSteps>  "[" "*" "]" <hi:@R> => {
+         let step = ast::PathStep::PathWildCard;
+
+         let mut steps = path;
+         steps.push(step);
+         steps
+         // ast::Path{ root:path.root, steps }
     },
-    <lo:@L> <ident:"AtIdentifier"> <hi:@R> => {
-        let root = ast::Expr{
-            kind: ast::ExprKind::VarRef(ast::VarRef {
-                name: ast::SymbolPrimitive { value: ident.to_owned() },
-                case: ast::CaseSensitivity::CaseInsensitive,
-                qualifier: ast::ScopeQualifier::Qualified
-            }.ast(lo..hi)),
-        };
-        ast::Path{ root: Box::new(root), steps: vec![] }
+    <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
+         let step = ast::PathStep::PathUnpivot;
+
+         let mut steps = path;
+         steps.push(step);
+         steps
+         // ast::Path{ root:path.root, steps }
+    },
+    // TODO Add path expression with CAST E.g. {'attr': 1, 'b':2}[CAST('at' || 'tr' AS STRING)]
+    // once https://github.com/partiql/partiql-lang-rust/pull/122 is merged
+    <lo:@L> <path:PathSteps> "[" <expr:ExprQuery> "]" <hi:@R> => {
+        let step = ast::PathStep::PathExpr(
+            ast::PathExpr{
+                index: Box::new(*expr),
+            });
+
+        let mut steps = path;
+        steps.push(step);
+        steps
+        // ast::Path{ root:path.root, steps }
+    },
+    <v:PathExprVarRef> => {
+        let step = ast::PathStep::PathExpr(
+            ast::PathExpr{
+                index: Box::new(v),
+            });
+        let steps = vec![step];
+        steps
+        // ast::Path{ root: Box::new(v), steps: vec![] }
     },
 }
 
+PathExprVarRef: ast::Expr = {
+    <lo:@L> <s:"String"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: s.to_owned(), case: None },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+    <VarRefExpr>,
+}
+
+VarRefExpr: ast::Expr = {
+    <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+    <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
+            case: ast::CaseSensitivity::CaseSensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+      }.ast(lo..hi)),
+    },
+    <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+    <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::VarRef(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
+            case: ast::CaseSensitivity::CaseInsensitive,
+            qualifier: ast::ScopeQualifier::Unqualified
+        }.ast(lo..hi)),
+    },
+};
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -959,7 +1069,6 @@ LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
 
-
 // ------------------------------------------------------------------------------ //
 //                                                                                //
 //                                  Utilities                                     //
@@ -1009,6 +1118,17 @@ CommaSepPlus<T>: Vec<T> = {
         v.push(e);
         v
     }
+};
+
+SymbolPrimitive: ast::SymbolPrimitive = {
+    <ident:"UnquotedIdent"> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        case: Some(ast::CaseSensitivity::CaseInsensitive),
+    },
+    <ident:"QuotedIdent"> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        case: Some(ast::CaseSensitivity::CaseSensitive),
+    },
 };
 
 // ------------------------------------------------------------------------------ //
@@ -1061,8 +1181,10 @@ extern {
 
 
         // Types
-        "Identifier" => lexer::Token::Identifier(<&'input str>),
-        "AtIdentifier" => lexer::Token::AtIdentifier(<&'input str>),
+        "UnquotedIdent" => lexer::Token::UnquotedIdent(<&'input str>),
+        "QuotedIdent" => lexer::Token::QuotedIdent(<&'input str>),
+        "UnquotedAtIdentifier" => lexer::Token::UnquotedAtIdentifier(<&'input str>),
+        "QuotedAtIdentifier" => lexer::Token::QuotedAtIdentifier(<&'input str>),
         "Int" => lexer::Token::Int(<&'input str>),
         "Real" => lexer::Token::Real(<&'input str>),
         "ExpReal" => lexer::Token::ExpReal(<&'input str>),

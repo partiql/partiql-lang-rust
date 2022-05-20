@@ -22,6 +22,7 @@ fn test_ast_init() {
 
     let span_only = ast::SymbolPrimitive {
         value: "symbol1".to_string(),
+        case: Some(CaseSensitivity::CaseInsensitive),
     }
     .to_node()
     .location(Location {
