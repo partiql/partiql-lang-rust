@@ -229,6 +229,7 @@ pub type BagAst = AstBytePos<Bag>;
 pub type BetweenAst = AstBytePos<Between>;
 pub type BinOpAst = AstBytePos<BinOp>;
 pub type CallAggAst = AstBytePos<CallAgg>;
+pub type CallArgAst = AstBytePos<CallArg>;
 pub type CallAst = AstBytePos<Call>;
 pub type CaseAst = AstBytePos<Case>;
 pub type FromClauseAst = AstBytePos<FromClause>;
@@ -507,8 +508,20 @@ pub struct Path {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
     pub func_name: SymbolPrimitive,
-    pub setq: Option<SetQuantifier>,
-    pub args: Vec<Box<Expr>>,
+    pub args: Vec<CallArgAst>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CallArg {
+    /// `*` used as an argument to a function call (e.g., in `count(*)`)
+    Star(),
+    /// positional argument to a function call (e.g., all arguments in `foo(1, 'a', 3)`)
+    Positional(Box<Expr>),
+    /// named argument to a function call (e.g., the `"from" : 2` in `substring(a, "from":2)`
+    Named {
+        name: SymbolPrimitive,
+        value: Option<Box<Expr>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

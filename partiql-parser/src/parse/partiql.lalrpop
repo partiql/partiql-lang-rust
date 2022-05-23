@@ -32,7 +32,7 @@ grammar<'input, 'err>(input: &'input str,
 //      precedence are at the bottom (i.e., `INTERSECT`)
 //    - all set operations are left-associative and are thus expressed as left-self-recursive rules
 
-pub Query: Box<ast::Expr> = {
+pub(crate) Query: Box<ast::Expr> = {
     <lo:@L>
     <set:QuerySetPrec02>
     <order_by:OrderByClause?>
@@ -100,7 +100,7 @@ Values: ast::QuerySetAst = {
 
 #[inline]
 ValueRow: Box<ast::Expr> = {
-    <array:ExprTermArrayParens> => Box::new(array)
+    <array:ExprTermCollection> => Box::new(array)
 }
 
 // ------------------------------------------------------------------------------ //
@@ -772,12 +772,11 @@ ExprPrecedence01: ast::Expr = {
     <ExprTerm>,
 };
 
-pub ExprTerm: ast::Expr = {
+ExprTerm: ast::Expr = {
     "(" <q:Query> ")" => *q,
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <VarRefExpr>,
-    <ExprTermArray>,
-    <ExprTermBag>,
+    <ExprTermCollection>,
     <ExprTermTuple>,
     ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
@@ -828,14 +827,22 @@ ExprPairWhenThen: ast::ExprPair = {
 };
 
 #[inline]
+ExprTermCollection: ast::Expr = {
+      <ExprTermArray>,
+      <ExprTermBag>,
+}
+
+#[inline]
 ExprTermArray: ast::Expr = {
     <ExprTermArrayBrackets>,
     <ExprTermArrayParens>
 }
+
 #[inline]
 ExprTermArrayBrackets: ast::Expr = {
     <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) }
 }
+
 #[inline]
 ExprTermArrayParens: ast::Expr = {
     <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
@@ -857,33 +864,51 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: ast::Call = {
-    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> ")" =>
-        ast::Call {
-            func_name: ast::SymbolPrimitive {
-                value: func_name.to_owned(),
-                case: Some(ast::CaseSensitivity::CaseInsensitive)
-            },
-            args: Vec::new(),
-            setq: Some(strategy)
-        },
-     <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> "*" ")" =>
-         ast::Call {
-            func_name: ast::SymbolPrimitive {
-                value: func_name.to_owned(),
-                case: Some(ast::CaseSensitivity::CaseInsensitive)
-            },
-            args: Vec::new(),
-            setq: Some(strategy)
-         },
-    <func_name:"UnquotedIdent"> "(" <strategy: SetQuantifierStrategy> <args:CommaSepPlus<ExprQuery>> ")" =>
-        ast::Call {
-            func_name: ast::SymbolPrimitive {
-                value: func_name.to_owned(),
-                case: Some(ast::CaseSensitivity::CaseInsensitive)
-            },
-            args,
-            setq: Some(strategy)
-        },
+    <func_name:FunctionName> "(" <args:CommaSepStar<FunctionCallArg>> ")" =>
+        ast::Call{ func_name, args }
+}
+
+#[inline]
+FunctionName: ast::SymbolPrimitive = {
+    <name:"UnquotedIdent"> => {
+        ast::SymbolPrimitive {
+            value: name.to_owned(),
+            case: Some(ast::CaseSensitivity::CaseInsensitive)
+        }
+    }
+}
+
+#[inline]
+FunctionCallArg: ast::CallArgAst = {
+    <FunctionArgPositional>,
+    <FunctionArgNamed>,
+}
+
+#[inline]
+FunctionArgPositional: ast::CallArgAst = {
+    <lo:@L> "*" <hi:@R> => ast::CallArg::Star().ast(lo..hi),
+    <lo:@L> <value:ExprQuery> <hi:@R> => ast::CallArg::Positional(value).ast(lo..hi)
+}
+
+#[inline]
+FunctionArgNamed: ast::CallArgAst = {
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: Some(value)}.ast(lo..hi)
+}
+
+#[inline]
+FunctionArgName: ast::SymbolPrimitive = {
+    <name:"QuotedIdent"> => {
+        ast::SymbolPrimitive {
+            value: name.to_owned(),
+            case: Some(ast::CaseSensitivity::CaseSensitive)
+        }
+    },
+    <name:"UnquotedIdent"> => {
+        ast::SymbolPrimitive {
+            value: name.to_owned(),
+            case: Some(ast::CaseSensitivity::CaseInsensitive)
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1008,7 +1033,7 @@ VarRefExpr: ast::Expr = {
 //                                                                                //
 // ------------------------------------------------------------------------------ //
 
-pub Literal: ast::Lit = {
+Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
     <LiteralIon>,
@@ -1209,6 +1234,7 @@ extern {
         "EXCEPT" => lexer::Token::Except,
         "FALSE" => lexer::Token::False,
         "FIRST" => lexer::Token::First,
+        "FOR" => lexer::Token::For,
         "FULL" => lexer::Token::Full,
         "FROM" => lexer::Token::From,
         "GROUP" => lexer::Token::Group,

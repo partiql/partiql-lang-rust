@@ -13,7 +13,20 @@ const Q_COMPLEX: &str = r#"
                 SELECT numRec, data
                 FROM delta_full_transactions.deltas delta,
                 (
-                    SELECT u.id, review, rindex
+                    SELECT foo(u.id), bar(review), rindex
+                    FROM delta.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
+                ) as data,
+                delta.numRec as numRec
+            )
+            AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
+            "#;
+
+const Q_COMPLEX_FEXPR: &str = r#"
+            SELECT (
+                SELECT numRec, data
+                FROM delta_full_transactions.deltas delta,
+                (
+                    SELECT cast(trim(u.id) as VARCHAR(20)), substring(review from 2 for 5), rindex
                     FROM delta.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
                 ) as data,
                 delta.numRec as numRec
@@ -27,11 +40,14 @@ fn parse_bench(c: &mut Criterion) {
     c.bench_function("parse-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("parse-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
     c.bench_function("parse-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
+    c.bench_function("parse-complex-fexpr", |b| {
+        b.iter(|| parse(black_box(Q_COMPLEX_FEXPR)))
+    });
 }
 
 criterion_group! {
     name = parse;
-    config = Criterion::default().measurement_time(Duration::new(10, 0));
+    config = Criterion::default().measurement_time(Duration::new(5, 0));
     targets = parse_bench
 }
 
