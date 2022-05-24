@@ -130,7 +130,6 @@ jobs:
         continue-on-error: true
         with:
           workflow: ci_build_test.yml
-          name: main-branch-report
           branch: main
       - name: backup case if download fails
         if: ${{ steps.download-report.outcome == 'failure' }}
