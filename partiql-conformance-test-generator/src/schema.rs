@@ -27,9 +27,10 @@ pub struct TestCase {
 /// Test case kind
 ///
 /// Currently, just supports `Parse` test cases. In the future, other test case variants will be
-/// added (e.g. evaluation, type-checking)
+/// added (e.g. evaluation, type-checking). For now, the other test case variants will be `Ignore`.
 pub enum TestCaseKind {
     Parse(ParseTestCase),
+    Ignore,
 }
 
 /// Test case to test the parsing behavior of a PartiQL statement

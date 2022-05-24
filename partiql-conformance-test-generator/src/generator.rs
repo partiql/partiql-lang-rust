@@ -1,4 +1,4 @@
-use crate::schema::TestCaseKind::Parse;
+use crate::schema::TestCaseKind::{Ignore, Parse};
 use crate::schema::{Namespace, ParseAssertions, ParseTestCase, TestCase, TestDocument};
 use codegen::{Function, Module, Scope};
 
@@ -40,10 +40,10 @@ fn namespace_to_module(namespace: &Namespace) -> Module {
 
 /// Converts a test case into a testing `Function`
 fn test_case_to_function(test_case: &TestCase) -> Function {
+    let mut test_fn: Function = Function::new(&test_case.test_name);
+    test_fn.attr("test");
     match &test_case.test_kind {
         Parse(ParseTestCase { parse_assertions }) => {
-            let mut test_fn: Function = Function::new(&test_case.test_name);
-            test_fn.attr("test");
             test_fn.line(format!("let query = r#\"{}\"#;", &test_case.statement));
             test_fn.line("let res = partiql_parser::parse_partiql(query);");
             match parse_assertions {
@@ -52,9 +52,14 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
                 ParseAssertions::ParseFail => test_fn
                     .line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", query, res);"#),
             };
-            test_fn
         }
-    }
+        Ignore => {
+            // for `Ignore` test cases, just output the statement and add the 'ignore' annotation
+            test_fn.attr("ignore");
+            test_fn.line(format!("let _statement = r#\"{}\"#;", &test_case.statement));
+        }
+    };
+    test_fn
 }
 
 #[cfg(test)]
