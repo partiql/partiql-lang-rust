@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::iter::FromIterator;
+use std::process::exit;
 use std::{env, fs};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -12,16 +13,35 @@ struct CTSReport {
     failing: Vec<String>,
 }
 
-// TODO: docs
+/// Compares two conformance reports generated from [`generate_cts_report`], generating a comparison
+/// report as markdown. The markdown report will contain the following:
+/// - a table showing the number and percent of passing/failing tests in both reports
+/// - number of tests passing in both reports
+/// - number of tests failing in both reports
+/// - number of tests passing in the first report but now fail in the second report (i.e. tests with
+/// regressed behavior)
+///   - also lists out these tests and gives a warning
+/// - number of tests failing in the first report but now pass in the second report
+///   - also lists out these tests
+///
+/// Requires the 3 following arguments
+/// 1. path to first conformance report (will most commonly refer to the `main` branch's report)
+/// 2. path to second conformance report
+/// 3. path to output comparison report
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // TODO: add argument checking
+    if args.len() != 4 {
+        println!("Requires passing in 3 arguments to `generate_comparison_report`. Usage:");
+        println!("    generate_comparison_report <path to first conformance report> <path to second conformance report> <output comparison report path>");
+        exit(1);
+    }
     let orig_path = &args[1];
     let new_path = &args[2];
+    let output_comparison_report_path = &args[3];
 
-    let orig_results = fs::read_to_string(orig_path).unwrap();
-    let new_results = fs::read_to_string(new_path).unwrap();
+    let orig_results = fs::read_to_string(orig_path).expect("read to string orig_results");
+    let new_results = fs::read_to_string(new_path).expect("read to string new_results");
 
     let orig_report: CTSReport = serde_json::from_str(&*orig_results).expect("from_str");
     let new_report: CTSReport = serde_json::from_str(&*new_results).expect("from_str");
@@ -34,12 +54,11 @@ fn main() {
 
     let passing_in_both = orig_passing.intersection(&new_passing);
     let failing_in_both = orig_failing.intersection(&new_failing);
-    let passing_orig_failing_new: Vec<&String> =
-        orig_passing.intersection(&new_failing).collect();
-    let failure_orig_passing_new: Vec<&String> =
-        orig_failing.intersection(&new_passing).collect();
+    let passing_orig_failing_new: Vec<&String> = orig_passing.intersection(&new_failing).collect();
+    let failure_orig_passing_new: Vec<&String> = orig_failing.intersection(&new_passing).collect();
 
-    let mut comparison_report_file = File::create("cts-comparison-report.md").expect("File create");
+    let mut comparison_report_file =
+        File::create(output_comparison_report_path).expect("File create");
 
     let num_orig_passing = orig_passing.len() as i32;
     let num_new_passing = new_passing.len() as i32;

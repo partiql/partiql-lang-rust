@@ -74,6 +74,7 @@ jobs:
           # Adding comments to the PR requires the GITHUB_TOKEN secret.
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
+      # Cache the `cargo build` so future jobs can reuse build
       - name: Cache cargo build
         if: matrix.os == 'ubuntu-latest'
         uses: actions/cache@v2
@@ -81,12 +82,15 @@ jobs:
         with:
           path: ./*
           key: ${{ github.sha }}
+  # Conformance report generation and comparison report generation job will run only after the `Build and Test` job
+  # succeeds.
   conformance:
     name: Check conformance
     runs-on: ubuntu-latest
     needs: [build]
     steps:
-      # Pull down the cached `partiql-lang-rust` build
+      # Pull down the cached `partiql-lang-rust` build from the `Build and Test` job. This allows us to reuse without
+      # needing to rebuild. If pulling the build fails, the subsequent `cargo test` will rebuild.
       - uses: actions/checkout@v2
         with:
           submodules: recursive
@@ -101,18 +105,25 @@ jobs:
         with:
           path: ./*
           key: ${{ github.sha }}
-      # Run the conformance tests and save to a file
-      - run: touch cargo_test_results.json
-      - name: Cargo Test of the conformance tests (can fail)
+      # Run the conformance tests (i.e. `cargo test`) and save to a json file. This uses the "format" unstable compile
+      # option to save as json. In the future, may want to use the `cargo_metadata` crate (https://crates.io/crates/cargo_metadata)
+      # to format and use the output.
+      - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
         run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" -- -Z unstable-options --format json > cargo_test_results.json
+      # Create a conformance report from the `cargo test` json file
       - run: ./target/debug/generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
-      # Upload conformance report for future runs
+      # Upload conformance report for comparison with future runs
       - name: Upload cts_report.json
         uses: actions/upload-artifact@v3
         with:
           path: cts_report.json
-      # Download conformance report from `main` to create comparison report. If `main` has no report, use a backup report
+      # Download conformance report from `main` to create comparison report. If `main` has no report, use a backup
+      # report (stored in partiql-conformance-tests/backup_conformance_report.json). Alternatively, we could consider
+      # - pulling `main` branch and rerun the tests
+      # - pulling latest release and rerun the tests
+      # - compare to an empty file
+      # - don't perform comparisons
       - name: Download cts_report.json from `main` branch
         uses: dawidd6/action-download-artifact@v2
         id: download-report
@@ -125,7 +136,7 @@ jobs:
         if: ${{ steps.download-report.outcome == 'failure' }}
         run: mkdir -p main-branch-report && cp -r ./partiql-conformance-tests/backup_conformance_report.json ./main-branch-report/cts_report.json
       # Run conformance report comparison. Generates cts-comparison-report.md
-      - run: ./target/debug/generate_comparison_report ./main-branch-report/cts_report.json cts_report.json
+      - run: ./target/debug/generate_comparison_report ./main-branch-report/cts_report.json cts_report.json cts-comparison-report.md
       # Print conformance report to GitHub actions workflow summary page
       - name: print markdown in run
         run: cat cts-comparison-report.md >> $GITHUB_STEP_SUMMARY
@@ -138,7 +149,7 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: 'github-actions[bot]'
           body-includes: Conformance
-      # Convert the comparison markdown report to a readable form for GitHub PR comments
+      # Convert the markdown comparison report to a readable form for GitHub PR comments
       - id: get-comment-body
         run: |
           body="$(cat ./cts-comparison-report.md)"
@@ -146,7 +157,7 @@ jobs:
           body="${body//$'\n'/'%0A'}"
           body="${body//$'\r'/'%0D'}"
           echo "::set-output name=body::$body"
-      # Create or update (if previous comment exists) with comparison markdown version of report
+      # Create or update (if previous comment exists) with markdown version of comparison report
       - name: Create or update comment
         uses: peter-evans/create-or-update-comment@v2
         if: github.event_name == 'pull_request'
