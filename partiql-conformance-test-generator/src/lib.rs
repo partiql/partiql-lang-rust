@@ -2,7 +2,7 @@ pub mod generator;
 mod schema;
 pub mod util;
 
-use crate::schema::TestCaseKind::{Ignore, Parse};
+use crate::schema::TestCaseKind::{NotYetImplemented, Parse};
 use crate::schema::{
     Namespace, Namespaces, ParseAssertions, ParseTestCase, TestCase, TestCases, TestDocument,
 };
@@ -112,7 +112,7 @@ pub fn test_namespace(element: &OwnedElement) -> Namespace {
 /// the test case category (currently limited to just 'parse'). The IonStruct requires two string
 /// fields with the 'name' and 'statement'.
 ///
-/// For test case categories that are not supported, will create an `Ignore` test case.
+/// For test case categories that are not supported, will create a `NotYetImplemented` test case.
 fn test_case(element: &OwnedElement) -> TestCase {
     let annot: Vec<_> = element.annotations().map(|a| a.text().expect("")).collect();
 
@@ -141,7 +141,7 @@ fn test_case(element: &OwnedElement) -> TestCase {
         TestCase {
             test_name,
             statement,
-            test_kind: Ignore,
+            test_kind: NotYetImplemented,
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::schema::TestCaseKind::{Ignore, Parse};
+use crate::schema::TestCaseKind::{NotYetImplemented, Parse};
 use crate::schema::{Namespace, ParseAssertions, ParseTestCase, TestCase, TestDocument};
 use codegen::{Function, Module, Scope};
 
@@ -53,8 +53,9 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
                     .line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", query, res);"#),
             };
         }
-        Ignore => {
-            // for `Ignore` test cases, just output the statement and add the 'ignore' annotation
+        NotYetImplemented => {
+            // for `NotYetImplemented` test cases, just output the statement and add the 'ignore'
+            // annotation
             test_fn.attr("ignore");
             test_fn.line(format!("let _statement = r#\"{}\"#;", &test_case.statement));
         }
