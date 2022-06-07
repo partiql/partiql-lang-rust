@@ -133,9 +133,9 @@ jobs:
           branch: main
       - name: backup case if download fails
         if: ${{ steps.download-report.outcome == 'failure' }}
-        run: mkdir -p main-branch-report && cp -r ./partiql-conformance-tests/backup_conformance_report.json ./main-branch-report/cts_report.json
+        run: mkdir -p artifact && cp -r ./partiql-conformance-tests/backup_conformance_report.json ./artifact/cts_report.json
       # Run conformance report comparison. Generates cts-comparison-report.md
-      - run: ./target/debug/generate_comparison_report ./main-branch-report/cts_report.json cts_report.json cts-comparison-report.md
+      - run: ./target/debug/generate_comparison_report ./artifact/cts_report.json cts_report.json cts-comparison-report.md
       # Print conformance report to GitHub actions workflow summary page
       - name: print markdown in run
         run: cat cts-comparison-report.md >> $GITHUB_STEP_SUMMARY
