@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>PartiQL Playground</title>
+    <link rel="stylesheet" href="./css/partiql-playground.css"/>
+    <link rel="stylesheet" href="./css/bootstrap-4.4.1.css"/>
+    <link rel="stylesheet" href="./css/jquery.json-viewer.css">
+    <script src="./js/jquery-3.4.1.min.js"></script>
+    <script src="./js/jquery.json-viewer.js"></script>
+    <script src="js/d3.v3.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <div class="row mt-3">
+        <h3>The PartiQL Playground</h3>
+    </div>
+    <div class="row mt-3">
+        <div class="col-4"></div>
+        <div class="col-4"></div>
+        <div class="col-4">
+            <select name="action" id="action" class="form-select form-select-lg mb-3">
+                <option value="parse">parse</option>
+                <option value="eval">eval</option>
+            </select>
+            <select name="ver" id="ver">
+                <option value="0">0.0.0</option>
+            </select>
+            <button name="exec" id="exec" class="btn btn-dark">Run</button>
+            <button name="save" id="save" class="btn btn-success">Save</button>
+        </div>
+    </div>
+    <div class="row mt-3">
+    </div>
+    <div class="row" id="edit-area">
+        <div class="col-12" id="editor"></div>
+    </div>
+    <div class="row mt-3" id="env">
+        <textarea id="env-data" class="form-control" placeholder="Environment data"></textarea>
+    </div>
+    <div class="row mt-3" id="result-area">
+        <div class="tab">
+            <button class="tablinks" id="btnJsonAst">JSON AST</button>
+            <button class="tablinks" id="btnGraphAst">AST Graph</button>
+            <button class="tablinks" id="btnRawJson">AST Raw JSON</button>
+            <button class="btn btn-link btn-sm" id="copyToClip" onclick="copyToClip()">copy to clipboard</button>
+        </div>
+        <div id="json" class="tab-content">
+            <pre id="rendered-json"></pre>
+        </div>
+        <div id="graph" class="tab-content">
+            <svg id="svg-scrim" class="svg svg-scrim">
+                <circle id="pivot" class="pivot" cx="0" cy="0" r="6"/>
+            </svg>
+        </div>
+        <div id="rawjson" class="tab-content">
+            <pre id="raw-json"></pre>
+        </div>
+    </div>
+    <div class="row mt-5" id="footer">Copyright 2016-2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.</div>
+</div>
+<script>
+    /**
+     * Handles the click event for the given event and tab.
+     * @param evt the event Object
+     * @param tabId the id of the tab element
+     */
+    function tabClick(evt, tabId) {
+        let i, tabContent, tablinks;
+
+        tabContent = document.getElementsByClassName('tab-content');
+
+        for (i = 0; i < tabContent.length; i++) {
+            tabContent[i].style.display = 'none';
+        }
+
+        tablinks = document.getElementsByClassName('tablinks');
+
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(' active', "");
+        }
+
+        document.getElementById(tabId).style.display = 'block';
+        evt.currentTarget.className += ' active';
+
+        if (tabId === 'rawjson') {
+            document.getElementById('copyToClip').style.display = 'block';
+        } else {
+            document.getElementById('copyToClip').style.display = 'none';
+        }
+    }
+
+    /**
+     * Copies the contents of `rendered-json` tab to clipboard.
+     */
+    function copyToClip() {
+        const copyText = document.getElementById('rendered-json');
+        if (copyText) {
+            navigator.clipboard.writeText(copyText.innerText);
+            document.getElementById('copyToClip').innerText = 'copied'
+        }
+    }
+</script>
+<script src="./ace-builds/src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
+<script src="./js/d3.v3.min.js"></script>
+<script src="js/ast-graph.js"></script>
+<script type="module">
+    import init, {parse} from './pkg/partiql_playground.js';
+
+    init();
+
+    let svgel;
+    const action = document.getElementById('action');
+    const btn = document.getElementById('exec');
+    const btnGraphAst = document.getElementById('btnGraphAst');
+    const btnJsonAst = document.getElementById('btnJsonAst');
+    const btnRawJson = document.getElementById('btnRawJson');
+    const copyToClipLabel = document.getElementById('copyToClip');
+    const editor = ace.edit('editor');
+    const env = document.getElementById('env');
+    const graph = document.getElementById('graph');
+    const rawjson = document.getElementById('raw-json')
+    const resultArea = document.getElementById('result-area');
+
+    editor.session.setMode('ace/mode/partiql');
+
+    btn.addEventListener('click', () => {
+        run()
+    });
+
+    action.addEventListener('change', () => {
+        if (action.value === 'parse') {
+            env.style.display = 'none';
+        } else {
+            resultArea.style.display = 'none';
+            env.style.display = 'block';
+        }
+    });
+
+    btnJsonAst.addEventListener('click', (e) => tabClick(e, 'json'));
+    btnGraphAst.addEventListener('click', (e) => tabClick(e, 'graph'));
+    btnRawJson.addEventListener('click', (e) => tabClick(e, 'rawjson'));
+
+    action.value = 'parse';
+    copyToClipLabel.innerText = 'copy to clipboard';
+
+    /**
+     * Exposes the entrypoint for execution based on the selected action.
+     */
+    function run() {
+        const res = parse(editor.getValue());
+        const j = JSON.parse(res);
+        j.version = '0.0.0';
+        graph.innerHTML = '';
+
+        $('#rendered-json').jsonViewer(j);
+
+        rawjson.innerText = JSON.stringify(j);
+        copyToClipLabel.innerText = 'copy to clipboard';
+        resultArea.style.display = 'block';
+
+        btnJsonAst.click();
+        drawGraph(res);
+
+        svgel = document.querySelector('svg');
+        svgel.addEventListener('mousedown', e1 => {
+            const x1 = e1.clientX;
+            const y1 = e1.clientY;
+
+            svgel.onmousemove = function (e2) {
+                const x2 = e2.clientX;
+                const y2 = e2.clientY;
+                pan(x1 - x2, y1 - y2);
+            }
+        });
+
+        svgel.addEventListener('mouseup', () => {
+            svgel.onmousemove = null;
+        });
+
+        svgel.addEventListener('mouseout', () => {
+            svgel.onmousemove = null;
+        });
+
+        svgel.onwheel = onWheel;
+    }
+
+    /**
+     * Provides the pan functionality for the give delte-x and delta-y.
+     * @param dx delta-x the change from original x axis.
+     * @param dy delta-y the change from original y axis.
+     */
+    const pan = (dx, dy) => {
+        const {scale, x, y} = getTransformParameters(svgel);
+        svgel.style.transform = getTransformString(scale, x + dx / 50, y + dy / 50);
+    };
+
+    /**
+     * Provides the svg zoom functionality on the given event.
+     * @param event
+     */
+    function onWheel(event) {
+        const point = svgel.createSVGPoint();
+
+        const viewBox = svgel.viewBox.baseVal;
+        event.preventDefault();
+
+        let normalized;
+        let delta = event.wheelDelta;
+
+        if (delta) {
+            normalized = (delta % 120) === 0 ? delta / 120 : delta / 12;
+        } else {
+            delta = event.deltaY || event.detail || 0;
+            normalized = -(delta % 3 ? delta * 10 : delta / 3);
+        }
+
+        const scaleDelta = normalized > 0 ? 1 / 1.6 : 1.6;
+
+        point.x = event.clientX;
+        point.y = event.clientY;
+
+        const startPoint = point.matrixTransform(svgel.getScreenCTM().inverse());
+
+        viewBox.x -= (startPoint.x - viewBox.x) * (scaleDelta - 1);
+        viewBox.y -= (startPoint.y - viewBox.y) * (scaleDelta - 1);
+        viewBox.width *= scaleDelta;
+        viewBox.height *= scaleDelta;
+    }
+
+    /**
+     * A helper for retrieving transform parameters for the given element.
+     * @param element
+     * @returns {{x: number, scale: number, y: number}}
+     */
+    const getTransformParameters = (element) => {
+        const transform = element.style.transform;
+        let scale = 1,
+            x = 0,
+            y = 0;
+        if (transform.includes("scale"))
+            scale = parseFloat(transform.slice(transform.indexOf("scale") + 6));
+        if (transform.includes("translateX"))
+            x = parseInt(transform.slice(transform.indexOf("translateX") + 11));
+        if (transform.includes("translateY"))
+            y = parseInt(transform.slice(transform.indexOf("translateY") + 11));
+        return {scale, x, y};
+    };
+
+    /**
+     * A helper for retrieving transform string.
+     * @param scale SVG zoom scale.
+     * @param x SVG x position.
+     * @param y SVG y position.
+     * @returns {string} The transform string.
+     */
+    const getTransformString = (scale, x, y) =>
+        "scale(" + scale + ") " + "translateX(" + x + "%) translateY(" + y + "%)";
+</script>
+</body>
+</html>

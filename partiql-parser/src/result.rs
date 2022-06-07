@@ -9,6 +9,8 @@ use partiql_ast::ast;
 use partiql_source_map::location::{LineAndColumn, Located};
 use thiserror::Error;
 
+use serde::{Deserialize, Serialize};
+
 /// [`Error`] type for errors in the lexical structure for the PartiQL parser.
 pub type LexicalError<'input> = crate::result::LexError<'input>;
 
@@ -22,7 +24,7 @@ pub type ParserResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input>>>
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[non_exhaustive]
 pub enum LexError<'input> {
     /// Generic invalid input; likely an unrecognizable token.
@@ -43,7 +45,7 @@ pub enum LexError<'input> {
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[non_exhaustive]
 pub enum ParseError<'input, Loc>
 where
@@ -74,7 +76,7 @@ where
     IllegalState(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct UnexpectedTokenData<'input> {
     /// The unexpected token
     pub token: Cow<'input, str>,

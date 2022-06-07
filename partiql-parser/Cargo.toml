@@ -40,6 +40,8 @@ itertools = "~0.10.3"
 regex = "~1.5.5"
 lazy_static = "~1.4.0"
 
+serde = { version = "~1.0.137", features = ["derive"] }
+
 [dev-dependencies]
 criterion = "0.3"
 

@@ -19,3 +19,4 @@ version = "0.0.0"
 
 [dependencies]
 smallvec = "~1.8.0"
+serde = { version = "~1.0.137", features = ["derive"] }
