@@ -264,12 +264,12 @@ TableBaseReference: ast::FromLetAst = {
 
 #[inline]
 TableUnpivot: ast::FromLetAst = {
-    <lo:@L> "UNPIVOT" <e:ExprQuery> "AS"? <ident_as:SymbolPrimitive> "AT" <ident_at:SymbolPrimitive> <hi:@R> => {
+    <lo:@L> "UNPIVOT" <e:ExprQuery> <as_ident:AsIdent?> <at_ident:AtIdent?> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
-            as_alias: Some(ident_as),
-            at_alias: Some(ident_at),
+            as_alias: as_ident,
+            at_alias: at_ident,
             by_alias: None,
         }.ast(lo..hi)
     }
@@ -1155,6 +1155,14 @@ SymbolPrimitive: ast::SymbolPrimitive = {
         case: Some(ast::CaseSensitivity::CaseSensitive),
     },
 };
+
+AsIdent: ast::SymbolPrimitive = {
+    "AS" <SymbolPrimitive>
+}
+
+AtIdent: ast::SymbolPrimitive = {
+    "AT" <SymbolPrimitive>
+}
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
