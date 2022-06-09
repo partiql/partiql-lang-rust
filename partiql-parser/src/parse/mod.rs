@@ -451,6 +451,16 @@ mod tests {
                     FROM UNPIVOT R.returnValueMap.success AS "list" AT symb"#
             );
         }
+
+        #[test]
+        fn select_with_cross_join_and_at() {
+            parse!(r#"SELECT * FROM a AS a CROSS JOIN c AS c AT q"#);
+        }
+
+        #[test]
+        fn select_with_at_and_cross_join_and_at() {
+            parse!(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
+        }
     }
 
     mod set_ops {
@@ -573,74 +583,6 @@ mod tests {
             CharOffset, LineAndCharPosition, LineOffset, Located, Location,
         };
         use std::borrow::Cow;
-
-        #[test]
-        fn improper_at() {
-            let res = parse_partiql(r#"SELECT * FROM a AS a CROSS JOIN c AS c AT q"#);
-            assert!(res.is_err());
-            let errors = res.unwrap_err();
-            assert_eq!(1, errors.len());
-            assert_eq!(
-                "Unexpected token `AT` at `(1:40..1:42)`",
-                errors[0].to_string()
-            );
-        }
-
-        #[test]
-        fn improper_at_multi() {
-            let res = parse_partiql(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
-            assert!(res.is_err());
-            let errors = res.unwrap_err();
-            assert_eq!(2, errors.len());
-            assert_eq!(
-                "Unexpected token `AT` at `(1:22..1:24)`",
-                errors[0].to_string()
-            );
-            assert_eq!(
-                "Unexpected token `AT` at `(1:45..1:47)`",
-                errors[1].to_string()
-            );
-            assert_eq!(
-                errors[0],
-                ParseError::UnexpectedToken(UnexpectedToken {
-                    inner: UnexpectedTokenData {
-                        token: Cow::from("AT")
-                    },
-                    location: Location {
-                        start: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(21)
-                        }
-                        .into(),
-                        end: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(23)
-                        }
-                        .into(),
-                    },
-                })
-            );
-            assert_eq!(
-                errors[1],
-                ParseError::UnexpectedToken(UnexpectedToken {
-                    inner: UnexpectedTokenData {
-                        token: Cow::from("AT")
-                    },
-                    location: Location {
-                        start: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(44)
-                        }
-                        .into(),
-                        end: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(46)
-                        }
-                        .into(),
-                    },
-                })
-            );
-        }
 
         #[test]
         fn eof() {

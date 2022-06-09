@@ -242,22 +242,22 @@ TableNonJoin: ast::FromClauseAst = {
 
 #[inline]
 TableBaseReference: ast::FromLetAst = {
-    <lo:@L> <e:ExprQuery> <hi:@R> => {
-        ast::FromLet {
-            expr: e,
-            kind: ast::FromLetKind::Scan,
-            as_alias: None,
-            at_alias: None,
-            by_alias: None
-        }.ast(lo..hi)
-    },
-    <lo:@L> <e:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
+    <lo:@L> <e:ExprQuery> <as_alias:SymbolPrimitive> <hi:@R> => {
         ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: Some(as_alias),
             at_alias: None,
             by_alias: None
+        }.ast(lo..hi)
+    },
+    <lo:@L> <e:ExprQuery> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
+        ast::FromLet {
+            expr: e,
+            kind: ast::FromLetKind::Scan,
+            as_alias,
+            at_alias,
+            by_alias
         }.ast(lo..hi)
     }
 }
@@ -1162,6 +1162,10 @@ AsIdent: ast::SymbolPrimitive = {
 
 AtIdent: ast::SymbolPrimitive = {
     "AT" <SymbolPrimitive>
+}
+
+ByIdent: ast::SymbolPrimitive = {
+    "BY" <SymbolPrimitive>
 }
 
 // ------------------------------------------------------------------------------ //

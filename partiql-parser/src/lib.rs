@@ -13,8 +13,8 @@
 //! assert_eq!(errs[0].to_string(), "Unexpected end of input");
 //!
 //! let errs_at: Vec<ParserError> =
-//!     parse_partiql("SELECT * FROM a AS a CROSS JOIN c AS c AT q").unwrap_err();
-//! assert_eq!(errs_at[0].to_string(), "Unexpected token `AT` at `(1:40..1:42)`");
+//!     parse_partiql("SELECT * FROM a AY a CROSS JOIN c AS c AT q").unwrap_err();
+//! assert_eq!(errs_at[0].to_string(), "Unexpected token `<a:UNQUOTED_IDENT>` at `(1:20..1:21)`");
 //! ```
 //!
 //! [partiql]: https://partiql.org
