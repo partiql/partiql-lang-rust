@@ -15,7 +15,11 @@ git clone --recursive https://github.com/partiql/partiql-lang-rust.git
 ```bash
 cd partiql-lang-rust/partiql-playground
 ```
-3. Start a webserver from the root directory, as an example, you can use [Python's SimpleHTTPServer](https://docs.python.org/3.8/library/http.server.html#http.server.SimpleHTTPRequestHandler):
+3. Build the WASM package:
+```
+wasm-pack build --target web
+```
+4. Start a webserver from the root directory, as an example, you can use [Python's SimpleHTTPServer](https://docs.python.org/3.8/library/http.server.html#http.server.SimpleHTTPRequestHandler):
 ```bash
 python3 -m http.server
 ```
@@ -23,7 +27,9 @@ python3 -m http.server
 
 ## Development
 `PartiQL Playground` uses [WebAssembly (Wasm)](https://webassembly.org/) for integrating the front-end with PartiQL Rust back-end.
-Considering this, upon any changes to the package's Rust dependencies (E.g. `partiql-parser`) or the wasm code under `./src/lib` of this package, you need to rebuild the Wasm package using the following command from the root of this package:
+Considering this, please install the `wasm-pack` by following the instructions [here](https://github.com/rustwasm/wasm-pack#-prerequisities).
+
+Upon any changes to the package's Rust dependencies (E.g. `partiql-parser`) or the wasm code under `./src/lib` of this package, you need to rebuild the Wasm package using the following command from the root of this package:
 ```bash
 wasm-pack build --target web
 ```

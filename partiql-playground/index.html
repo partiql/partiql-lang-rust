@@ -27,7 +27,7 @@
                 <option value="0">0.0.0</option>
             </select>
             <button name="exec" id="exec" class="btn btn-dark">Run</button>
-            <button name="save" id="save" class="btn btn-success">Save</button>
+            <button name="save" id="save" class="btn btn-success" disabled="true" title="Save the query to a Web URL">Save</button>
         </div>
     </div>
     <div class="row mt-3">
@@ -162,6 +162,8 @@
         btnJsonAst.click();
         drawGraph(res);
 
+        // Enable Zooming on the Graph using mouse wheel.
+        // TODO Fix the navigation as it still requires more work, especially for panning as it does not work smoothly.
         svgel = document.querySelector('svg');
         svgel.addEventListener('mousedown', e1 => {
             const x1 = e1.clientX;
