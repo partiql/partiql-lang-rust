@@ -27,6 +27,7 @@ use std::ops::Range;
 /// assert_eq!(tracker.at(source, ByteOffset(30).into()), Ok(LineAndCharPosition::new(3,4)));
 /// assert_eq!(tracker.at(source, ByteOffset(300).into()), Err(LineOffsetError::EndOfInput));
 /// ```
+#[derive(Debug)]
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
 }
