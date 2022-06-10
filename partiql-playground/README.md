@@ -2,7 +2,7 @@
 
 PartiQL Playground is intended to provide the required code for enabling execution of PartiQL queries on web.
 
-_Please note, at this stage the code within this package is considered experimental and should be used for production._
+_Please note, at this stage the code within this package is considered experimental and should not be used for production._
 
 ## Local Usage
 For local usage follow the below steps.
@@ -19,7 +19,7 @@ cd partiql-lang-rust/partiql-playground
 ```bash
 python3 -m http.server
 ```
-4. On your browser go to `http://http://localhost:8000/`
+4. On your browser go to `http://localhost:8000/`
 
 ## Development
 `PartiQL Playground` uses [WebAssembly (Wasm)](https://webassembly.org/) for integrating the front-end with PartiQL Rust back-end.
