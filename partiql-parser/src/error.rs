@@ -5,16 +5,10 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
-use partiql_source_map::location::{LineAndColumn, Located};
+use partiql_source_map::location::Located;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
-
-/// [`Error`] type for errors in the lexical structure for the PartiQL parser.
-pub type LexicalError<'input> = crate::error::LexError<'input>;
-
-/// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
-pub type ParserError<'input> = crate::error::ParseError<'input, LineAndColumn>;
 
 /// Errors in the lexical structure of a PartiQL query.
 ///
@@ -57,7 +51,7 @@ where
 
     /// An otherwise un-categorized error occurred
     #[error("Unknown parse error at `{}`", _0)]
-    UnknownParseError(Loc),
+    Unknown(Loc),
 
     /// There was a token that was not expected
     #[error("Unexpected token `{}` at `{}`", _0.inner.token, _0.location)]

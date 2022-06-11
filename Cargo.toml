@@ -11,4 +11,5 @@ members = [
   "partiql-parser",
   "partiql-playground",
   "partiql-rewriter",
+  "partiql-cli"
 ]

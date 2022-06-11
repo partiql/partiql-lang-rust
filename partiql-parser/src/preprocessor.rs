@@ -573,7 +573,6 @@ where
 mod tests {
     use super::*;
     use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-    use partiql_source_map::location::BytePosition;
 
     use crate::ParseError;
 
@@ -584,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn cast() -> Result<(), ParseError<'static, BytePosition>> {
+    fn cast() -> Result<(), ParseError<'static>> {
         let query = "CAST(a AS VARCHAR)";
 
         let mut offset_tracker = LineOffsetTracker::default();
@@ -609,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn composed() -> Result<(), ParseError<'static, BytePosition>> {
+    fn composed() -> Result<(), ParseError<'static>> {
         let query =
             "cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))";
 
@@ -673,20 +672,20 @@ mod tests {
     }
 
     #[test]
-    fn preprocessor() -> Result<(), ParseError<'static, BytePosition>> {
+    fn preprocessor() -> Result<(), ParseError<'static>> {
         fn to_tokens<'a>(
             lexer: impl Iterator<Item = LexResult<'a>>,
-        ) -> Result<Vec<Token<'a>>, ParseError<'a, BytePosition>> {
+        ) -> Result<Vec<Token<'a>>, ParseError<'a>> {
             lexer
                 .map(|result| result.map(|(_, t, _)| t))
                 .collect::<Result<Vec<_>, _>>()
         }
-        fn lex(query: &str) -> Result<Vec<Token>, ParseError<BytePosition>> {
+        fn lex(query: &str) -> Result<Vec<Token>, ParseError> {
             let mut offset_tracker = LineOffsetTracker::default();
             let lexer = PartiqlLexer::new(query, &mut offset_tracker);
             to_tokens(lexer)
         }
-        fn preprocess(query: &str) -> Result<Vec<Token>, ParseError<BytePosition>> {
+        fn preprocess(query: &str) -> Result<Vec<Token>, ParseError> {
             let mut offset_tracker = LineOffsetTracker::default();
             let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &*BUILT_INS);
             to_tokens(lexer)
