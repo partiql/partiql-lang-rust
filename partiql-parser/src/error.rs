@@ -5,18 +5,14 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
-use partiql_ast::ast;
 use partiql_source_map::location::{LineAndColumn, Located};
 use thiserror::Error;
 
 /// [`Error`] type for errors in the lexical structure for the PartiQL parser.
-pub type LexicalError<'input> = crate::result::LexError<'input>;
+pub type LexicalError<'input> = crate::error::LexError<'input>;
 
 /// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
-pub type ParserError<'input> = crate::result::ParseError<'input, LineAndColumn>;
-
-/// General [`Result`] type for the PartiQL parser.
-pub type ParserResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input>>>;
+pub type ParserError<'input> = crate::error::ParseError<'input, LineAndColumn>;
 
 /// Errors in the lexical structure of a PartiQL query.
 ///

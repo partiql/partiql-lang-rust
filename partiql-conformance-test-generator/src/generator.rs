@@ -45,7 +45,7 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
     match &test_case.test_kind {
         Parse(ParseTestCase { parse_assertions }) => {
             test_fn.line(format!("let query = r#\"{}\"#;", &test_case.statement));
-            test_fn.line("let res = partiql_parser::parse_partiql(query);");
+            test_fn.line("let res = partiql_parser::Parser::default().parse(query);");
             match parse_assertions {
                 ParseAssertions::ParsePass => test_fn
                     .line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", query, res);"#),

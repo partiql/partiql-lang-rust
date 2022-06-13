@@ -2,9 +2,9 @@
 
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
-use crate::lexer;
+use crate::error::{ParseError, UnexpectedTokenData};
 use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
-use crate::result::{ParseError, ParserResult, UnexpectedTokenData};
+use crate::{lexer, ParserError};
 use lalrpop_util as lpop;
 use lazy_static::lazy_static;
 use partiql_ast::ast;
@@ -30,19 +30,20 @@ type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
+pub(crate) type AstResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input>>>;
+
 lazy_static! {
     static ref BUILT_INS: FnExprSet<'static> = built_ins();
 }
 
 /// Parse PartiQL query text.
-pub fn parse_partiql(s: &str) -> ParserResult {
-    let mut offsets = LineOffsetTracker::default();
+pub fn parse_partiql<'input>(s: &'input str, offsets: &mut LineOffsetTracker) -> AstResult<'input> {
     let mut errors: Vec<LalrpopErrorRecovery> = vec![];
-    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &*BUILT_INS);
+    let lexer = PreprocessingPartiqlLexer::new(s, offsets, &*BUILT_INS);
 
     let parsed: LalrpopResult = grammar::QueryParser::new().parse(s, &mut errors, lexer);
 
-    process_errors(s, &offsets, parsed, errors)
+    process_errors(s, offsets, parsed, errors)
 }
 
 fn process_errors<'input, T>(
@@ -124,6 +125,10 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    pub fn parse_partiql(s: &str) -> AstResult {
+        let mut offsets = LineOffsetTracker::default();
+        super::parse_partiql(s, &mut offsets)
+    }
 
     macro_rules! parse {
         ($q:expr) => {{
@@ -578,7 +583,7 @@ mod tests {
 
     mod errors {
         use super::*;
-        use crate::result::{LexicalError, UnexpectedToken, UnexpectedTokenData};
+        use crate::error::{LexicalError, UnexpectedToken, UnexpectedTokenData};
         use partiql_source_map::location::{
             CharOffset, LineAndCharPosition, LineOffset, Located, Location,
         };

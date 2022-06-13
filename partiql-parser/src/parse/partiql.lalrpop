@@ -1,5 +1,5 @@
 use crate::parse::lexer;
-use crate::result::ParseError;
+use crate::error::ParseError;
 
 use lalrpop_util as lpop;
 

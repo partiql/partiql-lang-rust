@@ -8,7 +8,7 @@ use std::cmp::max;
 use std::fmt;
 use std::fmt::Formatter;
 
-use crate::result::{LexError, ParseError};
+use crate::error::{LexError, ParseError};
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 
 /// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
