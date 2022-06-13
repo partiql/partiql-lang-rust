@@ -25,6 +25,7 @@ partiql-source-map = { path = "../partiql-source-map" }
 
 derive_builder = "~0.11.1"
 rust_decimal = "~1.22.0"
+serde = { version = "~1.0.137", features = ["derive"] }
 
 [dev-dependencies]
 

@@ -1,6 +1,7 @@
 //! [`LineOffsetTracker`] and related types for mapping locations in source `str`s.
 
 use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
+use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
@@ -27,7 +28,7 @@ use std::ops::Range;
 /// assert_eq!(tracker.at(source, ByteOffset(30).into()), Ok(LineAndCharPosition::new(3,4)));
 /// assert_eq!(tracker.at(source, ByteOffset(300).into()), Err(LineOffsetError::EndOfInput));
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
 }

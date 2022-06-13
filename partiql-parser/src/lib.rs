@@ -35,6 +35,8 @@ pub use error::LexicalError;
 pub use error::ParseError;
 pub use error::ParserError;
 
+use serde::{Deserialize, Serialize};
+
 /// General [`Result`] type for the PartiQL [`Parser`].
 pub type ParserResult<'input> = Result<Parsed<'input>, Vec<ParserError<'input>>>;
 
@@ -60,7 +62,7 @@ impl Parser {
 
 /// The output of parsing PartiQL statement strings: an AST and auxiliary data.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Parsed<'input> {
     text: &'input str,
     offsets: LineOffsetTracker,
