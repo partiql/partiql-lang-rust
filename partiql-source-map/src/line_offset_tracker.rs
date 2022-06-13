@@ -1,9 +1,9 @@
 //! [`LineOffsetTracker`] and related types for mapping locations in source `str`s.
 
 use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
+use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
-use serde::{Deserialize, Serialize};
 
 /// Keeps track of source offsets of newlines for the purposes of later calculating
 /// line and column information
