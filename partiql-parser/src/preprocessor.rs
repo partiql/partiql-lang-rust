@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 
 use std::ops::Range;
 
-use crate::result::LexError;
+use crate::error::LexError;
 
 use crate::lexer::{InternalLexResult, LexResult, PartiqlLexer, Spanned, Token};
 
