@@ -18,5 +18,5 @@ version = "0.0.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-smallvec = "~1.8.0"
+smallvec = { version = "~1.8.0", features = ["serde"] }
 serde = { version = "~1.0.137", features = ["derive"] }

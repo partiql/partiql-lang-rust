@@ -3,6 +3,7 @@
 use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
+use serde::{Deserialize, Serialize};
 
 /// Keeps track of source offsets of newlines for the purposes of later calculating
 /// line and column information
@@ -27,7 +28,7 @@ use std::ops::Range;
 /// assert_eq!(tracker.at(source, ByteOffset(30).into()), Ok(LineAndCharPosition::new(3,4)));
 /// assert_eq!(tracker.at(source, ByteOffset(300).into()), Err(LineOffsetError::EndOfInput));
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
 }
