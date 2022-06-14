@@ -457,6 +457,8 @@ pub enum Token<'input> {
     Plus,
     #[token("*")]
     Star,
+    #[token("?")]
+    SqlParameter,
     #[token("%")]
     Percent,
     #[token("/")]
@@ -713,6 +715,7 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Minus => write!(f, "-"),
             Token::Plus => write!(f, "+"),
             Token::Star => write!(f, "*"),
+            Token::SqlParameter => write!(f, "?"),
             Token::Percent => write!(f, "%"),
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
@@ -805,7 +808,7 @@ mod tests {
     #[test]
     fn display() -> Result<(), ParseError<'static, BytePosition>> {
         let symbols =
-            "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * % / ^ . || : --foo /*block*/";
+            "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * ? % / ^ . || : --foo /*block*/";
         let primitives = r#"unquoted_ident "quoted_ident" @unquoted_atident @"quoted_atident""#;
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
@@ -824,16 +827,16 @@ mod tests {
 
         #[rustfmt::skip]
         let expected = vec![
-            "(", "WITH", "[", "WHERE", "{", "VALUE", "}", "USING", "]", "UNPIVOT",
-            ")", "UNION", "<<", "TRUE", ">>", "SELECT", ";", "RIGHT", ",", "PRESERVE", "<",
-            "PIVOT", ">", "OUTER", "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET",
-            "=", "NULLS", "==", "NULL", "-", "NOT", "+", "NATURAL", "*", "MISSING", "%",
-            "LIMIT", "/", "LIKE", "^", "LEFT", ".", "LATERAL", "||", "LAST", ":", "JOIN",
-            "--", "INTERSECT", "/**/","IS", "<unquoted_ident:UNQUOTED_IDENT>", "INNER",
-            "<quoted_ident:QUOTED_IDENT>", "IN", "<unquoted_atident:UNQUOTED_ATIDENT>", "HAVING",
-            "<quoted_atident:QUOTED_ATIDENT>", "GROUP", "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT",
-            "ESCAPE", "DESC", "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
-            "CASE", "WHEN", "THEN", "ELSE", "END",
+            "(", "WITH", "[", "WHERE", "{", "VALUE", "}", "USING", "]", "UNPIVOT", ")", "UNION",
+            "<<", "TRUE", ">>", "SELECT", ";", "RIGHT", ",", "PRESERVE", "<", "PIVOT", ">", "OUTER",
+            "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET", "=", "NULLS", "==", "NULL", "-",
+            "NOT", "+", "NATURAL", "*", "MISSING", "?", "LIMIT", "%", "LIKE", "/", "LEFT", "^",
+            "LATERAL", ".", "LAST", "||", "JOIN", ":", "INTERSECT", "--", "IS", "/**/", "INNER",
+            "<unquoted_ident:UNQUOTED_IDENT>", "IN", "<quoted_ident:QUOTED_IDENT>", "HAVING",
+            "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
+            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "BY",
+            "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE", "WHEN", "THEN", "ELSE",
+            "END"
         ];
         let displayed = toks
             .into_iter()
