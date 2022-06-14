@@ -499,8 +499,8 @@ pub enum Token<'input> {
     Real(&'input str),
 
     // strings are single-quoted in SQL/PartiQL
-    #[regex(r#"'([^'\\]|\\t|\\u|\\n|\\'|(?:''))*'"#,
-            |lex| lex.slice().trim_matches('\''))]
+    #[regex(r#"'([^'\\]|\\t|\\u|\\n|\\'|\\|(?:''))*'"#,
+    |lex| lex.slice().trim_matches('\''))]
     String(&'input str),
 
     #[token("`")]
