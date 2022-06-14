@@ -1,5 +1,5 @@
+use crate::error::LexError;
 use crate::lexer::{PartiqlLexer, Spanned, Token};
-use crate::LexError;
 use partiql_source_map::location::ByteOffset;
 use std::collections::VecDeque;
 
