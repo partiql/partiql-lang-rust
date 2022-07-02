@@ -465,6 +465,8 @@ pub enum Token<'input> {
     Caret,
     #[token(".")]
     Period,
+    #[token("~")]
+    Tilde,
     #[token("||")]
     DblPipe,
 
@@ -510,10 +512,14 @@ pub enum Token<'input> {
     // Keywords
     #[regex("(?i:All)")]
     All,
+    #[regex("(?i:Acyclic)")]
+    Acyclic,
     #[regex("(?i:Asc)")]
     Asc,
     #[regex("(?i:And)")]
     And,
+    #[regex("(?i:Any)")]
+    Any,
     #[regex("(?i:As)")]
     As,
     #[regex("(?i:At)")]
@@ -572,6 +578,8 @@ pub enum Token<'input> {
     Like,
     #[regex("(?i:Limit)")]
     Limit,
+    #[regex("(?i:Match)")]
+    Match,
     #[regex("(?i:Missing)")]
     Missing,
     #[regex("(?i:Natural)")]
@@ -602,8 +610,14 @@ pub enum Token<'input> {
     Right,
     #[regex("(?i:Select)")]
     Select,
+    #[regex("(?i:Simple)")]
+    Simple,
+    #[regex("(?i:Shortest)")]
+    Shortest,
     #[regex("(?i:Then)")]
     Then,
+    #[regex("(?i:Trail)")]
+    Trail,
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -628,9 +642,11 @@ impl<'input> Token<'input> {
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            Token::All
+            Token::Acyclic
+                | Token::All
                 | Token::Asc
                 | Token::And
+                | Token::Any
                 | Token::As
                 | Token::At
                 | Token::Between
@@ -656,6 +672,7 @@ impl<'input> Token<'input> {
                 | Token::Left
                 | Token::Like
                 | Token::Limit
+                | Token::Match
                 | Token::Missing
                 | Token::Natural
                 | Token::Not
@@ -671,7 +688,10 @@ impl<'input> Token<'input> {
                 | Token::Preserve
                 | Token::Right
                 | Token::Select
+                | Token::Simple
+                | Token::Shortest
                 | Token::Then
+                | Token::Trail
                 | Token::Union
                 | Token::Unpivot
                 | Token::Using
@@ -717,6 +737,7 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
+            Token::Tilde => write!(f, "~"),
             Token::DblPipe => write!(f, "||"),
             Token::UnquotedIdent(id) => write!(f, "<{}:UNQUOTED_IDENT>", id),
             Token::QuotedIdent(id) => write!(f, "<{}:QUOTED_IDENT>", id),
@@ -729,9 +750,11 @@ impl<'input> fmt::Display for Token<'input> {
             Token::EmbeddedIonQuote => write!(f, "<ION>"),
             Token::Ion(txt) => write!(f, "<{}:ION>", txt),
 
-            Token::All
+            Token::Acyclic
+            | Token::All
             | Token::Asc
             | Token::And
+            | Token::Any
             | Token::As
             | Token::At
             | Token::Between
@@ -761,6 +784,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Left
             | Token::Like
             | Token::Limit
+            | Token::Match
             | Token::Missing
             | Token::Natural
             | Token::Not
@@ -776,7 +800,10 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Preserve
             | Token::Right
             | Token::Select
+            | Token::Simple
+            | Token::Shortest
             | Token::Then
+            | Token::Trail
             | Token::True
             | Token::Union
             | Token::Unpivot
@@ -811,7 +838,8 @@ mod tests {
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
-             Cross By Between At As And Asc All Values Case When Then Else End";
+             Cross By Between At As And Asc All Values Case When Then Else End Match Any Shortest \
+             Trail Acyclic Simple";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -833,7 +861,7 @@ mod tests {
             "<quoted_ident:QUOTED_IDENT>", "IN", "<unquoted_atident:UNQUOTED_ATIDENT>", "HAVING",
             "<quoted_atident:QUOTED_ATIDENT>", "GROUP", "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT",
             "ESCAPE", "DESC", "CROSS", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
-            "CASE", "WHEN", "THEN", "ELSE", "END",
+            "CASE", "WHEN", "THEN", "ELSE", "END", "MATCH", "ANY", "SHORTEST", "TRAIL", "ACYCLIC", "SIMPLE",
         ];
         let displayed = toks
             .into_iter()

@@ -12,6 +12,7 @@ use rust_decimal::Decimal as RustDecimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 /// Provides the required methods for AstNode conversations.
@@ -235,6 +236,13 @@ pub type CallAst = AstBytePos<Call>;
 pub type CaseAst = AstBytePos<Case>;
 pub type FromClauseAst = AstBytePos<FromClause>;
 pub type FromLetAst = AstBytePos<FromLet>;
+pub type GraphMatchAst = AstBytePos<GraphMatch>;
+pub type GraphMatchExprAst = AstBytePos<GraphMatchExpr>;
+pub type GraphMatchEdgeAst = AstBytePos<GraphMatchEdge>;
+pub type GraphMatchNodeAst = AstBytePos<GraphMatchNode>;
+pub type GraphMatchPatternAst = AstBytePos<GraphMatchPattern>;
+pub type GraphMatchPatternPartAst = AstBytePos<GraphMatchPatternPart>;
+pub type GraphMatchQuantifierAst = AstBytePos<GraphMatchQuantifier>;
 pub type GroupByExprAst = AstBytePos<GroupByExpr>;
 pub type GroupKeyAst = AstBytePos<GroupKey>;
 pub type InAst = AstBytePos<In>;
@@ -655,6 +663,9 @@ pub enum FromClause {
     FromLet(FromLetAst),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(JoinAst),
+
+    /// <expr> MATCH <graph_pattern>
+    GraphMatch(GraphMatchAst),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -697,6 +708,142 @@ pub enum JoinKind {
     Right,
     Full,
     Cross,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatch {
+    pub expr: Box<Expr>,
+    pub graph_expr: Box<GraphMatchExprAst>,
+}
+
+/// The direction of an edge
+/// | Orientation               | Edge pattern | Abbreviation |
+/// |---------------------------+--------------+--------------|
+/// | Pointing left             | <−[ spec ]−  | <−           |
+/// | Undirected                | ~[ spec ]~   | ~            |
+/// | Pointing right            | −[ spec ]−>  | −>           |
+/// | Left or undirected        | <~[ spec ]~  | <~           |
+/// | Undirected or right       | ~[ spec ]~>  | ~>           |
+/// | Left or right             | <−[ spec ]−> | <−>          |
+/// | Left, undirected or right | −[ spec ]−   | −            |
+///
+/// Fig. 5. Table of edge patterns:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum GraphMatchDirection {
+    Left,
+    Undirected,
+    Right,
+    LeftOrUndirected,
+    UndirectedOrRight,
+    LeftOrRight,
+    LeftOrUndirectedOrRight,
+}
+
+/// A part of a graph pattern
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum GraphMatchPatternPart {
+    /// A single node in a graph pattern.
+    Node(GraphMatchNodeAst),
+
+    /// A single edge in a graph pattern.
+    Edge(GraphMatchEdgeAst),
+
+    /// A sub-pattern.
+    Pattern(GraphMatchPatternAst),
+}
+
+/// A quantifier for graph edges or patterns. (e.g., the `{2,5}` in `MATCH (x)->{2,5}(y)`)
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatchQuantifier {
+    pub lower: u32,
+    pub upper: Option<NonZeroU32>,
+}
+
+/// A path restrictor
+/// | Keyword        | Description
+/// |----------------+--------------
+/// | TRAIL          | No repeated edges.
+/// | ACYCLIC        | No repeated nodes.
+/// | SIMPLE         | No repeated nodes, except that the ﬁrst and last nodes may be the same.
+///
+/// Fig. 7. Table of restrictors:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum GraphMatchRestrictor {
+    Trail,
+    Acyclic,
+    Simple,
+}
+
+/// A single node in a graph pattern.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatchNode {
+    /// an optional node pre-filter, e.g.: `WHERE c.name='Alarm'` in `MATCH (c WHERE c.name='Alarm')`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the node match, e.g.: `x` in `MATCH (x)`
+    pub variable: Option<SymbolPrimitive>,
+    /// the optional label(s) to match for the node, e.g.: `Entity` in `MATCH (x:Entity)`
+    pub label: Option<Vec<SymbolPrimitive>>,
+}
+
+/// A single edge in a graph pattern.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatchEdge {
+    /// edge direction
+    pub direction: GraphMatchDirection,
+    /// an optional quantifier for the edge match
+    pub quantifier: Option<GraphMatchQuantifierAst>,
+    /// an optional edge pre-filter, e.g.: `WHERE t.capacity>100` in `MATCH −[t:hasSupply WHERE t.capacity>100]−>`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the edge match, e.g.: `t` in `MATCH −[t]−>`
+    pub variable: Option<SymbolPrimitive>,
+    /// the optional label(s) to match for the edge. e.g.: `Target` in `MATCH −[t:Target]−>`
+    pub label: Option<Vec<SymbolPrimitive>>,
+}
+
+/// A single graph match pattern.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatchPattern {
+    pub restrictor: Option<GraphMatchRestrictor>,
+    /// an optional quantifier for the entire pattern match
+    pub quantifier: Option<GraphMatchQuantifierAst>,
+    /// an optional pattern pre-filter, e.g.: `WHERE a.name=b.name` in `MATCH [(a)->(b) WHERE a.name=b.name]`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the pattern, e.g.: `p` in `MATCH p = (a) −[t]−> (b)`
+    pub variable: Option<SymbolPrimitive>,
+    /// the ordered pattern parts
+    pub parts: Vec<GraphMatchPatternPart>,
+}
+
+/// A path selector
+/// | Keyword
+/// |------------------
+/// | ANY SHORTEST
+/// | ALL SHORTEST
+/// | ANY
+/// | ANY k
+/// | SHORTEST k
+/// | SHORTEST k GROUP
+///
+/// Fig. 8. Table of restrictors:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum GraphMatchSelector {
+    AnyShortest,
+    AllShortest,
+    Any,
+    AnyK(NonZeroU32),
+    ShortestK(NonZeroU32),
+    ShortestKGroup(NonZeroU32),
+}
+
+/// A graph match clause as defined in GPML
+/// See https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GraphMatchExpr {
+    pub selector: Option<GraphMatchSelector>,
+    pub patterns: Vec<GraphMatchPatternAst>,
 }
 
 /// A generic pair of expressions. Used in the `pub struct`, `searched_case`
