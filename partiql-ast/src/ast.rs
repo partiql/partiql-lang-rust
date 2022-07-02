@@ -10,6 +10,7 @@
 use rust_decimal::Decimal as RustDecimal;
 
 use std::fmt;
+use std::num::NonZeroU32;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -534,6 +535,8 @@ pub enum FromClause {
     FromLet(AstNode<FromLet>),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(AstNode<Join>),
+    /// <expr> MATCH <graph_pattern>
+    GraphMatch(AstNode<GraphMatch>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -583,7 +586,153 @@ pub enum JoinSpec {
     Natural,
 }
 
-/// GROUP BY <grouping_strategy> <group_key>[, <group_key>]... \[AS <symbol>\]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatch {
+    pub expr: Box<Expr>,
+    pub graph_expr: Box<AstNode<GraphMatchExpr>>,
+}
+
+/// The direction of an edge
+/// | Orientation               | Edge pattern | Abbreviation |
+/// |---------------------------+--------------+--------------|
+/// | Pointing left             | <−[ spec ]−  | <−           |
+/// | Undirected                | ~[ spec ]~   | ~            |
+/// | Pointing right            | −[ spec ]−>  | −>           |
+/// | Left or undirected        | <~[ spec ]~  | <~           |
+/// | Undirected or right       | ~[ spec ]~>  | ~>           |
+/// | Left or right             | <−[ spec ]−> | <−>          |
+/// | Left, undirected or right | −[ spec ]−   | −            |
+///
+/// Fig. 5. Table of edge patterns:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchDirection {
+    Left,
+    Undirected,
+    Right,
+    LeftOrUndirected,
+    UndirectedOrRight,
+    LeftOrRight,
+    LeftOrUndirectedOrRight,
+}
+
+/// A part of a graph pattern
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchPatternPart {
+    /// A single node in a graph pattern.
+    Node(AstNode<GraphMatchNode>),
+
+    /// A single edge in a graph pattern.
+    Edge(AstNode<GraphMatchEdge>),
+
+    /// A sub-pattern.
+    Pattern(AstNode<GraphMatchPattern>),
+}
+
+/// A quantifier for graph edges or patterns. (e.g., the `{2,5}` in `MATCH (x)->{2,5}(y)`)
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchQuantifier {
+    pub lower: u32,
+    pub upper: Option<NonZeroU32>,
+}
+
+/// A path restrictor
+/// | Keyword        | Description
+/// |----------------+--------------
+/// | TRAIL          | No repeated edges.
+/// | ACYCLIC        | No repeated nodes.
+/// | SIMPLE         | No repeated nodes, except that the ﬁrst and last nodes may be the same.
+///
+/// Fig. 7. Table of restrictors:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchRestrictor {
+    Trail,
+    Acyclic,
+    Simple,
+}
+
+/// A single node in a graph pattern.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchNode {
+    /// an optional node pre-filter, e.g.: `WHERE c.name='Alarm'` in `MATCH (c WHERE c.name='Alarm')`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the node match, e.g.: `x` in `MATCH (x)`
+    pub variable: Option<SymbolPrimitive>,
+    /// the optional label(s) to match for the node, e.g.: `Entity` in `MATCH (x:Entity)`
+    pub label: Option<Vec<SymbolPrimitive>>,
+}
+
+/// A single edge in a graph pattern.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchEdge {
+    /// edge direction
+    pub direction: GraphMatchDirection,
+    /// an optional quantifier for the edge match
+    pub quantifier: Option<AstNode<GraphMatchQuantifier>>,
+    /// an optional edge pre-filter, e.g.: `WHERE t.capacity>100` in `MATCH −[t:hasSupply WHERE t.capacity>100]−>`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the edge match, e.g.: `t` in `MATCH −[t]−>`
+    pub variable: Option<SymbolPrimitive>,
+    /// the optional label(s) to match for the edge. e.g.: `Target` in `MATCH −[t:Target]−>`
+    pub label: Option<Vec<SymbolPrimitive>>,
+}
+
+/// A single graph match pattern.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchPattern {
+    pub restrictor: Option<GraphMatchRestrictor>,
+    /// an optional quantifier for the entire pattern match
+    pub quantifier: Option<AstNode<GraphMatchQuantifier>>,
+    /// an optional pattern pre-filter, e.g.: `WHERE a.name=b.name` in `MATCH [(a)->(b) WHERE a.name=b.name]`
+    pub prefilter: Option<Box<Expr>>,
+    /// the optional element variable of the pattern, e.g.: `p` in `MATCH p = (a) −[t]−> (b)`
+    pub variable: Option<SymbolPrimitive>,
+    /// the ordered pattern parts
+    pub parts: Vec<GraphMatchPatternPart>,
+}
+
+/// A path selector
+/// | Keyword
+/// |------------------
+/// | ANY SHORTEST
+/// | ALL SHORTEST
+/// | ANY
+/// | ANY k
+/// | SHORTEST k
+/// | SHORTEST k GROUP
+///
+/// Fig. 8. Table of restrictors:
+/// https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchSelector {
+    AnyShortest,
+    AllShortest,
+    Any,
+    AnyK(NonZeroU32),
+    ShortestK(NonZeroU32),
+    ShortestKGroup(NonZeroU32),
+}
+
+/// A graph match clause as defined in GPML
+/// See https://arxiv.org/abs/2112.06217
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchExpr {
+    pub selector: Option<GraphMatchSelector>,
+    pub patterns: Vec<AstNode<GraphMatchPattern>>,
+}
+
+/// GROUP BY <grouping_strategy> <group_key_list>... \[AS <symbol>\]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupByExpr {
