@@ -287,7 +287,7 @@ TableCrossJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:JoinRhs> <hi:@R> => {
         let kind = match j {
             Some(j) => j,
             None => ast::JoinKind::Cross
@@ -307,7 +307,7 @@ TableQualifiedJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
@@ -319,7 +319,7 @@ TableQualifiedJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
@@ -327,7 +327,12 @@ TableQualifiedJoin: ast::FromClauseAst = {
             predicate: Some(spec)
         };
         ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
-    }
+    },
+}
+#[inline]
+JoinRhs: ast::FromClauseAst = {
+    <TableNonJoin>,
+    "(" <TableJoined> ")"
 }
 #[inline]
 JoinSpecNatural: ast::JoinSpecAst = {
@@ -339,6 +344,7 @@ JoinType: ast::JoinKind = {
     "LEFT" "OUTER"? => ast::JoinKind::Left,
     "RIGHT" "OUTER"? => ast::JoinKind::Right,
     "FULL" "OUTER"? => ast::JoinKind::Full,
+    "OUTER" => ast::JoinKind::Full,
 }
 #[inline]
 JoinSpec: ast::JoinSpecAst = {
