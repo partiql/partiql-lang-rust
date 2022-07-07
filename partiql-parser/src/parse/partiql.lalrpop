@@ -1038,7 +1038,7 @@ Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
     <LiteralIon>,
-    // TODO other literals?
+    <LiteralDateTime>,
 };
 
 #[inline]
@@ -1093,6 +1093,12 @@ LiteralNumber: ast::Lit = {
 #[inline]
 LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
+}
+#[inline]
+LiteralDateTime: ast::Lit = {
+    <ion:"DATE"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
+    <ion:"TIME"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
+    <ion:"TIMESTAMP"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1239,6 +1245,7 @@ extern {
         "BY" => lexer::Token::By,
         "CASE" => lexer::Token::Case,
         "CROSS" => lexer::Token::Cross,
+        "DATE" => lexer::Token::Date,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
         "ELSE" => lexer::Token::Else,
@@ -1277,6 +1284,8 @@ extern {
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
+        "TIME" => lexer::Token::Time,
+        "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,

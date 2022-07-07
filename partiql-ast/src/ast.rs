@@ -103,7 +103,7 @@ pub enum ItemKind {
     Ddl(Ddl),
     // Data Modification Language statements
     Dml(Dml),
-    // Date retrieval statements
+    // Data retrieval statements
     Query(Query),
 }
 

@@ -528,6 +528,8 @@ pub enum Token<'input> {
     Case,
     #[regex("(?i:Cross)")]
     Cross,
+    #[regex("(?i:Date)")]
+    Date,
     #[regex("(?i:Desc)")]
     Desc,
     #[regex("(?i:Distinct)")]
@@ -604,6 +606,10 @@ pub enum Token<'input> {
     Right,
     #[regex("(?i:Select)")]
     Select,
+    #[regex("(?i:Time)")]
+    Time,
+    #[regex("(?i:Timestamp)")]
+    Timestamp,
     #[regex("(?i:Then)")]
     Then,
     #[regex("(?i:True)")]
@@ -638,6 +644,7 @@ impl<'input> Token<'input> {
                 | Token::Between
                 | Token::By
                 | Token::Cross
+                | Token::Date
                 | Token::Desc
                 | Token::Distinct
                 | Token::Escape
@@ -673,6 +680,8 @@ impl<'input> Token<'input> {
                 | Token::Preserve
                 | Token::Right
                 | Token::Select
+                | Token::Time
+                | Token::Timestamp
                 | Token::Then
                 | Token::Union
                 | Token::Unpivot
@@ -741,6 +750,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::By
             | Token::Case
             | Token::Cross
+            | Token::Date
             | Token::Desc
             | Token::Distinct
             | Token::Else
@@ -779,6 +789,8 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Preserve
             | Token::Right
             | Token::Select
+            | Token::Time
+            | Token::Timestamp
             | Token::Then
             | Token::True
             | Token::Union
@@ -814,7 +826,7 @@ mod tests {
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
-             Cross By Between At As And Asc All Values Case When Then Else End";
+             Cross Time Timestamp Date By Between At As And Asc All Values Case When Then Else End";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -834,9 +846,9 @@ mod tests {
             "LATERAL", ".", "LAST", "||", "JOIN", ":", "INTERSECT", "--", "IS", "/**/", "INNER",
             "<unquoted_ident:UNQUOTED_IDENT>", "IN", "<quoted_ident:QUOTED_IDENT>", "HAVING",
             "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
-            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "BY",
-            "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE", "WHEN", "THEN", "ELSE",
-            "END"
+            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TIME",
+            "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE",
+            "WHEN", "THEN", "ELSE", "END"
         ];
         let displayed = toks
             .into_iter()
