@@ -287,9 +287,13 @@ TableCrossJoin: ast::FromClauseAst = {
     // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
+        let kind = match j {
+            Some(j) => j,
+            None => ast::JoinKind::Cross
+        };
         let join = ast::Join {
-            kind: ast::JoinKind::Cross,
+            kind,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: None
