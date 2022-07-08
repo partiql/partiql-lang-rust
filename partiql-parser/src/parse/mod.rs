@@ -3,13 +3,13 @@
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
 use crate::error::{ParseError, UnexpectedTokenData};
+use crate::lexer;
 use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
-use crate::{lexer, ParserError};
 use lalrpop_util as lpop;
 use lazy_static::lazy_static;
 use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
+use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
@@ -30,7 +30,7 @@ type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
-pub(crate) type AstResult<'input> = Result<Box<ast::Expr>, Vec<ParserError<'input>>>;
+pub(crate) type AstResult<'input> = Result<Box<ast::Expr>, Vec<ParseError<'input, BytePosition>>>;
 
 lazy_static! {
     static ref BUILT_INS: FnExprSet<'static> = built_ins();
@@ -46,32 +46,24 @@ pub fn parse_partiql<'input>(s: &'input str, offsets: &mut LineOffsetTracker) ->
     process_errors(s, offsets, parsed, errors)
 }
 
-fn process_errors<'input, T>(
-    s: &'input str,
-    offsets: &LineOffsetTracker,
-    result: Result<T, LalrpopError<'input>>,
+fn process_errors<'input>(
+    _s: &'input str,
+    _offsets: &LineOffsetTracker,
+    result: Result<Box<ast::Expr>, LalrpopError<'input>>,
     errors: Vec<LalrpopErrorRecovery<'input>>,
-) -> Result<T, Vec<ParseError<'input, LineAndColumn>>> {
-    fn map_error<'input>(
-        s: &'input str,
-        offsets: &LineOffsetTracker,
-        e: LalrpopError<'input>,
-    ) -> ParseError<'input, LineAndColumn> {
-        ParseError::from(e).map_loc(|byte_loc| offsets.at(s, byte_loc).unwrap().into())
-    }
-
+) -> AstResult<'input> {
     let mut parser_errors: Vec<_> = errors
         .into_iter()
         // TODO do something with error_recovery.dropped_tokens?
-        .map(|e| map_error(s, offsets, e.error))
+        .map(|e| ParseError::from(e.error))
         .collect();
 
     match (result, parser_errors.is_empty()) {
         (Ok(ast), true) => Ok(ast),
         (Ok(_), false) => Err(parser_errors),
-        (Err(e), true) => Err(vec![map_error(s, offsets, e)]),
+        (Err(e), true) => Err(vec![ParseError::from(e)]),
         (Err(e), false) => {
-            parser_errors.push(map_error(s, offsets, e));
+            parser_errors.push(ParseError::from(e));
             Err(parser_errors)
         }
     }
@@ -100,7 +92,7 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
             ),
 
             lalrpop_util::ParseError::InvalidToken { location } => {
-                ParseError::UnknownParseError(location.into())
+                ParseError::Unknown(location.into())
             }
 
             // TODO do something with UnrecognizedEOF.expected
@@ -583,10 +575,8 @@ mod tests {
 
     mod errors {
         use super::*;
-        use crate::error::{LexicalError, UnexpectedToken, UnexpectedTokenData};
-        use partiql_source_map::location::{
-            CharOffset, LineAndCharPosition, LineOffset, Located, Location,
-        };
+        use crate::error::{LexError, UnexpectedToken, UnexpectedTokenData};
+        use partiql_source_map::location::{Located, Location};
         use std::borrow::Cow;
 
         #[test]
@@ -612,34 +602,18 @@ mod tests {
                         token: Cow::from("/")
                     },
                     location: Location {
-                        start: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(0)
-                        }
-                        .into(),
-                        end: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(1)
-                        }
-                        .into(),
+                        start: BytePosition::from(0),
+                        end: BytePosition::from(1),
                     },
                 })
             );
             assert_eq!(
                 errors[1],
                 ParseError::LexicalError(Located {
-                    inner: LexicalError::UnterminatedIonLiteral,
+                    inner: LexError::UnterminatedIonLiteral,
                     location: Location {
-                        start: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(1)
-                        }
-                        .into(),
-                        end: LineAndCharPosition {
-                            line: LineOffset(0),
-                            char: CharOffset(3)
-                        }
-                        .into(),
+                        start: BytePosition::from(1),
+                        end: BytePosition::from(4),
                     },
                 })
             );

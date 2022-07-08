@@ -11,11 +11,11 @@
 //!
 //! let parsed = parser.parse("SELECT g FROM data GROUP BY a").expect("successful parse");
 //!
-//! let errs: Vec<ParserError> = parser.parse("SELECT").expect_err("expected error");
+//! let errs: ParserError = parser.parse("SELECT").expect_err("expected error");
 //!
-//! let errs_at: Vec<ParserError> =
+//! let errs_at: ParserError =
 //!     parser.parse("SELECT * FROM a AY a CROSS JOIN c AS c AT q").unwrap_err();
-//! assert_eq!(errs_at[0].to_string(), "Unexpected token `<a:UNQUOTED_IDENT>` at `(1:20..1:21)`");
+//! assert_eq!(errs_at.errors[0].to_string(), "Unexpected token `<a:UNQUOTED_IDENT>` at `(b19..b20)`");
 //! ```
 //!
 //! [partiql]: https://partiql.org
@@ -29,42 +29,55 @@ mod token_parser;
 use parse::parse_partiql;
 use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+use partiql_source_map::location::BytePosition;
 
-pub use error::LexError;
-pub use error::LexicalError;
-pub use error::ParseError;
-pub use error::ParserError;
+/// [`Error`] type for errors in the lexical structure for the PartiQL parser.
+pub type LexicalError<'input> = error::LexError<'input>;
+
+/// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
+pub type ParseError<'input> = error::ParseError<'input, BytePosition>;
 
 use serde::{Deserialize, Serialize};
 
 /// General [`Result`] type for the PartiQL [`Parser`].
-pub type ParserResult<'input> = Result<Parsed<'input>, Vec<ParserError<'input>>>;
+pub type ParserResult<'input> = Result<Parsed<'input>, ParserError<'input>>;
 
 /// A PartiQL parser from statement strings to AST.
 #[non_exhaustive]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Parser {}
-
-impl Default for Parser {
-    fn default() -> Self {
-        Parser {}
-    }
-}
 
 impl Parser {
     /// Parse a PartiQL statement into an AST.
     pub fn parse<'input>(&self, text: &'input str) -> ParserResult<'input> {
         let mut offsets = LineOffsetTracker::default();
-        let ast = parse_partiql(text, &mut offsets)?;
-        Ok(Parsed { text, offsets, ast })
+        match parse_partiql(text, &mut offsets) {
+            Ok(ast) => Ok(Parsed { text, offsets, ast }),
+            Err(errors) => Err(ParserError {
+                text,
+                offsets,
+                errors,
+            }),
+        }
     }
 }
 
 /// The output of parsing PartiQL statement strings: an AST and auxiliary data.
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Parsed<'input> {
-    text: &'input str,
-    offsets: LineOffsetTracker,
-    ast: Box<ast::Expr>,
+    pub text: &'input str,
+    pub offsets: LineOffsetTracker,
+    pub ast: Box<ast::Expr>,
+}
+
+/// The output of errors when parsing PartiQL statement strings: an errors and auxiliary data.
+#[non_exhaustive]
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ParserError<'input> {
+    pub text: &'input str,
+    pub offsets: LineOffsetTracker,
+    pub errors: Vec<ParseError<'input>>,
 }

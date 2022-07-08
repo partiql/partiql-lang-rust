@@ -1,0 +1,142 @@
+%YAML 1.2
+# See https://www.sublimetext.com/docs/syntax.htm
+---
+name: ion
+version: "2"
+file_extensions:
+  - ion
+scope: source.ion
+contexts:
+  keywords:
+    - match: "\\b(?i:true|false)\\b"
+      scope: constant.language.bool.ion
+    - match: "\\b(?i:null.null|null.bool|null.int|null.float|null.decimal|null.timestamp|null.string|null.symbol|null.blob|null.clob|null.struct|null.list|null.sexp|null)\\b"
+      scope: constant.language.null.ion
+  main:
+    - include: value
+  value:
+    - include: whitespace
+    - include: comment
+    - include: annotation
+    - include: string
+    - include: number
+    - include: keywords
+    - include: symbol
+    - include: clob
+    - include: blob
+    - include: struct
+    - include: list
+    - include: sexp
+  sexp:
+    - match: "\\("
+      scope: punctuation.definition.sexp.begin.ion
+      push: sexp__0
+  sexp__0:
+    - match: "\\)"
+      scope: punctuation.definition.sexp.end.ion
+      pop: true
+    - include: comment
+    - include: value
+    - match: "[\\!\\#\\%\\&\\*\\+\\-\\.\\/\\;\\<\\=\\>\\?\\@\\^\\`\\|\\~]+"
+      scope: storage.type.symbol.operator.ion
+  comment:
+    - match: "\\/\\/[^\\n]*"
+      scope: comment.line.ion
+    - match: "\\/\\*"
+      scope: comment.block.ion
+      push: comment__1
+  comment__1:
+    - match: "[*]\\/"
+      scope: comment.block.ion
+      pop: true
+    - match: "[^*\\/]+"
+      scope: comment.block.ion
+    - match: "[*\\/]+"
+      scope: comment.block.ion
+  list:
+    - match: "\\["
+      scope: punctuation.definition.list.begin.ion
+      push: list__0
+  list__0:
+    - match: "\\]"
+      scope: punctuation.definition.list.end.ion
+      pop: true
+    - include: comment
+    - include: value
+    - match: ","
+      scope: punctuation.definition.list.separator.ion
+  struct:
+    - match: "\\{"
+      scope: punctuation.definition.struct.begin.ion
+      push: struct__0
+  struct__0:
+    - match: "\\}"
+      scope: punctuation.definition.struct.end.ion
+      pop: true
+    - include: comment
+    - include: value
+    - match: ",|:"
+      scope: punctuation.definition.struct.separator.ion
+  blob:
+    - match: "(\\{\\{)([^\"]*)(\\}\\})"
+      captures:
+        1: punctuation.definition.blob.begin.ion
+        2: string.other.blob.ion
+        3: punctuation.definition.blob.end.ion
+  clob:
+    - match: "(\\{\\{)(\"[^\"]*\")(\\}\\})"
+      captures:
+        1: punctuation.definition.clob.begin.ion
+        2: string.other.clob.ion
+        3: punctuation.definition.clob.end.ion
+  symbol:
+    - match: "(['])((?:(?:\\\\')|(?:[^']))*?)(['])"
+      scope: storage.type.symbol.quoted.ion
+    - match: "[\\$_a-zA-Z][\\$_a-zA-Z0-9]*"
+      scope: storage.type.symbol.identifier.ion
+  number:
+    - match: "\\d{4}(?:-\\d{2})?(?:-\\d{2})?T(?:\\d{2}:\\d{2})(?::\\d{2})?(?:\\.\\d+)?(?:Z|[-+]\\d{2}:\\d{2})?"
+      scope: constant.numeric.timestamp.ion
+    - match: "\\d{4}-\\d{2}-\\d{2}T?"
+      scope: constant.numeric.timestamp.ion
+    - match: "-?0[bB][01](?:_?[01])*"
+      scope: constant.numeric.integer.binary.ion
+    - match: "-?0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*"
+      scope: constant.numeric.integer.hex.ion
+    - match: "-?(?:0|[1-9](?:_?\\d)*)(?:\\.(?:\\d(?:_?\\d)*)?)?(?:[eE][+-]?\\d+)"
+      scope: constant.numeric.float.ion
+    - match: "(?:[-+]inf)|(?:nan)"
+      scope: constant.numeric.float.ion
+    - match: "-?(?:0|[1-9](?:_?\\d)*)(?:(?:(?:\\.(?:\\d(?:_?\\d)*)?)(?:[dD][+-]?\\d+)|\\.(?:\\d(?:_?\\d)*)?)|(?:[dD][+-]?\\d+))"
+      scope: constant.numeric.decimal.ion
+    - match: "-?(?:0|[1-9](?:_?\\d)*)"
+      scope: constant.numeric.integer.ion
+  string:
+    - match: "([\"])((?:(?:\\\\\")|(?:[^\"]))*?)([\"])"
+      captures:
+        1: punctuation.definition.string.begin.ion
+        2: string.quoted.double.ion
+        3: punctuation.definition.string.end.ion
+    - match: "'{3}"
+      scope: punctuation.definition.string.begin.ion
+      push: string__1
+  string__1:
+    - match: "'{3}"
+      scope: punctuation.definition.string.end.ion
+      pop: true
+    - match: "(?:\\\\'|[^'])+"
+      scope: string.quoted.triple.ion
+    - match: "'"
+      scope: string.quoted.triple.ion
+  annotation:
+    - match: "('(?:[^']|\\\\\\\\|\\\\')*')\\s*(::)"
+      captures:
+        1: variable.language.annotation.ion
+        2: punctuation.definition.annotation.ion
+    - match: "([\\$_a-zA-Z][\\$_a-zA-Z0-9]*)\\s*(::)"
+      captures:
+        1: variable.language.annotation.ion
+        2: punctuation.definition.annotation.ion
+  whitespace:
+    - match: "\\s+"
+      scope: text.ion

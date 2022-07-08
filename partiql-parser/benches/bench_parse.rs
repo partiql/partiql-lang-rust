@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use partiql_parser::parse_partiql;
+use partiql_parser::{Parser, ParserResult};
 use std::time::Duration;
 
 const Q_STAR: &str = "SELECT *";
@@ -35,7 +35,9 @@ const Q_COMPLEX_FEXPR: &str = r#"
             "#;
 
 fn parse_bench(c: &mut Criterion) {
-    let parse = parse_partiql;
+    fn parse(text: &str) -> ParserResult {
+        Parser::default().parse(text)
+    }
     c.bench_function("parse-simple", |b| b.iter(|| parse(black_box(Q_STAR))));
     c.bench_function("parse-ion", |b| b.iter(|| parse(black_box(Q_ION))));
     c.bench_function("parse-group", |b| b.iter(|| parse(black_box(Q_GROUP))));
