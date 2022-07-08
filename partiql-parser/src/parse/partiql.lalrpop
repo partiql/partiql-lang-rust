@@ -1106,9 +1106,9 @@ LiteralIon: ast::Lit = {
 }
 #[inline]
 LiteralDateTime: ast::Lit = {
-    <ion:"DATE"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
-    <ion:"TIME"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
-    <ion:"TIMESTAMP"> <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
+    "DATE" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
+    "TIME" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
+    "TIMESTAMP" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
 }
 
 // ------------------------------------------------------------------------------ //
