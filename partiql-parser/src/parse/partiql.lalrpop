@@ -284,7 +284,7 @@ TableJoined: ast::FromClauseAst = {
 
 #[inline]
 TableCrossJoin: ast::FromClauseAst = {
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
     <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:JoinRhs> <hi:@R> => {
@@ -304,7 +304,7 @@ TableCrossJoin: ast::FromClauseAst = {
 
 #[inline]
 TableQualifiedJoin: ast::FromClauseAst = {
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
     <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
@@ -316,7 +316,7 @@ TableQualifiedJoin: ast::FromClauseAst = {
         };
         ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     },
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
     <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <hi:@R> => {
