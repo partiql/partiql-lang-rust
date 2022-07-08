@@ -119,14 +119,14 @@ SfwClauses: ast::SelectAst = {
     <lo:@L>
     <with:WithClause?>
     <project:SelectClause>
-    <from:FromClause?>
+    <from:FromClause>
     <where_clause:WhereClause?>
     <group_by:GroupClause?>
     <having:HavingClause?>
     <hi:@R> => {
         ast::Select {
             project,
-            from,
+            from: Some(from),
             from_let: None,
             where_clause,
             group_by,
