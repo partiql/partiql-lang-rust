@@ -100,6 +100,7 @@ Values: ast::QuerySetAst = {
 
 #[inline]
 ValueRow: Box<ast::Expr> = {
+    "(" <e:ExprQuery> ")" => Box::new(*e),
     <array:ExprTermCollection> => Box::new(array)
 }
 
@@ -283,12 +284,16 @@ TableJoined: ast::FromClauseAst = {
 
 #[inline]
 TableCrossJoin: ast::FromClauseAst = {
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> "CROSS" "JOIN" <rtable:TableNonJoin> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:JoinRhs> <hi:@R> => {
+        let kind = match j {
+            Some(j) => j,
+            None => ast::JoinKind::Cross
+        };
         let join = ast::Join {
-            kind: ast::JoinKind::Cross,
+            kind,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: None
@@ -299,10 +304,10 @@ TableCrossJoin: ast::FromClauseAst = {
 
 #[inline]
 TableQualifiedJoin: ast::FromClauseAst = {
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <on:JoinSpec> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
@@ -311,10 +316,10 @@ TableQualifiedJoin: ast::FromClauseAst = {
         };
         ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
     },
-    // Note the `TableReference` on the lhs and the `TableNonJoin` on the rhs of the `JOIN`.
+    // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:TableNonJoin> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <hi:@R> => {
         let join = ast::Join {
             kind: j,
             left: Box::new(ltable),
@@ -322,7 +327,12 @@ TableQualifiedJoin: ast::FromClauseAst = {
             predicate: Some(spec)
         };
         ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
-    }
+    },
+}
+#[inline]
+JoinRhs: ast::FromClauseAst = {
+    <TableNonJoin>,
+    "(" <TableJoined> ")"
 }
 #[inline]
 JoinSpecNatural: ast::JoinSpecAst = {
@@ -334,6 +344,7 @@ JoinType: ast::JoinKind = {
     "LEFT" "OUTER"? => ast::JoinKind::Left,
     "RIGHT" "OUTER"? => ast::JoinKind::Right,
     "FULL" "OUTER"? => ast::JoinKind::Full,
+    "OUTER" => ast::JoinKind::Full,
 }
 #[inline]
 JoinSpec: ast::JoinSpecAst = {
@@ -1037,7 +1048,7 @@ Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
     <LiteralIon>,
-    // TODO other literals?
+    <LiteralDateTime>,
 };
 
 #[inline]
@@ -1092,6 +1103,12 @@ LiteralNumber: ast::Lit = {
 #[inline]
 LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
+}
+#[inline]
+LiteralDateTime: ast::Lit = {
+    "DATE" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
+    "TIME" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
+    "TIMESTAMP" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1238,6 +1255,7 @@ extern {
         "BY" => lexer::Token::By,
         "CASE" => lexer::Token::Case,
         "CROSS" => lexer::Token::Cross,
+        "DATE" => lexer::Token::Date,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
         "ELSE" => lexer::Token::Else,
@@ -1276,6 +1294,8 @@ extern {
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
+        "TIME" => lexer::Token::Time,
+        "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,

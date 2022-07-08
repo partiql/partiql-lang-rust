@@ -103,7 +103,7 @@ pub enum ItemKind {
     Ddl(Ddl),
     // Data Modification Language statements
     Dml(Dml),
-    // Date retrieval statements
+    // Data retrieval statements
     Query(Query),
 }
 
@@ -245,7 +245,7 @@ pub type LikeAst = AstBytePos<Like>;
 pub type ListAst = AstBytePos<List>;
 pub type LitAst = AstBytePos<Lit>;
 pub type OrderByExprAst = AstBytePos<OrderByExpr>;
-pub type ParamAst = AstBytePos<VarRef>;
+pub type ParamAst = AstBytePos<Param>;
 pub type PathAst = AstBytePos<Path>;
 pub type ProjectItemAst = AstBytePos<ProjectItem>;
 pub type ProjectionAst = AstBytePos<Projection>;
