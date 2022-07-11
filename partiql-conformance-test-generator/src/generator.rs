@@ -1,5 +1,4 @@
-use crate::schema::TestCaseKind::{NotYetImplemented, Parse};
-use crate::schema::{Namespace, ParseAssertions, ParseTestCase, TestCase, TestDocument};
+use crate::schema::{Assertion, Namespace, TestCase, TestDocument};
 use codegen::{Function, Module, Scope};
 
 /// Defines a test code generation object
@@ -42,24 +41,23 @@ fn namespace_to_module(namespace: &Namespace) -> Module {
 fn test_case_to_function(test_case: &TestCase) -> Function {
     let mut test_fn: Function = Function::new(&test_case.test_name);
     test_fn.attr("test");
-    match &test_case.test_kind {
-        Parse(ParseTestCase { parse_assertions }) => {
-            test_fn.line(format!("let query = r#\"{}\"#;", &test_case.statement));
-            test_fn.line("let res = partiql_parser::Parser::default().parse(query);");
-            match parse_assertions {
-                ParseAssertions::ParsePass => test_fn
-                    .line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", query, res);"#),
-                ParseAssertions::ParseFail => test_fn
-                    .line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", query, res);"#),
-            };
+    test_fn.line(format!("let statement = r#\"{}\"#;", &test_case.statement));
+    for assertion in &test_case.assertions {
+        match assertion {
+            Assertion::SyntaxSuccess => {
+                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
+                test_fn.line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", statement, res);"#);
+            }
+            Assertion::SyntaxFail => {
+                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
+                test_fn.line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", statement, res);"#);
+            }
+            Assertion::NotYetImplemented => {
+                // for `NotYetImplemented` assertions, add the 'ignore' annotation to the test case
+                test_fn.attr("ignore");
+            }
         }
-        NotYetImplemented => {
-            // for `NotYetImplemented` test cases, just output the statement and add the 'ignore'
-            // annotation
-            test_fn.attr("ignore");
-            test_fn.line(format!("let _statement = r#\"{}\"#;", &test_case.statement));
-        }
-    };
+    }
     test_fn
 }
 
