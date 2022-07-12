@@ -1,7 +1,9 @@
 /// Conformance test document containing namespaces and/or tests
-/// TODO: once test ISL is defined in `partiql-tests` (https://github.com/partiql/partiql-tests/issues/3),
-///  add link to ISL. Also, when `ion-schema-rust` supports schema code generation based on .isl,
-///  replace these objects.
+///
+/// Follows the `partiql-tests-data` specified in https://github.com/partiql/partiql-tests/blob/main/partiql-tests-data/partiql-tests-schema.isl.
+///
+/// TODO: when `ion-schema-rust` supports schema code generation based on .isl, replace these
+///  objects.
 pub struct TestDocument {
     pub(crate) namespaces: Namespaces,
     pub(crate) test_cases: TestCases,
@@ -16,32 +18,26 @@ pub struct Namespace {
 }
 pub type TestCases = Vec<TestCase>;
 
-/// Test cases have a `test_name` and a PartiQL `statement` along with additional test fields stored
-/// depending on the `test_kind`.
+/// Test cases have a `test_name` and a PartiQL `statement` along with the `assertions` to check for
+/// expected behavior(s). In the future, additional fields will be added the `TestCase` struct for
+/// additional testing configurations.
 pub struct TestCase {
     pub(crate) test_name: String,
     pub(crate) statement: String,
-    pub(crate) test_kind: TestCaseKind,
+    pub(crate) assertions: Assertions,
 }
+pub type Assertions = Vec<Assertion>;
 
-/// Test case kind
+/// Assertion specifies expected behaviors to be checked in the given test case.
 ///
-/// Currently, just supports `Parse` test cases. In the future, other test case variants will be
-/// added (e.g. evaluation, type-checking). For now, the other test case variants will be
+/// Currently just supports 'Syntax'-related assertions. In the future, other assertion variants
+/// will be added (e.g. static analysis, evaluation). For now, the other assertions will be
 /// `NotYetImplemented`.
-pub enum TestCaseKind {
-    Parse(ParseTestCase),
+pub enum Assertion {
+    /// Asserts statement is syntactically correct
+    SyntaxSuccess,
+    /// Asserts statement has at least one syntax error
+    SyntaxFail,
+    /// Assertion that has yet to be implemented
     NotYetImplemented,
-}
-
-/// Test case to test the parsing behavior of a PartiQL statement
-pub struct ParseTestCase {
-    pub(crate) parse_assertions: ParseAssertions,
-}
-
-/// Indicates whether a parsing test passes (`ParsePass`) without errors or fails (`ParseFail`) with
-/// a parsing-related error
-pub enum ParseAssertions {
-    ParsePass,
-    ParseFail,
 }

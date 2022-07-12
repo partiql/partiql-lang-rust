@@ -2,9 +2,8 @@ pub mod generator;
 mod schema;
 pub mod util;
 
-use crate::schema::TestCaseKind::{NotYetImplemented, Parse};
 use crate::schema::{
-    Namespace, Namespaces, ParseAssertions, ParseTestCase, TestCase, TestCases, TestDocument,
+    Assertion, Assertions, Namespace, Namespaces, TestCase, TestCases, TestDocument,
 };
 use crate::util::StringExt;
 use ion_rs::value::owned::OwnedElement;
@@ -108,14 +107,12 @@ pub fn test_namespace(element: &OwnedElement) -> Namespace {
     }
 }
 
-/// Parses the given IonStruct to a `TestCase`. Requires for there to be an annotation indicating
-/// the test case category (currently limited to just 'parse'). The IonStruct requires two string
-/// fields with the 'name' and 'statement'.
+/// Parses the given IonStruct to a `TestCase`. The IonStruct requires two string fields with the
+/// 'name' and 'statement' in addition to an 'assert' field containing one or more `Assertions`.
 ///
-/// For test case categories that are not supported, will create a `NotYetImplemented` test case.
+/// For test assertions that are not supported (e.g. StaticAnalysisFail), the assertion of
+/// `NotYetImplemented` will be used.
 fn test_case(element: &OwnedElement) -> TestCase {
-    let annot: Vec<_> = element.annotations().map(|a| a.text().expect("")).collect();
-
     let test_struct = element.as_struct().expect("struct");
     let test_name = test_struct
         .get("name")
@@ -131,61 +128,47 @@ fn test_case(element: &OwnedElement) -> TestCase {
         .expect("as_str()")
         .to_string();
 
-    if annot.contains(&"parse") {
-        TestCase {
-            test_name,
-            statement,
-            test_kind: Parse(parse_test_case(element)),
-        }
-    } else {
-        TestCase {
-            test_name,
-            statement,
-            test_kind: NotYetImplemented,
-        }
-    }
-}
-
-/// Converts the IonStruct into a `ParseTestCase`. Requires the 'assert' field to be present in the
-/// struct and for it to be an IonStruct or IonList.
-fn parse_test_case(element: &OwnedElement) -> ParseTestCase {
-    let parse_struct = element.as_struct().expect("struct");
-    let assert_field = parse_struct.get("assert").expect("assert");
-    let assertions: Vec<_> = match assert_field.ion_type() {
+    let assert_field = test_struct.get("assert").expect("assert field missing");
+    let assertions_vec: Vec<_> = match assert_field.ion_type() {
         IonType::Struct => vec![assert_field],
         IonType::List => assert_field
             .as_sequence()
             .expect("as_sequence")
             .iter()
             .collect(),
-        _ => panic!("Invalid IonType for the parse test case assertions"),
+        _ => panic!("Invalid IonType for the test case assertions"),
     };
-
-    ParseTestCase {
-        parse_assertions: parse_assertions(&assertions),
+    let assertions = assertions(&assertions_vec);
+    TestCase {
+        test_name,
+        statement,
+        assertions,
     }
 }
 
-/// Converts the vector of Ion values into `ParseAssertions`. Checks that a result field is provided
-/// in the vector and has the symbol 'ParseOk' or 'ParserError', which correspond to
-/// `ParseAssertions::ParsePass` and `ParseAssertions::ParseFail` respectively.
-fn parse_assertions(assertions: &Vec<&OwnedElement>) -> ParseAssertions {
+/// Converts the vector of Ion values into `Assertions`. Checks that a result field is provided
+/// in the vector and has the symbol 'SyntaxSuccess' or 'SyntaxFail', which correspond to
+/// `Assertion::SyntaxSuccess` and `Assertion::SyntaxFail` respectively. Other assertion symbols
+/// will default to `Assertion::NotYetImplemented`
+fn assertions(assertions: &Vec<&OwnedElement>) -> Assertions {
+    let mut test_case_assertions: Assertions = Vec::new();
     for assertion in assertions {
         let assertion_struct = assertion.as_struct().expect("as_struct()");
         let parse_result = assertion_struct.get("result");
         match parse_result {
             Some(r) => {
                 let r_as_str = r.as_str().expect("as_str()");
-                return match r_as_str {
-                    "ParseOk" => ParseAssertions::ParsePass,
-                    "ParseError" => ParseAssertions::ParseFail,
-                    _ => panic!("Unexpected parse result {}", r_as_str),
+                let assertion = match r_as_str {
+                    "SyntaxSuccess" => Assertion::SyntaxSuccess,
+                    "SyntaxFail" => Assertion::SyntaxFail,
+                    _ => Assertion::NotYetImplemented,
                 };
+                test_case_assertions.push(assertion);
             }
             None => (),
         }
     }
-    panic!("Expected a parse result field");
+    test_case_assertions
 }
 
 #[cfg(test)]
