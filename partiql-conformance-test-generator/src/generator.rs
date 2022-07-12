@@ -54,7 +54,7 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
             }
             Assertion::NotYetImplemented => {
                 // for `NotYetImplemented` assertions, add the 'ignore' annotation to the test case
-                test_fn.attr("ignore");
+                test_fn.attr("ignore = \"not yet implemented\"");
             }
         }
     }
