@@ -128,7 +128,7 @@ fn test_case(element: &OwnedElement) -> TestCase {
         .expect("as_str()")
         .to_string();
 
-    let assert_field = test_struct.get("assert").expect("assert");
+    let assert_field = test_struct.get("assert").expect("assert field missing");
     let assertions_vec: Vec<_> = match assert_field.ion_type() {
         IonType::Struct => vec![assert_field],
         IonType::List => assert_field
