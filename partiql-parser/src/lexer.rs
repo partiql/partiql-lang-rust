@@ -606,6 +606,8 @@ pub enum Token<'input> {
     Right,
     #[regex("(?i:Select)")]
     Select,
+    #[regex("(?i:Table)")]
+    Table,
     #[regex("(?i:Time)")]
     Time,
     #[regex("(?i:Timestamp)")]
@@ -680,6 +682,7 @@ impl<'input> Token<'input> {
                 | Token::Preserve
                 | Token::Right
                 | Token::Select
+                | Token::Table
                 | Token::Time
                 | Token::Timestamp
                 | Token::Then
@@ -789,6 +792,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Preserve
             | Token::Right
             | Token::Select
+            | Token::Table
             | Token::Time
             | Token::Timestamp
             | Token::Then
@@ -826,7 +830,7 @@ mod tests {
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
-             Cross Time Timestamp Date By Between At As And Asc All Values Case When Then Else End";
+             Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else End";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -846,9 +850,9 @@ mod tests {
             "LATERAL", ".", "LAST", "||", "JOIN", ":", "INTERSECT", "--", "IS", "/**/", "INNER",
             "<unquoted_ident:UNQUOTED_IDENT>", "IN", "<quoted_ident:QUOTED_IDENT>", "HAVING",
             "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
-            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TIME",
-            "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE",
-            "WHEN", "THEN", "ELSE", "END"
+            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TABLE",
+            "TIME", "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
+            "CASE", "WHEN", "THEN", "ELSE", "END"
         ];
         let displayed = toks
             .into_iter()
