@@ -302,12 +302,12 @@ mod tests {
 
         #[test]
         fn query() {
-            parse!(r#"(SELECT a FROM table).a"#);
-            parse!(r#"(SELECT a FROM table).'a'"#);
-            parse!(r#"(SELECT a FROM table)."a""#);
-            parse!(r#"(SELECT a FROM table)['a']"#);
-            parse!(r#"(SELECT a FROM table).*"#);
-            parse!(r#"(SELECT a FROM table)[*]"#);
+            parse!(r#"(SELECT a FROM t).a"#);
+            parse!(r#"(SELECT a FROM t).'a'"#);
+            parse!(r#"(SELECT a FROM t)."a""#);
+            parse!(r#"(SELECT a FROM t)['a']"#);
+            parse!(r#"(SELECT a FROM t).*"#);
+            parse!(r#"(SELECT a FROM t)[*]"#);
         }
 
         #[test]
@@ -317,6 +317,7 @@ mod tests {
             parse!(r#"foo(x, y)[*]"#);
             parse!(r#"foo(x, y)[5]"#);
             parse!(r#"foo(x, y).a.*"#);
+            parse!(r#"foo(x, y)[*].*.b[5]"#);
         }
 
         #[test]
