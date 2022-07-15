@@ -11,6 +11,7 @@ struct CTSReport {
     commit_hash: String,
     passing: Vec<String>,
     failing: Vec<String>,
+    ignored: Vec<String>
 }
 
 /// Compares two conformance reports generated from [`generate_cts_report`], generating a comparison
@@ -52,6 +53,9 @@ fn main() {
     let orig_passing: HashSet<String> = HashSet::from_iter(orig_report.passing);
     let new_passing: HashSet<String> = HashSet::from_iter(new_report.passing);
 
+    let orig_ignored: HashSet<String> = HashSet::from_iter(orig_report.ignored);
+    let new_ignored: HashSet<String> = HashSet::from_iter(new_report.ignored);
+
     let passing_in_both = orig_passing.intersection(&new_passing);
     let failing_in_both = orig_failing.intersection(&new_failing);
     let passing_orig_failing_new: Vec<&String> = orig_passing.intersection(&new_failing).collect();
@@ -66,8 +70,11 @@ fn main() {
     let num_orig_failing = orig_failing.len() as i32;
     let num_new_failing = new_failing.len() as i32;
 
-    let total_orig = num_orig_passing + num_orig_failing as i32;
-    let total_new = num_new_passing + num_new_failing as i32;
+    let num_orig_ignored = orig_ignored.len() as i32;
+    let num_new_ignored = new_ignored.len() as i32;
+
+    let total_orig = num_orig_passing + num_orig_failing + num_orig_ignored as i32;
+    let total_new = num_new_passing + num_new_failing + num_new_ignored as i32;
 
     let orig_passing = num_orig_passing as f32 / total_orig as f32 * 100.;
     let new_passing = num_new_passing as f32 / total_new as f32 * 100.;
@@ -81,6 +88,7 @@ fn main() {
 | % Passing | {:.2}% | {:.2}% | {:.2}% |
 | :white_check_mark: Passing | {} | {} | {} |
 | :x: Failing | {} | {} | {} |
+| :large_orange_diamond: Ignored | {} | {} | {} |
 | Total Tests | {} | {} | {} |\n",
                 &orig_report.commit_hash,
                 &new_report.commit_hash,
@@ -93,6 +101,9 @@ fn main() {
                 num_orig_failing,
                 num_new_failing,
                 num_new_failing - num_orig_failing,
+                num_orig_ignored,
+                num_new_ignored,
+                num_new_ignored - num_orig_ignored,
                 total_orig,
                 total_new,
                 total_new - total_orig
