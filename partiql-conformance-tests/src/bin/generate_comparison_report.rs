@@ -103,7 +103,7 @@ fn main() {
                 num_new_failing - num_orig_failing,
                 num_orig_ignored,
                 num_new_ignored,
-                num_new_ignored - num_orig_ignored
+                num_new_ignored - num_orig_ignored,
                 total_orig,
                 total_new,
                 total_new - total_orig
