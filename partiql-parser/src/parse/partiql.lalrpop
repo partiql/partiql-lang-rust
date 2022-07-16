@@ -751,9 +751,9 @@ ExprPrecedence03: ast::Expr = {
 }
 
 ExprPrecedence02: ast::Expr = {
-     <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
+    <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::Path( expr.ast(lo..hi) )
-      },
+    },
     <ExprPrecedence01>,
 }
 
