@@ -30,6 +30,7 @@ fn main() {
 
     let mut all_passing_test_names: Vec<Value> = Vec::new();
     let mut all_failing_test_names: Vec<Value> = Vec::new();
+    let mut all_ignored_test_names: Vec<Value> = Vec::new();
 
     for line in reader.lines() {
         match line {
@@ -41,6 +42,8 @@ fn main() {
                         all_passing_test_names.push(v["name"].to_owned());
                     } else if event == "failed" {
                         all_failing_test_names.push(v["name"].to_owned());
+                    } else if event == "ignored" {
+                        all_ignored_test_names.push(v["name"].to_owned());
                     }
                 }
             }
@@ -51,7 +54,8 @@ fn main() {
     let report_as_json = json!({
         "commit_hash": commit_hash,
         "passing": all_passing_test_names,
-        "failing": all_failing_test_names
+        "failing": all_failing_test_names,
+        "ignored": all_ignored_test_names
     });
 
     File::create(output_file_name)
