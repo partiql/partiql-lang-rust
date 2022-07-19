@@ -993,8 +993,7 @@ vec![ast::PathStep::PathWildCard];
         steps
     },
     "[" "*" "]" => {
-        let steps = vec![ast::PathStep::PathWildCard];
-        steps
+vec![ast::PathStep::PathWildCard];
     },
     "[" <expr:ExprQuery> "]" => {
 vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
