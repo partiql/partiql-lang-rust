@@ -1324,7 +1324,7 @@ extern {
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
-        "Table" => lexer::Token::Table,
+        "TABLE" => lexer::Token::Table,
         "TIME" => lexer::Token::Time,
         "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
