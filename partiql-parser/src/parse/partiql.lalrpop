@@ -1000,8 +1000,7 @@ vec![ast::PathStep::PathWildCard];
 vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
     },
     "*" => {
-        let steps = vec![ast::PathStep::PathUnpivot];
-        steps
+vec![ast::PathStep::PathUnpivot]
     },
     <v:PathExprVarRef> => {
         let step = ast::PathStep::PathExpr(
