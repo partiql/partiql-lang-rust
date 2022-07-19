@@ -967,9 +967,7 @@ PathSteps: Vec<ast::PathStep> = {
                 index: Box::new(v),
             });
 
-        let mut steps = path;
-        steps.push(step);
-        steps
+vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
     },
     <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
          let step = ast::PathStep::PathWildCard;
