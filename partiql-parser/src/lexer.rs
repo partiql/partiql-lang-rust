@@ -1,12 +1,13 @@
 use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use std::borrow::Cow;
 
-use logos::{Logos, Span};
+use logos::{Lexer, Logos, Span};
 
 use std::cmp::max;
 
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Formatter};
+use regex::Regex;
 
 use crate::error::{LexError, ParseError};
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
@@ -608,8 +609,16 @@ pub enum Token<'input> {
     Select,
     #[regex("(?i:Table)")]
     Table,
-    #[regex("(?i:Time)")]
-    Time,
+    // In comparison with other parametric types like `VARCHAR(n)` consider
+    // `TIME` as an exception since it can prepend timezone specification
+    // with or without precision:
+    // - TIME WITH TIME ZONE
+    // - TIME WITHOUT TIME ZONE
+    // - TIME (20) WITH TIME ZONE
+    // - TIME(30) WITHOUT TIME ZONE
+    // We're currently parsing other parametric as function expressions.
+    #[regex(r#"(?i:Time)\s*(\(((\d+)\s*(,\s*\d+)*)\))?"#, lex_type_parm)]
+    Time(String),
     #[regex("(?i:Timestamp)")]
     Timestamp,
     #[regex("(?i:Then)")]
@@ -632,7 +641,31 @@ pub enum Token<'input> {
     Where,
     #[regex("(?i:With)")]
     With,
+    #[regex("(?i:Without)")]
+    Without,
+    #[regex("(?i:Zone)")]
+    Zone,
 }
+
+/// For the given [Lexer] returns a [String] representing a Token's value
+/// ## Example:
+fn lex_type_parm<'input>(lex: &mut Lexer<'input, Token<'input>>) -> String {
+    let re = Regex::new(r"(?x)
+        ([a-zA-Z]+)\s* # type name
+        (\(((\d+)\s*(,\s*\d+)*)\))?
+    ").unwrap();
+
+    let caps = re.captures(lex.slice()).unwrap();
+    let type_name = caps.get(1).map_or("", |m| m.as_str());
+    let type_params = caps.get(3).map_or("", |m| m.as_str());
+
+    if type_params == "" {
+        type_name.to_uppercase().to_owned()
+    } else {
+        format!("{}:{}", type_name.to_uppercase().to_owned(), type_params)
+    }
+}
+
 
 impl<'input> Token<'input> {
     pub fn is_keyword(&self) -> bool {
@@ -683,7 +716,6 @@ impl<'input> Token<'input> {
                 | Token::Right
                 | Token::Select
                 | Token::Table
-                | Token::Time
                 | Token::Timestamp
                 | Token::Then
                 | Token::Union
@@ -693,6 +725,8 @@ impl<'input> Token<'input> {
                 | Token::Values
                 | Token::Where
                 | Token::With
+                | Token::Without
+                | Token::Zone
         )
     }
 }
@@ -741,6 +775,8 @@ impl<'input> fmt::Display for Token<'input> {
             Token::ExpReal(txt) => write!(f, "<{}:REAL>", txt),
             Token::Real(txt) => write!(f, "<{}:REAL>", txt),
             Token::String(txt) => write!(f, "<{}:STRING>", txt),
+            Token::Time(txt) => write!(f, "<{}>", txt),
+
             Token::EmbeddedIonQuote => write!(f, "<ION>"),
             Token::Ion(txt) => write!(f, "<{}:ION>", txt),
 
@@ -793,7 +829,6 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Right
             | Token::Select
             | Token::Table
-            | Token::Time
             | Token::Timestamp
             | Token::Then
             | Token::True
@@ -804,7 +839,9 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Values
             | Token::When
             | Token::Where
-            | Token::With => {
+            | Token::With
+            | Token::Without
+            | Token::Zone => {
                 write!(f, "{}", format!("{:?}", self).to_uppercase())
             }
         }
@@ -825,12 +862,13 @@ mod tests {
     fn display() -> Result<(), ParseError<'static, BytePosition>> {
         let symbols =
             "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * ? % / ^ . || : --foo /*block*/";
-        let primitives = r#"unquoted_ident "quoted_ident" @unquoted_atident @"quoted_atident""#;
+        let primitives = r#"a "a" @a @"a" Time(30)"#;
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
-             Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else End";
+             Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else \
+             End Without Zone";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -848,11 +886,11 @@ mod tests {
             "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET", "=", "NULLS", "==", "NULL", "-",
             "NOT", "+", "NATURAL", "*", "MISSING", "?", "LIMIT", "%", "LIKE", "/", "LEFT", "^",
             "LATERAL", ".", "LAST", "||", "JOIN", ":", "INTERSECT", "--", "IS", "/**/", "INNER",
-            "<unquoted_ident:UNQUOTED_IDENT>", "IN", "<quoted_ident:QUOTED_IDENT>", "HAVING",
-            "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
-            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TABLE",
-            "TIME", "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
-            "CASE", "WHEN", "THEN", "ELSE", "END"
+            "<a:UNQUOTED_IDENT>", "IN", "<a:QUOTED_IDENT>", "HAVING", "<a:UNQUOTED_ATIDENT>",
+            "GROUP", "<a:QUOTED_ATIDENT>", "FROM", "<TIME:30>", "FOR", "FULL", "FIRST", "FALSE",
+            "EXCEPT", "ESCAPE", "DESC", "CROSS", "TABLE", "<TIME>", "TIMESTAMP", "DATE", "BY",
+            "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES", "CASE", "WHEN", "THEN", "ELSE",
+            "END", "WITHOUT", "ZONE"
         ];
         let displayed = toks
             .into_iter()
@@ -1117,6 +1155,24 @@ mod tests {
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
         assert_eq!(offset_tracker.num_lines(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn time_with_param() -> Result<(), ParseError<'static, BytePosition>> {
+        let query = "TIME TIME(30)";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Time("TIME".to_string()),
+                Token::Time("TIME:30".to_string()),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+
         Ok(())
     }
 

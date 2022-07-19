@@ -922,7 +922,11 @@ FunctionArgPositional: ast::CallArgAst = {
 
 #[inline]
 FunctionArgNamed: ast::CallArgAst = {
-    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: Some(value)}.ast(lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: Some(value)}.ast(lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <value:Type> <hi:@R> => {
+        let v = Box::new(ast::Expr{ kind: ast::ExprKind::Type(value)});
+        ast::CallArg::Named{name, value: Some(v)}.ast(lo..hi)
+    }
 }
 
 #[inline]
@@ -1137,7 +1141,9 @@ LiteralIon: ast::Lit = {
 #[inline]
 LiteralDateTime: ast::Lit = {
     "DATE" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
-    "TIME" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
+    <lo:@L> <t:TimeType> <s:"String"> <hi:@R> =>? {
+        Ok(ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit {value: Some(s.to_owned()), type_spec: t}))
+    },
     "TIMESTAMP" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
 }
 
@@ -1213,6 +1219,53 @@ AtIdent: ast::SymbolPrimitive = {
 
 ByIdent: ast::SymbolPrimitive = {
     "BY" <SymbolPrimitive>
+}
+
+Type: ast::TypeAst = {
+    <lo:@L> <t:TimeType> <hi:@R> => (ast::Type::TimeType(t)).ast(lo..hi),
+}
+
+
+TimeType: ast::TimeType = {
+    <lo:@L> <t:"TIME"> <timezone:TimeZone?> <hi:@R> =>? {
+        let splits: Vec<_> = t.split(':').collect();
+        let tz = match timezone {
+            Some(v) => v,
+            None => false
+        };
+        match splits.len() {
+            1 => Ok(ast::TimeType {precision: None, tz}),
+            2 => splits[1].parse::<u32>()
+                .map(|n| ast::TimeType {precision: Some(n), tz})
+                .map_err(|_| lpop::ParseError::User {
+                    error: ParseError::SyntaxError(
+                    "Invalid TIME precision argument".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+                 }),
+            _ => Err(lpop::ParseError::User {
+                    error: ParseError::SyntaxError(
+                    "Invalid TIME type".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+                 })
+        }
+    },
+}
+
+TimeZone: bool = {
+    <lo:@L> <w:WithTz> <t:"TIME"> "ZONE" <hi:@R> =>? {
+        let splits: Vec<_> = t.split(':').collect();
+        if splits.len() == 1 && splits[0] == "TIME" {
+            Ok(w)
+        } else {
+          Err(lpop::ParseError::User {
+              error: ParseError::SyntaxError(
+                  "invalid time zone type spec".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
+           })
+        }
+    }
+}
+
+WithTz: bool = {
+    "WITH" => true,
+    "WITHOUT" => false
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1325,7 +1378,7 @@ extern {
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
         "TABLE" => lexer::Token::Table,
-        "TIME" => lexer::Token::Time,
+        "TIME" => lexer::Token::Time(<String>),
         "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
         "TRUE" => lexer::Token::True,
@@ -1337,5 +1390,7 @@ extern {
         "WHEN" => lexer::Token::When,
         "WHERE" => lexer::Token::Where,
         "WITH" => lexer::Token::With,
+        "WITHOUT" => lexer::Token::Without,
+        "ZONE" => lexer::Token::Zone,
     }
 }

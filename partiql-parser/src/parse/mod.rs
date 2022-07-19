@@ -177,6 +177,12 @@ mod tests {
         }
 
         #[test]
+        fn time() {
+            parse!("time '22:12'");
+            parse!("time(10) '22:12'");
+        }
+
+        #[test]
         fn ion() {
             parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo"]` "#);
             parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]` "#);
@@ -546,6 +552,8 @@ mod tests {
             parse!(r#"CAST(9 AS b)"#);
             parse!(r#"CAST(a AS VARCHAR)"#);
             parse!(r#"CAST(a AS VARCHAR(20))"#);
+            parse!(r#"CAST(a AS TIME)"#);
+            parse!(r#"CAST(a AS TIME(20))"#);
             parse!(r#"CAST( TRUE AS INTEGER)"#);
             parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
         }
