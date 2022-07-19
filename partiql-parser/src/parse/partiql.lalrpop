@@ -1007,8 +1007,7 @@ vec![ast::PathStep::PathUnpivot]
             ast::PathExpr{
                 index: Box::new(v),
             });
-        let steps = vec![step];
-        steps
+vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
     },
 }
 
