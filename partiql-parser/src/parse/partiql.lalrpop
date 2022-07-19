@@ -760,11 +760,10 @@ ExprPrecedence02: ast::Expr = {
 PathExpr: ast::Path = {
     <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l), steps },
     <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
-        let mut steps = vec![ast::PathStep::PathWildCard];
-        steps.extend(s);
+        let step = ast::PathStep::PathWildCard;
         ast::Path {
-            root:Box::new(l),
-            steps
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
     <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" "." <s:PathSteps> => {
