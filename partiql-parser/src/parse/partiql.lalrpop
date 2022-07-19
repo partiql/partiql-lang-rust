@@ -773,11 +773,9 @@ PathExpr: ast::Path = {
             }
         );
 
-        let mut steps = vec![step];
-        steps.extend(s);
         ast::Path {
-            root:Box::new(l),
-            steps
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
     <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
