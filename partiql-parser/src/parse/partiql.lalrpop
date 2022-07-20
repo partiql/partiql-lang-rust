@@ -11,6 +11,8 @@ use partiql_ast::ast::ToAstNode;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
+use crate::parse::parse_util::{strip_query};
+
 
 grammar<'input, 'err>(input: &'input str,
                       errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>>);
@@ -784,7 +786,7 @@ ExprPrecedence01: ast::Expr = {
 };
 
 ExprTerm: ast::Expr = {
-    "(" <q:Query> ")" => *q,
+    "(" <q:Query> ")" =>  *strip_query(q),
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <VarRefExpr>,
     <ExprTermCollection>,

@@ -2,6 +2,8 @@
 
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
+mod parse_util;
+
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
 use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
