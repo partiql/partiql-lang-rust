@@ -750,11 +750,34 @@ ExprPrecedence03: ast::Expr = {
     <ExprPrecedence02>,
 }
 
+ExprPrecedence02: ast::Expr = {
+    <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
+        kind: ast::ExprKind::Path( expr.ast(lo..hi) )
+    },
+    <ExprPrecedence01>,
+}
+
 PathExpr: ast::Path = {
     <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l), steps },
-    <l:ExprPrecedence01> "." "*" => ast::Path {
-        root:Box::new(l), steps:vec![ast::PathStep::PathUnpivot]
-     },
+    <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
+        let step = ast::PathStep::PathWildCard;
+        ast::Path {
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
+        }
+    },
+    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" "." <s:PathSteps> => {
+       let step = ast::PathStep::PathExpr(
+        ast::PathExpr{
+                index: Box::new(*expr),
+            }
+        );
+
+        ast::Path {
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
+        }
+    },
     <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
         root:Box::new(l), steps:vec![ast::PathStep::PathWildCard]
     },
@@ -769,13 +792,6 @@ PathExpr: ast::Path = {
         }
     },
 };
-
-ExprPrecedence02: ast::Expr = {
-     <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::Path( expr.ast(lo..hi) )
-      },
-    <ExprPrecedence01>,
-}
 
 #[inline]
 ExprPrecedence01: ast::Expr = {
@@ -946,23 +962,10 @@ FunctionArgName: ast::SymbolPrimitive = {
 // See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathSteps: Vec<ast::PathStep> = {
     <path:PathSteps> "." <v:PathExprVarRef> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(v),
-            });
-
-        let mut steps = path;
-        steps.push(step);
-        steps
-        // ast::Path{ root:path.root, steps }
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
     },
-    <lo:@L> <path:PathSteps>  "[" "*" "]" <hi:@R> => {
-         let step = ast::PathStep::PathWildCard;
-
-         let mut steps = path;
-         steps.push(step);
-         steps
-         // ast::Path{ root:path.root, steps }
+    <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
+        vec![ast::PathStep::PathWildCard]
     },
     <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
          let step = ast::PathStep::PathUnpivot;
@@ -983,16 +986,18 @@ PathSteps: Vec<ast::PathStep> = {
         let mut steps = path;
         steps.push(step);
         steps
-        // ast::Path{ root:path.root, steps }
+    },
+    "[" "*" "]" => {
+        vec![ast::PathStep::PathWildCard]
+    },
+    "[" <expr:ExprQuery> "]" => {
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
+    },
+    "*" => {
+        vec![ast::PathStep::PathUnpivot]
     },
     <v:PathExprVarRef> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(v),
-            });
-        let steps = vec![step];
-        steps
-        // ast::Path{ root: Box::new(v), steps: vec![] }
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
     },
 }
 
@@ -1294,6 +1299,7 @@ extern {
         "PRESERVE" => lexer::Token::Preserve,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
+        "TABLE" => lexer::Token::Table,
         "TIME" => lexer::Token::Time,
         "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
