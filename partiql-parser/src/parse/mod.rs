@@ -2,6 +2,8 @@
 
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
+mod parse_util;
+
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
 use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
@@ -133,9 +135,6 @@ mod tests {
         }};
     }
 
-    // TODO DATE <date string>
-    // TODO TIME <time string>
-    // TODO TIMESTAMP <timestamp string>
     mod literals {
         use super::*;
 
@@ -180,6 +179,12 @@ mod tests {
         fn time() {
             parse!("time '22:12'");
             parse!("time(10) '22:12'");
+            parse!("time WITH TIME ZONE '22:12'");
+            parse!("time WITHOUT TIME ZONE '22:12'");
+            parse!("time(10) WITH TIME ZONE '22:12'");
+            parse!("time(10) WITHOUT TIME ZONE '22:12'");
+            parse!("time (10) WITH TIME ZONE '22:12'");
+            parse!("time (10) WITHOUT TIME ZONE '22:12'");
         }
 
         #[test]
@@ -556,6 +561,8 @@ mod tests {
             parse!(r#"CAST(a AS TIME(20))"#);
             parse!(r#"CAST( TRUE AS INTEGER)"#);
             parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
+            // TODO ensure the following parse
+            // parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
         }
 
         #[test]

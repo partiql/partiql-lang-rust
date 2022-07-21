@@ -366,7 +366,10 @@ pub enum CollectionLit {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum DateTimeLit {
     DateLit(String),
-    TimeLit {value: Option<String>, type_spec: TimeType},
+    TimeLit {
+        value: Option<String>,
+        type_spec: TimeType,
+    },
     TimestampLit(String),
 }
 
@@ -853,7 +856,7 @@ pub enum Type {
     DoublePrecisionType,
     TimestampType,
     CharacterType,
-    CharacterVaryingType(CharacterVaryingType),
+    CharacterVaryingType,
     MissingType,
     StringType,
     SymbolType,
@@ -875,7 +878,7 @@ pub enum Type {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TimeType {
     pub precision: Option<u32>,
-    pub tz: bool
+    pub tz: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -885,7 +888,7 @@ pub struct CharacterType {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct CharacterVaryingType {
-    pub length: Option<u32>,
+    pub length: Option<LongPrimitive>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

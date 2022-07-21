@@ -11,6 +11,8 @@ use partiql_ast::ast::ToAstNode;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
+use crate::parse::parse_util::{strip_query};
+
 
 grammar<'input, 'err>(input: &'input str,
                       errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>>);
@@ -760,11 +762,10 @@ ExprPrecedence02: ast::Expr = {
 PathExpr: ast::Path = {
     <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l), steps },
     <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
-        let mut steps = vec![ast::PathStep::PathWildCard];
-        steps.extend(s);
+        let step = ast::PathStep::PathWildCard;
         ast::Path {
-            root:Box::new(l),
-            steps
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
     <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" "." <s:PathSteps> => {
@@ -773,12 +774,9 @@ PathExpr: ast::Path = {
                 index: Box::new(*expr),
             }
         );
-
-        let mut steps = vec![step];
-        steps.extend(s);
         ast::Path {
-            root:Box::new(l),
-            steps
+            root: Box::new(l),
+            steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
     <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
@@ -803,7 +801,7 @@ ExprPrecedence01: ast::Expr = {
 };
 
 ExprTerm: ast::Expr = {
-    "(" <q:Query> ")" => *q,
+    "(" <q:Query> ")" =>  *strip_query(q),
     <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
     <VarRefExpr>,
     <ExprTermCollection>,
@@ -969,21 +967,10 @@ FunctionArgName: ast::SymbolPrimitive = {
 // See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathSteps: Vec<ast::PathStep> = {
     <path:PathSteps> "." <v:PathExprVarRef> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(v),
-            });
-
-        let mut steps = path;
-        steps.push(step);
-        steps
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
     },
     <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
-         let step = ast::PathStep::PathWildCard;
-
-         let mut steps = path;
-         steps.push(step);
-         steps
+        vec![ast::PathStep::PathWildCard]
     },
     <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
          let step = ast::PathStep::PathUnpivot;
@@ -1006,27 +993,16 @@ PathSteps: Vec<ast::PathStep> = {
         steps
     },
     "[" "*" "]" => {
-        let steps = vec![ast::PathStep::PathWildCard];
-        steps
+        vec![ast::PathStep::PathWildCard]
     },
     "[" <expr:ExprQuery> "]" => {
-        let steps = vec![ast::PathStep::PathExpr(
-            ast::PathExpr{
-            index: Box::new(*expr),
-        })];
-        steps
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
     },
     "*" => {
-        let steps = vec![ast::PathStep::PathUnpivot];
-        steps
+        vec![ast::PathStep::PathUnpivot]
     },
     <v:PathExprVarRef> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(v),
-            });
-        let steps = vec![step];
-        steps
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
     },
 }
 
@@ -1225,7 +1201,6 @@ Type: ast::TypeAst = {
     <lo:@L> <t:TimeType> <hi:@R> => (ast::Type::TimeType(t)).ast(lo..hi),
 }
 
-
 TimeType: ast::TimeType = {
     <lo:@L> <t:"TIME"> <timezone:TimeZone?> <hi:@R> =>? {
         let splits: Vec<_> = t.split(':').collect();
@@ -1274,7 +1249,7 @@ WithTz: bool = {
 //                                                                                //
 // ------------------------------------------------------------------------------ //
 
-// The lexer is external; See [`lexer.rs`] for its definition.
+// The lexer is external; See [`lexer`] for its definition.
 //
 // See also http://lalrpop.github.io/lalrpop/lexer_tutorial/002_writing_custom_lexer.html
 extern {

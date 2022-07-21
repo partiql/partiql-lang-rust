@@ -5,9 +5,9 @@ use logos::{Lexer, Logos, Span};
 
 use std::cmp::max;
 
-use std::fmt;
-use std::fmt::{Formatter};
 use regex::Regex;
+use std::fmt;
+use std::fmt::Formatter;
 
 use crate::error::{LexError, ParseError};
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
@@ -610,14 +610,14 @@ pub enum Token<'input> {
     #[regex("(?i:Table)")]
     Table,
     // In comparison with other parametric types like `VARCHAR(n)` consider
-    // `TIME` as an exception since it can prepend timezone specification
+    // `TIME` as an exception since it can precede timezone specification
     // with or without precision:
-    // - TIME WITH TIME ZONE
-    // - TIME WITHOUT TIME ZONE
-    // - TIME (20) WITH TIME ZONE
-    // - TIME(30) WITHOUT TIME ZONE
-    // We're currently parsing other parametric as function expressions.
-    #[regex(r#"(?i:Time)\s*(\(((\d+)\s*(,\s*\d+)*)\))?"#, lex_type_parm)]
+    // - TIME WITH TIME ZONE <string-literal>
+    // - TIME WITHOUT TIME ZONE <string-literal>
+    // - TIME (20) WITH TIME ZONE <string-literal>
+    // - TIME(30) WITHOUT TIME ZONE <string-literal>
+    // We're currently parsing other parametric types as function expressions.
+    #[regex(r#"(?i:Time)\s*(\(((\d+)\s*(,\s*\d+)*)\))?"#, lex_parameter_type)]
     Time(String),
     #[regex("(?i:Timestamp)")]
     Timestamp,
@@ -646,26 +646,6 @@ pub enum Token<'input> {
     #[regex("(?i:Zone)")]
     Zone,
 }
-
-/// For the given [Lexer] returns a [String] representing a Token's value
-/// ## Example:
-fn lex_type_parm<'input>(lex: &mut Lexer<'input, Token<'input>>) -> String {
-    let re = Regex::new(r"(?x)
-        ([a-zA-Z]+)\s* # type name
-        (\(((\d+)\s*(,\s*\d+)*)\))?
-    ").unwrap();
-
-    let caps = re.captures(lex.slice()).unwrap();
-    let type_name = caps.get(1).map_or("", |m| m.as_str());
-    let type_params = caps.get(3).map_or("", |m| m.as_str());
-
-    if type_params == "" {
-        type_name.to_uppercase().to_owned()
-    } else {
-        format!("{}:{}", type_name.to_uppercase().to_owned(), type_params)
-    }
-}
-
 
 impl<'input> Token<'input> {
     pub fn is_keyword(&self) -> bool {
@@ -845,6 +825,31 @@ impl<'input> fmt::Display for Token<'input> {
                 write!(f, "{}", format!("{:?}", self).to_uppercase())
             }
         }
+    }
+}
+
+// For the given [Lexer] returns a [String] representing a [Token]'s value
+// Examples:
+//  Given: `TIME` Token, Expected: "TIME".to_string()
+//  Given: `TIME(30)` Token, Expected: "TIME:30".to_string()
+//  Given: `TIME    (40)` Token, Expected: "TIME:30".to_string()
+pub(crate) fn lex_parameter_type<'input>(lex: &mut Lexer<'input, Token<'input>>) -> String {
+    let re = Regex::new(
+        r"(?x)
+        (?P<t>[a-zA-Z]+)\s* # type name
+        (\((?P<p>(\d+)\s*(,\s*\d+)*)\))?
+    ",
+    )
+    .unwrap();
+
+    let caps = re.captures(lex.slice()).unwrap();
+    let type_name = caps.name("t").map_or("", |m| m.as_str());
+    let type_params = caps.name("p").map_or("", |m| m.as_str());
+
+    if type_params.is_empty() {
+        type_name.to_uppercase().to_owned()
+    } else {
+        format!("{}:{}", type_name.to_uppercase().to_owned(), type_params)
     }
 }
 
@@ -1160,7 +1165,7 @@ mod tests {
 
     #[test]
     fn time_with_param() -> Result<(), ParseError<'static, BytePosition>> {
-        let query = "TIME TIME(30)";
+        let query = "TIME TIME(30) TIME   (40)";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
@@ -1169,6 +1174,7 @@ mod tests {
             vec![
                 Token::Time("TIME".to_string()),
                 Token::Time("TIME:30".to_string()),
+                Token::Time("TIME:40".to_string()),
             ],
             toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
         );
