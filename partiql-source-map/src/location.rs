@@ -7,6 +7,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroUsize;
 use std::ops::{Add, Range, Sub};
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 macro_rules! impl_pos {
@@ -64,16 +65,14 @@ macro_rules! impl_pos {
 ///
 /// This type is small (u32 currently) to allow it to be included in ASTs and other
 /// data structures.
-#[derive(
-    Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Deserialize, Serialize,
-)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ByteOffset(pub u32);
 impl_pos!(ByteOffset, u32);
 
 /// A 0-indexed line offset, relative to some other position.
-#[derive(
-    Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Deserialize, Serialize,
-)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LineOffset(pub u32);
 impl_pos!(LineOffset, u32);
 
@@ -82,9 +81,8 @@ impl_pos!(LineOffset, u32);
 /// This value represents the number of unicode codepoints seen, so will differ
 /// from [`ByteOffset`] for a given location in a &str if the string contains
 /// non-ASCII unicode characters
-#[derive(
-    Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Deserialize, Serialize,
-)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CharOffset(pub u32);
 impl_pos!(CharOffset, u32);
 
@@ -92,7 +90,8 @@ impl_pos!(CharOffset, u32);
 ///
 /// This type is small (u32 currently) to allow it to be included in ASTs and other
 /// data structures.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BytePosition(pub ByteOffset);
 
 impl From<ByteOffset> for BytePosition {
@@ -123,6 +122,7 @@ impl fmt::Display for BytePosition {
 ///             format!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0)));
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LineAndCharPosition {
     /// The 0-indexed line absolute position (i.e., relative to the start of a &str)
     pub line: LineOffset,
@@ -150,7 +150,8 @@ impl LineAndCharPosition {
 /// # use partiql_source_map::location::LineAndColumn;
 /// assert_eq!("Beginning of &str: 1:1",format!("Beginning of &str: {}", LineAndColumn::new(1, 1).unwrap()));
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LineAndColumn {
     /// The 1-indexed line absolute position (i.e., relative to the start of a &str)
     pub line: NonZeroUsize,
@@ -200,7 +201,8 @@ impl fmt::Display for LineAndColumn {
 /// A range with an inclusive start and exclusive end.
 ///
 /// Basically, a [`Range`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Location<Loc: Display> {
     /// The start the range (inclusive).
     pub start: Loc,
@@ -232,7 +234,8 @@ where
 }
 
 /// A wrapper type that holds an `inner` value and a `location` for it
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Located<T, Loc: Display> {
     /// The item that has a location attached
     pub inner: T,

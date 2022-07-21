@@ -30,7 +30,7 @@ thiserror = "~1.0.24"
 num-traits = "~0.2.14"
 num-bigint = "~0.4.0"
 bigdecimal = "~0.2.0"
-rust_decimal = "~1.22.0"
+rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 
 lalrpop-util = "~0.19.7"
 logos = "~0.12.0"
@@ -40,10 +40,19 @@ itertools = "~0.10.3"
 regex = "~1.5.5"
 lazy_static = "~1.4.0"
 
-serde = { version = "~1.0.137", features = ["derive"] }
+serde = { version = "1.*", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = "0.3"
+
+[features]
+default = []
+serde = [
+  "dep:serde",
+  "rust_decimal/serde-with-str",
+  "partiql-ast/serde",
+  "partiql-source-map/serde"
+]
 
 [[bench]]
 name = "bench_parse"
