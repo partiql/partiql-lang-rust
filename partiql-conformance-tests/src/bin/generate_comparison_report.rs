@@ -11,7 +11,7 @@ struct CTSReport {
     commit_hash: String,
     passing: Vec<String>,
     failing: Vec<String>,
-    ignored: Vec<String>
+    ignored: Vec<String>,
 }
 
 /// Compares two conformance reports generated from [`generate_cts_report`], generating a comparison

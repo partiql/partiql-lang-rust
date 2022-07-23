@@ -258,6 +258,7 @@ pub type SexpAst = AstBytePos<Sexp>;
 pub type SimpleCaseAst = AstBytePos<SimpleCase>;
 pub type SortSpecAst = AstBytePos<SortSpec>;
 pub type StructAst = AstBytePos<Struct>;
+pub type TypeAst = AstBytePos<Type>;
 pub type UniOpAst = AstBytePos<UniOp>;
 pub type VarRefAst = AstBytePos<VarRef>;
 
@@ -319,6 +320,8 @@ pub enum ExprKind {
     Call(CallAst),
     CallAgg(CallAggAst),
 
+    Type(TypeAst),
+
     /// Query, e.g. `UNION` | `EXCEPT` | `INTERSECT` | `SELECT` and their parts.
     Query(QueryAst),
 
@@ -363,7 +366,10 @@ pub enum CollectionLit {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum DateTimeLit {
     DateLit(String),
-    TimeLit(String),
+    TimeLit {
+        value: Option<String>,
+        type_spec: TimeType,
+    },
     TimestampLit(String),
 }
 
@@ -857,7 +863,7 @@ pub enum Type {
     BlobType,
     ClobType,
     DateType,
-    TimeType,
+    TimeType(TimeType),
     ZonedTimestampType,
     StructType,
     TupleType,
@@ -867,6 +873,12 @@ pub enum Type {
     AnyType,
 
     CustomType(CustomType),
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TimeType {
+    pub precision: Option<u32>,
+    pub tz: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
