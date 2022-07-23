@@ -1,9 +1,11 @@
 //! [`LineOffsetTracker`] and related types for mapping locations in source `str`s.
 
 use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
-use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Keeps track of source offsets of newlines for the purposes of later calculating
 /// line and column information
@@ -28,7 +30,8 @@ use std::ops::Range;
 /// assert_eq!(tracker.at(source, ByteOffset(30).into()), Ok(LineAndCharPosition::new(3,4)));
 /// assert_eq!(tracker.at(source, ByteOffset(300).into()), Err(LineOffsetError::EndOfInput));
 /// ```
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LineOffsetTracker {
     line_starts: SmallVec<[ByteOffset; 16]>,
 }
@@ -43,6 +46,7 @@ impl Default for LineOffsetTracker {
 
 /// Errors that can be encountered when indexing by byte offset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineOffsetError {
     /// Requested `offset` is past end of input
     EndOfInput,

@@ -9,7 +9,11 @@ members = [
   "partiql-eval",
   "partiql-irgen",
   "partiql-parser",
-  "partiql-playground",
   "partiql-rewriter",
+]
+
+exclude = [
+  "partiql-playground",
   "partiql-cli"
 ]
+

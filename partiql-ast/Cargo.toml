@@ -24,8 +24,20 @@ path = "src/lib.rs"
 partiql-source-map = { path = "../partiql-source-map" }
 
 derive_builder = "~0.11.1"
-rust_decimal = "~1.22.0"
-serde = { version = "~1.0.137", features = ["derive"] }
+rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
+
+serde = { version = "1.*", features = ["derive"], optional = true }
+
 
 [dev-dependencies]
+
+
+[features]
+default = []
+serde = [
+  "dep:serde",
+  "partiql-source-map/serde",
+  "rust_decimal/serde-with-str",
+  "rust_decimal/serde"
+]
 
