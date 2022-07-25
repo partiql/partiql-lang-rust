@@ -31,13 +31,14 @@ use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::BytePosition;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// [`Error`] type for errors in the lexical structure for the PartiQL parser.
 pub type LexicalError<'input> = error::LexError<'input>;
 
 /// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
 pub type ParseError<'input> = error::ParseError<'input, BytePosition>;
-
-use serde::{Deserialize, Serialize};
 
 /// General [`Result`] type for the PartiQL [`Parser`].
 pub type ParserResult<'input> = Result<Parsed<'input>, ParserError<'input>>;
@@ -64,7 +65,8 @@ impl Parser {
 
 /// The output of parsing PartiQL statement strings: an AST and auxiliary data.
 #[non_exhaustive]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[allow(dead_code)]
 pub struct Parsed<'input> {
     pub text: &'input str,
@@ -75,7 +77,8 @@ pub struct Parsed<'input> {
 /// The output of errors when parsing PartiQL statement strings: an errors and auxiliary data.
 #[non_exhaustive]
 #[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParserError<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,

@@ -8,13 +8,15 @@ use std::fmt::{Debug, Display};
 use partiql_source_map::location::Located;
 use thiserror::Error;
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Errors in the lexical structure of a PartiQL query.
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum LexError<'input> {
     /// Generic invalid input; likely an unrecognizable token.
@@ -35,7 +37,8 @@ pub enum LexError<'input> {
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum ParseError<'input, Loc>
 where
@@ -66,7 +69,8 @@ where
     IllegalState(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UnexpectedTokenData<'input> {
     /// The unexpected token
     pub token: Cow<'input, str>,

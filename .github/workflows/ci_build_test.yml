@@ -112,7 +112,7 @@ jobs:
         continue-on-error: true
         run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" -- -Z unstable-options --format json > cargo_test_results.json
       # Create a conformance report from the `cargo test` json file
-      - run: ./target/debug/generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
+      - run: cargo run --features report_tool --bin generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
       # Upload conformance report for comparison with future runs
       - name: Upload cts_report.json
         uses: actions/upload-artifact@v3
@@ -164,7 +164,7 @@ jobs:
         if: ${{ steps.download-report.outcome == 'failure' }}
         run: mkdir -p artifact && cp -r ./partiql-conformance-tests/backup_conformance_report.json ./artifact/cts_report.json
       # Run conformance report comparison. Generates cts-comparison-report.md
-      - run: ./target/debug/generate_comparison_report ./artifact/cts_report.json cts_report.json cts-comparison-report.md
+      - run: cargo run --features report_tool --bin generate_comparison_report ./artifact/cts_report.json cts_report.json cts-comparison-report.md
       # Print conformance report to GitHub actions workflow summary page
       - name: print markdown in run
         run: cat cts-comparison-report.md >> $GITHUB_STEP_SUMMARY
