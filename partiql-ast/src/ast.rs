@@ -402,7 +402,6 @@ pub enum DateTimeLit {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VarRef {
     pub name: SymbolPrimitive,
-    pub case: CaseSensitivity,
     pub qualifier: ScopeQualifier,
 }
 
@@ -479,7 +478,8 @@ pub struct Between {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct In {
-    pub operands: Vec<Box<Expr>>,
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -548,13 +548,6 @@ pub struct Date {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LitTime {
     pub value: TimeValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Path {
-    pub root: Box<Expr>,
-    pub steps: Vec<PathStep>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -641,6 +634,13 @@ pub struct TimeValue {
     pub precision: i32,
     pub with_time_zone: bool,
     pub tz_minutes: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Path {
+    pub root: Box<Expr>,
+    pub steps: Vec<PathStep>,
 }
 
 /// A "step" within a path expression; that is the components of the expression following the root.

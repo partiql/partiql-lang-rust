@@ -637,9 +637,9 @@ ExprPrecedence09: ast::Expr = {
        )}
     },
     <lo:@L> <l:ExprPrecedence09> "IN" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) },
+       ast::Expr{ kind: ast::ExprKind::In( ast::In{ lhs: Box::new(l), rhs: Box::new(r) }.ast(lo..hi) ) },
     <lo:@L> <l:ExprPrecedence09> "NOT" "IN" <r:ExprPrecedence08> <hi:@R> => {
-       let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ operands: vec![Box::new(l),Box::new(r)] }.ast(lo..hi) ) };
+       let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ lhs: Box::new(l), rhs: Box::new(r) }.ast(lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
            ast::UniOp {
                kind: ast::UniOpKind::Not,
@@ -1006,8 +1006,7 @@ PathSteps: Vec<ast::PathStep> = {
 PathExprVarRef: ast::Expr = {
     <lo:@L> <s:"String"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
-            name: ast::SymbolPrimitive { value: s.to_owned(), case: None },
-            case: ast::CaseSensitivity::CaseInsensitive,
+            name: ast::SymbolPrimitive { value: s.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
@@ -1018,28 +1017,24 @@ VarRefExpr: ast::Expr = {
     <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
-            case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
     <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
-            case: ast::CaseSensitivity::CaseSensitive,
             qualifier: ast::ScopeQualifier::Unqualified
       }.ast(lo..hi)),
     },
     <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
-            case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr {
         kind: ast::ExprKind::VarRef(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
-            case: ast::CaseSensitivity::CaseInsensitive,
             qualifier: ast::ScopeQualifier::Unqualified
         }.ast(lo..hi)),
     },
