@@ -347,7 +347,7 @@ pub enum ExprKind {
     Path(PathAst),
     Call(CallAst),
     CallAgg(CallAggAst),
-
+    /// Expression representing a type, e.g. `TIME` in `'20:34' IS TIME`
     Type(TypeAst),
 
     /// Query, e.g. `UNION` | `EXCEPT` | `INTERSECT` | `SELECT` and their parts.
@@ -975,7 +975,7 @@ pub enum Type {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TimeType {
     pub precision: Option<u32>,
-    pub tz: bool,
+    pub with_tz: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

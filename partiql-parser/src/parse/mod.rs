@@ -561,7 +561,10 @@ mod tests {
             parse!(r#"CAST(a AS TIME(20))"#);
             parse!(r#"CAST( TRUE AS INTEGER)"#);
             parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
-            // TODO ensure the following parse
+            // TODO ensure the following parses correctly
+            // currently the test doesn't pass b/c as a result of
+            // we end up w/ `UnexpectedTokenData` error on `AS`
+            // keyword
             // parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
         }
 

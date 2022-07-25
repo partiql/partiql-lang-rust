@@ -1199,14 +1199,14 @@ Type: ast::TypeAst = {
 TimeType: ast::TimeType = {
     <lo:@L> <t:"TIME"> <timezone:TimeZone?> <hi:@R> =>? {
         let splits: Vec<_> = t.split(':').collect();
-        let tz = match timezone {
+        let with_tz = match timezone {
             Some(v) => v,
             None => false
         };
         match splits.len() {
-            1 => Ok(ast::TimeType {precision: None, tz}),
+            1 => Ok(ast::TimeType {precision: None, with_tz}),
             2 => splits[1].parse::<u32>()
-                .map(|n| ast::TimeType {precision: Some(n), tz})
+                .map(|n| ast::TimeType {precision: Some(n), with_tz})
                 .map_err(|_| lpop::ParseError::User {
                     error: ParseError::SyntaxError(
                     "Invalid TIME precision argument".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
