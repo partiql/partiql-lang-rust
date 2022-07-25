@@ -971,14 +971,13 @@ pub enum Type {
     CustomType(CustomType),
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TimeType {
     pub precision: Option<u32>,
     pub tz: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CharacterType {

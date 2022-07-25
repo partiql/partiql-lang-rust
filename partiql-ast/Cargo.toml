@@ -40,4 +40,3 @@ serde = [
   "rust_decimal/serde-with-str",
   "rust_decimal/serde"
 ]
-
