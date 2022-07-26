@@ -964,21 +964,21 @@ FunctionArgName: ast::SymbolPrimitive = {
 // See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathSteps: Vec<ast::PathStep> = {
     <path:PathSteps> "." <v:PathExprVarRef> => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
+        let mut steps = path;
+        steps.push(ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) }));
+        steps
     },
     <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
-        vec![ast::PathStep::PathWildCard]
+        let mut steps = path;
+        steps.push(ast::PathStep::PathWildCard);
+        steps
     },
     <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
-         let step = ast::PathStep::PathUnpivot;
-
          let mut steps = path;
-         steps.push(step);
+         steps.push(ast::PathStep::PathUnpivot);
          steps
          // ast::Path{ root:path.root, steps }
     },
-    // TODO Add path expression with CAST E.g. {'attr': 1, 'b':2}[CAST('at' || 'tr' AS STRING)]
-    // once https://github.com/partiql/partiql-lang-rust/pull/122 is merged
     <lo:@L> <path:PathSteps> "[" <expr:ExprQuery> "]" <hi:@R> => {
         let step = ast::PathStep::PathExpr(
             ast::PathExpr{

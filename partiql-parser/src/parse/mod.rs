@@ -283,6 +283,7 @@ mod tests {
             parse!(r#"@a.b[*]"#);
             parse!(r#"@"a".b[*]"#);
             parse!(r#"tables.items[*].product.*.nest"#);
+            parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
         }
 
         #[test]
@@ -320,6 +321,33 @@ mod tests {
             parse!(r#"foo(x, y)[5]"#);
             parse!(r#"foo(x, y).a.*"#);
             parse!(r#"foo(x, y)[*].*.b[5]"#);
+        }
+
+        #[test]
+        fn test_pathexpr_struct() {
+            let res = parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
+
+            if let ast::ExprKind::Query(ast::AstNode {
+                node:
+                    ast::Query {
+                        set:
+                            ast::AstNode {
+                                node: ast::QuerySet::Expr(ref e),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            }) = res.kind
+            {
+                if let ast::ExprKind::Path(p) = &e.kind {
+                    assert_eq!(9, p.node.steps.len())
+                } else {
+                    panic!("PathExpr test failed!");
+                }
+            } else {
+                panic!("PathExpr test failed!");
+            }
         }
 
         #[test]
