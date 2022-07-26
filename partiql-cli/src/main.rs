@@ -1,15 +1,16 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use clap::Parser;
+use partiql_cli::error::CLIErrors;
 use partiql_cli::{args, repl};
 
 use partiql_parser::Parsed;
 
 #[allow(dead_code)]
-fn parse(query: &str) -> miette::Result<Parsed> {
-    let res = partiql_parser::Parser::default().parse(query);
-    //TODO
-    Ok(res.expect("parse failure"))
+fn parse(query: &str) -> Result<Parsed, CLIErrors> {
+    partiql_parser::Parser::default()
+        .parse(query)
+        .map_err(CLIErrors::from_parser_error)
 }
 
 fn main() -> miette::Result<()> {

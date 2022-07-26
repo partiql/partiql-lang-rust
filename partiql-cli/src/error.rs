@@ -1,7 +1,29 @@
 use miette::{Diagnostic, LabeledSpan, SourceCode};
-use partiql_parser::ParseError;
+use partiql_parser::{ParseError, ParserError};
 use partiql_source_map::location::{BytePosition, Location};
+
 use thiserror::Error;
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("Error for query `{query}`")]
+pub struct CLIErrors {
+    query: String,
+    #[related]
+    related: Vec<CLIError>,
+}
+
+impl CLIErrors {
+    pub fn from_parser_error(err: ParserError) -> Self {
+        let query = err.text.to_string();
+
+        let related = err
+            .errors
+            .into_iter()
+            .map(|e| CLIError::from_parse_error(e, &query))
+            .collect();
+        CLIErrors { query, related }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum CLIError {
@@ -11,8 +33,7 @@ pub enum CLIError {
         msg: String,
         loc: Location<BytePosition>,
     },
-    // TODO add github issue link
-    #[error("Internal Compiler Error - please report this.")]
+    #[error("Internal Compiler Error - please report this (https://github.com/partiql/partiql-lang-rust/issues).")]
     InternalCompilerError { src: String },
 }
 
@@ -39,7 +60,7 @@ impl Diagnostic for CLIError {
 }
 
 impl CLIError {
-    pub fn from_parser_error(err: ParseError, source: &str) -> CLIError {
+    pub fn from_parse_error(err: ParseError, source: &str) -> Self {
         match err {
             ParseError::SyntaxError(partiql_source_map::location::Located { inner, location }) => {
                 CLIError::SyntaxError {

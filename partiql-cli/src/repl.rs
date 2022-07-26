@@ -18,10 +18,10 @@ use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::{SyntaxDefinition, SyntaxSet, SyntaxSetBuilder};
 use syntect::util::as_24_bit_terminal_escaped;
 
-use miette::Report;
+use miette::{IntoDiagnostic, Report};
 use owo_colors::OwoColorize;
 
-use crate::error::CLIError;
+use crate::error::CLIErrors;
 
 static ION_SYNTAX: &str = include_str!("ion.sublime-syntax");
 static PARTIQL_SYNTAX: &str = include_str!("partiql.sublime-syntax");
@@ -137,14 +137,8 @@ impl Validator for PartiqlHelper {
                     // TODO we should probably do something more ergonomic. Perhaps require a `;` or two newlines to end?
                     Ok(ValidationResult::Incomplete)
                 } else {
-                    let err_msg = e
-                        .errors
-                        .into_iter()
-                        .map(|e| CLIError::from_parser_error(e, source))
-                        .map(|e| format!("{:?}", Report::new(e)))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    Ok(ValidationResult::Invalid(Some(format!("\n\n{}", err_msg))))
+                    let err = Report::new(CLIErrors::from_parser_error(e));
+                    Ok(ValidationResult::Invalid(Some(format!("\n\n{:?}", err))))
                 }
             }
         }
@@ -152,7 +146,7 @@ impl Validator for PartiqlHelper {
 }
 
 pub fn repl() -> miette::Result<()> {
-    let mut rl = rustyline::Editor::<PartiqlHelper>::new();
+    let mut rl = rustyline::Editor::<PartiqlHelper>::new().into_diagnostic()?;
     rl.set_color_mode(ColorMode::Forced);
     rl.set_helper(Some(
         PartiqlHelper::new(PartiqlHelperConfig::infer()).unwrap(),
