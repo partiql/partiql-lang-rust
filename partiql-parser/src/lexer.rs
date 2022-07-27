@@ -632,6 +632,10 @@ pub enum Token<'input> {
     Where,
     #[regex("(?i:With)")]
     With,
+    #[regex("(?i:Without)")]
+    Without,
+    #[regex("(?i:Zone)")]
+    Zone,
 }
 
 impl<'input> Token<'input> {
@@ -804,7 +808,9 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Values
             | Token::When
             | Token::Where
-            | Token::With => {
+            | Token::With
+            | Token::Without
+            | Token::Zone => {
                 write!(f, "{}", format!("{:?}", self).to_uppercase())
             }
         }

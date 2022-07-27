@@ -381,6 +381,7 @@ pub enum Lit {
     HexStringLit(String),
     DateTimeLit(DateTimeLit),
     CollectionLit(CollectionLit),
+    TypedLit(String, Type),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -538,20 +539,6 @@ pub struct Sexp {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Date {
-    pub year: i32,
-    pub month: i32,
-    pub day: i32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LitTime {
-    pub value: TimeValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Call {
     pub func_name: SymbolPrimitive,
     pub args: Vec<CallArgAst>,
@@ -564,10 +551,17 @@ pub enum CallArg {
     Star(),
     /// positional argument to a function call (e.g., all arguments in `foo(1, 'a', 3)`)
     Positional(Box<Expr>),
+
+    PositionalType(Type),
     /// named argument to a function call (e.g., the `"from" : 2` in `substring(a, "from":2)`
     Named {
         name: SymbolPrimitive,
-        value: Option<Box<Expr>>,
+        value: Box<Expr>,
+    },
+
+    NamedType {
+        name: SymbolPrimitive,
+        ty: Type,
     },
 }
 
@@ -581,40 +575,6 @@ pub struct CallAgg {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Cast {
-    pub value: Box<Expr>,
-    pub as_type: Type,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CanCast {
-    pub value: Box<Expr>,
-    pub as_type: Type,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CanLossLessCast {
-    pub value: Box<Expr>,
-    pub as_type: Type,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NullIf {
-    pub expr1: Box<Expr>,
-    pub expr2: Box<Expr>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Coalesce {
-    pub args: Vec<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
     pub project: ProjectionAst,
     pub from: Option<FromClauseAst>,
@@ -622,18 +582,6 @@ pub struct Select {
     pub where_clause: Option<Box<Expr>>,
     pub group_by: Option<Box<GroupByExprAst>>,
     pub having: Option<Box<Expr>>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct TimeValue {
-    pub hour: i32,
-    pub minute: i32,
-    pub second: i32,
-    pub nano: i32,
-    pub precision: i32,
-    pub with_time_zone: bool,
-    pub tz_minutes: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -967,20 +915,22 @@ pub enum Type {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CharacterType {
-    pub length: Option<LongPrimitive>,
+pub enum CustomTypeParam {
+    Lit(Lit),
+    Type(Type),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CharacterVaryingType {
-    pub length: Option<LongPrimitive>,
+pub enum CustomTypePart {
+    Name(SymbolPrimitive),
+    Parameterized(SymbolPrimitive, Vec<CustomTypeParam>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CustomType {
-    pub name: SymbolPrimitive,
+    pub parts: Vec<CustomTypePart>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -989,10 +939,4 @@ pub struct SymbolPrimitive {
     pub value: String,
     // Optional because string literal symbols don't have case sensitivity
     pub case: Option<CaseSensitivity>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LongPrimitive {
-    pub value: i32,
 }

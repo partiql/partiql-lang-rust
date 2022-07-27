@@ -18,11 +18,11 @@ pub(crate) enum FnExprArgMatch<'a> {
     /// Any 1 [`Token`] that is not function punctuation (i.e., '(', ')', ',') and not a keyword.
     ///
     /// Generally this will be followed by a [`AnyZeroOrMore`] match, in order to match 1 or more [`Token`]s
-    AnyOne,
+    AnyOne(bool),
     /// 0 or more [`Token`]s that are not function punctuation (i.e., '(', ')', ',') and not a keyword
     ///
     /// Generally this will be preceded by a [`AnyOne`] match, in order to match 1 or more [`Token`]s
-    AnyZeroOrMore,
+    AnyZeroOrMore(bool),
     /// Explicitly match a single [`Token`]
     #[allow(dead_code)]
     Match(Token<'a>),
@@ -70,13 +70,13 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., trim(leading 'tt' from x) => trim("leading": 'tt', "from": x)
-                vec![Id(re.clone()), AnyOne, AnyStar, Kw(Token::From), AnyOne, AnyStar],
+                vec![Id(re.clone()), AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
                 // e.g., trim(trailing from x) => trim("trailing": ' ', "from": x)
-                vec![Id(re), Syn(Token::String(" ")), Kw(Token::From), AnyOne, AnyStar],
+                vec![Id(re), Syn(Token::String(" ")), Kw(Token::From), AnyOne(false), AnyStar(false)],
                 // e.g., trim(' ' from x) => trim(' ', "from": x)
-                vec![AnyOne, AnyStar, Kw(Token::From), AnyOne, AnyStar],
+                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
                 // e.g., trim(from x) => trim("from": x)
-                vec![Kw(Token::From), AnyOne, AnyStar],
+                vec![Kw(Token::From), AnyOne(false), AnyStar(false)],
             ],
         }
     }
@@ -91,7 +91,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., extract(day from x) => extract("day":true, "from": x)
-                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne, AnyStar]
+                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne(false), AnyStar(false)]
             ],
         }
     }
@@ -102,7 +102,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. position('foo' in 'xyzfooxyz') => position('foo', in: 'xyzfooxyz')
-                vec![AnyOne, AnyStar, Kw(Token::In), AnyOne, AnyStar]
+                vec![AnyOne(false), AnyStar(false), Kw(Token::In), AnyOne(false), AnyStar(false)]
             ],
         }
     }
@@ -113,9 +113,9 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., count(all x) => count("all": x)
-                vec![Kw(Token::All), AnyOne, AnyStar],
+                vec![Kw(Token::All), AnyOne(false), AnyStar(false)],
                 // e.g., count(distinct x) => count("distinct": x)
-                vec![Kw(Token::Distinct), AnyOne, AnyStar],
+                vec![Kw(Token::Distinct), AnyOne(false), AnyStar(false)],
             ],
         }
     }
@@ -126,11 +126,11 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. substring(x from 2 for 3) => substring(x, "from":2, "for":3)
-                vec![AnyOne, AnyStar, Kw(Token::From), AnyOne, AnyStar, Kw(Token::For), AnyOne, AnyStar],
+                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false), Kw(Token::For), AnyOne(false), AnyStar(false)],
                 // e.g. substring(x from 2) => substring(x, "from":2)
-                vec![AnyOne, AnyStar, Kw(Token::From), AnyOne, AnyStar],
+                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
                 // e.g. substring(x for 3) => substring(x, "for":3)
-                vec![AnyOne, AnyStar, Kw(Token::For), AnyOne, AnyStar],
+                vec![AnyOne(false), AnyStar(false), Kw(Token::For), AnyOne(false), AnyStar(false)],
             ],
         }
     }
@@ -141,7 +141,8 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., cast(9 as VARCHAR(5)) => cast(9 "as": VARCHAR(5))
-                vec![AnyOne, AnyStar, Kw(Token::As), AnyOne, AnyStar]
+                // Note the `true` passed to Any* as we need to support type-related keywords after `AS`
+                vec![AnyOne(false), AnyStar(false), Kw(Token::As), AnyOne(true), AnyStar(true)]
             ],
         }
     }
@@ -471,11 +472,11 @@ where
         use FnExprArgMatch::*;
 
         match (&matchers[0], tok) {
-            (AnyZeroOrMore, _) if is_nested => ArgMatch::Consume(0),
-            (AnyZeroOrMore, ((_, t, _), _)) => match &matchers.get(1) {
+            (AnyZeroOrMore(_), _) if is_nested => ArgMatch::Consume(0),
+            (AnyZeroOrMore(keyword_allowed), ((_, t, _), _)) => match &matchers.get(1) {
                 Some(_m) => match self.match_arg(tok, is_nested, false, &matchers[1..]) {
                     ArgMatch::Failed => {
-                        if t.is_keyword() || t == &Token::Comma {
+                        if (t.is_keyword() && !keyword_allowed) || t == &Token::Comma {
                             ArgMatch::Failed
                         } else {
                             ArgMatch::Consume(0)
@@ -485,17 +486,19 @@ where
                     ArgMatch::Replace((n, r)) => ArgMatch::Replace((n + 1, r)),
                 },
                 None => {
-                    if t.is_keyword() || t == &Token::Comma {
+                    if (t.is_keyword() && !keyword_allowed) || t == &Token::Comma {
                         ArgMatch::Failed
                     } else {
                         ArgMatch::Consume(0)
                     }
                 }
             },
-            (AnyOne, _) if is_nested => ArgMatch::Consume(1),
-            (AnyOne, ((_, Token::Comma, _), _)) => ArgMatch::Failed,
-            (AnyOne, ((_, t, _), _)) if t.is_keyword() => ArgMatch::Failed,
-            (AnyOne, _) => ArgMatch::Consume(1),
+            (AnyOne(_), _) if is_nested => ArgMatch::Consume(1),
+            (AnyOne(_), ((_, Token::Comma, _), _)) => ArgMatch::Failed,
+            (AnyOne(keyword_allowed), ((_, t, _), _)) if t.is_keyword() && !keyword_allowed => {
+                ArgMatch::Failed
+            }
+            (AnyOne(_), _) => ArgMatch::Consume(1),
             (Match(target), ((_, tok, _), _)) if target == tok => ArgMatch::Consume(1),
             (NamedArgId(re), (tok_id @ (s, Token::UnquotedIdent(id), e), _)) if re.is_match(id) => {
                 let args = [

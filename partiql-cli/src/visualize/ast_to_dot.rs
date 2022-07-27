@@ -2,6 +2,7 @@ use partiql_ast::ast;
 use std::fmt::Display;
 
 use dot_writer::{Attributes, DotWriter, Node, NodeId, Scope, Shape};
+use partiql_ast::ast::{CallArg, CustomTypeParam, CustomTypePart, Lit, Type};
 
 /*
 subgraph cluster_legend {
@@ -184,37 +185,74 @@ impl ToDot<ast::Expr> for AstToDot {
     }
 }
 
+fn lit_to_str(ast: &Lit) -> String {
+    match ast {
+        Lit::Null => "NULL".to_string(),
+        Lit::Missing => "MISSING".to_string(),
+        Lit::Int8Lit(l) => l.to_string(),
+        Lit::Int16Lit(l) => l.to_string(),
+        Lit::Int32Lit(l) => l.to_string(),
+        Lit::Int64Lit(l) => l.to_string(),
+        Lit::DecimalLit(l) => l.to_string(),
+        Lit::NumericLit(l) => l.to_string(),
+        Lit::RealLit(l) => l.to_string(),
+        Lit::FloatLit(l) => l.to_string(),
+        Lit::DoubleLit(l) => l.to_string(),
+        Lit::BoolLit(l) => (if *l { "TRUE" } else { "FALSE" }).to_string(),
+        Lit::IonStringLit(l) => format!("`{}`", l),
+        Lit::CharStringLit(l) => format!("'{}'", l),
+        Lit::NationalCharStringLit(l) => format!("'{}'", l),
+        Lit::BitStringLit(l) => format!("b'{}'", l),
+        Lit::HexStringLit(l) => format!("x'{}'", l),
+        Lit::DateTimeLit(l) => match l {
+            ast::DateTimeLit::DateLit(d) => format!("DATE '{}'", d),
+            ast::DateTimeLit::TimeLit(t) => format!("TIME '{}'", t),
+            ast::DateTimeLit::TimestampLit(ts) => format!("TIMESTAMP '{}'", ts),
+        },
+        Lit::CollectionLit(l) => match l {
+            ast::CollectionLit::ArrayLit(al) => format!("[{}]", al),
+            ast::CollectionLit::BagLit(bl) => format!("<<{}>>", bl),
+        },
+        Lit::TypedLit(val_str, ty) => {
+            format!("{} '{}'", type_to_str(ty), val_str)
+        }
+    }
+}
+
+fn type_to_str(ty: &ast::Type) -> String {
+    match ty {
+        Type::CustomType(cty) => {
+            cty.parts
+                .iter()
+                .map(|part| {
+                    // foo
+                    match part {
+                        CustomTypePart::Name(name) => symbol_primitive_to_label(name),
+                        CustomTypePart::Parameterized(name, args) => {
+                            let name = symbol_primitive_to_label(name);
+                            let args = args
+                                .iter()
+                                .map(|ctyp| match ctyp {
+                                    CustomTypeParam::Lit(lit) => lit_to_str(lit),
+                                    CustomTypeParam::Type(ty) => type_to_str(ty),
+                                })
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            format!("{}({})", name, args)
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+        _ => format!("{:?}", ty),
+    }
+}
+
 impl ToDot<ast::Lit> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::Lit) -> Targets {
         use ast::Lit;
-        let lbl = match ast {
-            Lit::Null => "NULL".to_string(),
-            Lit::Missing => "MISSING".to_string(),
-            Lit::Int8Lit(l) => l.to_string(),
-            Lit::Int16Lit(l) => l.to_string(),
-            Lit::Int32Lit(l) => l.to_string(),
-            Lit::Int64Lit(l) => l.to_string(),
-            Lit::DecimalLit(l) => l.to_string(),
-            Lit::NumericLit(l) => l.to_string(),
-            Lit::RealLit(l) => l.to_string(),
-            Lit::FloatLit(l) => l.to_string(),
-            Lit::DoubleLit(l) => l.to_string(),
-            Lit::BoolLit(l) => (if *l { "TRUE" } else { "FALSE" }).to_string(),
-            Lit::IonStringLit(l) => format!("`{}`", l),
-            Lit::CharStringLit(l) => format!("'{}'", l),
-            Lit::NationalCharStringLit(l) => format!("'{}'", l),
-            Lit::BitStringLit(l) => format!("b'{}'", l),
-            Lit::HexStringLit(l) => format!("x'{}'", l),
-            Lit::DateTimeLit(l) => match l {
-                ast::DateTimeLit::DateLit(d) => format!("DATE '{}'", d),
-                ast::DateTimeLit::TimeLit(t) => format!("TIME '{}'", t),
-                ast::DateTimeLit::TimestampLit(ts) => format!("TIMESTAMP '{}'", ts),
-            },
-            Lit::CollectionLit(l) => match l {
-                ast::CollectionLit::ArrayLit(al) => format!("[{}]", al),
-                ast::CollectionLit::BagLit(bl) => format!("<<{}>>", bl),
-            },
-        };
+        let lbl = lit_to_str(ast);
 
         let mut node = out.node_auto();
         node.set_label(&lbl).set_shape(Shape::Rectangle);
@@ -399,14 +437,18 @@ impl ToDot<ast::ProjectItem> for AstToDot {
     }
 }
 
+fn symbol_primitive_to_label(sym: &ast::SymbolPrimitive) -> String {
+    use ast::CaseSensitivity;
+    let case = sym.case.clone().unwrap_or(CaseSensitivity::CaseInsensitive);
+    match case {
+        CaseSensitivity::CaseSensitive => format!("'{}'", sym.value),
+        CaseSensitivity::CaseInsensitive => format!("{}", sym.value),
+    }
+}
+
 impl ToDot<ast::SymbolPrimitive> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::SymbolPrimitive) -> Targets {
-        use ast::CaseSensitivity;
-        let case = ast.case.clone().unwrap_or(CaseSensitivity::CaseInsensitive);
-        let lbl = match case {
-            CaseSensitivity::CaseSensitive => format!("'{}'", ast.value),
-            CaseSensitivity::CaseInsensitive => format!("{}", ast.value),
-        };
+        let lbl = symbol_primitive_to_label(ast);
         let id = out.node_auto_labelled(&lbl).id();
         vec![id]
     }
@@ -414,19 +456,10 @@ impl ToDot<ast::SymbolPrimitive> for AstToDot {
 
 impl ToDot<ast::VarRef> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::VarRef) -> Targets {
-        use ast::CaseSensitivity;
-        let case = ast
-            .name
-            .case
-            .clone()
-            .unwrap_or(CaseSensitivity::CaseInsensitive);
-        let prefix = match &ast.qualifier {
-            ast::ScopeQualifier::Unqualified => "",
-            ast::ScopeQualifier::Qualified => "@",
-        };
-        let lbl = match case {
-            CaseSensitivity::CaseSensitive => format!("{}'{}'", prefix, ast.name.value),
-            CaseSensitivity::CaseInsensitive => format!("{}{}", prefix, ast.name.value),
+        let lbl = symbol_primitive_to_label(&ast.name);
+        let lbl = match &ast.qualifier {
+            ast::ScopeQualifier::Unqualified => lbl,
+            ast::ScopeQualifier::Qualified => format!("@{}", lbl),
         };
         let id = out.node_auto_labelled(&lbl).id();
 
@@ -530,6 +563,24 @@ impl ToDot<ast::CallArg> for AstToDot {
                 let id = out.node_auto_labelled("Named").id();
                 self.to_dot(out, name).edges(out, &id, "name");
                 self.to_dot(out, value).edges(out, &id, "value");
+                vec![id]
+            }
+            CallArg::PositionalType(ty) => {
+                let mut node = out.node_auto_labelled(&type_to_str(ty));
+                node.set("shape", "parallelogram", false);
+                vec![node.id()]
+            }
+            CallArg::NamedType { name, ty } => {
+                let id = out.node_auto_labelled("Named").id();
+                self.to_dot(out, name).edges(out, &id, "name");
+
+                let ty_target = {
+                    let mut ty_node = out.node_auto_labelled(&type_to_str(ty));
+                    ty_node.set("shape", "parallelogram", false);
+                    vec![ty_node.id()]
+                };
+                ty_target.edges(out, &id, "type");
+
                 vec![id]
             }
         }
