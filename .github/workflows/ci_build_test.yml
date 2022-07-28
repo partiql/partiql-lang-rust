@@ -55,7 +55,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --verbose -- --check
+          args: --verbose --all -- --check
       # `clippy-check` will run `cargo clippy` on new pull requests. Due to a limitation in GitHub
       # permissions, the behavior of the Action is different depending on the source of the PR. If the
       # PR comes from the partiql-lang-rust project itself, any suggestions will be added to the PR as comments.
