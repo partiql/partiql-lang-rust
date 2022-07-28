@@ -55,7 +55,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --verbose -- --check
+          args: --verbose --all -- --check
       # `clippy-check` will run `cargo clippy` on new pull requests. Due to a limitation in GitHub
       # permissions, the behavior of the Action is different depending on the source of the PR. If the
       # PR comes from the partiql-lang-rust project itself, any suggestions will be added to the PR as comments.
@@ -171,6 +171,7 @@ jobs:
       # Find comment w/ conformance comparison if previous comment published
       - name: Find Comment
         uses: peter-evans/find-comment@v2
+        continue-on-error: true
         id: fc
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -178,6 +179,7 @@ jobs:
           body-includes: Conformance
       # Convert the markdown comparison report to a readable form for GitHub PR comments
       - id: get-comment-body
+        continue-on-error: true
         run: |
           body="$(cat ./cts-comparison-report.md)"
           body="${body//'%'/'%25'}"
@@ -186,6 +188,7 @@ jobs:
           echo "::set-output name=body::$body"
       # Create or update (if previous comment exists) with markdown version of comparison report
       - name: Create or update comment
+        continue-on-error: true
         uses: peter-evans/create-or-update-comment@v2
         with:
           comment-id: ${{ steps.fc.outputs.comment-id }}
