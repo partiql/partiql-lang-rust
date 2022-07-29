@@ -23,6 +23,7 @@ pub(crate) enum FnExprArgMatch<'a> {
     /// 0 or more [`Token`]s that are not function punctuation (i.e., '(', ')', ',') and not a keyword
     ///
     /// Generally this will be preceded by a [`AnyOne`] match, in order to match 1 or more [`Token`]s
+    /// `bool` tuple value denotes if keyword is allowed to be considered as match.
     AnyZeroOrMore(bool),
     /// Explicitly match a single [`Token`]
     #[allow(dead_code)]
