@@ -560,6 +560,7 @@ pub enum CallArg {
         value: Box<Expr>,
     },
 
+    /// E.g. `AS: VARCHAR` in `CAST('abc' AS VARCHAR`
     NamedType {
         name: SymbolPrimitive,
         ty: Type,
