@@ -80,6 +80,12 @@ fn render_to_string(format: GraphVizFormat, ast: &Box<ast::Expr>) -> String {
 
 /// Convert an AST into an attributed dot graph.
 #[inline]
+pub fn to_dot_raw(ast: &Box<ast::Expr>) -> String {
+    ast_to_dot(ast)
+}
+
+/// Convert an AST into an attributed dot graph.
+#[inline]
 pub fn to_dot(ast: &Box<ast::Expr>) -> String {
     render_to_string(GraphVizFormat::Dot, &ast)
 }
@@ -87,7 +93,7 @@ pub fn to_dot(ast: &Box<ast::Expr>) -> String {
 /// Convert an AST into a pretty-printed dot graph.
 #[inline]
 pub fn to_pretty_dot(ast: &Box<ast::Expr>) -> String {
-    render_to_string(GraphVizFormat::PrettyPrint, &ast)
+    render_to_string(GraphVizFormat::Canon, &ast)
 }
 
 /// Convert an AST into a graphviz svg.

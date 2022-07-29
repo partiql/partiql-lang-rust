@@ -916,12 +916,14 @@ FunctionCallArg: ast::CallArgAst = {
 #[inline]
 FunctionArgPositional: ast::CallArgAst = {
     <lo:@L> "*" <hi:@R> => ast::CallArg::Star().ast(lo..hi),
-    <lo:@L> <value:ExprQuery> <hi:@R> => ast::CallArg::Positional(value).ast(lo..hi)
+    <lo:@L> <value:ExprQuery> <hi:@R> => ast::CallArg::Positional(value).ast(lo..hi),
+    <lo:@L> <ty:TypeName> <hi:@R> => ast::CallArg::PositionalType(ty).ast(lo..hi),
 }
 
 #[inline]
 FunctionArgNamed: ast::CallArgAst = {
-    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: Some(value)}.ast(lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: value}.ast(lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => ast::CallArg::NamedType{name, ty: ty}.ast(lo..hi)
 }
 
 #[inline]
@@ -1050,7 +1052,7 @@ Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
     <LiteralIon>,
-    <LiteralDateTime>,
+    <TypedLiteral>,
 };
 
 #[inline]
@@ -1106,11 +1108,43 @@ LiteralNumber: ast::Lit = {
 LiteralIon: ast::Lit = {
     <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
 }
+
 #[inline]
-LiteralDateTime: ast::Lit = {
-    "DATE" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::DateLit(s.to_owned())),
-    "TIME" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimeLit(s.to_owned())),
-    "TIMESTAMP" <s:"String"> => ast::Lit::DateTimeLit(ast::DateTimeLit::TimestampLit(s.to_owned())),
+TypeKeywordStr: &'static str = {
+    "DATE" => "DATE",
+    "TIME" => "TIME",
+    "TIMESTAMP" => "TIMESTAMP",
+    "WITH" => "WITH",
+    "WITHOUT" => "WITHOUT",
+    "ZONE" => "ZONE",
+}
+
+#[inline]
+TypeKeyword: ast::SymbolPrimitive = {
+    <s:TypeKeywordStr> => ast::SymbolPrimitive { value: s.to_string(), case: Some(ast::CaseSensitivity::CaseInsensitive), },
+}
+
+#[inline]
+TypeParam: ast::CustomTypeParam = {
+    <lo:@L> <ty:TypeName> <hi:@R> => ast::CustomTypeParam::Type(ty),
+    <lo:@L> <lit:LiteralScalar> <hi:@R> => ast::CustomTypeParam::Lit(lit),
+}
+
+TypeNamePart: ast::CustomTypePart = {
+    <id:TypeKeyword> => ast::CustomTypePart::Name( id ),
+    <id:TypeKeyword> "(" <args:CommaSepPlus<TypeParam>> ")" =>  ast::CustomTypePart::Parameterized( id, args ),
+}
+
+#[inline]
+TypeName: ast::Type = {
+    <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts: parts } ),
+}
+
+#[inline]
+TypedLiteral: ast::Lit = {
+    <ty:TypeName> <s:"String"> => ast::Lit::TypedLit(s.to_owned(), ty),
+    // TODO we could support postgres-style literals with the following:
+    //<s:"String"> "::" <ty:TypeName> => ast::Lit::TypedLit(s.to_owned(), ty),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1309,5 +1343,7 @@ extern {
         "WHEN" => lexer::Token::When,
         "WHERE" => lexer::Token::Where,
         "WITH" => lexer::Token::With,
+        "WITHOUT" => lexer::Token::Without,
+        "ZONE" => lexer::Token::Zone,
     }
 }
