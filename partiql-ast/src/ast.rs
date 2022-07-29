@@ -553,6 +553,7 @@ pub enum CallArg {
     /// positional argument to a function call (e.g., all arguments in `foo(1, 'a', 3)`)
     Positional(Box<Expr>),
 
+    /// E.g. `INT` in `foo(INT)`
     PositionalType(Type),
     /// named argument to a function call (e.g., the `"from" : 2` in `substring(a, "from":2)`
     Named {
