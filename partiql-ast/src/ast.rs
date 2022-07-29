@@ -923,7 +923,9 @@ pub enum CustomTypeParam {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CustomTypePart {
+    /// E.g. any of `WITH`, `TIME`, and`ZONE` in `TIME(20) WITH TIME ZONE`
     Name(SymbolPrimitive),
+    /// E.g. `TIME(20) in `TIME(20) WITH TIME ZONE`
     Parameterized(SymbolPrimitive, Vec<CustomTypeParam>),
 }
 
