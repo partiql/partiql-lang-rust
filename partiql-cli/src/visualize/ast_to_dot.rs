@@ -185,6 +185,7 @@ impl ToDot<ast::Expr> for AstToDot {
     }
 }
 
+#[inline]
 fn lit_to_str(ast: &Lit) -> String {
     match ast {
         Lit::Null => "NULL".to_string(),
@@ -219,32 +220,39 @@ fn lit_to_str(ast: &Lit) -> String {
     }
 }
 
+#[inline]
+fn custom_type_param_to_str(param: &ast::CustomTypeParam) -> String {
+    match param {
+        CustomTypeParam::Lit(lit) => lit_to_str(lit),
+        CustomTypeParam::Type(ty) => type_to_str(ty),
+    }
+}
+
+#[inline]
+fn custom_type_part_to_str(part: &ast::CustomTypePart) -> String {
+    match part {
+        CustomTypePart::Name(name) => symbol_primitive_to_label(name),
+        CustomTypePart::Parameterized(name, args) => {
+            let name = symbol_primitive_to_label(name);
+            let args = args
+                .iter()
+                .map(custom_type_param_to_str)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}({})", name, args)
+        }
+    }
+}
+
+#[inline]
 fn type_to_str(ty: &ast::Type) -> String {
     match ty {
-        Type::CustomType(cty) => {
-            cty.parts
-                .iter()
-                .map(|part| {
-                    // foo
-                    match part {
-                        CustomTypePart::Name(name) => symbol_primitive_to_label(name),
-                        CustomTypePart::Parameterized(name, args) => {
-                            let name = symbol_primitive_to_label(name);
-                            let args = args
-                                .iter()
-                                .map(|ctyp| match ctyp {
-                                    CustomTypeParam::Lit(lit) => lit_to_str(lit),
-                                    CustomTypeParam::Type(ty) => type_to_str(ty),
-                                })
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            format!("{}({})", name, args)
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        }
+        Type::CustomType(cty) => cty
+            .parts
+            .iter()
+            .map(custom_type_part_to_str)
+            .collect::<Vec<_>>()
+            .join(" "),
         _ => format!("{:?}", ty),
     }
 }

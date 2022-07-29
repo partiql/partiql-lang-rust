@@ -381,7 +381,7 @@ pub enum Lit {
     HexStringLit(String),
     DateTimeLit(DateTimeLit),
     CollectionLit(CollectionLit),
-    /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...` 
+    /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
     TypedLit(String, Type),
 }
 
@@ -562,10 +562,7 @@ pub enum CallArg {
     },
 
     /// E.g. `AS: VARCHAR` in `CAST('abc' AS VARCHAR`
-    NamedType {
-        name: SymbolPrimitive,
-        ty: Type,
-    },
+    NamedType { name: SymbolPrimitive, ty: Type },
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -590,6 +590,8 @@ mod tests {
             parse!(r#"CAST( TRUE AS INTEGER)"#);
             parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
             parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
+            parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
+            parse!(r#"CAST(a AS TIME(20) WITH TIME ZONE)"#);
         }
 
         #[test]
