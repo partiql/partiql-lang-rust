@@ -1,6 +1,6 @@
 [package]
 name = "partiql-parser-fuzz"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
 description = "PartiQL Parser Fuzz Tests"
 publish = false
