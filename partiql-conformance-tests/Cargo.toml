@@ -6,6 +6,8 @@ homepage = "https://github.com/partiql/partiql-lang-rust"
 repository = "https://github.com/partiql/partiql-lang-rust"
 license = "Apache-2.0"
 readme = "../README.md"
+keywords = ["sql", "parser", "conformance", "compilers", "tests"]
+categories = ["database", "compilers", "parser-implementations"]
 exclude = [
     "**/.git/**",
     "**/.github/**",
