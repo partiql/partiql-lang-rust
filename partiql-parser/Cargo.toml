@@ -15,15 +15,15 @@ exclude = [
   "**/.appveyor.yml",
 ]
 edition = "2021"
-version = "0.0.0"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [build-dependencies]
 lalrpop = "~0.19.7"
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast" }
-partiql-source-map = { path = "../partiql-source-map" }
+partiql-ast = { path = "../partiql-ast", version = "0.1.0" }
+partiql-source-map = { path = "../partiql-source-map", version = "0.1.0" }
 
 thiserror = "~1.0.24"
 
