@@ -7,6 +7,7 @@ members = [
   "partiql-conformance-tests",
   "partiql-source-map",
   "partiql-eval",
+  "partiql-ir",
   "partiql-irgen",
   "partiql-parser",
   "partiql-rewriter",
