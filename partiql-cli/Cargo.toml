@@ -15,9 +15,7 @@ exclude = [
   "**/.appveyor.yml",
 ]
 edition = "2021"
-version = "0.1.1-alpha.0"
-
-[workspace]
+version = "0.1.0"
 
 # Example of customizing binaries in Cargo.toml.
 [[bin]]
