@@ -3,6 +3,8 @@
 members = [
   "partiql",
   "partiql-ast",
+  "partiql-conformance-tests",
+  "partiql-conformance-test-generator",
   "partiql-source-map",
   "partiql-eval",
   "partiql-ir",
@@ -12,8 +14,6 @@ members = [
 ]
 
 exclude = [
-  "partiql-conformance-test-generator",
-  "partiql-conformance-tests",
   "partiql-cli",
   "partiql-playground",
 ]
