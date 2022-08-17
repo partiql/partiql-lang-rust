@@ -18,3 +18,9 @@ exclude = [
   "partiql-playground",
 ]
 
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3
+
