@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="./css/jquery.json-viewer.css">
     <script src="./js/jquery-3.4.1.min.js"></script>
     <script src="./js/jquery.json-viewer.js"></script>
-    <script src="js/d3.v3.min.js"></script>
+    <script src="./js/popper.min.js"></script>
+    <script src="./js/bootstrap.min.js"></script>
+    <script src="./js/d3.v3.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -24,10 +26,42 @@
                 <option value="eval">eval</option>
             </select>
             <select name="ver" id="ver">
-                <option value="0">0.0.0</option>
+                <option value="0.1.0">0.1.0</option>
             </select>
-            <button name="exec" id="exec" class="btn btn-dark">Run</button>
-            <button name="save" id="save" class="btn btn-success" disabled="true" title="Save the query to a Web URL">Save</button>
+            <button name="exec" id="btnExec" class="btn btn-dark">Run</button>
+            <button type="btnExport" class="btn btn-success dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" title="Export">
+                Export
+            </button>
+            <div class="dropdown-menu">
+                <a class="dropdown-item" data-target="#exportModal" data-toggle="modal">session as URL...</a>
+            </div>
+        </div>
+        <div class="modal fade" id="exportModal" tabindex="-1" role="dialog" aria-labelledby="exportModalLabel" aria-hidden="true">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="exportModalLabel">Export</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <form>
+                            <div class="form-group">
+                                <label for="export-url" class="col-form-label">URL:</label>
+                                <input type="text" class="form-control" id="export-url">
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" onclick="openNewUrlWindow()">Open in new tab</button>
+                        <button type="button" class="btn btn-primary" id="btnUrlCopy" onclick="copyUrlClip()" data-dismiss="modal">
+                            Copy and Close
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <div class="row mt-3">
@@ -35,7 +69,7 @@
     <div class="row" id="edit-area">
         <div class="col-12" id="editor"></div>
     </div>
-    <div class="row mt-3" id="env">
+    <div class="row mt-3" id="env-div">
         <textarea id="env-data" class="form-control" placeholder="Environment data"></textarea>
     </div>
     <div class="row mt-3" id="result-area">
@@ -43,7 +77,7 @@
             <button class="tablinks" id="btnJsonAst">JSON AST</button>
             <button class="tablinks" id="btnGraphAst">AST Graph</button>
             <button class="tablinks" id="btnRawJson">AST Raw JSON</button>
-            <button class="btn btn-link btn-sm" id="copyToClip" onclick="copyToClip()">copy to clipboard</button>
+            <button class="btn btn-link btn-sm" id="copyToClip" onclick="copyRawJsonToClip()">copy to clipboard</button>
         </div>
         <div id="json" class="tab-content">
             <pre id="rendered-json"></pre>
@@ -91,49 +125,95 @@
     }
 
     /**
+     * Copies the exported-url to the Clipboard.
+     */
+    function copyUrlClip() {
+        copyToClip(document.getElementById('export-url').value);
+    }
+
+    /**
+     * Copies the raw-json to the Clipboard.
+     */
+    function copyRawJsonToClip() {
+        copyToClip(document.getElementById('rendered-json').innerText)
+    }
+
+    /**
      * Copies the contents of `rendered-json` tab to clipboard.
      */
-    function copyToClip() {
-        const copyText = document.getElementById('rendered-json');
-        if (copyText) {
-            navigator.clipboard.writeText(copyText.innerText);
+    function copyToClip(text) {
+        if (text) {
+            navigator.clipboard.writeText(text);
             document.getElementById('copyToClip').innerText = 'copied'
         }
     }
+
+    /**
+     * Opens the exported-url in a new window.
+     */
+    function openNewUrlWindow() {
+        openNewWindow(document.getElementById('export-url').value);
+    }
+
+    /**
+     * Opens the given URL in a new window or notifies the user if this is blocked by the browser.
+     * @param url
+     */
+    function openNewWindow(url) {
+        var win = window.open(url, '_blank');
+        if (win) {
+            win.focus();
+        } else {
+            // TODO: use another way than plain alert dialog to notify the user.
+            alert('Please allow popups for this website');
+        }
+    }
 </script>
-<script src="./js/ace.js"></script>
 <script src="./js/d3.v3.min.js"></script>
-<script src="js/ast-graph.js"></script>
+<script src="./js/ast-graph.js"></script>
+<script src="./js/ace.js"></script>
+<script src="./js/ion-bundle.min.js"></script>
 <script type="module">
     import init, {parse} from './pkg-web/partiql_playground.js';
 
     init();
 
-    let svgel;
+    const queryString = window.location.search;
+    const urlParams = new URLSearchParams(queryString);
+    const session = urlParams.get('session')
+
     const action = document.getElementById('action');
-    const btn = document.getElementById('exec');
+    const version = document.getElementById('ver');
+    const btnExec = document.getElementById('btnExec');
     const btnGraphAst = document.getElementById('btnGraphAst');
     const btnJsonAst = document.getElementById('btnJsonAst');
     const btnRawJson = document.getElementById('btnRawJson');
     const copyToClipLabel = document.getElementById('copyToClip');
-    const editor = ace.edit('editor');
-    const env = document.getElementById('env');
+
+    const envDiv = document.getElementById('env-div');
+    const envData = document.getElementById('env-data');
     const graph = document.getElementById('graph');
     const rawjson = document.getElementById('raw-json')
     const resultArea = document.getElementById('result-area');
 
+    const editor = ace.edit('editor');
     editor.session.setMode('ace/mode/partiql');
 
-    btn.addEventListener('click', () => {
+    btnExec.addEventListener('click', () => {
         run()
     });
 
+    $('#exportModal').on('show.bs.modal', function (event) {
+        $(this).find('.modal-body input').val(exportAsUrl());
+        $(this).find('.modal-body input').attr('readonly', true);
+    })
+
     action.addEventListener('change', () => {
         if (action.value === 'parse') {
-            env.style.display = 'none';
+            envDiv.style.display = 'none';
         } else {
             resultArea.style.display = 'none';
-            env.style.display = 'block';
+            envDiv.style.display = 'block';
         }
     });
 
@@ -141,123 +221,66 @@
     btnGraphAst.addEventListener('click', (e) => tabClick(e, 'graph'));
     btnRawJson.addEventListener('click', (e) => tabClick(e, 'rawjson'));
 
-    action.value = 'parse';
-    copyToClipLabel.innerText = 'copy to clipboard';
+    if (session) {
+        fetchSession(session)
+    } else {
+        cleanUp();
+    }
+
+    function exportAsUrl() {
+        // replace " with \" to be able to correctly render sessions with queries like `SELECT "zone" FROM tbl AS a`.
+        let envText = envData.value != null ? envData.value.replace(/\"/g, '\\\"') : "";
+        let ver = version.value;
+        // replace " with \" to be able to correctly render sessions with queries like `SELECT "zone" FROM tbl AS a`.
+        let query = editor.getValue().replace(/\"/g, '\\\"');
+        let ionData = `{ query: "${query}", env: "${envText}", version: "${ver}" }`;
+        let value = ion.load(ionData);
+
+        let session = btoa(ion.dumpText(value));
+
+        return `${location.origin.split('?')[0] }/?session=${session}`;
+    }
+
+    function fetchSession(session) {
+        let ionData = atob(session);
+        let value = ion.load(ionData);
+        let e = value.env;
+        editor.setValue(value.query);
+
+        if (e != '') {
+            action.value = 'eval';
+            envData.value = e;
+            envDiv.style.display = 'block';
+        }
+    }
+
+    function cleanUp() {
+        action.value = 'parse';
+        copyToClipLabel.innerText = 'copy to clipboard';
+        envData.value = '';
+        resultArea.style.display = 'none';
+    }
 
     /**
      * Exposes the entrypoint for execution based on the selected action.
      */
     function run() {
         const res = parse(editor.getValue());
-        const j = JSON.parse(res);
-        j.version = '0.0.0';
+        const resJson = JSON.parse(res);
+
+        resJson.version = version.value;
         graph.innerHTML = '';
 
-        $('#rendered-json').jsonViewer(j);
+        $('#rendered-json').jsonViewer(resJson);
 
-        rawjson.innerText = JSON.stringify(j);
+        rawjson.innerText = JSON.stringify(resJson);
         copyToClipLabel.innerText = 'copy to clipboard';
         resultArea.style.display = 'block';
 
         btnJsonAst.click();
-        drawGraph(res);
 
-        // Enable Zooming on the Graph using mouse wheel.
-        // TODO Fix the navigation as it still requires more work, especially for panning as it does not work smoothly.
-        svgel = document.querySelector('svg');
-        svgel.addEventListener('mousedown', e1 => {
-            const x1 = e1.clientX;
-            const y1 = e1.clientY;
-
-            svgel.onmousemove = function (e2) {
-                const x2 = e2.clientX;
-                const y2 = e2.clientY;
-                pan(x1 - x2, y1 - y2);
-            }
-        });
-
-        svgel.addEventListener('mouseup', () => {
-            svgel.onmousemove = null;
-        });
-
-        svgel.addEventListener('mouseout', () => {
-            svgel.onmousemove = null;
-        });
-
-        svgel.onwheel = onWheel;
+        drawGraph(JSON.stringify(JSON.parse(res).ast));
     }
-
-    /**
-     * Provides the pan functionality for the give delte-x and delta-y.
-     * @param dx delta-x the change from original x axis.
-     * @param dy delta-y the change from original y axis.
-     */
-    const pan = (dx, dy) => {
-        const {scale, x, y} = getTransformParameters(svgel);
-        svgel.style.transform = getTransformString(scale, x + dx / 50, y + dy / 50);
-    };
-
-    /**
-     * Provides the svg zoom functionality on the given event.
-     * @param event
-     */
-    function onWheel(event) {
-        const point = svgel.createSVGPoint();
-
-        const viewBox = svgel.viewBox.baseVal;
-        event.preventDefault();
-
-        let normalized;
-        let delta = event.wheelDelta;
-
-        if (delta) {
-            normalized = (delta % 120) === 0 ? delta / 120 : delta / 12;
-        } else {
-            delta = event.deltaY || event.detail || 0;
-            normalized = -(delta % 3 ? delta * 10 : delta / 3);
-        }
-
-        const scaleDelta = normalized > 0 ? 1 / 1.6 : 1.6;
-
-        point.x = event.clientX;
-        point.y = event.clientY;
-
-        const startPoint = point.matrixTransform(svgel.getScreenCTM().inverse());
-
-        viewBox.x -= (startPoint.x - viewBox.x) * (scaleDelta - 1);
-        viewBox.y -= (startPoint.y - viewBox.y) * (scaleDelta - 1);
-        viewBox.width *= scaleDelta;
-        viewBox.height *= scaleDelta;
-    }
-
-    /**
-     * A helper for retrieving transform parameters for the given element.
-     * @param element
-     * @returns {{x: number, scale: number, y: number}}
-     */
-    const getTransformParameters = (element) => {
-        const transform = element.style.transform;
-        let scale = 1,
-            x = 0,
-            y = 0;
-        if (transform.includes("scale"))
-            scale = parseFloat(transform.slice(transform.indexOf("scale") + 6));
-        if (transform.includes("translateX"))
-            x = parseInt(transform.slice(transform.indexOf("translateX") + 11));
-        if (transform.includes("translateY"))
-            y = parseInt(transform.slice(transform.indexOf("translateY") + 11));
-        return {scale, x, y};
-    };
-
-    /**
-     * A helper for retrieving transform string.
-     * @param scale SVG zoom scale.
-     * @param x SVG x position.
-     * @param y SVG y position.
-     * @returns {string} The transform string.
-     */
-    const getTransformString = (scale, x, y) =>
-        "scale(" + scale + ") " + "translateX(" + x + "%) translateY(" + y + "%)";
 </script>
 </body>
 </html>

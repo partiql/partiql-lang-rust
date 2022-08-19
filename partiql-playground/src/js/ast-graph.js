@@ -13,6 +13,11 @@ function drawGraph(jsonString) {
     }
     treeData = getTree(jsonString);
 
+    function zoom() {
+        svg.attr("transform", "translate(" + d3.event.translate + ")scale(" + d3.event.scale + ")");
+        console.log("translate: " + d3.event.translate + ", scale: " + d3.event.scale);
+    }
+
     const margin = {top: 20, right: 120, bottom: 20, left: 120},
         width = 2000 - margin.right - margin.left,
         height = 700 - margin.top - margin.bottom;
@@ -37,8 +42,10 @@ function drawGraph(jsonString) {
         .attr("viewBox", "0 0 " + (nodes.length * 50) + " " + (nodes.length * 20) )
         .attr("preserveAspectRatio", "xMidYMid meet")
         .attr("pointer-events", "all")
-        .append('g')
-        .attr('transform', 'translate(' + margin.left + ',' + margin.top + ')')
+        .call(d3.behavior.zoom().on("zoom", function () {
+            svg.attr("transform", "translate(" + d3.event.translate + ")" + " scale(" + d3.event.scale + ")")
+        }))
+        .append("g")
     update(root);
 }
 
@@ -168,8 +175,11 @@ function buildTree(jsonData) {
     let graph = []
     if (jsonData != null && typeof jsonData == 'object') {
         $.each(jsonData, function (k, v) {
-            let children = buildTree(v);
-            graph.push({'name': k, 'children': children});
+            // Purge nodes that are null to reduce the graph size
+            if (v != null) {
+                let children = buildTree(v);
+                graph.push({'name': k, 'children': children});
+            }
         });
     } else {
         graph.push({'name': jsonData});

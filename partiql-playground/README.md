@@ -85,10 +85,12 @@ _Please note, as the package is experimental at this stage, all HTML code and as
 | Package                                                                | License                                                                                         |
 |------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
 | [ace Editor](https://ace.c9.io/)                                       | [BSD License](https://github.com/ajaxorg/ace/blob/master/LICENSE)                               |
+| [body-parser](https://github.com/expressjs/body-parser)                | [MIT License](https://github.com/expressjs/body-parser/blob/master/LICENSE)                     |
 | [bootstrap](https://getbootstrap.com/)                                 | [MIT License](https://github.com/twbs/bootstrap/blob/main/LICENSE)                              |
 | [D3.js](https://d3js.org/)                                             | [ISC License](https://github.com/d3/d3/blob/main/LICENSE)                                       |
 | [jquery](https://jquery.com)                                           | [MIT License](https://github.com/jquery/jquery/blob/main/LICENSE.txt)                           |
 | [jquery.json-viewer](https://www.npmjs.com/package/jquery.json-viewer) | [MIT License](https://github.com/abodelot/jquery.json-viewer/blob/master/LICENSE)               |
 | [node](https://nodejs.org/en/)                                         | [MIT License](https://github.com/nodejs/node/blob/main/LICENSE)                                 |
+| [popper.js](https://github.com/floating-ui/floating-ui)                | [MIT License](https://github.com/floating-ui/floating-ui/blob/master/LICENSE)                   | 
 | [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)               | [Apache License Version 2.0](https://github.com/rustwasm/wasm-bindgen/blob/main/LICENSE-APACHE) | 
 | [wasm-pack](https://github.com/rustwasm/wasm-pack)                     | [Apache License Version 2.0](https://github.com/rustwasm/wasm-pack/blob/master/LICENSE-APACHE)  |
