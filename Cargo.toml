@@ -11,6 +11,7 @@ members = [
   "partiql-irgen",
   "partiql-parser",
   "partiql-rewriter",
+  "partiql-types",
 ]
 
 exclude = [
