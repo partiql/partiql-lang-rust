@@ -7,6 +7,7 @@ const port = 8000;
 app.use(favicon(__dirname + '/favicon.ico'));
 app.use('/js', express.static('src/js'));
 app.use('/css', express.static('src/css'));
+app.use('/ace-builds', express.static('src/ace-builds'));
 app.use('/pkg-web', express.static('pkg-web'));
 
 app.get('/', (req, res) => {
