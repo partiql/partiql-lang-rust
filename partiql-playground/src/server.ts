@@ -7,8 +7,10 @@ const partiql = require('../pkg-node/partiql_playground');
 const app = express();
 const port = 8000;
 
+
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
 app.use(favicon(__dirname + '/favicon.ico'));
 app.use('/js', express.static('src/js'));
 app.use('/css', express.static('src/css'));
