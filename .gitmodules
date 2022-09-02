@@ -1,6 +1,6 @@
 [submodule "partiql-conformance-tests/partiql-tests"]
 	path = partiql-conformance-tests/partiql-tests
 	url = https://github.com/partiql/partiql-tests.git
-[submodule "partiql-playground/ace-builds"]
-	path = partiql-playground/ace-builds
+[submodule "partiql-playground/src/ace-builds"]
+	path = partiql-playground/src/ace-builds
 	url = https://github.com/ajaxorg/ace-builds.git

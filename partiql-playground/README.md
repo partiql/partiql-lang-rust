@@ -7,23 +7,35 @@ _Please note, at this stage the code within this package is considered experimen
 ## Local Usage
 For local usage follow the below steps.
 
-1. Pull down the `partiql-rust` package from GitHub:
+1. Ensure `wasm-pack` is installed on your machine by running the following command; if not, install it from [here](https://rustwasm.github.io/wasm-pack/installer/):
+```bash
+wasm-pack --version
+# Sample output
+wasm-pack 0.10.2
+```
+2. Ensure `npm` is intalled on your machine; see [here](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) for more details:
+```bash
+npm --version
+# Sample output
+8.13.2
+```
+3. Pull down the `partiql-lang-rust` repository from GitHub:
 ```bash
 git clone --recursive https://github.com/partiql/partiql-lang-rust.git
 ```
-2. Enter the `partiql-playground` root directory:
+3. Enter the `partiql-playground` root directory:
 ```bash
 cd partiql-lang-rust/partiql-playground
 ```
-3. Build the WASM package:
+4. Run `make`:
 ```
-wasm-pack build --target web
+make
 ```
-4. Start a webserver from the root directory, as an example, you can use [Python's SimpleHTTPServer](https://docs.python.org/3.8/library/http.server.html#http.server.SimpleHTTPRequestHandler):
+5. Start the node server from `partiql-playground` package's root directory:
 ```bash
-python3 -m http.server
+node src/server.ts
 ```
-4. On your browser go to `http://localhost:8000/`
+6. your browser go to `http://localhost:8000/`
 
 ## Development
 `PartiQL Playground` uses [WebAssembly (Wasm)](https://webassembly.org/) for integrating the front-end with PartiQL Rust back-end.
@@ -43,6 +55,7 @@ _Please note, as the package is experimental at this stage, all HTML code and as
 | [bootstrap](https://getbootstrap.com/)                                 | [MIT License](https://github.com/twbs/bootstrap/blob/main/LICENSE)                              |
 | [D3.js](https://d3js.org/)                                             | [ISC License](https://github.com/d3/d3/blob/main/LICENSE)                                       |
 | [jquery](https://jquery.com)                                           | [MIT License](https://github.com/jquery/jquery/blob/main/LICENSE.txt)                           |
-| [jquery.json-viewer](https://www.npmjs.com/package/jquery.json-viewer) | [MIT License](https://github.com/abodelot/jquery.json-viewer/blob/master/LICENSE)               |  
+| [jquery.json-viewer](https://www.npmjs.com/package/jquery.json-viewer) | [MIT License](https://github.com/abodelot/jquery.json-viewer/blob/master/LICENSE)               |
+| [node](https://nodejs.org/en/)                                         | [MIT License](https://github.com/nodejs/node/blob/main/LICENSE)                                 |
 | [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)               | [Apache License Version 2.0](https://github.com/rustwasm/wasm-bindgen/blob/main/LICENSE-APACHE) | 
 | [wasm-pack](https://github.com/rustwasm/wasm-pack)                     | [Apache License Version 2.0](https://github.com/rustwasm/wasm-pack/blob/master/LICENSE-APACHE)  |
