@@ -23,19 +23,52 @@ npm --version
 ```bash
 git clone --recursive https://github.com/partiql/partiql-lang-rust.git
 ```
-3. Enter the `partiql-playground` root directory:
+4. Enter the `partiql-playground` root directory:
 ```bash
 cd partiql-lang-rust/partiql-playground
 ```
-4. Run `make`:
+5. Run `make build`:
 ```
 make
 ```
-5. Start the node server from `partiql-playground` package's root directory:
+6. Start the node server from `partiql-playground` package's root directory:
 ```bash
 node src/server.ts
 ```
-6. your browser go to `http://localhost:8000/`
+7. your browser go to `http://localhost:8000/`
+
+## Run via docker container
+
+1. Ensure `docker` is installed on your machine, by running the following:
+```bash
+docker --version
+# Example output
+Docker version 20.10.17, build 100c701
+```
+2. Build the package:
+```bash
+make build
+```
+3. Build the container:
+```bash
+make container-build
+```
+4. Run the container:
+```bash
+make container-run
+```
+5. Confirm it's running:
+```bash
+docker ps
+# Example output
+CONTAINER ID   IMAGE                         COMMAND                  CREATED          STATUS          PORTS                              NAMES
+1d666bba30c2   partiql-team/partiql-playground   "docker-entrypoint.s…"   4 minutes ago    Up 4 minutes    0.0.0.0:8000->8000/tcp, 8080/tcp   infallible_goldberg
+
+# Ensure `connected` is in the curl output 
+curl -v  http://localhost:8000 2>&1 |grep -i connected
+# Example output
+0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Connected to localhost (127.0.0.1) port 8000 (#0)
+```
 
 ## Development
 `PartiQL Playground` uses [WebAssembly (Wasm)](https://webassembly.org/) for integrating the front-end with PartiQL Rust back-end.
