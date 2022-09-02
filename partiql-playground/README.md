@@ -23,19 +23,19 @@ npm --version
 ```bash
 git clone --recursive https://github.com/partiql/partiql-lang-rust.git
 ```
-3. Enter the `partiql-playground` root directory:
+4. Enter the `partiql-playground` root directory:
 ```bash
 cd partiql-lang-rust/partiql-playground
 ```
-4. Run `make build`:
+5. Run `make build`:
 ```
 make
 ```
-5. Start the node server from `partiql-playground` package's root directory:
+6. Start the node server from `partiql-playground` package's root directory:
 ```bash
 node src/server.ts
 ```
-6. your browser go to `http://localhost:8000/`
+7. your browser go to `http://localhost:8000/`
 
 ## Run via docker container
 
@@ -53,11 +53,11 @@ make build
 ```bash
 make container-build
 ```
-3. Run the container:
+4. Run the container:
 ```bash
 make container-run
 ```
-4. Confirm it's running:
+5. Confirm it's running:
 ```bash
 docker ps
 # Example output

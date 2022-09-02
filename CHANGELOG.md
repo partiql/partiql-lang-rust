@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Adds the following functionalities to PartiQL Playground
+- Adds the following functionalities to PartiQL Playground:
   - Moves the project to a Node.js project
   - Adds the capability for exporting the playground session on client side to be able to get fetched from another playground windows.
   - Adds a REST API and exposes /parse for parsing the query over http request.
