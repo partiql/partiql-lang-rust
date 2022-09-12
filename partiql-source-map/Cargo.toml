@@ -21,6 +21,8 @@ version = "0.1.0"
 smallvec = { version = "~1.8.0" }
 serde = { version = "1.*", features = ["derive"], optional = true }
 
+anymap = "1.0.0-beta.2"
+
 
 [dev-dependencies]
 
