@@ -3,7 +3,7 @@ use partiql_ast::ast;
 // if this is just a parenthesized expr, lift it out of the query AST, otherwise return input
 //      e.g. `(1+2)` should be a ExprKind::Expr, not wrapped deep in a ExprKind::Query
 pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
-    if let ast::ExprKind::Query(ast::AstNode {
+    if let ast::Expr::Query(ast::AstNode {
         node:
             ast::Query {
                 set:
@@ -16,7 +16,7 @@ pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
                 offset: None,
             },
         ..
-    }) = q.kind
+    }) = *q
     {
         e
     } else {

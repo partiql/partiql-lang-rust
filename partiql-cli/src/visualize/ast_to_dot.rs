@@ -1,8 +1,6 @@
 use partiql_ast::ast;
-use std::fmt::Display;
 
 use dot_writer::{Attributes, DotWriter, Node, NodeId, Scope, Shape};
-use partiql_ast::ast::{CallArg, CustomTypeParam, CustomTypePart, Lit, Type};
 
 /*
 subgraph cluster_legend {
@@ -148,11 +146,11 @@ where
     }
 }
 
-impl<T, Loc: Display> ToDot<ast::AstNode<T, Loc>> for AstToDot
+impl<T> ToDot<ast::AstNode<T>> for AstToDot
 where
     AstToDot: ToDot<T>,
 {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::AstNode<T, Loc>) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope, ast: &ast::AstNode<T>) -> Targets {
         self.to_dot(out, &ast.node)
     }
 }
@@ -161,32 +159,32 @@ impl ToDot<ast::Expr> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::Expr) -> Targets {
         let mut expr_subgraph = out.subgraph();
 
-        use ast::ExprKind;
-        match &ast.kind {
-            ExprKind::Lit(l) => self.to_dot(&mut expr_subgraph, l),
-            ExprKind::VarRef(v) => self.to_dot(&mut expr_subgraph, v),
-            ExprKind::Param(_) => todo!(),
-            ExprKind::BinOp(bop) => self.to_dot(&mut expr_subgraph, bop),
-            ExprKind::UniOp(unop) => self.to_dot(&mut expr_subgraph, unop),
-            ExprKind::Like(like) => self.to_dot(&mut expr_subgraph, like),
-            ExprKind::Between(btwn) => self.to_dot(&mut expr_subgraph, btwn),
-            ExprKind::In(in_expr) => self.to_dot(&mut expr_subgraph, in_expr),
-            ExprKind::Case(_) => todo!(),
-            ExprKind::Struct(_) => todo!(),
-            ExprKind::Bag(_) => todo!(),
-            ExprKind::List(_) => todo!(),
-            ExprKind::Sexp(_) => todo!(),
-            ExprKind::Path(p) => self.to_dot(&mut expr_subgraph, p),
-            ExprKind::Call(c) => self.to_dot(&mut expr_subgraph, c),
-            ExprKind::CallAgg(c) => self.to_dot(&mut expr_subgraph, c),
-            ExprKind::Query(q) => self.to_dot(&mut expr_subgraph, q),
-            ExprKind::Error => todo!(),
+        use ast::Expr;
+        match &ast {
+            Expr::Lit(l) => self.to_dot(&mut expr_subgraph, l),
+            Expr::VarRef(v) => self.to_dot(&mut expr_subgraph, v),
+            Expr::BinOp(bop) => self.to_dot(&mut expr_subgraph, bop),
+            Expr::UniOp(unop) => self.to_dot(&mut expr_subgraph, unop),
+            Expr::Like(like) => self.to_dot(&mut expr_subgraph, like),
+            Expr::Between(btwn) => self.to_dot(&mut expr_subgraph, btwn),
+            Expr::In(in_expr) => self.to_dot(&mut expr_subgraph, in_expr),
+            Expr::Case(_) => todo!(),
+            Expr::Struct(_) => todo!(),
+            Expr::Bag(_) => todo!(),
+            Expr::List(_) => todo!(),
+            Expr::Sexp(_) => todo!(),
+            Expr::Path(p) => self.to_dot(&mut expr_subgraph, p),
+            Expr::Call(c) => self.to_dot(&mut expr_subgraph, c),
+            Expr::CallAgg(c) => self.to_dot(&mut expr_subgraph, c),
+            Expr::Query(q) => self.to_dot(&mut expr_subgraph, q),
+            Expr::Error => todo!(),
         }
     }
 }
 
 #[inline]
-fn lit_to_str(ast: &Lit) -> String {
+fn lit_to_str(ast: &ast::Lit) -> String {
+    use ast::Lit;
     match ast {
         Lit::Null => "NULL".to_string(),
         Lit::Missing => "MISSING".to_string(),
@@ -205,11 +203,6 @@ fn lit_to_str(ast: &Lit) -> String {
         Lit::NationalCharStringLit(l) => format!("'{}'", l),
         Lit::BitStringLit(l) => format!("b'{}'", l),
         Lit::HexStringLit(l) => format!("x'{}'", l),
-        Lit::DateTimeLit(l) => match l {
-            ast::DateTimeLit::DateLit(d) => format!("DATE '{}'", d),
-            ast::DateTimeLit::TimeLit(t) => format!("TIME '{}'", t),
-            ast::DateTimeLit::TimestampLit(ts) => format!("TIMESTAMP '{}'", ts),
-        },
         Lit::CollectionLit(l) => match l {
             ast::CollectionLit::ArrayLit(al) => format!("[{}]", al),
             ast::CollectionLit::BagLit(bl) => format!("<<{}>>", bl),
@@ -222,6 +215,7 @@ fn lit_to_str(ast: &Lit) -> String {
 
 #[inline]
 fn custom_type_param_to_str(param: &ast::CustomTypeParam) -> String {
+    use ast::CustomTypeParam;
     match param {
         CustomTypeParam::Lit(lit) => lit_to_str(lit),
         CustomTypeParam::Type(ty) => type_to_str(ty),
@@ -230,6 +224,7 @@ fn custom_type_param_to_str(param: &ast::CustomTypeParam) -> String {
 
 #[inline]
 fn custom_type_part_to_str(part: &ast::CustomTypePart) -> String {
+    use ast::CustomTypePart;
     match part {
         CustomTypePart::Name(name) => symbol_primitive_to_label(name),
         CustomTypePart::Parameterized(name, args) => {
@@ -246,6 +241,7 @@ fn custom_type_part_to_str(part: &ast::CustomTypePart) -> String {
 
 #[inline]
 fn type_to_str(ty: &ast::Type) -> String {
+    use ast::Type;
     match ty {
         Type::CustomType(cty) => cty
             .parts
@@ -259,7 +255,6 @@ fn type_to_str(ty: &ast::Type) -> String {
 
 impl ToDot<ast::Lit> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::Lit) -> Targets {
-        use ast::Lit;
         let lbl = lit_to_str(ast);
 
         let mut node = out.node_auto();
@@ -447,8 +442,7 @@ impl ToDot<ast::ProjectItem> for AstToDot {
 
 fn symbol_primitive_to_label(sym: &ast::SymbolPrimitive) -> String {
     use ast::CaseSensitivity;
-    let case = sym.case.clone().unwrap_or(CaseSensitivity::CaseInsensitive);
-    match case {
+    match &sym.case {
         CaseSensitivity::CaseSensitive => format!("'{}'", sym.value),
         CaseSensitivity::CaseInsensitive => format!("{}", sym.value),
     }
@@ -564,6 +558,7 @@ impl ToDot<ast::Call> for AstToDot {
 
 impl ToDot<ast::CallArg> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope, ast: &ast::CallArg) -> Targets {
+        use ast::CallArg;
         match ast {
             ast::CallArg::Star() => vec![out.node_auto_labelled("*").id()],
             ast::CallArg::Positional(e) => self.to_dot(out, e),

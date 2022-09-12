@@ -81,3 +81,10 @@ visualize = [
   "dep:strum",
   "dep:dot-writer",
 ]
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3
+
