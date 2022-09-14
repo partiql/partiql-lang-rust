@@ -361,7 +361,7 @@ mod tests {
         fn test_pathexpr_struct() {
             let res = parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
 
-            if let ast::ExprKind::Query(ast::AstNode {
+            if let ast::Expr::Query(ast::AstNode {
                 node:
                     ast::Query {
                         set:
@@ -372,9 +372,9 @@ mod tests {
                         ..
                     },
                 ..
-            }) = res.kind
+            }) = *res
             {
-                if let ast::ExprKind::Path(p) = &e.kind {
+                if let ast::Expr::Path(p) = &**e {
                     assert_eq!(9, p.node.steps.len())
                 } else {
                     panic!("PathExpr test failed!");

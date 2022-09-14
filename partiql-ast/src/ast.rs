@@ -28,22 +28,7 @@ pub struct AstNode<T> {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Item {
-    pub kind: ItemKind,
-    // We can/require to extend the fields as we get more clarity on the path forward.
-    // Candidate additional fields are `name: Ident`, `span: Span`, `attr: Vec<Attribute>`.
-}
-
-impl fmt::Display for Item {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Use Debug formatting for now
-        write!(f, "{:?}", self.kind)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ItemKind {
+pub enum Item {
     // Data Definition Language statements
     Ddl(Ddl),
     // Data Modification Language statements
@@ -52,22 +37,22 @@ pub enum ItemKind {
     Query(Query),
 }
 
+impl fmt::Display for Item {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Use Debug formatting for now
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ddl {
     pub op: DdlOp,
 }
 
-/// A data definition operation.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DdlOp {
-    pub kind: DdlOpKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum DdlOpKind {
+pub enum DdlOp {
     /// `CREATE TABLE <symbol>`
     CreateTable(CreateTable),
     /// `DROP TABLE <Ident>`
@@ -94,28 +79,21 @@ pub struct DropTable {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateIndex {
-    pub index_name: Ident,
+    pub index_name: SymbolPrimitive,
     pub fields: Vec<Box<Expr>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropIndex {
-    pub table: Ident,
-    pub keys: Ident,
+    pub table: SymbolPrimitive,
+    pub keys: SymbolPrimitive,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dml {
     pub op: DmlOp,
-}
-
-/// A Data Manipulation Operation.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DmlOp {
-    pub kind: DmlOpKind,
     pub from_clause: Option<FromClause>,
     pub where_clause: Option<Box<Expr>>,
     pub returning: Option<ReturningExpr>,
@@ -123,7 +101,7 @@ pub struct DmlOp {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum DmlOpKind {
+pub enum DmlOp {
     /// `INSERT INTO <expr> <expr>`
     Insert(Insert),
     /// `INSERT INTO <expr> VALUE <expr> [AT <expr>]` [ON CONFLICT WHERE <expr> DO NOTHING]`
@@ -181,50 +159,9 @@ pub enum ConflictAction {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Expr {
-    pub kind: ExprKind,
-}
-
-pub type BagAst = AstNode<Bag>;
-pub type BetweenAst = AstNode<Between>;
-pub type BinOpAst = AstNode<BinOp>;
-pub type CallAggAst = AstNode<CallAgg>;
-pub type CallArgAst = AstNode<CallArg>;
-pub type CallAst = AstNode<Call>;
-pub type CaseAst = AstNode<Case>;
-pub type FromClauseAst = AstNode<FromClause>;
-pub type FromLetAst = AstNode<FromLet>;
-pub type GroupByExprAst = AstNode<GroupByExpr>;
-pub type GroupKeyAst = AstNode<GroupKey>;
-pub type InAst = AstNode<In>;
-pub type JoinAst = AstNode<Join>;
-pub type JoinSpecAst = AstNode<JoinSpec>;
-pub type LetAst = AstNode<Let>;
-pub type LikeAst = AstNode<Like>;
-pub type ListAst = AstNode<List>;
-pub type LitAst = AstNode<Lit>;
-pub type OrderByExprAst = AstNode<OrderByExpr>;
-pub type ParamAst = AstNode<Param>;
-pub type PathAst = AstNode<Path>;
-pub type ProjectItemAst = AstNode<ProjectItem>;
-pub type ProjectionAst = AstNode<Projection>;
-pub type QueryAst = AstNode<Query>;
-pub type QuerySetAst = AstNode<QuerySet>;
-pub type SearchedCaseAst = AstNode<SearchedCase>;
-pub type SelectAst = AstNode<Select>;
-pub type SetExprAst = AstNode<SetExpr>;
-pub type SexpAst = AstNode<Sexp>;
-pub type SimpleCaseAst = AstNode<SimpleCase>;
-pub type SortSpecAst = AstNode<SortSpec>;
-pub type StructAst = AstNode<Struct>;
-pub type UniOpAst = AstNode<UniOp>;
-pub type VarRefAst = AstNode<VarRef>;
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Query {
-    pub set: QuerySetAst,
-    pub order_by: Option<Box<OrderByExprAst>>,
+    pub set: AstNode<QuerySet>,
+    pub order_by: Option<Box<AstNode<OrderByExpr>>>,
     pub limit: Option<Box<Expr>>,
     pub offset: Option<Box<Expr>>,
 }
@@ -232,8 +169,8 @@ pub struct Query {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum QuerySet {
-    SetOp(Box<SetExprAst>),
-    Select(Box<SelectAst>),
+    SetOp(Box<AstNode<SetExpr>>),
+    Select(Box<AstNode<Select>>),
     Expr(Box<Expr>),
     Values(Vec<Box<Expr>>),
 }
@@ -243,8 +180,8 @@ pub enum QuerySet {
 pub struct SetExpr {
     pub setop: SetOperator,
     pub setq: SetQuantifier,
-    pub lhs: Box<QuerySetAst>,
-    pub rhs: Box<QuerySetAst>,
+    pub lhs: Box<AstNode<QuerySet>>,
+    pub rhs: Box<AstNode<QuerySet>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,33 +195,31 @@ pub enum SetOperator {
 /// The expressions that can result in values.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ExprKind {
-    Lit(LitAst),
+pub enum Expr {
+    Lit(AstNode<Lit>),
     /// Variable reference
-    VarRef(VarRefAst),
-    /// A parameter, i.e. `?`
-    Param(ParamAst),
+    VarRef(AstNode<VarRef>),
     /// Binary operator
-    BinOp(BinOpAst),
+    BinOp(AstNode<BinOp>),
     /// Unary operators
-    UniOp(UniOpAst),
+    UniOp(AstNode<UniOp>),
     /// Comparison operators
-    Like(LikeAst),
-    Between(BetweenAst),
-    In(InAst),
-    Case(CaseAst),
+    Like(AstNode<Like>),
+    Between(AstNode<Between>),
+    In(AstNode<In>),
+    Case(AstNode<Case>),
     /// Constructors
-    Struct(StructAst),
-    Bag(BagAst),
-    List(ListAst),
-    Sexp(SexpAst),
+    Struct(AstNode<Struct>),
+    Bag(AstNode<Bag>),
+    List(AstNode<List>),
+    Sexp(AstNode<Sexp>),
     /// Other expression types
-    Path(PathAst),
-    Call(CallAst),
-    CallAgg(CallAggAst),
+    Path(AstNode<Path>),
+    Call(AstNode<Call>),
+    CallAgg(AstNode<CallAgg>),
 
     /// Query, e.g. `UNION` | `EXCEPT` | `INTERSECT` | `SELECT` and their parts.
-    Query(QueryAst),
+    Query(AstNode<Query>),
 
     /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
     Error,
@@ -315,7 +250,6 @@ pub enum Lit {
     NationalCharStringLit(String),
     BitStringLit(String),
     HexStringLit(String),
-    DateTimeLit(DateTimeLit),
     CollectionLit(CollectionLit),
     /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
     TypedLit(String, Type),
@@ -330,23 +264,9 @@ pub enum CollectionLit {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum DateTimeLit {
-    DateLit(String),
-    TimeLit(String),
-    TimestampLit(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VarRef {
     pub name: SymbolPrimitive,
     pub qualifier: ScopeQualifier,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Param {
-    pub index: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -422,13 +342,7 @@ pub struct In {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Case {
-    pub kind: CaseKind,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CaseKind {
+pub enum Case {
     /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
     SimpleCase(SimpleCase),
     /// CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
@@ -448,6 +362,15 @@ pub struct SimpleCase {
 pub struct SearchedCase {
     pub cases: Vec<ExprPair>,
     pub default: Option<Box<Expr>>,
+}
+
+/// A generic pair of expressions. Used in the `pub struct`, `searched_case`
+/// and `simple_case` expr variants above.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExprPair {
+    pub first: Box<Expr>,
+    pub second: Box<Expr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -478,7 +401,7 @@ pub struct Sexp {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Call {
     pub func_name: SymbolPrimitive,
-    pub args: Vec<CallArgAst>,
+    pub args: Vec<AstNode<CallArg>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -506,17 +429,17 @@ pub enum CallArg {
 pub struct CallAgg {
     pub func_name: SymbolPrimitive,
     pub setq: Option<SetQuantifier>,
-    pub args: Vec<Box<Expr>>,
+    pub args: Vec<AstNode<CallArg>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
-    pub project: ProjectionAst,
-    pub from: Option<FromClauseAst>,
-    pub from_let: Option<LetAst>,
+    pub project: AstNode<Projection>,
+    pub from: Option<AstNode<FromClause>>,
+    pub from_let: Option<AstNode<Let>>,
     pub where_clause: Option<Box<Expr>>,
-    pub group_by: Option<Box<GroupByExprAst>>,
+    pub group_by: Option<Box<AstNode<GroupByExpr>>>,
     pub having: Option<Box<Expr>>,
 }
 
@@ -562,7 +485,7 @@ pub struct Projection {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ProjectionKind {
     ProjectStar,
-    ProjectList(Vec<ProjectItemAst>),
+    ProjectList(Vec<AstNode<ProjectItem>>),
     ProjectPivot { key: Box<Expr>, value: Box<Expr> },
     ProjectValue(Box<Expr>),
 }
@@ -601,16 +524,16 @@ pub struct Let {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LetBinding {
     pub expr: Box<Expr>,
-    pub name: SymbolPrimitive,
+    pub as_alias: SymbolPrimitive,
 }
 
 /// FROM clause of an SFW query
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FromClause {
-    FromLet(FromLetAst),
+    FromLet(AstNode<FromLet>),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
-    Join(JoinAst),
+    Join(AstNode<Join>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -623,23 +546,6 @@ pub struct FromLet {
     pub by_alias: Option<SymbolPrimitive>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Join {
-    pub kind: JoinKind,
-    pub left: Box<FromClauseAst>,
-    pub right: Box<FromClauseAst>,
-    pub predicate: Option<JoinSpecAst>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum JoinSpec {
-    On(Box<Expr>),
-    Using(Vec<Path>),
-    Natural,
-}
-
 /// Indicates the type of FromLet, see the following for more details:
 /// https:///github.com/partiql/partiql-lang-kotlin/issues/242
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -647,6 +553,15 @@ pub enum JoinSpec {
 pub enum FromLetKind {
     Scan,
     Unpivot,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Join {
+    pub kind: JoinKind,
+    pub left: Box<AstNode<FromClause>>,
+    pub right: Box<AstNode<FromClause>>,
+    pub predicate: Option<AstNode<JoinSpec>>,
 }
 
 /// Indicates the logical type of join.
@@ -660,21 +575,20 @@ pub enum JoinKind {
     Cross,
 }
 
-/// A generic pair of expressions. Used in the `pub struct`, `searched_case`
-/// and `simple_case` expr variants above.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ExprPair {
-    pub first: Box<Expr>,
-    pub second: Box<Expr>,
+pub enum JoinSpec {
+    On(Box<Expr>),
+    Using(Vec<Path>),
+    Natural,
 }
 
-/// GROUP BY <grouping_strategy> <group_key_list>... \[AS <symbol>\]
+/// GROUP BY <grouping_strategy> <group_key>[, <group_key>]... \[AS <symbol>\]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupByExpr {
     pub strategy: GroupingStrategy,
-    pub key_list: GroupKeyList,
+    pub keys: Vec<AstNode<GroupKey>>,
     pub group_as_alias: Option<SymbolPrimitive>,
 }
 
@@ -685,13 +599,6 @@ pub struct GroupByExpr {
 pub enum GroupingStrategy {
     GroupFull,
     GroupPartial,
-}
-
-/// <group_key>[, <group_key>]...
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GroupKeyList {
-    pub keys: Vec<GroupKeyAst>,
 }
 
 /// <expr> [AS <symbol>]
@@ -706,7 +613,7 @@ pub struct GroupKey {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OrderByExpr {
-    pub sort_specs: Vec<SortSpecAst>,
+    pub sort_specs: Vec<AstNode<SortSpec>>,
 }
 
 /// <expr> [ASC | DESC] ?
@@ -789,23 +696,6 @@ pub enum ReturningMapping {
     AllOld,
 }
 
-/// `Ident` can be used for names that need to be looked up with a notion of case-sensitivity.
-
-/// For both `create_index` and `create_table`, there is no notion of case-sensitivity
-/// for table Idents since they are *defining* new Idents.  However, for `drop_index` and
-/// `drop_table` *do* have the notion of case sensitivity since they are referring to existing names.
-/// Idents with case-sensitivity is already modeled with the `id` variant of `expr`,
-/// but there is no way to specify to PIG that we want to only allow a single variant of a sum as
-/// an element of a type.  (Even though in the Kotlin code each varaint is its own type.)  Hence, we
-/// define an `Ident` type above which can be used without opening up an element's domain to
-/// all of `expr`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Ident {
-    pub name: SymbolPrimitive,
-    pub case: CaseSensitivity,
-}
-
 /// Represents `<expr> = <expr>` in a DML SET operation.  Note that in this case, `=` is representing
 /// an assignment operation and *not* the equality operator.
 #[derive(Clone, Debug, PartialEq)]
@@ -877,6 +767,5 @@ pub struct CustomType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SymbolPrimitive {
     pub value: String,
-    // Optional because string literal symbols don't have case sensitivity
-    pub case: Option<CaseSensitivity>,
+    pub case: CaseSensitivity,
 }

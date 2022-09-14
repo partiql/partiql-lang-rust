@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING:* Refactors the AST
-  - Removed Location from the AST, replacing with a 'node id' that gives the AST node identity; the id can be used to retrieve Location
+  - Removes Location from the AST, replacing with a 'node id' that gives the AST node identity; the id can be used to retrieve Location
+  - Removes redundancies and extraneous nesting
 
 ### Added
 - Adds the following functionalities to PartiQL Playground:
