@@ -26,18 +26,20 @@ mod parse;
 mod preprocessor;
 mod token_parser;
 
-use parse::parse_partiql;
+use parse::{parse_partiql, AstData, ErrorData};
 use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::BytePosition;
 
+use partiql_ast::ast::NodeId;
+use partiql_source_map::metadata::LocationMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// [`Error`] type for errors in the lexical structure for the PartiQL parser.
+/// [`std::error::Error`] type for errors in the lexical structure for the PartiQL parser.
 pub type LexicalError<'input> = error::LexError<'input>;
 
-/// [`Error`] type for errors in the syntactic structure for the PartiQL parser.
+/// [`std::error::Error`] type for errors in the syntactic structure for the PartiQL parser.
 pub type ParseError<'input> = error::ParseError<'input, BytePosition>;
 
 /// General [`Result`] type for the PartiQL [`Parser`].
@@ -51,10 +53,18 @@ pub struct Parser {}
 impl Parser {
     /// Parse a PartiQL statement into an AST.
     pub fn parse<'input>(&self, text: &'input str) -> ParserResult<'input> {
-        let mut offsets = LineOffsetTracker::default();
-        match parse_partiql(text, &mut offsets) {
-            Ok(ast) => Ok(Parsed { text, offsets, ast }),
-            Err(errors) => Err(ParserError {
+        match parse_partiql(text) {
+            Ok(AstData {
+                ast,
+                locations,
+                offsets,
+            }) => Ok(Parsed {
+                text,
+                offsets,
+                ast,
+                locations,
+            }),
+            Err(ErrorData { errors, offsets }) => Err(ParserError {
                 text,
                 offsets,
                 errors,
@@ -72,6 +82,7 @@ pub struct Parsed<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,
     pub ast: Box<ast::Expr>,
+    pub locations: LocationMap<NodeId>,
 }
 
 /// The output of errors when parsing PartiQL statement strings: an errors and auxiliary data.

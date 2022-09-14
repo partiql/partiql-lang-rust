@@ -3,19 +3,16 @@ use crate::error::ParseError;
 
 use lalrpop_util as lpop;
 
-use lpop::ErrorRecovery;
 use std::str::FromStr;
 
 use partiql_ast::ast;
-use partiql_ast::ast::ToAstNode;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
 use crate::parse::parse_util::{strip_query};
+use crate::parse::parser_state::{ParserState, IdGenerator};
 
-
-grammar<'input, 'err>(input: &'input str,
-                      errors: &'err mut Vec<ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>>);
+grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
 
 
 // ------------------------------------------------------------------------------ //
@@ -43,22 +40,35 @@ pub(crate) Query: Box<ast::Expr> = {
     <hi:@R> => {
         Box::new(ast::Expr {
             kind: ast::ExprKind::Query(
-                ast::Query { set, order_by, limit, offset, } .ast(lo..hi),
+                state.node(ast::Query { set, order_by, limit, offset, }, lo..hi)
             ),
         })
     }
 }
 
+
 QuerySetPrec02: ast::QuerySetAst = {
     <lo:@L> <lhs:QuerySetPrec02> <setop:SetOpUnionExcept> <setq:SetQuantifier> <rhs:QuerySetPrec01> <hi:@R> => {
-        ast::QuerySet::SetOp(Box::new(ast::SetExpr { setop, setq, lhs: Box::new(lhs), rhs: Box::new(rhs)}.ast(lo..hi))).ast(lo..hi)
+        let set_expr = state.node(ast::SetExpr {
+             setop,
+             setq,
+             lhs: Box::new(lhs),
+             rhs: Box::new(rhs)
+        }, lo..hi);
+        state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
 	},
     <QuerySetPrec01>
 }
 
 QuerySetPrec01: ast::QuerySetAst = {
     <lo:@L> <lhs:QuerySetPrec01> <setop:SetOpIntersect> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
-        ast::QuerySet::SetOp(Box::new(ast::SetExpr { setop, setq, lhs: Box::new(lhs), rhs: Box::new(rhs)}.ast(lo..hi))).ast(lo..hi)
+        let set_expr = state.node(ast::SetExpr {
+            setop,
+            setq,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs)
+        }, lo..hi);
+        state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
 	},
     <SingleQuery>
 }
@@ -80,6 +90,8 @@ SetQuantifier: ast::SetQuantifier = {
     "ALL"? => ast::SetQuantifier::All,
 }
 
+
+
 // ------------------------------------------------------------------------------ //
 //                                                                                //
 //                            ExprQuery or SFW Query                              //
@@ -89,15 +101,15 @@ SingleQuery: ast::QuerySetAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R> => {
         match *expr {
            ast::Expr{ kind: ast::ExprKind::Query(ast::QueryAst{ node: ast::Query{set, order_by:None, limit:None, offset:None} , .. })} => set,
-           _ => ast::QuerySet::Expr( expr ).ast(lo..hi),
+           _ => state.node(ast::QuerySet::Expr( expr ), lo..hi),
         }
     },
-    <lo:@L> <sfw:SfwQuery> <hi:@R> => ast::QuerySet::Select( Box::new(sfw) ).ast(lo..hi),
+    <lo:@L> <sfw:SfwQuery> <hi:@R> => state.node(ast::QuerySet::Select( Box::new(sfw)), lo..hi),
     <lo:@L> <values:Values> <hi:@R> => values,
 }
 
 Values: ast::QuerySetAst = {
-    <lo:@L> "VALUES" <rows:CommaSepPlus<ValueRow>> <hi:@R> => ast::QuerySet::Values( rows ).ast(lo..hi)
+    <lo:@L> "VALUES" <rows:CommaSepPlus<ValueRow>> <hi:@R> => state.node(ast::QuerySet::Values( rows ), lo..hi)
 }
 
 #[inline]
@@ -126,14 +138,14 @@ SfwClauses: ast::SelectAst = {
     <group_by:GroupClause?>
     <having:HavingClause?>
     <hi:@R> => {
-        ast::Select {
+        state.node(ast::Select {
             project,
             from,
             from_let: None,
             where_clause,
             group_by,
             having,
-        }.ast(lo..hi)
+        }, lo..hi)
     }
 }
 
@@ -147,14 +159,14 @@ FwsClauses: ast::SelectAst = {
     <having:HavingClause?>
     <project:SelectClause>
     <hi:@R> => {
-        ast::Select {
+        state.node(ast::Select {
             project,
             from: Some(from),
             from_let: None,
             where_clause,
             group_by,
             having,
-        }.ast(lo..hi)
+        }, lo..hi)
     }
 }
 
@@ -168,22 +180,22 @@ WithClause: () = {}
 //                                    SELECT                                      //
 // ------------------------------------------------------------------------------ //
 SelectClause: ast::ProjectionAst = {
-    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "*" <hi:@R> => ast::Projection {
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "*" <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectStar,
         setq: Some(strategy)
-    }.ast(lo..hi),
-    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> <project_items:CommaSepPlus<Projection>> <hi:@R> => ast::Projection {
+    }, lo..hi),
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> <project_items:CommaSepPlus<Projection>> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectList(project_items),
         setq: Some(strategy),
-    }.ast(lo..hi),
-    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "VALUE" <value:ExprQuery> <hi:@R> => ast::Projection {
+    }, lo..hi),
+    <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "VALUE" <value:ExprQuery> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectValue(value),
         setq: Some(strategy),
-    }.ast(lo..hi),
-    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => ast::Projection {
+    }, lo..hi),
+    <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectPivot { key, value },
         setq: None
-    }.ast(lo..hi),
+    }, lo..hi),
 }
 
 #[inline]
@@ -200,9 +212,9 @@ SetQuantifierStrategy: ast::SetQuantifier = {
 #[inline]
 Projection: ast::ProjectItemAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
-        => ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ).ast(lo..hi),
+        => state.node(ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: None } ), lo..hi),
     <lo:@L> <expr:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
-        ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: Some(as_alias) } ).ast(lo..hi)
+        state.node(ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: Some(as_alias) } ), lo..hi)
     },
 }
 
@@ -218,16 +230,16 @@ FromClause: ast::FromClauseAst = {
         froms.push(last);
         froms.into_iter()
             .reduce(|lfrom, rfrom| {
-	            let start = lfrom.location.as_ref().unwrap_or(&total).start.0.clone();
-                let end = rfrom.location.as_ref().unwrap_or(&total).end.0.clone();
+	            let start = state.locations.get(&lfrom.id).unwrap_or(&total).start.0.clone();
+                let end = state.locations.get(&rfrom.id).unwrap_or(&total).end.0.clone();
                 let range = start..end;
-                let join = ast::Join {
+                let join = state.node(ast::Join {
                     kind: ast::JoinKind::Cross,
                     left: Box::new(lfrom),
                     right: Box::new(rfrom),
                     predicate: None
-                };
-                ast::FromClause::Join( join.ast(range.clone()) ).ast(range)
+                }, range.clone());
+                state.node(ast::FromClause::Join( join ), range)
             })
             .unwrap() // safe, because we know there's at least 1 input
     }
@@ -239,42 +251,42 @@ TableReference: ast::FromClauseAst = {
 }
 
 TableNonJoin: ast::FromClauseAst = {
-    <lo:@L> <t:TableBaseReference> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
-    <lo:@L> <t:TableUnpivot> <hi:@R> => ast::FromClause::FromLet( t ).ast(lo..hi),
+    <lo:@L> <t:TableBaseReference> <hi:@R> => state.node(ast::FromClause::FromLet( t ), lo..hi),
+    <lo:@L> <t:TableUnpivot> <hi:@R> => state.node(ast::FromClause::FromLet( t ), lo..hi),
 }
 
 #[inline]
 TableBaseReference: ast::FromLetAst = {
     <lo:@L> <e:ExprQuery> <as_alias:SymbolPrimitive> <hi:@R> => {
-        ast::FromLet {
+        state.node(ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias: Some(as_alias),
             at_alias: None,
             by_alias: None
-        }.ast(lo..hi)
+        }, lo..hi)
     },
     <lo:@L> <e:ExprQuery> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
-        ast::FromLet {
+        state.node(ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Scan,
             as_alias,
             at_alias,
             by_alias
-        }.ast(lo..hi)
+        }, lo..hi)
     }
 }
 
 #[inline]
 TableUnpivot: ast::FromLetAst = {
     <lo:@L> "UNPIVOT" <e:ExprQuery> <as_ident:AsIdent?> <at_ident:AtIdent?> <hi:@R> => {
-        ast::FromLet {
+        state.node(ast::FromLet {
             expr: e,
             kind: ast::FromLetKind::Unpivot,
             as_alias: as_ident,
             at_alias: at_ident,
             by_alias: None,
-        }.ast(lo..hi)
+        }, lo..hi)
     }
 }
 
@@ -294,13 +306,13 @@ TableCrossJoin: ast::FromClauseAst = {
             Some(j) => j,
             None => ast::JoinKind::Cross
         };
-        let join = ast::Join {
+        let join = state.node(ast::Join {
             kind,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: None
-        };
-        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
+        }, lo..hi);
+        state.node(ast::FromClause::Join( join ), lo..hi)
     }
 }
 
@@ -310,25 +322,25 @@ TableQualifiedJoin: ast::FromClauseAst = {
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
     <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
-        let join = ast::Join {
+        let join = state.node(ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(on),
-        };
-        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
+        }, lo..hi);
+        state.node(ast::FromClause::Join( join ), lo..hi)
     },
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
     <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <hi:@R> => {
-        let join = ast::Join {
+        let join = state.node(ast::Join {
             kind: j,
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(spec)
-        };
-        ast::FromClause::Join( join.ast(lo..hi) ).ast(lo..hi)
+        }, lo..hi);
+        state.node(ast::FromClause::Join( join ), lo..hi)
     },
 }
 #[inline]
@@ -338,7 +350,7 @@ JoinRhs: ast::FromClauseAst = {
 }
 #[inline]
 JoinSpecNatural: ast::JoinSpecAst = {
-    <lo:@L> "NATURAL" <hi:@R> => ast::JoinSpec::Natural.ast(lo..hi)
+    <lo:@L> "NATURAL" <hi:@R> => state.node(ast::JoinSpec::Natural, lo..hi)
 }
 #[inline]
 JoinType: ast::JoinKind = {
@@ -350,8 +362,8 @@ JoinType: ast::JoinKind = {
 }
 #[inline]
 JoinSpec: ast::JoinSpecAst = {
-    <lo:@L> "ON" <e:ExprQuery> <hi:@R> => ast::JoinSpec::On(e).ast(lo..hi),
-    <lo:@L> "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" <hi:@R> => ast::JoinSpec::Using( paths ).ast(lo..hi),
+    <lo:@L> "ON" <e:ExprQuery> <hi:@R> => state.node(ast::JoinSpec::On(e), lo..hi),
+    <lo:@L> "USING" "(" <paths:CommaSepPlus<PathExpr>> ")" <hi:@R> => state.node(ast::JoinSpec::Using( paths ), lo..hi),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -364,11 +376,11 @@ WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
 // ------------------------------------------------------------------------------ //
 GroupClause: Box<ast::GroupByExprAst> = {
     <lo:@L> "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> <hi:@R> => {
-        Box::new(ast::GroupByExpr{
+        Box::new(state.node(ast::GroupByExpr{
             strategy,
             key_list: ast::GroupKeyList{ keys },
             group_as_alias,
-        }.ast(lo..hi))
+        }, lo..hi))
     }
 }
 #[inline]
@@ -384,9 +396,9 @@ GroupStrategy: ast::GroupingStrategy = {
 #[inline]
 GroupKey: ast::GroupKeyAst = {
     <lo:@L> <expr:ExprQuery> <hi:@R>
-        => ast::GroupKey{ expr, as_alias: None }.ast(lo..hi),
+        => state.node(ast::GroupKey{ expr, as_alias: None }, lo..hi),
     <lo:@L> <expr:ExprQuery> "AS" <as_alias:SymbolPrimitive> <hi:@R>
-        => ast::GroupKey{ expr, as_alias: Some(as_alias) }.ast(lo..hi),
+        => state.node(ast::GroupKey{ expr, as_alias: Some(as_alias) }, lo..hi),
 }
 #[inline]
 GroupAlias: ast::SymbolPrimitive = {
@@ -402,13 +414,13 @@ HavingClause: Box<ast::Expr> = { "HAVING" <ExprQuery> }
 //                                   ORDER BY                                     //
 // ------------------------------------------------------------------------------ //
 OrderByClause: Box<ast::OrderByExprAst> = {
-    <lo:@L> "ORDER" "BY" "PRESERVE" <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs: vec![] }.ast(lo..hi) ),
-    <lo:@L> "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> <hi:@R> => Box::new( ast::OrderByExpr{ sort_specs }.ast(lo..hi) ),
+    <lo:@L> "ORDER" "BY" "PRESERVE" <hi:@R> => Box::new( state.node(ast::OrderByExpr{ sort_specs: vec![] }, lo..hi) ),
+    <lo:@L> "ORDER" "BY" <sort_specs: CommaSepPlus<OrderSortSpec>> <hi:@R> => Box::new( state.node(ast::OrderByExpr{ sort_specs }, lo..hi) ),
 }
 #[inline]
 OrderSortSpec: ast::SortSpecAst = {
     <lo:@L> <expr:ExprQuery> <ordering_spec:BySpec?> <null_ordering_spec:ByNullSpec?> <hi:@R>
-        => ast::SortSpec { expr, ordering_spec, null_ordering_spec }.ast(lo..hi)
+        => state.node(ast::SortSpec { expr, ordering_spec, null_ordering_spec }, lo..hi)
 }
 #[inline]
 BySpec: ast::OrderingSpec = {
@@ -490,11 +502,11 @@ ExprQuery: Box<ast::Expr> = {
 ExprPrecedence15: ast::Expr = {
     <lo:@L> <l:ExprPrecedence15> "OR" <r:ExprPrecedence14> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Or,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence14>,
 }
@@ -502,11 +514,11 @@ ExprPrecedence15: ast::Expr = {
 ExprPrecedence14: ast::Expr = {
     <lo:@L> <l:ExprPrecedence14> "AND" <r:ExprPrecedence13> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::And,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence13>,
 }
@@ -514,10 +526,10 @@ ExprPrecedence14: ast::Expr = {
 ExprPrecedence13: ast::Expr = {
     <lo:@L> "NOT" <r:ExprPrecedence13> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence12>,
 }
@@ -525,25 +537,25 @@ ExprPrecedence13: ast::Expr = {
 ExprPrecedence12: ast::Expr = {
     <lo:@L> <l:ExprPrecedence12> "IS" <r:ExprPrecedence11> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Is,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <r:ExprPrecedence11> <hi:@R> => {
        let is =  ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Is,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )};
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(is),
-           }.ast(lo..hi)
+           }, lo..hi)
        )}
     },
     <ExprPrecedence11>
@@ -552,27 +564,27 @@ ExprPrecedence12: ast::Expr = {
 ExprPrecedence11: ast::Expr = {
     <lo:@L> <l:ExprPrecedence11> "=" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Eq,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence11> "!=" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Ne,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence11> "<>" <r:ExprPrecedence10> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Ne,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence10>,
 }
@@ -580,75 +592,76 @@ ExprPrecedence11: ast::Expr = {
 ExprPrecedence10: ast::Expr = {
     <lo:@L> <l:ExprPrecedence09> "<" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Lt,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence09> ">" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Gt,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence09> "<=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Lte,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence09> ">=" <r:ExprPrecedence09> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Gte,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence09>,
 }
 
 ExprPrecedence09: ast::Expr = {
     <lo:@L> <value:ExprPrecedence09> "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) },
+       ast::Expr{ kind: ast::ExprKind::Between( state.node(ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }, lo..hi) ) },
     <lo:@L> <value:ExprPrecedence09> "NOT" "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> => {
-       let between = ast::Expr{ kind: ast::ExprKind::Between( ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }.ast(lo..hi) ) };
+       let between = ast::Expr{ kind: ast::ExprKind::Between( state.node(ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }, lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(between),
-           }.ast(lo..hi)
+           }, lo..hi)
        )}
     },
     <lo:@L> <value:ExprPrecedence09> "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) },
+       ast::Expr{ kind: ast::ExprKind::Like( state.node(ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }, lo..hi) ) },
     <lo:@L> <value:ExprPrecedence09> "NOT" "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R>  => {
-       let like = ast::Expr{ kind: ast::ExprKind::Like( ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }.ast(lo..hi) ) };
+       let like = ast::Expr{ kind: ast::ExprKind::Like( state.node(ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }, lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(like),
-           }.ast(lo..hi)
+           }, lo..hi)
        )}
     },
     <lo:@L> <l:ExprPrecedence09> "IN" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr{ kind: ast::ExprKind::In( ast::In{ lhs: Box::new(l), rhs: Box::new(r) }.ast(lo..hi) ) },
+       ast::Expr{ kind: ast::ExprKind::In( state.node(ast::In{ lhs: Box::new(l), rhs: Box::new(r) }, lo..hi) ) },
     <lo:@L> <l:ExprPrecedence09> "NOT" "IN" <r:ExprPrecedence08> <hi:@R> => {
-       let in_expr = ast::Expr{ kind: ast::ExprKind::In( ast::In{ lhs: Box::new(l), rhs: Box::new(r) }.ast(lo..hi) ) };
+       let in_expr = ast::Expr{ kind: ast::ExprKind::In( state.node(ast::In{ lhs: Box::new(l), rhs: Box::new(r) }, lo..hi) ) };
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(in_expr),
-           }.ast(lo..hi)
+           }, lo..hi)
        )}
     },
     <ExprPrecedence08>,
 }
+
 #[inline]
 LikeEscape: Box<ast::Expr> = {
     "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
@@ -657,11 +670,11 @@ LikeEscape: Box<ast::Expr> = {
 ExprPrecedence08: ast::Expr = {
     <lo:@L> <l:ExprPrecedence08> "||" <r:ExprPrecedence07> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Concat,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence07>,
 }
@@ -669,19 +682,19 @@ ExprPrecedence08: ast::Expr = {
 ExprPrecedence07: ast::Expr = {
     <lo:@L> <l:ExprPrecedence07> "+" <r:ExprPrecedence06> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Add,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence07> "-" <r:ExprPrecedence06> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Neg,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence06>,
 }
@@ -689,27 +702,27 @@ ExprPrecedence07: ast::Expr = {
 ExprPrecedence06: ast::Expr = {
     <lo:@L> <l:ExprPrecedence06> "*" <r:ExprPrecedence05> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Mul,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence06> "/" <r:ExprPrecedence05> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Div,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> <l:ExprPrecedence06> "%" <r:ExprPrecedence05> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Mod,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence05>,
 }
@@ -717,11 +730,11 @@ ExprPrecedence06: ast::Expr = {
 ExprPrecedence05: ast::Expr = {
     <lo:@L> <l:ExprPrecedence05> "^" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::BinOp(
-           ast::BinOp {
+           state.node(ast::BinOp {
                kind: ast::BinOpKind::Exp,
                lhs: Box::new(l),
                rhs: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence04>,
 }
@@ -729,17 +742,17 @@ ExprPrecedence05: ast::Expr = {
 ExprPrecedence04: ast::Expr = {
     <lo:@L> "+" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Pos,
                expr: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <lo:@L> "-" <r:ExprPrecedence04> <hi:@R> =>
        ast::Expr{ kind: ast::ExprKind::UniOp(
-           ast::UniOp {
+           state.node(ast::UniOp {
                kind: ast::UniOpKind::Neg,
                expr: Box::new(r),
-           }.ast(lo..hi)
+           }, lo..hi)
        )},
     <ExprPrecedence03>,
 }
@@ -754,7 +767,7 @@ ExprPrecedence03: ast::Expr = {
 
 ExprPrecedence02: ast::Expr = {
     <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::Path( expr.ast(lo..hi) )
+        kind: ast::ExprKind::Path( state.node(expr, lo..hi) )
     },
     <ExprPrecedence01>,
 }
@@ -793,21 +806,21 @@ PathExpr: ast::Path = {
             root:Box::new(l), steps:vec![step]
         }
     },
-};
+}
 
 #[inline]
 ExprPrecedence01: ast::Expr = {
-    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( call.ast(lo..hi) ) },
+    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Call( state.node(call, lo..hi) ) },
     <ExprTerm>,
-};
+}
 
 ExprTerm: ast::Expr = {
     "(" <q:Query> ")" =>  *strip_query(q),
-    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( lit.ast(lo..hi) ) },
+    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr{ kind: ast::ExprKind::Lit( state.node(lit, lo..hi) ) },
     <VarRefExpr>,
     <ExprTermCollection>,
     <ExprTermTuple>,
-    ! => { errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
+    ! => { state.errors.push(<>); ast::Expr{ kind: ast::ExprKind::Error} },
 }
 
 // ------------------------------------------------------------------------------ //
@@ -833,27 +846,27 @@ ExprTerm: ast::Expr = {
 CaseExpr: ast::CaseAst = {
     <lo:@L> "CASE" <expr:ExprQuery?> <cases:ExprPairWhenThen+> <elsexpr:ElseClause?> "END" <hi:@R> => {
         match expr {
-            None => ast::Case {
+            None => state.node(ast::Case {
                 kind: ast::CaseKind::SearchedCase(
                     ast::SearchedCase { cases, default: elsexpr }
                 )
-            }.ast(lo..hi),
-            Some(expr) => ast::Case {
+            }, lo..hi),
+            Some(expr) => state.node(ast::Case {
                 kind: ast::CaseKind::SimpleCase(
                     ast::SimpleCase { expr, cases, default: elsexpr }
                 )
-            }.ast(lo..hi)
+            }, lo..hi)
         }
     }
-};
+}
 
 ElseClause: Box<ast::Expr> = {
   "ELSE" <e:ExprQuery> => Box::new(*e)
-};
+}
 
 ExprPairWhenThen: ast::ExprPair = {
     <lo:@L> "WHEN" <first:ExprQuery> "THEN" <second:ExprQuery> <hi:@R> => ast::ExprPair { first, second },
-};
+}
 
 #[inline]
 ExprTermCollection: ast::Expr = {
@@ -869,22 +882,22 @@ ExprTermArray: ast::Expr = {
 
 #[inline]
 ExprTermArrayBrackets: ast::Expr = {
-    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) }
+    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( state.node(ast::List{values}, lo..hi) ) }
 }
 
 #[inline]
 ExprTermArrayParens: ast::Expr = {
-    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( ast::List{values}.ast(lo..hi) ) },
+    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr{ kind: ast::ExprKind::List( state.node(ast::List{values}, lo..hi) ) },
 }
 
 #[inline]
 ExprTermBag: ast::Expr = {
-    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( ast::Bag{values}.ast(lo..hi) ) },
+    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Bag( state.node(ast::Bag{values}, lo..hi) ) },
 }
 
 #[inline]
 ExprTermTuple: ast::Expr = {
-    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( ast::Struct{fields}.ast(lo..hi) ) }
+    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr{ kind: ast::ExprKind::Struct( state.node(ast::Struct{fields}, lo..hi) ) }
 }
 
 ExprPair: ast::ExprPair = {
@@ -915,15 +928,15 @@ FunctionCallArg: ast::CallArgAst = {
 
 #[inline]
 FunctionArgPositional: ast::CallArgAst = {
-    <lo:@L> "*" <hi:@R> => ast::CallArg::Star().ast(lo..hi),
-    <lo:@L> <value:ExprQuery> <hi:@R> => ast::CallArg::Positional(value).ast(lo..hi),
-    <lo:@L> <ty:TypeName> <hi:@R> => ast::CallArg::PositionalType(ty).ast(lo..hi),
+    <lo:@L> "*" <hi:@R> => state.node(ast::CallArg::Star(), lo..hi),
+    <lo:@L> <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Positional(value), lo..hi),
+    <lo:@L> <ty:TypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
 }
 
 #[inline]
 FunctionArgNamed: ast::CallArgAst = {
-    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => ast::CallArg::Named{name, value: value}.ast(lo..hi),
-    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => ast::CallArg::NamedType{name, ty: ty}.ast(lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named{name, value: value}, lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType{name, ty: ty}, lo..hi)
 }
 
 #[inline]
@@ -1007,40 +1020,40 @@ PathSteps: Vec<ast::PathStep> = {
 
 PathExprVarRef: ast::Expr = {
     <lo:@L> <s:"String"> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::VarRef(ast::VarRef {
+        kind: ast::ExprKind::VarRef(state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: s.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
-        }.ast(lo..hi)),
+        }, lo..hi)),
     },
     <VarRefExpr>,
 }
 
 VarRefExpr: ast::Expr = {
     <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::VarRef(ast::VarRef {
+        kind: ast::ExprKind::VarRef(state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
-        }.ast(lo..hi)),
+        }, lo..hi)),
     },
     <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::VarRef(ast::VarRef {
+        kind: ast::ExprKind::VarRef(state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
-      }.ast(lo..hi)),
+      }, lo..hi)),
     },
     <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::VarRef(ast::VarRef {
+        kind: ast::ExprKind::VarRef(state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseInsensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
-        }.ast(lo..hi)),
+        }, lo..hi)),
     },
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr {
-        kind: ast::ExprKind::VarRef(ast::VarRef {
+        kind: ast::ExprKind::VarRef(state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: Some(ast::CaseSensitivity::CaseSensitive) },
             qualifier: ast::ScopeQualifier::Unqualified
-        }.ast(lo..hi)),
+        },lo..hi)),
     },
-};
+}
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -1053,7 +1066,7 @@ Literal: ast::Lit = {
     <LiteralScalar>,
     <LiteralIon>,
     <TypedLiteral>,
-};
+}
 
 #[inline]
 LiteralAbsent: ast::Lit = {
@@ -1163,7 +1176,7 @@ CommaTermStar<T>: Vec<T> = {
             v
         }
     }
-};
+}
 
 // Comma as terminator (i.e. "<T>, <T>, <T>," where final comma is optional); at least 1 arg
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
@@ -1175,7 +1188,7 @@ CommaTermPlus<T>: Vec<T> = {
             v
         }
     }
-};
+}
 
 // Comma as separator (i.e. "<T>, <T>, <T>"); may be empty
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
@@ -1187,7 +1200,7 @@ CommaSepStar<T>: Vec<T> = {
              v
         }
     }
-};
+}
 
 // Comma as separator (i.e. "<T>, <T>, <T>"); at least 1 arg
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
@@ -1196,7 +1209,7 @@ CommaSepPlus<T>: Vec<T> = {
         v.push(e);
         v
     }
-};
+}
 
 SymbolPrimitive: ast::SymbolPrimitive = {
     <ident:"UnquotedIdent"> => ast::SymbolPrimitive {
@@ -1207,7 +1220,7 @@ SymbolPrimitive: ast::SymbolPrimitive = {
         value: ident.to_owned(),
         case: Some(ast::CaseSensitivity::CaseSensitive),
     },
-};
+}
 
 AsIdent: ast::SymbolPrimitive = {
     "AS" <SymbolPrimitive>

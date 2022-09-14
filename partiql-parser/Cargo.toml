@@ -17,9 +17,10 @@ exclude = [
 edition = "2021"
 version = "0.1.0"
 
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [build-dependencies]
-lalrpop = "~0.19.7"
+lalrpop = "0.19.8"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast", version = "0.1.0" }
@@ -32,7 +33,7 @@ num-bigint = "~0.4.0"
 bigdecimal = "~0.2.0"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 
-lalrpop-util = "~0.19.7"
+lalrpop-util = "0.19.8"
 logos = "~0.12.0"
 
 itertools = "~0.10.3"

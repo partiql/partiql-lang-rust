@@ -7,85 +7,24 @@
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
 // in this crate directly is not recommended.
 
-use partiql_source_map::location::{ByteOffset, BytePosition, Location};
 use rust_decimal::Decimal as RustDecimal;
 
 use std::fmt;
-use std::fmt::Display;
-use std::ops::Range;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Provides the required methods for AstNode conversations.
-pub trait ToAstNode: Sized {
-    /// Wraps the `self` to an [AstNode] and returns an `AstNodeBuilder` for
-    /// further [AstNode] construction.
-    /// ## Example:
-    /// ```
-    /// use partiql_ast::ast;
-    /// use partiql_ast::ast::{SymbolPrimitive, ToAstNode};
-    /// use partiql_ast::ast::CaseSensitivity::CaseInsensitive;
-    /// use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
-    ///
-    /// let p = SymbolPrimitive {
-    ///     value: "symbol2".to_string(),
-    ///     case: Some(ast::CaseSensitivity::CaseInsensitive)
-    ///  };
-    ///
-    /// let node = p
-    ///     .to_node()
-    ///     .location((BytePosition::from(12)..BytePosition::from(1)).into())
-    ///     .build()
-    ///     .expect("Could not retrieve ast node");
-    /// ```
-    fn to_node(self) -> AstNodeBuilder<Self, BytePosition>
-    where
-        Self: Clone,
-    {
-        AstNodeBuilder::default().node(self).clone()
-    }
-
-    fn to_ast<Loc, IntoLoc>(self, location: IntoLoc) -> AstNode<Self, Loc>
-    where
-        Loc: Display,
-        IntoLoc: Into<Location<Loc>>,
-    {
-        AstNode {
-            node: self,
-            location: Some(location.into()),
-        }
-    }
-
-    fn ast(self, Range { start, end }: Range<ByteOffset>) -> AstNode<Self, BytePosition> {
-        self.to_ast(start.into()..end.into())
-    }
-}
-
-/// Implements [ToAstNode] for all types within this crate, read further [here][1].
-///
-/// [1]: https://doc.rust-lang.org/book/ch10-02-traits.html#using-trait-bounds-to-conditionally-implement-methods
-impl<T> ToAstNode for T {}
-
-/// Represents an AST node. [AstNode] uses [derive_builder][1] to expose a Builder
-/// for creating the node. See [ToAstNode] for more details on the usage.
-///
-/// [1]: https://crates.io/crates/derive_builder
-#[derive(Builder, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct AstNode<T, Loc: Display> {
+pub struct NodeId(pub u32);
+
+/// Represents an AST node.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AstNode<T> {
+    pub id: NodeId,
     pub node: T,
-    #[builder(setter(strip_option), default)]
-    pub location: Option<Location<Loc>>,
 }
-
-impl<T: PartialEq, Loc: Display> PartialEq for AstNode<T, Loc> {
-    fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
-    }
-}
-
-impl<T: Eq, Loc: Display> Eq for AstNode<T, Loc> {}
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -140,13 +79,13 @@ pub enum DdlOpKind {
     DropIndex(DropIndex),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateTable {
     pub table_name: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropTable {
     pub table_name: SymbolPrimitive,
@@ -159,7 +98,7 @@ pub struct CreateIndex {
     pub fields: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropIndex {
     pub table: Ident,
@@ -234,7 +173,7 @@ pub struct OnConflict {
 }
 
 /// `CONFLICT_ACTION <action>`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConflictAction {
     DoNothing,
@@ -246,43 +185,40 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
-/// Represents an AST Node of type T with BytePosition Location
-pub type AstBytePos<T> = AstNode<T, BytePosition>;
-
-pub type BagAst = AstBytePos<Bag>;
-pub type BetweenAst = AstBytePos<Between>;
-pub type BinOpAst = AstBytePos<BinOp>;
-pub type CallAggAst = AstBytePos<CallAgg>;
-pub type CallArgAst = AstBytePos<CallArg>;
-pub type CallAst = AstBytePos<Call>;
-pub type CaseAst = AstBytePos<Case>;
-pub type FromClauseAst = AstBytePos<FromClause>;
-pub type FromLetAst = AstBytePos<FromLet>;
-pub type GroupByExprAst = AstBytePos<GroupByExpr>;
-pub type GroupKeyAst = AstBytePos<GroupKey>;
-pub type InAst = AstBytePos<In>;
-pub type JoinAst = AstBytePos<Join>;
-pub type JoinSpecAst = AstBytePos<JoinSpec>;
-pub type LetAst = AstBytePos<Let>;
-pub type LikeAst = AstBytePos<Like>;
-pub type ListAst = AstBytePos<List>;
-pub type LitAst = AstBytePos<Lit>;
-pub type OrderByExprAst = AstBytePos<OrderByExpr>;
-pub type ParamAst = AstBytePos<Param>;
-pub type PathAst = AstBytePos<Path>;
-pub type ProjectItemAst = AstBytePos<ProjectItem>;
-pub type ProjectionAst = AstBytePos<Projection>;
-pub type QueryAst = AstBytePos<Query>;
-pub type QuerySetAst = AstBytePos<QuerySet>;
-pub type SearchedCaseAst = AstBytePos<SearchedCase>;
-pub type SelectAst = AstBytePos<Select>;
-pub type SetExprAst = AstBytePos<SetExpr>;
-pub type SexpAst = AstBytePos<Sexp>;
-pub type SimpleCaseAst = AstBytePos<SimpleCase>;
-pub type SortSpecAst = AstBytePos<SortSpec>;
-pub type StructAst = AstBytePos<Struct>;
-pub type UniOpAst = AstBytePos<UniOp>;
-pub type VarRefAst = AstBytePos<VarRef>;
+pub type BagAst = AstNode<Bag>;
+pub type BetweenAst = AstNode<Between>;
+pub type BinOpAst = AstNode<BinOp>;
+pub type CallAggAst = AstNode<CallAgg>;
+pub type CallArgAst = AstNode<CallArg>;
+pub type CallAst = AstNode<Call>;
+pub type CaseAst = AstNode<Case>;
+pub type FromClauseAst = AstNode<FromClause>;
+pub type FromLetAst = AstNode<FromLet>;
+pub type GroupByExprAst = AstNode<GroupByExpr>;
+pub type GroupKeyAst = AstNode<GroupKey>;
+pub type InAst = AstNode<In>;
+pub type JoinAst = AstNode<Join>;
+pub type JoinSpecAst = AstNode<JoinSpec>;
+pub type LetAst = AstNode<Let>;
+pub type LikeAst = AstNode<Like>;
+pub type ListAst = AstNode<List>;
+pub type LitAst = AstNode<Lit>;
+pub type OrderByExprAst = AstNode<OrderByExpr>;
+pub type ParamAst = AstNode<Param>;
+pub type PathAst = AstNode<Path>;
+pub type ProjectItemAst = AstNode<ProjectItem>;
+pub type ProjectionAst = AstNode<Projection>;
+pub type QueryAst = AstNode<Query>;
+pub type QuerySetAst = AstNode<QuerySet>;
+pub type SearchedCaseAst = AstNode<SearchedCase>;
+pub type SelectAst = AstNode<Select>;
+pub type SetExprAst = AstNode<SetExpr>;
+pub type SexpAst = AstNode<Sexp>;
+pub type SimpleCaseAst = AstNode<SimpleCase>;
+pub type SortSpecAst = AstNode<SortSpec>;
+pub type StructAst = AstNode<Struct>;
+pub type UniOpAst = AstNode<UniOp>;
+pub type VarRefAst = AstNode<VarRef>;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -311,7 +247,7 @@ pub struct SetExpr {
     pub rhs: Box<QuerySetAst>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetOperator {
     Union,
@@ -385,14 +321,14 @@ pub enum Lit {
     TypedLit(String, Type),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CollectionLit {
     ArrayLit(String),
     BagLit(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DateTimeLit {
     DateLit(String),
@@ -400,14 +336,14 @@ pub enum DateTimeLit {
     TimestampLit(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VarRef {
     pub name: SymbolPrimitive,
     pub qualifier: ScopeQualifier,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Param {
     pub index: i32,
@@ -421,7 +357,7 @@ pub struct BinOp {
     pub rhs: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BinOpKind {
     // Arithmetic
@@ -453,7 +389,7 @@ pub struct UniOp {
     pub expr: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UniOpKind {
     Pos,
@@ -607,7 +543,7 @@ pub struct PathExpr {
 }
 
 /// Is used to determine if variable lookup should be case-sensitive or not.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseSensitivity {
     CaseSensitive,
@@ -706,7 +642,7 @@ pub enum JoinSpec {
 
 /// Indicates the type of FromLet, see the following for more details:
 /// https:///github.com/partiql/partiql-lang-kotlin/issues/242
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FromLetKind {
     Scan,
@@ -714,7 +650,7 @@ pub enum FromLetKind {
 }
 
 /// Indicates the logical type of join.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum JoinKind {
     Inner,
@@ -744,7 +680,7 @@ pub struct GroupByExpr {
 
 /// Desired grouping qualifier:  ALL or PARTIAL.  Note: the `group_` prefix is
 /// needed to avoid naming clashes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GroupingStrategy {
     GroupFull,
@@ -782,14 +718,14 @@ pub struct SortSpec {
     pub null_ordering_spec: Option<NullOrderingSpec>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OrderingSpec {
     Asc,
     Desc,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum NullOrderingSpec {
     First,
@@ -798,7 +734,7 @@ pub enum NullOrderingSpec {
 
 /// Indicates scope search order when resolving variables.
 /// Has no effect except within `FROM` sources.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ScopeQualifier {
     /// Use the default search order.
@@ -808,7 +744,7 @@ pub enum ScopeQualifier {
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetQuantifier {
     All,
@@ -844,7 +780,7 @@ pub struct ReturningColumn {
 }
 
 /// ( MODIFIED | ALL ) ( NEW | OLD )
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ReturningMapping {
     ModifiedNew,
@@ -863,7 +799,7 @@ pub enum ReturningMapping {
 /// an element of a type.  (Even though in the Kotlin code each varaint is its own type.)  Hence, we
 /// define an `Ident` type above which can be used without opening up an element's domain to
 /// all of `expr`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ident {
     pub name: SymbolPrimitive,
@@ -937,7 +873,7 @@ pub struct CustomType {
     pub parts: Vec<CustomTypePart>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SymbolPrimitive {
     pub value: String,

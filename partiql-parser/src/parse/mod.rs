@@ -3,15 +3,19 @@
 //! Provides the [`parse_partiql`] function to parse a PartiQL query.
 
 mod parse_util;
+mod parser_state;
 
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
+use crate::parse::parser_state::{IdGenerator, ParserState};
 use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
 use lalrpop_util as lpop;
 use lazy_static::lazy_static;
 use partiql_ast::ast;
+use partiql_ast::ast::NodeId;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
+use partiql_source_map::metadata::LocationMap;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::clone_on_copy)]
@@ -32,42 +36,64 @@ type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
-pub(crate) type AstResult<'input> = Result<Box<ast::Expr>, Vec<ParseError<'input, BytePosition>>>;
+#[derive(Debug, Clone)]
+pub(crate) struct AstData {
+    pub ast: Box<ast::Expr>,
+    pub locations: LocationMap<NodeId>,
+    pub offsets: LineOffsetTracker,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ErrorData<'input> {
+    pub errors: Vec<ParseError<'input, BytePosition>>,
+    pub offsets: LineOffsetTracker,
+}
+
+pub(crate) type AstResult<'input> = Result<AstData, ErrorData<'input>>;
 
 lazy_static! {
     static ref BUILT_INS: FnExprSet<'static> = built_ins();
 }
 
-/// Parse PartiQL query text.
-pub fn parse_partiql<'input>(s: &'input str, offsets: &mut LineOffsetTracker) -> AstResult<'input> {
-    let mut errors: Vec<LalrpopErrorRecovery> = vec![];
-    let lexer = PreprocessingPartiqlLexer::new(s, offsets, &*BUILT_INS);
-
-    let parsed: LalrpopResult = grammar::QueryParser::new().parse(s, &mut errors, lexer);
-
-    process_errors(s, offsets, parsed, errors)
+/// Parse PartiQL query text into an AST.
+pub(crate) fn parse_partiql(s: &str) -> AstResult {
+    parse_partiql_with_state(s, ParserState::default())
 }
 
-fn process_errors<'input>(
-    _s: &'input str,
-    _offsets: &LineOffsetTracker,
-    result: Result<Box<ast::Expr>, LalrpopError<'input>>,
-    errors: Vec<LalrpopErrorRecovery<'input>>,
+fn parse_partiql_with_state<'input, Id: IdGenerator>(
+    s: &'input str,
+    mut state: ParserState<'input, Id>,
 ) -> AstResult<'input> {
-    let mut parser_errors: Vec<_> = errors
+    let mut offsets = LineOffsetTracker::default();
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &*BUILT_INS);
+
+    let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
+
+    let ParserState {
+        locations, errors, ..
+    } = state;
+
+    let mut errors: Vec<_> = errors
         .into_iter()
         // TODO do something with error_recovery.dropped_tokens?
         .map(|e| ParseError::from(e.error))
         .collect();
 
-    match (result, parser_errors.is_empty()) {
-        (Ok(ast), true) => Ok(ast),
-        (Ok(_), false) => Err(parser_errors),
-        (Err(e), true) => Err(vec![ParseError::from(e)]),
-        (Err(e), false) => {
-            parser_errors.push(ParseError::from(e));
-            Err(parser_errors)
+    match (result, errors.is_empty()) {
+        (Ok(_), false) => Err(ErrorData { errors, offsets }),
+        (Err(e), true) => {
+            let errors = vec![ParseError::from(e)];
+            Err(ErrorData { errors, offsets })
         }
+        (Err(e), false) => {
+            errors.push(ParseError::from(e));
+            Err(ErrorData { errors, offsets })
+        }
+        (Ok(ast), true) => Ok(AstData {
+            ast,
+            locations,
+            offsets,
+        }),
     }
 }
 
@@ -119,9 +145,8 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    pub fn parse_partiql(s: &str) -> AstResult {
-        let mut offsets = LineOffsetTracker::default();
-        super::parse_partiql(s, &mut offsets)
+    fn parse_partiql(s: &str) -> AstResult {
+        super::parse_partiql(s)
     }
 
     macro_rules! parse {
@@ -129,7 +154,7 @@ mod tests {
             let res = parse_partiql($q);
             println!("{:#?}", res);
             match res {
-                Ok(ast) => ast,
+                Ok(data) => data.ast,
                 _ => panic!("{:?}", res),
             }
         }};
@@ -503,6 +528,38 @@ mod tests {
     mod set_ops {
         use super::*;
 
+        #[derive(Default)]
+        pub(crate) struct NullIdGenerator {}
+
+        impl IdGenerator for NullIdGenerator {
+            fn id(&mut self) -> NodeId {
+                NodeId(0)
+            }
+        }
+
+        impl<'input> ParserState<'input, NullIdGenerator> {
+            pub(crate) fn new_null_id() -> ParserState<'input, NullIdGenerator> {
+                ParserState::with_id_gen(NullIdGenerator::default())
+            }
+        }
+
+        fn parse_partiql_null_id(s: &str) -> AstResult {
+            super::parse_partiql_with_state(s, ParserState::new_null_id())
+        }
+
+        // parse partiql query with all AST nodes having an id of `0` for ease of comparison regardless
+        //   of parse order
+        macro_rules! parse_null_id {
+            ($q:expr) => {{
+                let res = parse_partiql_null_id($q);
+                println!("{:#?}", res);
+                match res {
+                    Ok(data) => data.ast,
+                    _ => panic!("{:?}", res),
+                }
+            }};
+        }
+
         #[test]
         fn set_ops() {
             parse!(
@@ -512,26 +569,30 @@ mod tests {
 
         #[test]
         fn union_prec() {
-            let l = parse!(r#"a union b union c"#);
-            let r = parse!(r#"(a union b) union c"#);
+            let l = parse_null_id!(r#"a union b union c"#);
+            let r = parse_null_id!(r#"(a union b) union c"#);
             assert_eq!(l, r);
         }
 
         #[test]
         fn intersec_prec() {
-            let l = parse!(r#"a union b intersect c"#);
-            let r = parse!(r#"a union (b intersect c)"#);
+            let l = parse_null_id!(r#"a union b intersect c"#);
+            let r = parse_null_id!(r#"a union (b intersect c)"#);
             assert_eq!(l, r);
         }
 
         #[test]
         fn limit() {
-            let l = parse!(r#"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"#);
-            let r =
-                parse!(r#"(SELECT a FROM b UNION SELECT x FROM y) ORDER BY a LIMIT 10 OFFSET 5"#);
+            let l = parse_null_id!(
+                r#"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"#
+            );
+            let r = parse_null_id!(
+                r#"(SELECT a FROM b UNION SELECT x FROM y) ORDER BY a LIMIT 10 OFFSET 5"#
+            );
             assert_eq!(l, r);
-            let r2 =
-                parse!(r#"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"#);
+            let r2 = parse_null_id!(
+                r#"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"#
+            );
             assert_ne!(l, r2);
             assert_ne!(r, r2);
         }
@@ -628,9 +689,9 @@ mod tests {
         fn eof() {
             let res = parse_partiql(r#"SELECT"#);
             assert!(res.is_err());
-            let errors = res.unwrap_err();
-            assert_eq!(1, errors.len());
-            assert_eq!(errors[0], ParseError::UnexpectedEndOfInput);
+            let err_data = res.unwrap_err();
+            assert_eq!(1, err_data.errors.len());
+            assert_eq!(err_data.errors[0], ParseError::UnexpectedEndOfInput);
         }
 
         #[test]
@@ -638,10 +699,10 @@ mod tests {
             let q = r#"/`܋"#;
             let res = parse_partiql(q);
             assert!(res.is_err());
-            let errors = res.unwrap_err();
-            assert_eq!(2, errors.len());
+            let err_data = res.unwrap_err();
+            assert_eq!(2, err_data.errors.len());
             assert_eq!(
-                errors[0],
+                err_data.errors[0],
                 ParseError::UnexpectedToken(UnexpectedToken {
                     inner: UnexpectedTokenData {
                         token: Cow::from("/")
@@ -653,7 +714,7 @@ mod tests {
                 })
             );
             assert_eq!(
-                errors[1],
+                err_data.errors[1],
                 ParseError::LexicalError(Located {
                     inner: LexError::UnterminatedIonLiteral,
                     location: Location {
