@@ -208,6 +208,8 @@ pub enum Expr {
     Like(AstNode<Like>),
     Between(AstNode<Between>),
     In(AstNode<In>),
+    /// <expr> MATCH <graph_pattern>
+    GraphMatch(AstNode<GraphMatch>),
     Case(AstNode<Case>),
     /// Constructors
     Struct(AstNode<Struct>),
@@ -535,8 +537,6 @@ pub enum FromClause {
     FromLet(AstNode<FromLet>),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(AstNode<Join>),
-    /// <expr> MATCH <graph_pattern>
-    GraphMatch(AstNode<GraphMatch>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -606,7 +606,7 @@ pub struct GraphMatch {
 ///
 /// Fig. 5. Table of edge patterns:
 /// https://arxiv.org/abs/2112.06217
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphMatchDirection {
     Left,
@@ -633,7 +633,7 @@ pub enum GraphMatchPatternPart {
 }
 
 /// A quantifier for graph edges or patterns. (e.g., the `{2,5}` in `MATCH (x)->{2,5}(y)`)
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchQuantifier {
     pub lower: u32,
@@ -649,7 +649,7 @@ pub struct GraphMatchQuantifier {
 ///
 /// Fig. 7. Table of restrictors:
 /// https://arxiv.org/abs/2112.06217
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphMatchRestrictor {
     Trail,
@@ -670,7 +670,7 @@ pub struct GraphMatchNode {
 }
 
 /// A single edge in a graph pattern.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchEdge {
     /// edge direction
@@ -712,7 +712,7 @@ pub struct GraphMatchPattern {
 ///
 /// Fig. 8. Table of restrictors:
 /// https://arxiv.org/abs/2112.06217
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphMatchSelector {
     AnyShortest,
