@@ -261,6 +261,15 @@ TableBaseReference: ast::AstNode<ast::FromLet> = {
             by_alias: None
         }, lo..hi)
     },
+    <lo:@L> <e:GraphMatchExprNoParens> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
+        state.node(ast::FromLet {
+            expr: Box::new(e),
+            kind: ast::FromLetKind::Scan,
+            as_alias,
+            at_alias,
+            by_alias
+        }, lo..hi)
+    },
     <lo:@L> <e:ExprQuery> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
         state.node(ast::FromLet {
             expr: e,
@@ -284,7 +293,6 @@ TableUnpivot: ast::AstNode<ast::FromLet> = {
         }, lo..hi)
     }
 }
-
 
 TableJoined: ast::AstNode<ast::FromClause> = {
     <TableCrossJoin>,
@@ -667,19 +675,36 @@ ExprPrecedence09: ast::Expr = {
            }, lo..hi)
        )
     },
-    <lo:@L> "(" <l:ExprPrecedence08> "MATCH" <r:GraphMatchList> ")" <hi:@R> =>
-       ast::Expr::GraphMatch(
-           state.node(ast::GraphMatch {
-               expr: Box::new(l),
-               graph_expr: Box::new(r),
-           }, lo..hi)
-       ),
+    <GraphMatchExpr>,
     <ExprPrecedence08>,
 }
 
 #[inline]
 LikeEscape: Box<ast::Expr> = {
     "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
+}
+
+#[inline]
+GraphMatchExpr: ast::Expr = {
+    <lo:@L> "(" <l:ExprPrecedence08> "MATCH" <r:GraphMatchList> ")" <hi:@R> => {
+       ast::Expr::GraphMatch(
+           state.node(ast::GraphMatch {
+               expr: Box::new(l),
+               graph_expr: Box::new(r),
+           }, lo..hi)
+       )
+    }
+}
+
+#[inline]
+GraphMatchExprNoParens: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence08> "MATCH" <r:GraphMatch> <hi:@R> =>
+       ast::Expr::GraphMatch(
+           state.node(ast::GraphMatch {
+               expr: Box::new(l),
+               graph_expr: Box::new(r),
+           }, lo..hi)
+       )
 }
 
 ExprPrecedence08: ast::Expr = {
