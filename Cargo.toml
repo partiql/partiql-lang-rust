@@ -1,3 +1,10 @@
+[workspace.package]
+authors = ["PartiQL Team <partiql-team@amazon.com>"]
+homepage = "https://github.com/partiql/partiql-lang-rust"
+repository = "https://github.com/partiql/partiql-lang-rust"
+version = "0.1.0"
+edition = "2021"
+
 [workspace]
 
 members = [
@@ -6,12 +13,14 @@ members = [
   "partiql-conformance-tests",
   "partiql-conformance-test-generator",
   "partiql-source-map",
+  "partiql-logical",
   "partiql-eval",
   "partiql-ir",
   "partiql-irgen",
   "partiql-parser",
   "partiql-rewriter",
   "partiql-types",
+  "partiql-value",
 ]
 
 exclude = [
