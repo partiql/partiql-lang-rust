@@ -1,9 +1,9 @@
 [package]
 name = "partiql-conformance-tests"
-authors = ["PartiQL Team <partiql-team@amazon.com>"]
 description = "PartiQL conformance test runner"
-homepage = "https://github.com/partiql/partiql-lang-rust"
-repository = "https://github.com/partiql/partiql-lang-rust"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 license = "Apache-2.0"
 readme = "../README.md"
 keywords = ["sql", "parser", "conformance", "compilers", "tests"]
@@ -14,8 +14,8 @@ exclude = [
     "**/.travis.yml",
     "**/.appveyor.yml",
 ]
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [[bin]]
 name = "generate_comparison_report"

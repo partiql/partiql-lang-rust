@@ -1,9 +1,9 @@
 [package]
 name = "partiql-parser"
-authors = ["PartiQL Team <partiql-team@amazon.com>"]
 description = "PartiQL Parser"
-homepage = "https://github.com/partiql/partiql-lang-rust"
-repository = "https://github.com/partiql/partiql-lang-rust"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 license = "Apache-2.0"
 readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
@@ -14,8 +14,8 @@ exclude = [
   "**/.travis.yml",
   "**/.appveyor.yml",
 ]
-edition = "2021"
-version = "0.1.0"
+version.workspace = true
+edition.workspace = true
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -44,7 +44,7 @@ lazy_static = "~1.4.0"
 serde = { version = "1.*", features = ["derive"], optional = true }
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.4"
 
 [features]
 default = []
