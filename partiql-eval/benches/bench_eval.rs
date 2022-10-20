@@ -5,47 +5,44 @@ use partiql_eval::eval::{
     BasicContext, EvalFrom, EvalOutputAccumulator, EvalPath, EvalVarRef, Evaluable, Output,
     PathComponent,
 };
-use partiql_value::{partiql_bag, partiql_list, Bag, BindingsName, List, Tuple, Value};
+use partiql_value::{
+    partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 fn data() -> MapBindings<Value> {
-    let employees = partiql_bag![
-        Tuple::from([
-            ("id", 3.into()),
-            ("name", "Bob Smith".into()),
-            ("title", Value::Null),
-            (
-                "projects",
-                partiql_list![
-                    "AWS Redshift Spectrum querying".into(),
-                    "AWS Redshift security".into(),
-                    "AWS Aurora security".into()
-                ]
-                .into()
-            ),
-        ])
-        .into(),
-        Tuple::from([
-            ("id", 4.into()),
-            ("name", "Susan Smith".into()),
-            ("title", "Dev Mgr".into()),
-            ("projects", partiql_list![].into()),
-        ])
-        .into(),
-        Tuple::from([
-            ("id", 6.into()),
-            ("name", "Jane Smith".into()),
-            ("title", "Software Eng 2".into()),
-            (
-                "projects",
-                partiql_list!["AWS Redshift security".into()].into()
-            ),
-        ])
-        .into(),
-    ];
-    let hr = Tuple::from([("employeesNestScalars", Value::from(employees))]);
+    let hr = partiql_tuple![(
+        "employeesNestScalars",
+        partiql_bag![
+            partiql_tuple![
+                ("id", 3),
+                ("name", "Bob Smith"),
+                ("title", Value::Null),
+                (
+                    "projects",
+                    partiql_list![
+                        "AWS Redshift Spectrum querying",
+                        "AWS Redshift security",
+                        "AWS Aurora security",
+                    ]
+                ),
+            ],
+            partiql_tuple![
+                ("id", 4),
+                ("name", "Susan Smith"),
+                ("title", "Dev Mgr"),
+                ("projects", partiql_list![]),
+            ],
+            partiql_tuple![
+                ("id", 6),
+                ("name", "Jane Smith"),
+                ("title", "Software Eng 2"),
+                ("projects", partiql_list!["AWS Redshift security"]),
+            ],
+        ]
+    )];
 
     let mut p0: MapBindings<Value> = MapBindings::default();
     p0.insert("hr", hr.into());

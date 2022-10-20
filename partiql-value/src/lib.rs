@@ -222,16 +222,16 @@ impl From<Bag> for List {
 
 #[macro_export]
 macro_rules! partiql_list {
-        () => (
-             List::from(vec![])
-        );
-        ($elem:expr; $n:expr) => (
-            List::from(vec![$elem, $n])
-        );
-        ($($x:expr),+ $(,)?) => (
-            List::from(vec![$($x),+])
-        );
-    }
+    () => (
+         List::from(vec![])
+    );
+    ($elem:expr; $n:expr) => (
+        List::from(vec![Value::from($elem), $n])
+    );
+    ($($x:expr),+ $(,)?) => (
+        List::from(vec![$(Value::from($x)),+])
+    );
+}
 
 impl IntoIterator for List {
     type Item = Value;
@@ -342,16 +342,16 @@ impl From<List> for Bag {
 
 #[macro_export]
 macro_rules! partiql_bag {
-        () => (
-             Bag::from(vec![])
-        );
-        ($elem:expr; $n:expr) => (
-            Bag::from(vec![$elem, $n])
-        );
-        ($($x:expr),+ $(,)?) => (
-            Bag::from(vec![$($x),+])
-        );
-    }
+    () => (
+         Bag::from(vec![])
+    );
+    ($elem:expr; $n:expr) => (
+        Bag::from(vec![Value::from($elem), $n])
+    );
+    ($($x:expr),+ $(,)?) => (
+        Bag::from(vec![$(Value::from($x)),+])
+    );
+}
 
 impl IntoIterator for Bag {
     type Item = Value;
@@ -432,11 +432,14 @@ impl Hash for Bag {
 #[derive(Default, Eq, Clone)]
 pub struct Tuple(pub HashMap<String, Value>);
 
-impl<const N: usize> From<[(&str, Value); N]> for Tuple {
+impl<const N: usize, T> From<[(&str, T); N]> for Tuple
+where
+    T: Into<Value>,
+{
     #[inline]
-    fn from(arr: [(&str, Value); N]) -> Self {
+    fn from(arr: [(&str, T); N]) -> Self {
         Tuple(HashMap::from_iter(
-            arr.into_iter().map(|(k, v)| (k.to_string(), v)),
+            arr.into_iter().map(|(k, v)| (k.to_string(), v.into())),
         ))
     }
 }
@@ -446,6 +449,16 @@ impl From<Tuple> for Value {
     fn from(v: Tuple) -> Self {
         Value::Tuple(Box::new(v))
     }
+}
+
+#[macro_export]
+macro_rules! partiql_tuple {
+    () => (
+         Tuple::from(vec![])
+    );
+    ($(($x:expr, $y:expr)),+ $(,)?) => (
+        Tuple::from([$(($x, Value::from($y))),+])
+    );
 }
 
 impl Debug for Tuple {
