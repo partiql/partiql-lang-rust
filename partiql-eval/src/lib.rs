@@ -11,7 +11,9 @@ mod tests {
     use crate::env::basic::MapBindings;
     use crate::plan;
     use partiql_logical::{BindingsExpr, PathComponent, ValueExpr};
-    use partiql_value::{partiql_bag, partiql_list, Bag, BindingsName, List, Tuple, Value};
+    use partiql_value::{
+        partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
+    };
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -165,8 +167,8 @@ mod tests {
 
         fn some_ordered_table() -> List {
             partiql_list![
-                Tuple::from([("a", Value::from(0)), ("b", Value::from(0))]).into(),
-                Tuple::from([("a", 1.into()), ("b", 1.into())]).into(),
+                partiql_tuple![("a", 0), ("b", 0)],
+                partiql_tuple![("a", 1), ("b", 1)],
             ]
         }
 
@@ -198,16 +200,8 @@ mod tests {
             println!("{:?}", &output.borrow().output);
             // <<{ x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 } }>>
             let expected = partiql_bag![
-                Tuple::from([(
-                    "x",
-                    Tuple::from([("a", Value::Integer(0)), ("b", 0.into())]).into()
-                ),])
-                .into(),
-                Tuple::from([(
-                    "x",
-                    Tuple::from([("a", Value::Integer(1)), ("b", 1.into())]).into()
-                ),])
-                .into()
+                partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]),],
+                partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]),],
             ];
             assert_eq!(&expected, &output.borrow().output);
         }
@@ -237,22 +231,8 @@ mod tests {
             println!("{:?}", &output.borrow().output);
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
             let expected = partiql_bag![
-                Tuple::from([
-                    (
-                        "x",
-                        Tuple::from([("a", Value::Integer(0)), ("b", 0.into())]).into()
-                    ),
-                    ("y", Value::Integer(0))
-                ])
-                .into(),
-                Tuple::from([
-                    (
-                        "x",
-                        Tuple::from([("a", Value::Integer(1)), ("b", 1.into())]).into()
-                    ),
-                    ("y", value::Value::Integer(1))
-                ])
-                .into()
+                partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]), ("y", 0)],
+                partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]), ("y", 1)],
             ];
             assert_eq!(&expected, &output.borrow().output);
         }
@@ -282,22 +262,14 @@ mod tests {
             println!("{:?}", &output.borrow().output);
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
             let expected = partiql_bag![
-                Tuple::from([
-                    (
-                        "x",
-                        Tuple::from([("a", Value::Integer(0)), ("b", 0.into())]).into()
-                    ),
+                partiql_tuple![
+                    ("x", partiql_tuple![("a", 0), ("b", 0)]),
                     ("y", value::Value::Missing)
-                ])
-                .into(),
-                Tuple::from([
-                    (
-                        "x",
-                        Tuple::from([("a", Value::Integer(1)), ("b", 1.into())]).into()
-                    ),
+                ],
+                partiql_tuple![
+                    ("x", partiql_tuple![("a", 1), ("b", 1)]),
                     ("y", value::Value::Missing)
-                ])
-                .into()
+                ],
             ];
             assert_eq!(&expected, &output.borrow().output);
         }
@@ -326,7 +298,7 @@ mod tests {
             from.evaluate(&ctx);
 
             println!("{:?}", &output.borrow().output);
-            let expected = partiql_bag![Tuple::from([("x", 0.into())]).into()];
+            let expected = partiql_bag![partiql_tuple![("x", 0)]];
             assert_eq!(&expected, &output.borrow().output);
         }
 
@@ -354,7 +326,7 @@ mod tests {
             from.evaluate(&ctx);
 
             println!("{:?}", &output.borrow().output);
-            let expected = partiql_bag![Tuple::from([("x", value::Value::Missing)]).into()];
+            let expected = partiql_bag![partiql_tuple![("x", value::Value::Missing)]];
             assert_eq!(&expected, &output.borrow().output);
         }
     }
@@ -365,7 +337,7 @@ mod tests {
         use partiql_value::{partiql_bag, BindingsName, Tuple};
 
         fn just_a_tuple() -> Tuple {
-            Tuple::from([("amzn", Value::from(840.05)), ("tdc", Value::from(31.06))])
+            partiql_tuple![("amzn", 840.05), ("tdc", 31.06)]
         }
 
         // Spec 5.2
@@ -392,16 +364,8 @@ mod tests {
 
             println!("{:?}", &output.borrow().output);
             let expected = partiql_bag![
-                Tuple::from([
-                    ("symbol", "tdc".into()),
-                    ("price", Value::Real(31.06.into()))
-                ])
-                .into(),
-                Tuple::from([
-                    ("symbol", "amzn".into()),
-                    ("price", Value::Real(840.05.into()))
-                ])
-                .into(),
+                partiql_tuple![("symbol", "tdc"), ("price", 31.06)],
+                partiql_tuple![("symbol", "amzn"), ("price", 840.05)],
             ];
             assert_eq!(&expected, &output.borrow().output);
         }
@@ -429,8 +393,7 @@ mod tests {
             unpivot.evaluate(&ctx);
 
             println!("{:?}", &output.borrow().output);
-            let expected =
-                partiql_bag![Tuple::from([("x", Value::Integer(1)), ("y", "_1".into())]).into()];
+            let expected = partiql_bag![partiql_tuple![("x", 1), ("y", "_1")]];
             assert_eq!(&expected, &output.borrow().output);
         }
     }
