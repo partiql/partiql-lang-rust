@@ -1,6 +1,6 @@
 [package]
-name = "partiql-eval"
-description = "PartiQL Expression Evaluator"
+name = "partiql-logical"
+description = "PartiQL Logical Model"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -20,15 +20,9 @@ edition.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-partiql-logical = { path = "../partiql-logical" }
 partiql-value = { path = "../partiql-value" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
 
-[dev-dependencies]
-criterion = "0.4"
 
-[[bench]]
-name = "bench_eval"
-harness = false
