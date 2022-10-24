@@ -1,9 +1,9 @@
 [package]
 name = "partiql-ast"
-authors = ["PartiQL Team <partiql-team@amazon.com>"]
 description = "PartiQL AST"
-homepage = "https://github.com/partiql/partiql-lang-rust"
-repository = "https://github.com/partiql/partiql-lang-rust"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 license = "Apache-2.0"
 readme = "../README.md"
 keywords = ["sql", "ast", "query", "compilers", "interpreters"]
@@ -12,8 +12,8 @@ exclude = [
   "**/.git/**",
   "**/.github/**",
 ]
-edition = "2021"
-version = "0.1.0"
+version.workspace = true
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
