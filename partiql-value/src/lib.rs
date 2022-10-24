@@ -176,7 +176,57 @@ impl Ord for Value {
     }
 }
 
+impl From<String> for Value {
+    #[inline]
+    fn from(s: String) -> Self {
+        Value::String(Box::new(s))
+    }
+}
+
+impl From<&str> for Value {
+    #[inline]
+    fn from(s: &str) -> Self {
+        Value::String(Box::new(s.to_string()))
+    }
+}
+
+impl From<i64> for Value {
+    #[inline]
+    fn from(n: i64) -> Self {
+        Value::Integer(n)
+    }
+}
+
+impl From<f64> for Value {
+    #[inline]
+    fn from(f: f64) -> Self {
+        Value::Real(OrderedFloat(f))
+    }
+}
+
+impl From<List> for Value {
+    #[inline]
+    fn from(v: List) -> Self {
+        Value::List(Box::new(v))
+    }
+}
+
+impl From<Tuple> for Value {
+    #[inline]
+    fn from(v: Tuple) -> Self {
+        Value::Tuple(Box::new(v))
+    }
+}
+
+impl From<Bag> for Value {
+    #[inline]
+    fn from(v: Bag) -> Self {
+        Value::Bag(Box::new(v))
+    }
+}
+
 #[derive(Default, Hash, PartialEq, Eq, Clone)]
+/// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
 
 impl List {
@@ -226,7 +276,7 @@ macro_rules! partiql_list {
          List::from(vec![])
     );
     ($elem:expr; $n:expr) => (
-        List::from(vec![Value::from($elem), $n])
+        List::from(vec![Value::from($elem); $n])
     );
     ($($x:expr),+ $(,)?) => (
         List::from(vec![$(Value::from($x)),+])
@@ -249,13 +299,6 @@ impl Iterator for ListIntoIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
-    }
-}
-
-impl From<List> for Value {
-    #[inline]
-    fn from(v: List) -> Self {
-        Value::List(Box::new(v))
     }
 }
 
@@ -307,6 +350,7 @@ impl Ord for List {
 }
 
 #[derive(Default, Eq, Clone)]
+/// Represents a PartiQL BAG value, e.g.: <<1, 'two', 4>>
 pub struct Bag(Vec<Value>);
 
 impl Bag {
@@ -346,7 +390,7 @@ macro_rules! partiql_bag {
          Bag::from(vec![])
     );
     ($elem:expr; $n:expr) => (
-        Bag::from(vec![Value::from($elem), $n])
+        Bag::from(vec![Value::from($elem); $n])
     );
     ($($x:expr),+ $(,)?) => (
         Bag::from(vec![$(Value::from($x)),+])
@@ -369,13 +413,6 @@ impl Iterator for BagIntoIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
-    }
-}
-
-impl From<Bag> for Value {
-    #[inline]
-    fn from(v: Bag) -> Self {
-        Value::Bag(Box::new(v))
     }
 }
 
@@ -441,13 +478,6 @@ where
         Tuple(HashMap::from_iter(
             arr.into_iter().map(|(k, v)| (k.to_string(), v.into())),
         ))
-    }
-}
-
-impl From<Tuple> for Value {
-    #[inline]
-    fn from(v: Tuple) -> Self {
-        Value::Tuple(Box::new(v))
     }
 }
 
@@ -517,34 +547,6 @@ impl Hash for Tuple {
     }
 }
 
-impl From<String> for Value {
-    #[inline]
-    fn from(s: String) -> Self {
-        Value::String(Box::new(s))
-    }
-}
-
-impl From<&str> for Value {
-    #[inline]
-    fn from(s: &str) -> Self {
-        Value::String(Box::new(s.to_string()))
-    }
-}
-
-impl From<i64> for Value {
-    #[inline]
-    fn from(n: i64) -> Self {
-        Value::Integer(n)
-    }
-}
-
-impl From<f64> for Value {
-    #[inline]
-    fn from(f: f64) -> Self {
-        Value::Real(OrderedFloat(f))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +579,16 @@ mod tests {
         println!("Option<Value> size: {}", mem::size_of::<Option<Value>>());
         println!("Cow<Value> size: {}", mem::size_of::<Cow<Value>>());
         println!("Cow<&Value> size: {}", mem::size_of::<Cow<&Value>>());
+    }
+
+    #[test]
+    fn macro_rules_tests() {
+        println!("partiql_list:{:?}", partiql_list!());
+        println!("partiql_list:{:?}", partiql_list![10, 10]);
+        println!("partiql_list:{:?}", partiql_list!(5; 3));
+        println!("partiql_bag:{:?}", partiql_bag!());
+        println!("partiql_bag:{:?}", partiql_bag![10, 10]);
+        println!("partiql_bag:{:?}", partiql_bag!(5; 3));
+        println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
     }
 }
