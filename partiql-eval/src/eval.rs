@@ -1,11 +1,77 @@
-use crate::env::basic::MapBindings;
-use crate::env::Bindings;
-use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{Bag, BindingsName, Tuple, Value};
+use itertools::Itertools;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::rc::Rc;
+
+use petgraph::algo::toposort;
+use petgraph::graph::NodeIndex;
+use petgraph::{Graph, Incoming, Outgoing};
+
+use partiql_value::Value::{Boolean, Missing, Null};
+use partiql_value::{Bag, BindingsName, Tuple, Value};
+
+use crate::env::basic::MapBindings;
+use crate::env::Bindings;
+
+#[derive(Debug)]
+pub enum EvalOp {
+    Scan(Scan),
+    Project(Project),
+    Sink(Sink),
+}
+
+#[derive(Debug)]
+pub struct Scan {
+    pub expr: Box<dyn EvalExpr>,
+    pub as_key: String,
+    pub output: Option<Value>,
+    pub consumers: Vec<NodeIndex>,
+}
+
+impl Scan {
+    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, consumers: Vec<NodeIndex>) -> Self {
+        Scan {
+            expr,
+            as_key: as_key.to_string(),
+            output: None,
+            consumers,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Project {
+    pub exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub input: Vec<Tuple>,
+    pub output: Vec<Tuple>,
+    pub consumers: Vec<NodeIndex>,
+}
+
+impl Project {
+    pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>, consumers: Vec<NodeIndex>) -> Self {
+        Project {
+            exprs,
+            input: vec![],
+            output: vec![],
+            consumers,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Sink {
+    pub output: Rc<RefCell<dyn TupleSink>>,
+}
+
+#[derive(Debug)]
+pub struct EvalPlan(pub Graph<EvalOp, ()>);
+
+impl EvalPlan {
+    pub fn new() -> Self {
+        EvalPlan(Graph::<EvalOp, ()>::new())
+    }
+}
 
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
@@ -41,6 +107,93 @@ impl Evaluator {
 
     pub fn execute(&mut self) {
         self.evaluable.evaluate(&*self.ctx);
+    }
+}
+
+pub struct DagEvaluator {
+    ctx: Box<dyn EvalContext>,
+}
+
+impl DagEvaluator {
+    pub fn new(bindings: MapBindings<Value>) -> Self {
+        let ctx: Box<dyn EvalContext> = Box::new(BasicContext { bindings });
+        DagEvaluator { ctx }
+    }
+
+    pub fn execute_dag(&mut self, plan: EvalPlan) {
+        let mut graph = plan.0;
+        // We are only interested in DAGs that can be used as execution plans, which leads to the
+        // following definition.
+        // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
+        // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
+        // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
+        // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
+        match graph.externals(Incoming).exactly_one() {
+            Ok(_) => {
+                let sorted_ops = toposort(&graph, None);
+                match sorted_ops {
+                    Ok(ops) => {
+                        for idx in ops.into_iter() {
+                            let mut ne = graph.neighbors_directed(idx, Outgoing).detach();
+                            while let Some(d) = ne.next_node(&graph) {
+                                let (src, dst) = graph.index_twice_mut(idx, d);
+                                match src {
+                                    EvalOp::Scan(o) => {
+                                        o.output = Some(
+                                            o.expr.evaluate(&Tuple(HashMap::new()), &*self.ctx),
+                                        );
+                                        match dst {
+                                            EvalOp::Project(p) => match o.output.clone() {
+                                                Some(v) => {
+                                                    for t in v.into_iter() {
+                                                        let out = Tuple(HashMap::from([(
+                                                            o.as_key.clone(),
+                                                            t.clone(),
+                                                        )]));
+                                                        p.input.push(out)
+                                                    }
+                                                }
+                                                _ => {}
+                                            },
+                                            _ => {}
+                                        }
+                                    }
+                                    EvalOp::Project(p) => {
+                                        for t in &p.input {
+                                            let proj: HashMap<String, Value> = p
+                                                .exprs
+                                                .iter()
+                                                .map(|(alias, expr)| {
+                                                    (
+                                                        alias.to_string(),
+                                                        expr.evaluate(t, &*self.ctx),
+                                                    )
+                                                })
+                                                .collect();
+                                            p.output.push(Tuple(proj));
+                                        }
+                                        match dst {
+                                            EvalOp::Sink(sink) => {
+                                                for t in p.output.iter_mut() {
+                                                    sink.output
+                                                        .borrow_mut()
+                                                        .push_tuple(t.clone(), &*self.ctx);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    EvalOp::Sink(_) => {}
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -222,10 +375,18 @@ impl EvalFrom {
     }
 }
 
+impl Evaluable for EvalFrom {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) {
+        let empty = Tuple(HashMap::new());
+        self.push_tuple(empty, ctx);
+    }
+}
+
 impl TupleSink for EvalFrom {
     #[inline]
     fn push_tuple(&mut self, bindings: Tuple, ctx: &dyn EvalContext) {
-        self.push_value(self.expr.evaluate(&bindings, ctx), ctx);
+        let from_tuple = self.expr.evaluate(&bindings, ctx);
+        self.push_value(from_tuple, ctx);
     }
 }
 
@@ -236,13 +397,6 @@ impl ValueSink for EvalFrom {
             let out = Tuple(HashMap::from([(self.as_key.clone(), v)]));
             self.output.push_tuple(out, ctx);
         }
-    }
-}
-
-impl Evaluable for EvalFrom {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) {
-        let empty = Tuple(HashMap::new());
-        self.push_tuple(empty, ctx);
     }
 }
 

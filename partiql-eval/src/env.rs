@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use partiql_value::{BindingsName, Tuple, Value};
 use unicase::UniCase;
 

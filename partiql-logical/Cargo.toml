@@ -21,6 +21,7 @@ edition.workspace = true
 
 [dependencies]
 partiql-value = { path = "../partiql-value" }
+petgraph = "0.6.*"
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"

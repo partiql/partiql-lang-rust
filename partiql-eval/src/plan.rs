@@ -1,12 +1,18 @@
-use crate::eval;
-use crate::eval::{
-    EvalBinop, EvalBinopExpr, EvalExpr, EvalLitExpr, EvalPath, EvalVarRef, Evaluable, TupleSink,
-};
-use partiql_logical as logical;
-use partiql_logical::{BinaryOp, BindingsExpr, PathComponent, ValueExpr};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use petgraph::graph::{Neighbors, NodeIndex};
+use petgraph::Outgoing;
+
+use partiql_logical as logical;
+use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+
+use crate::eval;
+use crate::eval::{
+    EvalBinop, EvalBinopExpr, EvalExpr, EvalLitExpr, EvalOp, EvalPath, EvalPlan, EvalVarRef,
+    Evaluable, TupleSink,
+};
 
 pub struct EvaluatorPlanner {
     pub output: Rc<RefCell<dyn TupleSink>>,
@@ -30,6 +36,54 @@ impl EvaluatorPlanner {
                 &as_key,
                 self.plan_bindings(*out),
             )),
+            _ => panic!("Unevaluable bexpr"),
+        }
+    }
+
+    pub fn compile_dag(&self, plan: LogicalPlan) -> EvalPlan {
+        self.plan_eval_dag(plan)
+    }
+
+    #[inline]
+    fn plan_eval_dag(&self, lg: LogicalPlan) -> EvalPlan {
+        let plan = lg.0;
+        let mut eval_plan = EvalPlan::new();
+        eval_plan.0 = plan.map(
+            |idx, n| {
+                let ne = plan.neighbors_directed(idx, Outgoing);
+                self.get_eval_node(n, ne)
+            },
+            |_, e| e.clone(),
+        );
+
+        eval_plan
+    }
+
+    fn get_eval_node(&self, be: &BindingsExpr, consumers: Neighbors<()>) -> EvalOp {
+        match be {
+            BindingsExpr::Scan(logical::Scan {
+                expr,
+                as_key,
+                at_key: _,
+            }) => EvalOp::Scan(eval::Scan::new(
+                self.plan_values(expr.clone()),
+                as_key,
+                consumers.collect::<Vec<NodeIndex>>(),
+            )),
+            BindingsExpr::Project(logical::Project { exprs }) => {
+                let exprs: HashMap<_, _> = exprs
+                    .into_iter()
+                    .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
+                    .collect();
+
+                EvalOp::Project(eval::Project::new(
+                    exprs,
+                    consumers.collect::<Vec<NodeIndex>>(),
+                ))
+            }
+            BindingsExpr::Output => EvalOp::Sink(eval::Sink {
+                output: self.output.clone(),
+            }),
             _ => panic!("Unevaluable bexpr"),
         }
     }
@@ -71,6 +125,9 @@ impl EvaluatorPlanner {
             BindingsExpr::SelectValue(_) => todo!(),
             BindingsExpr::Unpivot => todo!(),
             BindingsExpr::Join => todo!(),
+            BindingsExpr::Project(_) => todo!(),
+            BindingsExpr::From(_) => todo!(),
+            BindingsExpr::Scan(_) => todo!(),
         }
     }
 
