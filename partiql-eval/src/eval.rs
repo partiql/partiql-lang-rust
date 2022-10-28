@@ -67,8 +67,14 @@ pub struct Sink {
 #[derive(Debug)]
 pub struct EvalPlan(pub Graph<EvalOp, ()>);
 
+impl Default for EvalPlan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EvalPlan {
-    pub fn new() -> Self {
+    fn new() -> Self {
         EvalPlan(Graph::<EvalOp, ()>::new())
     }
 }
@@ -143,8 +149,8 @@ impl DagEvaluator {
                                             o.expr.evaluate(&Tuple(HashMap::new()), &*self.ctx),
                                         );
                                         match dst {
-                                            EvalOp::Project(p) => match o.output.clone() {
-                                                Some(v) => {
+                                            EvalOp::Project(p) => {
+                                                if let Some(v) = o.output.clone() {
                                                     for t in v.into_iter() {
                                                         let out = Tuple(HashMap::from([(
                                                             o.as_key.clone(),
@@ -153,9 +159,11 @@ impl DagEvaluator {
                                                         p.input.push(out)
                                                     }
                                                 }
-                                                _ => {}
-                                            },
-                                            _ => {}
+                                            }
+                                            _ => todo!(
+                                                "Pushing to {:?} from `Scan` is not supported yet.",
+                                                &dst
+                                            ),
                                         }
                                     }
                                     EvalOp::Project(p) => {
@@ -180,7 +188,11 @@ impl DagEvaluator {
                                                         .push_tuple(t.clone(), &*self.ctx);
                                                 }
                                             }
-                                            _ => {}
+                                            _ =>
+                                                todo!(
+                                                    "Pushing to {:?} from `Project` is not supported yet.",
+                                                    &dst
+                                                )
                                         }
                                     }
                                     EvalOp::Sink(_) => {}
@@ -189,10 +201,10 @@ impl DagEvaluator {
                             }
                         }
                     }
-                    Err(_) => {}
+                    Err(e) => panic!("Malformed evaluation plan detected: {:?}", e),
                 }
             }
-            _ => {}
+            Err(e) => panic!("Malformed evaluation plan detected: {:?}", e),
         }
     }
 }

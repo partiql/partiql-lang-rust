@@ -47,7 +47,7 @@ impl EvaluatorPlanner {
     #[inline]
     fn plan_eval_dag(&self, lg: LogicalPlan) -> EvalPlan {
         let plan = lg.0;
-        let mut eval_plan = EvalPlan::new();
+        let mut eval_plan = EvalPlan::default();
         eval_plan.0 = plan.map(
             |idx, n| {
                 let ne = plan.neighbors_directed(idx, Outgoing);
