@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 use petgraph::algo::toposort;
-use petgraph::graph::NodeIndex;
 use petgraph::{Graph, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
@@ -26,16 +25,14 @@ pub struct Scan {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
     pub output: Option<Value>,
-    pub consumers: Vec<NodeIndex>,
 }
 
 impl Scan {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, consumers: Vec<NodeIndex>) -> Self {
+    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str) -> Self {
         Scan {
             expr,
             as_key: as_key.to_string(),
             output: None,
-            consumers,
         }
     }
 }
@@ -45,16 +42,14 @@ pub struct Project {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
     pub input: Vec<Tuple>,
     pub output: Vec<Tuple>,
-    pub consumers: Vec<NodeIndex>,
 }
 
 impl Project {
-    pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>, consumers: Vec<NodeIndex>) -> Self {
+    pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
         Project {
             exprs,
             input: vec![],
             output: vec![],
-            consumers,
         }
     }
 }

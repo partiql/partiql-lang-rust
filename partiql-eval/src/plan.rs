@@ -2,9 +2,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use petgraph::graph::{Neighbors, NodeIndex};
-use petgraph::Outgoing;
-
 use partiql_logical as logical;
 use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
 
@@ -48,38 +45,25 @@ impl EvaluatorPlanner {
     fn plan_eval_dag(&self, lg: LogicalPlan) -> EvalPlan {
         let plan = lg.0;
         let mut eval_plan = EvalPlan::default();
-        eval_plan.0 = plan.map(
-            |idx, n| {
-                let ne = plan.neighbors_directed(idx, Outgoing);
-                self.get_eval_node(n, ne)
-            },
-            |_, e| e.clone(),
-        );
+        eval_plan.0 = plan.map(|_, n| self.get_eval_node(n), |_, e| e.clone());
 
         eval_plan
     }
 
-    fn get_eval_node(&self, be: &BindingsExpr, consumers: Neighbors<()>) -> EvalOp {
+    fn get_eval_node(&self, be: &BindingsExpr) -> EvalOp {
         match be {
             BindingsExpr::Scan(logical::Scan {
                 expr,
                 as_key,
                 at_key: _,
-            }) => EvalOp::Scan(eval::Scan::new(
-                self.plan_values(expr.clone()),
-                as_key,
-                consumers.collect::<Vec<NodeIndex>>(),
-            )),
+            }) => EvalOp::Scan(eval::Scan::new(self.plan_values(expr.clone()), as_key)),
             BindingsExpr::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .into_iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
 
-                EvalOp::Project(eval::Project::new(
-                    exprs,
-                    consumers.collect::<Vec<NodeIndex>>(),
-                ))
+                EvalOp::Project(eval::Project::new(exprs))
             }
             BindingsExpr::Output => EvalOp::Sink(eval::Sink {
                 output: self.output.clone(),
