@@ -5,7 +5,8 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 use petgraph::algo::toposort;
-use petgraph::{Graph, Incoming, Outgoing};
+use petgraph::{Directed, Incoming, Outgoing};
+use petgraph::prelude::StableGraph;
 
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{Bag, BindingsName, Tuple, Value};
@@ -60,7 +61,7 @@ pub struct Sink {
 }
 
 #[derive(Debug)]
-pub struct EvalPlan(pub Graph<EvalOp, ()>);
+pub struct EvalPlan(pub StableGraph::<EvalOp, (), Directed>);
 
 impl Default for EvalPlan {
     fn default() -> Self {
@@ -70,7 +71,7 @@ impl Default for EvalPlan {
 
 impl EvalPlan {
     fn new() -> Self {
-        EvalPlan(Graph::<EvalOp, ()>::new())
+        EvalPlan(StableGraph::<EvalOp, (), Directed>::new())
     }
 }
 
