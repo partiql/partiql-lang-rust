@@ -10,7 +10,7 @@ use std::{ops, vec};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),
