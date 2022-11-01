@@ -300,6 +300,12 @@ impl Ord for Value {
             (Value::Boolean(_), _) => Ordering::Less,
             (_, Value::Boolean(_)) => Ordering::Greater,
 
+            // TODO: `OrderedFloat`'s implementation of `Ord` slightly differs from what we want in
+            //  the PartiQL spec. See https://partiql.org/assets/PartiQL-Specification.pdf#subsection.12.2
+            //  point 3. In PartiQL, `nan`, comes before `-inf` which comes before all numeric
+            //  values, which are followed by `+inf`. `OrderedFloat` places `NaN` as greater than
+            //  all other `OrderedFloat` values. We could consider creating our own float type
+            //  to get around this annoyance.
             (Value::Real(l), Value::Real(r)) => {
                 if l.is_nan() {
                     if r.is_nan() {
