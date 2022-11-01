@@ -5,20 +5,42 @@ use std::fmt::Debug;
 use std::rc::Rc;
 
 use petgraph::algo::toposort;
-use petgraph::{Directed, Incoming, Outgoing};
 use petgraph::prelude::StableGraph;
+use petgraph::{Directed, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{Bag, BindingsName, Tuple, Value};
+use partiql_value::{partiql_bag, Bag, BindingsName, Tuple, Value};
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
 
 #[derive(Debug)]
-pub enum EvalOp {
-    Scan(Scan),
-    Project(Project),
-    Sink(Sink),
+pub struct EvalPlan(pub StableGraph<Box<dyn DagEvaluable>, (), Directed>);
+
+impl Default for EvalPlan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EvalPlan {
+    fn new() -> Self {
+        EvalPlan(StableGraph::<Box<dyn DagEvaluable>, (), Directed>::new())
+    }
+}
+
+pub type EvalResult = Result<Evaluated, EvalErr>;
+
+pub struct Evaluated {
+    pub result: Option<Value>,
+}
+
+pub struct EvalErr {
+    pub errors: Vec<EvaluationError>,
+}
+
+pub enum EvaluationError {
+    InvalidEvaluationPlan(String),
 }
 
 #[derive(Debug)]
@@ -38,40 +60,76 @@ impl Scan {
     }
 }
 
+impl DagEvaluable for Scan {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let mut value = partiql_bag!();
+        let v = self.expr.evaluate(&Tuple(HashMap::new()), ctx);
+        for t in v.into_iter() {
+            let out = Tuple(HashMap::from([(self.as_key.clone(), t)]));
+            value.push(Value::Tuple(Box::new(out)));
+        }
+        Some(Value::Bag(Box::new(value)))
+    }
+    fn update_input(&mut self, _input: &Value) {
+        todo!("update_input for Scan")
+    }
+}
+
 #[derive(Debug)]
 pub struct Project {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
-    pub input: Vec<Tuple>,
-    pub output: Vec<Tuple>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
 }
 
 impl Project {
     pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
         Project {
             exprs,
-            input: vec![],
-            output: vec![],
+            input: None,
+            output: None,
         }
+    }
+}
+
+impl DagEvaluable for Project {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self
+            .input
+            .as_ref()
+            .expect("Error in retrieving input value")
+            .clone();
+        let mut value = partiql_bag![];
+        for v in input_value.into_iter() {
+            let out = v.coerce_to_tuple();
+
+            let proj: HashMap<String, Value> = self
+                .exprs
+                .iter()
+                .map(|(alias, expr)| (alias.to_string(), expr.evaluate(&out, ctx)))
+                .collect();
+            value.push(Value::Tuple(Box::new(Tuple(proj))));
+        }
+
+        Some(Value::Bag(Box::new(value)))
+    }
+    fn update_input(&mut self, input: &Value) {
+        self.input = Some(input.clone());
     }
 }
 
 #[derive(Debug)]
 pub struct Sink {
-    pub output: Rc<RefCell<dyn TupleSink>>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
 }
 
-#[derive(Debug)]
-pub struct EvalPlan(pub StableGraph::<EvalOp, (), Directed>);
-
-impl Default for EvalPlan {
-    fn default() -> Self {
-        Self::new()
+impl DagEvaluable for Sink {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
+        self.input.clone()
     }
-}
-
-impl EvalPlan {
-    fn new() -> Self {
-        EvalPlan(StableGraph::<EvalOp, (), Directed>::new())
+    fn update_input(&mut self, input: &Value) {
+        self.input = Some(input.clone());
     }
 }
 
@@ -122,7 +180,7 @@ impl DagEvaluator {
         DagEvaluator { ctx }
     }
 
-    pub fn execute_dag(&mut self, plan: EvalPlan) {
+    pub fn execute_dag(&mut self, plan: EvalPlan) -> Result<Evaluated, EvalErr> {
         let mut graph = plan.0;
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
@@ -135,78 +193,51 @@ impl DagEvaluator {
                 let sorted_ops = toposort(&graph, None);
                 match sorted_ops {
                     Ok(ops) => {
+                        let mut result = None;
                         for idx in ops.into_iter() {
+                            let src = graph
+                                .node_weight_mut(idx)
+                                .expect("Error in retrieving node");
+                            result = src.evaluate(&*self.ctx);
+
                             let mut ne = graph.neighbors_directed(idx, Outgoing).detach();
-                            while let Some(d) = ne.next_node(&graph) {
-                                let (src, dst) = graph.index_twice_mut(idx, d);
-                                match src {
-                                    EvalOp::Scan(o) => {
-                                        o.output = Some(
-                                            o.expr.evaluate(&Tuple(HashMap::new()), &*self.ctx),
-                                        );
-                                        match dst {
-                                            EvalOp::Project(p) => {
-                                                if let Some(v) = o.output.clone() {
-                                                    for t in v.into_iter() {
-                                                        let out = Tuple(HashMap::from([(
-                                                            o.as_key.clone(),
-                                                            t.clone(),
-                                                        )]));
-                                                        p.input.push(out)
-                                                    }
-                                                }
-                                            }
-                                            _ => todo!(
-                                                "Pushing to {:?} from `Scan` is not supported yet.",
-                                                &dst
-                                            ),
-                                        }
-                                    }
-                                    EvalOp::Project(p) => {
-                                        for t in &p.input {
-                                            let proj: HashMap<String, Value> = p
-                                                .exprs
-                                                .iter()
-                                                .map(|(alias, expr)| {
-                                                    (
-                                                        alias.to_string(),
-                                                        expr.evaluate(t, &*self.ctx),
-                                                    )
-                                                })
-                                                .collect();
-                                            p.output.push(Tuple(proj));
-                                        }
-                                        match dst {
-                                            EvalOp::Sink(sink) => {
-                                                for t in p.output.iter_mut() {
-                                                    sink.output
-                                                        .borrow_mut()
-                                                        .push_tuple(t.clone(), &*self.ctx);
-                                                }
-                                            }
-                                            _ =>
-                                                todo!(
-                                                    "Pushing to {:?} from `Project` is not supported yet.",
-                                                    &dst
-                                                )
-                                        }
-                                    }
-                                    EvalOp::Sink(_) => {}
-                                    _ => {}
-                                }
+                            while let Some(n) = ne.next_node(&graph) {
+                                let dst =
+                                    graph.node_weight_mut(n).expect("Error in retrieving node");
+                                dst.update_input(
+                                    &result.clone().expect("Error in retrieving source value"),
+                                );
                             }
                         }
+                        let evaluated = Evaluated { result };
+                        Ok(evaluated)
                     }
-                    Err(e) => panic!("Malformed evaluation plan detected: {:?}", e),
+                    Err(e) => Err(EvalErr {
+                        errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
+                            "Malformed evaluation plan detected: {:?}",
+                            e
+                        ))],
+                    }),
                 }
             }
-            Err(e) => panic!("Malformed evaluation plan detected: {:?}", e),
+            Err(e) => Err(EvalErr {
+                errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
+                    "Malformed evaluation plan detected: {:?}",
+                    e
+                ))],
+            }),
         }
     }
 }
 
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext);
+}
+
+// TODO rename to `Evaluable` when moved to DAG model completely
+pub trait DagEvaluable: Debug {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
+    fn update_input(&mut self, input: &Value);
 }
 
 pub trait TupleSink: Debug {
@@ -393,8 +424,7 @@ impl Evaluable for EvalFrom {
 impl TupleSink for EvalFrom {
     #[inline]
     fn push_tuple(&mut self, bindings: Tuple, ctx: &dyn EvalContext) {
-        let from_tuple = self.expr.evaluate(&bindings, ctx);
-        self.push_value(from_tuple, ctx);
+        self.push_value(self.expr.evaluate(&bindings, ctx), ctx);
     }
 }
 

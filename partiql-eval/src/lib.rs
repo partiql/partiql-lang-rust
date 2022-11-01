@@ -38,19 +38,22 @@ mod tests {
     }
 
     // TODO: rename once we move to DAG model completely
-    fn evaluate_dag(logical: LogicalPlan, bindings: MapBindings<Value>) -> Bag {
+    fn evaluate_dag(logical: LogicalPlan, bindings: MapBindings<Value>) -> Value {
+        // TODO remove once we agree on using evaluate output in the following PR:
+        // https://github.com/partiql/partiql-lang-rust/pull/202
         let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
         let planner = plan::EvaluatorPlanner {
             output: output.clone(),
         };
+
         let plan = planner.compile_dag(logical);
         let mut evaluator = DagEvaluator::new(bindings);
 
-        evaluator.execute_dag(plan);
-
-        println!("{:?}", &output);
-        let result = &output.borrow_mut().output;
-        result.clone()
+        if let Ok(out) = evaluator.execute_dag(plan) {
+            out.result.unwrap()
+        } else {
+            Value::Missing
+        }
     }
 
     fn data_customer() -> MapBindings<Value> {
@@ -123,7 +126,7 @@ mod tests {
             at_key: None,
         }));
 
-        let select = logical.0.add_node(BindingsExpr::Project(logical::Project {
+        let project = logical.0.add_node(BindingsExpr::Project(logical::Project {
             exprs: HashMap::from([(
                 "b".to_string(),
                 ValueExpr::Path(
@@ -135,14 +138,17 @@ mod tests {
             )]),
         }));
 
-        let output = logical.0.add_node(BindingsExpr::Output);
+        let sink = logical.0.add_node(BindingsExpr::Output);
 
         logical
             .0
-            .extend_with_edges(&[(from, select), (select, output)]);
+            .extend_with_edges(&[(from, project), (project, sink)]);
 
-        let result = evaluate_dag(logical, data_3_tuple());
-        assert_eq!(result.len(), 3);
+        if let Value::Bag(b) = evaluate_dag(logical, data_3_tuple()) {
+            assert_eq!(b.len(), 3);
+        } else {
+            panic!("Wrong output")
+        }
     }
 
     #[test]

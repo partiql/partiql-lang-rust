@@ -1,10 +1,10 @@
 use partiql_value::{BindingsName, Value};
-use petgraph::{Directed};
-use std::collections::HashMap;
 use petgraph::prelude::StableGraph;
+use petgraph::Directed;
+use std::collections::HashMap;
 
 #[derive(Debug)]
-pub struct LogicalPlan(pub StableGraph::<BindingsExpr, (), Directed>);
+pub struct LogicalPlan(pub StableGraph<BindingsExpr, (), Directed>);
 
 impl LogicalPlan {
     pub fn new() -> Self {

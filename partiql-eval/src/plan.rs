@@ -7,11 +7,13 @@ use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueE
 
 use crate::eval;
 use crate::eval::{
-    EvalBinop, EvalBinopExpr, EvalExpr, EvalLitExpr, EvalOp, EvalPath, EvalPlan, EvalVarRef,
+    DagEvaluable, EvalBinop, EvalBinopExpr, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalVarRef,
     Evaluable, TupleSink,
 };
 
 pub struct EvaluatorPlanner {
+    // TODO remove once we agree on using evaluate output in the following PR:
+    // https://github.com/partiql/partiql-lang-rust/pull/202
     pub output: Rc<RefCell<dyn TupleSink>>,
 }
 
@@ -50,23 +52,23 @@ impl EvaluatorPlanner {
         eval_plan
     }
 
-    fn get_eval_node(&self, be: &BindingsExpr) -> EvalOp {
+    fn get_eval_node(&self, be: &BindingsExpr) -> Box<dyn DagEvaluable> {
         match be {
             BindingsExpr::Scan(logical::Scan {
                 expr,
                 as_key,
                 at_key: _,
-            }) => EvalOp::Scan(eval::Scan::new(self.plan_values(expr.clone()), as_key)),
+            }) => Box::new(eval::Scan::new(self.plan_values(expr.clone()), as_key)),
             BindingsExpr::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .into_iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
-
-                EvalOp::Project(eval::Project::new(exprs))
+                Box::new(eval::Project::new(exprs))
             }
-            BindingsExpr::Output => EvalOp::Sink(eval::Sink {
-                output: self.output.clone(),
+            BindingsExpr::Output => Box::new(eval::Sink {
+                input: None,
+                output: None,
             }),
             _ => panic!("Unevaluable bexpr"),
         }
@@ -110,7 +112,6 @@ impl EvaluatorPlanner {
             BindingsExpr::Unpivot => todo!(),
             BindingsExpr::Join => todo!(),
             BindingsExpr::Project(_) => todo!(),
-            BindingsExpr::From(_) => todo!(),
             BindingsExpr::Scan(_) => todo!(),
         }
     }
