@@ -9,13 +9,12 @@ mod tests {
     use std::rc::Rc;
 
     use partiql_logical as logical;
-    use partiql_logical::{BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
     use partiql_value as value;
 
     use crate::env::basic::MapBindings;
     use crate::plan;
     use ordered_float::OrderedFloat;
-    use partiql_logical::{BinaryOp, BindingsExpr, PathComponent, ValueExpr};
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
