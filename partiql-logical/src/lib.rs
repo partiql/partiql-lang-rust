@@ -1,13 +1,24 @@
 use partiql_value::{BindingsName, Value};
+use petgraph::prelude::StableGraph;
+use petgraph::Directed;
 use std::collections::HashMap;
 
-// TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 #[derive(Debug)]
+pub struct LogicalPlan(pub StableGraph<BindingsExpr, (), Directed>);
+
+impl LogicalPlan {
+    pub fn new() -> Self {
+        LogicalPlan(StableGraph::<BindingsExpr, (), Directed>::new())
+    }
+}
+
+// TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum UnaryOp {}
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum BinaryOp {
     And,
@@ -21,22 +32,13 @@ pub enum BinaryOp {
     Lteq,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum PathComponent {
     Key(String),
     Index(i64),
 }
 
-#[derive(Debug)]
-#[allow(dead_code)] // TODO remove once out of PoC
-pub enum Expr {
-    Value(ValueExpr),
-    Bindings(BindingsToValueExpr),
-    BindingsToValue(BindingsToValueExpr),
-    ValueToBindings(ValueToBindingsExpr),
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum ValueExpr {
     // TODO other variants
@@ -51,10 +53,11 @@ pub enum ValueExpr {
 // Values   -> Bindings : From
 // Bindings -> Values   : Select Value
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum BindingsExpr {
     From(From),
+    Scan(Scan),
     Unpivot,
     Where(Where),
     OrderBy,
@@ -64,8 +67,10 @@ pub enum BindingsExpr {
     SetOp,
     SelectValue(SelectValue),
     Select(Select),
+    Project(Project),
     Distinct(Distinct),
     GroupBy,
+    #[default]
     Output,
 }
 
@@ -87,6 +92,13 @@ pub struct From {
 }
 
 #[derive(Debug)]
+pub struct Scan {
+    pub expr: ValueExpr,
+    pub as_key: String,
+    pub at_key: Option<String>,
+}
+
+#[derive(Debug)]
 pub struct Where {
     pub expr: ValueExpr,
     pub out: Box<BindingsExpr>,
@@ -96,6 +108,11 @@ pub struct Where {
 pub struct Select {
     pub exprs: HashMap<String, ValueExpr>,
     pub out: Box<BindingsExpr>,
+}
+
+#[derive(Debug)]
+pub struct Project {
+    pub exprs: HashMap<String, ValueExpr>,
 }
 
 #[derive(Debug)]

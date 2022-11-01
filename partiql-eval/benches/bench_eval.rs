@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
@@ -8,9 +12,6 @@ use partiql_eval::eval::{
 use partiql_value::{
     partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::time::Duration;
 
 fn data() -> MapBindings<Value> {
     let hr = partiql_tuple![(

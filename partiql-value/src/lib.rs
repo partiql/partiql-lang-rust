@@ -7,7 +7,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::vec;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),

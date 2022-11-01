@@ -4,19 +4,22 @@ pub mod plan;
 
 #[cfg(test)]
 mod tests {
-    use crate::eval::{EvalFromAt, EvalOutputAccumulator, Evaluable, Evaluator, Output};
-    use partiql_logical as logical;
-    use partiql_value as value;
-
-    use crate::env::basic::MapBindings;
-    use crate::plan;
-    use partiql_logical::{BindingsExpr, PathComponent, ValueExpr};
-    use partiql_value::{
-        partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
-    };
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
+
+    use partiql_logical as logical;
+    use partiql_logical::{BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+    use partiql_value as value;
+    use partiql_value::{
+        partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
+    };
+
+    use crate::env::basic::MapBindings;
+    use crate::eval::{
+        DagEvaluator, EvalFromAt, EvalOutputAccumulator, Evaluable, Evaluator, Output,
+    };
+    use crate::plan;
 
     fn evaluate(logical: BindingsExpr, bindings: MapBindings<Value>) -> Bag {
         let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
@@ -25,14 +28,32 @@ mod tests {
         };
 
         let evaluable = planner.compile(logical);
-
         let mut evaluator = Evaluator::new(bindings, evaluable);
+
         evaluator.execute();
 
         println!("{:?}", &output);
-
         let result = &output.borrow_mut().output;
         result.clone()
+    }
+
+    // TODO: rename once we move to DAG model completely
+    fn evaluate_dag(logical: LogicalPlan, bindings: MapBindings<Value>) -> Value {
+        // TODO remove once we agree on using evaluate output in the following PR:
+        // https://github.com/partiql/partiql-lang-rust/pull/202
+        let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
+        let planner = plan::EvaluatorPlanner {
+            output: output.clone(),
+        };
+
+        let plan = planner.compile_dag(logical);
+        let mut evaluator = DagEvaluator::new(bindings);
+
+        if let Ok(out) = evaluator.execute_dag(plan) {
+            out.result.unwrap()
+        } else {
+            Value::Missing
+        }
     }
 
     fn data_customer() -> MapBindings<Value> {
@@ -93,6 +114,41 @@ mod tests {
 
         let result = evaluate(logical, data_3_tuple());
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn select_dag() {
+        // Plan for `select a as b from data`
+        let mut logical = LogicalPlan::new();
+        let from = logical.0.add_node(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        let project = logical.0.add_node(BindingsExpr::Project(logical::Project {
+            exprs: HashMap::from([(
+                "b".to_string(),
+                ValueExpr::Path(
+                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                        "data".into(),
+                    ))),
+                    vec![PathComponent::Key("a".to_string())],
+                ),
+            )]),
+        }));
+
+        let sink = logical.0.add_node(BindingsExpr::Output);
+
+        logical
+            .0
+            .extend_with_edges(&[(from, project), (project, sink)]);
+
+        if let Value::Bag(b) = evaluate_dag(logical, data_3_tuple()) {
+            assert_eq!(b.len(), 3);
+        } else {
+            panic!("Wrong output")
+        }
     }
 
     #[test]
@@ -161,9 +217,11 @@ mod tests {
     }
 
     mod clause_from {
-        use super::*;
-        use crate::eval::{BasicContext, EvalFrom, EvalPath, EvalVarRef, PathComponent};
         use partiql_value::{partiql_bag, partiql_list, BindingsName};
+
+        use crate::eval::{BasicContext, EvalFrom, EvalPath, EvalVarRef, PathComponent};
+
+        use super::*;
 
         fn some_ordered_table() -> List {
             partiql_list![
@@ -332,9 +390,11 @@ mod tests {
     }
 
     mod clause_unpivot {
-        use super::*;
-        use crate::eval::{BasicContext, EvalUnpivot, EvalVarRef, Output};
         use partiql_value::{partiql_bag, BindingsName, Tuple};
+
+        use crate::eval::{BasicContext, EvalUnpivot, EvalVarRef, Output};
+
+        use super::*;
 
         fn just_a_tuple() -> Tuple {
             partiql_tuple![("amzn", 840.05), ("tdc", 31.06)]
