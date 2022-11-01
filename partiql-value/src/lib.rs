@@ -163,7 +163,7 @@ fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
             } else {
                 match Decimal::from_f64(real_value.0) {
                     Some(d_from_r) => Value::Decimal(rust_decimal::Decimal::from(d_from_r)),
-                    None => Value::Missing,
+                    None => Value::Missing, // TODO: decide on behavior when float cannot be coerced to Decimal
                 }
             }
         }
