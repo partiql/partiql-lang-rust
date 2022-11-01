@@ -1,50 +1,22 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use partiql_logical as logical;
 use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
 
 use crate::eval;
 use crate::eval::{
-    DagEvaluable, EvalBinop, EvalBinopExpr, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalVarRef,
-    Evaluable, TupleSink,
+    EvalBinOpExpr, EvalBinop, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalVarRef, Evaluable,
 };
 
-pub struct EvaluatorPlanner {
-    // TODO remove once we agree on using evaluate output in the following PR:
-    // https://github.com/partiql/partiql-lang-rust/pull/202
-    pub output: Rc<RefCell<dyn TupleSink>>,
-}
+pub struct EvaluatorPlanner;
 
 impl EvaluatorPlanner {
-    pub fn compile(&self, be: BindingsExpr) -> Box<dyn Evaluable> {
-        self.plan_eval(be)
+    pub fn compile(&self, plan: LogicalPlan<BindingsExpr>) -> EvalPlan {
+        self.plan_eval(plan)
     }
 
     #[inline]
-    fn plan_eval(&self, be: BindingsExpr) -> Box<dyn Evaluable> {
-        match be {
-            BindingsExpr::From(logical::From {
-                expr,
-                as_key,
-                at_key: _,
-                out,
-            }) => Box::new(eval::EvalFrom::new(
-                self.plan_values(expr),
-                &as_key,
-                self.plan_bindings(*out),
-            )),
-            _ => panic!("Unevaluable bexpr"),
-        }
-    }
-
-    pub fn compile_dag(&self, plan: LogicalPlan<BindingsExpr>) -> EvalPlan {
-        self.plan_eval_dag(plan)
-    }
-
-    #[inline]
-    fn plan_eval_dag(&self, lg: LogicalPlan<BindingsExpr>) -> EvalPlan {
+    fn plan_eval(&self, lg: LogicalPlan<BindingsExpr>) -> EvalPlan {
         let mut eval_plan = EvalPlan::default();
         let ops = lg.operators();
         let flows = lg.flows();
@@ -73,67 +45,44 @@ impl EvaluatorPlanner {
         eval_plan
     }
 
-    fn get_eval_node(&self, be: &BindingsExpr) -> Box<dyn DagEvaluable> {
+    fn get_eval_node(&self, be: &BindingsExpr) -> Box<dyn Evaluable> {
         match be {
             BindingsExpr::Scan(logical::Scan {
                 expr,
                 as_key,
-                at_key: _,
-            }) => Box::new(eval::Scan::new(self.plan_values(expr.clone()), as_key)),
+                at_key,
+            }) => Box::new(eval::EvalScan::new(
+                self.plan_values(expr.clone()),
+                as_key,
+                at_key,
+            )),
             BindingsExpr::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .into_iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
-                Box::new(eval::Project::new(exprs))
+                Box::new(eval::EvalProject::new(exprs))
             }
-            BindingsExpr::Output => Box::new(eval::Sink {
+            BindingsExpr::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
+                expr: self.plan_values(expr.clone()),
                 input: None,
                 output: None,
             }),
-            _ => panic!("Unevaluable bexpr"),
-        }
-    }
-
-    fn plan_bindings(&self, be: BindingsExpr) -> Box<dyn TupleSink> {
-        match be {
-            BindingsExpr::From(logical::From {
+            BindingsExpr::Distinct => Box::new(eval::EvalDistinct::new()),
+            BindingsExpr::Sink => Box::new(eval::EvalSink {
+                input: None,
+                output: None,
+            }),
+            BindingsExpr::Unpivot(logical::Unpivot {
                 expr,
                 as_key,
-                at_key: _,
-                out,
-            }) => Box::new(eval::EvalFrom::new(
-                self.plan_values(expr),
-                &as_key,
-                self.plan_bindings(*out),
+                at_key,
+            }) => Box::new(eval::EvalUnpivot::new(
+                self.plan_values(expr.clone()),
+                as_key,
+                at_key.as_ref().unwrap(),
             )),
-            BindingsExpr::Limit => todo!(),
-            BindingsExpr::Offset => todo!(),
-            BindingsExpr::OrderBy => todo!(),
-            BindingsExpr::SetOp => todo!(),
-            BindingsExpr::Select(logical::Select { exprs, out }) => {
-                let exprs: HashMap<_, _> = exprs
-                    .into_iter()
-                    .map(|(k, v)| (k, self.plan_values(v)))
-                    .collect();
-                Box::new(eval::EvalSelect::new(exprs, self.plan_bindings(*out)))
-            }
-            BindingsExpr::Where(logical::Where { expr, out }) => Box::new(eval::EvalWhere::new(
-                self.plan_values(expr),
-                self.plan_bindings(*out),
-            )),
-            BindingsExpr::GroupBy => todo!(),
-            BindingsExpr::Distinct(logical::Distinct { out }) => {
-                Box::new(eval::EvalDistinct::new(self.plan_bindings(*out)))
-            }
-            BindingsExpr::Output => Box::new(eval::Output {
-                output: self.output.clone(),
-            }),
-            BindingsExpr::SelectValue(_) => todo!(),
-            BindingsExpr::Unpivot => todo!(),
-            BindingsExpr::Join => todo!(),
-            BindingsExpr::Project(_) => todo!(),
-            BindingsExpr::Scan(_) => todo!(),
+            _ => panic!("Unevaluable bexpr"),
         }
     }
 
@@ -160,7 +109,7 @@ impl EvaluatorPlanner {
                     BinaryOp::Mod => EvalBinop::Mod,
                     BinaryOp::Exp => EvalBinop::Exp,
                 };
-                Box::new(EvalBinopExpr { op, lhs, rhs })
+                Box::new(EvalBinOpExpr { op, lhs, rhs })
             }
             ValueExpr::Lit(lit) => Box::new(EvalLitExpr { lit }),
             ValueExpr::Path(expr, components) => Box::new(EvalPath {
@@ -168,8 +117,8 @@ impl EvaluatorPlanner {
                 components: components
                     .iter()
                     .map(|c| match c {
-                        PathComponent::Key(k) => eval::PathComponent::Key(k.clone()),
-                        PathComponent::Index(i) => eval::PathComponent::Index(*i),
+                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k.clone()),
+                        PathComponent::Index(i) => eval::EvalPathComponent::Index(*i),
                     })
                     .collect(),
             }),

@@ -2,7 +2,7 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::{ops, vec};
@@ -597,6 +597,13 @@ impl From<Vec<Value>> for Bag {
     #[inline]
     fn from(values: Vec<Value>) -> Self {
         Bag(values)
+    }
+}
+
+impl From<HashSet<Value>> for Bag {
+    #[inline]
+    fn from(values: HashSet<Value>) -> Self {
+        Bag(values.into_iter().collect())
     }
 }
 

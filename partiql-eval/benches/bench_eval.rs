@@ -6,8 +6,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{
-    BasicContext, EvalFrom, EvalOutputAccumulator, EvalPath, EvalVarRef, Evaluable, Output,
-    PathComponent,
+    BasicContext, EvalFrom, EvalOutputAccumulator, EvalPath, EvalPathComponent, EvalVarRef,
+    Evaluable, Output,
 };
 use partiql_value::{
     partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
@@ -61,7 +61,7 @@ fn eval_bench(c: &mut Criterion) {
                 expr: Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("hr".to_string()),
                 }),
-                components: vec![PathComponent::Key("employeesNestScalars".to_string())],
+                components: vec![EvalPathComponent::Key("employeesNestScalars".to_string())],
             }),
             "x",
             eout,

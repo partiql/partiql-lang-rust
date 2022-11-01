@@ -30,12 +30,19 @@ impl<T> LogicalPlan<T> {
     }
 
     pub fn add_flow(&mut self, src: OpId, dst: OpId) {
-        let src_idx = src.index() - 1;
-        let dst_idx = dst.index() - 1;
-        assert!(src_idx <= self.operator_count());
-        assert!(dst_idx <= self.operator_count());
+        assert!(src.index() <= self.operator_count());
+        assert!(dst.index() <= self.operator_count());
 
         self.edges.push((src, dst));
+    }
+
+    pub fn extend_with_flows(&mut self, flows: &[(OpId, OpId)]) {
+        flows.iter().for_each(|f| {
+            assert!(f.0.index() <= self.operator_count());
+            assert!(f.1.index() <= self.operator_count());
+
+            self.edges.push(*f);
+        });
     }
 
     pub fn operator_count(&self) -> usize {
@@ -103,22 +110,20 @@ pub enum ValueExpr {
 #[derive(Debug, Default)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum BindingsExpr {
-    From(From),
     Scan(Scan),
-    Unpivot,
-    Where(Where),
+    Unpivot(Unpivot),
+    Filter(Filter),
     OrderBy,
     Offset,
     Limit,
     Join,
     SetOp,
     SelectValue(SelectValue),
-    Select(Select),
     Project(Project),
-    Distinct(Distinct),
+    Distinct,
     GroupBy,
     #[default]
-    Output,
+    Sink,
 }
 
 #[derive(Debug)]
@@ -129,32 +134,25 @@ pub enum BindingsToValueExpr {}
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum ValueToBindingsExpr {}
 
-/// [`From`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
-#[derive(Debug)]
-pub struct From {
-    pub expr: ValueExpr,
-    pub as_key: String,
-    pub at_key: Option<String>,
-    pub out: Box<BindingsExpr>,
-}
-
+/// [`Scan`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
 #[derive(Debug)]
 pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
+    pub at_key: String,
+}
+
+/// [`Scan`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
+#[derive(Debug)]
+pub struct Unpivot {
+    pub expr: ValueExpr,
+    pub as_key: String,
     pub at_key: Option<String>,
 }
 
 #[derive(Debug)]
-pub struct Where {
+pub struct Filter {
     pub expr: ValueExpr,
-    pub out: Box<BindingsExpr>,
-}
-
-#[derive(Debug)]
-pub struct Select {
-    pub exprs: HashMap<String, ValueExpr>,
-    pub out: Box<BindingsExpr>,
 }
 
 #[derive(Debug)]
@@ -168,11 +166,6 @@ pub struct SelectValue {
     pub out: Box<ValueExpr>,
 }
 
-#[derive(Debug)]
-pub struct Distinct {
-    pub out: Box<BindingsExpr>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,12 +174,15 @@ mod tests {
     fn test_plan() {
         let mut p: LogicalPlan<BindingsExpr> = LogicalPlan::new();
         let a = p.add_operator(BindingsExpr::OrderBy);
-        let b = p.add_operator(BindingsExpr::Output);
+        let b = p.add_operator(BindingsExpr::Sink);
         let c = p.add_operator(BindingsExpr::Limit);
+        let d = p.add_operator(BindingsExpr::GroupBy);
+        let e = p.add_operator(BindingsExpr::Join);
         p.add_flow(a, b);
         p.add_flow(a, c);
         p.add_flow(b, c);
-        assert_eq!(3, p.operators().len());
-        assert_eq!(3, p.flows().len());
+        p.extend_with_flows(&[(c, d), (d, e)]);
+        assert_eq!(5, p.operators().len());
+        assert_eq!(5, p.flows().len());
     }
 }
