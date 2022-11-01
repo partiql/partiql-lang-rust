@@ -5,7 +5,10 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::vec;
+use std::{ops, vec};
+
+use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::{Decimal as RustDecimal, Decimal};
 
 #[derive(Debug)]
 pub enum BindingsName {
@@ -23,11 +26,156 @@ pub enum Value {
     Boolean(bool),
     Integer(i64),
     Real(OrderedFloat<f64>),
+    Decimal(RustDecimal),
     String(Box<String>),
     Blob(Box<Vec<u8>>),
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+}
+
+impl ops::Add for Value {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            // TODO: edge cases dealing with overflow
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (Value::Integer(l), Value::Integer(r)) => Value::Integer(l + r),
+            (Value::Real(l), Value::Real(r)) => Value::Real(*l + *r),
+            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l + r),
+            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) + rhs,
+            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) + rhs,
+            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) + rhs,
+            (Value::Real(_), Value::Integer(_)) => self + coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self + coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self + coerce_int_or_real_to_decimal(&rhs),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Sub for Value {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            // TODO: edge cases dealing with overflow
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (Value::Integer(l), Value::Integer(r)) => Value::Integer(l - r),
+            (Value::Real(l), Value::Real(r)) => Value::Real(*l - *r),
+            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l - r),
+            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) - rhs,
+            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) - rhs,
+            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) - rhs,
+            (Value::Real(_), Value::Integer(_)) => self - coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self - coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self - coerce_int_or_real_to_decimal(&rhs),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Mul for Value {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            // TODO: edge cases dealing with overflow
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (Value::Integer(l), Value::Integer(r)) => Value::Integer(l * r),
+            (Value::Real(l), Value::Real(r)) => Value::Real(*l * *r),
+            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l * r),
+            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) * rhs,
+            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) * rhs,
+            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) * rhs,
+            (Value::Real(_), Value::Integer(_)) => self * coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self * coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self * coerce_int_or_real_to_decimal(&rhs),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Div for Value {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            // TODO: edge cases dealing with division by 0
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (Value::Integer(l), Value::Integer(r)) => Value::Integer(l / r),
+            (Value::Real(l), Value::Real(r)) => Value::Real(*l / *r),
+            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l / r),
+            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) / rhs,
+            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) / rhs,
+            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) / rhs,
+            (Value::Real(_), Value::Integer(_)) => self / coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self / coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self / coerce_int_or_real_to_decimal(&rhs),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Rem for Value {
+    type Output = Self;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            // TODO: edge cases dealing with division by 0
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (Value::Integer(l), Value::Integer(r)) => Value::Integer(l % r),
+            (Value::Real(l), Value::Real(r)) => Value::Real(*l % *r),
+            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l % r),
+            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) % rhs,
+            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) % rhs,
+            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) % rhs,
+            (Value::Real(_), Value::Integer(_)) => self % coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self % coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self % coerce_int_or_real_to_decimal(&rhs),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
+    match value {
+        Value::Integer(int_value) => Value::Decimal(rust_decimal::Decimal::from(*int_value)),
+        Value::Real(real_value) => {
+            if !real_value.is_finite() {
+                Value::Missing
+            } else {
+                match Decimal::from_f64(real_value.0) {
+                    Some(d_from_r) => Value::Decimal(rust_decimal::Decimal::from(d_from_r)),
+                    None => Value::Missing,
+                }
+            }
+        }
+        _ => todo!("Unsupported coercion to Decimal"),
+    }
+}
+
+fn coerce_int_to_real(value: &Value) -> Value {
+    match value {
+        Value::Integer(int_value) => Value::Real(OrderedFloat(*int_value as f64)),
+        _ => todo!("Unsupported coercion to Real"),
+    }
 }
 
 impl Default for Value {
@@ -113,6 +261,7 @@ impl Debug for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Integer(i) => write!(f, "{}", i),
             Value::Real(r) => write!(f, "{}", r.0),
+            Value::Decimal(d) => write!(f, "{}", d),
             Value::String(s) => write!(f, "'{}'", s),
             Value::Blob(s) => write!(f, "'{:?}'", s),
             Value::List(l) => l.fmt(f),
@@ -151,12 +300,59 @@ impl Ord for Value {
             (Value::Boolean(_), _) => Ordering::Less,
             (_, Value::Boolean(_)) => Ordering::Greater,
 
+            (Value::Real(l), Value::Real(r)) => {
+                if l.is_nan() {
+                    if r.is_nan() {
+                        Ordering::Equal
+                    } else {
+                        Ordering::Less
+                    }
+                } else if r.is_nan() {
+                    Ordering::Greater
+                } else {
+                    l.cmp(r)
+                }
+            }
             (Value::Integer(l), Value::Integer(r)) => l.cmp(r),
-            (Value::Real(l), Value::Real(r)) => l.cmp(r),
-            (Value::Integer(l), Value::Real(r)) => ordered_float::OrderedFloat(*l as f64).cmp(r),
-            (Value::Real(l), Value::Integer(r)) => l.cmp(&ordered_float::OrderedFloat(*r as f64)),
+            (Value::Integer(l), Value::Real(_)) => {
+                Value::Real(ordered_float::OrderedFloat(*l as f64)).cmp(other)
+            }
+            (Value::Real(_), Value::Integer(r)) => {
+                self.cmp(&Value::Real(ordered_float::OrderedFloat(*r as f64)))
+            }
+            (Value::Integer(l), Value::Decimal(r)) => RustDecimal::from(*l).cmp(r),
+            (Value::Decimal(l), Value::Integer(r)) => l.cmp(&RustDecimal::from(*r)),
+            (Value::Real(l), Value::Decimal(r)) => {
+                if l.is_nan() || l.0 == f64::NEG_INFINITY {
+                    Ordering::Less
+                } else if l.0 == f64::INFINITY {
+                    Ordering::Greater
+                } else {
+                    match RustDecimal::from_f64(l.0) {
+                        Some(l_d) => l_d.cmp(&r),
+                        None => todo!(
+                            "Decide default behavior when f64 can't be converted to RustDecimal"
+                        ),
+                    }
+                }
+            }
+            (Value::Decimal(l), Value::Real(r)) => {
+                if r.is_nan() || r.0 == f64::NEG_INFINITY {
+                    Ordering::Greater
+                } else if r.0 == f64::INFINITY {
+                    Ordering::Less
+                } else {
+                    match RustDecimal::from_f64(r.0) {
+                        Some(r_d) => l.cmp(&r_d),
+                        None => todo!(
+                            "Decide default behavior when f64 can't be converted to RustDecimal"
+                        ),
+                    }
+                }
+            }
             (_, Value::Integer(_)) => Ordering::Greater,
             (_, Value::Real(_)) => Ordering::Greater,
+            (_, Value::Decimal(_)) => Ordering::Greater,
 
             (Value::String(l), Value::String(r)) => l.cmp(r),
             (_, Value::String(_)) => Ordering::Greater,
@@ -201,6 +397,13 @@ impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
         Value::Real(OrderedFloat(f))
+    }
+}
+
+impl From<RustDecimal> for Value {
+    #[inline]
+    fn from(d: RustDecimal) -> Self {
+        Value::Decimal(d)
     }
 }
 
@@ -550,7 +753,7 @@ impl Hash for Tuple {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ordered_float::OrderedFloat;
+    use rust_decimal_macros::dec;
     use std::borrow::Cow;
     use std::cell::RefCell;
     use std::mem;
@@ -564,6 +767,7 @@ mod tests {
             "OrderedFloat<f64> size: {}",
             mem::size_of::<OrderedFloat<f64>>()
         );
+        println!("Decimal size: {}", mem::size_of::<RustDecimal>());
         println!("String size: {}", mem::size_of::<String>());
         println!("Bag size: {}", mem::size_of::<Bag>());
         println!("List size: {}", mem::size_of::<List>());
@@ -590,5 +794,163 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn partiql_value_arithmetic() {
+        // Add
+        assert_eq!(Value::Missing, Value::Missing + Value::Missing);
+        assert_eq!(Value::Missing, Value::Missing + Value::Null);
+        assert_eq!(Value::Missing, Value::Null + Value::Missing);
+        assert_eq!(Value::Null, Value::Null + Value::Null);
+        assert_eq!(Value::Missing, Value::Integer(1) + Value::from("a"));
+        assert_eq!(Value::Integer(3), Value::Integer(1) + Value::Integer(2));
+        assert_eq!(Value::from(4.0), Value::from(1.5) + Value::from(2.5));
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            Value::Decimal(dec!(1)) + Value::Decimal(dec!(2))
+        );
+        assert_eq!(Value::from(3.5), Value::Integer(1) + Value::from(2.5));
+        assert_eq!(Value::from(3.), Value::from(1.) + Value::from(2.));
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            Value::Integer(1) + Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            Value::Decimal(dec!(1)) + Value::Integer(2)
+        );
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            Value::from(1.) + Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            Value::Decimal(dec!(1)) + Value::from(2.)
+        );
+
+        // Sub
+        assert_eq!(Value::Missing, Value::Missing - Value::Missing);
+        assert_eq!(Value::Missing, Value::Missing - Value::Null);
+        assert_eq!(Value::Missing, Value::Null - Value::Missing);
+        assert_eq!(Value::Null, Value::Null - Value::Null);
+        assert_eq!(Value::Missing, Value::Integer(1) - Value::from("a"));
+        assert_eq!(Value::Integer(-1), Value::Integer(1) - Value::Integer(2));
+        assert_eq!(Value::from(-1.0), Value::from(1.5) - Value::from(2.5));
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            Value::Decimal(dec!(1)) - Value::Decimal(dec!(2))
+        );
+        assert_eq!(Value::from(-1.5), Value::Integer(1) - Value::from(2.5));
+        assert_eq!(Value::from(-1.), Value::from(1.) - Value::from(2.));
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            Value::Integer(1) - Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            Value::Decimal(dec!(1)) - Value::Integer(2)
+        );
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            Value::from(1.) - Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            Value::Decimal(dec!(1)) - Value::from(2.)
+        );
+
+        // Mul
+        assert_eq!(Value::Missing, Value::Missing * Value::Missing);
+        assert_eq!(Value::Missing, Value::Missing * Value::Null);
+        assert_eq!(Value::Missing, Value::Null * Value::Missing);
+        assert_eq!(Value::Null, Value::Null * Value::Null);
+        assert_eq!(Value::Missing, Value::Integer(1) * Value::from("a"));
+        assert_eq!(Value::Integer(2), Value::Integer(1) * Value::Integer(2));
+        assert_eq!(Value::from(3.75), Value::from(1.5) * Value::from(2.5));
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            Value::Decimal(dec!(1)) * Value::Decimal(dec!(2))
+        );
+        assert_eq!(Value::from(2.5), Value::Integer(1) * Value::from(2.5));
+        assert_eq!(Value::from(2.), Value::from(1.) * Value::from(2.));
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            Value::Integer(1) * Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            Value::Decimal(dec!(1)) * Value::Integer(2)
+        );
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            Value::from(1.) * Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            Value::Decimal(dec!(1)) * Value::from(2.)
+        );
+
+        // Div
+        assert_eq!(Value::Missing, Value::Missing / Value::Missing);
+        assert_eq!(Value::Missing, Value::Missing / Value::Null);
+        assert_eq!(Value::Missing, Value::Null / Value::Missing);
+        assert_eq!(Value::Null, Value::Null / Value::Null);
+        assert_eq!(Value::Missing, Value::Integer(1) / Value::from("a"));
+        assert_eq!(Value::Integer(0), Value::Integer(1) / Value::Integer(2));
+        assert_eq!(Value::from(0.6), Value::from(1.5) / Value::from(2.5));
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            Value::Decimal(dec!(1)) / Value::Decimal(dec!(2))
+        );
+        assert_eq!(Value::from(0.4), Value::Integer(1) / Value::from(2.5));
+        assert_eq!(Value::from(0.5), Value::from(1.) / Value::from(2.));
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            Value::Integer(1) / Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            Value::Decimal(dec!(1)) / Value::Integer(2)
+        );
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            Value::from(1.) / Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            Value::Decimal(dec!(1)) / Value::from(2.)
+        );
+
+        // Mod
+        assert_eq!(Value::Missing, Value::Missing % Value::Missing);
+        assert_eq!(Value::Missing, Value::Missing % Value::Null);
+        assert_eq!(Value::Missing, Value::Null % Value::Missing);
+        assert_eq!(Value::Null, Value::Null % Value::Null);
+        assert_eq!(Value::Missing, Value::Integer(1) % Value::from("a"));
+        assert_eq!(Value::Integer(1), Value::Integer(1) % Value::Integer(2));
+        assert_eq!(Value::from(1.5), Value::from(1.5) % Value::from(2.5));
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            Value::Decimal(dec!(1)) % Value::Decimal(dec!(2))
+        );
+        assert_eq!(Value::from(1.), Value::Integer(1) % Value::from(2.5));
+        assert_eq!(Value::from(1.), Value::from(1.) % Value::from(2.));
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            Value::Integer(1) % Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            Value::Decimal(dec!(1)) % Value::Integer(2)
+        );
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            Value::from(1.) % Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            Value::Decimal(dec!(1)) % Value::from(2.)
+        );
     }
 }

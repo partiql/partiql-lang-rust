@@ -90,6 +90,12 @@ impl EvaluatorPlanner {
                     BinaryOp::Gteq => EvalBinop::Gteq,
                     BinaryOp::Lt => EvalBinop::Lt,
                     BinaryOp::Lteq => EvalBinop::Gteq,
+                    BinaryOp::Add => EvalBinop::Add,
+                    BinaryOp::Sub => EvalBinop::Sub,
+                    BinaryOp::Mul => EvalBinop::Mul,
+                    BinaryOp::Div => EvalBinop::Div,
+                    BinaryOp::Mod => EvalBinop::Mod,
+                    BinaryOp::Exp => EvalBinop::Exp,
                 };
                 Box::new(EvalBinopExpr { op, lhs, rhs })
             }

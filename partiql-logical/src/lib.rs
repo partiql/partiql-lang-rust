@@ -19,6 +19,14 @@ pub enum BinaryOp {
     Gteq,
     Lt,
     Lteq,
+
+    // Arithmetic ops
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Exp,
 }
 
 #[derive(Debug)]

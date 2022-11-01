@@ -10,10 +10,12 @@ mod tests {
 
     use crate::env::basic::MapBindings;
     use crate::plan;
-    use partiql_logical::{BindingsExpr, PathComponent, ValueExpr};
+    use ordered_float::OrderedFloat;
+    use partiql_logical::{BinaryOp, BindingsExpr, PathComponent, ValueExpr};
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
+    use rust_decimal::Decimal as RustDecimal;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -70,6 +72,23 @@ mod tests {
         bindings
     }
 
+    fn data_arithmetic_tuple() -> MapBindings<Value> {
+        fn tuple_a_to_v(v: Value) -> value::Value {
+            Tuple(HashMap::from([("a".into(), v)])).into()
+        }
+        // <<{'a': <int>}, {'a': <decimal>}, {'a': <float>}, {'a': NULL}, {'a': MISSING}>>
+        let data = partiql_list![
+            tuple_a_to_v(Value::Integer(1)),
+            tuple_a_to_v(Value::Decimal(RustDecimal::from(1))),
+            tuple_a_to_v(Value::Real(OrderedFloat(1.5))),
+            tuple_a_to_v(Value::Null),
+            tuple_a_to_v(Value::Missing),
+        ];
+        let mut bindings = MapBindings::default();
+        bindings.insert("data", data.into());
+        bindings
+    }
+
     #[test]
     fn select() {
         // Plan for `select a as b from data`
@@ -93,6 +112,124 @@ mod tests {
 
         let result = evaluate(logical, data_3_tuple());
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn arithmetic() {
+        // Tests arithmetic ops using int, real, decimal, null, and missing with values defined from
+        // `data_arithmetic_tuple`
+        fn arithmetic_logical(binary_op: BinaryOp, lit: Value) -> BindingsExpr {
+            BindingsExpr::From(logical::From {
+                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+                as_key: "data".to_string(),
+                at_key: None,
+                out: Box::new(BindingsExpr::Select(logical::Select {
+                    exprs: HashMap::from([(
+                        "b".to_string(),
+                        ValueExpr::BinaryExpr(
+                            binary_op,
+                            Box::new(ValueExpr::Path(
+                                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                    "data".into(),
+                                ))),
+                                vec![PathComponent::Key("a".to_string())],
+                            )),
+                            Box::new(ValueExpr::Lit(Box::new(lit))),
+                        ),
+                    )]),
+                    out: Box::new(BindingsExpr::Output),
+                })),
+            })
+        }
+        // Plan for `select a + <lit> as b from data`
+        println!("Add+++++++++++++++++++++++++++++");
+        let logical = arithmetic_logical(BinaryOp::Add, Value::Integer(1));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Add, Value::Decimal(RustDecimal::new(11, 1)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Add, Value::Real(OrderedFloat(1.5)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Add, Value::Null);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Add, Value::Missing);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+
+        // Plan for `select a - <lit> as b from data`
+        println!("Sub-----------------------------");
+        let logical = arithmetic_logical(BinaryOp::Sub, Value::Integer(1));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Sub, Value::Decimal(RustDecimal::new(11, 1)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Sub, Value::Real(OrderedFloat(1.5)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Sub, Value::Null);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Sub, Value::Missing);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+
+        // Plan for `select a * <lit> as b from data`
+        println!("Mul*****************************");
+        let logical = arithmetic_logical(BinaryOp::Mul, Value::Integer(1));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mul, Value::Decimal(RustDecimal::new(11, 1)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mul, Value::Real(OrderedFloat(1.5)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mul, Value::Null);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mul, Value::Missing);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+
+        // Plan for `select a / <lit> as b from data`
+        println!("Div/////////////////////////////");
+        let logical = arithmetic_logical(BinaryOp::Div, Value::Integer(1));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Div, Value::Decimal(RustDecimal::new(11, 1)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Div, Value::Real(OrderedFloat(1.5)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Div, Value::Null);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Div, Value::Missing);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+
+        // Plan for `select a % <lit> as b from data`
+        println!("Mod%%%%%%%%%%%%%%%%%%%%%%%%%%%%%");
+        let logical = arithmetic_logical(BinaryOp::Mod, Value::Integer(1));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mod, Value::Decimal(RustDecimal::new(11, 1)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mod, Value::Real(OrderedFloat(1.5)));
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mod, Value::Null);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
+        let logical = arithmetic_logical(BinaryOp::Mod, Value::Missing);
+        let result = evaluate(logical, data_arithmetic_tuple());
+        println!("{:?}", result);
     }
 
     #[test]
