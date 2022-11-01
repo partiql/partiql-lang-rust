@@ -32,6 +32,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+    // TODO: add other supported PartiQL values -- timestamp, date, time, sexp
 }
 
 impl ops::Add for Value {
@@ -356,25 +357,38 @@ impl Ord for Value {
                     }
                 }
             }
+            (Value::Integer(_), _) => Ordering::Less,
+            (Value::Real(_), _) => Ordering::Less,
+            (Value::Decimal(_), _) => Ordering::Less,
             (_, Value::Integer(_)) => Ordering::Greater,
             (_, Value::Real(_)) => Ordering::Greater,
             (_, Value::Decimal(_)) => Ordering::Greater,
 
             (Value::String(l), Value::String(r)) => l.cmp(r),
+            (Value::String(_), _) => Ordering::Less,
             (_, Value::String(_)) => Ordering::Greater,
 
             (Value::Blob(l), Value::Blob(r)) => l.cmp(r),
+            (Value::Blob(_), _) => Ordering::Less,
             (_, Value::Blob(_)) => Ordering::Greater,
 
             (Value::List(l), Value::List(r)) => l.cmp(r),
+            (Value::List(_), _) => Ordering::Less,
             (_, Value::List(_)) => Ordering::Greater,
 
             (Value::Tuple(l), Value::Tuple(r)) => l.cmp(r),
+            (Value::Tuple(_), _) => Ordering::Less,
             (_, Value::Tuple(_)) => Ordering::Greater,
 
             (Value::Bag(l), Value::Bag(r)) => l.cmp(r),
-            (_, Value::Bag(_)) => Ordering::Greater,
         }
+    }
+}
+
+impl From<bool> for Value {
+    #[inline]
+    fn from(b: bool) -> Self {
+        Value::Boolean(b)
     }
 }
 
@@ -693,7 +707,7 @@ where
 #[macro_export]
 macro_rules! partiql_tuple {
     () => (
-         Tuple::from(vec![])
+         Tuple(HashMap::new())
     );
     ($(($x:expr, $y:expr)),+ $(,)?) => (
         Tuple::from([$(($x, Value::from($y))),+])
@@ -702,11 +716,16 @@ macro_rules! partiql_tuple {
 
 impl Debug for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut dbg = f.debug_struct("");
-        for (k, v) in &self.0 {
-            dbg.field(k, v);
+        match self.0.is_empty() {
+            true => write!(f, "{{}}"),
+            false => {
+                let mut dbg = f.debug_struct("");
+                for (k, v) in &self.0 {
+                    dbg.field(k, v);
+                }
+                dbg.finish()
+            }
         }
-        dbg.finish()
     }
 }
 
@@ -800,6 +819,42 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn partiql_value_ordering() {
+        // TODO: some additional checking can be included in the ordering testing
+        //  - add timestamp, date, time once added to `Value`
+        //  - equality checking between equivalent ordered values (e.g. missing and null, same numeric values)
+        let mut vals = vec![
+            Value::Missing,
+            Value::from(false),
+            Value::from(true),
+            Value::from(f64::NAN),
+            Value::from(f64::NEG_INFINITY),
+            Value::from(-123.456),
+            Value::Decimal(dec!(1.23456)),
+            Value::from(123456),
+            Value::from(f64::INFINITY),
+            Value::from(""),
+            Value::from("abc"),
+            Value::Blob(Box::new(vec![])),
+            Value::Blob(Box::new(vec![1, 2, 3])),
+            Value::from(partiql_list!()),
+            Value::from(partiql_list!(1, 2, 3)),
+            Value::from(partiql_list!(1, 2, 3, 4, 5)),
+            Value::from(partiql_tuple!()),
+            Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+            Value::from(partiql_tuple![("a", 1), ("b", 3)]),
+            Value::from(partiql_tuple![("a", 1), ("c", 2)]),
+            Value::from(partiql_bag!()),
+            Value::from(partiql_bag!(1, 2, 3)),
+            Value::from(partiql_bag!(3, 3, 3)),
+        ];
+        let expected_vals = vals.clone();
+        vals.reverse();
+        vals.sort();
+        assert_eq!(expected_vals, vals);
     }
 
     #[test]
