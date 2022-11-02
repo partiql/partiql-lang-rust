@@ -1,5 +1,6 @@
 use crate::generator::Generator;
 use crate::reader::read_schema;
+use crate::writer::{Writer, WriterConfig};
 use std::path::Path;
 
 mod generator;
@@ -43,7 +44,8 @@ impl Config {
         let scopes = Generator::new().generate(schema)?;
 
         // TODO implement OverwriteStrategy
-        writer::write_scopes(out_path, scopes)?;
+        let config = WriterConfig::new(&out_path.as_ref().to_string_lossy());
+        Writer::new(config).write(out_path, scopes)?;
         Ok(())
     }
 }

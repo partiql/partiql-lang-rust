@@ -15,15 +15,10 @@ use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
 use std::path::{Path, PathBuf};
 
 pub fn read_schema(root: impl AsRef<Path>) -> miette::Result<TestRoot> {
-    let fail = read_root(&root, "fail")?;
-    let success = read_root(&root, "success")?;
-    Ok(TestRoot { fail, success })
+    read_root(&root).map(|r| TestRoot(r))
 }
 
-fn read_root(root: impl AsRef<Path>, root_type: &str) -> miette::Result<Vec<TestEntry>> {
-    let mut dir: PathBuf = PathBuf::from(root.as_ref());
-    dir.push(root_type);
-
+fn read_root(root: impl AsRef<Path>) -> miette::Result<Vec<TestEntry>> {
     let root = fs::read_dir(root)
         .into_diagnostic()?
         .filter_map(|entry| read_entry(entry.expect("entry")))

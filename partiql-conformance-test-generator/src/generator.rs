@@ -58,12 +58,8 @@ impl Generator {
     }
 
     pub fn generate(mut self, root: TestRoot) -> miette::Result<TestModule> {
-        let TestRoot { fail, success } = root;
-        for f in fail {
-            self.test_entry(f)
-        }
-        for s in success {
-            self.test_entry(s)
+        for entry in root.0 {
+            self.test_entry(entry)
         }
 
         Ok(self.result)

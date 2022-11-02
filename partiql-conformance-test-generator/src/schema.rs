@@ -1,10 +1,7 @@
 pub mod structure {
     use crate::schema::spec::TestDocument;
 
-    pub struct TestRoot {
-        pub fail: Vec<TestEntry>,
-        pub success: Vec<TestEntry>,
-    }
+    pub struct TestRoot(pub Vec<TestEntry>);
 
     pub enum TestEntry {
         Dir(TestDir),
