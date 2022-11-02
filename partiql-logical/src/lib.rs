@@ -1,61 +1,57 @@
 use partiql_value::{BindingsName, Value};
-use petgraph::prelude::StableGraph;
-use petgraph::Directed;
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct LogicalPlan(pub StableGraph<BindingsExpr, (), Directed>);
-
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct OpId(usize);
 
 impl OpId {
-    fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.0
     }
 }
 
-impl LogicalPlan {
-    pub fn new() -> Self {
-        LogicalPlan(StableGraph::<BindingsExpr, (), Directed>::new())
+impl PartialEq<Self> for OpId {
+    fn eq(&self, other: &Self) -> bool {
+        self.index() == other.index()
     }
 }
 
+impl Eq for OpId {}
+
 #[derive(Debug)]
-pub struct LgPlan<'a, T> {
+pub struct LogicalPlan<'a, T> {
     nodes: Vec<T>,
-    edges: Vec<Vec<&'a OpId>>,
+    edges: Vec<(&'a OpId, &'a OpId)>,
     node_count: usize,
 }
 
-impl<'b, T> LgPlan<'b, T> {
-    fn new() -> Self {
-        LgPlan {
+impl<'b, T> LogicalPlan<'b, T> {
+    pub fn new() -> Self {
+        LogicalPlan {
             nodes: vec![],
             edges: vec![],
             node_count: 0,
         }
     }
 
-    fn add_operator(&mut self, op: T) -> OpId {
+    pub fn add_operator(&mut self, op: T) -> OpId {
         self.nodes.push(op);
-        self.edges.push(vec![]);
         self.node_count += 1;
         OpId(self.node_count)
     }
-    fn add_relation<'a: 'b>(&mut self, src: &'a OpId, dst: &'a OpId) {
+
+    pub fn add_flow<'a: 'b>(&mut self, src: &'a OpId, dst: &'a OpId) {
         let src_index = src.index() - 1;
         let dst_index = dst.index() - 1;
         self.nodes.get(src_index).expect("No such operator exists");
         self.nodes.get(dst_index).expect("No such operator exists");
 
-        // let mut edge:&mut Vec<&OpId> = self.edges.get(src_index).expect("some").borrow_mut();
-        self.edges[src_index].extend(vec![dst]);
+        self.edges.push((src, dst));
     }
-    fn operators(&self) -> &Vec<T> {
+    pub fn operators(&self) -> &Vec<T> {
         &self.nodes
     }
-    fn relations(&self) -> &Vec<Vec<&OpId>> {
+    pub fn flows(&self) -> &Vec<(&OpId, &OpId)> {
         &self.edges
     }
 }
@@ -188,14 +184,14 @@ mod tests {
 
     #[test]
     fn test_plan() {
-        let mut p:LgPlan<BindingsExpr> = LgPlan::new();
+        let mut p: LogicalPlan<BindingsExpr> = LogicalPlan::new();
         let a = p.add_operator(BindingsExpr::OrderBy);
         let b = p.add_operator(BindingsExpr::Output);
         let c = p.add_operator(BindingsExpr::Limit);
-        p.add_relation(&a, &b);
-        p.add_relation(&a, &c);
-        p.add_relation(&b, &c);
+        p.add_flow(&a, &b);
+        p.add_flow(&a, &c);
+        p.add_flow(&b, &c);
         assert_eq!(3, p.operators().len());
-        assert_eq!(3, p.relations().len());
+        assert_eq!(3, p.flows().len());
     }
 }

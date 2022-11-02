@@ -39,15 +39,36 @@ impl EvaluatorPlanner {
         }
     }
 
-    pub fn compile_dag(&self, plan: LogicalPlan) -> EvalPlan {
+    pub fn compile_dag(&self, plan: LogicalPlan<BindingsExpr>) -> EvalPlan {
         self.plan_eval_dag(plan)
     }
 
     #[inline]
-    fn plan_eval_dag(&self, lg: LogicalPlan) -> EvalPlan {
-        let plan = lg.0;
+    fn plan_eval_dag(&self, lg: LogicalPlan<BindingsExpr>) -> EvalPlan {
         let mut eval_plan = EvalPlan::default();
-        eval_plan.0 = plan.map(|_, n| self.get_eval_node(n), |_, e| e.clone());
+        let ops = lg.operators();
+        let flows = lg.flows();
+
+        let mut seen = HashMap::new();
+
+        flows.into_iter().for_each(|r| {
+            let (s, d) = r;
+
+            let mut nodes = vec![];
+            for op_id in vec![s, d] {
+                let logical_op = &ops[op_id.index() - 1];
+                let eval_op = if let Some(op) = seen.get(op_id) {
+                    *op
+                } else {
+                    let id = eval_plan.0.add_node(self.get_eval_node(logical_op));
+                    seen.insert(op_id, id);
+                    id
+                };
+                nodes.push(eval_op)
+            }
+
+            eval_plan.0.add_edge(nodes[0], nodes[1], ());
+        });
 
         eval_plan
     }
