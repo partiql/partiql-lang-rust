@@ -1,45 +1,122 @@
-use crate::schema::{Assertion, Namespace, TestCase, TestDocument};
-use codegen::{Function, Module, Scope};
+use crate::schema::spec::{Assertion, Namespace, TestCase, TestDocument};
+use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
 
-/// Defines a test code generation object
+use crate::StringExt;
+use codegen::{Function, Module, Scope};
+use std::collections::HashMap;
+
+#[derive(Debug)]
+pub enum TestComponent {
+    Scope(TestScope),
+    Module(TestModule),
+}
+
+#[derive(Debug)]
+pub struct TestScope {
+    pub module: Module,
+}
+
+#[derive(Debug, Default)]
+pub struct TestModule {
+    pub children: HashMap<String, TestComponent>,
+}
+
+impl TestModule {
+    pub fn insert(&mut self, path: &[&String], scope: TestScope) {
+        if let Some((first, rest)) = path.split_first() {
+            if rest.is_empty() {
+                self.children
+                    .insert(first.to_string(), TestComponent::Scope(scope));
+            } else {
+                let child = self
+                    .children
+                    .entry((*first).clone())
+                    .or_insert_with(|| TestComponent::Module(TestModule::default()));
+                if let TestComponent::Module(child_mod) = child {
+                    child_mod.insert(rest, scope)
+                } else {
+                    unreachable!();
+                }
+            }
+        }
+    }
+}
+
+/// Generates a [`TestModule`] root from a [`TestRoot`] specification.
+#[derive(Debug)]
 pub struct Generator {
-    pub test_document: TestDocument,
+    result: TestModule,
+    curr_path: Vec<String>,
 }
 
 impl Generator {
-    /// Generates a `Scope` from the `Generator`'s `test_document`
-    pub fn generate_scope(&self) -> Scope {
-        test_document_to_scope(&self.test_document)
+    pub fn new() -> Generator {
+        Self {
+            result: Default::default(),
+            curr_path: Default::default(),
+        }
+    }
+
+    pub fn generate(mut self, root: TestRoot) -> miette::Result<TestModule> {
+        let TestRoot { fail, success } = root;
+        for f in fail {
+            self.test_entry(f)
+        }
+        for s in success {
+            self.test_entry(s)
+        }
+
+        Ok(self.result)
+    }
+
+    fn test_entry(&mut self, entry: TestEntry) {
+        match entry {
+            TestEntry::Dir(TestDir { dir_name, contents }) => {
+                self.curr_path.push(dir_name);
+                for c in contents {
+                    self.test_entry(c);
+                }
+                self.curr_path.pop();
+            }
+            TestEntry::Doc(TestFile {
+                file_name,
+                contents,
+            }) => {
+                let mod_name = file_name.replace(".ion", "").escaped_snake_case();
+                let out_file = format!("{}.rs", &mod_name);
+                let path: Vec<_> = self
+                    .curr_path
+                    .iter()
+                    .chain(std::iter::once(&out_file))
+                    .collect();
+                let mut module = Module::new(&mod_name);
+                gen_tests(module.scope(), &contents);
+                self.result.insert(&path, TestScope { module });
+            }
+        }
     }
 }
 
-/// Converts a `TestDocument` into a `Scope`
-fn test_document_to_scope(test_document: &TestDocument) -> Scope {
-    let mut scope = Scope::new();
+fn gen_tests(scope: &mut Scope, test_document: &TestDocument) {
     for namespace in &test_document.namespaces {
-        scope.push_module(namespace_to_module(namespace));
+        gen_mod(scope, namespace);
     }
     for test in &test_document.test_cases {
-        scope.push_fn(test_case_to_function(test));
+        gen_test(scope, test);
     }
-    scope
 }
 
-/// Converts a `Namespace` into a `Module`
-fn namespace_to_module(namespace: &Namespace) -> Module {
-    let mut module = Module::new(&*namespace.name);
+fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
+    let module = scope.new_module(&namespace.name);
     for ns in &namespace.namespaces {
-        module.push_module(namespace_to_module(ns));
+        gen_mod(module.scope(), ns);
     }
     for test in &namespace.test_cases {
-        module.push_fn(test_case_to_function(test));
+        gen_test(module.scope(), test);
     }
-    module
 }
-
-/// Converts a test case into a testing `Function`
-fn test_case_to_function(test_case: &TestCase) -> Function {
-    let mut test_fn: Function = Function::new(&test_case.test_name);
+fn gen_test(scope: &mut Scope, test_case: &TestCase) {
+    let test_fn: &mut Function = scope.new_fn(&test_case.test_name);
     test_fn.attr("test");
     test_fn.line(format!("let statement = r#\"{}\"#;", &test_case.statement));
     for assertion in &test_case.assertions {
@@ -59,7 +136,6 @@ fn test_case_to_function(test_case: &TestCase) -> Function {
             }
         }
     }
-    test_fn
 }
 
 #[cfg(test)]
