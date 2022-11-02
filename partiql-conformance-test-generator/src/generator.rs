@@ -104,6 +104,7 @@ fn gen_tests(scope: &mut Scope, test_document: &TestDocument) {
 
 fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
     let module = scope.new_module(&namespace.name.escape_module_name());
+
     for ns in &namespace.namespaces {
         gen_mod(module.scope(), ns);
     }
@@ -115,16 +116,19 @@ fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
 fn gen_test(scope: &mut Scope, test_case: &TestCase) {
     let test_fn: &mut Function = scope.new_fn(&test_case.test_name.escape_test_name());
     test_fn.attr("test");
-    test_fn.line(format!("let statement = r#\"{}\"#;", &test_case.statement));
     for assertion in &test_case.assertions {
         match assertion {
             Assertion::SyntaxSuccess => {
-                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
-                test_fn.line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", statement, res);"#);
+                test_fn.line(format!(
+                    r####"crate::pass_syntax(r#"{}"#);"####,
+                    &test_case.statement
+                ));
             }
             Assertion::SyntaxFail => {
-                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
-                test_fn.line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", statement, res);"#);
+                test_fn.line(format!(
+                    r####"crate::fail_syntax(r#"{}"#);"####,
+                    &test_case.statement
+                ));
             }
             Assertion::NotYetImplemented => {
                 // for `NotYetImplemented` assertions, add the 'ignore' annotation to the test case
