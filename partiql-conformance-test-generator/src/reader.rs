@@ -12,7 +12,7 @@ use crate::schema::spec::{
     Assertion, Assertions, Namespace, Namespaces, TestCase, TestCases, TestDocument,
 };
 use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn read_schema(root: impl AsRef<Path>) -> miette::Result<TestRoot> {
     read_root(&root).map(|r| TestRoot(r))

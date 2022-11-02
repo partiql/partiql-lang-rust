@@ -71,8 +71,6 @@ impl Writer {
         module: TestModule,
         depth: u8,
     ) -> miette::Result<()> {
-        println!("####{}::{:?}", depth, &path.as_ref());
-
         if self.config.depth.is_exceeded(&depth) {
             self.write_collapsed_module(&path, module)
         } else {
@@ -107,7 +105,7 @@ impl Writer {
         let name = path.as_ref().file_name().unwrap().to_str().unwrap();
         let mut module = collapse_module(name, module)?;
 
-        let mut path = PathBuf::from(path.as_ref()).with_extension("rs");
+        let path = PathBuf::from(path.as_ref()).with_extension("rs");
         write_scope(path, module.scope())
     }
 }
@@ -147,7 +145,6 @@ fn write_dir_mod<'a>(
 }
 
 fn write_scope(path: impl AsRef<Path>, scope: &Scope) -> miette::Result<()> {
-    println!("write_scope-{:?}", path.as_ref());
     let contents = format!("{}{}", FILE_HEADER, scope.to_string());
 
     let mut file = File::create(path).into_diagnostic()?;
