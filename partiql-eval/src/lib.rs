@@ -50,7 +50,6 @@ mod tests {
         };
 
         let plan = planner.compile_dag(logical);
-        // dbg!(&plan);
         let mut evaluator = DagEvaluator::new(bindings);
 
         if let Ok(out) = evaluator.execute_dag(plan) {
