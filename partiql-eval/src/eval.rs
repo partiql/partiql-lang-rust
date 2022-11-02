@@ -297,35 +297,56 @@ pub enum EvalBinop {
     Gteq,
     Lt,
     Lteq,
+
+    // Arithmetic ops
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Exp,
 }
 
 impl EvalExpr for EvalBinopExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let lhs = self.lhs.evaluate(bindings, ctx);
         let rhs = self.rhs.evaluate(bindings, ctx);
-        match self.op {
-            EvalBinop::And => todo!(),
-            EvalBinop::Or => todo!(),
-            EvalBinop::Concat => {
-                // TODO non-naive concat
-                let lhs = if let Value::String(s) = lhs {
-                    *s
-                } else {
-                    format!("{:?}", lhs)
-                };
-                let rhs = if let Value::String(s) = rhs {
-                    *s
-                } else {
-                    format!("{:?}", lhs)
-                };
-                Value::String(Box::new(format!("{}{}", lhs, rhs)))
+        // Missing and Null propagation. Missing has precedence over Null
+        if lhs == Value::Missing || rhs == Value::Missing {
+            Value::Missing
+        } else if lhs == Value::Null || rhs == Value::Null {
+            Value::Null
+        } else {
+            match self.op {
+                EvalBinop::And => todo!(),
+                EvalBinop::Or => todo!(),
+                EvalBinop::Concat => {
+                    // TODO non-naive concat
+                    let lhs = if let Value::String(s) = lhs {
+                        *s
+                    } else {
+                        format!("{:?}", lhs)
+                    };
+                    let rhs = if let Value::String(s) = rhs {
+                        *s
+                    } else {
+                        format!("{:?}", lhs)
+                    };
+                    Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                }
+                EvalBinop::Eq => todo!(),
+                EvalBinop::Neq => todo!(),
+                EvalBinop::Gt => Boolean(lhs > rhs),
+                EvalBinop::Gteq => Boolean(lhs >= rhs),
+                EvalBinop::Lt => Boolean(lhs < rhs),
+                EvalBinop::Lteq => Boolean(lhs <= rhs),
+                EvalBinop::Add => lhs + rhs,
+                EvalBinop::Sub => lhs - rhs,
+                EvalBinop::Mul => lhs * rhs,
+                EvalBinop::Div => lhs / rhs,
+                EvalBinop::Mod => lhs % rhs,
+                EvalBinop::Exp => todo!("Exponentiation"),
             }
-            EvalBinop::Eq => todo!(),
-            EvalBinop::Neq => todo!(),
-            EvalBinop::Gt => Boolean(lhs > rhs),
-            EvalBinop::Gteq => Boolean(lhs >= rhs),
-            EvalBinop::Lt => Boolean(lhs < rhs),
-            EvalBinop::Lteq => Boolean(lhs <= rhs),
         }
     }
 }
