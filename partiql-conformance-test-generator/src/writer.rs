@@ -1,5 +1,5 @@
 use crate::generator::{TestComponent, TestModule};
-use crate::StringExt;
+
 use codegen::Scope;
 use miette::IntoDiagnostic;
 
@@ -33,7 +33,7 @@ fn write_module(path: impl AsRef<Path>, module: TestModule) -> miette::Result<()
                 write_scope(child_path, scope.module.scope())?
             }
             TestComponent::Module(module) => {
-                child_path.push(&name.escaped_snake_case());
+                child_path.push(&name);
 
                 write_module(child_path, module)?
             }
@@ -68,7 +68,7 @@ fn write_dir_mod<'a>(
     std::fs::create_dir_all(&path).into_diagnostic()?;
 
     let contents = sub_mods
-        .map(|m| format!("mod {};", m.replace(".rs", "").escaped_snake_case()))
+        .map(|m| format!("mod {};", m.replace(".rs", "")))
         .collect::<Vec<String>>()
         .join("\n");
 

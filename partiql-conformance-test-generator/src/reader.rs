@@ -1,8 +1,3 @@
-use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
-use crate::{
-    Assertion, Assertions, Namespace, Namespaces, StringExt, TestCase, TestCases, TestDocument,
-};
-
 use ion_rs::value::owned::Element;
 use ion_rs::value::reader::{element_reader, ElementReader};
 use ion_rs::value::{IonElement, IonSequence, IonStruct};
@@ -13,7 +8,10 @@ use std::ffi::OsStr;
 use std::fs;
 use std::fs::DirEntry;
 
-use std::ops::Add;
+use crate::schema::spec::{
+    Assertion, Assertions, Namespace, Namespaces, TestCase, TestCases, TestDocument,
+};
+use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
 use std::path::{Path, PathBuf};
 
 pub fn read_schema(root: impl AsRef<Path>) -> miette::Result<TestRoot> {
@@ -124,8 +122,7 @@ fn test_namespace(element: &Element) -> Namespace {
     let name = annot
         .first()
         .expect("expected an annotation for the namespace")
-        .escaped_snake_case()
-        .add("_namespace");
+        .to_string();
 
     let mut namespaces: Namespaces = Vec::new();
     let mut test_cases: TestCases = Vec::new();
@@ -175,8 +172,7 @@ fn test_case(element: &Element) -> TestCase {
         .expect("name")
         .as_str()
         .expect("as_str()")
-        .escaped_snake_case()
-        .add("_test");
+        .to_string();
     let statement = test_struct
         .get("statement")
         .expect("statement")

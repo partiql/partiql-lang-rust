@@ -1,18 +1,12 @@
+use crate::generator::Generator;
+use crate::reader::read_schema;
+use std::path::Path;
+
 mod generator;
 mod reader;
 mod schema;
 mod util;
 mod writer;
-
-use crate::generator::Generator;
-use crate::schema::spec::{
-    Assertion, Assertions, Namespace, Namespaces, TestCase, TestCases, TestDocument,
-};
-use crate::util::StringExt;
-
-use std::path::Path;
-
-use crate::reader::read_schema;
 
 // TODO docs
 #[derive(Debug, Copy, Clone)]
