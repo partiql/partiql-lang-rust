@@ -278,8 +278,8 @@ mod tests {
 
         let sink = lg.add_operator(BindingsExpr::Output);
 
-        lg.add_flow(&from, &project);
-        lg.add_flow(&project, &sink);
+        lg.add_flow(from, project);
+        lg.add_flow(project, sink);
 
         if let Value::Bag(b) = evaluate_dag(lg, data_3_tuple()) {
             assert_eq!(b.len(), 3);

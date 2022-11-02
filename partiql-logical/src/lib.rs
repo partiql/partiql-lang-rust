@@ -1,7 +1,7 @@
 use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
 
-#[derive(Debug, Hash)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub struct OpId(usize);
 
 impl OpId {
@@ -10,48 +10,43 @@ impl OpId {
     }
 }
 
-impl PartialEq<Self> for OpId {
-    fn eq(&self, other: &Self) -> bool {
-        self.index() == other.index()
-    }
-}
-
-impl Eq for OpId {}
-
 #[derive(Debug)]
-pub struct LogicalPlan<'a, T> {
+pub struct LogicalPlan<T> {
     nodes: Vec<T>,
-    edges: Vec<(&'a OpId, &'a OpId)>,
-    node_count: usize,
+    edges: Vec<(OpId, OpId)>,
 }
 
-impl<'b, T> LogicalPlan<'b, T> {
+impl<T> LogicalPlan<T> {
     pub fn new() -> Self {
         LogicalPlan {
             nodes: vec![],
             edges: vec![],
-            node_count: 0,
         }
     }
 
     pub fn add_operator(&mut self, op: T) -> OpId {
         self.nodes.push(op);
-        self.node_count += 1;
-        OpId(self.node_count)
+        OpId(self.operator_count())
     }
 
-    pub fn add_flow<'a: 'b>(&mut self, src: &'a OpId, dst: &'a OpId) {
-        let src_index = src.index() - 1;
-        let dst_index = dst.index() - 1;
-        self.nodes.get(src_index).expect("No such operator exists");
-        self.nodes.get(dst_index).expect("No such operator exists");
+    pub fn add_flow(&mut self, src: OpId, dst: OpId) {
+        let src_idx = src.index() - 1;
+        let dst_idx = dst.index() - 1;
+        assert!(src_idx <= self.operator_count());
+        assert!(dst_idx <= self.operator_count());
 
         self.edges.push((src, dst));
     }
+
+    pub fn operator_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn operators(&self) -> &Vec<T> {
         &self.nodes
     }
-    pub fn flows(&self) -> &Vec<(&OpId, &OpId)> {
+
+    pub fn flows(&self) -> &Vec<(OpId, OpId)> {
         &self.edges
     }
 }
@@ -188,9 +183,9 @@ mod tests {
         let a = p.add_operator(BindingsExpr::OrderBy);
         let b = p.add_operator(BindingsExpr::Output);
         let c = p.add_operator(BindingsExpr::Limit);
-        p.add_flow(&a, &b);
-        p.add_flow(&a, &c);
-        p.add_flow(&b, &c);
+        p.add_flow(a, b);
+        p.add_flow(a, c);
+        p.add_flow(b, c);
         assert_eq!(3, p.operators().len());
         assert_eq!(3, p.flows().len());
     }
