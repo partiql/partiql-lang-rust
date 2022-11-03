@@ -1,14 +1,53 @@
 use partiql_value::{BindingsName, Value};
-use petgraph::prelude::StableGraph;
-use petgraph::Directed;
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct LogicalPlan(pub StableGraph<BindingsExpr, (), Directed>);
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub struct OpId(usize);
 
-impl LogicalPlan {
+impl OpId {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct LogicalPlan<T> {
+    nodes: Vec<T>,
+    edges: Vec<(OpId, OpId)>,
+}
+
+impl<T> LogicalPlan<T> {
     pub fn new() -> Self {
-        LogicalPlan(StableGraph::<BindingsExpr, (), Directed>::new())
+        LogicalPlan {
+            nodes: vec![],
+            edges: vec![],
+        }
+    }
+
+    pub fn add_operator(&mut self, op: T) -> OpId {
+        self.nodes.push(op);
+        OpId(self.operator_count())
+    }
+
+    pub fn add_flow(&mut self, src: OpId, dst: OpId) {
+        let src_idx = src.index() - 1;
+        let dst_idx = dst.index() - 1;
+        assert!(src_idx <= self.operator_count());
+        assert!(dst_idx <= self.operator_count());
+
+        self.edges.push((src, dst));
+    }
+
+    pub fn operator_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub fn operators(&self) -> &Vec<T> {
+        &self.nodes
+    }
+
+    pub fn flows(&self) -> &Vec<(OpId, OpId)> {
+        &self.edges
     }
 }
 
@@ -132,4 +171,22 @@ pub struct SelectValue {
 #[derive(Debug)]
 pub struct Distinct {
     pub out: Box<BindingsExpr>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plan() {
+        let mut p: LogicalPlan<BindingsExpr> = LogicalPlan::new();
+        let a = p.add_operator(BindingsExpr::OrderBy);
+        let b = p.add_operator(BindingsExpr::Output);
+        let c = p.add_operator(BindingsExpr::Limit);
+        p.add_flow(a, b);
+        p.add_flow(a, c);
+        p.add_flow(b, c);
+        assert_eq!(3, p.operators().len());
+        assert_eq!(3, p.flows().len());
+    }
 }

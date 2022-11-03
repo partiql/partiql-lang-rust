@@ -41,7 +41,7 @@ mod tests {
     }
 
     // TODO: rename once we move to DAG model completely
-    fn evaluate_dag(logical: LogicalPlan, bindings: MapBindings<Value>) -> Value {
+    fn evaluate_dag(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
         // TODO remove once we agree on using evaluate output in the following PR:
         // https://github.com/partiql/partiql-lang-rust/pull/202
         let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
@@ -256,15 +256,15 @@ mod tests {
 
     #[test]
     fn select_dag() {
-        // Plan for `select a as b from data`
-        let mut logical = LogicalPlan::new();
-        let from = logical.0.add_node(BindingsExpr::Scan(logical::Scan {
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
         }));
 
-        let project = logical.0.add_node(BindingsExpr::Project(logical::Project {
+        let project = lg.add_operator(BindingsExpr::Project(logical::Project {
             exprs: HashMap::from([(
                 "b".to_string(),
                 ValueExpr::Path(
@@ -276,13 +276,12 @@ mod tests {
             )]),
         }));
 
-        let sink = logical.0.add_node(BindingsExpr::Output);
+        let sink = lg.add_operator(BindingsExpr::Output);
 
-        logical
-            .0
-            .extend_with_edges(&[(from, project), (project, sink)]);
+        lg.add_flow(from, project);
+        lg.add_flow(project, sink);
 
-        if let Value::Bag(b) = evaluate_dag(logical, data_3_tuple()) {
+        if let Value::Bag(b) = evaluate_dag(lg, data_3_tuple()) {
             assert_eq!(b.len(), 3);
         } else {
             panic!("Wrong output")
