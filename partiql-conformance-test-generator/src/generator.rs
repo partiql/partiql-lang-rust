@@ -1,7 +1,7 @@
 use crate::schema::spec::{Assertion, Namespace, TestCase, TestDocument};
 use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
 
-use crate::StringExt;
+use crate::util::Escaper;
 use codegen::{Function, Module, Scope};
 use std::collections::HashMap;
 
@@ -58,12 +58,8 @@ impl Generator {
     }
 
     pub fn generate(mut self, root: TestRoot) -> miette::Result<TestModule> {
-        let TestRoot { fail, success } = root;
-        for f in fail {
-            self.test_entry(f)
-        }
-        for s in success {
-            self.test_entry(s)
+        for entry in root.0 {
+            self.test_entry(entry)
         }
 
         Ok(self.result)
@@ -72,7 +68,7 @@ impl Generator {
     fn test_entry(&mut self, entry: TestEntry) {
         match entry {
             TestEntry::Dir(TestDir { dir_name, contents }) => {
-                self.curr_path.push(dir_name);
+                self.curr_path.push(dir_name.escape_path());
                 for c in contents {
                     self.test_entry(c);
                 }
@@ -82,7 +78,7 @@ impl Generator {
                 file_name,
                 contents,
             }) => {
-                let mod_name = file_name.replace(".ion", "").escaped_snake_case();
+                let mod_name = file_name.replace(".ion", "").escape_path();
                 let out_file = format!("{}.rs", &mod_name);
                 let path: Vec<_> = self
                     .curr_path
@@ -107,7 +103,8 @@ fn gen_tests(scope: &mut Scope, test_document: &TestDocument) {
 }
 
 fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
-    let module = scope.new_module(&namespace.name);
+    let module = scope.new_module(&namespace.name.escape_module_name());
+
     for ns in &namespace.namespaces {
         gen_mod(module.scope(), ns);
     }
@@ -115,19 +112,23 @@ fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
         gen_test(module.scope(), test);
     }
 }
+
 fn gen_test(scope: &mut Scope, test_case: &TestCase) {
-    let test_fn: &mut Function = scope.new_fn(&test_case.test_name);
+    let test_fn: &mut Function = scope.new_fn(&test_case.test_name.escape_test_name());
     test_fn.attr("test");
-    test_fn.line(format!("let statement = r#\"{}\"#;", &test_case.statement));
     for assertion in &test_case.assertions {
         match assertion {
             Assertion::SyntaxSuccess => {
-                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
-                test_fn.line(r#"assert!(res.is_ok(), "For `{}`, expected `Ok(_)`, but was `{:#?}`", statement, res);"#);
+                test_fn.line(format!(
+                    r####"crate::pass_syntax(r#"{}"#);"####,
+                    &test_case.statement
+                ));
             }
             Assertion::SyntaxFail => {
-                test_fn.line("let res = partiql_parser::Parser::default().parse(statement);");
-                test_fn.line(r#"assert!(res.is_err(), "For `{}`, expected `Err(_)`, but was `{:#?}`", statement, res);"#);
+                test_fn.line(format!(
+                    r####"crate::fail_syntax(r#"{}"#);"####,
+                    &test_case.statement
+                ));
             }
             Assertion::NotYetImplemented => {
                 // for `NotYetImplemented` assertions, add the 'ignore' annotation to the test case

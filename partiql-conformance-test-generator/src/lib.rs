@@ -1,18 +1,13 @@
+use crate::generator::Generator;
+use crate::reader::read_schema;
+use crate::writer::{TreeDepth, Writer, WriterConfig};
+use std::path::Path;
+
 mod generator;
 mod reader;
 mod schema;
 mod util;
 mod writer;
-
-use crate::generator::Generator;
-use crate::schema::spec::{
-    Assertion, Assertions, Namespace, Namespaces, TestCase, TestCases, TestDocument,
-};
-use crate::util::StringExt;
-
-use std::path::Path;
-
-use crate::reader::read_schema;
 
 // TODO docs
 #[derive(Debug, Copy, Clone)]
@@ -49,7 +44,8 @@ impl Config {
         let scopes = Generator::new().generate(schema)?;
 
         // TODO implement OverwriteStrategy
-        writer::write_scopes(out_path, scopes)?;
+        let config = WriterConfig::new(TreeDepth::N(4));
+        Writer::new(config).write(out_path, scopes)?;
         Ok(())
     }
 }
