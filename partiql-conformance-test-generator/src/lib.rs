@@ -40,12 +40,12 @@ impl Config {
         test_data: impl AsRef<Path>,
         out_path: impl AsRef<Path>,
     ) -> miette::Result<()> {
-        let schema = read_schema(test_data)?;
-        let scopes = Generator::new().generate(schema)?;
+        let schema = read_schema(&test_data)?;
+        let tests = Generator::new().generate(schema)?;
 
-        // TODO implement OverwriteStrategy
+        // TODO overwrite vs. backup old content?
         let config = WriterConfig::new(TreeDepth::N(4));
-        Writer::new(config).write(out_path, scopes)?;
+        Writer::new(config).write(out_path, tests)?;
         Ok(())
     }
 }

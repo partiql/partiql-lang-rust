@@ -1,9 +1,9 @@
-use crate::schema::spec::{Assertion, Namespace, TestCase, TestDocument};
-use crate::schema::structure::{TestDir, TestEntry, TestFile, TestRoot};
+use crate::schema::spec::*;
+use crate::schema::structure::*;
 
 use crate::util::Escaper;
 use codegen::{Function, Module, Scope};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum TestComponent {
@@ -47,6 +47,7 @@ impl TestModule {
 pub struct Generator {
     result: TestModule,
     curr_path: Vec<String>,
+    seen_fns: Vec<HashSet<String>>,
 }
 
 impl Generator {
@@ -54,6 +55,7 @@ impl Generator {
         Self {
             result: Default::default(),
             curr_path: Default::default(),
+            seen_fns: Default::default(),
         }
     }
 
@@ -79,62 +81,122 @@ impl Generator {
                 contents,
             }) => {
                 let mod_name = file_name.replace(".ion", "").escape_path();
+                let mut module = Module::new(&mod_name);
+                self.gen_tests(module.scope(), &contents);
+
                 let out_file = format!("{}.rs", &mod_name);
                 let path: Vec<_> = self
                     .curr_path
                     .iter()
                     .chain(std::iter::once(&out_file))
                     .collect();
-                let mut module = Module::new(&mod_name);
-                gen_tests(module.scope(), &contents);
                 self.result.insert(&path, TestScope { module });
             }
         }
     }
-}
 
-fn gen_tests(scope: &mut Scope, test_document: &TestDocument) {
-    for namespace in &test_document.namespaces {
-        gen_mod(scope, namespace);
+    fn gen_tests(&mut self, scope: &mut Scope, doc: &PartiQLTestDocument) {
+        self.seen_fns.push(HashSet::new());
+        self.gen_variants(scope, &doc.0);
+        self.seen_fns.pop();
     }
-    for test in &test_document.test_cases {
-        gen_test(scope, test);
-    }
-}
 
-fn gen_mod(scope: &mut Scope, namespace: &Namespace) {
-    let module = scope.new_module(&namespace.name.escape_module_name());
-
-    for ns in &namespace.namespaces {
-        gen_mod(module.scope(), ns);
-    }
-    for test in &namespace.test_cases {
-        gen_test(module.scope(), test);
-    }
-}
-
-fn gen_test(scope: &mut Scope, test_case: &TestCase) {
-    let test_fn: &mut Function = scope.new_fn(&test_case.test_name.escape_test_name());
-    test_fn.attr("test");
-    for assertion in &test_case.assertions {
-        match assertion {
-            Assertion::SyntaxSuccess => {
-                test_fn.line(format!(
-                    r####"crate::pass_syntax(r#"{}"#);"####,
-                    &test_case.statement
-                ));
+    fn gen_variants(&mut self, scope: &mut Scope, variants: &[TestVariant]) {
+        for var in variants {
+            match var {
+                TestVariant::TestCase(test) => self.gen_test(scope, test),
+                TestVariant::Namespace(namespace) => self.gen_mod(scope, namespace),
+                TestVariant::Environments(envs) => self.gen_envs(scope, envs),
+                TestVariant::EquivalenceClass(equivs) => self.gen_equivs(scope, equivs),
             }
-            Assertion::SyntaxFail => {
-                test_fn.line(format!(
-                    r####"crate::fail_syntax(r#"{}"#);"####,
-                    &test_case.statement
-                ));
+        }
+    }
+
+    fn gen_envs(&mut self, _scope: &mut Scope, _envs: &Environments) {
+        // TODO
+    }
+
+    fn gen_equivs(&mut self, _scope: &mut Scope, _equivs: &EquivalenceClass) {
+        // TODO
+    }
+
+    fn gen_mod(&mut self, scope: &mut Scope, namespace: &Namespace) {
+        let module = scope.new_module(&namespace.name.escape_module_name());
+        self.seen_fns.push(HashSet::new());
+        self.gen_variants(module.scope(), &namespace.contents);
+        self.seen_fns.pop();
+    }
+
+    fn intern_test_name(&mut self, mut name: String) -> String {
+        let seen_fns = self.seen_fns.last_mut().unwrap();
+
+        while seen_fns.contains(&name) {
+            name.push('_');
+        }
+
+        seen_fns.insert(name.clone());
+        name
+    }
+
+    fn gen_test(&mut self, scope: &mut Scope, test_case: &TestCase) {
+        let escaped_name = test_case.name.escape_test_name();
+        let name = self.intern_test_name(escaped_name);
+
+        let test_fn: &mut Function = scope.new_fn(&name);
+        test_fn.attr("test");
+        test_fn.attr("allow(text_direction_codepoint_in_literal)");
+
+        let doc = format!("Generated test for test named `{}`", &test_case.name);
+        test_fn.doc(&doc);
+
+        let mut ignore_test = false;
+
+        for assertion in &test_case.assert {
+            match assertion {
+                Assertion::SyntaxSuccess(_) => {
+                    test_fn.line(format!(
+                        r####"crate::pass_syntax(r#"{}"#);"####,
+                        &test_case.statement
+                    ));
+                }
+                Assertion::SyntaxFail(_) => {
+                    test_fn.line(format!(
+                        r####"crate::fail_syntax(r#"{}"#);"####,
+                        &test_case.statement
+                    ));
+                }
+                Assertion::StaticAnalysisFail(_) => {
+                    // TODO semantics tests are not yet implemented
+                    ignore_test = true;
+
+                    test_fn.line(format!(
+                        r####"crate::fail_semantics(r#"{}"#);"####,
+                        &test_case.statement
+                    ));
+                }
+                Assertion::EvaluationSuccess(_) => {
+                    // TODO semantics tests are not yet implemented
+                    ignore_test = true;
+
+                    test_fn.line(format!(
+                        r####"crate::pass_eval(r##"{}"##);"####,
+                        &test_case.statement
+                    ));
+                }
+                Assertion::EvaluationFail(_) => {
+                    // TODO semantics tests are not yet implemented
+                    ignore_test = true;
+
+                    test_fn.line(format!(
+                        r####"crate::fail_eval(r##"{}"##);"####,
+                        &test_case.statement
+                    ));
+                }
             }
-            Assertion::NotYetImplemented => {
-                // for `NotYetImplemented` assertions, add the 'ignore' annotation to the test case
-                test_fn.attr("ignore = \"not yet implemented\"");
-                test_fn.attr("allow(unused_variables)");
-            }
+        }
+
+        if ignore_test {
+            test_fn.attr("ignore = \"not yet implemented\"");
         }
     }
 }

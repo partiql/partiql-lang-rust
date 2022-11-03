@@ -1,69 +1,155 @@
 pub mod structure {
-    use crate::schema::spec::TestDocument;
+    use crate::schema::spec::PartiQLTestDocument;
 
+    #[derive(Debug, Clone)]
     pub struct TestRoot(pub Vec<TestEntry>);
 
+    #[derive(Debug, Clone)]
     pub enum TestEntry {
         Dir(TestDir),
         Doc(TestFile),
     }
 
+    #[derive(Debug, Clone)]
     pub struct TestDir {
         pub dir_name: String,
         pub contents: Vec<TestEntry>,
     }
 
+    #[derive(Debug, Clone)]
     pub struct TestFile {
         pub file_name: String,
-        pub contents: TestDocument,
+        pub contents: PartiQLTestDocument,
     }
 }
 
 pub mod spec {
-    /// Conformance test document containing namespaces and/or tests
-    ///
-    /// Follows the `partiql-tests-data` specified in https://github.com/partiql/partiql-tests/blob/main/partiql-tests-data/partiql-tests-schema.isl.
-    ///
-    /// TODO: when `ion-schema-rust` supports schema code generation based on .isl, replace these
-    ///  objects.
-    pub struct TestDocument {
-        pub namespaces: Namespaces,
-        pub test_cases: TestCases,
+    use ion_rs::value::owned::{Element, Struct};
+
+    #[derive(Debug, Clone)]
+    pub enum TestVariant {
+        TestCase(TestCase),
+        Namespace(Namespace),
+        Environments(Environments),
+        EquivalenceClass(EquivalenceClass),
     }
 
-    pub type Namespaces = Vec<Namespace>;
+    #[derive(Debug, Clone)]
+    pub struct PartiQLTestDocument(pub Vec<TestVariant>);
 
-    /// Namespace can contain other namespaces and/or tests
+    #[derive(Debug, Clone)]
     pub struct Namespace {
         pub name: String,
-        pub namespaces: Namespaces,
-        pub test_cases: TestCases,
+        pub contents: Vec<TestVariant>,
     }
 
-    pub type TestCases = Vec<TestCase>;
+    #[derive(Debug, Clone)]
+    pub struct Environments {
+        pub envs: Struct,
+    }
 
-    /// Test cases have a `test_name` and a PartiQL `statement` along with the `assertions` to check for
-    /// expected behavior(s). In the future, additional fields will be added the `TestCase` struct for
-    /// additional testing configurations.
+    #[derive(Debug, Clone)]
+    pub struct EquivalenceClass {
+        pub id: String,
+        pub statements: Vec<String>,
+    }
+
+    #[derive(Debug, Clone)]
     pub struct TestCase {
-        pub test_name: String,
+        pub name: String,
         pub statement: String,
-        pub assertions: Assertions,
+        pub env: Option<Struct>,
+        pub assert: Vec<Assertion>,
     }
 
-    pub type Assertions = Vec<Assertion>;
-
-    /// Assertion specifies expected behaviors to be checked in the given test case.
-    ///
-    /// Currently just supports 'Syntax'-related assertions. In the future, other assertion variants
-    /// will be added (e.g. static analysis, evaluation). For now, the other assertions will be
-    /// `NotYetImplemented`.
+    #[derive(Debug, Clone)]
     pub enum Assertion {
-        /// Asserts statement is syntactically correct
-        SyntaxSuccess,
-        /// Asserts statement has at least one syntax error
-        SyntaxFail,
-        /// Assertion that has yet to be implemented
-        NotYetImplemented,
+        SyntaxSuccess(SyntaxSuccessAssertion),
+        SyntaxFail(SyntaxFailAssertion),
+        StaticAnalysisFail(StaticAnalysisFailAssertion),
+        EvaluationSuccess(EvaluationSuccessAssertion),
+        EvaluationFail(EvaluationFailAssertion),
+    }
+
+    impl From<SyntaxSuccessAssertion> for Assertion {
+        fn from(assertion: SyntaxSuccessAssertion) -> Self {
+            Assertion::SyntaxSuccess(assertion)
+        }
+    }
+
+    impl From<SyntaxFailAssertion> for Assertion {
+        fn from(assertion: SyntaxFailAssertion) -> Self {
+            Assertion::SyntaxFail(assertion)
+        }
+    }
+
+    impl From<StaticAnalysisFailAssertion> for Assertion {
+        fn from(assertion: StaticAnalysisFailAssertion) -> Self {
+            Assertion::StaticAnalysisFail(assertion)
+        }
+    }
+
+    impl From<EvaluationSuccessAssertion> for Assertion {
+        fn from(assertion: EvaluationSuccessAssertion) -> Self {
+            Assertion::EvaluationSuccess(assertion)
+        }
+    }
+
+    impl From<EvaluationFailAssertion> for Assertion {
+        fn from(assertion: EvaluationFailAssertion) -> Self {
+            Assertion::EvaluationFail(assertion)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum EvaluationMode {
+        EvalModeError,
+        EvalModeCoerce,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum EvaluationModeSymbolOrList {
+        Mode(EvaluationMode),
+        List(Vec<EvaluationMode>),
+    }
+
+    impl From<EvaluationMode> for EvaluationModeSymbolOrList {
+        fn from(mode: EvaluationMode) -> Self {
+            EvaluationModeSymbolOrList::Mode(mode)
+        }
+    }
+
+    impl From<Vec<EvaluationMode>> for EvaluationModeSymbolOrList {
+        fn from(mode: Vec<EvaluationMode>) -> Self {
+            EvaluationModeSymbolOrList::List(mode)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct SyntaxSuccessAssertion {
+        pub result: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct SyntaxFailAssertion {
+        pub result: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct StaticAnalysisFailAssertion {
+        pub result: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct EvaluationSuccessAssertion {
+        pub result: String,
+        pub output: Element,
+        pub eval_mode: EvaluationModeSymbolOrList,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct EvaluationFailAssertion {
+        pub result: String,
+        pub eval_mode: EvaluationModeSymbolOrList,
     }
 }
