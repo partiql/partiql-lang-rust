@@ -175,7 +175,7 @@ impl Generator {
                     ));
                 }
                 Assertion::EvaluationSuccess(_) => {
-                    // TODO semantics tests are not yet implemented
+                    // TODO evaluation success tests are not yet implemented
                     ignore_test = true;
 
                     test_fn.line(format!(
@@ -184,7 +184,7 @@ impl Generator {
                     ));
                 }
                 Assertion::EvaluationFail(_) => {
-                    // TODO semantics tests are not yet implemented
+                    // TODO evaluation fail tests are not yet implemented
                     ignore_test = true;
 
                     test_fn.line(format!(
