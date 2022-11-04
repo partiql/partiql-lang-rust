@@ -9,7 +9,10 @@ use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, Tuple, UnaryPlus, Value};
+use partiql_value::{
+    partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, NullableEq, NullableOrd, Tuple, UnaryPlus,
+    Value,
+};
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
@@ -333,51 +336,51 @@ pub enum EvalBinOp {
 
 impl EvalExpr for EvalBinOpExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        #[inline]
+        fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
+            match (op, value) {
+                (EvalBinOp::And, Value::Boolean(false)) => Some(false.into()),
+                (EvalBinOp::Or, Value::Boolean(true)) => Some(true.into()),
+                (_, Value::Missing) => Some(Value::Missing),
+                _ => None,
+            }
+        }
+
         let lhs = self.lhs.evaluate(bindings, ctx);
+        if let Some(propagate) = short_circuit(&self.op, &lhs) {
+            return propagate;
+        }
+
         let rhs = self.rhs.evaluate(bindings, ctx);
         match self.op {
             EvalBinOp::And => lhs.and(rhs),
             EvalBinOp::Or => lhs.or(rhs),
-            _ => {
-                // Missing and Null propagation. Missing has precedence over Null
-                if lhs == Value::Missing || rhs == Value::Missing {
-                    Value::Missing
-                } else if lhs == Value::Null || rhs == Value::Null {
-                    Value::Null
+            EvalBinOp::Concat => {
+                // TODO non-naive concat. Also doesn't properly propagate MISSING and NULL
+                let lhs = if let Value::String(s) = lhs {
+                    *s
                 } else {
-                    match self.op {
-                        EvalBinOp::Concat => {
-                            // TODO non-naive concat
-                            let lhs = if let Value::String(s) = lhs {
-                                *s
-                            } else {
-                                format!("{:?}", lhs)
-                            };
-                            let rhs = if let Value::String(s) = rhs {
-                                *s
-                            } else {
-                                format!("{:?}", lhs)
-                            };
-                            Value::String(Box::new(format!("{}{}", lhs, rhs)))
-                        }
-                        EvalBinOp::Eq => Value::from(lhs == rhs),
-                        EvalBinOp::Neq => Value::from(lhs != rhs),
-                        EvalBinOp::Gt => Boolean(lhs > rhs),
-                        EvalBinOp::Gteq => Boolean(lhs >= rhs),
-                        EvalBinOp::Lt => Boolean(lhs < rhs),
-                        EvalBinOp::Lteq => Boolean(lhs <= rhs),
-                        EvalBinOp::Add => lhs + rhs,
-                        EvalBinOp::Sub => lhs - rhs,
-                        EvalBinOp::Mul => lhs * rhs,
-                        EvalBinOp::Div => lhs / rhs,
-                        EvalBinOp::Mod => lhs % rhs,
-                        EvalBinOp::Exp => todo!("Exponentiation"),
-                        EvalBinOp::And | EvalBinOp::Or => {
-                            unreachable!("Ops already covered")
-                        }
-                    }
-                }
+                    format!("{:?}", lhs)
+                };
+                let rhs = if let Value::String(s) = rhs {
+                    *s
+                } else {
+                    format!("{:?}", lhs)
+                };
+                Value::String(Box::new(format!("{}{}", lhs, rhs)))
             }
+            EvalBinOp::Eq => lhs.eq(rhs),
+            EvalBinOp::Neq => lhs.neq(rhs),
+            EvalBinOp::Gt => lhs.gt(rhs),
+            EvalBinOp::Gteq => lhs.gteq(rhs),
+            EvalBinOp::Lt => lhs.lt(rhs),
+            EvalBinOp::Lteq => lhs.lteq(rhs),
+            EvalBinOp::Add => lhs + rhs,
+            EvalBinOp::Sub => lhs - rhs,
+            EvalBinOp::Mul => lhs * rhs,
+            EvalBinOp::Div => lhs / rhs,
+            EvalBinOp::Mod => lhs % rhs,
+            EvalBinOp::Exp => todo!("Exponentiation"),
         }
     }
 }

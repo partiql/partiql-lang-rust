@@ -257,6 +257,92 @@ impl ops::Not for Value {
     }
 }
 
+// `Value` `eq` and `neq` with Missing and Null propagation
+pub trait NullableEq {
+    type Output;
+
+    fn eq(self, rhs: Self) -> Self::Output;
+    fn neq(self, rhs: Self) -> Self::Output;
+}
+
+// `Value` comparison with Missing and Null propagation
+pub trait NullableOrd {
+    type Output;
+
+    fn lt(self, rhs: Self) -> Self::Output;
+    fn gt(self, rhs: Self) -> Self::Output;
+    fn lteq(self, rhs: Self) -> Self::Output;
+    fn gteq(self, rhs: Self) -> Self::Output;
+}
+
+impl NullableEq for Value {
+    type Output = Self;
+
+    fn eq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self == rhs),
+        }
+    }
+
+    fn neq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self != rhs),
+        }
+    }
+}
+
+impl NullableOrd for Value {
+    type Output = Self;
+
+    fn lt(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self < rhs),
+        }
+    }
+
+    fn gt(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self > rhs),
+        }
+    }
+
+    fn lteq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self <= rhs),
+        }
+    }
+
+    fn gteq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self >= rhs),
+        }
+    }
+}
+
 fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
     match value {
         Value::Integer(int_value) => Value::Decimal(rust_decimal::Decimal::from(*int_value)),
