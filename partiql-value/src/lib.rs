@@ -302,6 +302,8 @@ impl NullableEq for Value {
 impl NullableOrd for Value {
     type Output = Self;
 
+    // TODO: comparison is not right for data type mismatches. Equality permits mistyped arguments
+    //  while comparison ops should return Missing
     fn lt(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
             (Value::Missing, _) => Value::Missing,
@@ -1295,5 +1297,35 @@ mod tests {
         assert_eq!(Value::Missing, Value::from(false).or(Value::from(123)));
         assert_eq!(Value::Missing, Value::from(123).or(Value::from(true)));
         assert_eq!(Value::Missing, Value::from(true).or(Value::from(123)));
+    }
+
+    // TODO: other comparison op tests
+    #[test]
+    fn partiql_value_equality() {
+        // TODO: many equality tests missing. Can use conformance tests to fill the gap or some other
+        //  tests
+        // Eq
+        assert_eq!(Value::from(true), Value::from(true).eq(Value::from(true)));
+        assert_eq!(Value::from(false), Value::from(true).eq(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(true).eq(Value::Null));
+        assert_eq!(Value::Null, Value::Null.eq(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).eq(Value::Missing));
+        assert_eq!(Value::Missing, Value::Missing.eq(Value::from(true)));
+
+        // different types result in boolean
+        assert_eq!(Value::from(false), Value::from(true).eq(Value::from("abc")));
+        assert_eq!(Value::from(false), Value::from("abc").eq(Value::from(true)));
+
+        // Neq
+        assert_eq!(Value::from(false), Value::from(true).neq(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).neq(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(true).neq(Value::Null));
+        assert_eq!(Value::Null, Value::Null.neq(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).neq(Value::Missing));
+        assert_eq!(Value::Missing, Value::Missing.neq(Value::from(true)));
+
+        // different types result in boolean
+        assert_eq!(Value::from(true), Value::from(true).neq(Value::from("abc")));
+        assert_eq!(Value::from(true), Value::from("abc").neq(Value::from(true)));
     }
 }
