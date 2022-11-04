@@ -155,6 +155,34 @@ impl ops::Rem for Value {
     }
 }
 
+impl ops::Neg for Value {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match &self {
+            // TODO: handle overflow for negation
+            Value::Null => Value::Null,
+            Value::Missing => Value::Missing,
+            Value::Integer(i) => Value::from(-i),
+            Value::Real(f) => Value::Real(-f),
+            Value::Decimal(d) => Value::from(-d),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Not for Value {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match &self {
+            Value::Boolean(b) => Value::from(!b),
+            Value::Null | Value::Missing => Value::Null,
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
 fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
     match value {
         Value::Integer(int_value) => Value::Decimal(rust_decimal::Decimal::from(*int_value)),
@@ -859,6 +887,14 @@ mod tests {
 
     #[test]
     fn partiql_value_arithmetic() {
+        // Negation
+        assert_eq!(Value::Missing, -Value::Missing);
+        assert_eq!(Value::Null, -Value::Null);
+        assert_eq!(Value::Integer(-123), -Value::Integer(123));
+        assert_eq!(Value::Decimal(dec!(-3)), -Value::Decimal(dec!(3)));
+        assert_eq!(Value::from(-4.0), -Value::from(4.0));
+        assert_eq!(Value::Missing, -Value::from("foo"));
+
         // Add
         assert_eq!(Value::Missing, Value::Missing + Value::Missing);
         assert_eq!(Value::Missing, Value::Missing + Value::Null);
@@ -1013,5 +1049,14 @@ mod tests {
             Value::Decimal(dec!(1)),
             Value::Decimal(dec!(1)) % Value::from(2.)
         );
+    }
+
+    #[test]
+    fn partiql_value_unary_not() {
+        assert_eq!(Value::Null, !Value::Missing);
+        assert_eq!(Value::Null, !Value::Null);
+        assert_eq!(Value::from(true), !Value::from(false));
+        assert_eq!(Value::from(false), !Value::from(true));
+        assert_eq!(Value::Missing, !Value::from("foo"));
     }
 }

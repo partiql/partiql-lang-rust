@@ -9,16 +9,15 @@ mod tests {
     use std::rc::Rc;
 
     use partiql_logical as logical;
-    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryOp, ValueExpr};
     use partiql_value as value;
 
     use crate::env::basic::MapBindings;
     use crate::plan;
-    use ordered_float::OrderedFloat;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
-    use rust_decimal::Decimal as RustDecimal;
+    use rust_decimal_macros::dec;
 
     use crate::eval::{
         DagEvaluator, EvalFromAt, EvalOutputAccumulator, Evaluable, Evaluator, Output,
@@ -94,23 +93,6 @@ mod tests {
         bindings
     }
 
-    fn data_arithmetic_tuple() -> MapBindings<Value> {
-        fn tuple_a_to_v(v: Value) -> value::Value {
-            Tuple(HashMap::from([("a".into(), v)])).into()
-        }
-        // <<{'a': <int>}, {'a': <decimal>}, {'a': <float>}, {'a': NULL}, {'a': MISSING}>>
-        let data = partiql_list![
-            tuple_a_to_v(Value::Integer(1)),
-            tuple_a_to_v(Value::Decimal(RustDecimal::from(1))),
-            tuple_a_to_v(Value::Real(OrderedFloat(1.5))),
-            tuple_a_to_v(Value::Null),
-            tuple_a_to_v(Value::Missing),
-        ];
-        let mut bindings = MapBindings::default();
-        bindings.insert("data", data.into());
-        bindings
-    }
-
     #[test]
     fn select() {
         // Plan for `select a as b from data`
@@ -136,122 +118,697 @@ mod tests {
         assert_eq!(result.len(), 3);
     }
 
+    // Creates the plan: `SELECT <op> <v> AS result FROM data` where <v> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
+    //  in evaluator output), change or delete tests using this function
+    fn eval_unary_op(op: UnaryOp, v: Value, expected_first_elem: Value) {
+        let logical = BindingsExpr::From(logical::From {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+            out: Box::new(BindingsExpr::Select(logical::Select {
+                exprs: HashMap::from([(
+                    "result".to_string(),
+                    ValueExpr::UnExpr(
+                        op,
+                        Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "data".into(),
+                            ))),
+                            vec![PathComponent::Key("v".to_string())],
+                        )),
+                    ),
+                )]),
+                out: Box::new(BindingsExpr::Output),
+            })),
+        });
+        let mut bindings = MapBindings::default();
+        bindings.insert(
+            "data",
+            partiql_list![Tuple(HashMap::from([("v".into(), v)]))].into(),
+        );
+        let result = evaluate(logical, bindings);
+        assert!(!result.is_empty());
+        let expected_result = partiql_bag!(Tuple(HashMap::from([(
+            "result".into(),
+            expected_first_elem
+        )])));
+        assert_eq!(expected_result, result);
+    }
+
+    // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
+    //  in evaluator output), change or delete tests using this function
+    fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
+        let logical = BindingsExpr::From(logical::From {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+            out: Box::new(BindingsExpr::Select(logical::Select {
+                exprs: HashMap::from([(
+                    "result".to_string(),
+                    ValueExpr::BinaryExpr(
+                        op,
+                        Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "data".into(),
+                            ))),
+                            vec![PathComponent::Key("lhs".to_string())],
+                        )),
+                        Box::new(ValueExpr::Lit(Box::new(rhs))),
+                    ),
+                )]),
+                out: Box::new(BindingsExpr::Output),
+            })),
+        });
+        let mut bindings = MapBindings::default();
+        bindings.insert(
+            "data",
+            partiql_list![Tuple(HashMap::from([("lhs".into(), lhs)]))].into(),
+        );
+        let result = evaluate(logical, bindings);
+        assert!(!result.is_empty());
+        let expected_result = partiql_bag!(Tuple(HashMap::from([(
+            "result".into(),
+            expected_first_elem
+        )])));
+        assert_eq!(expected_result, result);
+    }
+
     #[test]
-    fn arithmetic() {
-        // Tests arithmetic ops using int, real, decimal, null, and missing with values defined from
-        // `data_arithmetic_tuple`
-        fn arithmetic_logical(binary_op: BinaryOp, lit: Value) -> BindingsExpr {
-            BindingsExpr::From(logical::From {
-                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
-                as_key: "data".to_string(),
-                at_key: None,
-                out: Box::new(BindingsExpr::Select(logical::Select {
-                    exprs: HashMap::from([(
-                        "b".to_string(),
-                        ValueExpr::BinaryExpr(
-                            binary_op,
-                            Box::new(ValueExpr::Path(
-                                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                    "data".into(),
-                                ))),
-                                vec![PathComponent::Key("a".to_string())],
-                            )),
-                            Box::new(ValueExpr::Lit(Box::new(lit))),
-                        ),
-                    )]),
-                    out: Box::new(BindingsExpr::Output),
-                })),
-            })
-        }
-        // Plan for `select a + <lit> as b from data`
-        println!("Add+++++++++++++++++++++++++++++");
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+    fn arithmetic_ops() {
+        // Unary +
+        // Plan for `select +v AS result from data`
+        eval_unary_op(UnaryOp::Pos, Value::from(1), Value::from(1));
+        eval_unary_op(UnaryOp::Pos, Value::from(1.), Value::from(1.));
+        eval_unary_op(UnaryOp::Pos, Value::from(dec!(1.)), Value::from(dec!(1.)));
+        eval_unary_op(UnaryOp::Pos, Value::Null, Value::Null);
+        eval_unary_op(UnaryOp::Pos, Value::Missing, Value::Missing);
 
-        // Plan for `select a - <lit> as b from data`
-        println!("Sub-----------------------------");
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Unary -
+        // Plan for `select -v AS result from data`
+        eval_unary_op(UnaryOp::Neg, Value::from(1), Value::from(-1));
+        eval_unary_op(UnaryOp::Neg, Value::from(1.), Value::from(-1.));
+        eval_unary_op(UnaryOp::Neg, Value::from(dec!(1.)), Value::from(dec!(-1.)));
+        eval_unary_op(UnaryOp::Neg, Value::Null, Value::Null);
+        eval_unary_op(UnaryOp::Neg, Value::Missing, Value::Missing);
 
-        // Plan for `select a * <lit> as b from data`
-        println!("Mul*****************************");
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Addition
+        // Plan for `select lhs + rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(2),
+            Value::from(3),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(BinaryOp::Add, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a / <lit> as b from data`
-        println!("Div/////////////////////////////");
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Subtraction
+        // Plan for `select lhs - rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(2),
+            Value::from(-1),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(BinaryOp::Sub, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a % <lit> as b from data`
-        println!("Mod%%%%%%%%%%%%%%%%%%%%%%%%%%%%%");
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Multiplication
+        // Plan for `select lhs * rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(2),
+            Value::from(2),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(BinaryOp::Mul, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
+
+        // Division
+        // Plan for `select lhs / rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(2),
+            Value::from(0),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(BinaryOp::Div, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
+
+        // Modulo
+        // Plan for `select lhs % rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(2),
+            Value::from(1),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(BinaryOp::Mod, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
+    }
+
+    #[test]
+    fn logical_ops() {
+        // Not
+        // Plan for `select NOT v AS result from data`
+        eval_unary_op(UnaryOp::Not, Value::from(false), Value::from(true));
+        eval_unary_op(UnaryOp::Not, Value::from(true), Value::from(false));
+        eval_unary_op(UnaryOp::Not, Value::Null, Value::Null);
+        eval_unary_op(UnaryOp::Not, Value::Missing, Value::Null);
+        eval_unary_op(UnaryOp::Not, Value::from(123), Value::Missing);
+
+        // AND
+        // Plan for `select lhs AND rhs as result from data`
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(false),
+            Value::from(true),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(true),
+            Value::from(false),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(true),
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(false),
+            Value::from(false),
+            Value::from(false),
+        );
+
+        // short-circuit cases => false
+        eval_bin_op(
+            BinaryOp::And,
+            Value::Null,
+            Value::from(false),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(false),
+            Value::Null,
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::Missing,
+            Value::from(false),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(false),
+            Value::Missing,
+            Value::from(false),
+        );
+
+        // Null propagation => Null
+        eval_bin_op(BinaryOp::And, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(BinaryOp::And, Value::Missing, Value::Missing, Value::Null);
+        eval_bin_op(BinaryOp::And, Value::Null, Value::Missing, Value::Null);
+        eval_bin_op(BinaryOp::And, Value::Missing, Value::Null, Value::Null);
+
+        // Data type mismatch cases => Missing
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(123),
+            Value::from(false),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(false),
+            Value::from(123),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(123),
+            Value::from(true),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::And,
+            Value::from(true),
+            Value::from(123),
+            Value::Missing,
+        );
+
+        // OR cases
+        // Plan for `select lhs OR rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(false),
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(true),
+            Value::from(false),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(true),
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(false),
+            Value::from(false),
+            Value::from(false),
+        );
+
+        // short-circuit cases => true
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::Null,
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(true),
+            Value::Null,
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::Missing,
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(true),
+            Value::Missing,
+            Value::from(true),
+        );
+
+        // Null propagation => Null
+        eval_bin_op(BinaryOp::Or, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(BinaryOp::Or, Value::Missing, Value::Missing, Value::Null);
+        eval_bin_op(BinaryOp::Or, Value::Null, Value::Missing, Value::Null);
+        eval_bin_op(BinaryOp::Or, Value::Missing, Value::Null, Value::Null);
+
+        // Data type mismatch cases => Missing
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(123),
+            Value::from(false),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(false),
+            Value::from(123),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(123),
+            Value::from(true),
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::Or,
+            Value::from(true),
+            Value::from(123),
+            Value::Missing,
+        );
+    }
+
+    // TODO: other comparison op tests
+    #[test]
+    fn equality_ops() {
+        // TODO: many equality tests missing. Can use conformance tests to fill the gap or some other
+        //  tests
+        // Eq
+        // Plan for `select lhs = rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::from(true),
+            Value::from(true),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::from(true),
+            Value::from(false),
+            Value::from(false),
+        );
+        eval_bin_op(BinaryOp::Eq, Value::from(true), Value::Null, Value::Null);
+        eval_bin_op(BinaryOp::Eq, Value::Null, Value::from(true), Value::Null);
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::from(true),
+            Value::Missing,
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::Missing,
+            Value::from(true),
+            Value::Missing,
+        );
+
+        // different types result in boolean
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::from(true),
+            Value::from("abc"),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Eq,
+            Value::from("abc"),
+            Value::from(true),
+            Value::from(false),
+        );
+
+        // Neq
+        // Plan for `select lhs != rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::from(true),
+            Value::from(true),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::from(true),
+            Value::from(false),
+            Value::from(true),
+        );
+        eval_bin_op(BinaryOp::Neq, Value::from(true), Value::Null, Value::Null);
+        eval_bin_op(BinaryOp::Neq, Value::Null, Value::from(true), Value::Null);
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::from(true),
+            Value::Missing,
+            Value::Missing,
+        );
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::Missing,
+            Value::from(true),
+            Value::Missing,
+        );
+
+        // different types result in boolean
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::from(true),
+            Value::from("abc"),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Neq,
+            Value::from("abc"),
+            Value::from(true),
+            Value::from(true),
+        );
     }
 
     #[test]

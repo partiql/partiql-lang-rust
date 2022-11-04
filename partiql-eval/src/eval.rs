@@ -278,8 +278,14 @@ impl EvalExpr for EvalLitExpr {
 }
 
 #[derive(Debug)]
-pub struct EvalBinopExpr {
-    pub op: EvalBinop,
+pub struct EvalUnaryOpExpr {
+    pub op: EvalUnaryOp,
+    pub operand: Box<dyn EvalExpr>,
+}
+
+#[derive(Debug)]
+pub struct EvalBinOpExpr {
+    pub op: EvalBinOp,
     pub lhs: Box<dyn EvalExpr>,
     pub rhs: Box<dyn EvalExpr>,
 }
@@ -287,7 +293,32 @@ pub struct EvalBinopExpr {
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
-pub enum EvalBinop {
+pub enum EvalUnaryOp {
+    Pos,
+    Neg,
+    Not,
+}
+
+impl EvalExpr for EvalUnaryOpExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.operand.evaluate(bindings, ctx);
+        match self.op {
+            EvalUnaryOp::Pos => match value {
+                Value::Null => Value::Null,
+                Value::Missing => Value::Missing,
+                Value::Integer(_) | Value::Real(_) | Value::Decimal(_) => value,
+                _ => Value::Missing, // data type mismatch => Missing
+            },
+            EvalUnaryOp::Neg => -value,
+            EvalUnaryOp::Not => !value,
+        }
+    }
+}
+
+// TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
+#[derive(Debug)]
+#[allow(dead_code)] // TODO remove once out of PoC
+pub enum EvalBinOp {
     And,
     Or,
     Concat,
@@ -307,45 +338,78 @@ pub enum EvalBinop {
     Exp,
 }
 
-impl EvalExpr for EvalBinopExpr {
+impl EvalExpr for EvalBinOpExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let lhs = self.lhs.evaluate(bindings, ctx);
         let rhs = self.rhs.evaluate(bindings, ctx);
-        // Missing and Null propagation. Missing has precedence over Null
-        if lhs == Value::Missing || rhs == Value::Missing {
-            Value::Missing
-        } else if lhs == Value::Null || rhs == Value::Null {
-            Value::Null
-        } else {
-            match self.op {
-                EvalBinop::And => todo!(),
-                EvalBinop::Or => todo!(),
-                EvalBinop::Concat => {
-                    // TODO non-naive concat
-                    let lhs = if let Value::String(s) = lhs {
-                        *s
+        match self.op {
+            EvalBinOp::And => {
+                match (&lhs, &rhs) {
+                    (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
+                    (Value::Null, Value::Boolean(false))    // short-circuiting
+                    | (Value::Boolean(false), Value::Null)
+                    | (Value::Missing, Value::Boolean(false))
+                    | (Value::Boolean(false), Value::Missing) => Value::from(false),
+                    _ => if matches!(lhs, Value::Missing | Value::Null | Value::Boolean(true)) && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(true)) {
+                        Value::Null
                     } else {
-                        format!("{:?}", lhs)
-                    };
-                    let rhs = if let Value::String(s) = rhs {
-                        *s
-                    } else {
-                        format!("{:?}", lhs)
-                    };
-                    Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                        Value::Missing
+                    }
                 }
-                EvalBinop::Eq => todo!(),
-                EvalBinop::Neq => todo!(),
-                EvalBinop::Gt => Boolean(lhs > rhs),
-                EvalBinop::Gteq => Boolean(lhs >= rhs),
-                EvalBinop::Lt => Boolean(lhs < rhs),
-                EvalBinop::Lteq => Boolean(lhs <= rhs),
-                EvalBinop::Add => lhs + rhs,
-                EvalBinop::Sub => lhs - rhs,
-                EvalBinop::Mul => lhs * rhs,
-                EvalBinop::Div => lhs / rhs,
-                EvalBinop::Mod => lhs % rhs,
-                EvalBinop::Exp => todo!("Exponentiation"),
+            }
+            EvalBinOp::Or => {
+                match (&lhs, &rhs) {
+                    (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
+                    (Value::Null, Value::Boolean(true))     // short-circuiting
+                    | (Value::Boolean(true), Value::Null)
+                    | (Value::Missing, Value::Boolean(true))
+                    | (Value::Boolean(true), Value::Missing) => Value::from(true),
+                    _ => if matches!(lhs, Value::Missing | Value::Null | Value::Boolean(false)) && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(false)) {
+                        Value::Null
+                    } else {
+                        Value::Missing
+                    }
+                }
+            }
+            _ => {
+                // Missing and Null propagation. Missing has precedence over Null
+                if lhs == Value::Missing || rhs == Value::Missing {
+                    Value::Missing
+                } else if lhs == Value::Null || rhs == Value::Null {
+                    Value::Null
+                } else {
+                    match self.op {
+                        EvalBinOp::Concat => {
+                            // TODO non-naive concat
+                            let lhs = if let Value::String(s) = lhs {
+                                *s
+                            } else {
+                                format!("{:?}", lhs)
+                            };
+                            let rhs = if let Value::String(s) = rhs {
+                                *s
+                            } else {
+                                format!("{:?}", lhs)
+                            };
+                            Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                        }
+                        EvalBinOp::Eq => Value::from(lhs == rhs),
+                        EvalBinOp::Neq => Value::from(lhs != rhs),
+                        EvalBinOp::Gt => Boolean(lhs > rhs),
+                        EvalBinOp::Gteq => Boolean(lhs >= rhs),
+                        EvalBinOp::Lt => Boolean(lhs < rhs),
+                        EvalBinOp::Lteq => Boolean(lhs <= rhs),
+                        EvalBinOp::Add => lhs + rhs,
+                        EvalBinOp::Sub => lhs - rhs,
+                        EvalBinOp::Mul => lhs * rhs,
+                        EvalBinOp::Div => lhs / rhs,
+                        EvalBinOp::Mod => lhs % rhs,
+                        EvalBinOp::Exp => todo!("Exponentiation"),
+                        EvalBinOp::And | EvalBinOp::Or => {
+                            unreachable!("Ops already covered")
+                        }
+                    }
+                }
             }
         }
     }
