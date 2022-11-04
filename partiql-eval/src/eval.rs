@@ -9,7 +9,7 @@ use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{partiql_bag, Bag, BindingsName, Tuple, Value};
+use partiql_value::{partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, Tuple, UnaryPlus, Value};
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
@@ -303,12 +303,7 @@ impl EvalExpr for EvalUnaryOpExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = self.operand.evaluate(bindings, ctx);
         match self.op {
-            EvalUnaryOp::Pos => match value {
-                Value::Null => Value::Null,
-                Value::Missing => Value::Missing,
-                Value::Integer(_) | Value::Real(_) | Value::Decimal(_) => value,
-                _ => Value::Missing, // data type mismatch => Missing
-            },
+            EvalUnaryOp::Pos => value.positive(),
             EvalUnaryOp::Neg => -value,
             EvalUnaryOp::Not => !value,
         }
@@ -343,34 +338,8 @@ impl EvalExpr for EvalBinOpExpr {
         let lhs = self.lhs.evaluate(bindings, ctx);
         let rhs = self.rhs.evaluate(bindings, ctx);
         match self.op {
-            EvalBinOp::And => {
-                match (&lhs, &rhs) {
-                    (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
-                    (Value::Null, Value::Boolean(false))    // short-circuiting
-                    | (Value::Boolean(false), Value::Null)
-                    | (Value::Missing, Value::Boolean(false))
-                    | (Value::Boolean(false), Value::Missing) => Value::from(false),
-                    _ => if matches!(lhs, Value::Missing | Value::Null | Value::Boolean(true)) && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(true)) {
-                        Value::Null
-                    } else {
-                        Value::Missing
-                    }
-                }
-            }
-            EvalBinOp::Or => {
-                match (&lhs, &rhs) {
-                    (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
-                    (Value::Null, Value::Boolean(true))     // short-circuiting
-                    | (Value::Boolean(true), Value::Null)
-                    | (Value::Missing, Value::Boolean(true))
-                    | (Value::Boolean(true), Value::Missing) => Value::from(true),
-                    _ => if matches!(lhs, Value::Missing | Value::Null | Value::Boolean(false)) && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(false)) {
-                        Value::Null
-                    } else {
-                        Value::Missing
-                    }
-                }
-            }
+            EvalBinOp::And => lhs.and(rhs),
+            EvalBinOp::Or => lhs.or(rhs),
             _ => {
                 // Missing and Null propagation. Missing has precedence over Null
                 if lhs == Value::Missing || rhs == Value::Missing {

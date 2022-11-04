@@ -155,6 +155,24 @@ impl ops::Rem for Value {
     }
 }
 
+pub trait UnaryPlus {
+    type Output;
+
+    fn positive(self) -> Self::Output;
+}
+
+impl UnaryPlus for Value {
+    type Output = Self;
+    fn positive(self) -> Self::Output {
+        match self {
+            Value::Null => Value::Null,
+            Value::Missing => Value::Missing,
+            Value::Integer(_) | Value::Real(_) | Value::Decimal(_) => self,
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
 impl ops::Neg for Value {
     type Output = Self;
 
@@ -167,6 +185,62 @@ impl ops::Neg for Value {
             Value::Real(f) => Value::Real(-f),
             Value::Decimal(d) => Value::from(-d),
             _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+pub trait BinaryAnd {
+    type Output;
+
+    fn and(self, rhs: Self) -> Self::Output;
+}
+
+impl BinaryAnd for Value {
+    type Output = Self;
+    fn and(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
+            (Value::Null, Value::Boolean(false))
+            | (Value::Boolean(false), Value::Null)
+            | (Value::Missing, Value::Boolean(false))
+            | (Value::Boolean(false), Value::Missing) => Value::from(false),
+            _ => {
+                if matches!(self, Value::Missing | Value::Null | Value::Boolean(true))
+                    && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(true))
+                {
+                    Value::Null
+                } else {
+                    Value::Missing
+                }
+            }
+        }
+    }
+}
+
+pub trait BinaryOr {
+    type Output;
+
+    fn or(self, rhs: Self) -> Self::Output;
+}
+
+impl BinaryOr for Value {
+    type Output = Self;
+    fn or(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
+            (Value::Null, Value::Boolean(true))
+            | (Value::Boolean(true), Value::Null)
+            | (Value::Missing, Value::Boolean(true))
+            | (Value::Boolean(true), Value::Missing) => Value::from(true),
+            _ => {
+                if matches!(self, Value::Missing | Value::Null | Value::Boolean(false))
+                    && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(false))
+                {
+                    Value::Null
+                } else {
+                    Value::Missing
+                }
+            }
         }
     }
 }
@@ -887,6 +961,14 @@ mod tests {
 
     #[test]
     fn partiql_value_arithmetic() {
+        // Unary plus
+        assert_eq!(Value::Missing, Value::Missing.positive());
+        assert_eq!(Value::Null, Value::Null.positive());
+        assert_eq!(Value::Integer(123), Value::Integer(123).positive());
+        assert_eq!(Value::Decimal(dec!(3)), Value::Decimal(dec!(3)).positive());
+        assert_eq!(Value::from(4.0), Value::from(4.0).positive());
+        assert_eq!(Value::Missing, Value::from("foo").positive());
+
         // Negation
         assert_eq!(Value::Missing, -Value::Missing);
         assert_eq!(Value::Null, -Value::Null);
@@ -1052,11 +1134,72 @@ mod tests {
     }
 
     #[test]
-    fn partiql_value_unary_not() {
+    fn partiql_value_logical() {
+        // Unary NOT
         assert_eq!(Value::Null, !Value::Missing);
         assert_eq!(Value::Null, !Value::Null);
         assert_eq!(Value::from(true), !Value::from(false));
         assert_eq!(Value::from(false), !Value::from(true));
         assert_eq!(Value::Missing, !Value::from("foo"));
+
+        // AND
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).and(Value::from(true))
+        );
+        assert_eq!(
+            Value::from(false),
+            Value::from(true).and(Value::from(false))
+        );
+        assert_eq!(Value::from(true), Value::from(true).and(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).and(Value::from(false))
+        );
+
+        // false with null or missing => false
+        assert_eq!(Value::from(false), Value::Null.and(Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(Value::Null));
+        assert_eq!(Value::from(false), Value::Missing.and(Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(Value::Missing));
+
+        // Null propagation => Null
+        assert_eq!(Value::Null, Value::Null.and(Value::Null));
+        assert_eq!(Value::Null, Value::Missing.and(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.and(Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.and(Value::Null));
+
+        // Data type mismatch cases => Missing
+        assert_eq!(Value::Missing, Value::from(123).and(Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).and(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).and(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).and(Value::from(123)));
+
+        // OR
+        assert_eq!(Value::from(true), Value::from(false).or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::from(false)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).or(Value::from(false))
+        );
+
+        // true with null or missing => true
+        assert_eq!(Value::from(true), Value::Null.or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::Null));
+        assert_eq!(Value::from(true), Value::Missing.or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::Missing));
+
+        // Null propagation => Null
+        assert_eq!(Value::Null, Value::Null.or(Value::Null));
+        assert_eq!(Value::Null, Value::Missing.or(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.or(Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.or(Value::Null));
+
+        // Data type mismatch cases => Missing
+        assert_eq!(Value::Missing, Value::from(123).or(Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).or(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).or(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).or(Value::from(123)));
     }
 }
