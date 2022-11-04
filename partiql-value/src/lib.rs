@@ -1168,6 +1168,10 @@ mod tests {
         assert_eq!(Value::Null, Value::Missing.and(Value::Missing));
         assert_eq!(Value::Null, Value::Null.and(Value::Missing));
         assert_eq!(Value::Null, Value::Missing.and(Value::Null));
+        assert_eq!(Value::Null, Value::Null.and(Value::from(true)));
+        assert_eq!(Value::Null, Value::Missing.and(Value::from(true)));
+        assert_eq!(Value::Null, Value::from(true).and(Value::Null));
+        assert_eq!(Value::Null, Value::from(true).and(Value::Missing));
 
         // Data type mismatch cases => Missing
         assert_eq!(Value::Missing, Value::from(123).and(Value::from(false)));
@@ -1195,6 +1199,10 @@ mod tests {
         assert_eq!(Value::Null, Value::Missing.or(Value::Missing));
         assert_eq!(Value::Null, Value::Null.or(Value::Missing));
         assert_eq!(Value::Null, Value::Missing.or(Value::Null));
+        assert_eq!(Value::Null, Value::Null.or(Value::from(false)));
+        assert_eq!(Value::Null, Value::Missing.or(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(false).or(Value::Null));
+        assert_eq!(Value::Null, Value::from(false).or(Value::Missing));
 
         // Data type mismatch cases => Missing
         assert_eq!(Value::Missing, Value::from(123).or(Value::from(false)));

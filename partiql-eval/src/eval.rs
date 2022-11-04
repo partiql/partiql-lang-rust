@@ -292,7 +292,6 @@ pub struct EvalBinOpExpr {
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
-#[allow(dead_code)] // TODO remove once out of PoC
 pub enum EvalUnaryOp {
     Pos,
     Neg,
@@ -312,7 +311,6 @@ impl EvalExpr for EvalUnaryOpExpr {
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
-#[allow(dead_code)] // TODO remove once out of PoC
 pub enum EvalBinOp {
     And,
     Or,

@@ -9,7 +9,7 @@ mod tests {
     use std::rc::Rc;
 
     use partiql_logical as logical;
-    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryOp, ValueExpr};
+    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
     use partiql_value as value;
 
     use crate::env::basic::MapBindings;
