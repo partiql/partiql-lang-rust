@@ -14,11 +14,10 @@ mod tests {
 
     use crate::env::basic::MapBindings;
     use crate::plan;
-    use ordered_float::OrderedFloat;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
-    use rust_decimal::Decimal as RustDecimal;
+    use rust_decimal_macros::dec;
 
     use crate::eval::{
         DagEvaluator, EvalFromAt, EvalOutputAccumulator, Evaluable, Evaluator, Output,
@@ -94,23 +93,6 @@ mod tests {
         bindings
     }
 
-    fn data_arithmetic_tuple() -> MapBindings<Value> {
-        fn tuple_a_to_v(v: Value) -> value::Value {
-            Tuple(HashMap::from([("a".into(), v)])).into()
-        }
-        // <<{'a': <int>}, {'a': <decimal>}, {'a': <float>}, {'a': NULL}, {'a': MISSING}>>
-        let data = partiql_list![
-            tuple_a_to_v(Value::Integer(1)),
-            tuple_a_to_v(Value::Decimal(RustDecimal::from(1))),
-            tuple_a_to_v(Value::Real(OrderedFloat(1.5))),
-            tuple_a_to_v(Value::Null),
-            tuple_a_to_v(Value::Missing),
-        ];
-        let mut bindings = MapBindings::default();
-        bindings.insert("data", data.into());
-        bindings
-    }
-
     #[test]
     fn select() {
         // Plan for `select a as b from data`
@@ -136,122 +118,368 @@ mod tests {
         assert_eq!(result.len(), 3);
     }
 
+    // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
+    //  in evaluator output), change or delete tests using this function
+    fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
+        let logical = BindingsExpr::From(logical::From {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+            out: Box::new(BindingsExpr::Select(logical::Select {
+                exprs: HashMap::from([(
+                    "result".to_string(),
+                    ValueExpr::BinaryExpr(
+                        op,
+                        Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "data".into(),
+                            ))),
+                            vec![PathComponent::Key("lhs".to_string())],
+                        )),
+                        Box::new(ValueExpr::Lit(Box::new(rhs))),
+                    ),
+                )]),
+                out: Box::new(BindingsExpr::Output),
+            })),
+        });
+        let mut bindings = MapBindings::default();
+        bindings.insert(
+            "data",
+            partiql_list![Tuple(HashMap::from([("lhs".into(), lhs)]))].into(),
+        );
+        let result = evaluate(logical, bindings);
+        assert!(!result.is_empty());
+        let expected_result = partiql_bag!(Tuple(HashMap::from([(
+            "result".into(),
+            expected_first_elem
+        )])));
+        assert_eq!(expected_result, result);
+    }
+
     #[test]
-    fn arithmetic() {
-        // Tests arithmetic ops using int, real, decimal, null, and missing with values defined from
-        // `data_arithmetic_tuple`
-        fn arithmetic_logical(binary_op: BinaryOp, lit: Value) -> BindingsExpr {
-            BindingsExpr::From(logical::From {
-                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
-                as_key: "data".to_string(),
-                at_key: None,
-                out: Box::new(BindingsExpr::Select(logical::Select {
-                    exprs: HashMap::from([(
-                        "b".to_string(),
-                        ValueExpr::BinaryExpr(
-                            binary_op,
-                            Box::new(ValueExpr::Path(
-                                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                    "data".into(),
-                                ))),
-                                vec![PathComponent::Key("a".to_string())],
-                            )),
-                            Box::new(ValueExpr::Lit(Box::new(lit))),
-                        ),
-                    )]),
-                    out: Box::new(BindingsExpr::Output),
-                })),
-            })
-        }
-        // Plan for `select a + <lit> as b from data`
-        println!("Add+++++++++++++++++++++++++++++");
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Add, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+    fn arithmetic_ops() {
+        // Addition
+        // Plan for `select lhs + rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(2),
+            Value::from(3),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(3.),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(3.)),
+        );
+        eval_bin_op(BinaryOp::Add, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Add,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a - <lit> as b from data`
-        println!("Sub-----------------------------");
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Sub, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Subtraction
+        // Plan for `select lhs - rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(2),
+            Value::from(-1),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(-1.),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(-1.)),
+        );
+        eval_bin_op(BinaryOp::Sub, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Sub,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a * <lit> as b from data`
-        println!("Mul*****************************");
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mul, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Multiplication
+        // Plan for `select lhs * rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(2),
+            Value::from(2),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(2.),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(2.)),
+        );
+        eval_bin_op(BinaryOp::Mul, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Mul,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a / <lit> as b from data`
-        println!("Div/////////////////////////////");
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Div, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Division
+        // Plan for `select lhs / rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(2),
+            Value::from(0),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(0.5),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(0.5)),
+        );
+        eval_bin_op(BinaryOp::Div, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Div,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
 
-        // Plan for `select a % <lit> as b from data`
-        println!("Mod%%%%%%%%%%%%%%%%%%%%%%%%%%%%%");
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Integer(1));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Decimal(RustDecimal::new(11, 1)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Real(OrderedFloat(1.5)));
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Null);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
-        let logical = arithmetic_logical(BinaryOp::Mod, Value::Missing);
-        let result = evaluate(logical, data_arithmetic_tuple());
-        println!("{:?}", result);
+        // Modulo
+        // Plan for `select lhs % rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(2),
+            Value::from(1),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(2),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(2.),
+            Value::from(1.),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(1.),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(2),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(2.),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::from(dec!(1.)),
+            Value::from(dec!(2.)),
+            Value::from(dec!(1.)),
+        );
+        eval_bin_op(BinaryOp::Mod, Value::Null, Value::Null, Value::Null);
+        eval_bin_op(
+            BinaryOp::Mod,
+            Value::Missing,
+            Value::Missing,
+            Value::Missing,
+        );
     }
 
     #[test]
