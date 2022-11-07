@@ -148,7 +148,7 @@ pub struct Scan {
     pub at_key: String,
 }
 
-/// [`Scan`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
+/// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
 #[derive(Debug)]
 pub struct Unpivot {
     pub expr: ValueExpr,
