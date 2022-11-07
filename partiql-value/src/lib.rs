@@ -155,6 +155,196 @@ impl ops::Rem for Value {
     }
 }
 
+pub trait UnaryPlus {
+    type Output;
+
+    fn positive(self) -> Self::Output;
+}
+
+impl UnaryPlus for Value {
+    type Output = Self;
+    fn positive(self) -> Self::Output {
+        match self {
+            Value::Null => Value::Null,
+            Value::Missing => Value::Missing,
+            Value::Integer(_) | Value::Real(_) | Value::Decimal(_) => self,
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Neg for Value {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match &self {
+            // TODO: handle overflow for negation
+            Value::Null => Value::Null,
+            Value::Missing => Value::Missing,
+            Value::Integer(i) => Value::from(-i),
+            Value::Real(f) => Value::Real(-f),
+            Value::Decimal(d) => Value::from(-d),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+pub trait BinaryAnd {
+    type Output;
+
+    fn and(self, rhs: Self) -> Self::Output;
+}
+
+impl BinaryAnd for Value {
+    type Output = Self;
+    fn and(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
+            (Value::Null, Value::Boolean(false))
+            | (Value::Boolean(false), Value::Null)
+            | (Value::Missing, Value::Boolean(false))
+            | (Value::Boolean(false), Value::Missing) => Value::from(false),
+            _ => {
+                if matches!(self, Value::Missing | Value::Null | Value::Boolean(true))
+                    && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(true))
+                {
+                    Value::Null
+                } else {
+                    Value::Missing
+                }
+            }
+        }
+    }
+}
+
+pub trait BinaryOr {
+    type Output;
+
+    fn or(self, rhs: Self) -> Self::Output;
+}
+
+impl BinaryOr for Value {
+    type Output = Self;
+    fn or(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
+            (Value::Null, Value::Boolean(true))
+            | (Value::Boolean(true), Value::Null)
+            | (Value::Missing, Value::Boolean(true))
+            | (Value::Boolean(true), Value::Missing) => Value::from(true),
+            _ => {
+                if matches!(self, Value::Missing | Value::Null | Value::Boolean(false))
+                    && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(false))
+                {
+                    Value::Null
+                } else {
+                    Value::Missing
+                }
+            }
+        }
+    }
+}
+
+impl ops::Not for Value {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match &self {
+            Value::Boolean(b) => Value::from(!b),
+            Value::Null | Value::Missing => Value::Null,
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+// `Value` `eq` and `neq` with Missing and Null propagation
+pub trait NullableEq {
+    type Output;
+
+    fn eq(self, rhs: Self) -> Self::Output;
+    fn neq(self, rhs: Self) -> Self::Output;
+}
+
+// `Value` comparison with Missing and Null propagation
+pub trait NullableOrd {
+    type Output;
+
+    fn lt(self, rhs: Self) -> Self::Output;
+    fn gt(self, rhs: Self) -> Self::Output;
+    fn lteq(self, rhs: Self) -> Self::Output;
+    fn gteq(self, rhs: Self) -> Self::Output;
+}
+
+impl NullableEq for Value {
+    type Output = Self;
+
+    fn eq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self == rhs),
+        }
+    }
+
+    fn neq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self != rhs),
+        }
+    }
+}
+
+impl NullableOrd for Value {
+    type Output = Self;
+
+    // TODO: comparison is not right for data type mismatches. Equality permits mistyped arguments
+    //  while comparison ops should return Missing
+    fn lt(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self < rhs),
+        }
+    }
+
+    fn gt(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self > rhs),
+        }
+    }
+
+    fn lteq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self <= rhs),
+        }
+    }
+
+    fn gteq(self, rhs: Self) -> Self::Output {
+        match (&self, &rhs) {
+            (Value::Missing, _) => Value::Missing,
+            (_, Value::Missing) => Value::Missing,
+            (Value::Null, _) => Value::Null,
+            (_, Value::Null) => Value::Null,
+            (_, _) => Value::from(self >= rhs),
+        }
+    }
+}
+
 fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
     match value {
         Value::Integer(int_value) => Value::Decimal(rust_decimal::Decimal::from(*int_value)),
@@ -866,6 +1056,22 @@ mod tests {
 
     #[test]
     fn partiql_value_arithmetic() {
+        // Unary plus
+        assert_eq!(Value::Missing, Value::Missing.positive());
+        assert_eq!(Value::Null, Value::Null.positive());
+        assert_eq!(Value::Integer(123), Value::Integer(123).positive());
+        assert_eq!(Value::Decimal(dec!(3)), Value::Decimal(dec!(3)).positive());
+        assert_eq!(Value::from(4.0), Value::from(4.0).positive());
+        assert_eq!(Value::Missing, Value::from("foo").positive());
+
+        // Negation
+        assert_eq!(Value::Missing, -Value::Missing);
+        assert_eq!(Value::Null, -Value::Null);
+        assert_eq!(Value::Integer(-123), -Value::Integer(123));
+        assert_eq!(Value::Decimal(dec!(-3)), -Value::Decimal(dec!(3)));
+        assert_eq!(Value::from(-4.0), -Value::from(4.0));
+        assert_eq!(Value::Missing, -Value::from("foo"));
+
         // Add
         assert_eq!(Value::Missing, Value::Missing + Value::Missing);
         assert_eq!(Value::Missing, Value::Missing + Value::Null);
@@ -1020,5 +1226,113 @@ mod tests {
             Value::Decimal(dec!(1)),
             Value::Decimal(dec!(1)) % Value::from(2.)
         );
+    }
+
+    #[test]
+    fn partiql_value_logical() {
+        // Unary NOT
+        assert_eq!(Value::Null, !Value::Missing);
+        assert_eq!(Value::Null, !Value::Null);
+        assert_eq!(Value::from(true), !Value::from(false));
+        assert_eq!(Value::from(false), !Value::from(true));
+        assert_eq!(Value::Missing, !Value::from("foo"));
+
+        // AND
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).and(Value::from(true))
+        );
+        assert_eq!(
+            Value::from(false),
+            Value::from(true).and(Value::from(false))
+        );
+        assert_eq!(Value::from(true), Value::from(true).and(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).and(Value::from(false))
+        );
+
+        // false with null or missing => false
+        assert_eq!(Value::from(false), Value::Null.and(Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(Value::Null));
+        assert_eq!(Value::from(false), Value::Missing.and(Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(Value::Missing));
+
+        // Null propagation => Null
+        assert_eq!(Value::Null, Value::Null.and(Value::Null));
+        assert_eq!(Value::Null, Value::Missing.and(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.and(Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.and(Value::Null));
+        assert_eq!(Value::Null, Value::Null.and(Value::from(true)));
+        assert_eq!(Value::Null, Value::Missing.and(Value::from(true)));
+        assert_eq!(Value::Null, Value::from(true).and(Value::Null));
+        assert_eq!(Value::Null, Value::from(true).and(Value::Missing));
+
+        // Data type mismatch cases => Missing
+        assert_eq!(Value::Missing, Value::from(123).and(Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).and(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).and(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).and(Value::from(123)));
+
+        // OR
+        assert_eq!(Value::from(true), Value::from(false).or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::from(false)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            Value::from(false).or(Value::from(false))
+        );
+
+        // true with null or missing => true
+        assert_eq!(Value::from(true), Value::Null.or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::Null));
+        assert_eq!(Value::from(true), Value::Missing.or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(Value::Missing));
+
+        // Null propagation => Null
+        assert_eq!(Value::Null, Value::Null.or(Value::Null));
+        assert_eq!(Value::Null, Value::Missing.or(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.or(Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.or(Value::Null));
+        assert_eq!(Value::Null, Value::Null.or(Value::from(false)));
+        assert_eq!(Value::Null, Value::Missing.or(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(false).or(Value::Null));
+        assert_eq!(Value::Null, Value::from(false).or(Value::Missing));
+
+        // Data type mismatch cases => Missing
+        assert_eq!(Value::Missing, Value::from(123).or(Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).or(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).or(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).or(Value::from(123)));
+    }
+
+    // TODO: other comparison op tests
+    #[test]
+    fn partiql_value_equality() {
+        // TODO: many equality tests missing. Can use conformance tests to fill the gap or some other
+        //  tests
+        // Eq
+        assert_eq!(Value::from(true), Value::from(true).eq(Value::from(true)));
+        assert_eq!(Value::from(false), Value::from(true).eq(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(true).eq(Value::Null));
+        assert_eq!(Value::Null, Value::Null.eq(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).eq(Value::Missing));
+        assert_eq!(Value::Missing, Value::Missing.eq(Value::from(true)));
+
+        // different types result in boolean
+        assert_eq!(Value::from(false), Value::from(true).eq(Value::from("abc")));
+        assert_eq!(Value::from(false), Value::from("abc").eq(Value::from(true)));
+
+        // Neq
+        assert_eq!(Value::from(false), Value::from(true).neq(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).neq(Value::from(false)));
+        assert_eq!(Value::Null, Value::from(true).neq(Value::Null));
+        assert_eq!(Value::Null, Value::Null.neq(Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).neq(Value::Missing));
+        assert_eq!(Value::Missing, Value::Missing.neq(Value::from(true)));
+
+        // different types result in boolean
+        assert_eq!(Value::from(true), Value::from(true).neq(Value::from("abc")));
+        assert_eq!(Value::from(true), Value::from("abc").neq(Value::from(true)));
     }
 }

@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use partiql_logical as logical;
-use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryOp, ValueExpr};
 
 use crate::eval;
 use crate::eval::{
-    EvalBinOpExpr, EvalBinop, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalVarRef, Evaluable,
+    EvalBinOp, EvalBinOpExpr, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalUnaryOp,
+    EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -88,26 +89,34 @@ impl EvaluatorPlanner {
 
     fn plan_values(&self, ve: ValueExpr) -> Box<dyn EvalExpr> {
         match ve {
-            ValueExpr::UnExpr(_, _) => todo!("{:?}", ve),
+            ValueExpr::UnExpr(unary_op, operand) => {
+                let operand = self.plan_values(*operand);
+                let op = match unary_op {
+                    UnaryOp::Pos => EvalUnaryOp::Pos,
+                    UnaryOp::Neg => EvalUnaryOp::Neg,
+                    UnaryOp::Not => EvalUnaryOp::Not,
+                };
+                Box::new(EvalUnaryOpExpr { op, operand })
+            }
             ValueExpr::BinaryExpr(binop, lhs, rhs) => {
                 let lhs = self.plan_values(*lhs);
                 let rhs = self.plan_values(*rhs);
                 let op = match binop {
-                    BinaryOp::And => EvalBinop::And,
-                    BinaryOp::Or => EvalBinop::Or,
-                    BinaryOp::Concat => EvalBinop::Concat,
-                    BinaryOp::Eq => EvalBinop::Eq,
-                    BinaryOp::Neq => EvalBinop::Neq,
-                    BinaryOp::Gt => EvalBinop::Gt,
-                    BinaryOp::Gteq => EvalBinop::Gteq,
-                    BinaryOp::Lt => EvalBinop::Lt,
-                    BinaryOp::Lteq => EvalBinop::Gteq,
-                    BinaryOp::Add => EvalBinop::Add,
-                    BinaryOp::Sub => EvalBinop::Sub,
-                    BinaryOp::Mul => EvalBinop::Mul,
-                    BinaryOp::Div => EvalBinop::Div,
-                    BinaryOp::Mod => EvalBinop::Mod,
-                    BinaryOp::Exp => EvalBinop::Exp,
+                    BinaryOp::And => EvalBinOp::And,
+                    BinaryOp::Or => EvalBinOp::Or,
+                    BinaryOp::Concat => EvalBinOp::Concat,
+                    BinaryOp::Eq => EvalBinOp::Eq,
+                    BinaryOp::Neq => EvalBinOp::Neq,
+                    BinaryOp::Gt => EvalBinOp::Gt,
+                    BinaryOp::Gteq => EvalBinOp::Gteq,
+                    BinaryOp::Lt => EvalBinOp::Lt,
+                    BinaryOp::Lteq => EvalBinOp::Gteq,
+                    BinaryOp::Add => EvalBinOp::Add,
+                    BinaryOp::Sub => EvalBinOp::Sub,
+                    BinaryOp::Mul => EvalBinOp::Mul,
+                    BinaryOp::Div => EvalBinOp::Div,
+                    BinaryOp::Mod => EvalBinOp::Mod,
+                    BinaryOp::Exp => EvalBinOp::Exp,
                 };
                 Box::new(EvalBinOpExpr { op, lhs, rhs })
             }

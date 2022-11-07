@@ -7,7 +7,10 @@ use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{partiql_bag, Bag, BindingsName, Tuple, Value};
+use partiql_value::{
+    partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, NullableEq, NullableOrd, Tuple, UnaryPlus,
+    Value,
+};
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
@@ -345,16 +348,40 @@ impl EvalExpr for EvalLitExpr {
 }
 
 #[derive(Debug)]
+pub struct EvalUnaryOpExpr {
+    pub op: EvalUnaryOp,
+    pub operand: Box<dyn EvalExpr>,
+}
+
+#[derive(Debug)]
 pub struct EvalBinOpExpr {
-    pub op: EvalBinop,
+    pub op: EvalBinOp,
     pub lhs: Box<dyn EvalExpr>,
     pub rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
-#[allow(dead_code)] // TODO remove once out of PoC
-pub enum EvalBinop {
+pub enum EvalUnaryOp {
+    Pos,
+    Neg,
+    Not,
+}
+
+impl EvalExpr for EvalUnaryOpExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.operand.evaluate(bindings, ctx);
+        match self.op {
+            EvalUnaryOp::Pos => value.positive(),
+            EvalUnaryOp::Neg => -value,
+            EvalUnaryOp::Not => !value,
+        }
+    }
+}
+
+// TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
+#[derive(Debug)]
+pub enum EvalBinOp {
     And,
     Or,
     Concat,
@@ -376,44 +403,51 @@ pub enum EvalBinop {
 
 impl EvalExpr for EvalBinOpExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let lhs = self.lhs.evaluate(bindings, ctx);
-        let rhs = self.rhs.evaluate(bindings, ctx);
-        // Missing and Null propagation. Missing has precedence over Null
-        if lhs == Value::Missing || rhs == Value::Missing {
-            Value::Missing
-        } else if lhs == Value::Null || rhs == Value::Null {
-            Value::Null
-        } else {
-            match self.op {
-                EvalBinop::And => todo!(),
-                EvalBinop::Or => todo!(),
-                EvalBinop::Concat => {
-                    // TODO non-naive concat
-                    let lhs = if let Value::String(s) = lhs {
-                        *s
-                    } else {
-                        format!("{:?}", lhs)
-                    };
-                    let rhs = if let Value::String(s) = rhs {
-                        *s
-                    } else {
-                        format!("{:?}", lhs)
-                    };
-                    Value::String(Box::new(format!("{}{}", lhs, rhs)))
-                }
-                EvalBinop::Eq => todo!(),
-                EvalBinop::Neq => todo!(),
-                EvalBinop::Gt => Boolean(lhs > rhs),
-                EvalBinop::Gteq => Boolean(lhs >= rhs),
-                EvalBinop::Lt => Boolean(lhs < rhs),
-                EvalBinop::Lteq => Boolean(lhs <= rhs),
-                EvalBinop::Add => lhs + rhs,
-                EvalBinop::Sub => lhs - rhs,
-                EvalBinop::Mul => lhs * rhs,
-                EvalBinop::Div => lhs / rhs,
-                EvalBinop::Mod => lhs % rhs,
-                EvalBinop::Exp => todo!("Exponentiation"),
+        #[inline]
+        fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
+            match (op, value) {
+                (EvalBinOp::And, Value::Boolean(false)) => Some(false.into()),
+                (EvalBinOp::Or, Value::Boolean(true)) => Some(true.into()),
+                (_, Value::Missing) => Some(Value::Missing),
+                _ => None,
             }
+        }
+
+        let lhs = self.lhs.evaluate(bindings, ctx);
+        if let Some(propagate) = short_circuit(&self.op, &lhs) {
+            return propagate;
+        }
+
+        let rhs = self.rhs.evaluate(bindings, ctx);
+        match self.op {
+            EvalBinOp::And => lhs.and(rhs),
+            EvalBinOp::Or => lhs.or(rhs),
+            EvalBinOp::Concat => {
+                // TODO non-naive concat. Also doesn't properly propagate MISSING and NULL
+                let lhs = if let Value::String(s) = lhs {
+                    *s
+                } else {
+                    format!("{:?}", lhs)
+                };
+                let rhs = if let Value::String(s) = rhs {
+                    *s
+                } else {
+                    format!("{:?}", lhs)
+                };
+                Value::String(Box::new(format!("{}{}", lhs, rhs)))
+            }
+            EvalBinOp::Eq => lhs.eq(rhs),
+            EvalBinOp::Neq => lhs.neq(rhs),
+            EvalBinOp::Gt => lhs.gt(rhs),
+            EvalBinOp::Gteq => lhs.gteq(rhs),
+            EvalBinOp::Lt => lhs.lt(rhs),
+            EvalBinOp::Lteq => lhs.lteq(rhs),
+            EvalBinOp::Add => lhs + rhs,
+            EvalBinOp::Sub => lhs - rhs,
+            EvalBinOp::Mul => lhs * rhs,
+            EvalBinOp::Div => lhs / rhs,
+            EvalBinOp::Mod => lhs % rhs,
+            EvalBinOp::Exp => todo!("Exponentiation"),
         }
     }
 }

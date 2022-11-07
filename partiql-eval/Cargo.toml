@@ -27,6 +27,7 @@ ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
+rust_decimal_macros = "1.26"
 
 [dev-dependencies]
 criterion = "0.4"

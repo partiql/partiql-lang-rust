@@ -58,10 +58,16 @@ impl<T> LogicalPlan<T> {
     }
 }
 
+// TODO: other expressions modeled in logical plan and evaluator -- IN, IS, BETWEEN
+
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
-pub enum UnaryOp {}
+pub enum UnaryOp {
+    Pos,
+    Neg,
+    Not,
+}
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 #[derive(Clone, Debug)]
