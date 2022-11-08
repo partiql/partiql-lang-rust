@@ -4,55 +4,30 @@ pub mod plan;
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::collections::HashMap;
-    use std::rc::Rc;
-
-    use partiql_logical as logical;
-    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
-    use partiql_value as value;
 
     use crate::env::basic::MapBindings;
     use crate::plan;
+    use rust_decimal_macros::dec;
+
+    use crate::eval::Evaluator;
+
+    use partiql_logical as logical;
+    use partiql_logical::BindingsExpr::{Distinct, Project};
+    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+    use partiql_value as value;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
-    use rust_decimal_macros::dec;
 
-    use crate::eval::{
-        DagEvaluator, EvalFromAt, EvalOutputAccumulator, Evaluable, Evaluator, Output,
-    };
+    fn evaluate(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
+        let planner = plan::EvaluatorPlanner;
 
-    fn evaluate(logical: BindingsExpr, bindings: MapBindings<Value>) -> Bag {
-        let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-        let planner = plan::EvaluatorPlanner {
-            output: output.clone(),
-        };
+        let plan = planner.compile(logical);
+        let mut evaluator = Evaluator::new(bindings);
 
-        let evaluable = planner.compile(logical);
-        let mut evaluator = Evaluator::new(bindings, evaluable);
-
-        evaluator.execute();
-
-        println!("{:?}", &output);
-        let result = &output.borrow_mut().output;
-        result.clone()
-    }
-
-    // TODO: rename once we move to DAG model completely
-    fn evaluate_dag(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
-        // TODO remove once we agree on using evaluate output in the following PR:
-        // https://github.com/partiql/partiql-lang-rust/pull/202
-        let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-        let planner = plan::EvaluatorPlanner {
-            output: output.clone(),
-        };
-
-        let plan = planner.compile_dag(logical);
-        let mut evaluator = DagEvaluator::new(bindings);
-
-        if let Ok(out) = evaluator.execute_dag(plan) {
-            out.result.unwrap()
+        if let Ok(out) = evaluator.execute(plan) {
+            out.result
         } else {
             Value::Missing
         }
@@ -93,65 +68,46 @@ mod tests {
         bindings
     }
 
-    #[test]
-    fn select() {
-        // Plan for `select a as b from data`
-        let logical = BindingsExpr::From(logical::From {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
-            as_key: "data".to_string(),
-            at_key: None,
-            out: Box::new(BindingsExpr::Select(logical::Select {
-                exprs: HashMap::from([(
-                    "b".to_string(),
-                    ValueExpr::Path(
-                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                            "data".into(),
-                        ))),
-                        vec![PathComponent::Key("a".to_string())],
-                    ),
-                )]),
-                out: Box::new(BindingsExpr::Output),
-            })),
-        });
-
-        let result = evaluate(logical, data_3_tuple());
-        assert_eq!(result.len(), 3);
-    }
-
     // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
     // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
     // (i.e. <<{'result': <expected_first_elem>}>>)
     // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
     //  in evaluator output), change or delete tests using this function
     fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
-        let logical = BindingsExpr::From(logical::From {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
-            out: Box::new(BindingsExpr::Select(logical::Select {
-                exprs: HashMap::from([(
-                    "result".to_string(),
-                    ValueExpr::BinaryExpr(
-                        op,
-                        Box::new(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                "data".into(),
-                            ))),
-                            vec![PathComponent::Key("lhs".to_string())],
-                        )),
-                        Box::new(ValueExpr::Lit(Box::new(rhs))),
-                    ),
-                )]),
-                out: Box::new(BindingsExpr::Output),
-            })),
-        });
+        }));
+
+        let project = plan.add_operator(BindingsExpr::Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::BinaryExpr(
+                    op,
+                    Box::new(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                            "data".into(),
+                        ))),
+                        vec![PathComponent::Key("lhs".to_string())],
+                    )),
+                    Box::new(ValueExpr::Lit(Box::new(rhs))),
+                ),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
         let mut bindings = MapBindings::default();
         bindings.insert(
             "data",
             partiql_list![Tuple(HashMap::from([("lhs".into(), lhs)]))].into(),
         );
-        let result = evaluate(logical, bindings);
-        assert!(!result.is_empty());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
         let expected_result = partiql_bag!(Tuple(HashMap::from([(
             "result".into(),
             expected_first_elem
@@ -483,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn select_dag() {
+    fn select() {
         let mut lg = LogicalPlan::new();
 
         let from = lg.add_operator(BindingsExpr::Scan(logical::Scan {
@@ -504,12 +460,12 @@ mod tests {
             )]),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Output);
+        let sink = lg.add_operator(BindingsExpr::Sink);
 
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
 
-        if let Value::Bag(b) = evaluate_dag(lg, data_3_tuple()) {
+        if let Value::Bag(b) = evaluate(lg, data_3_tuple()) {
             assert_eq!(b.len(), 3);
         } else {
             panic!("Wrong output")
@@ -525,66 +481,82 @@ mod tests {
     #[test]
     fn select_distinct() {
         // Plan for `SELECT DISTINCT firstName, (firstName || firstName) AS doubleName FROM customer WHERE balance > 0`
-        let logical = BindingsExpr::From(logical::From {
+        let mut logical = LogicalPlan::new();
+
+        let scan = logical.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("customer".into())),
             as_key: "customer".to_string(),
             at_key: None,
-            out: Box::new(BindingsExpr::Where(logical::Where {
-                expr: ValueExpr::BinaryExpr(
-                    logical::BinaryOp::Gt,
-                    Box::new(ValueExpr::Path(
+        }));
+
+        let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
+            expr: ValueExpr::BinaryExpr(
+                logical::BinaryOp::Gt,
+                Box::new(ValueExpr::Path(
+                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                        "customer".into(),
+                    ))),
+                    vec![PathComponent::Key("balance".to_string())],
+                )),
+                Box::new(ValueExpr::Lit(Box::new(Value::Integer(0)))),
+            ),
+        }));
+
+        let project = logical.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                (
+                    "firstName".to_string(),
+                    ValueExpr::Path(
                         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                             "customer".into(),
                         ))),
-                        vec![PathComponent::Key("balance".to_string())],
-                    )),
-                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(0)))),
+                        vec![PathComponent::Key("firstName".to_string())],
+                    ),
                 ),
-                out: Box::new(BindingsExpr::Select(logical::Select {
-                    exprs: HashMap::from([
-                        (
-                            "firstName".to_string(),
-                            ValueExpr::Path(
-                                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                    "customer".into(),
-                                ))),
-                                vec![PathComponent::Key("firstName".to_string())],
-                            ),
-                        ),
-                        (
-                            "doubleName".to_string(),
-                            ValueExpr::BinaryExpr(
-                                logical::BinaryOp::Concat,
-                                Box::new(ValueExpr::Path(
-                                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                        "customer".into(),
-                                    ))),
-                                    vec![PathComponent::Key("firstName".to_string())],
-                                )),
-                                Box::new(ValueExpr::Path(
-                                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                        "customer".into(),
-                                    ))),
-                                    vec![PathComponent::Key("firstName".to_string())],
-                                )),
-                            ),
-                        ),
-                    ]),
-                    out: Box::new(BindingsExpr::Distinct(logical::Distinct {
-                        out: Box::new(BindingsExpr::Output),
-                    })),
-                })),
-            })),
-        });
+                (
+                    "doubleName".to_string(),
+                    ValueExpr::BinaryExpr(
+                        logical::BinaryOp::Concat,
+                        Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "customer".into(),
+                            ))),
+                            vec![PathComponent::Key("firstName".to_string())],
+                        )),
+                        Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "customer".into(),
+                            ))),
+                            vec![PathComponent::Key("firstName".to_string())],
+                        )),
+                    ),
+                ),
+            ]),
+        }));
 
-        let result = evaluate(logical, data_customer());
-        assert_eq!(result.len(), 2);
+        let distinct = logical.add_operator(Distinct);
+        let sink = logical.add_operator(BindingsExpr::Sink);
+
+        logical.extend_with_flows(&[
+            (scan, filter),
+            (filter, project),
+            (project, distinct),
+            (distinct, sink),
+        ]);
+
+        if let Value::Bag(b) = evaluate(logical, data_customer()) {
+            assert_eq!(b.len(), 2);
+        } else {
+            panic!("Wrong output")
+        }
     }
 
     mod clause_from {
         use partiql_value::{partiql_bag, partiql_list, BindingsName};
 
-        use crate::eval::{BasicContext, EvalFrom, EvalPath, EvalVarRef, PathComponent};
+        use crate::eval::{
+            BasicContext, EvalPath, EvalPathComponent, EvalScan, EvalVarRef, Evaluable,
+        };
 
         use super::*;
 
@@ -605,59 +577,26 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
-            let mut from = EvalFrom::new(
-                Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
-                }),
-                "x",
-                eout,
-            );
-
             let ctx = BasicContext::new(p0);
-            from.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
-            // <<{ x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 } }>>
-            let expected = partiql_bag![
-                partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]),],
-                partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]),],
-            ];
-            assert_eq!(&expected, &output.borrow().output);
-        }
-
-        // Spec 5.1
-        #[test]
-        fn at() {
-            let mut p0: MapBindings<Value> = MapBindings::default();
-            p0.insert("someOrderedTable", some_ordered_table().into());
-
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
-            let mut from = EvalFromAt::new(
+            let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
                 }),
                 "x",
                 "y",
-                eout,
             );
 
-            let ctx = BasicContext::new(p0);
-            from.evaluate(&ctx);
+            let res = scan.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &scan.output);
+
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
             let expected = partiql_bag![
                 partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]), ("y", 0)],
                 partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]), ("y", 1)],
             ];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
 
         // Spec 5.1.1
@@ -666,23 +605,20 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someUnorderedTable", some_unordered_table().into());
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
-            let mut from = EvalFromAt::new(
+            let ctx = BasicContext::new(p0);
+
+            let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("someUnorderedTable".to_string()),
                 }),
                 "x",
                 "y",
-                eout,
             );
 
-            let ctx = BasicContext::new(p0);
-            from.evaluate(&ctx);
+            let res = scan.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &scan.output);
+
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
             let expected = partiql_bag![
                 partiql_tuple![
@@ -694,7 +630,7 @@ mod tests {
                     ("y", value::Value::Missing)
                 ],
             ];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
 
         // Spec 5.1.1
@@ -703,26 +639,25 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
-
             let table_ref = EvalVarRef {
                 name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
             };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
-                components: vec![PathComponent::Index(0), PathComponent::Key("a".into())],
+                components: vec![
+                    EvalPathComponent::Index(0),
+                    EvalPathComponent::Key("a".into()),
+                ],
             };
-            let mut from = EvalFrom::new(Box::new(path_to_scalar), "x", eout);
+            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let ctx = BasicContext::new(p0);
-            from.evaluate(&ctx);
+            let scan_res = scan.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &scan.output);
+
             let expected = partiql_bag![partiql_tuple![("x", 0)]];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), scan_res.unwrap());
         }
 
         // Spec 5.1.1
@@ -731,33 +666,31 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
-
             let table_ref = EvalVarRef {
                 name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
             };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
-                components: vec![PathComponent::Index(0), PathComponent::Key("c".into())],
+                components: vec![
+                    EvalPathComponent::Index(0),
+                    EvalPathComponent::Key("c".into()),
+                ],
             };
-            let mut from = EvalFrom::new(Box::new(path_to_scalar), "x", eout);
+            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let ctx = BasicContext::new(p0);
-            from.evaluate(&ctx);
+            let res = scan.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &scan.output.unwrap());
             let expected = partiql_bag![partiql_tuple![("x", value::Value::Missing)]];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
     }
 
     mod clause_unpivot {
         use partiql_value::{partiql_bag, BindingsName, Tuple};
 
-        use crate::eval::{BasicContext, EvalUnpivot, EvalVarRef, Output};
+        use crate::eval::{BasicContext, EvalUnpivot, EvalVarRef, Evaluable};
 
         use super::*;
 
@@ -771,28 +704,23 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("justATuple", just_a_tuple().into());
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
             let mut unpivot = EvalUnpivot::new(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("justATuple".to_string()),
                 }),
                 "price",
                 "symbol",
-                eout,
             );
 
             let ctx = BasicContext::new(p0);
-            unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &unpivot.output.unwrap());
             let expected = partiql_bag![
                 partiql_tuple![("symbol", "tdc"), ("price", 31.06)],
                 partiql_tuple![("symbol", "amzn"), ("price", 840.05)],
             ];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
 
         // Spec 5.2.1
@@ -801,25 +729,20 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("nonTuple", Value::from(1));
 
-            let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-            let eout = Box::new(Output {
-                output: output.clone(),
-            });
             let mut unpivot = EvalUnpivot::new(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("nonTuple".to_string()),
                 }),
                 "x",
                 "y",
-                eout,
             );
 
             let ctx = BasicContext::new(p0);
-            unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate(&ctx);
 
-            println!("{:?}", &output.borrow().output);
+            println!("{:?}", &unpivot.output);
             let expected = partiql_bag![partiql_tuple![("x", 1), ("y", "_1")]];
-            assert_eq!(&expected, &output.borrow().output);
+            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
     }
 }

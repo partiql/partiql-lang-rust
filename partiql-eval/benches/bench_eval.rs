@@ -1,13 +1,10 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{
-    BasicContext, EvalFrom, EvalOutputAccumulator, EvalPath, EvalVarRef, Evaluable, Output,
-    PathComponent,
+    BasicContext, EvalPath, EvalPathComponent, EvalScan, EvalVarRef, Evaluable,
 };
 use partiql_value::{
     partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
@@ -52,19 +49,15 @@ fn data() -> MapBindings<Value> {
 
 fn eval_bench(c: &mut Criterion) {
     fn eval(eval: bool) {
-        let output = Rc::new(RefCell::new(EvalOutputAccumulator::default()));
-        let eout = Box::new(Output { output });
-
         // eval plan for SELECT * FROM hr.employeesNestScalars
-        let mut from = EvalFrom::new(
+        let mut from = EvalScan::new(
             Box::new(EvalPath {
                 expr: Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("hr".to_string()),
                 }),
-                components: vec![PathComponent::Key("employeesNestScalars".to_string())],
+                components: vec![EvalPathComponent::Key("employeesNestScalars".to_string())],
             }),
             "x",
-            eout,
         );
 
         let ctx = BasicContext::new(data());
