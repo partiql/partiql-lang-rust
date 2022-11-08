@@ -17,40 +17,11 @@ const FILE_HEADER: &str = "\
 ";
 
 #[derive(Debug)]
-#[allow(dead_code)]
-pub enum TreeDepth {
-    Full,
-    N(u8),
-}
-
-impl TreeDepth {
-    pub fn is_exceeded(&self, depth: &u8) -> bool {
-        match self {
-            TreeDepth::Full => false,
-            TreeDepth::N(n) => depth >= n,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct WriterConfig {
-    depth: TreeDepth,
-}
-
-impl WriterConfig {
-    pub fn new(depth: TreeDepth) -> WriterConfig {
-        WriterConfig { depth }
-    }
-}
-
-#[derive(Debug)]
-pub struct Writer {
-    config: WriterConfig,
-}
+pub struct Writer {}
 
 impl Writer {
-    pub fn new(config: WriterConfig) -> Writer {
-        Self { config }
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub fn write(&self, path: impl AsRef<Path>, root: TestModule) -> miette::Result<()> {
@@ -61,30 +32,12 @@ impl Writer {
             .collect();
         std::fs::create_dir_all(&path).into_diagnostic()?;
 
-        self.write_module(&path, root, 1)?;
+        self.write_module(&path, root)?;
 
         Ok(())
     }
 
-    fn write_module(
-        &self,
-        path: impl AsRef<Path>,
-        module: TestModule,
-        depth: u8,
-    ) -> miette::Result<()> {
-        if self.config.depth.is_exceeded(&depth) {
-            self.write_collapsed_module(&path, module)
-        } else {
-            self.write_nested_module(&path, module, depth)
-        }
-    }
-
-    fn write_nested_module(
-        &self,
-        path: &impl AsRef<Path>,
-        module: TestModule,
-        depth: u8,
-    ) -> Result<(), Report> {
+    fn write_module(&self, path: impl AsRef<Path>, module: TestModule) -> miette::Result<()> {
         write_dir_mod(&path, module.children.keys())?;
 
         for (name, child) in module.children {
@@ -92,39 +45,11 @@ impl Writer {
             child_path.push(&name);
             match child {
                 TestComponent::Scope(mut s) => write_scope(child_path, s.module.scope())?,
-                TestComponent::Module(m) => self.write_module(child_path, m, depth + 1)?,
+                TestComponent::Module(m) => self.write_module(child_path, m)?,
             }
         }
         Ok(())
     }
-
-    fn write_collapsed_module(
-        &self,
-        path: impl AsRef<Path>,
-        module: TestModule,
-    ) -> miette::Result<()> {
-        let name = path.as_ref().file_name().unwrap().to_str().unwrap();
-        let mut module = collapse_module(name, module)?;
-
-        let path = PathBuf::from(path.as_ref()).with_extension("rs");
-        write_scope(path, module.scope())
-    }
-}
-
-fn collapse_module(name: &str, module: TestModule) -> miette::Result<Module> {
-    let children = module
-        .children
-        .into_iter()
-        .map(|(name, child)| match child {
-            TestComponent::Scope(scope) => Ok(scope.module),
-            TestComponent::Module(module) => collapse_module(&name, module),
-        });
-
-    let mut module = Module::new(name);
-    for child in children {
-        module.push_module(child?);
-    }
-    Ok(module)
 }
 
 fn write_dir_mod<'a>(

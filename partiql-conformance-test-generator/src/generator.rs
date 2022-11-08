@@ -6,6 +6,33 @@ use codegen::{Function, Module, Scope};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
+#[allow(dead_code)]
+pub enum TreeDepth {
+    Full,
+    N(u8),
+}
+
+impl TreeDepth {
+    pub fn is_exceeded(&self, depth: &u8) -> bool {
+        match self {
+            TreeDepth::Full => false,
+            TreeDepth::N(n) => depth >= n,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GeneratorConfig {
+    depth: TreeDepth,
+}
+
+impl GeneratorConfig {
+    pub fn new(depth: TreeDepth) -> GeneratorConfig {
+        GeneratorConfig { depth }
+    }
+}
+
+#[derive(Debug)]
 pub enum TestComponent {
     Scope(TestScope),
     Module(TestModule),
@@ -45,14 +72,16 @@ impl TestModule {
 /// Generates a [`TestModule`] root from a [`TestRoot`] specification.
 #[derive(Debug)]
 pub struct Generator {
+    config: GeneratorConfig,
     result: TestModule,
     curr_path: Vec<String>,
     seen_fns: Vec<HashSet<String>>,
 }
 
 impl Generator {
-    pub fn new() -> Generator {
+    pub fn new(config: GeneratorConfig) -> Generator {
         Self {
+            config,
             result: Default::default(),
             curr_path: Default::default(),
             seen_fns: Default::default(),
@@ -68,6 +97,15 @@ impl Generator {
     }
 
     fn test_entry(&mut self, entry: TestEntry) {
+        let depth = self.curr_path.len() + 1;
+        if self.config.depth.is_exceeded(&(depth as u8)) {
+            self.collapsed_test_entry(entry);
+        } else {
+            self.nested_test_entry(entry);
+        }
+    }
+
+    fn nested_test_entry(&mut self, entry: TestEntry) {
         match entry {
             TestEntry::Dir(TestDir { dir_name, contents }) => {
                 self.curr_path.push(dir_name.escape_path());
@@ -91,6 +129,43 @@ impl Generator {
                     .chain(std::iter::once(&out_file))
                     .collect();
                 self.result.insert(&path, TestScope { module });
+            }
+        }
+    }
+
+    fn collapsed_test_entry(&mut self, entry: TestEntry) {
+        let mod_name = match &entry {
+            TestEntry::Dir(TestDir { dir_name, .. }) => dir_name.clone(),
+            TestEntry::Doc(TestFile { file_name, .. }) => file_name.replace(".ion", ""),
+        };
+
+        let mut module = Module::new(&mod_name.escape_module_name());
+        self.collapse_test_entry(module.scope(), entry);
+
+        let out_file = format!("{}.rs", &mod_name.escape_path());
+        let path: Vec<_> = self
+            .curr_path
+            .iter()
+            .chain(std::iter::once(&out_file))
+            .collect();
+        self.result.insert(&path, TestScope { module });
+    }
+
+    fn collapse_test_entry(&mut self, scope: &mut Scope, entry: TestEntry) {
+        match entry {
+            TestEntry::Dir(TestDir { dir_name, contents }) => {
+                let module = scope.new_module(&dir_name.escape_module_name());
+                for c in contents {
+                    self.collapse_test_entry(module.scope(), c);
+                }
+            }
+            TestEntry::Doc(TestFile {
+                file_name,
+                contents,
+            }) => {
+                let mod_name = file_name.replace(".ion", "");
+                let module = scope.new_module(&mod_name.escape_module_name());
+                self.gen_tests(module.scope(), &contents);
             }
         }
     }
