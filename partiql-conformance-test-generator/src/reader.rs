@@ -258,7 +258,7 @@ impl TryFrom<&Element> for Assertion {
     }
 }
 
-impl TryFrom<&Element> for EvaluationModeSymbolOrList {
+impl TryFrom<&Element> for EvaluationModeList {
     type Error = miette::Report;
 
     fn try_from(value: &Element) -> Result<Self, Self::Error> {

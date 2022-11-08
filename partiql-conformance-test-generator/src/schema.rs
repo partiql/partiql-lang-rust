@@ -108,20 +108,17 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
-    pub enum EvaluationModeSymbolOrList {
-        Mode(EvaluationMode),
-        List(Vec<EvaluationMode>),
-    }
+    pub struct EvaluationModeList(Vec<EvaluationMode>);
 
-    impl From<EvaluationMode> for EvaluationModeSymbolOrList {
+    impl From<EvaluationMode> for EvaluationModeList {
         fn from(mode: EvaluationMode) -> Self {
-            EvaluationModeSymbolOrList::Mode(mode)
+            EvaluationModeList(vec![mode])
         }
     }
 
-    impl From<Vec<EvaluationMode>> for EvaluationModeSymbolOrList {
+    impl From<Vec<EvaluationMode>> for EvaluationModeList {
         fn from(mode: Vec<EvaluationMode>) -> Self {
-            EvaluationModeSymbolOrList::List(mode)
+            EvaluationModeList(mode)
         }
     }
 
@@ -144,12 +141,12 @@ pub mod spec {
     pub struct EvaluationSuccessAssertion {
         pub result: String,
         pub output: Element,
-        pub eval_mode: EvaluationModeSymbolOrList,
+        pub eval_mode: EvaluationModeList,
     }
 
     #[derive(Debug, Clone)]
     pub struct EvaluationFailAssertion {
         pub result: String,
-        pub eval_mode: EvaluationModeSymbolOrList,
+        pub eval_mode: EvaluationModeList,
     }
 }
