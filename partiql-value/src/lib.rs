@@ -2,10 +2,11 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::{ops, vec};
+use std::iter::zip;
 
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
@@ -396,8 +397,8 @@ impl Value {
         if let Value::Tuple(t) = self {
             *t
         } else {
-            let fresh_key = "_1".to_string(); // TODO don't hard-code 'fresh' keys
-            Tuple(HashMap::from([(fresh_key, self)]))
+            let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
+            Tuple::from([(fresh_key, self)])
         }
     }
 
@@ -566,7 +567,7 @@ impl Ord for Value {
             (Value::List(_), _) => Ordering::Less,
             (_, Value::List(_)) => Ordering::Greater,
 
-            (Value::Tuple(l), Value::Tuple(r)) => l.cmp(r),
+            // (Value::Tuple(l), Value::Tuple(r)) => l.cmp(r.clone()),
             (Value::Tuple(_), _) => Ordering::Less,
             (_, Value::Tuple(_)) => Ordering::Greater,
 
@@ -886,8 +887,54 @@ impl Hash for Bag {
 }
 
 // TODO replace HashMap to support multi key
-#[derive(Default, Eq, Clone)]
-pub struct Tuple(pub HashMap<String, Value>);
+#[derive(Default, Eq, Hash, Debug, Clone)]
+pub struct Tuple {
+    attrs: Vec<String>,
+    vals: Vec<Value>
+}
+
+impl Tuple {
+    pub fn new() -> Self {
+        Tuple {
+            attrs: vec![],
+            vals: vec![],
+        }
+    }
+
+    #[inline]
+    pub fn insert(&mut self, attr: &str, val: Value) {
+        self.attrs.push(attr.to_string());
+        self.vals.push(val);
+    }
+
+    #[inline]
+    pub fn get(&self, attr: &str) -> Option<&Value> {
+        let idx = self.attrs.iter().position(|a| *a == attr.to_string());
+        match idx {
+            Some(i) => Some(&self.vals[i]),
+            _ => None
+        }
+    }
+
+    #[inline]
+    pub fn remove(&mut self, attr: &str) -> Option< Value> {
+        let idx = self.attrs.iter().position(|a| *a == attr.to_string());
+        match idx {
+            Some(i) => {
+                self.attrs.remove(i);
+                Some(self.vals.remove(i))
+            },
+            _ => None
+        }
+    }
+
+    #[inline]
+    pub fn pairs(&self) -> Vec<(&str, &Value)> {
+        zip(&self.attrs, &self.vals)
+            .map(|(k, v)| (k.as_str(), v))
+            .collect()
+    }
+}
 
 impl<const N: usize, T> From<[(&str, T); N]> for Tuple
 where
@@ -895,81 +942,43 @@ where
 {
     #[inline]
     fn from(arr: [(&str, T); N]) -> Self {
-        Tuple(HashMap::from_iter(
-            arr.into_iter().map(|(k, v)| (k.to_string(), v.into())),
-        ))
+        let out = arr.into_iter()
+            .fold(Tuple::new(), |mut acc: Tuple, (attr, val)| {
+                acc.insert(attr, val.into());
+                acc
+            });
+
+        out
     }
 }
 
-#[macro_export]
-macro_rules! partiql_tuple {
-    () => (
-         Tuple(HashMap::new())
-    );
-    ($(($x:expr, $y:expr)),+ $(,)?) => (
-        Tuple::from([$(($x, Value::from($y))),+])
-    );
-}
+impl Iterator for Tuple {
+    type Item = (String, Value);
 
-impl Debug for Tuple {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.0.is_empty() {
-            true => write!(f, "{{}}"),
-            false => {
-                let mut dbg = f.debug_struct("");
-                for (k, v) in &self.0 {
-                    dbg.field(k, v);
-                }
-                dbg.finish()
-            }
-        }
-    }
-}
-
-impl PartialOrd for Tuple {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Tuple {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let mut l = self.0.keys().sorted();
-        let mut r = other.0.keys().sorted();
-
-        loop {
-            match (l.next(), r.next()) {
-                (None, None) => return Ordering::Equal,
-                (Some(_), None) => return Ordering::Greater,
-                (None, Some(_)) => return Ordering::Less,
-                (Some(lv), Some(rv)) => match lv.cmp(rv) {
-                    Ordering::Less => return Ordering::Less,
-                    Ordering::Greater => return Ordering::Greater,
-                    Ordering::Equal => match self.0[lv].cmp(&other.0[rv]) {
-                        Ordering::Less => return Ordering::Less,
-                        Ordering::Greater => return Ordering::Greater,
-                        Ordering::Equal => continue,
-                    },
-                },
-            }
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.attrs.pop(), self.vals.pop()) {
+            (Some(attr), Some(val)) => Some((attr, val)),
+            _ => None
         }
     }
 }
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        let s1: HashSet<(&str, &Value)> = self.pairs().into_iter().collect();
+        let s2: HashSet<(&str, &Value)> = other.pairs().into_iter().collect();
+        s1.eq(&s2)
     }
 }
 
-impl Hash for Tuple {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let keys = self.0.keys().into_iter().sorted();
-        for k in keys {
-            k.hash(state);
-            self.0[k].hash(state);
-        }
-    }
+#[macro_export]
+macro_rules! partiql_tuple {
+    () => (
+         Tuple::new()
+    );
+    ($(($x:expr, $y:expr)),+ $(,)?) => (
+        Tuple::from([$(($x, Value::from($y))),+])
+    );
 }
 
 #[cfg(test)]
@@ -1016,6 +1025,12 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn partiql_tuple_test() {
+        let mut t = partiql_tuple![("a", 1), ("b", 2)];
+        t.iter.into_iter().for_each(|(a, v)| println!("({:?}. {:?}", a, v));
     }
 
     #[test]

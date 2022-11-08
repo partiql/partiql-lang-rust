@@ -2,16 +2,16 @@ use partiql_value::{BindingsName, Tuple, Value};
 use unicase::UniCase;
 
 pub trait Bindings<T> {
-    fn get(&self, name: &BindingsName) -> Option<&T>;
+    fn get_binding(&self, name: &BindingsName) -> Option<&T>;
 }
 
 impl Bindings<Value> for Tuple {
-    fn get(&self, name: &BindingsName) -> Option<&Value> {
+    fn get_binding(&self, name: &BindingsName) -> Option<&Value> {
         match name {
-            BindingsName::CaseSensitive(s) => self.0.get(s),
+            BindingsName::CaseSensitive(s) => self.get(s),
             BindingsName::CaseInsensitive(s) => {
                 //TODO
-                self.0.get(s)
+                self.get(s)
             }
         }
     }
@@ -50,7 +50,7 @@ pub mod basic {
 
     impl<T> Bindings<T> for MapBindings<T> {
         #[inline]
-        fn get(&self, name: &BindingsName) -> Option<&T> {
+        fn get_binding(&self, name: &BindingsName) -> Option<&T> {
             let idx = match name {
                 BindingsName::CaseSensitive(s) => self.sensitive.get(s),
                 BindingsName::CaseInsensitive(s) => {
