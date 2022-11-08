@@ -73,14 +73,14 @@ impl Evaluable for EvalScan {
         let mut value = partiql_bag![];
         let v = self.expr.evaluate(&Tuple(HashMap::new()), ctx);
         let ordered = &v.is_ordered();
-        let mut c: i64 = 0;
+        let mut at_index_counter: i64 = 0;
         let at_key = &self.at_key;
         for t in v.into_iter() {
             let mut out = HashMap::from([(self.as_key.clone(), t)]);
             if !at_key.is_empty() {
-                let at_id = if *ordered { c.into() } else { Missing };
-                out.insert(at_key.clone(), at_id.into());
-                c += 1;
+                let at_id = if *ordered { at_index_counter.into() } else { Missing };
+                out.insert(at_key.clone(), at_id);
+                at_index_counter += 1;
             }
 
             value.push(Value::Tuple(Box::new(Tuple(out))));
@@ -100,7 +100,6 @@ pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
     pub at_key: String,
-    pub input: Option<Value>,
     pub output: Option<Value>,
 }
 
@@ -110,7 +109,6 @@ impl EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
             at_key: at_key.to_string(),
-            input: None,
             output: None,
         }
     }
@@ -138,8 +136,8 @@ impl Evaluable for EvalUnpivot {
         self.output.clone()
     }
 
-    fn update_input(&mut self, input: &Value) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, _input: &Value) {
+        todo!()
     }
 }
 
@@ -164,7 +162,10 @@ impl EvalFilter {
         let result = self.expr.evaluate(bindings, ctx);
         match result {
             Boolean(bool_val) => bool_val,
-            _ => panic!("invalid filter -- not boolean"),
+            // Alike SQL, when the expression of the WHERE clause expression evaluates to
+            // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
+            // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
+            _ => false
         }
     }
 }
