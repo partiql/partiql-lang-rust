@@ -78,7 +78,7 @@ mod tests {
         let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
-            at_key: "".to_string(),
+            at_key: None,
         }));
 
         let project = plan.add_operator(BindingsExpr::Project(logical::Project {
@@ -445,7 +445,7 @@ mod tests {
         let from = lg.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
-            at_key: "".to_string(),
+            at_key: None,
         }));
 
         let project = lg.add_operator(BindingsExpr::Project(logical::Project {
@@ -486,7 +486,7 @@ mod tests {
         let scan = logical.add_operator(BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("customer".into())),
             as_key: "customer".to_string(),
-            at_key: "".to_string(),
+            at_key: None,
         }));
 
         let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
@@ -579,7 +579,7 @@ mod tests {
 
             let ctx = BasicContext::new(p0);
 
-            let mut scan = EvalScan::new(
+            let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
                 }),
@@ -607,7 +607,7 @@ mod tests {
 
             let ctx = BasicContext::new(p0);
 
-            let mut scan = EvalScan::new(
+            let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("someUnorderedTable".to_string()),
                 }),
@@ -649,7 +649,7 @@ mod tests {
                     EvalPathComponent::Key("a".into()),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x", "");
+            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let ctx = BasicContext::new(p0);
             let scan_res = scan.evaluate(&ctx);
@@ -676,7 +676,7 @@ mod tests {
                     EvalPathComponent::Key("c".into()),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x", "");
+            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let ctx = BasicContext::new(p0);
             let res = scan.evaluate(&ctx);

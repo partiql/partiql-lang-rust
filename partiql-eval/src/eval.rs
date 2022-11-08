@@ -53,16 +53,24 @@ pub trait Evaluable: Debug {
 pub struct EvalScan {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
-    pub at_key: String,
+    pub at_key: Option<String>,
     pub output: Option<Value>,
 }
 
 impl EvalScan {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str) -> Self {
         EvalScan {
             expr,
             as_key: as_key.to_string(),
-            at_key: at_key.to_string(),
+            at_key: None,
+            output: None,
+        }
+    }
+    pub fn new_with_at_key(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+        EvalScan {
+            expr,
+            as_key: as_key.to_string(),
+            at_key: Some(at_key.to_string()),
             output: None,
         }
     }
@@ -74,18 +82,24 @@ impl Evaluable for EvalScan {
         let v = self.expr.evaluate(&Tuple(HashMap::new()), ctx);
         let ordered = &v.is_ordered();
         let mut at_index_counter: i64 = 0;
-        let at_key = &self.at_key;
-        for t in v.into_iter() {
-            let mut out = HashMap::from([(self.as_key.clone(), t)]);
-            if !at_key.is_empty() {
-                let at_id = if *ordered { at_index_counter.into() } else { Missing };
+        if let Some(at_key) = &self.at_key {
+            for t in v.into_iter() {
+                let mut out = HashMap::from([(self.as_key.clone(), t)]);
+                let at_id = if *ordered {
+                    at_index_counter.into()
+                } else {
+                    Missing
+                };
                 out.insert(at_key.clone(), at_id);
+                value.push(Value::Tuple(Box::new(Tuple(out))));
                 at_index_counter += 1;
             }
-
-            value.push(Value::Tuple(Box::new(Tuple(out))));
+        } else {
+            for t in v.into_iter() {
+                let out = HashMap::from([(self.as_key.clone(), t)]);
+                value.push(Value::Tuple(Box::new(Tuple(out))));
+            }
         }
-
         self.output = Some(Value::Bag(Box::new(value)));
         self.output.clone()
     }
@@ -165,7 +179,7 @@ impl EvalFilter {
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
             // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
-            _ => false
+            _ => false,
         }
     }
 }

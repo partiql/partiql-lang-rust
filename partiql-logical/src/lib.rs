@@ -29,6 +29,7 @@ impl<T> LogicalPlan<T> {
         OpId(self.operator_count())
     }
 
+    #[inline]
     pub fn add_flow(&mut self, src: OpId, dst: OpId) {
         assert!(src.index() <= self.operator_count());
         assert!(dst.index() <= self.operator_count());
@@ -36,15 +37,12 @@ impl<T> LogicalPlan<T> {
         self.edges.push((src, dst));
     }
 
+    #[inline]
     pub fn extend_with_flows(&mut self, flows: &[(OpId, OpId)]) {
-        flows.iter().for_each(|f| {
-            assert!(f.0.index() <= self.operator_count());
-            assert!(f.1.index() <= self.operator_count());
-
-            self.edges.push(*f);
-        });
+        flows.iter().for_each(|&(s, d)| self.add_flow(s, d));
     }
 
+    #[inline]
     pub fn operator_count(&self) -> usize {
         self.nodes.len()
     }
@@ -145,7 +143,7 @@ pub enum ValueToBindingsExpr {}
 pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
-    pub at_key: String,
+    pub at_key: Option<String>,
 }
 
 /// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingExpr`]s

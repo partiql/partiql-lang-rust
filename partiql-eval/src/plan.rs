@@ -52,11 +52,17 @@ impl EvaluatorPlanner {
                 expr,
                 as_key,
                 at_key,
-            }) => Box::new(eval::EvalScan::new(
-                self.plan_values(expr.clone()),
-                as_key,
-                at_key,
-            )),
+            }) => {
+                if let Some(at_key) = at_key {
+                    Box::new(eval::EvalScan::new_with_at_key(
+                        self.plan_values(expr.clone()),
+                        as_key,
+                        at_key,
+                    ))
+                } else {
+                    Box::new(eval::EvalScan::new(self.plan_values(expr.clone()), as_key))
+                }
+            }
             BindingsExpr::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .into_iter()
