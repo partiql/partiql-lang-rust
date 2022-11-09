@@ -34,13 +34,8 @@ mod tests {
     }
 
     fn data_customer() -> MapBindings<Value> {
-        fn customer_tuple(id: i64, first_name: &str, balance: i64) -> value::Value {
-            partiql_tuple![
-                ("id", id),
-                ("firstName", first_name),
-                ("balance", balance),
-            ]
-            .into()
+        fn customer_tuple(id: i64, first_name: &str, balance: i64) -> Value {
+            partiql_tuple![("id", id), ("firstName", first_name), ("balance", balance),].into()
         }
 
         let customer_val = partiql_bag![
@@ -57,7 +52,7 @@ mod tests {
     }
 
     fn data_3_tuple() -> MapBindings<Value> {
-        fn a_tuple(n: i64) -> value::Value {
+        fn a_tuple(n: i64) -> Value {
             partiql_tuple![("a", n)].into()
         }
 
@@ -81,7 +76,7 @@ mod tests {
             at_key: None,
         }));
 
-        let project = plan.add_operator(BindingsExpr::Project(logical::Project {
+        let project = plan.add_operator(Project(logical::Project {
             exprs: HashMap::from([(
                 "result".to_string(),
                 ValueExpr::BinaryExpr(
@@ -108,10 +103,7 @@ mod tests {
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        let expected_result = partiql_bag!(Tuple::from([(
-            "result".into(),
-            expected_first_elem
-        )]));
+        let expected_result = partiql_bag!(Tuple::from([("result".into(), expected_first_elem)]));
         assert_eq!(expected_result, result);
     }
 
@@ -448,7 +440,7 @@ mod tests {
             at_key: None,
         }));
 
-        let project = lg.add_operator(BindingsExpr::Project(logical::Project {
+        let project = lg.add_operator(Project(logical::Project {
             exprs: HashMap::from([(
                 "b".to_string(),
                 ValueExpr::Path(
@@ -491,7 +483,7 @@ mod tests {
 
         let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
             expr: ValueExpr::BinaryExpr(
-                logical::BinaryOp::Gt,
+                BinaryOp::Gt,
                 Box::new(ValueExpr::Path(
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                         "customer".into(),
@@ -516,7 +508,7 @@ mod tests {
                 (
                     "doubleName".to_string(),
                     ValueExpr::BinaryExpr(
-                        logical::BinaryOp::Concat,
+                        BinaryOp::Concat,
                         Box::new(ValueExpr::Path(
                             Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                                 "customer".into(),
@@ -548,7 +540,6 @@ mod tests {
             let expected = partiql_bag![
                 partiql_tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
                 partiql_tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
-
             ];
             assert_eq!(expected, *out);
         } else {

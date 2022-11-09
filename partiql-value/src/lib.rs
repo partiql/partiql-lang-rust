@@ -2,11 +2,11 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::{ops, vec};
 use std::iter::zip;
+use std::{ops, vec};
 
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
@@ -567,7 +567,6 @@ impl Ord for Value {
             (Value::List(_), _) => Ordering::Less,
             (_, Value::List(_)) => Ordering::Greater,
 
-            // (Value::Tuple(l), Value::Tuple(r)) => l.cmp(r.clone()),
             (Value::Tuple(_), _) => Ordering::Less,
             (_, Value::Tuple(_)) => Ordering::Greater,
 
@@ -890,7 +889,7 @@ impl Hash for Bag {
 #[derive(Default, Eq, Hash, Debug, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
-    vals: Vec<Value>
+    vals: Vec<Value>,
 }
 
 impl Tuple {
@@ -909,22 +908,20 @@ impl Tuple {
 
     #[inline]
     pub fn get(&self, attr: &str) -> Option<&Value> {
-        let idx = self.attrs.iter().position(|a| *a == attr.to_string());
-        match idx {
+        match self.attrs.iter().position(|a| *a == attr.to_string()) {
             Some(i) => Some(&self.vals[i]),
-            _ => None
+            _ => None,
         }
     }
 
     #[inline]
-    pub fn remove(&mut self, attr: &str) -> Option< Value> {
-        let idx = self.attrs.iter().position(|a| *a == attr.to_string());
-        match idx {
+    pub fn remove(&mut self, attr: &str) -> Option<Value> {
+        match self.attrs.iter().position(|a| *a == attr.to_string()) {
             Some(i) => {
                 self.attrs.remove(i);
                 Some(self.vals.remove(i))
-            },
-            _ => None
+            }
+            _ => None,
         }
     }
 
@@ -942,7 +939,8 @@ where
 {
     #[inline]
     fn from(arr: [(&str, T); N]) -> Self {
-        let out = arr.into_iter()
+        let out = arr
+            .into_iter()
             .fold(Tuple::new(), |mut acc: Tuple, (attr, val)| {
                 acc.insert(attr, val.into());
                 acc
@@ -958,7 +956,7 @@ impl Iterator for Tuple {
     fn next(&mut self) -> Option<Self::Item> {
         match (self.attrs.pop(), self.vals.pop()) {
             (Some(attr), Some(val)) => Some((attr, val)),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -1025,12 +1023,6 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
-    }
-
-    #[test]
-    fn partiql_tuple_test() {
-        let mut t = partiql_tuple![("a", 1), ("b", 2)];
-        t.iter.into_iter().for_each(|(a, v)| println!("({:?}. {:?}", a, v));
     }
 
     #[test]

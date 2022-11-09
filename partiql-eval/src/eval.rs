@@ -236,11 +236,9 @@ impl Evaluable for EvalProject {
             let v_as_tuple = v.coerce_to_tuple();
             let mut t = Tuple::new();
 
-            self.exprs
-                .iter()
-                .for_each(|(alias, expr)| {
-                    t.insert(alias.as_str(), expr.evaluate(&v_as_tuple, ctx));
-                });
+            self.exprs.iter().for_each(|(alias, expr)| {
+                t.insert(alias.as_str(), expr.evaluate(&v_as_tuple, ctx));
+            });
             value.push(Value::Tuple(Box::new(t)));
         }
 
@@ -345,9 +343,7 @@ pub struct EvalVarRef {
 
 impl EvalExpr for EvalVarRef {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = bindings
-            .get_binding(&self.name)
-            .or_else(|| ctx.bindings().get_binding(&self.name));
+        let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
         value.map_or(Null, |v| v.clone())
     }
 }
@@ -422,9 +418,9 @@ impl EvalExpr for EvalBinOpExpr {
         #[inline]
         fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
             match (op, value) {
-                (EvalBinOp::And, Value::Boolean(false)) => Some(false.into()),
-                (EvalBinOp::Or, Value::Boolean(true)) => Some(true.into()),
-                (_, Value::Missing) => Some(Value::Missing),
+                (EvalBinOp::And, Boolean(false)) => Some(false.into()),
+                (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
+                (_, Missing) => Some(Missing),
                 _ => None,
             }
         }
