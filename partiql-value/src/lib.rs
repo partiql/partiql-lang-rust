@@ -567,6 +567,7 @@ impl Ord for Value {
             (Value::List(_), _) => Ordering::Less,
             (_, Value::List(_)) => Ordering::Greater,
 
+            (Value::Tuple(l), Value::Tuple(r)) => l.cmp(r),
             (Value::Tuple(_), _) => Ordering::Less,
             (_, Value::Tuple(_)) => Ordering::Greater,
 
