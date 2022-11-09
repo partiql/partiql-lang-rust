@@ -886,7 +886,6 @@ impl Hash for Bag {
     }
 }
 
-// TODO replace HashMap to support multi key
 #[derive(Default, Eq, Hash, Debug, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
@@ -967,6 +966,34 @@ impl PartialEq for Tuple {
         let s1: HashSet<(&str, &Value)> = self.pairs().into_iter().collect();
         let s2: HashSet<(&str, &Value)> = other.pairs().into_iter().collect();
         s1.eq(&s2)
+    }
+}
+
+impl PartialOrd for Tuple {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Tuple {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let self_pairs = self.pairs();
+        let other_pairs = other.pairs();
+        let mut p1 = self_pairs.iter().sorted();
+        let mut p2 = other_pairs.iter().sorted();
+
+        loop {
+            return match (p1.next(), p2.next()) {
+                (None, None) => Ordering::Equal,
+                (Some(_), None) => Ordering::Greater,
+                (None, Some(_)) => Ordering::Less,
+                (Some(lv), Some(rv)) => match lv.cmp(rv) {
+                    Ordering::Less => Ordering::Less,
+                    Ordering::Greater => Ordering::Greater,
+                    Ordering::Equal => continue,
+                },
+            };
+        }
     }
 }
 
