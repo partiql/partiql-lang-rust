@@ -110,6 +110,15 @@ pub mod spec {
     #[derive(Debug, Clone)]
     pub struct EvaluationModeList(Vec<EvaluationMode>);
 
+    impl<'a> IntoIterator for &'a EvaluationModeList {
+        type Item = &'a EvaluationMode;
+        type IntoIter = std::slice::Iter<'a, EvaluationMode>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.iter()
+        }
+    }
+
     impl From<EvaluationMode> for EvaluationModeList {
         fn from(mode: EvaluationMode) -> Self {
             EvaluationModeList(vec![mode])

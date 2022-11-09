@@ -3,6 +3,11 @@ use crate::schema::structure::*;
 
 use crate::util::Escaper;
 use codegen::{Function, Module, Scope};
+use ion_rs::value::native_writer::NativeElementWriter;
+use ion_rs::value::owned::{Element, Struct};
+use ion_rs::value::writer::ElementWriter;
+use ion_rs::TextWriterBuilder;
+use quote::quote;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
@@ -33,34 +38,45 @@ impl GeneratorConfig {
 }
 
 #[derive(Debug)]
-pub enum TestComponent {
-    Scope(TestScope),
-    Module(TestModule),
+pub enum TestTree {
+    Node(Node),
+    Namespace(NamespaceNode),
 }
 
 #[derive(Debug)]
-pub struct TestScope {
+pub enum Node {
+    Test(TestNode),
+    Env(EnvNode),
+}
+
+#[derive(Debug)]
+pub struct TestNode {
     pub module: Module,
 }
 
-#[derive(Debug, Default)]
-pub struct TestModule {
-    pub children: HashMap<String, TestComponent>,
+#[derive(Debug)]
+pub struct EnvNode {
+    pub env: String,
 }
 
-impl TestModule {
-    pub fn insert(&mut self, path: &[&String], scope: TestScope) {
+#[derive(Debug, Default)]
+pub struct NamespaceNode {
+    pub children: HashMap<String, TestTree>,
+}
+
+impl NamespaceNode {
+    pub fn insert(&mut self, path: &[&String], node: Node) {
         if let Some((first, rest)) = path.split_first() {
             if rest.is_empty() {
                 self.children
-                    .insert(first.to_string(), TestComponent::Scope(scope));
+                    .insert(first.to_string(), TestTree::Node(node));
             } else {
                 let child = self
                     .children
                     .entry((*first).clone())
-                    .or_insert_with(|| TestComponent::Module(TestModule::default()));
-                if let TestComponent::Module(child_mod) = child {
-                    child_mod.insert(rest, scope)
+                    .or_insert_with(|| TestTree::Namespace(NamespaceNode::default()));
+                if let TestTree::Namespace(child_mod) = child {
+                    child_mod.insert(rest, node)
                 } else {
                     unreachable!();
                 }
@@ -69,12 +85,13 @@ impl TestModule {
     }
 }
 
-/// Generates a [`TestModule`] root from a [`TestRoot`] specification.
+/// Generates a [`NamespaceNode`] root from a [`TestRoot`] specification.
 #[derive(Debug)]
 pub struct Generator {
     config: GeneratorConfig,
-    result: TestModule,
+    result: NamespaceNode,
     curr_path: Vec<String>,
+    curr_mod_path: Vec<String>,
     seen_fns: Vec<HashSet<String>>,
 }
 
@@ -84,11 +101,12 @@ impl Generator {
             config,
             result: Default::default(),
             curr_path: Default::default(),
+            curr_mod_path: Default::default(),
             seen_fns: Default::default(),
         }
     }
 
-    pub fn generate(mut self, root: TestRoot) -> miette::Result<TestModule> {
+    pub fn generate(mut self, root: TestRoot) -> miette::Result<NamespaceNode> {
         for entry in root.0 {
             self.test_entry(entry)
         }
@@ -120,7 +138,12 @@ impl Generator {
             }) => {
                 let mod_name = file_name.replace(".ion", "").escape_path();
                 let mut module = Module::new(&mod_name);
+                module.attr("allow(unused_imports)");
+                module.import("super", "*");
+
+                self.curr_mod_path.push(mod_name.clone());
                 self.gen_tests(module.scope(), &contents);
+                self.curr_mod_path.pop();
 
                 let out_file = format!("{}.rs", &mod_name);
                 let path: Vec<_> = self
@@ -128,7 +151,7 @@ impl Generator {
                     .iter()
                     .chain(std::iter::once(&out_file))
                     .collect();
-                self.result.insert(&path, TestScope { module });
+                self.result.insert(&path, Node::Test(TestNode { module }));
             }
         }
     }
@@ -140,7 +163,12 @@ impl Generator {
         };
 
         let mut module = Module::new(&mod_name.escape_module_name());
+        module.attr("allow(unused_imports)");
+        module.import("super", "*");
+
+        self.curr_mod_path.push(mod_name.clone());
         self.collapse_test_entry(module.scope(), entry);
+        self.curr_mod_path.pop();
 
         let out_file = format!("{}.rs", &mod_name.escape_path());
         let path: Vec<_> = self
@@ -148,16 +176,22 @@ impl Generator {
             .iter()
             .chain(std::iter::once(&out_file))
             .collect();
-        self.result.insert(&path, TestScope { module });
+        self.result.insert(&path, Node::Test(TestNode { module }));
     }
 
     fn collapse_test_entry(&mut self, scope: &mut Scope, entry: TestEntry) {
         match entry {
             TestEntry::Dir(TestDir { dir_name, contents }) => {
-                let module = scope.new_module(&dir_name.escape_module_name());
+                let mod_name = dir_name;
+                let module = scope.new_module(&mod_name.escape_module_name());
+                module.attr("allow(unused_imports)");
+                module.import("super", "*");
+
+                self.curr_mod_path.push(mod_name);
                 for c in contents {
                     self.collapse_test_entry(module.scope(), c);
                 }
+                self.curr_mod_path.pop();
             }
             TestEntry::Doc(TestFile {
                 file_name,
@@ -165,7 +199,12 @@ impl Generator {
             }) => {
                 let mod_name = file_name.replace(".ion", "");
                 let module = scope.new_module(&mod_name.escape_module_name());
+                module.attr("allow(unused_imports)");
+                module.import("super", "*");
+
+                self.curr_mod_path.push(mod_name);
                 self.gen_tests(module.scope(), &contents);
+                self.curr_mod_path.pop();
             }
         }
     }
@@ -187,8 +226,35 @@ impl Generator {
         }
     }
 
-    fn gen_envs(&mut self, _scope: &mut Scope, _envs: &Environments) {
-        // TODO
+    fn gen_envs(&mut self, scope: &mut Scope, envs: &Environments) {
+        let env_file = self
+            .curr_mod_path
+            .iter()
+            .map(|s| s.escape_path())
+            .collect::<Vec<_>>()
+            .join("___")
+            + ".env.ion";
+
+        scope.raw(
+            quote! {
+                const ENV_ION_TEXT : &'static str = include_str!(#env_file);
+                fn environment() -> Option<&'static str> {
+                    Some(ENV_ION_TEXT)
+                }
+            }
+            .to_string()
+            .replace("\\n", "\n"),
+        );
+
+        let env_path: Vec<_> = self
+            .curr_path
+            .iter()
+            .chain(std::iter::once(&env_file))
+            .collect();
+        let env = struct_to_string(&envs.envs);
+
+        self.result
+            .insert(env_path.as_slice(), Node::Env(EnvNode { env }));
     }
 
     fn gen_equivs(&mut self, _scope: &mut Scope, _equivs: &EquivalenceClass) {
@@ -196,10 +262,16 @@ impl Generator {
     }
 
     fn gen_mod(&mut self, scope: &mut Scope, namespace: &Namespace) {
-        let module = scope.new_module(&namespace.name.escape_module_name());
+        let mod_name = &namespace.name;
+        let module = scope.new_module(&mod_name.escape_module_name());
+        module.attr("allow(unused_imports)");
+        module.import("super", "*");
+
+        self.curr_mod_path.push(mod_name.clone());
         self.seen_fns.push(HashSet::new());
         self.gen_variants(module.scope(), &namespace.contents);
         self.seen_fns.pop();
+        self.curr_mod_path.pop();
     }
 
     fn intern_test_name(&mut self, mut name: String) -> String {
@@ -229,43 +301,62 @@ impl Generator {
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
-                    test_fn.line(format!(
-                        r####"crate::pass_syntax(r#"{}"#);"####,
-                        &test_case.statement
-                    ));
+                    let test_case_stmt = &test_case.statement;
+                    let tokens = quote! {
+                            crate::pass_syntax(#test_case_stmt);
+                    };
+                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::SyntaxFail(_) => {
-                    test_fn.line(format!(
-                        r####"crate::fail_syntax(r#"{}"#);"####,
-                        &test_case.statement
-                    ));
+                    let test_case_stmt = &test_case.statement;
+                    let tokens = quote! {
+                            crate::fail_syntax(#test_case_stmt);
+                    };
+                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::StaticAnalysisFail(_) => {
                     // TODO semantics tests are not yet implemented
                     ignore_test = true;
 
-                    test_fn.line(format!(
-                        r####"crate::fail_semantics(r#"{}"#);"####,
-                        &test_case.statement
-                    ));
+                    let test_case_stmt = &test_case.statement;
+                    let tokens = quote! {
+                            crate::fail_semantics(#test_case_stmt);
+                    };
+                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
-                Assertion::EvaluationSuccess(_) => {
+                Assertion::EvaluationSuccess(EvaluationSuccessAssertion {
+                    output,
+                    eval_mode,
+                    ..
+                }) => {
                     // TODO evaluation success tests are not yet implemented
                     ignore_test = true;
 
-                    test_fn.line(format!(
-                        r####"crate::pass_eval(r##"{}"##);"####,
-                        &test_case.statement
-                    ));
+                    let expected = elt_to_string(output);
+                    let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
+                    let test_case_stmt = &test_case.statement;
+                    let tokens = quote! {
+                        let env = environment();
+                        let expected = #expected;
+                        for mode in [#(#modes),*] {
+                            crate::pass_eval(#test_case_stmt, mode, env, expected);
+                        }
+                    };
+                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
-                Assertion::EvaluationFail(_) => {
+                Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
                     // TODO evaluation fail tests are not yet implemented
                     ignore_test = true;
 
-                    test_fn.line(format!(
-                        r####"crate::fail_eval(r##"{}"##);"####,
-                        &test_case.statement
-                    ));
+                    let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
+                    let test_case_stmt = &test_case.statement;
+                    let tokens = quote! {
+                        let env = environment();
+                        for mode in [#(#modes),*] {
+                            crate::fail_eval(#test_case_stmt, mode, env);
+                        }
+                    };
+                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
             }
         }
@@ -274,6 +365,22 @@ impl Generator {
             test_fn.attr("ignore = \"not yet implemented\"");
         }
     }
+}
+
+fn struct_to_string(elt: &Struct) -> String {
+    elt_to_string(&Element::from(elt.clone()))
+}
+
+fn elt_to_string(elt: &Element) -> String {
+    let mut buffer = Vec::new();
+    {
+        let writer = TextWriterBuilder::pretty()
+            .build(&mut buffer)
+            .expect("ion text builder");
+        let mut element_writer = NativeElementWriter::new(writer);
+        element_writer.write(elt).expect("element write");
+    }
+    String::from_utf8(buffer).expect("utf8")
 }
 
 #[cfg(test)]
