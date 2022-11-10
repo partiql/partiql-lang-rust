@@ -1,6 +1,6 @@
-use crate::generator::Generator;
+use crate::generator::{Generator, GeneratorConfig};
 use crate::reader::read_schema;
-use crate::writer::{TreeDepth, Writer, WriterConfig};
+use crate::writer::Writer;
 use std::path::Path;
 
 mod generator;
@@ -41,11 +41,12 @@ impl Config {
         out_path: impl AsRef<Path>,
     ) -> miette::Result<()> {
         let schema = read_schema(&test_data)?;
-        let tests = Generator::new().generate(schema)?;
+
+        let config = GeneratorConfig::new(generator::TreeDepth::N(3));
+        let tests = Generator::new(config).generate(schema)?;
 
         // TODO overwrite vs. backup old content?
-        let config = WriterConfig::new(TreeDepth::N(4));
-        Writer::new(config).write(out_path, tests)?;
+        Writer::new().write(out_path, tests)?;
         Ok(())
     }
 }

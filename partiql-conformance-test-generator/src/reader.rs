@@ -182,7 +182,24 @@ impl TryFrom<&Struct> for TestCase {
 
     fn try_from(value: &Struct) -> Result<Self, Self::Error> {
         let name = expect_str!(value.get("name"), "TestCase name").into();
-        let statement = expect_str!(value.get("statement"), "TestCase statement").into();
+
+        let statement = expect_value!(value.get("statement"), "TestCase statement");
+        let statement = match statement.ion_type() {
+            IonType::Symbol => TestStatement::EquivalenceClass(
+                expect_str!(value.get("statement"), "TestCase statement").to_string(),
+            ),
+            IonType::String => TestStatement::Statement(
+                expect_str!(value.get("statement"), "TestCase statement").to_string(),
+            ),
+            _ => {
+                return Err(miette!(
+                    "unexpected type {:?} when parsing TestCase statement",
+                    statement.ion_type()
+                ))
+            }
+        };
+
+        //let statement = expect_str!(value.get("statement"), "TestCase statement").into();
         let env = if let Some(v) = value.get("env") {
             Some(expect_struct!(Some(v), "TestCase envs").clone())
         } else {
@@ -258,7 +275,7 @@ impl TryFrom<&Element> for Assertion {
     }
 }
 
-impl TryFrom<&Element> for EvaluationModeSymbolOrList {
+impl TryFrom<&Element> for EvaluationModeList {
     type Error = miette::Report;
 
     fn try_from(value: &Element) -> Result<Self, Self::Error> {

@@ -57,9 +57,15 @@ pub mod spec {
     #[derive(Debug, Clone)]
     pub struct TestCase {
         pub name: String,
-        pub statement: String,
+        pub statement: TestStatement,
         pub env: Option<Struct>,
         pub assert: Vec<Assertion>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum TestStatement {
+        Statement(String),
+        EquivalenceClass(String),
     }
 
     #[derive(Debug, Clone)]
@@ -108,20 +114,26 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
-    pub enum EvaluationModeSymbolOrList {
-        Mode(EvaluationMode),
-        List(Vec<EvaluationMode>),
-    }
+    pub struct EvaluationModeList(Vec<EvaluationMode>);
 
-    impl From<EvaluationMode> for EvaluationModeSymbolOrList {
-        fn from(mode: EvaluationMode) -> Self {
-            EvaluationModeSymbolOrList::Mode(mode)
+    impl<'a> IntoIterator for &'a EvaluationModeList {
+        type Item = &'a EvaluationMode;
+        type IntoIter = std::slice::Iter<'a, EvaluationMode>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.iter()
         }
     }
 
-    impl From<Vec<EvaluationMode>> for EvaluationModeSymbolOrList {
+    impl From<EvaluationMode> for EvaluationModeList {
+        fn from(mode: EvaluationMode) -> Self {
+            EvaluationModeList(vec![mode])
+        }
+    }
+
+    impl From<Vec<EvaluationMode>> for EvaluationModeList {
         fn from(mode: Vec<EvaluationMode>) -> Self {
-            EvaluationModeSymbolOrList::List(mode)
+            EvaluationModeList(mode)
         }
     }
 
@@ -144,12 +156,12 @@ pub mod spec {
     pub struct EvaluationSuccessAssertion {
         pub result: String,
         pub output: Element,
-        pub eval_mode: EvaluationModeSymbolOrList,
+        pub eval_mode: EvaluationModeList,
     }
 
     #[derive(Debug, Clone)]
     pub struct EvaluationFailAssertion {
         pub result: String,
-        pub eval_mode: EvaluationModeSymbolOrList,
+        pub eval_mode: EvaluationModeList,
     }
 }
