@@ -79,25 +79,25 @@ impl EvalScan {
 impl Evaluable for EvalScan {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let mut value = partiql_bag![];
-        let v = self.expr.evaluate(&Tuple(HashMap::new()), ctx);
+        let v = self.expr.evaluate(&Tuple::new(), ctx);
         let ordered = &v.is_ordered();
         let mut at_index_counter: i64 = 0;
         if let Some(at_key) = &self.at_key {
             for t in v.into_iter() {
-                let mut out = HashMap::from([(self.as_key.clone(), t)]);
+                let mut out = Tuple::from([(self.as_key.as_str(), t)]);
                 let at_id = if *ordered {
                     at_index_counter.into()
                 } else {
                     Missing
                 };
-                out.insert(at_key.clone(), at_id);
-                value.push(Value::Tuple(Box::new(Tuple(out))));
+                out.insert(&at_key, at_id);
+                value.push(Value::Tuple(Box::new(out)));
                 at_index_counter += 1;
             }
         } else {
             for t in v.into_iter() {
-                let out = HashMap::from([(self.as_key.clone(), t)]);
-                value.push(Value::Tuple(Box::new(Tuple(out))));
+                let out = Tuple::from([(self.as_key.as_str(), t)]);
+                value.push(Value::Tuple(Box::new(out)));
             }
         }
         self.output = Some(Value::Bag(Box::new(value)));
@@ -130,7 +130,7 @@ impl EvalUnpivot {
 
 impl Evaluable for EvalUnpivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let result = self.expr.evaluate(&Tuple(HashMap::new()), ctx);
+        let result = self.expr.evaluate(&Tuple::new(), ctx);
         let mut out = vec![];
 
         let tuple = match result {
@@ -138,7 +138,7 @@ impl Evaluable for EvalUnpivot {
             other => other.coerce_to_tuple(),
         };
 
-        let unpivoted = tuple.0.into_iter().map(|(k, v)| {
+        let unpivoted = tuple.into_iter().map(|(k, v)| {
             Tuple::from([(self.as_key.as_str(), v), (self.at_key.as_str(), k.into())])
         });
 
@@ -233,14 +233,13 @@ impl Evaluable for EvalProject {
             .clone();
         let mut value = partiql_bag![];
         for v in input_value.into_iter() {
-            let out = v.coerce_to_tuple();
+            let v_as_tuple = v.coerce_to_tuple();
+            let mut t = Tuple::new();
 
-            let proj: HashMap<String, Value> = self
-                .exprs
-                .iter()
-                .map(|(alias, expr)| (alias.to_string(), expr.evaluate(&out, ctx)))
-                .collect();
-            value.push(Value::Tuple(Box::new(Tuple(proj))));
+            self.exprs.iter().for_each(|(alias, expr)| {
+                t.insert(alias.as_str(), expr.evaluate(&v_as_tuple, ctx));
+            });
+            value.push(Value::Tuple(Box::new(t)));
         }
 
         self.output = Some(Value::Bag(Box::new(value)));
@@ -269,7 +268,7 @@ impl EvalExpr for EvalPath {
         fn path_into(value: Value, path: &EvalPathComponent) -> Value {
             match path {
                 EvalPathComponent::Key(s) => match value {
-                    Value::Tuple(mut tuple) => tuple.0.remove(s).unwrap_or(Missing),
+                    Value::Tuple(mut tuple) => tuple.remove(s).unwrap_or(Missing),
                     _ => Missing,
                 },
                 EvalPathComponent::Index(idx) => match value {
@@ -344,9 +343,7 @@ pub struct EvalVarRef {
 
 impl EvalExpr for EvalVarRef {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = bindings
-            .get(&self.name)
-            .or_else(|| ctx.bindings().get(&self.name));
+        let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
         value.map_or(Null, |v| v.clone())
     }
 }
@@ -421,9 +418,9 @@ impl EvalExpr for EvalBinOpExpr {
         #[inline]
         fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
             match (op, value) {
-                (EvalBinOp::And, Value::Boolean(false)) => Some(false.into()),
-                (EvalBinOp::Or, Value::Boolean(true)) => Some(true.into()),
-                (_, Value::Missing) => Some(Value::Missing),
+                (EvalBinOp::And, Boolean(false)) => Some(false.into()),
+                (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
+                (_, Missing) => Some(Missing),
                 _ => None,
             }
         }

@@ -8,10 +8,10 @@ pub trait Bindings<T> {
 impl Bindings<Value> for Tuple {
     fn get(&self, name: &BindingsName) -> Option<&Value> {
         match name {
-            BindingsName::CaseSensitive(s) => self.0.get(s),
+            BindingsName::CaseSensitive(s) => self.get(s),
             BindingsName::CaseInsensitive(s) => {
                 //TODO
-                self.0.get(s)
+                self.get(s)
             }
         }
     }
