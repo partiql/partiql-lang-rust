@@ -262,8 +262,8 @@ impl Generator {
         scope.raw(
             quote! {
                 const ENV_ION_TEXT : &'static str = include_str!(#env_file);
-                fn environment() -> Option<&'static str> {
-                    Some(ENV_ION_TEXT)
+                fn environment() -> Option<TestValue<'static>> {
+                    Some(ENV_ION_TEXT.into())
                 }
             }
             .to_string()
@@ -322,6 +322,7 @@ impl Generator {
         test_fn.doc(&doc);
 
         let mut ignore_test = false;
+        let mut has_env = false;
         let test_case_expr = |gen: &dyn Fn(&str) -> _| match &test_case.statement {
             TestStatement::EquivalenceClass(equiv_id) => {
                 let stmts = self
@@ -340,14 +341,14 @@ impl Generator {
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
-                    let stmts = test_case_expr(&|stmt: &str| quote! {crate::pass_syntax(#stmt);});
+                    let stmts = test_case_expr(&|stmt: &str| quote! {pass_syntax(#stmt);});
                     let tokens = quote! {
                         #(#stmts)*
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::SyntaxFail(_) => {
-                    let stmts = test_case_expr(&|stmt: &str| quote! {crate::fail_syntax(#stmt);});
+                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_syntax(#stmt);});
                     let tokens = quote! {
                         #(#stmts)*
                     };
@@ -357,8 +358,7 @@ impl Generator {
                     // TODO semantics tests are not yet implemented
                     ignore_test = true;
 
-                    let stmts =
-                        test_case_expr(&|stmt: &str| quote! {crate::fail_semantics(#stmt);});
+                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_semantics(#stmt);});
                     let tokens = quote! {
                         #(#stmts)*
                     };
@@ -372,15 +372,26 @@ impl Generator {
                     // TODO evaluation success tests are not yet implemented
                     ignore_test = true;
 
+                    if !std::mem::replace(&mut has_env, true) {
+                        test_fn.line("let env = environment();\n\n");
+                    }
+                    test_fn.line("\n//**** evaluation success test case(s) ****//");
+
                     let expected = elt_to_string(output);
-                    let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
+                    let modes: Vec<_> = eval_mode
+                        .into_iter()
+                        .map(|mode| match mode {
+                            EvaluationMode::EvalModeError => quote! { EvaluationMode::Error },
+                            EvaluationMode::EvalModeCoerce => quote! { EvaluationMode::Coerce },
+                        })
+                        .collect();
 
                     // emit asserts for all statements X all modes
                     let stmts = test_case_expr(&|stmt: &str| {
                         // emit one assert statement per evaluation mode
                         let asserts = modes.iter().map(|mode| {
                             quote! {
-                                crate::pass_eval(stmt, #mode, environment(), expected);
+                                pass_eval(stmt, #mode, &env, &expected);
                             }
                         });
                         // emit PartiQL statement and evaluation mode asserts
@@ -391,23 +402,34 @@ impl Generator {
                     });
 
                     let tokens = quote! {
-                        let expected = #expected;
+                        let expected = #expected.into();
                         #(#stmts)*
                     };
-                    test_fn.line("\n//**** evaluation success test case(s) ****//");
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
                     // TODO evaluation fail tests are not yet implemented
                     ignore_test = true;
-                    let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
+
+                    if !std::mem::replace(&mut has_env, true) {
+                        test_fn.line("let env = environment();\n\n");
+                    }
+                    test_fn.line("\n//**** evaluation failure test case(s) ****//");
+
+                    let modes: Vec<_> = eval_mode
+                        .into_iter()
+                        .map(|mode| match mode {
+                            EvaluationMode::EvalModeError => quote! { EvaluationMode::Error },
+                            EvaluationMode::EvalModeCoerce => quote! { EvaluationMode::Coerce },
+                        })
+                        .collect();
 
                     // emit asserts for all statements X all modes
                     let stmts = test_case_expr(&|stmt: &str| {
                         // emit one assert statement per evaluation mode
                         let asserts = modes.iter().map(|mode| {
                             quote! {
-                                crate::fail_eval(stmt, #mode, environment());
+                                fail_eval(stmt, #mode, &env);
                             }
                         });
                         // emit PartiQL statement and evaluation mode asserts
@@ -420,7 +442,6 @@ impl Generator {
                     let tokens = quote! {
                         #(#stmts)*
                     };
-                    test_fn.line("\n//**** evaluation failure test case(s) ****//");
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
             }

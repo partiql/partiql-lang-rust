@@ -67,7 +67,7 @@ fn write_dir_mod<'a>(
     std::fs::create_dir_all(&path).into_diagnostic()?;
 
     let mut contents = FILE_HEADER.to_string();
-    contents.push_str("use super::environment;");
+    contents.push_str("use super::*;");
     for sub_mod in sub_mods {
         contents.push_str(&format!("mod {};\n", sub_mod.replace(".rs", "")))
     }
