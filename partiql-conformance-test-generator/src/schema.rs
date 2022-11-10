@@ -57,9 +57,15 @@ pub mod spec {
     #[derive(Debug, Clone)]
     pub struct TestCase {
         pub name: String,
-        pub statement: String,
+        pub statement: TestStatement,
         pub env: Option<Struct>,
         pub assert: Vec<Assertion>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum TestStatement {
+        Statement(String),
+        EquivalenceClass(String),
     }
 
     #[derive(Debug, Clone)]

@@ -7,6 +7,7 @@ use ion_rs::value::native_writer::NativeElementWriter;
 use ion_rs::value::owned::{Element, Struct};
 use ion_rs::value::writer::ElementWriter;
 use ion_rs::TextWriterBuilder;
+
 use quote::quote;
 use std::collections::{HashMap, HashSet};
 
@@ -92,6 +93,8 @@ pub struct Generator {
     result: NamespaceNode,
     curr_path: Vec<String>,
     curr_mod_path: Vec<String>,
+    curr_scope_has_mod: Vec<bool>,
+    curr_equivs: Vec<HashMap<String, Vec<String>>>,
     seen_fns: Vec<HashSet<String>>,
 }
 
@@ -102,6 +105,8 @@ impl Generator {
             result: Default::default(),
             curr_path: Default::default(),
             curr_mod_path: Default::default(),
+            curr_scope_has_mod: Default::default(),
+            curr_equivs: Default::default(),
             seen_fns: Default::default(),
         }
     }
@@ -123,6 +128,25 @@ impl Generator {
         }
     }
 
+    fn push_scope(&mut self, mod_name: Option<String>) {
+        self.curr_scope_has_mod.push(mod_name.is_some());
+        if let Some(mod_name) = mod_name {
+            self.curr_mod_path.push(mod_name);
+        }
+
+        self.seen_fns.push(HashSet::new());
+        self.curr_equivs.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.curr_equivs.pop();
+        self.seen_fns.pop();
+
+        if self.curr_scope_has_mod.pop().unwrap() {
+            self.curr_mod_path.pop();
+        }
+    }
+
     fn nested_test_entry(&mut self, entry: TestEntry) {
         match entry {
             TestEntry::Dir(TestDir { dir_name, contents }) => {
@@ -141,9 +165,9 @@ impl Generator {
                 module.attr("allow(unused_imports)");
                 module.import("super", "*");
 
-                self.curr_mod_path.push(mod_name.clone());
+                self.push_scope(Some(mod_name.clone()));
                 self.gen_tests(module.scope(), &contents);
-                self.curr_mod_path.pop();
+                self.pop_scope();
 
                 let out_file = format!("{}.rs", &mod_name);
                 let path: Vec<_> = self
@@ -166,9 +190,9 @@ impl Generator {
         module.attr("allow(unused_imports)");
         module.import("super", "*");
 
-        self.curr_mod_path.push(mod_name.clone());
+        self.push_scope(Some(mod_name.clone()));
         self.collapse_test_entry(module.scope(), entry);
-        self.curr_mod_path.pop();
+        self.pop_scope();
 
         let out_file = format!("{}.rs", &mod_name.escape_path());
         let path: Vec<_> = self
@@ -187,11 +211,11 @@ impl Generator {
                 module.attr("allow(unused_imports)");
                 module.import("super", "*");
 
-                self.curr_mod_path.push(mod_name);
+                self.push_scope(Some(mod_name));
                 for c in contents {
                     self.collapse_test_entry(module.scope(), c);
                 }
-                self.curr_mod_path.pop();
+                self.pop_scope();
             }
             TestEntry::Doc(TestFile {
                 file_name,
@@ -202,17 +226,17 @@ impl Generator {
                 module.attr("allow(unused_imports)");
                 module.import("super", "*");
 
-                self.curr_mod_path.push(mod_name);
+                self.push_scope(Some(mod_name));
                 self.gen_tests(module.scope(), &contents);
-                self.curr_mod_path.pop();
+                self.pop_scope();
             }
         }
     }
 
     fn gen_tests(&mut self, scope: &mut Scope, doc: &PartiQLTestDocument) {
-        self.seen_fns.push(HashSet::new());
+        self.push_scope(None);
         self.gen_variants(scope, &doc.0);
-        self.seen_fns.pop();
+        self.pop_scope();
     }
 
     fn gen_variants(&mut self, scope: &mut Scope, variants: &[TestVariant]) {
@@ -257,8 +281,11 @@ impl Generator {
             .insert(env_path.as_slice(), Node::Env(EnvNode { env }));
     }
 
-    fn gen_equivs(&mut self, _scope: &mut Scope, _equivs: &EquivalenceClass) {
-        // TODO
+    fn gen_equivs(&mut self, _scope: &mut Scope, equivs: &EquivalenceClass) {
+        self.curr_equivs
+            .last_mut()
+            .unwrap()
+            .insert(equivs.id.to_string(), equivs.statements.clone());
     }
 
     fn gen_mod(&mut self, scope: &mut Scope, namespace: &Namespace) {
@@ -267,11 +294,9 @@ impl Generator {
         module.attr("allow(unused_imports)");
         module.import("super", "*");
 
-        self.curr_mod_path.push(mod_name.clone());
-        self.seen_fns.push(HashSet::new());
+        self.push_scope(Some(mod_name.clone()));
         self.gen_variants(module.scope(), &namespace.contents);
-        self.seen_fns.pop();
-        self.curr_mod_path.pop();
+        self.pop_scope()
     }
 
     fn intern_test_name(&mut self, mut name: String) -> String {
@@ -297,20 +322,34 @@ impl Generator {
         test_fn.doc(&doc);
 
         let mut ignore_test = false;
+        let test_case_expr = |gen: &dyn Fn(&str) -> _| match &test_case.statement {
+            TestStatement::EquivalenceClass(equiv_id) => {
+                let stmts = self
+                    .curr_equivs
+                    .iter()
+                    .rev()
+                    .filter_map(|equiv| equiv.get(equiv_id))
+                    .next();
+
+                let stmts = stmts.expect("equivalence class named");
+                stmts.iter().map(|s| gen(s)).collect::<Vec<_>>()
+            }
+            TestStatement::Statement(s) => vec![gen(s)],
+        };
 
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
-                    let test_case_stmt = &test_case.statement;
+                    let stmts = test_case_expr(&|stmt: &str| quote! {crate::pass_syntax(#stmt);});
                     let tokens = quote! {
-                            crate::pass_syntax(#test_case_stmt);
+                        #(#stmts)*
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::SyntaxFail(_) => {
-                    let test_case_stmt = &test_case.statement;
+                    let stmts = test_case_expr(&|stmt: &str| quote! {crate::fail_syntax(#stmt);});
                     let tokens = quote! {
-                            crate::fail_syntax(#test_case_stmt);
+                        #(#stmts)*
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
@@ -318,9 +357,10 @@ impl Generator {
                     // TODO semantics tests are not yet implemented
                     ignore_test = true;
 
-                    let test_case_stmt = &test_case.statement;
+                    let stmts =
+                        test_case_expr(&|stmt: &str| quote! {crate::fail_semantics(#stmt);});
                     let tokens = quote! {
-                            crate::fail_semantics(#test_case_stmt);
+                        #(#stmts)*
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
@@ -334,12 +374,14 @@ impl Generator {
 
                     let expected = elt_to_string(output);
                     let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
-                    let test_case_stmt = &test_case.statement;
+                    let stmts = test_case_expr(
+                        &|stmt: &str| quote! {crate::pass_eval(#stmt, mode, env, expected);},
+                    );
                     let tokens = quote! {
                         let env = environment();
                         let expected = #expected;
                         for mode in [#(#modes),*] {
-                            crate::pass_eval(#test_case_stmt, mode, env, expected);
+                            #(#stmts)*
                         }
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
@@ -349,11 +391,12 @@ impl Generator {
                     ignore_test = true;
 
                     let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
-                    let test_case_stmt = &test_case.statement;
+                    let stmts =
+                        test_case_expr(&|stmt: &str| quote! {crate::fail_eval(#stmt, mode, env);});
                     let tokens = quote! {
                         let env = environment();
                         for mode in [#(#modes),*] {
-                            crate::fail_eval(#test_case_stmt, mode, env);
+                            #(#stmts)*
                         }
                     };
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
