@@ -374,31 +374,53 @@ impl Generator {
 
                     let expected = elt_to_string(output);
                     let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
-                    let stmts = test_case_expr(
-                        &|stmt: &str| quote! {crate::pass_eval(#stmt, mode, env, expected);},
-                    );
-                    let tokens = quote! {
-                        let env = environment();
-                        let expected = #expected;
-                        for mode in [#(#modes),*] {
-                            #(#stmts)*
+
+                    // emit asserts for all statements X all modes
+                    let stmts = test_case_expr(&|stmt: &str| {
+                        // emit one assert statement per evaluation mode
+                        let asserts = modes.iter().map(|mode| {
+                            quote! {
+                                crate::pass_eval(stmt, #mode, environment(), expected);
+                            }
+                        });
+                        // emit PartiQL statement and evaluation mode asserts
+                        quote! {
+                            let stmt = #stmt;
+                            #(#asserts)*
                         }
+                    });
+
+                    let tokens = quote! {
+                        let expected = #expected;
+                        #(#stmts)*
                     };
+                    test_fn.line("\n//**** evaluation success test case(s) ****//");
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
                     // TODO evaluation fail tests are not yet implemented
                     ignore_test = true;
-
                     let modes: Vec<_> = eval_mode.into_iter().map(|x| format!("{:?}", x)).collect();
-                    let stmts =
-                        test_case_expr(&|stmt: &str| quote! {crate::fail_eval(#stmt, mode, env);});
-                    let tokens = quote! {
-                        let env = environment();
-                        for mode in [#(#modes),*] {
-                            #(#stmts)*
+
+                    // emit asserts for all statements X all modes
+                    let stmts = test_case_expr(&|stmt: &str| {
+                        // emit one assert statement per evaluation mode
+                        let asserts = modes.iter().map(|mode| {
+                            quote! {
+                                crate::fail_eval(stmt, #mode, environment());
+                            }
+                        });
+                        // emit PartiQL statement and evaluation mode asserts
+                        quote! {
+                            let stmt = #stmt;
+                            #(#asserts)*
                         }
+                    });
+
+                    let tokens = quote! {
+                        #(#stmts)*
                     };
+                    test_fn.line("\n//**** evaluation failure test case(s) ****//");
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
             }
