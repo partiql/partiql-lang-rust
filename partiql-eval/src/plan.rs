@@ -5,8 +5,8 @@ use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryO
 
 use crate::eval;
 use crate::eval::{
-    EvalBinOp, EvalBinOpExpr, EvalExpr, EvalLitExpr, EvalPath, EvalPlan, EvalUnaryOp,
-    EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
+    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -69,6 +69,10 @@ impl EvaluatorPlanner {
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
                 Box::new(eval::EvalProject::new(exprs))
+            }
+            BindingsExpr::ProjectValue(logical::ProjectValue { expr }) => {
+                let expr = self.plan_values(expr.clone());
+                Box::new(eval::EvalProjectValue::new(expr))
             }
             BindingsExpr::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
                 expr: self.plan_values(expr.clone()),
@@ -138,6 +142,35 @@ impl EvaluatorPlanner {
                     .collect(),
             }),
             ValueExpr::VarRef(name) => Box::new(EvalVarRef { name }),
+            ValueExpr::TupleExpr(expr) => {
+                let attrs: Vec<Box<dyn EvalExpr>> = expr
+                    .attrs
+                    .into_iter()
+                    .map(|attr| self.plan_values(attr))
+                    .collect();
+                let vals: Vec<Box<dyn EvalExpr>> = expr
+                    .values
+                    .into_iter()
+                    .map(|attr| self.plan_values(attr))
+                    .collect();
+                Box::new(EvalTupleExpr { attrs, vals })
+            }
+            ValueExpr::ListExpr(expr) => {
+                let elements: Vec<Box<dyn EvalExpr>> = expr
+                    .elements
+                    .into_iter()
+                    .map(|elem| self.plan_values(elem))
+                    .collect();
+                Box::new(EvalListExpr { elements })
+            }
+            ValueExpr::BagExpr(expr) => {
+                let elements: Vec<Box<dyn EvalExpr>> = expr
+                    .elements
+                    .into_iter()
+                    .map(|elem| self.plan_values(elem))
+                    .collect();
+                Box::new(EvalBagExpr { elements })
+            }
         }
     }
 }

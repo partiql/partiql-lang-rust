@@ -13,8 +13,11 @@ mod tests {
     use crate::eval::Evaluator;
 
     use partiql_logical as logical;
-    use partiql_logical::BindingsExpr::{Distinct, Project};
-    use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, ValueExpr};
+    use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
+    use partiql_logical::{
+        BagExpr, BinaryOp, BindingsExpr, ListExpr, LogicalPlan, PathComponent, TupleExpr, ValueExpr,
+    };
+
     use partiql_value as value;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
@@ -61,6 +64,23 @@ mod tests {
         let mut bindings = MapBindings::default();
         bindings.insert("data", data.into());
         bindings
+    }
+
+    fn scan(name: &str, as_key: &str) -> BindingsExpr {
+        BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive(name.into())),
+            as_key: as_key.to_string(),
+            at_key: None,
+        })
+    }
+
+    fn path_var(name: &str, component: &str) -> ValueExpr {
+        ValueExpr::Path(
+            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                name.into(),
+            ))),
+            vec![PathComponent::Key(component.to_string())],
+        )
     }
 
     // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
@@ -434,11 +454,7 @@ mod tests {
     fn select() {
         let mut lg = LogicalPlan::new();
 
-        let from = lg.add_operator(BindingsExpr::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
-            as_key: "data".to_string(),
-            at_key: None,
-        }));
+        let from = lg.add_operator(scan("data", "data"));
 
         let project = lg.add_operator(Project(logical::Project {
             exprs: HashMap::from([(
@@ -464,10 +480,498 @@ mod tests {
         }
     }
 
+    // Spec 6.1:
+    //  SELECT VALUE 2*v.a
+    //  FROM [{'a': 1}, {'a': 2}, {'a': 3}] AS v;
+    //  Expected: <<2, 4, 6>>
     #[test]
     fn select_value() {
-        // Plan for `select value a from data`
-        // TODO
+        // Plan for `select value a as b from data`
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::Mul,
+                Box::new(va),
+                Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+            ),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![2, 4, 6];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.1 — Tuple constructors
+    //  SELECT VALUE {'a': v.a, 'b': v.b}
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2, 'b': 2}] AS v;
+    //  Expected: <<{'a': 1, 'b': 1}, {'a': 2, 'b': 2}>>
+    #[test]
+    fn select_value_tuple_constructor_1() {
+        // Plan for `select value {'test': a} from data`
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut tuple_expr = TupleExpr::new();
+        tuple_expr.attrs.push(ValueExpr::Lit(Box::new("a".into())));
+        tuple_expr.attrs.push(ValueExpr::Lit(Box::new("b".into())));
+        tuple_expr.values.push(va);
+        tuple_expr.values.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::TupleExpr(tuple_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_bag![
+            partiql_tuple![("a", 1), ("b", 1)],
+            partiql_tuple![("a", 2), ("b", 2)],
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", 1)],
+                partiql_tuple![("a", 2), ("b", 2)],
+            ];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.1 — Tuple constructors
+    //  SELECT VALUE {'test': 2*v.a }
+    //  FROM [{'a': 1}, {'a': 2}, {'a': 3}] AS v;
+    //  Expected: <<{'test': 2}, {'test': 4}, {'test': 6}>>
+    #[test]
+    fn select_value_tuple_constructor_2() {
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let mut tuple_expr = TupleExpr::new();
+        tuple_expr
+            .attrs
+            .push(ValueExpr::Lit(Box::new("test".into())));
+        tuple_expr.values.push(ValueExpr::BinaryExpr(
+            BinaryOp::Mul,
+            Box::new(va),
+            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+        ));
+
+        let project = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::TupleExpr(tuple_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, project);
+        lg.add_flow(project, sink);
+
+        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![
+                partiql_tuple![("test", 2)],
+                partiql_tuple![("test", 4)],
+                partiql_tuple![("test", 6)],
+            ];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.1 — Treatment of mistyped attribute names in permissive mode
+    //  SELECT VALUE {v.a: v.b}
+    //  FROM [{'a': 'legit', 'b': 1}, {'a': 400, 'b': 2}] AS v;
+    //  Expected: <<{'legit': 1}, {}>>
+    #[test]
+    fn select_value_with_tuple_mistype_attr() {
+        // Plan for `select value {'test': a} from data`
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut tuple_expr = TupleExpr::new();
+        tuple_expr.attrs.push(va);
+        tuple_expr.values.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::TupleExpr(tuple_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![
+            partiql_tuple![("a", "legit"), ("b", 1)],
+            partiql_tuple![("a", 400), ("b", 2)],
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_tuple![("legit", 1)], partiql_tuple![]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.1 — Treatment of duplicate attribute names
+    //  SELECT VALUE {v.a: v.b, v.c: v.d}
+    //  FROM [{'a': 'same', 'b': 1, 'c': 'same', 'd': 2}] AS v;
+    //  Expected: <<{'same': 1, 'same': 2}>>
+    #[test]
+    fn select_value_with_duplicate_attrs() {
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+        let vc = path_var("v", "c");
+        let vd = path_var("v", "d");
+
+        let mut tuple_expr = TupleExpr::new();
+        tuple_expr.attrs.push(va);
+        tuple_expr.values.push(vb);
+        tuple_expr.attrs.push(vc);
+        tuple_expr.values.push(vd);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::TupleExpr(tuple_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![partiql_tuple![
+            ("a", "same"),
+            ("b", 1),
+            ("c", "same"),
+            ("d", 2)
+        ]];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_tuple![("same", 1), ("same", 2)]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.2 — Array Constructors
+    //  SELECT VALUE [v.a, v.b]
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2, 'b': 2}] AS v;
+    //  Expected: <<[1, 1], [2, 2]>>
+    #[test]
+    fn select_value_array_constructor_1() {
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut list_expr = ListExpr::new();
+        list_expr.elements.push(va);
+        list_expr.elements.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::ListExpr(list_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![
+            partiql_tuple![("a", 1), ("b", 1)],
+            partiql_tuple![("a", 2), ("b", 2)],
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, 2]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.2 — Array Constructors
+    //  SELECT VALUE [2*v.a]
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2, 'b': 2}] AS v;
+    //  Expected: <<[2], [4], [6]>>
+    #[test]
+    fn select_value_with_array_constructor_2() {
+        // Plan for `select value {'test': a} from data`
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let mut list_expr = ListExpr::new();
+        list_expr.elements.push(ValueExpr::BinaryExpr(
+            BinaryOp::Mul,
+            Box::new(va),
+            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+        ));
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::ListExpr(list_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_list![2], partiql_list![4], partiql_list![6]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.3 — Bag Constructors
+    //  SELECT VALUE <<v.a, v.b>>
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2, 'b': 2}] AS v;
+    //  Expected: << <<1, 1>>, <<2, 2>> >>
+    #[test]
+    fn select_value_bag_constructor() {
+        // Plan for `select value {'test': a} from data`
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut bag_expr = BagExpr::new();
+        bag_expr.elements.push(va);
+        bag_expr.elements.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::BagExpr(bag_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![
+            partiql_tuple![("a", 1), ("b", 1)],
+            partiql_tuple![("a", 2), ("b", 2)],
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, 2]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
+    //  SELECT VALUE {'a': v.a, 'b': v.b}
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2}] AS v;
+    //  Expected: <<{'a':1, 'b':1}, {'a':2}>>
+    #[test]
+    fn missing_in_select_value_for_tuple() {
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut tuple_expr = TupleExpr::new();
+        tuple_expr.attrs.push(ValueExpr::Lit(Box::new("a".into())));
+        tuple_expr.values.push(va);
+        tuple_expr.attrs.push(ValueExpr::Lit(Box::new("b".into())));
+        tuple_expr.values.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::TupleExpr(tuple_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected =
+                partiql_bag![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)],];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
+    //  SELECT VALUE [v.a, v.b]
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2}] AS v;
+    // Expected: <<[1, 1], [2, MISSING]>>
+    #[test]
+    fn missing_in_select_value_for_list() {
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut list_expr = ListExpr::new();
+        list_expr.elements.push(va);
+        list_expr.elements.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::ListExpr(list_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, Value::Missing]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
+    //  SELECT VALUE v.b
+    //  FROM [{'a':1, 'b':1}, {'a':2}] AS v;
+    //  Expected: <<1, MISSING>>
+    #[test]
+    fn missing_in_select_value_for_bag_1() {
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "v"));
+
+        let vb = path_var("v", "b");
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue { expr: vb }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![1, Value::Missing];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
+    }
+
+    // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
+    //  SELECT VALUE <<v.a, v.b>>
+    //  FROM [{'a': 1, 'b': 1}, {'a': 2}] AS v;
+    // Expected: << <<1, 1>>, <<2, MISSING>> >>
+    #[test]
+    fn missing_in_select_value_for_bag_2() {
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "v"));
+
+        let va = path_var("v", "a");
+        let vb = path_var("v", "b");
+
+        let mut bag_expr = BagExpr::new();
+        bag_expr.elements.push(va);
+        bag_expr.elements.push(vb);
+
+        let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
+            expr: ValueExpr::BagExpr(bag_expr),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, select_value);
+        lg.add_flow(select_value, sink);
+
+        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        if let Value::Bag(out) = evaluate(lg, bindings) {
+            println!("{:?}", &out);
+            let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, Value::Missing]];
+            assert_eq!(expected, *out);
+        } else {
+            panic!("Wrong output")
+        }
     }
 
     #[test]
@@ -475,11 +979,7 @@ mod tests {
         // Plan for `SELECT DISTINCT firstName, (firstName || firstName) AS doubleName FROM customer WHERE balance > 0`
         let mut logical = LogicalPlan::new();
 
-        let scan = logical.add_operator(BindingsExpr::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("customer".into())),
-            as_key: "customer".to_string(),
-            at_key: None,
-        }));
+        let scan = logical.add_operator(scan("customer", "customer"));
 
         let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
             expr: ValueExpr::BinaryExpr(
