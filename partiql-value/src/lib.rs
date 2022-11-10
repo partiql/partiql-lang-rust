@@ -886,7 +886,7 @@ impl Hash for Bag {
     }
 }
 
-#[derive(Default, Eq, Hash, Debug, Clone)]
+#[derive(Default, Eq, Debug, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
     vals: Vec<Value>,
@@ -908,7 +908,7 @@ impl Tuple {
 
     #[inline]
     pub fn get(&self, attr: &str) -> Option<&Value> {
-        match self.attrs.iter().position(|a| *a == attr.to_string()) {
+        match self.attrs.iter().position(|a| a.as_str() == attr) {
             Some(i) => Some(&self.vals[i]),
             _ => None,
         }
@@ -916,7 +916,7 @@ impl Tuple {
 
     #[inline]
     pub fn remove(&mut self, attr: &str) -> Option<Value> {
-        match self.attrs.iter().position(|a| *a == attr.to_string()) {
+        match self.attrs.iter().position(|a| a.as_str() == attr) {
             Some(i) => {
                 self.attrs.remove(i);
                 Some(self.vals.remove(i))
@@ -939,14 +939,11 @@ where
 {
     #[inline]
     fn from(arr: [(&str, T); N]) -> Self {
-        let out = arr
-            .into_iter()
+        arr.into_iter()
             .fold(Tuple::new(), |mut acc: Tuple, (attr, val)| {
                 acc.insert(attr, val.into());
                 acc
-            });
-
-        out
+            })
     }
 }
 
@@ -972,6 +969,15 @@ impl PartialEq for Tuple {
 impl PartialOrd for Tuple {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Hash for Tuple {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for (k, v) in self.pairs() {
+            k.hash(state);
+            v.hash(state);
+        }
     }
 }
 
