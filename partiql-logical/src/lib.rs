@@ -105,6 +105,46 @@ pub enum ValueExpr {
     Lit(Box<Value>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
     VarRef(BindingsName),
+    TupleExpr(TupleExpr),
+    ListExpr(ListExpr),
+    BagExpr(BagExpr),
+}
+
+#[derive(Clone, Debug)]
+pub struct TupleExpr {
+    pub attrs: Vec<ValueExpr>,
+    pub values: Vec<ValueExpr>,
+}
+
+impl TupleExpr {
+    pub fn new() -> Self {
+        TupleExpr {
+            attrs: vec![],
+            values: vec![],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ListExpr {
+    pub elements: Vec<ValueExpr>,
+}
+
+impl ListExpr {
+    pub fn new() -> Self {
+        ListExpr { elements: vec![] }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BagExpr {
+    pub elements: Vec<ValueExpr>,
+}
+
+impl BagExpr {
+    pub fn new() -> Self {
+        BagExpr { elements: vec![] }
+    }
 }
 
 // Bindings -> Bindings : Where, OrderBy, Offset, Limit, Join, SetOp, Select, Distinct, GroupBy, Unpivot, Let
@@ -122,8 +162,8 @@ pub enum BindingsExpr {
     Limit,
     Join,
     SetOp,
-    SelectValue(SelectValue),
     Project(Project),
+    ProjectValue(ProjectValue),
     Distinct,
     GroupBy,
     #[default]
@@ -165,9 +205,8 @@ pub struct Project {
 }
 
 #[derive(Debug)]
-pub struct SelectValue {
-    pub exprs: ValueExpr,
-    pub out: Box<ValueExpr>,
+pub struct ProjectValue {
+    pub expr: ValueExpr,
 }
 
 #[cfg(test)]

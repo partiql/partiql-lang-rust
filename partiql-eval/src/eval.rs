@@ -2,14 +2,16 @@ use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+use thiserror::Error;
+
 use petgraph::algo::toposort;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Incoming, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
-    partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, NullableEq, NullableOrd, Tuple, UnaryPlus,
-    Value,
+    partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, List, NullableEq, NullableOrd, Tuple,
+    UnaryPlus, Value,
 };
 
 use crate::env::basic::MapBindings;
@@ -40,7 +42,9 @@ pub struct EvalErr {
     pub errors: Vec<EvaluationError>,
 }
 
+#[derive(Error, Debug)]
 pub enum EvaluationError {
+    #[error("Evaluation Error: malformed evaluation plan detected `{}`", _0)]
     InvalidEvaluationPlan(String),
 }
 
@@ -231,7 +235,10 @@ impl Evaluable for EvalProject {
             .as_ref()
             .expect("Error in retrieving input value")
             .clone();
-        let mut value = partiql_bag![];
+
+        let ordered = &input_value.is_ordered();
+        let mut value = vec![];
+
         for v in input_value.into_iter() {
             let v_as_tuple = v.coerce_to_tuple();
             let mut t = Tuple::new();
@@ -242,11 +249,128 @@ impl Evaluable for EvalProject {
             value.push(Value::Tuple(Box::new(t)));
         }
 
-        self.output = Some(Value::Bag(Box::new(value)));
+        self.output = match ordered {
+            true => Some(Value::List(Box::new(List::from(value)))),
+            false => Some(Value::Bag(Box::new(Bag::from(value)))),
+        };
+
         self.output.clone()
     }
+
     fn update_input(&mut self, input: &Value) {
         self.input = Some(input.clone());
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalProjectValue {
+    pub expr: Box<dyn EvalExpr>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+}
+
+impl EvalProjectValue {
+    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+        EvalProjectValue {
+            expr,
+            input: None,
+            output: None,
+        }
+    }
+}
+
+impl Evaluable for EvalProjectValue {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self
+            .input
+            .as_ref()
+            .expect("Error in retrieving input value")
+            .clone();
+
+        let ordered = &input_value.is_ordered();
+        let mut value = vec![];
+
+        for v in input_value.into_iter() {
+            let out = v.coerce_to_tuple();
+            let evaluated = self.expr.evaluate(&out, ctx);
+            value.push(evaluated);
+        }
+
+        self.output = match ordered {
+            true => Some(Value::List(Box::new(List::from(value)))),
+            false => Some(Value::Bag(Box::new(Bag::from(value)))),
+        };
+
+        self.output.clone()
+    }
+
+    fn update_input(&mut self, input: &Value) {
+        self.input = Some(input.clone());
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalTupleExpr {
+    pub attrs: Vec<Box<dyn EvalExpr>>,
+    pub vals: Vec<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalTupleExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let mut t = Tuple::new();
+        self.attrs
+            .iter()
+            .filter_map(|attr| {
+                let expr = attr.evaluate(bindings, ctx);
+                match expr {
+                    Value::String(s) => Some(*s),
+                    _ => None,
+                }
+            })
+            .zip(self.vals.iter())
+            .for_each(|(k, v)| {
+                let evaluated = v.evaluate(bindings, ctx);
+                // Spec. section 6.1.4
+                if evaluated != Value::Missing {
+                    t.insert(k.as_str(), evaluated.clone());
+                }
+            });
+
+        Value::Tuple(Box::new(t))
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalListExpr {
+    pub elements: Vec<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalListExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let evaluated_elements: Vec<Value> = self
+            .elements
+            .iter()
+            .map(|val| val.evaluate(bindings, ctx))
+            .collect();
+
+        Value::List(Box::new(List::from(evaluated_elements)))
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalBagExpr {
+    pub elements: Vec<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalBagExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let evaluated_elements: Vec<Value> = self
+            .elements
+            .iter()
+            .map(|val| val.evaluate(bindings, ctx))
+            .collect();
+
+        Value::Bag(Box::new(Bag::from(evaluated_elements)))
     }
 }
 

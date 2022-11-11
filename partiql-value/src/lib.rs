@@ -11,7 +11,7 @@ use std::{ops, vec};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Hash, Debug)]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),
@@ -458,7 +458,7 @@ impl Debug for Value {
             Value::Blob(s) => write!(f, "'{:?}'", s),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
-            Value::Tuple(t) => t.fmt(f),
+            Value::Tuple(t) => write!(f, "{:?}", t),
         }
     }
 }
@@ -886,7 +886,7 @@ impl Hash for Bag {
     }
 }
 
-#[derive(Default, Eq, Debug, Clone)]
+#[derive(Default, Eq, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
     vals: Vec<Value>,
@@ -978,6 +978,18 @@ impl Hash for Tuple {
             k.hash(state);
             v.hash(state);
         }
+    }
+}
+
+impl Debug for Tuple {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let pairs = self.pairs();
+        let mut fmt = f.debug_struct("Tuple");
+        pairs.into_iter().for_each(|(k, v)| {
+            fmt.field(k, v);
+        });
+
+        fmt.finish()
     }
 }
 
