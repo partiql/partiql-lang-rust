@@ -2,6 +2,8 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
+#[macro_use]
+extern crate assert_matches;
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -473,11 +475,16 @@ mod tests {
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
 
-        if let Value::Bag(b) = evaluate(lg, data_3_tuple()) {
-            assert_eq!(b.len(), 3);
-        } else {
-            panic!("Wrong output")
-        }
+        let out = evaluate(lg, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("b", 1)],
+                partiql_tuple![("b", 2)],
+                partiql_tuple![("b", 3)],
+            ];
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1:
@@ -505,13 +512,12 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![2, 4, 6];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.1 — Tuple constructors
@@ -551,16 +557,15 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
                 partiql_tuple![("a", 1), ("b", 1)],
                 partiql_tuple![("a", 2), ("b", 2)],
             ];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.1 — Tuple constructors
@@ -593,17 +598,16 @@ mod tests {
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
 
-        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
                 partiql_tuple![("test", 2)],
                 partiql_tuple![("test", 4)],
                 partiql_tuple![("test", 6)],
             ];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.1 — Treatment of mistyped attribute names in permissive mode
@@ -641,13 +645,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_tuple![("legit", 1)], partiql_tuple![]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.1 — Treatment of duplicate attribute names
@@ -689,13 +692,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_tuple![("same", 1), ("same", 2)]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.2 — Array Constructors
@@ -732,13 +734,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, 2]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.2 — Array Constructors
@@ -769,13 +770,12 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        if let Value::Bag(out) = evaluate(lg, data_3_tuple()) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_list![2], partiql_list![4], partiql_list![6]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.3 — Bag Constructors
@@ -813,13 +813,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, 2]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
@@ -854,14 +853,13 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected =
                 partiql_bag![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)],];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
@@ -894,13 +892,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, Value::Missing]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
@@ -926,13 +923,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![1, Value::Missing];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     // Spec 6.1.4 — Treatment of MISSING in SELECT VALUE
@@ -965,13 +961,12 @@ mod tests {
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
 
-        if let Value::Bag(out) = evaluate(lg, bindings) {
-            println!("{:?}", &out);
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, Value::Missing]];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     #[test]
@@ -1036,15 +1031,15 @@ mod tests {
             (distinct, sink),
         ]);
 
-        if let Value::Bag(out) = evaluate(logical, data_customer()) {
+        let out = evaluate(logical, data_customer());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
                 partiql_tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
                 partiql_tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
             ];
-            assert_eq!(expected, *out);
-        } else {
-            panic!("Wrong output")
-        }
+            assert_eq!(*bag, expected);
+        });
     }
 
     mod clause_from {
