@@ -47,7 +47,7 @@ pub enum TestTree {
 #[derive(Debug)]
 pub enum Node {
     Test(TestNode),
-    Env(EnvNode),
+    Value(TestValueNode),
 }
 
 #[derive(Debug)]
@@ -56,8 +56,8 @@ pub struct TestNode {
 }
 
 #[derive(Debug)]
-pub struct EnvNode {
-    pub env: String,
+pub struct TestValueNode {
+    pub value: String,
 }
 
 #[derive(Debug, Default)]
@@ -97,6 +97,10 @@ pub struct Generator {
     curr_equivs: Vec<HashMap<String, Vec<String>>>,
     seen_fns: Vec<HashSet<String>>,
 }
+
+const TEST_DATA_DIR: &'static str = "_test_data";
+const ENV_INLINE_LOWER_BOUND_LINE_COUNT: usize = 10;
+const EXPECTED_INLINE_LOWER_BOUND_LINE_COUNT: usize = 25;
 
 impl Generator {
     pub fn new(config: GeneratorConfig) -> Generator {
@@ -251,6 +255,29 @@ impl Generator {
     }
 
     fn gen_envs(&mut self, scope: &mut Scope, envs: &Environments) {
+        let envs = struct_to_string(&envs.envs);
+
+        if envs.lines().count() < ENV_INLINE_LOWER_BOUND_LINE_COUNT {
+            self.gen_envs_inline(scope, envs);
+        } else {
+            self.gen_envs_external(scope, envs);
+        }
+    }
+
+    fn gen_envs_inline(&mut self, scope: &mut Scope, envs: String) {
+        scope.raw(
+            quote! {
+                const ENV_ION_TEXT : &'static str = #envs;
+                fn environment() -> Option<TestValue<'static>> {
+                    Some(ENV_ION_TEXT.into())
+                }
+            }
+            .to_string()
+            .replace("\\n", "\n"),
+        );
+    }
+
+    fn gen_envs_external(&mut self, scope: &mut Scope, envs: String) {
         let env_file = self
             .curr_mod_path
             .iter()
@@ -259,9 +286,10 @@ impl Generator {
             .join("___")
             + ".env.ion";
 
+        let data_file = format!("{}/{}", TEST_DATA_DIR, env_file);
         scope.raw(
             quote! {
-                const ENV_ION_TEXT : &'static str = include_str!(#env_file);
+                const ENV_ION_TEXT : &'static str = include_str!(#data_file);
                 fn environment() -> Option<TestValue<'static>> {
                     Some(ENV_ION_TEXT.into())
                 }
@@ -270,15 +298,18 @@ impl Generator {
             .replace("\\n", "\n"),
         );
 
+        let td_dir = TEST_DATA_DIR.to_string();
         let env_path: Vec<_> = self
             .curr_path
             .iter()
+            .chain(std::iter::once(&td_dir))
             .chain(std::iter::once(&env_file))
             .collect();
-        let env = struct_to_string(&envs.envs);
 
-        self.result
-            .insert(env_path.as_slice(), Node::Env(EnvNode { env }));
+        self.result.insert(
+            env_path.as_slice(),
+            Node::Value(TestValueNode { value: envs }),
+        );
     }
 
     fn gen_equivs(&mut self, _scope: &mut Scope, equivs: &EquivalenceClass) {
@@ -378,6 +409,36 @@ impl Generator {
                     test_fn.line("\n//**** evaluation success test case(s) ****//");
 
                     let expected = elt_to_string(output);
+                    let expected =
+                        if expected.lines().count() > EXPECTED_INLINE_LOWER_BOUND_LINE_COUNT {
+                            let expected_file = self
+                                .curr_mod_path
+                                .iter()
+                                .map(|s| s.escape_path())
+                                .chain(std::iter::once(test_case.name.escape_path()))
+                                .collect::<Vec<_>>()
+                                .join("___")
+                                + ".expected.ion";
+
+                            let td_dir = TEST_DATA_DIR.to_string();
+                            let expected_path: Vec<_> = self
+                                .curr_path
+                                .iter()
+                                .chain(std::iter::once(&td_dir))
+                                .chain(std::iter::once(&expected_file))
+                                .collect();
+
+                            self.result.insert(
+                                expected_path.as_slice(),
+                                Node::Value(TestValueNode { value: expected }),
+                            );
+
+                            let data_file = format!("{}/{}", TEST_DATA_DIR, expected_file);
+                            quote! {include_str!(#data_file)}
+                        } else {
+                            quote! {#expected}
+                        };
+
                     let modes: Vec<_> = eval_mode
                         .into_iter()
                         .map(|mode| match mode {

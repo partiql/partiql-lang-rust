@@ -4,7 +4,7 @@ use crate::util::Escaper;
 use codegen::Scope;
 use miette::IntoDiagnostic;
 
-use std::fs::File;
+use std::fs::{DirBuilder, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,8 @@ const FILE_HEADER: &str = "\
 // ********************************************************************************************** //
 
 #[allow(unused_imports)]
+use super::*;
+
 ";
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ impl Writer {
         Self {}
     }
 
-    pub fn write(&self, path: impl AsRef<Path>, root: NamespaceNode) -> miette::Result<()> {
+    pub fn write(&self, path: impl AsRef<Path>, mut root: NamespaceNode) -> miette::Result<()> {
         let path: PathBuf = path
             .as_ref()
             .components()
@@ -32,42 +34,47 @@ impl Writer {
             .collect();
         std::fs::create_dir_all(&path).into_diagnostic()?;
 
-        write_module(&path, root)?;
+        write_module(&path, &mut root)?;
 
         Ok(())
     }
 }
 
-fn write_module(path: impl AsRef<Path>, module: NamespaceNode) -> miette::Result<()> {
-    let sub_mods = module.children.iter().filter_map(|(name, tree)| {
-        if let TestTree::Node(Node::Env(_)) = tree {
-            None
-        } else {
-            Some(name)
-        }
-    });
-    write_dir_mod(&path, sub_mods)?;
+fn write_module(path: impl AsRef<Path>, module: &mut NamespaceNode) -> miette::Result<bool> {
+    DirBuilder::new()
+        .recursive(true)
+        .create(&path)
+        .into_diagnostic()?;
 
-    for (name, child) in module.children {
+    let mut sub_mods = vec![];
+
+    for (name, child) in &mut module.children {
         let mut child_path: PathBuf = path.as_ref().into();
         child_path.push(&name);
-        match child {
-            TestTree::Node(Node::Test(mut s)) => write_scope(child_path, s.module.scope())?,
-            TestTree::Node(Node::Env(e)) => write_file(child_path, &e.env)?,
+        let is_sub_mod = match child {
+            TestTree::Node(Node::Test(s)) => write_scope(child_path, s.module.scope())?,
+            TestTree::Node(Node::Value(e)) => write_file(child_path, &e.value)?,
             TestTree::Namespace(m) => write_module(child_path, m)?,
+        };
+        if is_sub_mod {
+            sub_mods.push(name.clone());
         }
     }
-    Ok(())
+
+    if !sub_mods.is_empty() {
+        write_dir_mod(&path, sub_mods.iter())?;
+    }
+
+    Ok(!sub_mods.is_empty())
 }
 
 fn write_dir_mod<'a>(
     path: impl AsRef<Path>,
     sub_mods: impl Iterator<Item = &'a String>,
-) -> miette::Result<()> {
+) -> miette::Result<bool> {
     std::fs::create_dir_all(&path).into_diagnostic()?;
 
     let mut contents = FILE_HEADER.to_string();
-    contents.push_str("use super::*;");
     for sub_mod in sub_mods {
         contents.push_str(&format!("mod {};\n", sub_mod.replace(".rs", "")))
     }
@@ -76,16 +83,19 @@ fn write_dir_mod<'a>(
     File::create(file_path)
         .into_diagnostic()?
         .write_all(contents.as_bytes())
-        .into_diagnostic()
+        .into_diagnostic()?;
+    Ok(true)
 }
 
-fn write_scope(path: impl AsRef<Path>, scope: &Scope) -> miette::Result<()> {
+fn write_scope(path: impl AsRef<Path>, scope: &Scope) -> miette::Result<bool> {
     let contents = format!("{}{}", FILE_HEADER, scope.to_string());
-    write_file(path, &contents)
+    write_file(path, &contents)?;
+    Ok(true)
 }
 
-fn write_file(path: impl AsRef<Path>, contents: &str) -> miette::Result<()> {
+fn write_file(path: impl AsRef<Path>, contents: &str) -> miette::Result<bool> {
     let mut file = File::create(path).into_diagnostic()?;
     file.write_all(contents.as_bytes()).into_diagnostic()?;
-    file.sync_all().into_diagnostic()
+    file.sync_all().into_diagnostic()?;
+    Ok(false)
 }
