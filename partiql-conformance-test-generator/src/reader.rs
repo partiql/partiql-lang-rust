@@ -199,7 +199,6 @@ impl TryFrom<&Struct> for TestCase {
             }
         };
 
-        //let statement = expect_str!(value.get("statement"), "TestCase statement").into();
         let env = if let Some(v) = value.get("env") {
             Some(expect_struct!(Some(v), "TestCase envs").clone())
         } else {
