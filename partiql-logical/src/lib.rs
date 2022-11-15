@@ -88,6 +88,8 @@ pub enum BinaryOp {
     Div,
     Mod,
     Exp,
+
+    In,
 }
 
 #[derive(Clone, Debug)]
@@ -154,20 +156,20 @@ impl BagExpr {
 #[derive(Debug, Default)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum BindingsExpr {
-    Scan(Scan),
-    Unpivot(Unpivot),
+    Distinct,
     Filter(Filter),
-    OrderBy,
-    Offset,
-    Limit,
+    GroupBy,
     Join,
-    SetOp,
+    Limit,
+    Offset,
+    OrderBy,
     Project(Project),
     ProjectValue(ProjectValue),
-    Distinct,
-    GroupBy,
+    Scan(Scan),
+    SetOp,
     #[default]
     Sink,
+    Unpivot(Unpivot),
 }
 
 #[derive(Debug)]

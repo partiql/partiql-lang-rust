@@ -535,6 +535,7 @@ pub enum EvalBinOp {
     Div,
     Mod,
     Exp,
+    In,
 }
 
 impl EvalExpr for EvalBinOpExpr {
@@ -583,6 +584,15 @@ impl EvalExpr for EvalBinOpExpr {
             EvalBinOp::Mul => lhs * rhs,
             EvalBinOp::Div => lhs / rhs,
             EvalBinOp::Mod => lhs % rhs,
+            // TODO apply the changes once we clarify the rules of coercion for `IN` RHS.
+            // See also:
+            // - https://github.com/partiql/partiql-docs/pull/13
+            // - https://github.com/partiql/partiql-lang-kotlin/issues/524
+            // - https://github.com/partiql/partiql-lang-kotlin/pull/621#issuecomment-1147754213
+            EvalBinOp::In => match rhs.is_bag() | rhs.is_list() {
+                true => Boolean(rhs.into_iter().contains(&lhs)),
+                false => Boolean(false),
+            },
             EvalBinOp::Exp => todo!("Exponentiation"),
         }
     }
