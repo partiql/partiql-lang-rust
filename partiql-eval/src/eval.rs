@@ -145,6 +145,9 @@ impl EvalJoin {
 
 impl Evaluable for EvalJoin {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
+        //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
+        //  to be spec-compliant may result in changes to the DAG flows.
         let output = match self.kind {
             EvalJoinKind::Inner => {
                 let mut result = partiql_bag!();
