@@ -14,6 +14,8 @@ use std::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use partiql_ast_macros::Visit;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeId(pub u32);
@@ -26,7 +28,7 @@ pub struct AstNode<T> {
     pub node: T,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Item {
     // Data Definition Language statements
@@ -44,13 +46,13 @@ impl fmt::Display for Item {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ddl {
     pub op: DdlOp,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DdlOp {
     /// `CREATE TABLE <symbol>`
@@ -64,33 +66,38 @@ pub enum DdlOp {
     DropIndex(DropIndex),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateTable {
+    #[visit(skip)]
     pub table_name: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropTable {
+    #[visit(skip)]
     pub table_name: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateIndex {
+    #[visit(skip)]
     pub index_name: SymbolPrimitive,
     pub fields: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropIndex {
+    #[visit(skip)]
     pub table: SymbolPrimitive,
+    #[visit(skip)]
     pub keys: SymbolPrimitive,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dml {
     pub op: DmlOp,
@@ -99,7 +106,7 @@ pub struct Dml {
     pub returning: Option<ReturningExpr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DmlOp {
     /// `INSERT INTO <expr> <expr>`
@@ -111,17 +118,17 @@ pub enum DmlOp {
     /// `REMOVE <expr>`
     Remove(Remove),
     /// DELETE
-    Delete,
+    Delete(Delete),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Insert {
     pub target: Box<Expr>,
     pub values: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct InsertValue {
     pub target: Box<Expr>,
@@ -130,23 +137,37 @@ pub struct InsertValue {
     pub on_conflict: Option<OnConflict>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Set {
     pub assignment: Assignment,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// Represents `<expr> = <expr>` in a DML SET operation.  Note that in this case, `=` is representing
+/// an assignment operation and *not* the equality operator.
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Assignment {
+    pub target: Box<Expr>,
+    pub value: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Remove {
     pub target: Box<Expr>,
 }
 
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Delete {}
+
 /// `ON CONFLICT <expr> <conflict_action>`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OnConflict {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub conflict_action: ConflictAction,
 }
 
@@ -157,7 +178,7 @@ pub enum ConflictAction {
     DoNothing,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Query {
     pub set: AstNode<QuerySet>,
@@ -166,7 +187,7 @@ pub struct Query {
     pub offset: Option<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum QuerySet {
     SetOp(Box<AstNode<SetExpr>>),
@@ -175,10 +196,12 @@ pub enum QuerySet {
     Values(Vec<Box<Expr>>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SetExpr {
+    #[visit(skip)]
     pub setop: SetOperator,
+    #[visit(skip)]
     pub setq: SetQuantifier,
     pub lhs: Box<AstNode<QuerySet>>,
     pub rhs: Box<AstNode<QuerySet>>,
@@ -192,8 +215,16 @@ pub enum SetOperator {
     Intersect,
 }
 
+/// Indicates if a set should be reduced to its distinct elements or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetQuantifier {
+    All,
+    Distinct,
+}
+
 /// The expressions that can result in values.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Expr {
     Lit(AstNode<Lit>),
@@ -222,6 +253,7 @@ pub enum Expr {
     Query(AstNode<Query>),
 
     /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
+    #[visit(skip)]
     Error,
 }
 
@@ -230,28 +262,48 @@ pub enum Expr {
 /// <https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt>
 /// and Section 2 of the following (Figure 1: BNF Grammar for PartiQL Values):
 /// <https://partiql.org/assets/PartiQL-Specification.pdf>
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[visit(skip_recurse)]
 pub enum Lit {
+    #[visit(skip)]
     Null,
+    #[visit(skip)]
     Missing,
+    #[visit(skip)]
     Int8Lit(i8),
+    #[visit(skip)]
     Int16Lit(i16),
+    #[visit(skip)]
     Int32Lit(i32),
+    #[visit(skip)]
     Int64Lit(i64),
+    #[visit(skip)]
     DecimalLit(RustDecimal),
+    #[visit(skip)]
     NumericLit(RustDecimal),
+    #[visit(skip)]
     RealLit(f32),
+    #[visit(skip)]
     FloatLit(f32),
+    #[visit(skip)]
     DoubleLit(f64),
+    #[visit(skip)]
     BoolLit(bool),
+    #[visit(skip)]
     IonStringLit(String),
+    #[visit(skip)]
     CharStringLit(String),
+    #[visit(skip)]
     NationalCharStringLit(String),
+    #[visit(skip)]
     BitStringLit(String),
+    #[visit(skip)]
     HexStringLit(String),
+    #[visit(skip)]
     CollectionLit(CollectionLit),
     /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
+    #[visit(skip)]
     TypedLit(String, Type),
 }
 
@@ -262,16 +314,30 @@ pub enum CollectionLit {
     BagLit(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VarRef {
+    #[visit(skip)]
     pub name: SymbolPrimitive,
+    #[visit(skip)]
     pub qualifier: ScopeQualifier,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// Indicates scope search order when resolving variables.
+/// Has no effect except within `FROM` sources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ScopeQualifier {
+    /// Use the default search order.
+    Unqualified,
+    /// Skip the globals, first check within FROM sources and resolve starting with the local scope.
+    Qualified,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BinOp {
+    #[visit(skip)]
     pub kind: BinOpKind,
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
@@ -286,7 +352,7 @@ pub enum BinOpKind {
     Exp,
     Mod,
     Mul,
-    Neg,
+    Sub,
     // Logical
     And,
     Or,
@@ -302,9 +368,10 @@ pub enum BinOpKind {
     Is,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UniOp {
+    #[visit(skip)]
     pub kind: UniOpKind,
     pub expr: Box<Expr>,
 }
@@ -317,7 +384,7 @@ pub enum UniOpKind {
     Not,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Like {
     pub value: Box<Expr>,
@@ -325,7 +392,7 @@ pub struct Like {
     pub escape: Option<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Between {
     pub value: Box<Expr>,
@@ -333,14 +400,14 @@ pub struct Between {
     pub to: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct In {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Case {
     /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
@@ -349,7 +416,7 @@ pub enum Case {
     SearchedCase(SearchedCase),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SimpleCase {
     pub expr: Box<Expr>,
@@ -357,7 +424,7 @@ pub struct SimpleCase {
     pub default: Option<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SearchedCase {
     pub cases: Vec<ExprPair>,
@@ -366,73 +433,90 @@ pub struct SearchedCase {
 
 /// A generic pair of expressions. Used in the `pub struct`, `searched_case`
 /// and `simple_case` expr variants above.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExprPair {
     pub first: Box<Expr>,
     pub second: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Struct {
     pub fields: Vec<ExprPair>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Bag {
     pub values: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct List {
     pub values: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Sexp {
     pub values: Vec<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Call {
+    #[visit(skip)]
     pub func_name: SymbolPrimitive,
     pub args: Vec<AstNode<CallArg>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CallArg {
     /// `*` used as an argument to a function call (e.g., in `count(*)`)
+    #[visit(skip)]
     Star(),
     /// positional argument to a function call (e.g., all arguments in `foo(1, 'a', 3)`)
     Positional(Box<Expr>),
-
     /// E.g. `INT` in `foo(INT)`
+    #[visit(skip)]
     PositionalType(Type),
     /// named argument to a function call (e.g., the `"from" : 2` in `substring(a, "from":2)`
-    Named {
-        name: SymbolPrimitive,
-        value: Box<Expr>,
-    },
-
+    Named(CallArgNamed),
     /// E.g. `AS: VARCHAR` in `CAST('abc' AS VARCHAR`
-    NamedType { name: SymbolPrimitive, ty: Type },
+    NamedType(CallArgNamedType),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CallArgNamed {
+    #[visit(skip)]
+    pub name: SymbolPrimitive,
+    pub value: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CallArgNamedType {
+    #[visit(skip)]
+    pub name: SymbolPrimitive,
+    #[visit(skip)]
+    pub ty: Type,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CallAgg {
+    #[visit(skip)]
     pub func_name: SymbolPrimitive,
+    #[visit(skip)]
     pub setq: Option<SetQuantifier>,
     pub args: Vec<AstNode<CallArg>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
     pub project: AstNode<Projection>,
@@ -443,7 +527,7 @@ pub struct Select {
     pub having: Option<Box<Expr>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
     pub root: Box<Expr>,
@@ -451,47 +535,43 @@ pub struct Path {
 }
 
 /// A "step" within a path expression; that is the components of the expression following the root.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PathStep {
     PathExpr(PathExpr),
+    #[visit(skip)]
     PathWildCard,
+    #[visit(skip)]
     PathUnpivot,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PathExpr {
     pub index: Box<Expr>,
 }
 
-/// Is used to determine if variable lookup should be case-sensitive or not.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CaseSensitivity {
-    CaseSensitive,
-    CaseInsensitive,
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Projection {
     pub kind: ProjectionKind,
+    #[visit(skip)]
     pub setq: Option<SetQuantifier>,
 }
 
 /// Indicates the type of projection in a SFW query.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ProjectionKind {
+    #[visit(skip)]
     ProjectStar,
     ProjectList(Vec<AstNode<ProjectItem>>),
-    ProjectPivot { key: Box<Expr>, value: Box<Expr> },
+    ProjectPivot(ProjectPivot),
     ProjectValue(Box<Expr>),
 }
 
 /// An item to be projected in a `SELECT`-list.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ProjectItem {
     /// For `.*` in SELECT list
@@ -500,35 +580,44 @@ pub enum ProjectItem {
     ProjectExpr(ProjectExpr),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ProjectPivot {
+    pub key: Box<Expr>,
+    pub value: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProjectAll {
     pub expr: Box<Expr>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProjectExpr {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub as_alias: Option<SymbolPrimitive>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Let {
     /// A list of LET bindings
     pub let_bindings: Vec<LetBinding>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LetBinding {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub as_alias: SymbolPrimitive,
 }
 
 /// FROM clause of an SFW query
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FromClause {
     FromLet(AstNode<FromLet>),
@@ -536,13 +625,17 @@ pub enum FromClause {
     Join(AstNode<Join>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FromLet {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub kind: FromLetKind,
+    #[visit(skip)]
     pub as_alias: Option<SymbolPrimitive>,
+    #[visit(skip)]
     pub at_alias: Option<SymbolPrimitive>,
+    #[visit(skip)]
     pub by_alias: Option<SymbolPrimitive>,
 }
 
@@ -555,9 +648,10 @@ pub enum FromLetKind {
     Unpivot,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Join {
+    #[visit(skip)]
     pub kind: JoinKind,
     pub left: Box<AstNode<FromClause>>,
     pub right: Box<AstNode<FromClause>>,
@@ -575,20 +669,23 @@ pub enum JoinKind {
     Cross,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum JoinSpec {
     On(Box<Expr>),
     Using(Vec<Path>),
+    #[visit(skip)]
     Natural,
 }
 
 /// GROUP BY <grouping_strategy> <group_key>[, <group_key>]... \[AS <symbol>\]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupByExpr {
+    #[visit(skip)]
     pub strategy: GroupingStrategy,
     pub keys: Vec<AstNode<GroupKey>>,
+    #[visit(skip)]
     pub group_as_alias: Option<SymbolPrimitive>,
 }
 
@@ -602,26 +699,29 @@ pub enum GroupingStrategy {
 }
 
 /// <expr> [AS <symbol>]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupKey {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub as_alias: Option<SymbolPrimitive>,
 }
 
 /// ORDER BY <sort_spec>...
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OrderByExpr {
     pub sort_specs: Vec<AstNode<SortSpec>>,
 }
 
 /// <expr> [ASC | DESC] ?
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SortSpec {
     pub expr: Box<Expr>,
+    #[visit(skip)]
     pub ordering_spec: Option<OrderingSpec>,
+    #[visit(skip)]
     pub null_ordering_spec: Option<NullOrderingSpec>,
 }
 
@@ -639,37 +739,20 @@ pub enum NullOrderingSpec {
     Last,
 }
 
-/// Indicates scope search order when resolving variables.
-/// Has no effect except within `FROM` sources.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ScopeQualifier {
-    /// Use the default search order.
-    Unqualified,
-    /// Skip the globals, first check within FROM sources and resolve starting with the local scope.
-    Qualified,
-}
-
-/// Indicates if a set should be reduced to its distinct elements or not.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum SetQuantifier {
-    All,
-    Distinct,
-}
-
 /// `RETURNING (<returning_elem> [, <returning_elem>]...)`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ReturningExpr {
     pub elems: Vec<ReturningElem>,
 }
 
 /// `<returning mapping> (<expr> [, <expr>]...)`
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ReturningElem {
+    #[visit(skip)]
     pub mapping: ReturningMapping,
+    #[visit(skip)]
     pub column: ColumnComponent,
 }
 
@@ -694,15 +777,6 @@ pub enum ReturningMapping {
     ModifiedOld,
     AllNew,
     AllOld,
-}
-
-/// Represents `<expr> = <expr>` in a DML SET operation.  Note that in this case, `=` is representing
-/// an assignment operation and *not* the equality operator.
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Assignment {
-    pub target: Box<Expr>,
-    pub value: Box<Expr>,
 }
 
 /// Represents all possible PartiQL data types.
@@ -757,9 +831,10 @@ pub enum CustomTypePart {
     Parameterized(SymbolPrimitive, Vec<CustomTypeParam>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CustomType {
+    #[visit(skip)]
     pub parts: Vec<CustomTypePart>,
 }
 
@@ -768,4 +843,12 @@ pub struct CustomType {
 pub struct SymbolPrimitive {
     pub value: String,
     pub case: CaseSensitivity,
+}
+
+/// Is used to determine if variable lookup should be case-sensitive or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CaseSensitivity {
+    CaseSensitive,
+    CaseInsensitive,
 }

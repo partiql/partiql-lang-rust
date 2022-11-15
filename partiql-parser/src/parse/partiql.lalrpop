@@ -188,7 +188,7 @@ SelectClause: ast::AstNode<ast::Projection> = {
         setq: Some(strategy),
     }, lo..hi),
     <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => state.node(ast::Projection {
-        kind: ast::ProjectionKind::ProjectPivot { key, value },
+        kind: ast::ProjectionKind::ProjectPivot(ast::ProjectPivot { key, value }),
         setq: None
     }, lo..hi),
 }
@@ -686,7 +686,7 @@ ExprPrecedence07: ast::Expr = {
     <lo:@L> <l:ExprPrecedence07> "-" <r:ExprPrecedence06> <hi:@R> =>
        ast::Expr::BinOp(
            state.node(ast::BinOp {
-               kind: ast::BinOpKind::Neg,
+               kind: ast::BinOpKind::Sub,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }, lo..hi)
@@ -917,8 +917,8 @@ FunctionArgPositional: ast::AstNode<ast::CallArg> = {
 
 #[inline]
 FunctionArgNamed: ast::AstNode<ast::CallArg> = {
-    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named{name, value}, lo..hi),
-    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType{name, ty}, lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named(ast::CallArgNamed{name, value}), lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
 }
 
 #[inline]
