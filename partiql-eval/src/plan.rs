@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
 use partiql_logical as logical;
-use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryOp, ValueExpr};
+use partiql_logical::{
+    BinaryOp, BindingsExpr, JoinKind, LogicalPlan, PathComponent, UnaryOp, ValueExpr,
+};
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalListExpr, EvalLitExpr,
-    EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
+    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
+    Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -25,7 +28,7 @@ impl EvaluatorPlanner {
         let mut seen = HashMap::new();
 
         flows.into_iter().for_each(|r| {
-            let (s, d) = r;
+            let (s, d, w) = r;
 
             let mut nodes = vec![];
             for op_id in vec![s, d] {
@@ -40,7 +43,7 @@ impl EvaluatorPlanner {
                 nodes.push(eval_op)
             }
 
-            eval_plan.0.add_edge(nodes[0], nodes[1], ());
+            eval_plan.0.add_edge(nodes[0], nodes[1], *w);
         });
 
         eval_plan
@@ -93,6 +96,20 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key.as_ref().unwrap(),
             )),
+            BindingsExpr::Join(logical::Join { kind, on }) => {
+                let kind = match kind {
+                    JoinKind::Inner => EvalJoinKind::Inner,
+                    JoinKind::Left => EvalJoinKind::Left,
+                    JoinKind::Right => EvalJoinKind::Right,
+                    JoinKind::Full => EvalJoinKind::Full,
+                    JoinKind::Cross => EvalJoinKind::Cross,
+                };
+                let on = match on {
+                    None => None,
+                    Some(on_condition) => Some(self.plan_values(on_condition.clone())),
+                };
+                Box::new(eval::EvalJoin::new(kind, on))
+            }
             _ => panic!("Unevaluable bexpr"),
         }
     }
