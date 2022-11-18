@@ -706,10 +706,45 @@ mod tests {
             preprocess(r#"trim(LEADING 'Foo' from 'FooBar')"#)?,
             lex(r#"trim(LEADING : 'Foo', "from" : 'FooBar')"#)?
         );
+
+        // Trim Specification in all 3 spots
+        assert_eq!(
+            preprocess(r#"trim(BOTH TrAiLiNg from TRAILING)"#)?,
+            lex(r#"trim(BOTH : TrAiLiNg, "from" : TRAILING)"#)?
+        );
+
+        // Trim specification in 1st and 2nd spot
+        assert_eq!(
+            preprocess(r#"trim(LEADING LEADING from 'FooBar')"#)?,
+            lex(r#"trim(LEADING : LEADING, "from" : 'FooBar')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"trim(LEADING TrAiLiNg from 'FooBar')"#)?,
+            lex(r#"trim(LEADING : TrAiLiNg, "from" : 'FooBar')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"trim(tRaIlInG TrAiLiNg from 'FooBar')"#)?,
+            lex(r#"trim(tRaIlInG : TrAiLiNg, "from" : 'FooBar')"#)?
+        );
+
+        // Trim specification in 1st and 3rd spot
         assert_eq!(
             preprocess(r#"trim(LEADING 'Foo' from leaDing)"#)?,
             lex(r#"trim(LEADING : 'Foo', "from" : leaDing)"#)?
         );
+
+        // Trim Specification (quoted) in 2nd and 3rd spot
+        assert_eq!(
+            preprocess(r#"trim('LEADING' from leaDing)"#)?,
+            lex(r#"trim('LEADING', "from" : leaDing)"#)?
+        );
+
+        // Trim Specification in 3rd spot only
+        assert_eq!(
+            preprocess(r#"trim('a' from leaDing)"#)?,
+            lex(r#"trim('a', "from" : leaDing)"#)?
+        );
+
         assert_eq!(
             preprocess(r#"trim(leading from '   Bar')"#)?,
             lex(r#"trim(leading : ' ',  "from" : '   Bar')"#)?
