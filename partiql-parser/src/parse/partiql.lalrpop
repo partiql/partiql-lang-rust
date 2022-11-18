@@ -1025,6 +1025,27 @@ VarRefExpr: ast::Expr = {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
             qualifier: ast::ScopeQualifier::Unqualified
         },lo..hi)),
+    <lo:@L> <ident:NonReservedKeyword> <hi:@R> => ast::Expr::VarRef(state.node(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
+            qualifier: ast::ScopeQualifier::Unqualified
+        },lo..hi)),
+}
+
+// PROOF OF CONCEPT
+// These are all the proposed non-reserved keywords (except ORDER)
+// ORDER is only in this list to prove that even ORDER can be parsed as a non-reserved keyword.
+#[inline]
+NonReservedKeyword: &'static str = {
+    "ACYCLIC" => "ACYCLIC",
+    "BOTH" => "BOTH",
+    "DOMAIN" => "DOMAIN",
+    "LEADING" => "LEADING",
+    "ORDER" => "ORDER",
+    "PUBLIC" => "PUBLIC",
+    "SIMPLE" => "SIMPLE",
+    "TRAIL" => "TRAIL",
+    "TRAILING" => "TRAILING",
+    "USER" => "USER",
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1267,18 +1288,21 @@ extern {
         "Ion" => lexer::Token::Ion(<&'input str>),
 
         // Keywords
+        "ACYCLIC" => lexer::Token::Acyclic,
         "ALL" => lexer::Token::All,
         "ASC" => lexer::Token::Asc,
         "AND" => lexer::Token::And,
         "AS" => lexer::Token::As,
         "AT" => lexer::Token::At,
         "BETWEEN" => lexer::Token::Between,
+        "BOTH" => lexer::Token::Both,
         "BY" => lexer::Token::By,
         "CASE" => lexer::Token::Case,
         "CROSS" => lexer::Token::Cross,
         "DATE" => lexer::Token::Date,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
+        "DOMAIN" => lexer::Token::Domain,
         "ELSE" => lexer::Token::Else,
         "END" => lexer::Token::End,
         "ESCAPE" => lexer::Token::Escape,
@@ -1297,6 +1321,7 @@ extern {
         "JOIN" => lexer::Token::Join,
         "LAST" => lexer::Token::Last,
         "LATERAL" => lexer::Token::Lateral,
+        "LEADING" => lexer::Token::Leading,
         "LEFT" => lexer::Token::Left,
         "LIKE" => lexer::Token::Like,
         "LIMIT" => lexer::Token::Limit,
@@ -1313,15 +1338,20 @@ extern {
         "PARTIAL" => lexer::Token::Partial,
         "PIVOT" => lexer::Token::Pivot,
         "PRESERVE" => lexer::Token::Preserve,
+        "PUBLIC" => lexer::Token::Public,
         "RIGHT" => lexer::Token::Right,
         "SELECT" => lexer::Token::Select,
+        "SIMPLE" => lexer::Token::Simple,
         "TABLE" => lexer::Token::Table,
         "TIME" => lexer::Token::Time,
         "TIMESTAMP" => lexer::Token::Timestamp,
         "THEN" => lexer::Token::Then,
+        "TRAIL" => lexer::Token::Trail,
+        "TRAILING" => lexer::Token::Trailing,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,
+        "USER" => lexer::Token::User,
         "USING" => lexer::Token::Using,
         "VALUE" => lexer::Token::Value,
         "VALUES" => lexer::Token::Values,

@@ -510,6 +510,8 @@ pub enum Token<'input> {
     Ion(&'input str),
 
     // Keywords
+    #[regex("(?i:Acyclic)")]
+    Acyclic,
     #[regex("(?i:All)")]
     All,
     #[regex("(?i:Asc)")]
@@ -522,6 +524,8 @@ pub enum Token<'input> {
     At,
     #[regex("(?i:Between)")]
     Between,
+    #[regex("(?i:Both)")]
+    Both,
     #[regex("(?i:By)")]
     By,
     #[regex("(?i:Case)")]
@@ -534,6 +538,8 @@ pub enum Token<'input> {
     Desc,
     #[regex("(?i:Distinct)")]
     Distinct,
+    #[regex("(?i:Domain)")]
+    Domain,
     #[regex("(?i:Else)")]
     Else,
     #[regex("(?i:End)")]
@@ -570,6 +576,8 @@ pub enum Token<'input> {
     Last,
     #[regex("(?i:Lateral)")]
     Lateral,
+    #[regex("(?i:Leading)")]
+    Leading,
     #[regex("(?i:Left)")]
     Left,
     #[regex("(?i:Like)")]
@@ -602,10 +610,14 @@ pub enum Token<'input> {
     Pivot,
     #[regex("(?i:Preserve)")]
     Preserve,
+    #[regex("(?i:Public)")]
+    Public,
     #[regex("(?i:Right)")]
     Right,
     #[regex("(?i:Select)")]
     Select,
+    #[regex("(?i:Simple)")]
+    Simple,
     #[regex("(?i:Table)")]
     Table,
     #[regex("(?i:Time)")]
@@ -614,12 +626,18 @@ pub enum Token<'input> {
     Timestamp,
     #[regex("(?i:Then)")]
     Then,
+    #[regex("(?i:Trail)")]
+    Trail,
+    #[regex("(?i:Trailing)")]
+    Trailing,
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
     Union,
     #[regex("(?i:Unpivot)")]
     Unpivot,
+    #[regex("(?i:User)")]
+    User,
     #[regex("(?i:Using)")]
     Using,
     #[regex("(?i:Value)")]
@@ -642,17 +660,20 @@ impl<'input> Token<'input> {
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            Token::All
+            Token::Acyclic
+                | Token::All
                 | Token::Asc
                 | Token::And
                 | Token::As
                 | Token::At
                 | Token::Between
+                | Token::Both
                 | Token::By
                 | Token::Cross
                 | Token::Date
                 | Token::Desc
                 | Token::Distinct
+                | Token::Domain
                 | Token::Escape
                 | Token::Except
                 | Token::First
@@ -668,6 +689,7 @@ impl<'input> Token<'input> {
                 | Token::Join
                 | Token::Last
                 | Token::Lateral
+                | Token::Leading
                 | Token::Left
                 | Token::Like
                 | Token::Limit
@@ -684,14 +706,19 @@ impl<'input> Token<'input> {
                 | Token::Partial
                 | Token::Pivot
                 | Token::Preserve
+                | Token::Public
                 | Token::Right
                 | Token::Select
+                | Token::Simple
                 | Token::Table
                 | Token::Time
                 | Token::Timestamp
                 | Token::Then
+                | Token::Trail
+                | Token::Trailing
                 | Token::Union
                 | Token::Unpivot
+                | Token::User
                 | Token::Using
                 | Token::Value
                 | Token::Values
@@ -748,18 +775,21 @@ impl<'input> fmt::Display for Token<'input> {
             Token::EmbeddedIonQuote => write!(f, "<ION>"),
             Token::Ion(txt) => write!(f, "<{}:ION>", txt),
 
-            Token::All
+            Token::Acyclic
+            | Token::All
             | Token::Asc
             | Token::And
             | Token::As
             | Token::At
             | Token::Between
+            | Token::Both
             | Token::By
             | Token::Case
             | Token::Cross
             | Token::Date
             | Token::Desc
             | Token::Distinct
+            | Token::Domain
             | Token::Else
             | Token::End
             | Token::Escape
@@ -778,6 +808,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Join
             | Token::Last
             | Token::Lateral
+            | Token::Leading
             | Token::Left
             | Token::Like
             | Token::Limit
@@ -794,15 +825,20 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Partial
             | Token::Pivot
             | Token::Preserve
+            | Token::Public
             | Token::Right
             | Token::Select
+            | Token::Simple
             | Token::Table
             | Token::Time
             | Token::Timestamp
             | Token::Then
+            | Token::Trail
+            | Token::Trailing
             | Token::True
             | Token::Union
             | Token::Unpivot
+            | Token::User
             | Token::Using
             | Token::Value
             | Token::Values
@@ -1098,6 +1134,38 @@ mod tests {
                 Token::Select,
                 Token::CommentLine("--comment"),
                 Token::UnquotedAtIdentifier("g"),
+                Token::From,
+                Token::QuotedAtIdentifier("foo"),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        assert_eq!(offset_tracker.num_lines(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn select_non_reserved_keywords() -> Result<(), ParseError<'static, BytePosition>> {
+        let query = "SELECT acyclic, BoTh, DOMAIN, SImple, Trail, TRailing, USER\nfrom @\"foo\"";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::Acyclic,
+                Token::Comma,
+                Token::Both,
+                Token::Comma,
+                Token::Domain,
+                Token::Comma,
+                Token::Simple,
+                Token::Comma,
+                Token::Trail,
+                Token::Comma,
+                Token::Trailing,
+                Token::Comma,
+                Token::User,
                 Token::From,
                 Token::QuotedAtIdentifier("foo"),
             ],

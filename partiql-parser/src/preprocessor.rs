@@ -60,26 +60,128 @@ mod built_ins {
     use regex::Regex;
 
     use FnExprArgMatch::{
-        AnyOne, AnyZeroOrMore as AnyStar, NamedArgId as Id, NamedArgKw as Kw, Synthesize as Syn,
+        AnyOne, AnyZeroOrMore as AnyStar, Match, NamedArgId as Id, NamedArgKw as Kw,
+        Synthesize as Syn,
     };
 
-    const TRIM_SPECIFIER: &str = "(?i:leading)|(?i:trailing)|(?i:both)";
+    /// PROOF OF CONCEPT EXAMPLE
+    /// Creates the combinations of regular expressions to parse TRIM.
+    /// Allows for using LEADING/TRAILING/BOTH as both identifiers and keywords.
+    /// Note: This isn't meant to be efficient.
+    fn create_trim_regular_expression_combinations<'a>() -> Vec<Vec<FnExprArgMatch<'a>>> {
+        let outer_tokens = [Token::Leading, Token::Trailing, Token::Both];
+        let mid_tokens = [Token::Leading, Token::Trailing, Token::Both];
+        let inner_tokens = [Token::Leading, Token::Trailing, Token::Both];
+        let mut regular_expressions: Vec<Vec<FnExprArgMatch>> = Vec::new();
+
+        // 1st, 2nd, and 3rd: trim(trailing both from leading) => trim("trailing": both, "from": leading)
+        for outer_token in outer_tokens.iter() {
+            for mid_token in mid_tokens.iter() {
+                for last_token in inner_tokens.iter() {
+                    let expression = vec![
+                        Kw(outer_token.clone()),
+                        Match(mid_token.clone()),
+                        AnyStar(false),
+                        Kw(Token::From),
+                        Match(last_token.clone()),
+                        AnyStar(false),
+                    ];
+                    regular_expressions.push(expression);
+                }
+            }
+        }
+
+        // 1st and 3rd: trim(trailing 'hello' from leading) => trim("trailing": 'hello', "from": leading)
+        // 1st and 2nd: trim(trailing leading from x) => trim("trailing": leading, "from": x)
+        for outer_token in outer_tokens.iter() {
+            for mid_token in mid_tokens.iter() {
+                let expression = vec![
+                    Kw(outer_token.clone()),
+                    AnyOne(false),
+                    AnyStar(false),
+                    Kw(Token::From),
+                    Match(mid_token.clone()),
+                    AnyStar(false),
+                ];
+                let expression1 = vec![
+                    Kw(outer_token.clone()),
+                    Match(mid_token.clone()),
+                    AnyStar(false),
+                    Kw(Token::From),
+                    AnyOne(false),
+                    AnyStar(false),
+                ];
+                regular_expressions.push(expression);
+                regular_expressions.push(expression1);
+            }
+        }
+
+        // 1st only: trim(trailing 'hello' from x) => trim("trailing": 'hello', "from": x)
+        // 3rd only: trim('hello' from leading) => trim('hello', "from": leading)
+        for outer_token in outer_tokens {
+            let expression = vec![
+                Kw(outer_token.clone()),
+                AnyOne(false),
+                AnyStar(false),
+                Kw(Token::From),
+                AnyOne(false),
+                AnyStar(false),
+            ];
+
+            let expression_01 = vec![
+                AnyOne(false),
+                AnyStar(false),
+                Kw(Token::From),
+                Match(outer_token.clone()),
+                AnyStar(false),
+            ];
+            regular_expressions.push(expression);
+            regular_expressions.push(expression_01);
+        }
+        regular_expressions
+    }
 
     pub(crate) fn built_in_trim() -> FnExpr<'static> {
-        let re = Regex::new(TRIM_SPECIFIER).unwrap();
+        let mut permutations = create_trim_regular_expression_combinations();
+        let mut patterns = vec![
+            // e.g., trim(trailing from x) => trim("trailing": ' ', "from": x)
+            vec![
+                Kw(Token::Leading),
+                Syn(Token::String(" ")),
+                Kw(Token::From),
+                AnyOne(false),
+                AnyStar(false),
+            ],
+            vec![
+                Kw(Token::Trailing),
+                Syn(Token::String(" ")),
+                Kw(Token::From),
+                AnyOne(false),
+                AnyStar(false),
+            ],
+            vec![
+                Kw(Token::Both),
+                Syn(Token::String(" ")),
+                Kw(Token::From),
+                AnyOne(false),
+                AnyStar(false),
+            ],
+            // e.g., trim(' ' from x) => trim(' ', "from": x)
+            vec![
+                AnyOne(false),
+                AnyStar(false),
+                Kw(Token::From),
+                AnyOne(false),
+                AnyStar(false),
+            ],
+            // e.g., trim(from x) => trim("from": x)
+            vec![Kw(Token::From), AnyOne(false), AnyStar(false)],
+        ];
+        permutations.append(&mut patterns);
         FnExpr {
             fn_names: vec!["trim"],
             #[rustfmt::skip]
-            patterns: vec![
-                // e.g., trim(leading 'tt' from x) => trim("leading": 'tt', "from": x)
-                vec![Id(re.clone()), AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
-                // e.g., trim(trailing from x) => trim("trailing": ' ', "from": x)
-                vec![Id(re), Syn(Token::String(" ")), Kw(Token::From), AnyOne(false), AnyStar(false)],
-                // e.g., trim(' ' from x) => trim(' ', "from": x)
-                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
-                // e.g., trim(from x) => trim("from": x)
-                vec![Kw(Token::From), AnyOne(false), AnyStar(false)],
-            ],
+            patterns: permutations,
         }
     }
 
@@ -640,7 +742,7 @@ mod tests {
             vec![
                 Token::UnquotedIdent("trim"),
                 Token::OpenParen,
-                Token::UnquotedIdent("LEADING"),
+                Token::QuotedIdent("LEADING"),
                 Token::Colon,
                 Token::String("Foo"),
                 Token::Comma,
@@ -704,31 +806,71 @@ mod tests {
 
         assert_eq!(
             preprocess(r#"trim(LEADING 'Foo' from 'FooBar')"#)?,
-            lex(r#"trim(LEADING : 'Foo', "from" : 'FooBar')"#)?
+            lex(r#"trim("LEADING" : 'Foo', "from" : 'FooBar')"#)?
         );
+
+        // Trim Specification in all 3 spots
+        assert_eq!(
+            preprocess(r#"trim(BOTH TrAiLiNg from TRAILING)"#)?,
+            lex(r#"trim("BOTH" : TrAiLiNg, "from" : TRAILING)"#)?
+        );
+
+        // Trim specification in 1st and 2nd spot
+        assert_eq!(
+            preprocess(r#"trim(LEADING LEADING from 'FooBar')"#)?,
+            lex(r#"trim("LEADING" : LEADING, "from" : 'FooBar')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"trim(LEADING TrAiLiNg from 'FooBar')"#)?,
+            lex(r#"trim("LEADING" : TrAiLiNg, "from" : 'FooBar')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"trim(tRaIlInG TrAiLiNg from 'FooBar')"#)?,
+            lex(r#"trim("tRaIlInG" : TrAiLiNg, "from" : 'FooBar')"#)?
+        );
+
+        // Trim Specification in 1st and 3rd spot
         assert_eq!(
             preprocess(r#"trim(LEADING 'Foo' from leaDing)"#)?,
-            lex(r#"trim(LEADING : 'Foo', "from" : leaDing)"#)?
+            lex(r#"trim("LEADING" : 'Foo', "from" : leaDing)"#)?
         );
+
+        // Trim Specification (quoted) in 2nd and 3rd spot
+        assert_eq!(
+            preprocess(r#"trim('LEADING' from leaDing)"#)?,
+            lex(r#"trim('LEADING', "from" : leaDing)"#)?
+        );
+
+        // Trim Specification in 3rd spot only
+        assert_eq!(
+            preprocess(r#"trim('a' from leaDing)"#)?,
+            lex(r#"trim('a', "from" : leaDing)"#)?
+        );
+
+        assert_eq!(
+            preprocess(r#"trim(LEADING a from b)"#)?,
+            lex(r#"trim("LEADING" : a, "from" : b)"#)?
+        );
+
         assert_eq!(
             preprocess(r#"trim(leading from '   Bar')"#)?,
-            lex(r#"trim(leading : ' ',  "from" : '   Bar')"#)?
+            lex(r#"trim("leading" : ' ',  "from" : '   Bar')"#)?
         );
         assert_eq!(
             preprocess(r#"trim(TrAiLiNg 'Bar' from 'FooBar')"#)?,
-            lex(r#"trim(TrAiLiNg : 'Bar',  "from" : 'FooBar')"#)?
+            lex(r#"trim("TrAiLiNg" : 'Bar',  "from" : 'FooBar')"#)?
         );
         assert_eq!(
             preprocess(r#"trim(TRAILING from 'Bar   ')"#)?,
-            lex(r#"trim(TRAILING: ' ', "from": 'Bar   ')"#)?
+            lex(r#"trim("TRAILING": ' ', "from": 'Bar   ')"#)?
         );
         assert_eq!(
             preprocess(r#"trim(BOTH 'Foo' from 'FooBarBar')"#)?,
-            lex(r#"trim(BOTH: 'Foo', "from": 'FooBarBar')"#)?
+            lex(r#"trim("BOTH": 'Foo', "from": 'FooBarBar')"#)?
         );
         assert_eq!(
             preprocess(r#"trim(botH from '   Bar   ')"#)?,
-            lex(r#"trim(botH: ' ', "from": '   Bar   ')"#)?
+            lex(r#"trim("botH": ' ', "from": '   Bar   ')"#)?
         );
         assert_eq!(
             preprocess(r#"trim(from '   Bar   ')"#)?,
