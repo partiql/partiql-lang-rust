@@ -34,6 +34,20 @@ const Q_COMPLEX_FEXPR: &str = r#"
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
             "#;
 
+const Q_COMPLEX_MATCH: &str = r#"
+            SELECT (
+                SELECT numRec, data
+                FROM
+                (deltaGraph MATCH (t) -[:hasChange]-> (dt), (dt) -[:checkPointedBy]-> (t1)), 
+                (
+                    SELECT foo(u.id), bar(review), rindex
+                    FROM delta.data as u CROSS JOIN UNPIVOT u.reviews as review AT rindex
+                ) as data,
+                delta.numRec as numRec
+            )
+            AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
+            "#;
+
 fn parse_bench(c: &mut Criterion) {
     fn parse(text: &str) -> ParserResult {
         Parser::default().parse(text)
@@ -44,6 +58,9 @@ fn parse_bench(c: &mut Criterion) {
     c.bench_function("parse-complex", |b| b.iter(|| parse(black_box(Q_COMPLEX))));
     c.bench_function("parse-complex-fexpr", |b| {
         b.iter(|| parse(black_box(Q_COMPLEX_FEXPR)))
+    });
+    c.bench_function("parse-complex-match", |b| {
+        b.iter(|| parse(black_box(Q_COMPLEX_MATCH)))
     });
 }
 
