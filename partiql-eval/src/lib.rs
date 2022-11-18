@@ -17,8 +17,8 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan, PathComponent, TupleExpr,
-        ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan,
+        PathComponent, TupleExpr, ValueExpr,
     };
     use partiql_value as value;
     use partiql_value::{
@@ -470,6 +470,200 @@ mod tests {
     }
 
     #[test]
+    fn comparison_ops() {
+        // Lt
+        // Plan for `select lhs < rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Gt
+        // Plan for `select lhs > rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Gt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Lteq
+        // Plan for `select lhs <= rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Gteq
+        // Plan for `select lhs >= rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Gteq, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+    }
+
+    #[test]
+    fn between_op() {
+        fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
+            let mut plan = LogicalPlan::new();
+            let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+                as_key: "data".to_string(),
+                at_key: None,
+            }));
+
+            let project = plan.add_operator(Project(logical::Project {
+                exprs: HashMap::from([(
+                    "result".to_string(),
+                    ValueExpr::BetweenExpr(BetweenExpr {
+                        value: Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "data".into(),
+                            ))),
+                            vec![PathComponent::Key("value".to_string())],
+                        )),
+                        from: Box::new(ValueExpr::Lit(Box::new(from))),
+                        to: Box::new(ValueExpr::Lit(Box::new(to))),
+                    }),
+                )]),
+            }));
+
+            let sink = plan.add_operator(BindingsExpr::Sink);
+            plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+            let mut bindings = MapBindings::default();
+            bindings.insert(
+                "data",
+                partiql_list![Tuple::from([("value".into(), value)])].into(),
+            );
+
+            let result = evaluate(plan, bindings).coerce_to_bag();
+            assert!(!&result.is_empty());
+            let expected_result =
+                partiql_bag!(Tuple::from([("result".into(), expected_first_elem)]));
+            assert_eq!(expected_result, result);
+        }
+        eval_between_op(
+            Value::from(2),
+            Value::from(1),
+            Value::from(3),
+            Value::from(true),
+        );
+        eval_between_op(
+            Value::from(2),
+            Value::from(1.),
+            Value::from(dec!(3.)),
+            Value::from(true),
+        );
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::from(3),
+            Value::from(false),
+        );
+        eval_between_op(Value::Null, Value::from(1), Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::Null, Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::from(1), Value::Null, Value::Null);
+        eval_between_op(Value::Missing, Value::from(1), Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::Missing, Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::from(1), Value::Missing, Value::Null);
+        // left part of AND evaluates to false
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::Null,
+            Value::from(false),
+        );
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::Missing,
+            Value::from(false),
+        );
+    }
+
     fn select_with_cross_join() {
         let mut lg = LogicalPlan::new();
 

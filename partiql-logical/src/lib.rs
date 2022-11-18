@@ -117,6 +117,7 @@ pub enum ValueExpr {
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),
+    BetweenExpr(BetweenExpr),
 }
 
 #[derive(Clone, Debug)]
@@ -154,6 +155,13 @@ impl BagExpr {
     pub fn new() -> Self {
         BagExpr { elements: vec![] }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct BetweenExpr {
+    pub value: Box<ValueExpr>,
+    pub from: Box<ValueExpr>,
+    pub to: Box<ValueExpr>,
 }
 
 // Bindings -> Bindings : Where, OrderBy, Offset, Limit, Join, SetOp, Select, Distinct, GroupBy, Unpivot, Let

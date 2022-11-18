@@ -7,8 +7,9 @@ use partiql_logical::{
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr, EvalLitExpr,
-    EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
+    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
+    Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -136,7 +137,7 @@ impl EvaluatorPlanner {
                     BinaryOp::Gt => EvalBinOp::Gt,
                     BinaryOp::Gteq => EvalBinOp::Gteq,
                     BinaryOp::Lt => EvalBinOp::Lt,
-                    BinaryOp::Lteq => EvalBinOp::Gteq,
+                    BinaryOp::Lteq => EvalBinOp::Lteq,
                     BinaryOp::Add => EvalBinOp::Add,
                     BinaryOp::Sub => EvalBinOp::Sub,
                     BinaryOp::Mul => EvalBinOp::Mul,
@@ -186,6 +187,12 @@ impl EvaluatorPlanner {
                     .map(|elem| self.plan_values(elem))
                     .collect();
                 Box::new(EvalBagExpr { elements })
+            }
+            ValueExpr::BetweenExpr(expr) => {
+                let value = self.plan_values(*expr.value);
+                let from = self.plan_values(*expr.from);
+                let to = self.plan_values(*expr.to);
+                Box::new(EvalBetweenExpr { value, from, to })
             }
         }
     }
