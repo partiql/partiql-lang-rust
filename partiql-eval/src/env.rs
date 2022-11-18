@@ -21,7 +21,7 @@ pub mod basic {
     use super::*;
     use std::collections::HashMap;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct MapBindings<T> {
         sensitive: HashMap<String, usize>,
         insensitive: HashMap<UniCase<String>, usize>,
