@@ -556,8 +556,8 @@ impl EvalExpr for EvalBinOpExpr {
 
         let rhs = self.rhs.evaluate(bindings, ctx);
         match self.op {
-            EvalBinOp::And => lhs.and(rhs),
-            EvalBinOp::Or => lhs.or(rhs),
+            EvalBinOp::And => lhs.and(&rhs),
+            EvalBinOp::Or => lhs.or(&rhs),
             EvalBinOp::Concat => {
                 // TODO non-naive concat. Also doesn't properly propagate MISSING and NULL
                 let lhs = if let Value::String(s) = lhs {
@@ -572,12 +572,12 @@ impl EvalExpr for EvalBinOpExpr {
                 };
                 Value::String(Box::new(format!("{}{}", lhs, rhs)))
             }
-            EvalBinOp::Eq => lhs.eq(rhs),
-            EvalBinOp::Neq => lhs.neq(rhs),
-            EvalBinOp::Gt => lhs.gt(rhs),
-            EvalBinOp::Gteq => lhs.gteq(rhs),
-            EvalBinOp::Lt => lhs.lt(rhs),
-            EvalBinOp::Lteq => lhs.lteq(rhs),
+            EvalBinOp::Eq => NullableEq::eq(&lhs, &rhs),
+            EvalBinOp::Neq => lhs.neq(&rhs),
+            EvalBinOp::Gt => NullableOrd::gt(&lhs, &rhs),
+            EvalBinOp::Gteq => NullableOrd::gteq(&lhs, &rhs),
+            EvalBinOp::Lt => NullableOrd::lt(&lhs, &rhs),
+            EvalBinOp::Lteq => NullableOrd::lteq(&lhs, &rhs),
             EvalBinOp::Add => lhs + rhs,
             EvalBinOp::Sub => lhs - rhs,
             EvalBinOp::Mul => lhs * rhs,
@@ -585,6 +585,22 @@ impl EvalExpr for EvalBinOpExpr {
             EvalBinOp::Mod => lhs % rhs,
             EvalBinOp::Exp => todo!("Exponentiation"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalBetweenExpr {
+    pub value: Box<dyn EvalExpr>,
+    pub from: Box<dyn EvalExpr>,
+    pub to: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalBetweenExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        let from = self.from.evaluate(bindings, ctx);
+        let to = self.to.evaluate(bindings, ctx);
+        value.gteq(&from).and(&value.lteq(&to))
     }
 }
 
