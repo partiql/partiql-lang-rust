@@ -13,7 +13,8 @@ impl OpId {
 #[derive(Debug)]
 pub struct LogicalPlan<T> {
     nodes: Vec<T>,
-    edges: Vec<(OpId, OpId)>,
+    /// Third argument indicates the branch number into the outgoing node.
+    edges: Vec<(OpId, OpId, u8)>,
 }
 
 impl<T> LogicalPlan<T> {
@@ -34,7 +35,15 @@ impl<T> LogicalPlan<T> {
         assert!(src.index() <= self.operator_count());
         assert!(dst.index() <= self.operator_count());
 
-        self.edges.push((src, dst));
+        self.edges.push((src, dst, 0));
+    }
+
+    #[inline]
+    pub fn add_flow_with_branch_num(&mut self, src: OpId, dst: OpId, branch_num: u8) {
+        assert!(src.index() <= self.operator_count());
+        assert!(dst.index() <= self.operator_count());
+
+        self.edges.push((src, dst, branch_num));
     }
 
     #[inline]
@@ -51,7 +60,7 @@ impl<T> LogicalPlan<T> {
         &self.nodes
     }
 
-    pub fn flows(&self) -> &Vec<(OpId, OpId)> {
+    pub fn flows(&self) -> &Vec<(OpId, OpId, u8)> {
         &self.edges
     }
 }
@@ -160,7 +169,7 @@ pub enum BindingsExpr {
     OrderBy,
     Offset,
     Limit,
-    Join,
+    Join(Join),
     SetOp,
     Project(Project),
     ProjectValue(ProjectValue),
@@ -195,6 +204,21 @@ pub struct Unpivot {
 }
 
 #[derive(Debug)]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
+}
+
+#[derive(Debug)]
+pub struct Join {
+    pub kind: JoinKind,
+    pub on: Option<ValueExpr>,
+}
+
+#[derive(Debug)]
 pub struct Filter {
     pub expr: ValueExpr,
 }
@@ -220,7 +244,7 @@ mod tests {
         let b = p.add_operator(BindingsExpr::Sink);
         let c = p.add_operator(BindingsExpr::Limit);
         let d = p.add_operator(BindingsExpr::GroupBy);
-        let e = p.add_operator(BindingsExpr::Join);
+        let e = p.add_operator(BindingsExpr::Offset);
         p.add_flow(a, b);
         p.add_flow(a, c);
         p.add_flow(b, c);

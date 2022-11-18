@@ -17,9 +17,9 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BinaryOp, BindingsExpr, ListExpr, LogicalPlan, PathComponent, TupleExpr, ValueExpr,
+        BagExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan, PathComponent, TupleExpr,
+        ValueExpr,
     };
-
     use partiql_value as value;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
@@ -83,6 +83,23 @@ mod tests {
             ))),
             vec![PathComponent::Key(component.to_string())],
         )
+    }
+
+    fn join_data() -> MapBindings<Value> {
+        let customers = partiql_list![
+            partiql_tuple![("id", 5), ("name", "Joe")],
+            partiql_tuple![("id", 7), ("name", "Mary")],
+        ];
+
+        let orders = partiql_list![
+            partiql_tuple![("custId", 7), ("productId", 101)],
+            partiql_tuple![("custId", 7), ("productId", 523)],
+        ];
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("customers", customers.into());
+        bindings.insert("orders", orders.into());
+        bindings
     }
 
     // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
@@ -450,6 +467,94 @@ mod tests {
             Value::Missing,
             Value::Missing,
         );
+    }
+
+    #[test]
+    fn select_with_cross_join() {
+        let mut lg = LogicalPlan::new();
+
+        // Example 9 from spec with projected columns from different tables demonstrates a cross join:
+        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o
+        let from_lhs = lg.add_operator(scan("customers", "c"));
+        let from_rhs = lg.add_operator(scan("orders", "o"));
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                ("id".to_string(), path_var("c", "id")),
+                ("name".to_string(), path_var("c", "name")),
+                ("custId".to_string(), path_var("o", "custId")),
+                ("productId".to_string(), path_var("o", "productId")),
+            ]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Cross,
+            on: None,
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 523)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_with_join_and_on() {
+        let mut lg = LogicalPlan::new();
+
+        // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
+        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o ON c.id = o.custId
+        let from_lhs = lg.add_operator(scan("customers", "c"));
+        let from_rhs = lg.add_operator(scan("orders", "o"));
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                ("id".to_string(), path_var("c", "id")),
+                ("name".to_string(), path_var("c", "name")),
+                ("custId".to_string(), path_var("o", "custId")),
+                ("productId".to_string(), path_var("o", "productId")),
+            ]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Inner,
+            on: Some(ValueExpr::BinaryExpr(
+                BinaryOp::Eq,
+                Box::new(path_var("c", "id")),
+                Box::new(path_var("o", "custId")),
+            )),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
     }
 
     #[test]
