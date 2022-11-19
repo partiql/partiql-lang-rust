@@ -21,6 +21,7 @@ mod tests {
     };
 
     use partiql_value as value;
+    use partiql_value::Value::{Missing, Null};
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
@@ -485,7 +486,37 @@ mod tests {
             BinaryOp::In,
             Value::from(1),
             Value::from(1),
-            Value::from(false),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![10, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(Missing),
+            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(Null),
+            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![1, Null, "b"]),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![3, Null]),
+            Value::from(Null),
         );
     }
 
