@@ -679,6 +679,55 @@ mod tests {
         }
     }
 
+    // PROOF OF CONCEPT: NON-RESERVED KEYWORDS
+    mod non_reserved {
+        use super::*;
+
+        #[test]
+        fn projection_list_trim_spec() {
+            parse!(r#"SELECT leading FROM t"#);
+            parse!(r#"SELECT leading, a FROM t"#);
+            parse!(r#"SELECT leading + trailing, b FROM t"#);
+            parse!(r#"SELECT both + leading + trailing, a, b, c FROM t"#);
+        }
+
+        #[test]
+        fn from_source() {
+            parse!(r#"SELECT leading, trailing, both FROM leading, trailing, both"#);
+        }
+
+        #[test]
+        fn with_trim() {
+            parse!(
+                r#"SELECT leading + trim(leading leading FROM '  hello world'), both FROM leading, trailing, both"#
+            );
+        }
+
+        #[test]
+        fn with_order() {
+            parse!(r#"SELECT order FROM t ORDER BY order + 5"#);
+            parse!(r#"SELECT order FROM order ORDER BY order + 5"#);
+            parse!(r#"SELECT ORDER FROM ORDER ORDER BY ORDER + 5"#);
+        }
+
+        #[test]
+        fn with_gpml() {
+            parse!(r#"SELECT acyclic, trail, simple FROM t"#);
+            parse!(r#"AcYcLiC"#);
+            parse!(r#"TrAiL"#);
+            parse!(r#"SiMpLe"#);
+        }
+
+        //
+        #[test]
+        fn external_customer_request() {
+            parse!(r#"SELECT user, puBlIC, DOMAIN FROM USER, pUbLIc, domain"#);
+            parse!(r#"USER"#);
+            parse!(r#"pUbLIC"#);
+            parse!(r#"domain"#);
+        }
+    }
+
     mod errors {
         use super::*;
         use crate::error::{LexError, UnexpectedToken, UnexpectedTokenData};
