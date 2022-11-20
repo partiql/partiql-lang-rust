@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
-use std::{ops, vec};
+use std::{ops, slice, vec};
 
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
@@ -508,6 +508,34 @@ impl Value {
             Cow::Owned(self.clone().coerce_to_list())
         }
     }
+
+    #[inline]
+    pub fn iter(&self) -> ValueIter {
+        match self {
+            Value::List(list) => ValueIter::List(list.iter()),
+            Value::Bag(bag) => ValueIter::Bag(bag.iter()),
+            other => ValueIter::Single(Some(other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ValueIter<'a> {
+    List(ListIter<'a>),
+    Bag(BagIter<'a>),
+    Single(Option<&'a Value>),
+}
+
+impl<'a> Iterator for ValueIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ValueIter::List(list) => list.next(),
+            ValueIter::Bag(bag) => bag.next(),
+            ValueIter::Single(v) => v.take(),
+        }
+    }
 }
 
 impl IntoIterator for Value {
@@ -767,6 +795,11 @@ impl List {
     pub fn get_mut(&mut self, idx: i64) -> Option<&mut Value> {
         self.0.get_mut(idx as usize)
     }
+
+    #[inline]
+    pub fn iter(&self) -> ListIter {
+        ListIter(self.0.iter())
+    }
 }
 
 impl From<Vec<Value>> for List {
@@ -794,6 +827,17 @@ macro_rules! partiql_list {
     ($($x:expr),+ $(,)?) => (
         List::from(vec![$(Value::from($x)),+])
     );
+}
+
+#[derive(Debug, Clone)]
+pub struct ListIter<'a>(slice::Iter<'a, Value>);
+
+impl<'a> Iterator for ListIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
 }
 
 impl IntoIterator for List {
@@ -881,6 +925,11 @@ impl Bag {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    #[inline]
+    pub fn iter(&self) -> BagIter {
+        BagIter(self.0.iter())
+    }
 }
 
 impl From<Vec<Value>> for Bag {
@@ -915,6 +964,17 @@ macro_rules! partiql_bag {
     ($($x:expr),+ $(,)?) => (
         Bag::from(vec![$(Value::from($x)),+])
     );
+}
+
+#[derive(Debug, Clone)]
+pub struct BagIter<'a>(slice::Iter<'a, Value>);
+
+impl<'a> Iterator for BagIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
 }
 
 impl IntoIterator for Bag {
