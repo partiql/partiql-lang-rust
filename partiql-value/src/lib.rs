@@ -816,6 +816,17 @@ impl From<Bag> for List {
     }
 }
 
+impl<T> FromIterator<T> for List
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> List {
+        let iterator = iter.into_iter().map(Into::into);
+        iterator.collect::<Vec<_>>().into()
+    }
+}
+
 #[macro_export]
 macro_rules! partiql_list {
     () => (
@@ -950,6 +961,17 @@ impl From<List> for Bag {
     #[inline]
     fn from(list: List) -> Self {
         Bag(list.0)
+    }
+}
+
+impl<T> FromIterator<T> for Bag
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Bag {
+        let iterator = iter.into_iter().map(Into::into);
+        iterator.collect::<Vec<_>>().into()
     }
 }
 
@@ -1103,6 +1125,24 @@ where
                 acc.insert(attr, val.into());
                 acc
             })
+    }
+}
+
+impl<'a, T> FromIterator<(&'a str, T)> for Tuple
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = (&'a str, T)>>(iter: I) -> Tuple {
+        let iterator = iter.into_iter();
+        let (lower, _) = iterator.size_hint();
+        let mut attrs = Vec::with_capacity(lower);
+        let mut vals = Vec::with_capacity(lower);
+        for (k, v) in iterator {
+            attrs.push(k.into());
+            vals.push(v.into());
+        }
+        Tuple { attrs, vals }
     }
 }
 
