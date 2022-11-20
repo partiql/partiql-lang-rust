@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 use petgraph::algo::toposort;
+use petgraph::data::DataMapMut;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
@@ -145,54 +146,43 @@ impl EvalJoin {
 
 impl Evaluable for EvalJoin {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let l_vals = self.input_l.as_ref().unwrap().iter();
+        let r_vals = self.input_r.as_ref().unwrap().iter();
+
+        #[inline]
+        fn cross<'a>(
+            left: impl Iterator<Item = &'a Value> + Clone + 'a,
+            right: impl Iterator<Item = &'a Value> + Clone + 'a,
+        ) -> impl Iterator<Item = Tuple> + 'a {
+            left.cartesian_product(right).map(|(l_tuple, r_tuple)| {
+                l_tuple
+                    .as_tuple_ref()
+                    .pairs()
+                    .chain(r_tuple.as_tuple_ref().pairs())
+                    .map(|(a, v)| (a, v.clone()))
+                    .collect::<Tuple>()
+            })
+        }
+
         // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
         //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
         //  to be spec-compliant may result in changes to the DAG flows.
-        let output = match self.kind {
-            EvalJoinKind::Inner => {
-                let mut result = partiql_bag!();
-                for binding_tuple_l in self.input_l.clone().unwrap() {
-                    let binding_tuple_l = binding_tuple_l.coerce_to_tuple();
-                    for binding_tuple_r in self.input_r.clone().unwrap() {
-                        let binding_tuple_r = binding_tuple_r.coerce_to_tuple();
-                        let mut new_result = binding_tuple_l.clone();
-                        for pairs in binding_tuple_r.pairs() {
-                            new_result.insert(pairs.0, pairs.1.clone());
-                        }
-                        if let Some(on_condition) = &self.on {
-                            if on_condition.evaluate(&new_result, ctx) == Boolean(true) {
-                                result.push(new_result.into());
-                            }
-                        } else {
-                            result.push(new_result.into());
-                        }
-                    }
-                }
-                Some(result.into())
-            }
+        let output: Bag = match self.kind {
+            EvalJoinKind::Inner => match &self.on {
+                None => cross(l_vals, r_vals).collect(),
+                Some(condition) => cross(l_vals, r_vals)
+                    .filter(|t| matches!(condition.evaluate(&t, ctx), Value::Boolean(true)))
+                    .collect(),
+            },
             EvalJoinKind::Left => {
                 todo!("Left JOINs")
             }
-            EvalJoinKind::Cross => {
-                let mut result = partiql_bag!();
-                for binding_tuple_l in self.input_l.clone().unwrap() {
-                    let binding_tuple_l = binding_tuple_l.coerce_to_tuple();
-                    for binding_tuple_r in self.input_r.clone().unwrap() {
-                        let binding_tuple_r = binding_tuple_r.coerce_to_tuple();
-                        let mut new_result = binding_tuple_l.clone();
-                        for pairs in binding_tuple_r.pairs() {
-                            new_result.insert(pairs.0, pairs.1.clone());
-                        }
-                        result.push(new_result.into());
-                    }
-                }
-                Some(result.into())
-            }
+            EvalJoinKind::Cross => cross(l_vals, r_vals).collect(),
             EvalJoinKind::Full | EvalJoinKind::Right => {
                 todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
             }
         };
-        self.output = output;
+        self.output = Some(output.into());
         self.output.clone()
     }
 

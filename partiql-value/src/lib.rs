@@ -1107,10 +1107,8 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn pairs(&self) -> Vec<(&str, &Value)> {
-        zip(&self.attrs, &self.vals)
-            .map(|(k, v)| (k.as_str(), v))
-            .collect()
+    pub fn pairs(&self) -> impl Iterator<Item = (&str, &Value)> + Clone {
+        zip(&self.attrs, &self.vals).map(|(k, v)| (k.as_str(), v))
     }
 }
 
@@ -1196,15 +1194,15 @@ impl Ord for Tuple {
     fn cmp(&self, other: &Self) -> Ordering {
         let self_pairs = self.pairs();
         let other_pairs = other.pairs();
-        let mut p1 = self_pairs.iter().sorted();
-        let mut p2 = other_pairs.iter().sorted();
+        let mut p1 = self_pairs.sorted();
+        let mut p2 = other_pairs.sorted();
 
         loop {
             return match (p1.next(), p2.next()) {
                 (None, None) => Ordering::Equal,
                 (Some(_), None) => Ordering::Greater,
                 (None, Some(_)) => Ordering::Less,
-                (Some(lv), Some(rv)) => match lv.cmp(rv) {
+                (Some(lv), Some(rv)) => match lv.cmp(&rv) {
                     Ordering::Less => Ordering::Less,
                     Ordering::Greater => Ordering::Greater,
                     Ordering::Equal => continue,
