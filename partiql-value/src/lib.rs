@@ -2,6 +2,7 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
@@ -464,11 +465,47 @@ impl Value {
     }
 
     #[inline]
+    pub fn as_tuple_ref(&self) -> Cow<Tuple> {
+        if let Value::Tuple(t) = self {
+            Cow::Borrowed(t)
+        } else {
+            Cow::Owned(self.clone().coerce_to_tuple())
+        }
+    }
+
+    #[inline]
     pub fn coerce_to_bag(self) -> Bag {
         if let Value::Bag(b) = self {
             *b
         } else {
             Bag(vec![self])
+        }
+    }
+
+    #[inline]
+    pub fn as_bag_ref(&self) -> Cow<Bag> {
+        if let Value::Bag(b) = self {
+            Cow::Borrowed(b)
+        } else {
+            Cow::Owned(self.clone().coerce_to_bag())
+        }
+    }
+
+    #[inline]
+    pub fn coerce_to_list(self) -> List {
+        if let Value::List(b) = self {
+            *b
+        } else {
+            List(vec![self])
+        }
+    }
+
+    #[inline]
+    pub fn as_list_ref(&self) -> Cow<List> {
+        if let Value::List(l) = self {
+            Cow::Borrowed(l)
+        } else {
+            Cow::Owned(self.clone().coerce_to_list())
         }
     }
 }
