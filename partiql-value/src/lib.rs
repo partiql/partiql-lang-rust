@@ -703,6 +703,17 @@ impl Ord for Value {
     }
 }
 
+impl<T> From<&T> for Value
+where
+    T: Copy,
+    Value: From<T>,
+{
+    #[inline]
+    fn from(t: &T) -> Self {
+        Value::from(*t)
+    }
+}
+
 impl From<bool> for Value {
     #[inline]
     fn from(b: bool) -> Self {
@@ -1266,6 +1277,60 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn iterators() {
+        let bag: Bag = [1, 10, 3, 4].iter().collect();
+        assert_eq!(bag.len(), 4);
+        let max = bag
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::Integer(10));
+        let _bref = Value::from(bag).as_bag_ref();
+
+        let list: List = [1, 2, 3, -4].iter().collect();
+        assert_eq!(list.len(), 4);
+        let max = list
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::Integer(3));
+        let _lref = Value::from(list).as_bag_ref();
+
+        let bag: Bag = [Value::from(5), "text".into(), true.into()]
+            .iter()
+            .map(Clone::clone)
+            .collect();
+        assert_eq!(bag.len(), 3);
+        let max = bag
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::String(Box::new("text".to_string())));
+
+        let list: List = [Value::from(5), Value::from(bag.clone()), true.into()]
+            .iter()
+            .map(Clone::clone)
+            .collect();
+        assert_eq!(list.len(), 3);
+        let max = list
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::from(bag.clone()));
+
+        let tuple: Tuple = [
+            ("list", Value::from(list.clone())),
+            ("bag", Value::from(bag.clone())),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        let mut pairs = tuple.pairs();
+        let list_val = Value::from(list);
+        assert_eq!(pairs.next(), Some(("list", &list_val)));
+        let bag_val = Value::from(bag);
+        assert_eq!(pairs.next(), Some(("bag", &bag_val)));
+        assert_eq!(pairs.next(), None);
     }
 
     #[test]
