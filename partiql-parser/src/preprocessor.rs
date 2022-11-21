@@ -592,7 +592,7 @@ mod tests {
         let query = "CAST(a AS VARCHAR)";
 
         let mut offset_tracker = LineOffsetTracker::default();
-        let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &*BUILT_INS);
+        let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &BUILT_INS);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
         assert_eq!(
@@ -618,7 +618,7 @@ mod tests {
             "cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))";
 
         let mut offset_tracker = LineOffsetTracker::default();
-        let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &*BUILT_INS);
+        let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &BUILT_INS);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
 
         let substring_expect = vec![
@@ -692,7 +692,7 @@ mod tests {
         }
         fn preprocess(query: &str) -> Result<Vec<Token>, ParseError> {
             let mut offset_tracker = LineOffsetTracker::default();
-            let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &*BUILT_INS);
+            let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &BUILT_INS);
             to_tokens(lexer)
         }
 

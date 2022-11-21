@@ -98,7 +98,7 @@ pub struct Generator {
     seen_fns: Vec<HashSet<String>>,
 }
 
-const TEST_DATA_DIR: &'static str = "_test_data";
+const TEST_DATA_DIR: &str = "_test_data";
 const ENV_INLINE_LOWER_BOUND_LINE_COUNT: usize = 10;
 const EXPECTED_INLINE_LOWER_BOUND_LINE_COUNT: usize = 25;
 

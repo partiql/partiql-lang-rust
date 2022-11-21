@@ -94,7 +94,7 @@ impl Evaluable for EvalScan {
                 } else {
                     Missing
                 };
-                out.insert(&at_key, at_id);
+                out.insert(at_key, at_id);
                 value.push(Value::Tuple(Box::new(out)));
                 at_index_counter += 1;
             }
@@ -424,7 +424,7 @@ impl EvalExpr for EvalTupleExpr {
                 let evaluated = v.evaluate(bindings, ctx);
                 // Spec. section 6.1.4
                 if evaluated != Value::Missing {
-                    t.insert(k.as_str(), evaluated.clone());
+                    t.insert(k.as_str(), evaluated);
                 }
             });
 
@@ -505,7 +505,7 @@ impl EvalExpr for EvalPath {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EvalDistinct {
     pub input: Option<Value>,
     pub output: Option<Value>,
@@ -513,10 +513,7 @@ pub struct EvalDistinct {
 
 impl EvalDistinct {
     pub fn new() -> Self {
-        EvalDistinct {
-            input: None,
-            output: None,
-        }
+        Self::default()
     }
 }
 
