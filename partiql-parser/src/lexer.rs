@@ -1126,6 +1126,43 @@ mod tests {
         Ok(())
     }
 
+    /// In the future, the following identifiers may be converted into reserved keywords. In that case,
+    /// the following test will need to be modified.
+    #[test]
+    fn select_non_reserved_keywords() -> Result<(), ParseError<'static, BytePosition>> {
+        let query =
+            "SELECT acyclic, BoTh, DOMAIN, SiMpLe, Trail, leading, TRailing, USER\nfrom @\"foo\"";
+        let mut offset_tracker = LineOffsetTracker::default();
+        let lexer = PartiqlLexer::new(query, &mut offset_tracker);
+        let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
+
+        assert_eq!(
+            vec![
+                Token::Select,
+                Token::UnquotedIdent("acyclic"),
+                Token::Comma,
+                Token::UnquotedIdent("BoTh"),
+                Token::Comma,
+                Token::UnquotedIdent("DOMAIN"),
+                Token::Comma,
+                Token::UnquotedIdent("SiMpLe"),
+                Token::Comma,
+                Token::UnquotedIdent("Trail"),
+                Token::Comma,
+                Token::UnquotedIdent("leading"),
+                Token::Comma,
+                Token::UnquotedIdent("TRailing"),
+                Token::Comma,
+                Token::UnquotedIdent("USER"),
+                Token::From,
+                Token::QuotedAtIdentifier("foo"),
+            ],
+            toks.into_iter().map(|(_s, t, _e)| t).collect::<Vec<_>>()
+        );
+        assert_eq!(offset_tracker.num_lines(), 2);
+        Ok(())
+    }
+
     #[test]
     fn err_invalid_input() {
         let query = "SELECT # FROM data GROUP BY a";
