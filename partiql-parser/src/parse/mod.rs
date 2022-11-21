@@ -65,7 +65,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
     mut state: ParserState<'input, Id>,
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
-    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &*BUILT_INS);
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
 
     let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
 

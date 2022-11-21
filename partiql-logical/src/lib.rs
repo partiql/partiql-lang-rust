@@ -10,19 +10,22 @@ impl OpId {
     }
 }
 
-#[derive(Debug)]
-pub struct LogicalPlan<T> {
+#[derive(Debug, Default)]
+pub struct LogicalPlan<T>
+where
+    T: Default,
+{
     nodes: Vec<T>,
     /// Third argument indicates the branch number into the outgoing node.
     edges: Vec<(OpId, OpId, u8)>,
 }
 
-impl<T> LogicalPlan<T> {
+impl<T> LogicalPlan<T>
+where
+    T: Default,
+{
     pub fn new() -> Self {
-        LogicalPlan {
-            nodes: vec![],
-            edges: vec![],
-        }
+        Self::default()
     }
 
     pub fn add_operator(&mut self, op: T) -> OpId {
@@ -120,7 +123,7 @@ pub enum ValueExpr {
     BetweenExpr(BetweenExpr),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TupleExpr {
     pub attrs: Vec<ValueExpr>,
     pub values: Vec<ValueExpr>,
@@ -128,32 +131,29 @@ pub struct TupleExpr {
 
 impl TupleExpr {
     pub fn new() -> Self {
-        TupleExpr {
-            attrs: vec![],
-            values: vec![],
-        }
+        Self::default()
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ListExpr {
     pub elements: Vec<ValueExpr>,
 }
 
 impl ListExpr {
     pub fn new() -> Self {
-        ListExpr { elements: vec![] }
+        Self::default()
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BagExpr {
     pub elements: Vec<ValueExpr>,
 }
 
 impl BagExpr {
     pub fn new() -> Self {
-        BagExpr { elements: vec![] }
+        Self::default()
     }
 }
 

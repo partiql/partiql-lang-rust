@@ -2,10 +2,9 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
-#[macro_use]
-extern crate assert_matches;
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
     use crate::env::basic::MapBindings;
@@ -28,7 +27,7 @@ mod tests {
     fn evaluate(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
         let planner = plan::EvaluatorPlanner;
 
-        let plan = planner.compile(logical);
+        let plan = planner.compile(&logical);
         let mut evaluator = Evaluator::new(bindings);
 
         if let Ok(out) = evaluator.execute(plan) {
@@ -135,14 +134,11 @@ mod tests {
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
-        bindings.insert(
-            "data",
-            partiql_list![Tuple::from([("lhs".into(), lhs)])].into(),
-        );
+        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        let expected_result = partiql_bag!(Tuple::from([("result".into(), expected_first_elem)]));
+        let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
         assert_eq!(expected_result, result);
     }
 
@@ -616,13 +612,12 @@ mod tests {
             let mut bindings = MapBindings::default();
             bindings.insert(
                 "data",
-                partiql_list![Tuple::from([("value".into(), value)])].into(),
+                partiql_list![Tuple::from([("value", value)])].into(),
             );
 
             let result = evaluate(plan, bindings).coerce_to_bag();
             assert!(!&result.is_empty());
-            let expected_result =
-                partiql_bag!(Tuple::from([("result".into(), expected_first_elem)]));
+            let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
             assert_eq!(expected_result, result);
         }
         eval_between_op(
@@ -664,6 +659,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn select_with_cross_join() {
         let mut lg = LogicalPlan::new();
 
