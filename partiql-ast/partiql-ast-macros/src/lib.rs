@@ -5,25 +5,6 @@ use quote::{format_ident, quote};
 use syn::{Data, Fields};
 use syn::{DeriveInput, Ident};
 
-#[proc_macro]
-pub fn visitor_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let ast = syn::parse_macro_input!(input as syn::TypePath);
-    let gen = impl_visitor(&ast);
-    gen.into()
-}
-
-fn impl_visitor(ident: &syn::TypePath) -> proc_macro2::TokenStream {
-    let type_name = &ident.path.segments.last().unwrap().ident;
-    let fn_base = type_name.to_string().to_snake_case();
-
-    let fn_enter = format_ident!("enter_{}", fn_base);
-    let fn_exit = format_ident!("exit_{}", fn_base);
-    quote! {
-        fn #fn_enter(&mut self, _: &'v crate::ast::#type_name) {}
-        fn #fn_exit(&mut self, _: &'v crate::ast::#type_name) {}
-    }
-}
-
 #[proc_macro_derive(Visit, attributes(visit))]
 pub fn visit_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ast = syn::parse_macro_input!(input as syn::DeriveInput);
