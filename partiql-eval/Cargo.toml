@@ -19,6 +19,9 @@ edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+bench = false
+
 [dependencies]
 partiql-logical = { path = "../partiql-logical" }
 partiql-value = { path = "../partiql-value" }

@@ -82,6 +82,20 @@ jobs:
         with:
           path: ./*
           key: ${{ github.sha }}
+  # Criterion benchmark comparison report generation. Runs only after the `Build and Test` job succeeds.
+  benchmark-compare:
+    name: Compare criterion benchmarks
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: boa-dev/criterion-compare-action@v3
+        with:
+          defaultFeatures: true
+          # Needed. The name of the branch to compare with. This default uses the branch which is being pulled against
+          branchName: ${{ github.base_ref }}
+          # Adding comments to the PR requires the GITHUB_TOKEN secret.
+          token: ${{ secrets.GITHUB_TOKEN }}
   # Conformance report generation and comparison report generation job will run only after the `Build and Test` job
   # succeeds.
   conformance-report:

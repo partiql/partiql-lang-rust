@@ -20,10 +20,17 @@ edition.workspace = true
 [[bin]]
 name = "generate_comparison_report"
 required-features = ["report_tool"]
+bench = false
 
 [[bin]]
 name = "generate_cts_report"
 required-features = ["report_tool"]
+bench = false
+
+[[test]]
+name = "partiql_tests"
+path = "tests/mod.rs"
+bench = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
