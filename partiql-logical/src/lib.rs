@@ -171,9 +171,9 @@ pub struct BetweenExpr {
 // Bindings -> Values   : Select Value
 
 #[derive(Debug, Default)]
-#[allow(dead_code)] // TODO remove once out of PoC
 pub enum BindingsExpr {
-    Distinct,
+    Scan(Scan),
+    Unpivot(Unpivot),
     Filter(Filter),
     OrderBy,
     Offset,
@@ -182,11 +182,10 @@ pub enum BindingsExpr {
     SetOp,
     Project(Project),
     ProjectValue(ProjectValue),
-    Scan(Scan),
-    SetOp,
+    Distinct,
+    GroupBy,
     #[default]
     Sink,
-    Unpivot(Unpivot),
 }
 
 #[derive(Debug)]

@@ -532,7 +532,7 @@ mod tests {
             Value::from(Null),
         );
     }
-    
+
     #[test]
     fn comparison_ops() {
         // Lt
