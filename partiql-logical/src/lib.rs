@@ -100,6 +100,8 @@ pub enum BinaryOp {
     Div,
     Mod,
     Exp,
+
+    In,
 }
 
 #[derive(Clone, Debug)]
@@ -169,7 +171,6 @@ pub struct BetweenExpr {
 // Bindings -> Values   : Select Value
 
 #[derive(Debug, Default)]
-#[allow(dead_code)] // TODO remove once out of PoC
 pub enum BindingsExpr {
     Scan(Scan),
     Unpivot(Unpivot),

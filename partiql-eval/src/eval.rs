@@ -624,6 +624,9 @@ pub enum EvalBinOp {
     Div,
     Mod,
     Exp,
+
+    // Boolean ops
+    In,
 }
 
 impl EvalExpr for EvalBinOpExpr {
@@ -633,6 +636,7 @@ impl EvalExpr for EvalBinOpExpr {
             match (op, value) {
                 (EvalBinOp::And, Boolean(false)) => Some(false.into()),
                 (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
+                (EvalBinOp::In, Null) | (EvalBinOp::In, Missing) => Some(Null),
                 (_, Missing) => Some(Missing),
                 _ => None,
             }
@@ -672,6 +676,39 @@ impl EvalExpr for EvalBinOpExpr {
             EvalBinOp::Mul => lhs * rhs,
             EvalBinOp::Div => lhs / rhs,
             EvalBinOp::Mod => lhs % rhs,
+            // TODO apply the changes once we clarify the rules of coercion for `IN` RHS.
+            // See also:
+            // - https://github.com/partiql/partiql-docs/pull/13
+            // - https://github.com/partiql/partiql-lang-kotlin/issues/524
+            // - https://github.com/partiql/partiql-lang-kotlin/pull/621#issuecomment-1147754213
+
+            // TODO change the Null propagation if required.
+            // Current implementation propagates `Null` as described in PartiQL spec section 8 [1]
+            // and differs from `partiql-lang-kotlin` impl [2].
+            // [1] https://github.com/partiql/partiql-lang-kotlin/issues/896
+            // [2] https://partiql.org/assets/PartiQL-Specification.pdf#section.8
+            EvalBinOp::In => match rhs.is_bag() || rhs.is_list() {
+                true => {
+                    let mut has_missing = false;
+                    let mut has_null = false;
+                    for elem in rhs.into_iter() {
+                        // b/c of short_circuiting as we've reached this branch, we know LHS is neither MISSING nor NULL.
+                        if elem == lhs {
+                            return Boolean(true);
+                        } else if elem == Missing {
+                            has_missing = true;
+                        } else if elem == Null {
+                            has_null = true;
+                        }
+                    }
+
+                    match has_missing | has_null {
+                        true => Null,
+                        false => Boolean(false),
+                    }
+                }
+                _ => Null,
+            },
             EvalBinOp::Exp => todo!("Exponentiation"),
         }
     }
