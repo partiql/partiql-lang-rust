@@ -2,10 +2,9 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
-#[macro_use]
-extern crate assert_matches;
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
     use crate::env::basic::MapBindings;
@@ -17,9 +16,9 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BinaryOp, BindingsExpr, ListExpr, LogicalPlan, PathComponent, TupleExpr, ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan,
+        PathComponent, TupleExpr, ValueExpr,
     };
-
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
     use partiql_value::{
@@ -29,7 +28,7 @@ mod tests {
     fn evaluate(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
         let planner = plan::EvaluatorPlanner;
 
-        let plan = planner.compile(logical);
+        let plan = planner.compile(&logical);
         let mut evaluator = Evaluator::new(bindings);
 
         if let Ok(out) = evaluator.execute(plan) {
@@ -86,6 +85,23 @@ mod tests {
         )
     }
 
+    fn join_data() -> MapBindings<Value> {
+        let customers = partiql_list![
+            partiql_tuple![("id", 5), ("name", "Joe")],
+            partiql_tuple![("id", 7), ("name", "Mary")],
+        ];
+
+        let orders = partiql_list![
+            partiql_tuple![("custId", 7), ("productId", 101)],
+            partiql_tuple![("custId", 7), ("productId", 523)],
+        ];
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("customers", customers.into());
+        bindings.insert("orders", orders.into());
+        bindings
+    }
+
     // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
     // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
     // (i.e. <<{'result': <expected_first_elem>}>>)
@@ -119,14 +135,11 @@ mod tests {
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
-        bindings.insert(
-            "data",
-            partiql_list![Tuple::from([("lhs".into(), lhs)])].into(),
-        );
+        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        let expected_result = partiql_bag!(Tuple::from([("result".into(), expected_first_elem)]));
+        let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
         assert_eq!(expected_result, result);
     }
 
@@ -518,6 +531,288 @@ mod tests {
             Value::from(partiql_list![3, Null]),
             Value::from(Null),
         );
+    }
+    
+    #[test]
+    fn comparison_ops() {
+        // Lt
+        // Plan for `select lhs < rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Lt,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Gt
+        // Plan for `select lhs > rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Gt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Gt,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Lteq
+        // Plan for `select lhs <= rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Lteq,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+
+        // Gteq
+        // Plan for `select lhs >= rhs as result from data`
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from(1),
+            Value::from(2.),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from("abc"),
+            Value::from("def"),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::Missing,
+            Value::from(2.),
+            Value::Missing,
+        );
+        eval_bin_op(BinaryOp::Gteq, Value::Null, Value::from(2.), Value::Null);
+        eval_bin_op(
+            BinaryOp::Gteq,
+            Value::from(1),
+            Value::from("foo"),
+            Value::Missing,
+        );
+    }
+
+    #[test]
+    fn between_op() {
+        fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
+            let mut plan = LogicalPlan::new();
+            let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+                as_key: "data".to_string(),
+                at_key: None,
+            }));
+
+            let project = plan.add_operator(Project(logical::Project {
+                exprs: HashMap::from([(
+                    "result".to_string(),
+                    ValueExpr::BetweenExpr(BetweenExpr {
+                        value: Box::new(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                                "data".into(),
+                            ))),
+                            vec![PathComponent::Key("value".to_string())],
+                        )),
+                        from: Box::new(ValueExpr::Lit(Box::new(from))),
+                        to: Box::new(ValueExpr::Lit(Box::new(to))),
+                    }),
+                )]),
+            }));
+
+            let sink = plan.add_operator(BindingsExpr::Sink);
+            plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+            let mut bindings = MapBindings::default();
+            bindings.insert(
+                "data",
+                partiql_list![Tuple::from([("value", value)])].into(),
+            );
+
+            let result = evaluate(plan, bindings).coerce_to_bag();
+            assert!(!&result.is_empty());
+            let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
+            assert_eq!(expected_result, result);
+        }
+        eval_between_op(
+            Value::from(2),
+            Value::from(1),
+            Value::from(3),
+            Value::from(true),
+        );
+        eval_between_op(
+            Value::from(2),
+            Value::from(1.),
+            Value::from(dec!(3.)),
+            Value::from(true),
+        );
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::from(3),
+            Value::from(false),
+        );
+        eval_between_op(Value::Null, Value::from(1), Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::Null, Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::from(1), Value::Null, Value::Null);
+        eval_between_op(Value::Missing, Value::from(1), Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::Missing, Value::from(3), Value::Null);
+        eval_between_op(Value::from(2), Value::from(1), Value::Missing, Value::Null);
+        // left part of AND evaluates to false
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::Null,
+            Value::from(false),
+        );
+        eval_between_op(
+            Value::from(1),
+            Value::from(2),
+            Value::Missing,
+            Value::from(false),
+        );
+    }
+
+    #[test]
+    fn select_with_cross_join() {
+        let mut lg = LogicalPlan::new();
+
+        // Example 9 from spec with projected columns from different tables demonstrates a cross join:
+        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o
+        let from_lhs = lg.add_operator(scan("customers", "c"));
+        let from_rhs = lg.add_operator(scan("orders", "o"));
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                ("id".to_string(), path_var("c", "id")),
+                ("name".to_string(), path_var("c", "name")),
+                ("custId".to_string(), path_var("o", "custId")),
+                ("productId".to_string(), path_var("o", "productId")),
+            ]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Cross,
+            on: None,
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 523)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_with_join_and_on() {
+        let mut lg = LogicalPlan::new();
+
+        // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
+        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o ON c.id = o.custId
+        let from_lhs = lg.add_operator(scan("customers", "c"));
+        let from_rhs = lg.add_operator(scan("orders", "o"));
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                ("id".to_string(), path_var("c", "id")),
+                ("name".to_string(), path_var("c", "name")),
+                ("custId".to_string(), path_var("o", "custId")),
+                ("productId".to_string(), path_var("o", "productId")),
+            ]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Inner,
+            on: Some(ValueExpr::BinaryExpr(
+                BinaryOp::Eq,
+                Box::new(path_var("c", "id")),
+                Box::new(path_var("o", "custId")),
+            )),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
+                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
     }
 
     #[test]

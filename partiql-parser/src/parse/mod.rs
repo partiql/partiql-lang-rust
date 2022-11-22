@@ -65,7 +65,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
     mut state: ParserState<'input, Id>,
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
-    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &*BUILT_INS);
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
 
     let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
 
@@ -676,6 +676,48 @@ mod tests {
             parse!(
                 r#"cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))"#
             );
+        }
+    }
+
+    /// In the future, the following identifiers may be converted into reserved keywords. In that case,
+    /// the following tests will need to be modified.
+    mod non_reserved_keywords {
+        use super::*;
+
+        #[test]
+        fn projection_list_trim_spec() {
+            parse!(r#"SELECT leading FROM t"#);
+            parse!(r#"SELECT leading, a FROM t"#);
+            parse!(r#"SELECT leading + trailing, b FROM t"#);
+            parse!(r#"SELECT both + leading + trailing, a, b, c FROM t"#);
+        }
+
+        #[test]
+        fn from_source_trim_spec() {
+            parse!(r#"SELECT leading, trailing, both FROM leading, trailing, both"#);
+        }
+
+        #[test]
+        fn complex_trim() {
+            parse!(
+                r#"SELECT leading + trim(leading leading FROM '  hello world'), both FROM leading, trailing, both"#
+            );
+        }
+
+        #[test]
+        fn graph_pattern_matching() {
+            parse!(r#"SELECT acyclic, trail, simple FROM t"#);
+            parse!(r#"AcYcLiC"#);
+            parse!(r#"TrAiL"#);
+            parse!(r#"SiMpLe"#);
+        }
+
+        #[test]
+        fn user_public_domain() {
+            parse!(r#"SELECT user, puBlIC, DOMAIN FROM USER, pUbLIc, domain"#);
+            parse!(r#"USER"#);
+            parse!(r#"pUbLIC"#);
+            parse!(r#"domain"#);
         }
     }
 

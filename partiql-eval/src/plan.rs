@@ -1,49 +1,46 @@
+use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
 
 use partiql_logical as logical;
-use partiql_logical::{BinaryOp, BindingsExpr, LogicalPlan, PathComponent, UnaryOp, ValueExpr};
+use partiql_logical::{
+    BinaryOp, BindingsExpr, JoinKind, LogicalPlan, OpId, PathComponent, UnaryOp, ValueExpr,
+};
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
-    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
+    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
+    Evaluable,
 };
 
 pub struct EvaluatorPlanner;
 
 impl EvaluatorPlanner {
-    pub fn compile(&self, plan: LogicalPlan<BindingsExpr>) -> EvalPlan {
+    pub fn compile(&self, plan: &LogicalPlan<BindingsExpr>) -> EvalPlan {
         self.plan_eval(plan)
     }
 
     #[inline]
-    fn plan_eval(&self, lg: LogicalPlan<BindingsExpr>) -> EvalPlan {
-        let mut eval_plan = EvalPlan::default();
+    fn plan_eval(&self, lg: &LogicalPlan<BindingsExpr>) -> EvalPlan {
         let ops = lg.operators();
         let flows = lg.flows();
 
+        let mut graph: StableGraph<_, _> = Default::default();
         let mut seen = HashMap::new();
 
-        flows.into_iter().for_each(|r| {
-            let (s, d) = r;
-
-            let mut nodes = vec![];
-            for op_id in vec![s, d] {
+        for (s, d, w) in flows {
+            let mut add_node = |op_id: &OpId| {
                 let logical_op = &ops[op_id.index() - 1];
-                let eval_op = if let Some(op) = seen.get(op_id) {
-                    *op
-                } else {
-                    let id = eval_plan.0.add_node(self.get_eval_node(logical_op));
-                    seen.insert(op_id, id);
-                    id
-                };
-                nodes.push(eval_op)
-            }
+                *seen
+                    .entry(*op_id)
+                    .or_insert_with(|| graph.add_node(self.get_eval_node(logical_op)))
+            };
 
-            eval_plan.0.add_edge(nodes[0], nodes[1], ());
-        });
+            let (s, d) = (add_node(s), add_node(d));
+            graph.add_edge(s, d, *w);
+        }
 
-        eval_plan
+        EvalPlan(graph)
     }
 
     fn get_eval_node(&self, be: &BindingsExpr) -> Box<dyn Evaluable> {
@@ -65,7 +62,7 @@ impl EvaluatorPlanner {
             }
             BindingsExpr::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
-                    .into_iter()
+                    .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
                 Box::new(eval::EvalProject::new(exprs))
@@ -93,6 +90,19 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key.as_ref().unwrap(),
             )),
+            BindingsExpr::Join(logical::Join { kind, on }) => {
+                let kind = match kind {
+                    JoinKind::Inner => EvalJoinKind::Inner,
+                    JoinKind::Left => EvalJoinKind::Left,
+                    JoinKind::Right => EvalJoinKind::Right,
+                    JoinKind::Full => EvalJoinKind::Full,
+                    JoinKind::Cross => EvalJoinKind::Cross,
+                };
+                let on = on
+                    .as_ref()
+                    .map(|on_condition| self.plan_values(on_condition.clone()));
+                Box::new(eval::EvalJoin::new(kind, on))
+            }
             _ => panic!("Unevaluable bexpr"),
         }
     }
@@ -120,7 +130,7 @@ impl EvaluatorPlanner {
                     BinaryOp::Gt => EvalBinOp::Gt,
                     BinaryOp::Gteq => EvalBinOp::Gteq,
                     BinaryOp::Lt => EvalBinOp::Lt,
-                    BinaryOp::Lteq => EvalBinOp::Gteq,
+                    BinaryOp::Lteq => EvalBinOp::Lteq,
                     BinaryOp::Add => EvalBinOp::Add,
                     BinaryOp::Sub => EvalBinOp::Sub,
                     BinaryOp::Mul => EvalBinOp::Mul,
@@ -171,6 +181,12 @@ impl EvaluatorPlanner {
                     .map(|elem| self.plan_values(elem))
                     .collect();
                 Box::new(EvalBagExpr { elements })
+            }
+            ValueExpr::BetweenExpr(expr) => {
+                let value = self.plan_values(*expr.value);
+                let from = self.plan_values(*expr.from);
+                let to = self.plan_values(*expr.to);
+                Box::new(EvalBetweenExpr { value, from, to })
             }
         }
     }

@@ -193,13 +193,13 @@ impl ops::Neg for Value {
 pub trait BinaryAnd {
     type Output;
 
-    fn and(self, rhs: Self) -> Self::Output;
+    fn and(&self, rhs: &Self) -> Self::Output;
 }
 
 impl BinaryAnd for Value {
     type Output = Self;
-    fn and(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn and(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
             (Value::Null, Value::Boolean(false))
             | (Value::Boolean(false), Value::Null)
@@ -221,13 +221,13 @@ impl BinaryAnd for Value {
 pub trait BinaryOr {
     type Output;
 
-    fn or(self, rhs: Self) -> Self::Output;
+    fn or(&self, rhs: &Self) -> Self::Output;
 }
 
 impl BinaryOr for Value {
     type Output = Self;
-    fn or(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn or(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
             (Value::Null, Value::Boolean(true))
             | (Value::Boolean(true), Value::Null)
@@ -258,29 +258,66 @@ impl ops::Not for Value {
     }
 }
 
+pub trait Comparable {
+    type Output;
+
+    fn is_comparable_to(&self, rhs: &Self) -> bool;
+}
+
+impl Comparable for Value {
+    type Output = Self;
+
+    /// Returns true if and only if `self` is comparable to `rhs`
+    fn is_comparable_to(&self, rhs: &Self) -> bool {
+        match (self, rhs) {
+            (Value::Missing, _) |
+            (_, Value::Missing) |
+            (Value::Null, _) |
+            (_, Value::Null) |
+            (Value::Boolean(_), Value::Boolean(_)) |
+            (Value::Integer(_), Value::Integer(_)) |
+            (Value::Real(_), Value::Real(_)) |
+            (Value::Decimal(_), Value::Decimal(_)) |
+            (Value::String(_), Value::String(_)) |
+            (Value::Blob(_), Value::Blob(_)) |
+            (Value::List(_), Value::List(_)) |
+            (Value::Bag(_), Value::Bag(_)) |
+            (Value::Tuple(_), Value::Tuple(_)) |
+            // Numeric types are comparable to one another
+            (Value::Integer(_), Value::Real(_)) |
+            (Value::Integer(_), Value::Decimal(_)) |
+            (Value::Real(_), Value::Integer(_)) |
+            (Value::Real(_), Value::Decimal(_)) |
+            (Value::Decimal(_), Value::Integer(_)) |
+            (Value::Decimal(_), Value::Real(_)) => true,
+            (_, _) => false
+        }
+    }
+}
+
 // `Value` `eq` and `neq` with Missing and Null propagation
 pub trait NullableEq {
     type Output;
 
-    fn eq(self, rhs: Self) -> Self::Output;
-    fn neq(self, rhs: Self) -> Self::Output;
+    fn eq(&self, rhs: &Self) -> Self::Output;
+    fn neq(&self, rhs: &Self) -> Self::Output;
 }
 
 // `Value` comparison with Missing and Null propagation
 pub trait NullableOrd {
     type Output;
 
-    fn lt(self, rhs: Self) -> Self::Output;
-    fn gt(self, rhs: Self) -> Self::Output;
-    fn lteq(self, rhs: Self) -> Self::Output;
-    fn gteq(self, rhs: Self) -> Self::Output;
+    fn lt(&self, rhs: &Self) -> Self::Output;
+    fn gt(&self, rhs: &Self) -> Self::Output;
+    fn lteq(&self, rhs: &Self) -> Self::Output;
+    fn gteq(&self, rhs: &Self) -> Self::Output;
 }
 
 impl NullableEq for Value {
     type Output = Self;
 
-    fn eq(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn eq(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
@@ -289,8 +326,8 @@ impl NullableEq for Value {
         }
     }
 
-    fn neq(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn neq(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
@@ -305,43 +342,67 @@ impl NullableOrd for Value {
 
     // TODO: comparison is not right for data type mismatches. Equality permits mistyped arguments
     //  while comparison ops should return Missing
-    fn lt(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn lt(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
-            (_, _) => Value::from(self < rhs),
+            (_, _) => {
+                if self.is_comparable_to(rhs) {
+                    Value::from(self < rhs)
+                } else {
+                    Value::Missing
+                }
+            }
         }
     }
 
-    fn gt(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn gt(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
-            (_, _) => Value::from(self > rhs),
+            (_, _) => {
+                if self.is_comparable_to(rhs) {
+                    Value::from(self > rhs)
+                } else {
+                    Value::Missing
+                }
+            }
         }
     }
 
-    fn lteq(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn lteq(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
-            (_, _) => Value::from(self <= rhs),
+            (_, _) => {
+                if self.is_comparable_to(rhs) {
+                    Value::from(self <= rhs)
+                } else {
+                    Value::Missing
+                }
+            }
         }
     }
 
-    fn gteq(self, rhs: Self) -> Self::Output {
-        match (&self, &rhs) {
+    fn gteq(&self, rhs: &Self) -> Self::Output {
+        match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
-            (_, _) => Value::from(self >= rhs),
+            (_, _) => {
+                if self.is_comparable_to(rhs) {
+                    Value::from(self >= rhs)
+                } else {
+                    Value::Missing
+                }
+            }
         }
     }
 }
@@ -354,7 +415,7 @@ fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
                 Value::Missing
             } else {
                 match Decimal::from_f64(real_value.0) {
-                    Some(d_from_r) => Value::Decimal(rust_decimal::Decimal::from(d_from_r)),
+                    Some(d_from_r) => Value::Decimal(d_from_r),
                     None => Value::Missing, // TODO: decide on behavior when float cannot be coerced to Decimal
                 }
             }
@@ -512,6 +573,7 @@ impl Ord for Value {
                 }
             }
             (Value::Integer(l), Value::Integer(r)) => l.cmp(r),
+            (Value::Decimal(l), Value::Decimal(r)) => l.cmp(r),
             (Value::Integer(l), Value::Real(_)) => {
                 Value::Real(ordered_float::OrderedFloat(*l as f64)).cmp(other)
             }
@@ -527,7 +589,7 @@ impl Ord for Value {
                     Ordering::Greater
                 } else {
                     match RustDecimal::from_f64(l.0) {
-                        Some(l_d) => l_d.cmp(&r),
+                        Some(l_d) => l_d.cmp(r),
                         None => todo!(
                             "Decide default behavior when f64 can't be converted to RustDecimal"
                         ),
@@ -1293,99 +1355,420 @@ mod tests {
         // AND
         assert_eq!(
             Value::from(false),
-            Value::from(false).and(Value::from(true))
+            Value::from(false).and(&Value::from(true))
         );
         assert_eq!(
             Value::from(false),
-            Value::from(true).and(Value::from(false))
+            Value::from(true).and(&Value::from(false))
         );
-        assert_eq!(Value::from(true), Value::from(true).and(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).and(&Value::from(true)));
         assert_eq!(
             Value::from(false),
-            Value::from(false).and(Value::from(false))
+            Value::from(false).and(&Value::from(false))
         );
 
         // false with null or missing => false
-        assert_eq!(Value::from(false), Value::Null.and(Value::from(false)));
-        assert_eq!(Value::from(false), Value::from(false).and(Value::Null));
-        assert_eq!(Value::from(false), Value::Missing.and(Value::from(false)));
-        assert_eq!(Value::from(false), Value::from(false).and(Value::Missing));
+        assert_eq!(Value::from(false), Value::Null.and(&Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(&Value::Null));
+        assert_eq!(Value::from(false), Value::Missing.and(&Value::from(false)));
+        assert_eq!(Value::from(false), Value::from(false).and(&Value::Missing));
 
         // Null propagation => Null
-        assert_eq!(Value::Null, Value::Null.and(Value::Null));
-        assert_eq!(Value::Null, Value::Missing.and(Value::Missing));
-        assert_eq!(Value::Null, Value::Null.and(Value::Missing));
-        assert_eq!(Value::Null, Value::Missing.and(Value::Null));
-        assert_eq!(Value::Null, Value::Null.and(Value::from(true)));
-        assert_eq!(Value::Null, Value::Missing.and(Value::from(true)));
-        assert_eq!(Value::Null, Value::from(true).and(Value::Null));
-        assert_eq!(Value::Null, Value::from(true).and(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.and(&Value::Null));
+        assert_eq!(Value::Null, Value::Missing.and(&Value::Missing));
+        assert_eq!(Value::Null, Value::Null.and(&Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.and(&Value::Null));
+        assert_eq!(Value::Null, Value::Null.and(&Value::from(true)));
+        assert_eq!(Value::Null, Value::Missing.and(&Value::from(true)));
+        assert_eq!(Value::Null, Value::from(true).and(&Value::Null));
+        assert_eq!(Value::Null, Value::from(true).and(&Value::Missing));
 
         // Data type mismatch cases => Missing
-        assert_eq!(Value::Missing, Value::from(123).and(Value::from(false)));
-        assert_eq!(Value::Missing, Value::from(false).and(Value::from(123)));
-        assert_eq!(Value::Missing, Value::from(123).and(Value::from(true)));
-        assert_eq!(Value::Missing, Value::from(true).and(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).and(&Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).and(&Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).and(&Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).and(&Value::from(123)));
 
         // OR
-        assert_eq!(Value::from(true), Value::from(false).or(Value::from(true)));
-        assert_eq!(Value::from(true), Value::from(true).or(Value::from(false)));
-        assert_eq!(Value::from(true), Value::from(true).or(Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(false).or(&Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(&Value::from(false)));
+        assert_eq!(Value::from(true), Value::from(true).or(&Value::from(true)));
         assert_eq!(
             Value::from(false),
-            Value::from(false).or(Value::from(false))
+            Value::from(false).or(&Value::from(false))
         );
 
         // true with null or missing => true
-        assert_eq!(Value::from(true), Value::Null.or(Value::from(true)));
-        assert_eq!(Value::from(true), Value::from(true).or(Value::Null));
-        assert_eq!(Value::from(true), Value::Missing.or(Value::from(true)));
-        assert_eq!(Value::from(true), Value::from(true).or(Value::Missing));
+        assert_eq!(Value::from(true), Value::Null.or(&Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(&Value::Null));
+        assert_eq!(Value::from(true), Value::Missing.or(&Value::from(true)));
+        assert_eq!(Value::from(true), Value::from(true).or(&Value::Missing));
 
         // Null propagation => Null
-        assert_eq!(Value::Null, Value::Null.or(Value::Null));
-        assert_eq!(Value::Null, Value::Missing.or(Value::Missing));
-        assert_eq!(Value::Null, Value::Null.or(Value::Missing));
-        assert_eq!(Value::Null, Value::Missing.or(Value::Null));
-        assert_eq!(Value::Null, Value::Null.or(Value::from(false)));
-        assert_eq!(Value::Null, Value::Missing.or(Value::from(false)));
-        assert_eq!(Value::Null, Value::from(false).or(Value::Null));
-        assert_eq!(Value::Null, Value::from(false).or(Value::Missing));
+        assert_eq!(Value::Null, Value::Null.or(&Value::Null));
+        assert_eq!(Value::Null, Value::Missing.or(&Value::Missing));
+        assert_eq!(Value::Null, Value::Null.or(&Value::Missing));
+        assert_eq!(Value::Null, Value::Missing.or(&Value::Null));
+        assert_eq!(Value::Null, Value::Null.or(&Value::from(false)));
+        assert_eq!(Value::Null, Value::Missing.or(&Value::from(false)));
+        assert_eq!(Value::Null, Value::from(false).or(&Value::Null));
+        assert_eq!(Value::Null, Value::from(false).or(&Value::Missing));
 
         // Data type mismatch cases => Missing
-        assert_eq!(Value::Missing, Value::from(123).or(Value::from(false)));
-        assert_eq!(Value::Missing, Value::from(false).or(Value::from(123)));
-        assert_eq!(Value::Missing, Value::from(123).or(Value::from(true)));
-        assert_eq!(Value::Missing, Value::from(true).or(Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).or(&Value::from(false)));
+        assert_eq!(Value::Missing, Value::from(false).or(&Value::from(123)));
+        assert_eq!(Value::Missing, Value::from(123).or(&Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).or(&Value::from(123)));
     }
 
-    // TODO: other comparison op tests
     #[test]
     fn partiql_value_equality() {
         // TODO: many equality tests missing. Can use conformance tests to fill the gap or some other
         //  tests
         // Eq
-        assert_eq!(Value::from(true), Value::from(true).eq(Value::from(true)));
-        assert_eq!(Value::from(false), Value::from(true).eq(Value::from(false)));
-        assert_eq!(Value::Null, Value::from(true).eq(Value::Null));
-        assert_eq!(Value::Null, Value::Null.eq(Value::from(true)));
-        assert_eq!(Value::Missing, Value::from(true).eq(Value::Missing));
-        assert_eq!(Value::Missing, Value::Missing.eq(Value::from(true)));
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(true), &Value::from(true))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(true), &Value::from(false))
+        );
+        assert_eq!(
+            Value::Null,
+            NullableEq::eq(&Value::from(true), &Value::Null)
+        );
+        assert_eq!(
+            Value::Null,
+            NullableEq::eq(&Value::Null, &Value::from(true))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableEq::eq(&Value::from(true), &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableEq::eq(&Value::Missing, &Value::from(true))
+        );
 
         // different types result in boolean
-        assert_eq!(Value::from(false), Value::from(true).eq(Value::from("abc")));
-        assert_eq!(Value::from(false), Value::from("abc").eq(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(true), &Value::from("abc"))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from("abc"), &Value::from(true))
+        );
 
         // Neq
-        assert_eq!(Value::from(false), Value::from(true).neq(Value::from(true)));
-        assert_eq!(Value::from(true), Value::from(true).neq(Value::from(false)));
-        assert_eq!(Value::Null, Value::from(true).neq(Value::Null));
-        assert_eq!(Value::Null, Value::Null.neq(Value::from(true)));
-        assert_eq!(Value::Missing, Value::from(true).neq(Value::Missing));
-        assert_eq!(Value::Missing, Value::Missing.neq(Value::from(true)));
+        assert_eq!(
+            Value::from(false),
+            Value::from(true).neq(&Value::from(true))
+        );
+        assert_eq!(
+            Value::from(true),
+            Value::from(true).neq(&Value::from(false))
+        );
+        assert_eq!(Value::Null, Value::from(true).neq(&Value::Null));
+        assert_eq!(Value::Null, Value::Null.neq(&Value::from(true)));
+        assert_eq!(Value::Missing, Value::from(true).neq(&Value::Missing));
+        assert_eq!(Value::Missing, Value::Missing.neq(&Value::from(true)));
 
         // different types result in boolean
-        assert_eq!(Value::from(true), Value::from(true).neq(Value::from("abc")));
-        assert_eq!(Value::from(true), Value::from("abc").neq(Value::from(true)));
+        assert_eq!(
+            Value::from(true),
+            Value::from(true).neq(&Value::from("abc"))
+        );
+        assert_eq!(
+            Value::from(true),
+            Value::from("abc").neq(&Value::from(true))
+        );
+    }
+
+    #[test]
+    fn partiql_value_comparison() {
+        // LT
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::from(1), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::lt(&Value::from(1), &Value::from(0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::lt(&Value::from(1), &Value::from(1))
+        );
+
+        // GT
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::gt(&Value::from(1), &Value::from(0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1), &Value::from(1))
+        );
+
+        // LTEQ
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::lteq(&Value::from(1), &Value::from(0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1), &Value::from(1))
+        );
+
+        // GTEQ
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::from(1), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::gteq(&Value::from(1), &Value::from(0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::gteq(&Value::from(1), &Value::from(1))
+        );
+
+        // Missing propagation
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::Missing, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::from(1), &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::Null, &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::Missing, &Value::Null)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::Missing, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::from(1), &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::Null, &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::Missing, &Value::Null)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::Missing, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::from(1), &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::Null, &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::Missing, &Value::Null)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::Missing, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::from(1), &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::Null, &Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::Missing, &Value::Null)
+        );
+
+        // Null propagation
+        assert_eq!(Value::Null, NullableOrd::lt(&Value::Null, &Value::from(2)));
+        assert_eq!(Value::Null, NullableOrd::lt(&Value::from(1), &Value::Null));
+        assert_eq!(Value::Null, NullableOrd::gt(&Value::Null, &Value::from(2)));
+        assert_eq!(Value::Null, NullableOrd::gt(&Value::from(1), &Value::Null));
+        assert_eq!(
+            Value::Null,
+            NullableOrd::lteq(&Value::Null, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Null,
+            NullableOrd::lteq(&Value::from(1), &Value::Null)
+        );
+        assert_eq!(
+            Value::Null,
+            NullableOrd::gteq(&Value::Null, &Value::from(2))
+        );
+        assert_eq!(
+            Value::Null,
+            NullableOrd::gteq(&Value::from(1), &Value::Null)
+        );
+
+        // Data type mismatch
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::from(1), &Value::from("abc"))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lt(&Value::from("abc"), &Value::from(1))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::from(1), &Value::from("abc"))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gt(&Value::from("abc"), &Value::from(1))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::from(1), &Value::from("abc"))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::lteq(&Value::from("abc"), &Value::from(1))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::from(1), &Value::from("abc"))
+        );
+        assert_eq!(
+            Value::Missing,
+            NullableOrd::gteq(&Value::from("abc"), &Value::from(1))
+        );
+
+        // Numeric type comparison
+        // LT
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::from(1), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::Decimal(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lt(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+        );
+
+        // GT
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::Decimal(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gt(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+        );
+
+        // LTEQ
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::Decimal(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableOrd::lteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+        );
+
+        // GTEQ
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::from(1), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+        );
     }
 }

@@ -10,18 +10,22 @@ impl OpId {
     }
 }
 
-#[derive(Debug)]
-pub struct LogicalPlan<T> {
+#[derive(Debug, Default)]
+pub struct LogicalPlan<T>
+where
+    T: Default,
+{
     nodes: Vec<T>,
-    edges: Vec<(OpId, OpId)>,
+    /// Third argument indicates the branch number into the outgoing node.
+    edges: Vec<(OpId, OpId, u8)>,
 }
 
-impl<T> LogicalPlan<T> {
+impl<T> LogicalPlan<T>
+where
+    T: Default,
+{
     pub fn new() -> Self {
-        LogicalPlan {
-            nodes: vec![],
-            edges: vec![],
-        }
+        Self::default()
     }
 
     pub fn add_operator(&mut self, op: T) -> OpId {
@@ -34,7 +38,15 @@ impl<T> LogicalPlan<T> {
         assert!(src.index() <= self.operator_count());
         assert!(dst.index() <= self.operator_count());
 
-        self.edges.push((src, dst));
+        self.edges.push((src, dst, 0));
+    }
+
+    #[inline]
+    pub fn add_flow_with_branch_num(&mut self, src: OpId, dst: OpId, branch_num: u8) {
+        assert!(src.index() <= self.operator_count());
+        assert!(dst.index() <= self.operator_count());
+
+        self.edges.push((src, dst, branch_num));
     }
 
     #[inline]
@@ -51,7 +63,7 @@ impl<T> LogicalPlan<T> {
         &self.nodes
     }
 
-    pub fn flows(&self) -> &Vec<(OpId, OpId)> {
+    pub fn flows(&self) -> &Vec<(OpId, OpId, u8)> {
         &self.edges
     }
 }
@@ -110,9 +122,10 @@ pub enum ValueExpr {
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),
+    BetweenExpr(BetweenExpr),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TupleExpr {
     pub attrs: Vec<ValueExpr>,
     pub values: Vec<ValueExpr>,
@@ -120,33 +133,37 @@ pub struct TupleExpr {
 
 impl TupleExpr {
     pub fn new() -> Self {
-        TupleExpr {
-            attrs: vec![],
-            values: vec![],
-        }
+        Self::default()
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ListExpr {
     pub elements: Vec<ValueExpr>,
 }
 
 impl ListExpr {
     pub fn new() -> Self {
-        ListExpr { elements: vec![] }
+        Self::default()
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BagExpr {
     pub elements: Vec<ValueExpr>,
 }
 
 impl BagExpr {
     pub fn new() -> Self {
-        BagExpr { elements: vec![] }
+        Self::default()
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct BetweenExpr {
+    pub value: Box<ValueExpr>,
+    pub from: Box<ValueExpr>,
+    pub to: Box<ValueExpr>,
 }
 
 // Bindings -> Bindings : Where, OrderBy, Offset, Limit, Join, SetOp, Select, Distinct, GroupBy, Unpivot, Let
@@ -158,11 +175,11 @@ impl BagExpr {
 pub enum BindingsExpr {
     Distinct,
     Filter(Filter),
-    GroupBy,
-    Join,
-    Limit,
-    Offset,
     OrderBy,
+    Offset,
+    Limit,
+    Join(Join),
+    SetOp,
     Project(Project),
     ProjectValue(ProjectValue),
     Scan(Scan),
@@ -197,6 +214,21 @@ pub struct Unpivot {
 }
 
 #[derive(Debug)]
+pub enum JoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
+}
+
+#[derive(Debug)]
+pub struct Join {
+    pub kind: JoinKind,
+    pub on: Option<ValueExpr>,
+}
+
+#[derive(Debug)]
 pub struct Filter {
     pub expr: ValueExpr,
 }
@@ -222,7 +254,7 @@ mod tests {
         let b = p.add_operator(BindingsExpr::Sink);
         let c = p.add_operator(BindingsExpr::Limit);
         let d = p.add_operator(BindingsExpr::GroupBy);
-        let e = p.add_operator(BindingsExpr::Join);
+        let e = p.add_operator(BindingsExpr::Offset);
         p.add_flow(a, b);
         p.add_flow(a, c);
         p.add_flow(b, c);

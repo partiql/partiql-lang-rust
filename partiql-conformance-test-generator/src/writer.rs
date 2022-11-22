@@ -50,7 +50,7 @@ fn write_module(path: impl AsRef<Path>, module: &mut NamespaceNode) -> miette::R
 
     for (name, child) in &mut module.children {
         let mut child_path: PathBuf = path.as_ref().into();
-        child_path.push(&name);
+        child_path.push(name);
         let is_sub_mod = match child {
             TestTree::Node(Node::Test(s)) => write_scope(child_path, s.module.scope())?,
             TestTree::Node(Node::Value(e)) => write_file(child_path, &e.value)?,

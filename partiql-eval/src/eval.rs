@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use petgraph::algo::toposort;
 use petgraph::prelude::StableGraph;
-use petgraph::{Directed, Incoming, Outgoing};
+use petgraph::{Directed, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
@@ -18,7 +18,7 @@ use crate::env::basic::MapBindings;
 use crate::env::Bindings;
 
 #[derive(Debug)]
-pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, (), Directed>);
+pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
 
 impl Default for EvalPlan {
     fn default() -> Self {
@@ -28,7 +28,7 @@ impl Default for EvalPlan {
 
 impl EvalPlan {
     fn new() -> Self {
-        EvalPlan(StableGraph::<Box<dyn Evaluable>, (), Directed>::new())
+        EvalPlan(StableGraph::<Box<dyn Evaluable>, u8, Directed>::new())
     }
 }
 
@@ -50,7 +50,7 @@ pub enum EvaluationError {
 
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
-    fn update_input(&mut self, input: &Value);
+    fn update_input(&mut self, input: &Value, branch_num: u8);
 }
 
 #[derive(Debug)]
@@ -94,7 +94,7 @@ impl Evaluable for EvalScan {
                 } else {
                     Missing
                 };
-                out.insert(&at_key, at_id);
+                out.insert(at_key, at_id);
                 value.push(Value::Tuple(Box::new(out)));
                 at_index_counter += 1;
             }
@@ -108,8 +108,100 @@ impl Evaluable for EvalScan {
         self.output.clone()
     }
 
-    fn update_input(&mut self, _input: &Value) {
+    fn update_input(&mut self, _input: &Value, _branch_num: u8) {
         todo!("update_input for Scan")
+    }
+}
+
+#[derive(Debug)]
+pub enum EvalJoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
+    Cross,
+}
+
+#[derive(Debug)]
+pub struct EvalJoin {
+    pub kind: EvalJoinKind,
+    pub on: Option<Box<dyn EvalExpr>>,
+    pub input_l: Option<Value>,
+    pub input_r: Option<Value>,
+    pub output: Option<Value>,
+}
+
+impl EvalJoin {
+    pub fn new(kind: EvalJoinKind, on: Option<Box<dyn EvalExpr>>) -> Self {
+        EvalJoin {
+            kind,
+            on,
+            input_l: None,
+            input_r: None,
+            output: None,
+        }
+    }
+}
+
+impl Evaluable for EvalJoin {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
+        //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
+        //  to be spec-compliant may result in changes to the DAG flows.
+        let output = match self.kind {
+            EvalJoinKind::Inner => {
+                let mut result = partiql_bag!();
+                for binding_tuple_l in self.input_l.clone().unwrap() {
+                    let binding_tuple_l = binding_tuple_l.coerce_to_tuple();
+                    for binding_tuple_r in self.input_r.clone().unwrap() {
+                        let binding_tuple_r = binding_tuple_r.coerce_to_tuple();
+                        let mut new_result = binding_tuple_l.clone();
+                        for pairs in binding_tuple_r.pairs() {
+                            new_result.insert(pairs.0, pairs.1.clone());
+                        }
+                        if let Some(on_condition) = &self.on {
+                            if on_condition.evaluate(&new_result, ctx) == Boolean(true) {
+                                result.push(new_result.into());
+                            }
+                        } else {
+                            result.push(new_result.into());
+                        }
+                    }
+                }
+                Some(result.into())
+            }
+            EvalJoinKind::Left => {
+                todo!("Left JOINs")
+            }
+            EvalJoinKind::Cross => {
+                let mut result = partiql_bag!();
+                for binding_tuple_l in self.input_l.clone().unwrap() {
+                    let binding_tuple_l = binding_tuple_l.coerce_to_tuple();
+                    for binding_tuple_r in self.input_r.clone().unwrap() {
+                        let binding_tuple_r = binding_tuple_r.coerce_to_tuple();
+                        let mut new_result = binding_tuple_l.clone();
+                        for pairs in binding_tuple_r.pairs() {
+                            new_result.insert(pairs.0, pairs.1.clone());
+                        }
+                        result.push(new_result.into());
+                    }
+                }
+                Some(result.into())
+            }
+            EvalJoinKind::Full | EvalJoinKind::Right => {
+                todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
+            }
+        };
+        self.output = output;
+        self.output.clone()
+    }
+
+    fn update_input(&mut self, input: &Value, branch_num: u8) {
+        match branch_num {
+            0 => self.input_l = Some(input.clone()),
+            1 => self.input_r = Some(input.clone()),
+            _ => panic!("EvalJoin nodes only support `0` and `1` for the `branch_num`"),
+        };
     }
 }
 
@@ -154,7 +246,7 @@ impl Evaluable for EvalUnpivot {
         self.output.clone()
     }
 
-    fn update_input(&mut self, _input: &Value) {
+    fn update_input(&mut self, _input: &Value, _branch_num: u8) {
         todo!()
     }
 }
@@ -206,7 +298,7 @@ impl Evaluable for EvalFilter {
         self.output = Some(Value::Bag(Box::new(out)));
         self.output.clone()
     }
-    fn update_input(&mut self, input: &Value) {
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone())
     }
 }
@@ -257,7 +349,7 @@ impl Evaluable for EvalProject {
         self.output.clone()
     }
 
-    fn update_input(&mut self, input: &Value) {
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone());
     }
 }
@@ -304,7 +396,7 @@ impl Evaluable for EvalProjectValue {
         self.output.clone()
     }
 
-    fn update_input(&mut self, input: &Value) {
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone());
     }
 }
@@ -332,7 +424,7 @@ impl EvalExpr for EvalTupleExpr {
                 let evaluated = v.evaluate(bindings, ctx);
                 // Spec. section 6.1.4
                 if evaluated != Value::Missing {
-                    t.insert(k.as_str(), evaluated.clone());
+                    t.insert(k.as_str(), evaluated);
                 }
             });
 
@@ -413,7 +505,7 @@ impl EvalExpr for EvalPath {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EvalDistinct {
     pub input: Option<Value>,
     pub output: Option<Value>,
@@ -421,10 +513,7 @@ pub struct EvalDistinct {
 
 impl EvalDistinct {
     pub fn new() -> Self {
-        EvalDistinct {
-            input: None,
-            output: None,
-        }
+        Self::default()
     }
 }
 
@@ -436,7 +525,7 @@ impl Evaluable for EvalDistinct {
         self.output.clone()
     }
 
-    fn update_input(&mut self, input: &Value) {
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone());
     }
 }
@@ -451,7 +540,7 @@ impl Evaluable for EvalSink {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         self.input.clone()
     }
-    fn update_input(&mut self, input: &Value) {
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone());
     }
 }
@@ -560,8 +649,8 @@ impl EvalExpr for EvalBinOpExpr {
 
         let rhs = self.rhs.evaluate(bindings, ctx);
         match self.op {
-            EvalBinOp::And => lhs.and(rhs),
-            EvalBinOp::Or => lhs.or(rhs),
+            EvalBinOp::And => lhs.and(&rhs),
+            EvalBinOp::Or => lhs.or(&rhs),
             EvalBinOp::Concat => {
                 // TODO non-naive concat. Also doesn't properly propagate MISSING and NULL
                 let lhs = if let Value::String(s) = lhs {
@@ -576,12 +665,12 @@ impl EvalExpr for EvalBinOpExpr {
                 };
                 Value::String(Box::new(format!("{}{}", lhs, rhs)))
             }
-            EvalBinOp::Eq => lhs.eq(rhs),
-            EvalBinOp::Neq => lhs.neq(rhs),
-            EvalBinOp::Gt => lhs.gt(rhs),
-            EvalBinOp::Gteq => lhs.gteq(rhs),
-            EvalBinOp::Lt => lhs.lt(rhs),
-            EvalBinOp::Lteq => lhs.lteq(rhs),
+            EvalBinOp::Eq => NullableEq::eq(&lhs, &rhs),
+            EvalBinOp::Neq => lhs.neq(&rhs),
+            EvalBinOp::Gt => NullableOrd::gt(&lhs, &rhs),
+            EvalBinOp::Gteq => NullableOrd::gteq(&lhs, &rhs),
+            EvalBinOp::Lt => NullableOrd::lt(&lhs, &rhs),
+            EvalBinOp::Lteq => NullableOrd::lteq(&lhs, &rhs),
             EvalBinOp::Add => lhs + rhs,
             EvalBinOp::Sub => lhs - rhs,
             EvalBinOp::Mul => lhs * rhs,
@@ -625,6 +714,22 @@ impl EvalExpr for EvalBinOpExpr {
     }
 }
 
+#[derive(Debug)]
+pub struct EvalBetweenExpr {
+    pub value: Box<dyn EvalExpr>,
+    pub from: Box<dyn EvalExpr>,
+    pub to: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalBetweenExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        let from = self.from.evaluate(bindings, ctx);
+        let to = self.to.evaluate(bindings, ctx);
+        value.gteq(&from).and(&value.lteq(&to))
+    }
+}
+
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
 }
@@ -664,39 +769,33 @@ impl Evaluator {
         // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
         // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
         // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
-        match graph.externals(Incoming).exactly_one() {
-            Ok(_) => {
-                let sorted_ops = toposort(&graph, None);
-                match sorted_ops {
-                    Ok(ops) => {
-                        let mut result = None;
-                        for idx in ops.into_iter() {
-                            let src = graph
-                                .node_weight_mut(idx)
-                                .expect("Error in retrieving node");
-                            result = src.evaluate(&*self.ctx);
+        let sorted_ops = toposort(&graph, None);
+        match sorted_ops {
+            Ok(ops) => {
+                let mut result = None;
+                for idx in ops.into_iter() {
+                    let src = graph
+                        .node_weight_mut(idx)
+                        .expect("Error in retrieving node");
+                    result = src.evaluate(&*self.ctx);
 
-                            let mut ne = graph.neighbors_directed(idx, Outgoing).detach();
-                            while let Some(n) = ne.next_node(&graph) {
-                                let dst =
-                                    graph.node_weight_mut(n).expect("Error in retrieving node");
-                                dst.update_input(
-                                    &result.clone().expect("Error in retrieving source value"),
-                                );
-                            }
-                        }
-                        let evaluated = Evaluated {
-                            result: result.expect("Error in retrieving eval output"),
-                        };
-                        Ok(evaluated)
+                    let mut ne = graph.neighbors_directed(idx, Outgoing).detach();
+                    while let Some((e, n)) = ne.next(&graph) {
+                        // use the edge weight to store the `branch_num`
+                        let branch_num = *graph
+                            .edge_weight(e)
+                            .expect("Error in retrieving weight for edge");
+                        let dst = graph.node_weight_mut(n).expect("Error in retrieving node");
+                        dst.update_input(
+                            &result.clone().expect("Error in retrieving source value"),
+                            branch_num,
+                        );
                     }
-                    Err(e) => Err(EvalErr {
-                        errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
-                            "Malformed evaluation plan detected: {:?}",
-                            e
-                        ))],
-                    }),
                 }
+                let evaluated = Evaluated {
+                    result: result.expect("Error in retrieving eval output"),
+                };
+                Ok(evaluated)
             }
             Err(e) => Err(EvalErr {
                 errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
