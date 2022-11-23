@@ -9,8 +9,8 @@ use partiql_logical::{
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
-    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
-    Evaluable,
+    EvalLitExpr, EvalPath, EvalPlan, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
+    EvalVarRef, Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -97,6 +97,7 @@ impl EvaluatorPlanner {
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
                     JoinKind::Cross => EvalJoinKind::Cross,
+                    JoinKind::CrossLateral => EvalJoinKind::CrossLateral,
                 };
                 let on = on
                     .as_ref()
@@ -137,6 +138,7 @@ impl EvaluatorPlanner {
                     BinaryOp::Div => EvalBinOp::Div,
                     BinaryOp::Mod => EvalBinOp::Mod,
                     BinaryOp::Exp => EvalBinOp::Exp,
+                    BinaryOp::In => EvalBinOp::In,
                 };
                 Box::new(EvalBinOpExpr { op, lhs, rhs })
             }
@@ -186,6 +188,9 @@ impl EvaluatorPlanner {
                 let from = self.plan_values(*expr.from);
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
+            }
+            ValueExpr::SubQueryExpr(expr) => {
+                Box::new(EvalSubQueryExpr::new(self.plan_eval(&expr.plan)))
             }
         }
     }

@@ -5,7 +5,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{
-    BasicContext, EvalPath, EvalPathComponent, EvalPlan, EvalScan, EvalVarRef, Evaluable, Evaluator,
+    BasicContext, EvalPath, EvalPathComponent, EvalPlan, EvalScan, EvalVarRef, Evaluable,
 };
 use partiql_eval::plan;
 use partiql_logical as logical;
@@ -127,10 +127,8 @@ fn eval_plan(logical: &LogicalPlan<BindingsExpr>) -> EvalPlan {
     planner.compile(logical)
 }
 
-fn evaluate(plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
-    let mut evaluator = Evaluator::new(bindings);
-
-    if let Ok(out) = evaluator.execute(plan) {
+fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
+    if let Ok(out) = plan.execute_mut(bindings) {
         out.result
     } else {
         Value::Missing

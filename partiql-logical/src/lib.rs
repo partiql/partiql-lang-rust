@@ -10,7 +10,7 @@ impl OpId {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LogicalPlan<T>
 where
     T: Default,
@@ -100,6 +100,8 @@ pub enum BinaryOp {
     Div,
     Mod,
     Exp,
+
+    In,
 }
 
 #[derive(Clone, Debug)]
@@ -121,6 +123,7 @@ pub enum ValueExpr {
     ListExpr(ListExpr),
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
+    SubQueryExpr(SubQueryExpr),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -168,8 +171,7 @@ pub struct BetweenExpr {
 // Values   -> Bindings : From
 // Bindings -> Values   : Select Value
 
-#[derive(Debug, Default)]
-#[allow(dead_code)] // TODO remove once out of PoC
+#[derive(Debug, Clone, Default)]
 pub enum BindingsExpr {
     Scan(Scan),
     Unpivot(Unpivot),
@@ -196,7 +198,7 @@ pub enum BindingsToValueExpr {}
 pub enum ValueToBindingsExpr {}
 
 /// [`Scan`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
@@ -204,41 +206,48 @@ pub struct Scan {
 }
 
 /// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingExpr`]s
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Unpivot {
     pub expr: ValueExpr,
     pub as_key: String,
     pub at_key: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum JoinKind {
     Inner,
     Left,
     Right,
     Full,
     Cross,
+    // TODO revisit JOINS to consider the `Lateral` logic as part of current joins
+    CrossLateral,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Join {
     pub kind: JoinKind,
     pub on: Option<ValueExpr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Filter {
     pub expr: ValueExpr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Project {
     pub exprs: HashMap<String, ValueExpr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProjectValue {
     pub expr: ValueExpr,
+}
+
+#[derive(Clone, Debug)]
+pub struct SubQueryExpr {
+    pub plan: LogicalPlan<BindingsExpr>,
 }
 
 #[cfg(test)]

@@ -60,4 +60,26 @@ pub mod basic {
             idx.and_then(|idx| self.values.get(*idx))
         }
     }
+
+    impl From<&Tuple> for MapBindings<Value> {
+        fn from(t: &Tuple) -> Self {
+            let mut bindings = MapBindings::default();
+            t.pairs().for_each(|(k, v)| bindings.insert(k, v.clone()));
+
+            bindings
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::basic::MapBindings;
+    use partiql_value::partiql_tuple;
+
+    #[test]
+    fn test_bindings_from_tuple() {
+        let t = partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)];
+        println!("{:?}", MapBindings::from(&t));
+    }
 }
