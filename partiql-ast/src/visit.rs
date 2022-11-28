@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::ast::NodeId;
 
 pub trait Visit {
     fn visit<'ast, V>(&'ast self, _: &mut V)
@@ -14,7 +15,9 @@ where
     where
         V: Visitor<'ast>,
     {
-        self.node.visit(v)
+        v.enter_ast_node(self.id);
+        self.node.visit(v);
+        v.exit_ast_node(self.id);
     }
 }
 
@@ -71,6 +74,9 @@ where
 }
 
 pub trait Visitor<'ast> {
+    fn enter_ast_node(&mut self, _id: NodeId) {}
+    fn exit_ast_node(&mut self, _id: NodeId) {}
+
     fn enter_item(&mut self, _item: &'ast ast::Item) {}
     fn exit_item(&mut self, _item: &'ast ast::Item) {}
     fn enter_ddl(&mut self, _ddl: &'ast ast::Ddl) {}
