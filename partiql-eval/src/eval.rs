@@ -690,7 +690,7 @@ impl EvalExpr for EvalBetweenExpr {
 #[derive(Debug)]
 pub struct EvalSearchedCaseExpr {
     pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
-    pub default: Option<Box<dyn EvalExpr>>,
+    pub default: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalSearchedCaseExpr {
@@ -701,10 +701,7 @@ impl EvalExpr for EvalSearchedCaseExpr {
                 return then_expr.evaluate(bindings, ctx);
             }
         }
-        match &self.default {
-            None => Value::Null,
-            Some(default) => default.evaluate(bindings, ctx),
-        }
+        self.default.evaluate(bindings, ctx)
     }
 }
 

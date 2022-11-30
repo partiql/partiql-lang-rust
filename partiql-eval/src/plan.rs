@@ -12,6 +12,7 @@ use crate::eval::{
     EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp,
     EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
+use partiql_value::Value::Null;
 
 pub struct EvaluatorPlanner;
 
@@ -202,10 +203,13 @@ impl EvaluatorPlanner {
                         )
                     })
                     .collect();
-                let default = e
-                    .default
-                    .as_ref()
-                    .map(|default| self.plan_values(*default.clone()));
+                let default = match e.default {
+                    // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
+                    None => Box::new(EvalLitExpr {
+                        lit: Box::new(Null),
+                    }),
+                    Some(def) => self.plan_values(*def),
+                };
                 // Here, rewrite `SimpleCaseExpr`s as `SearchedCaseExpr`s
                 Box::new(EvalSearchedCaseExpr { cases, default })
             }
@@ -215,10 +219,13 @@ impl EvaluatorPlanner {
                     .into_iter()
                     .map(|case| (self.plan_values(*case.0), self.plan_values(*case.1)))
                     .collect();
-                let default = e
-                    .default
-                    .as_ref()
-                    .map(|default| self.plan_values(*default.clone()));
+                let default = match e.default {
+                    // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
+                    None => Box::new(EvalLitExpr {
+                        lit: Box::new(Null),
+                    }),
+                    Some(def) => self.plan_values(*def),
+                };
                 Box::new(EvalSearchedCaseExpr { cases, default })
             }
         }
