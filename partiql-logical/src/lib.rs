@@ -121,6 +121,8 @@ pub enum ValueExpr {
     ListExpr(ListExpr),
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
+    SimpleCase(SimpleCase),
+    SearchedCase(SearchedCase),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -162,6 +164,19 @@ pub struct BetweenExpr {
     pub value: Box<ValueExpr>,
     pub from: Box<ValueExpr>,
     pub to: Box<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SimpleCase {
+    pub expr: Box<ValueExpr>,
+    pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
+    pub default: Option<Box<ValueExpr>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchedCase {
+    pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
+    pub default: Option<Box<ValueExpr>>,
 }
 
 // Bindings -> Bindings : Where, OrderBy, Offset, Limit, Join, SetOp, Select, Distinct, GroupBy, Unpivot, Let

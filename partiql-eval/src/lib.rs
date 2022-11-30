@@ -20,6 +20,7 @@ mod tests {
         PathComponent, TupleExpr, ValueExpr,
     };
     use partiql_value as value;
+    use partiql_value::Value::Null;
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
@@ -98,6 +99,18 @@ mod tests {
         let mut bindings = MapBindings::default();
         bindings.insert("customers", customers.into());
         bindings.insert("orders", orders.into());
+        bindings
+    }
+
+    fn case_when_data() -> MapBindings<Value> {
+        let nums = partiql_list![
+            partiql_tuple![("a", 1)],
+            partiql_tuple![("a", 2)],
+            partiql_tuple![("a", 3)],
+        ];
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("nums", nums.into());
         bindings
     }
 
@@ -742,6 +755,205 @@ mod tests {
             let expected = partiql_bag![
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    fn simple_case_expr_with_default() -> logical::SimpleCase {
+        logical::SimpleCase {
+            expr: Box::new(path_var("n", "a")),
+            cases: vec![
+                (
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                ),
+                (
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                ),
+            ],
+            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
+                "other".to_string(),
+            ))))),
+        }
+    }
+
+    fn searched_case_expr_with_default() -> logical::SearchedCase {
+        logical::SearchedCase {
+            cases: vec![
+                (
+                    Box::new(ValueExpr::BinaryExpr(
+                        BinaryOp::Eq,
+                        Box::new(path_var("n", "a")),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
+                    )),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                ),
+                (
+                    Box::new(ValueExpr::BinaryExpr(
+                        BinaryOp::Eq,
+                        Box::new(path_var("n", "a")),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    )),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                ),
+            ],
+            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
+                "other".to_string(),
+            ))))),
+        }
+    }
+
+    #[test]
+    fn simple_case_when_expr_with_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE n.a WHEN 1 THEN 'one'
+        //               WHEN 2 THEN 'two'
+        //               ELSE 'other'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+
+        let project_logical = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SimpleCase(simple_case_expr_with_default()),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", "other")],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn simple_case_when_expr_without_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE n.a WHEN 1 THEN 'one'
+        //               WHEN 2 THEN 'two'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+        let project_logical_no_default = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SimpleCase(logical::SimpleCase {
+                        default: None,
+                        ..simple_case_expr_with_default()
+                    }),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical_no_default);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", Null)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn searched_case_when_expr_with_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE WHEN n.a = 1 THEN 'one'
+        //             WHEN n.a = 2 THEN 'two'
+        //             ELSE 'other'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+
+        let project_logical = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SearchedCase(searched_case_expr_with_default()),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", "other")],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn searched_case_when_expr_without_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE WHEN n.a = 1 THEN 'one'
+        //             WHEN n.a = 2 THEN 'two'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+        let project_logical_no_default = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SearchedCase(logical::SearchedCase {
+                        default: None,
+                        ..searched_case_expr_with_default()
+                    }),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical_no_default);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", Null)],
             ];
             assert_eq!(*bag, expected);
         });

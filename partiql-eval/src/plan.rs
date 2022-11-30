@@ -9,8 +9,8 @@ use partiql_logical::{
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
-    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
-    Evaluable,
+    EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSimpleCaseExpr, EvalTupleExpr,
+    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 
 pub struct EvaluatorPlanner;
@@ -186,6 +186,35 @@ impl EvaluatorPlanner {
                 let from = self.plan_values(*expr.from);
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
+            }
+            ValueExpr::SimpleCase(e) => {
+                let expr = self.plan_values(*e.expr);
+                let cases = e
+                    .cases
+                    .into_iter()
+                    .map(|case| (self.plan_values(*case.0), self.plan_values(*case.1)))
+                    .collect();
+                let default = e
+                    .default
+                    .as_ref()
+                    .map(|default| self.plan_values(*default.clone()));
+                Box::new(EvalSimpleCaseExpr {
+                    expr,
+                    cases,
+                    default,
+                })
+            }
+            ValueExpr::SearchedCase(e) => {
+                let cases = e
+                    .cases
+                    .into_iter()
+                    .map(|case| (self.plan_values(*case.0), self.plan_values(*case.1)))
+                    .collect();
+                let default = e
+                    .default
+                    .as_ref()
+                    .map(|default| self.plan_values(*default.clone()));
+                Box::new(EvalSearchedCaseExpr { cases, default })
             }
         }
     }

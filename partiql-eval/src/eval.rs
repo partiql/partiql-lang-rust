@@ -683,6 +683,50 @@ impl EvalExpr for EvalBetweenExpr {
     }
 }
 
+#[derive(Debug)]
+pub struct EvalSimpleCaseExpr {
+    pub expr: Box<dyn EvalExpr>,
+    pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
+    pub default: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalSimpleCaseExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let expr = &self.expr.evaluate(bindings, ctx);
+        for (when_expr, then_expr) in &self.cases {
+            let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
+            if NullableEq::eq(expr, &when_expr_evaluated) == Value::Boolean(true) {
+                return then_expr.evaluate(bindings, ctx);
+            }
+        }
+        match &self.default {
+            None => Value::Null,
+            Some(default) => default.evaluate(bindings, ctx),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalSearchedCaseExpr {
+    pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
+    pub default: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalSearchedCaseExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        for (when_expr, then_expr) in &self.cases {
+            let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
+            if when_expr_evaluated == Value::Boolean(true) {
+                return then_expr.evaluate(bindings, ctx);
+            }
+        }
+        match &self.default {
+            None => Value::Null,
+            Some(default) => default.evaluate(bindings, ctx),
+        }
+    }
+}
+
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
 }
