@@ -20,7 +20,7 @@ mod tests {
         PathComponent, TupleExpr, ValueExpr,
     };
     use partiql_value as value;
-    use partiql_value::Value::Null;
+    use partiql_value::Value::{Missing, Null};
     use partiql_value::{
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
@@ -107,6 +107,9 @@ mod tests {
             partiql_tuple![("a", 1)],
             partiql_tuple![("a", 2)],
             partiql_tuple![("a", 3)],
+            partiql_tuple![("a", Null)],
+            partiql_tuple![("a", Missing)],
+            partiql_tuple![("a", "foo")],
         ];
 
         let mut bindings = MapBindings::default();
@@ -151,7 +154,12 @@ mod tests {
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
+        let expected_result = if expected_first_elem != Missing {
+            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+        } else {
+            // Filter tuples with `MISSING` vals
+            partiql_bag!(Tuple::new())
+        };
         assert_eq!(expected_result, result);
     }
 
@@ -838,6 +846,9 @@ mod tests {
                 partiql_tuple![("a", 1), ("b", "one")],
                 partiql_tuple![("a", 2), ("b", "two")],
                 partiql_tuple![("a", 3), ("b", "other")],
+                partiql_tuple![("a", Null), ("b", "other")],
+                partiql_tuple![("b", "other")],
+                partiql_tuple![("a", "foo"), ("b", "other")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -877,6 +888,9 @@ mod tests {
                 partiql_tuple![("a", 1), ("b", "one")],
                 partiql_tuple![("a", 2), ("b", "two")],
                 partiql_tuple![("a", 3), ("b", Null)],
+                partiql_tuple![("a", Null), ("b", Null)],
+                partiql_tuple![("b", Null)],
+                partiql_tuple![("a", "foo"), ("b", Null)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -915,6 +929,9 @@ mod tests {
                 partiql_tuple![("a", 1), ("b", "one")],
                 partiql_tuple![("a", 2), ("b", "two")],
                 partiql_tuple![("a", 3), ("b", "other")],
+                partiql_tuple![("a", Null), ("b", "other")],
+                partiql_tuple![("b", "other")],
+                partiql_tuple![("a", "foo"), ("b", "other")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -954,6 +971,9 @@ mod tests {
                 partiql_tuple![("a", 1), ("b", "one")],
                 partiql_tuple![("a", 2), ("b", "two")],
                 partiql_tuple![("a", 3), ("b", Null)],
+                partiql_tuple![("a", Null), ("b", Null)],
+                partiql_tuple![("b", Null)],
+                partiql_tuple![("a", "foo"), ("b", Null)],
             ];
             assert_eq!(*bag, expected);
         });

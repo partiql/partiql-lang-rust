@@ -326,7 +326,11 @@ impl Evaluable for EvalProject {
             let mut t = Tuple::new();
 
             self.exprs.iter().for_each(|(alias, expr)| {
-                t.insert(alias.as_str(), expr.evaluate(&v_as_tuple, ctx));
+                let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
+                if evaluated_val != Missing {
+                    // Per section 2 of PartiQL spec: "value MISSING may not appear as an attribute value
+                    t.insert(alias.as_str(), evaluated_val);
+                }
             });
             value.push(Value::Tuple(Box::new(t)));
         }
@@ -680,29 +684,6 @@ impl EvalExpr for EvalBetweenExpr {
         let from = self.from.evaluate(bindings, ctx);
         let to = self.to.evaluate(bindings, ctx);
         value.gteq(&from).and(&value.lteq(&to))
-    }
-}
-
-#[derive(Debug)]
-pub struct EvalSimpleCaseExpr {
-    pub expr: Box<dyn EvalExpr>,
-    pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
-    pub default: Option<Box<dyn EvalExpr>>,
-}
-
-impl EvalExpr for EvalSimpleCaseExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let expr = &self.expr.evaluate(bindings, ctx);
-        for (when_expr, then_expr) in &self.cases {
-            let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
-            if NullableEq::eq(expr, &when_expr_evaluated) == Value::Boolean(true) {
-                return then_expr.evaluate(bindings, ctx);
-            }
-        }
-        match &self.default {
-            None => Value::Null,
-            Some(default) => default.evaluate(bindings, ctx),
-        }
     }
 }
 
