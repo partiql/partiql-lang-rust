@@ -317,6 +317,8 @@ pub trait NullableOrd {
 impl NullableEq for Value {
     type Output = Self;
 
+    // TODO: `eq` and `neq` are not quite right as implemented. Should be able to assert equality between
+    //  different comparable types (e.g. numerics)
     fn eq(&self, rhs: &Self) -> Self::Output {
         match (self, rhs) {
             (Value::Missing, _) => Value::Missing,

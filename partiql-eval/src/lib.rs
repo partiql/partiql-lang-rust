@@ -16,8 +16,8 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, IsTypeExpr, JoinKind, ListExpr, LogicalPlan,
-        PathComponent, TupleExpr, Type, ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, CoalesceExpr, IsTypeExpr, JoinKind, ListExpr,
+        LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -979,6 +979,9 @@ mod tests {
         });
     }
 
+    // Creates the plan: `SELECT <expr> IS [<not>] <is_type> AS result FROM data` where <expr> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
     fn eval_is_op(not: bool, expr: Value, is_type: Type, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
@@ -1038,6 +1041,142 @@ mod tests {
         eval_is_op(true, Value::from(1), Type::NullType, Value::from(true));
         eval_is_op(true, Value::Missing, Type::NullType, Value::from(false));
         eval_is_op(true, Value::Null, Type::NullType, Value::from(false));
+    }
+
+    // Creates the plan: `SELECT NULLIF(<lhs>, <rhs>) AS result FROM data` where <lhs> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    fn eval_null_if_op(lhs: Value, rhs: Value, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::NullIfExpr(NullIfExpr {
+                    lhs: Box::new(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                            "data".into(),
+                        ))),
+                        vec![PathComponent::Key("lhs".to_string())],
+                    )),
+                    rhs: Box::new(ValueExpr::Lit(Box::new(rhs))),
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        let expected_result = if expected_first_elem != Missing {
+            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+        } else {
+            // Filter tuples with `MISSING` vals
+            partiql_bag!(Tuple::new())
+        };
+        assert_eq!(expected_result, result);
+    }
+
+    #[test]
+    fn test_null_if_op() {
+        eval_null_if_op(Value::from(1), Value::from(1), Value::Null);
+        eval_null_if_op(Value::from(1), Value::from("foo"), Value::from(1));
+        eval_null_if_op(Value::from("foo"), Value::from(1), Value::from("foo"));
+        eval_null_if_op(Value::from(Null), Value::from(Null), Value::Null);
+        eval_null_if_op(Value::from(Missing), Value::from(Null), Value::Missing);
+        eval_null_if_op(Value::from(Null), Value::from(Missing), Value::Null);
+    }
+
+    // Creates the plan: `SELECT COALESCE(data.arg1, data.arg2, ..., argN) AS result FROM data` where arg1...argN comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    fn eval_coalesce_op(elements: Vec<Value>, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        fn index_to_valueexpr(i: usize) -> ValueExpr {
+            ValueExpr::Path(
+                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                    "data".into(),
+                ))),
+                vec![PathComponent::Key(format!("arg{}", i))],
+            )
+        }
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::CoalesceExpr(CoalesceExpr {
+                    elements: (0..elements.len()).map(|i| index_to_valueexpr(i)).collect(),
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        let mut data = Tuple::new();
+        // Bindings created from `elements`. For each `e` in elements with index `i`, adds tuple pair ('argi', e)
+        elements
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, e)| data.insert(&*format!("arg{}", i), e));
+        bindings.insert("data", partiql_list![data].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        assert_eq!(
+            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
+            result
+        );
+    }
+
+    #[test]
+    fn test_coalesce_op() {
+        // 1 elem
+        eval_coalesce_op(vec![Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Null], Null);
+        eval_coalesce_op(vec![Missing], Null);
+
+        // Multiple elems
+        eval_coalesce_op(vec![Missing, Null, Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Missing, Null, Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Missing, Null, Null], Null);
+        eval_coalesce_op(
+            vec![
+                Missing,
+                Null,
+                Missing,
+                Null,
+                Missing,
+                Null,
+                Value::from(1),
+                Value::from(2),
+                Missing,
+                Null,
+            ],
+            Value::from(1),
+        );
+        eval_coalesce_op(
+            vec![
+                Missing, Null, Missing, Null, Missing, Null, Missing, Null, Missing, Null,
+            ],
+            Null,
+        );
     }
 
     #[test]

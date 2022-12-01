@@ -147,6 +147,17 @@ pub enum Type {
 }
 
 #[derive(Clone, Debug)]
+pub struct NullIfExpr {
+    pub lhs: Box<ValueExpr>,
+    pub rhs: Box<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CoalesceExpr {
+    pub elements: Vec<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum ValueExpr {
     // TODO other variants
@@ -162,6 +173,8 @@ pub enum ValueExpr {
     SimpleCase(SimpleCase),
     SearchedCase(SearchedCase),
     IsTypeExpr(IsTypeExpr),
+    NullIfExpr(NullIfExpr),
+    CoalesceExpr(CoalesceExpr),
 }
 
 #[derive(Clone, Debug, Default)]
