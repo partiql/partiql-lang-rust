@@ -17,6 +17,7 @@ use partiql_value::{
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
+use partiql_logical::Type;
 
 #[derive(Debug)]
 pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
@@ -595,6 +596,24 @@ impl EvalExpr for EvalUnaryOpExpr {
             EvalUnaryOp::Neg => -value,
             EvalUnaryOp::Not => !value,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalIsTypeExpr {
+    pub expr: Box<dyn EvalExpr>,
+    pub is_type: Type,
+}
+
+impl EvalExpr for EvalIsTypeExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let expr = self.expr.evaluate(bindings, ctx);
+        let result = match self.is_type {
+            Type::NullType => matches!(expr, Missing | Null),
+            Type::MissingType => matches!(expr, Missing),
+            _ => todo!("Implement `IS` for other types"),
+        };
+        Value::from(result)
     }
 }
 

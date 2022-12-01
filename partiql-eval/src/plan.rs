@@ -8,9 +8,9 @@ use partiql_logical::{
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
-    EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp,
-    EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalIsTypeExpr, EvalJoinKind,
+    EvalListExpr, EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalTupleExpr,
+    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 use partiql_value::Value::Null;
 
@@ -227,6 +227,22 @@ impl EvaluatorPlanner {
                     Some(def) => self.plan_values(*def),
                 };
                 Box::new(EvalSearchedCaseExpr { cases, default })
+            }
+            ValueExpr::IsTypeExpr(i) => {
+                let expr = self.plan_values(*i.expr);
+                match i.not {
+                    true => Box::new(EvalUnaryOpExpr {
+                        op: EvalUnaryOp::Not,
+                        operand: Box::new(EvalIsTypeExpr {
+                            expr,
+                            is_type: i.is_type,
+                        }),
+                    }),
+                    false => Box::new(EvalIsTypeExpr {
+                        expr,
+                        is_type: i.is_type,
+                    }),
+                }
             }
         }
     }

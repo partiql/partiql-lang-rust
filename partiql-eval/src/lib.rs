@@ -16,8 +16,8 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan,
-        PathComponent, TupleExpr, ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, IsTypeExpr, JoinKind, ListExpr, LogicalPlan,
+        PathComponent, TupleExpr, Type, ValueExpr,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -977,6 +977,67 @@ mod tests {
             ];
             assert_eq!(*bag, expected);
         });
+    }
+
+    fn eval_is_op(not: bool, expr: Value, is_type: Type, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::IsTypeExpr(IsTypeExpr {
+                    not,
+                    expr: Box::new(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                            "data".into(),
+                        ))),
+                        vec![PathComponent::Key("expr".to_string())],
+                    )),
+                    is_type,
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("data", partiql_list![Tuple::from([("expr", expr)])].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        assert_eq!(
+            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
+            result
+        );
+    }
+
+    #[test]
+    fn is_type_null_missing() {
+        // IS MISSING
+        eval_is_op(false, Value::from(1), Type::MissingType, Value::from(false));
+        eval_is_op(false, Value::Missing, Type::MissingType, Value::from(true));
+        eval_is_op(false, Value::Null, Type::MissingType, Value::from(false));
+
+        // IS NOT MISSING
+        eval_is_op(true, Value::from(1), Type::MissingType, Value::from(true));
+        eval_is_op(true, Value::Missing, Type::MissingType, Value::from(false));
+        eval_is_op(true, Value::Null, Type::MissingType, Value::from(true));
+
+        // IS NULL
+        eval_is_op(false, Value::from(1), Type::NullType, Value::from(false));
+        eval_is_op(false, Value::Missing, Type::NullType, Value::from(true));
+        eval_is_op(false, Value::Null, Type::NullType, Value::from(true));
+
+        // IS NOT NULL
+        eval_is_op(true, Value::from(1), Type::NullType, Value::from(true));
+        eval_is_op(true, Value::Missing, Type::NullType, Value::from(false));
+        eval_is_op(true, Value::Null, Type::NullType, Value::from(false));
     }
 
     #[test]

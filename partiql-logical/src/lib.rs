@@ -109,6 +109,44 @@ pub enum PathComponent {
 }
 
 #[derive(Clone, Debug)]
+pub struct IsTypeExpr {
+    pub not: bool,
+    pub expr: Box<ValueExpr>,
+    pub is_type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    NullType,
+    BooleanType,
+    Integer2Type,
+    Integer4Type,
+    Integer8Type,
+    DecimalType,
+    NumericType,
+    RealType,
+    DoublePrecisionType,
+    TimestampType,
+    CharacterType,
+    CharacterVaryingType,
+    MissingType,
+    StringType,
+    SymbolType,
+    BlobType,
+    ClobType,
+    DateType,
+    TimeType,
+    ZonedTimestampType,
+    StructType,
+    TupleType,
+    ListType,
+    SexpType,
+    BagType,
+    AnyType,
+    // TODO CustomType
+}
+
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum ValueExpr {
     // TODO other variants
@@ -123,6 +161,7 @@ pub enum ValueExpr {
     BetweenExpr(BetweenExpr),
     SimpleCase(SimpleCase),
     SearchedCase(SearchedCase),
+    IsTypeExpr(IsTypeExpr),
 }
 
 #[derive(Clone, Debug, Default)]
