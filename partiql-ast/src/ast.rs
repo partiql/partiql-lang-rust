@@ -121,6 +121,46 @@ pub enum DmlOp {
     Delete(Delete),
 }
 
+/// `RETURNING (<returning_elem> [, <returning_elem>]...)`
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ReturningExpr {
+    pub elems: Vec<ReturningElem>,
+}
+
+/// `<returning mapping> (<expr> [, <expr>]...)`
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ReturningElem {
+    #[visit(skip)]
+    pub mapping: ReturningMapping,
+    #[visit(skip)]
+    pub column: ColumnComponent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ColumnComponent {
+    ReturningWildcard,
+    ReturningColumn(ReturningColumn),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ReturningColumn {
+    pub expr: Box<Expr>,
+}
+
+/// ( MODIFIED | ALL ) ( NEW | OLD )
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ReturningMapping {
+    ModifiedNew,
+    ModifiedOld,
+    AllNew,
+    AllOld,
+}
+
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Insert {
@@ -178,6 +218,18 @@ pub enum ConflictAction {
     DoNothing,
 }
 
+// Evaluation order
+// WITH,
+// FROM,
+// LET,
+// WHERE,
+// GROUP BY,
+// HAVING,
+// LETTING (which is special to PartiQL),
+// ORDER BY,
+// LIMIT / OFFSET
+// SELECT (or SELECT VALUE or PIVOT, which are both special to ion PartiQL).
+
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Query {
@@ -221,6 +273,67 @@ pub enum SetOperator {
 pub enum SetQuantifier {
     All,
     Distinct,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Select {
+    pub project: AstNode<Projection>,
+    pub from: Option<AstNode<FromClause>>,
+    pub from_let: Option<AstNode<Let>>,
+    pub where_clause: Option<Box<AstNode<WhereClause>>>,
+    pub group_by: Option<Box<AstNode<GroupByExpr>>>,
+    pub having: Option<Box<AstNode<HavingClause>>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Projection {
+    pub kind: ProjectionKind,
+    #[visit(skip)]
+    pub setq: Option<SetQuantifier>,
+}
+
+/// Indicates the type of projection in a SFW query.
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ProjectionKind {
+    #[visit(skip)]
+    ProjectStar,
+    ProjectList(Vec<AstNode<ProjectItem>>),
+    ProjectPivot(ProjectPivot),
+    ProjectValue(Box<Expr>),
+}
+
+/// An item to be projected in a `SELECT`-list.
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ProjectItem {
+    /// For `.*` in SELECT list
+    ProjectAll(ProjectAll), // TODO remove this?
+    /// For `<expr> [AS <id>]`
+    ProjectExpr(ProjectExpr),
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ProjectPivot {
+    pub key: Box<Expr>,
+    pub value: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ProjectAll {
+    pub expr: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ProjectExpr {
+    pub expr: Box<Expr>,
+    #[visit(skip)]
+    pub as_alias: Option<SymbolPrimitive>,
 }
 
 /// The expressions that can result in values.
@@ -518,17 +631,6 @@ pub struct CallAgg {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Select {
-    pub project: AstNode<Projection>,
-    pub from: Option<AstNode<FromClause>>,
-    pub from_let: Option<AstNode<Let>>,
-    pub where_clause: Option<Box<Expr>>,
-    pub group_by: Option<Box<AstNode<GroupByExpr>>>,
-    pub having: Option<Box<Expr>>,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
     pub root: Box<Expr>,
     pub steps: Vec<PathStep>,
@@ -553,56 +655,6 @@ pub struct PathExpr {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Projection {
-    pub kind: ProjectionKind,
-    #[visit(skip)]
-    pub setq: Option<SetQuantifier>,
-}
-
-/// Indicates the type of projection in a SFW query.
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ProjectionKind {
-    #[visit(skip)]
-    ProjectStar,
-    ProjectList(Vec<AstNode<ProjectItem>>),
-    ProjectPivot(ProjectPivot),
-    ProjectValue(Box<Expr>),
-}
-
-/// An item to be projected in a `SELECT`-list.
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ProjectItem {
-    /// For `.*` in SELECT list
-    ProjectAll(ProjectAll), // TODO remove this?
-    /// For `<expr> [AS <id>]`
-    ProjectExpr(ProjectExpr),
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ProjectPivot {
-    pub key: Box<Expr>,
-    pub value: Box<Expr>,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ProjectAll {
-    pub expr: Box<Expr>,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ProjectExpr {
-    pub expr: Box<Expr>,
-    #[visit(skip)]
-    pub as_alias: Option<SymbolPrimitive>,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Let {
     /// A list of LET bindings
     pub let_bindings: Vec<LetBinding>,
@@ -619,10 +671,28 @@ pub struct LetBinding {
 /// FROM clause of an SFW query
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum FromClause {
+pub struct FromClause {
+    pub source: AstNode<FromSource>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FromSource {
     FromLet(AstNode<FromLet>),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(AstNode<Join>),
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WhereClause {
+    pub expr: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct HavingClause {
+    pub expr: Box<Expr>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -653,8 +723,8 @@ pub enum FromLetKind {
 pub struct Join {
     #[visit(skip)]
     pub kind: JoinKind,
-    pub left: Box<AstNode<FromClause>>,
-    pub right: Box<AstNode<FromClause>>,
+    pub left: Box<AstNode<FromSource>>,
+    pub right: Box<AstNode<FromSource>>,
     pub predicate: Option<AstNode<JoinSpec>>,
 }
 
@@ -737,46 +807,6 @@ pub enum OrderingSpec {
 pub enum NullOrderingSpec {
     First,
     Last,
-}
-
-/// `RETURNING (<returning_elem> [, <returning_elem>]...)`
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ReturningExpr {
-    pub elems: Vec<ReturningElem>,
-}
-
-/// `<returning mapping> (<expr> [, <expr>]...)`
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ReturningElem {
-    #[visit(skip)]
-    pub mapping: ReturningMapping,
-    #[visit(skip)]
-    pub column: ColumnComponent,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ColumnComponent {
-    ReturningWildcard,
-    ReturningColumn(ReturningColumn),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ReturningColumn {
-    pub expr: Box<Expr>,
-}
-
-/// ( MODIFIED | ALL ) ( NEW | OLD )
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ReturningMapping {
-    ModifiedNew,
-    ModifiedOld,
-    AllNew,
-    AllOld,
 }
 
 /// Represents all possible PartiQL data types.

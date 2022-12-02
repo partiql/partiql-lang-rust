@@ -79,6 +79,7 @@ pub trait Visitor<'ast> {
 
     fn enter_item(&mut self, _item: &'ast ast::Item) {}
     fn exit_item(&mut self, _item: &'ast ast::Item) {}
+
     fn enter_ddl(&mut self, _ddl: &'ast ast::Ddl) {}
     fn exit_ddl(&mut self, _ddl: &'ast ast::Ddl) {}
     fn enter_ddl_op(&mut self, _ddl_op: &'ast ast::DdlOp) {}
@@ -91,10 +92,15 @@ pub trait Visitor<'ast> {
     fn exit_create_index(&mut self, _create_index: &'ast ast::CreateIndex) {}
     fn enter_drop_index(&mut self, _drop_index: &'ast ast::DropIndex) {}
     fn exit_drop_index(&mut self, _drop_index: &'ast ast::DropIndex) {}
+
     fn enter_dml(&mut self, _dml: &'ast ast::Dml) {}
     fn exit_dml(&mut self, _dml: &'ast ast::Dml) {}
     fn enter_dml_op(&mut self, _dml_op: &'ast ast::DmlOp) {}
     fn exit_dml_op(&mut self, _dml_op: &'ast ast::DmlOp) {}
+    fn enter_returning_expr(&mut self, _returning_expr: &'ast ast::ReturningExpr) {}
+    fn exit_returning_expr(&mut self, _returning_expr: &'ast ast::ReturningExpr) {}
+    fn enter_returning_elem(&mut self, _returning_elem: &'ast ast::ReturningElem) {}
+    fn exit_returning_elem(&mut self, _returning_elem: &'ast ast::ReturningElem) {}
     fn enter_insert(&mut self, _insert: &'ast ast::Insert) {}
     fn exit_insert(&mut self, _insert: &'ast ast::Insert) {}
     fn enter_insert_value(&mut self, _insert_value: &'ast ast::InsertValue) {}
@@ -109,12 +115,27 @@ pub trait Visitor<'ast> {
     fn exit_delete(&mut self, _delete: &'ast ast::Delete) {}
     fn enter_on_conflict(&mut self, _on_conflict: &'ast ast::OnConflict) {}
     fn exit_on_conflict(&mut self, _on_conflict: &'ast ast::OnConflict) {}
+
     fn enter_query(&mut self, _query: &'ast ast::Query) {}
     fn exit_query(&mut self, _query: &'ast ast::Query) {}
     fn enter_query_set(&mut self, _query_set: &'ast ast::QuerySet) {}
     fn exit_query_set(&mut self, _query_set: &'ast ast::QuerySet) {}
     fn enter_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) {}
     fn exit_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) {}
+    fn enter_select(&mut self, _select: &'ast ast::Select) {}
+    fn exit_select(&mut self, _select: &'ast ast::Select) {}
+    fn enter_projection(&mut self, _projection: &'ast ast::Projection) {}
+    fn exit_projection(&mut self, _projection: &'ast ast::Projection) {}
+    fn enter_projection_kind(&mut self, _projection_kind: &'ast ast::ProjectionKind) {}
+    fn exit_projection_kind(&mut self, _projection_kind: &'ast ast::ProjectionKind) {}
+    fn enter_project_item(&mut self, _project_item: &'ast ast::ProjectItem) {}
+    fn exit_project_item(&mut self, _project_item: &'ast ast::ProjectItem) {}
+    fn enter_project_pivot(&mut self, _project_pivot: &'ast ast::ProjectPivot) {}
+    fn exit_project_pivot(&mut self, _project_pivot: &'ast ast::ProjectPivot) {}
+    fn enter_project_all(&mut self, _project_all: &'ast ast::ProjectAll) {}
+    fn exit_project_all(&mut self, _project_all: &'ast ast::ProjectAll) {}
+    fn enter_project_expr(&mut self, _project_expr: &'ast ast::ProjectExpr) {}
+    fn exit_project_expr(&mut self, _project_expr: &'ast ast::ProjectExpr) {}
     fn enter_expr(&mut self, _expr: &'ast ast::Expr) {}
     fn exit_expr(&mut self, _expr: &'ast ast::Expr) {}
     fn enter_lit(&mut self, _lit: &'ast ast::Lit) {}
@@ -157,32 +178,24 @@ pub trait Visitor<'ast> {
     fn exit_call_arg_named_type(&mut self, _call_arg_named_type: &'ast ast::CallArgNamedType) {}
     fn enter_call_agg(&mut self, _call_agg: &'ast ast::CallAgg) {}
     fn exit_call_agg(&mut self, _call_agg: &'ast ast::CallAgg) {}
-    fn enter_select(&mut self, _select: &'ast ast::Select) {}
-    fn exit_select(&mut self, _select: &'ast ast::Select) {}
     fn enter_path(&mut self, _path: &'ast ast::Path) {}
     fn exit_path(&mut self, _path: &'ast ast::Path) {}
     fn enter_path_step(&mut self, _path_step: &'ast ast::PathStep) {}
     fn exit_path_step(&mut self, _path_step: &'ast ast::PathStep) {}
     fn enter_path_expr(&mut self, _path_expr: &'ast ast::PathExpr) {}
     fn exit_path_expr(&mut self, _path_expr: &'ast ast::PathExpr) {}
-    fn enter_projection(&mut self, _projection: &'ast ast::Projection) {}
-    fn exit_projection(&mut self, _projection: &'ast ast::Projection) {}
-    fn enter_projection_kind(&mut self, _projection_kind: &'ast ast::ProjectionKind) {}
-    fn exit_projection_kind(&mut self, _projection_kind: &'ast ast::ProjectionKind) {}
-    fn enter_project_item(&mut self, _project_item: &'ast ast::ProjectItem) {}
-    fn exit_project_item(&mut self, _project_item: &'ast ast::ProjectItem) {}
-    fn enter_project_pivot(&mut self, _project_pivot: &'ast ast::ProjectPivot) {}
-    fn exit_project_pivot(&mut self, _project_pivot: &'ast ast::ProjectPivot) {}
-    fn enter_project_all(&mut self, _project_all: &'ast ast::ProjectAll) {}
-    fn exit_project_all(&mut self, _project_all: &'ast ast::ProjectAll) {}
-    fn enter_project_expr(&mut self, _project_expr: &'ast ast::ProjectExpr) {}
-    fn exit_project_expr(&mut self, _project_expr: &'ast ast::ProjectExpr) {}
     fn enter_let(&mut self, _let: &'ast ast::Let) {}
     fn exit_let(&mut self, _let: &'ast ast::Let) {}
     fn enter_let_binding(&mut self, _let_binding: &'ast ast::LetBinding) {}
     fn exit_let_binding(&mut self, _let_binding: &'ast ast::LetBinding) {}
     fn enter_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {}
     fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {}
+    fn enter_from_source(&mut self, _from_clause: &'ast ast::FromSource) {}
+    fn exit_from_source(&mut self, _from_clause: &'ast ast::FromSource) {}
+    fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {}
+    fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {}
+    fn enter_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {}
+    fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {}
     fn enter_from_let(&mut self, _from_let: &'ast ast::FromLet) {}
     fn exit_from_let(&mut self, _from_let: &'ast ast::FromLet) {}
     fn enter_join(&mut self, _join: &'ast ast::Join) {}
@@ -197,10 +210,6 @@ pub trait Visitor<'ast> {
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast ast::OrderByExpr) {}
     fn enter_sort_spec(&mut self, _sort_spec: &'ast ast::SortSpec) {}
     fn exit_sort_spec(&mut self, _sort_spec: &'ast ast::SortSpec) {}
-    fn enter_returning_expr(&mut self, _returning_expr: &'ast ast::ReturningExpr) {}
-    fn exit_returning_expr(&mut self, _returning_expr: &'ast ast::ReturningExpr) {}
-    fn enter_returning_elem(&mut self, _returning_elem: &'ast ast::ReturningElem) {}
-    fn exit_returning_elem(&mut self, _returning_elem: &'ast ast::ReturningElem) {}
     fn enter_custom_type(&mut self, _custom_type: &'ast ast::CustomType) {}
     fn exit_custom_type(&mut self, _custom_type: &'ast ast::CustomType) {}
 }
