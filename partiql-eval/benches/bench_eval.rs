@@ -140,7 +140,7 @@ fn evaluate(plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
 fn eval_bench(c: &mut Criterion) {
     let join_data = join_data();
     let logical_plan = logical_plan();
-    //let eval_plan = eval_plan(&logical_plan);
+
     c.bench_function("join", |b| {
         b.iter(|| {
             let eval_plan = eval_plan(black_box(&logical_plan));

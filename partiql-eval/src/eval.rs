@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 use petgraph::algo::toposort;
-use petgraph::data::DataMapMut;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
@@ -171,7 +170,7 @@ impl Evaluable for EvalJoin {
             EvalJoinKind::Inner => match &self.on {
                 None => cross(l_vals, r_vals).collect(),
                 Some(condition) => cross(l_vals, r_vals)
-                    .filter(|t| matches!(condition.evaluate(&t, ctx), Value::Boolean(true)))
+                    .filter(|t| matches!(condition.evaluate(t, ctx), Value::Boolean(true)))
                     .collect(),
             },
             EvalJoinKind::Left => {
