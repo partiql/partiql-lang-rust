@@ -2,11 +2,12 @@ use itertools::Itertools;
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
-use std::{ops, vec};
+use std::{ops, slice, vec};
 
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
@@ -464,11 +465,75 @@ impl Value {
     }
 
     #[inline]
+    pub fn as_tuple_ref(&self) -> Cow<Tuple> {
+        if let Value::Tuple(t) = self {
+            Cow::Borrowed(t)
+        } else {
+            Cow::Owned(self.clone().coerce_to_tuple())
+        }
+    }
+
+    #[inline]
     pub fn coerce_to_bag(self) -> Bag {
         if let Value::Bag(b) = self {
             *b
         } else {
             Bag(vec![self])
+        }
+    }
+
+    #[inline]
+    pub fn as_bag_ref(&self) -> Cow<Bag> {
+        if let Value::Bag(b) = self {
+            Cow::Borrowed(b)
+        } else {
+            Cow::Owned(self.clone().coerce_to_bag())
+        }
+    }
+
+    #[inline]
+    pub fn coerce_to_list(self) -> List {
+        if let Value::List(b) = self {
+            *b
+        } else {
+            List(vec![self])
+        }
+    }
+
+    #[inline]
+    pub fn as_list_ref(&self) -> Cow<List> {
+        if let Value::List(l) = self {
+            Cow::Borrowed(l)
+        } else {
+            Cow::Owned(self.clone().coerce_to_list())
+        }
+    }
+
+    #[inline]
+    pub fn iter(&self) -> ValueIter {
+        match self {
+            Value::List(list) => ValueIter::List(list.iter()),
+            Value::Bag(bag) => ValueIter::Bag(bag.iter()),
+            other => ValueIter::Single(Some(other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ValueIter<'a> {
+    List(ListIter<'a>),
+    Bag(BagIter<'a>),
+    Single(Option<&'a Value>),
+}
+
+impl<'a> Iterator for ValueIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ValueIter::List(list) => list.next(),
+            ValueIter::Bag(bag) => bag.next(),
+            ValueIter::Single(v) => v.take(),
         }
     }
 }
@@ -638,6 +703,17 @@ impl Ord for Value {
     }
 }
 
+impl<T> From<&T> for Value
+where
+    T: Copy,
+    Value: From<T>,
+{
+    #[inline]
+    fn from(t: &T) -> Self {
+        Value::from(*t)
+    }
+}
+
 impl From<bool> for Value {
     #[inline]
     fn from(b: bool) -> Self {
@@ -730,6 +806,11 @@ impl List {
     pub fn get_mut(&mut self, idx: i64) -> Option<&mut Value> {
         self.0.get_mut(idx as usize)
     }
+
+    #[inline]
+    pub fn iter(&self) -> ListIter {
+        ListIter(self.0.iter())
+    }
 }
 
 impl From<Vec<Value>> for List {
@@ -746,6 +827,17 @@ impl From<Bag> for List {
     }
 }
 
+impl<T> FromIterator<T> for List
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> List {
+        let iterator = iter.into_iter().map(Into::into);
+        iterator.collect::<Vec<_>>().into()
+    }
+}
+
 #[macro_export]
 macro_rules! partiql_list {
     () => (
@@ -757,6 +849,17 @@ macro_rules! partiql_list {
     ($($x:expr),+ $(,)?) => (
         List::from(vec![$(Value::from($x)),+])
     );
+}
+
+#[derive(Debug, Clone)]
+pub struct ListIter<'a>(slice::Iter<'a, Value>);
+
+impl<'a> Iterator for ListIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
 }
 
 impl IntoIterator for List {
@@ -844,6 +947,11 @@ impl Bag {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    #[inline]
+    pub fn iter(&self) -> BagIter {
+        BagIter(self.0.iter())
+    }
 }
 
 impl From<Vec<Value>> for Bag {
@@ -867,6 +975,17 @@ impl From<List> for Bag {
     }
 }
 
+impl<T> FromIterator<T> for Bag
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Bag {
+        let iterator = iter.into_iter().map(Into::into);
+        iterator.collect::<Vec<_>>().into()
+    }
+}
+
 #[macro_export]
 macro_rules! partiql_bag {
     () => (
@@ -878,6 +997,17 @@ macro_rules! partiql_bag {
     ($($x:expr),+ $(,)?) => (
         Bag::from(vec![$(Value::from($x)),+])
     );
+}
+
+#[derive(Debug, Clone)]
+pub struct BagIter<'a>(slice::Iter<'a, Value>);
+
+impl<'a> Iterator for BagIter<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
 }
 
 impl IntoIterator for Bag {
@@ -988,10 +1118,8 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn pairs(&self) -> Vec<(&str, &Value)> {
-        zip(&self.attrs, &self.vals)
-            .map(|(k, v)| (k.as_str(), v))
-            .collect()
+    pub fn pairs(&self) -> impl Iterator<Item = (&str, &Value)> + Clone {
+        zip(&self.attrs, &self.vals).map(|(k, v)| (k.as_str(), v))
     }
 }
 
@@ -1006,6 +1134,24 @@ where
                 acc.insert(attr, val.into());
                 acc
             })
+    }
+}
+
+impl<'a, T> FromIterator<(&'a str, T)> for Tuple
+where
+    T: Into<Value>,
+{
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = (&'a str, T)>>(iter: I) -> Tuple {
+        let iterator = iter.into_iter();
+        let (lower, _) = iterator.size_hint();
+        let mut attrs = Vec::with_capacity(lower);
+        let mut vals = Vec::with_capacity(lower);
+        for (k, v) in iterator {
+            attrs.push(k.into());
+            vals.push(v.into());
+        }
+        Tuple { attrs, vals }
     }
 }
 
@@ -1059,15 +1205,15 @@ impl Ord for Tuple {
     fn cmp(&self, other: &Self) -> Ordering {
         let self_pairs = self.pairs();
         let other_pairs = other.pairs();
-        let mut p1 = self_pairs.iter().sorted();
-        let mut p2 = other_pairs.iter().sorted();
+        let mut p1 = self_pairs.sorted();
+        let mut p2 = other_pairs.sorted();
 
         loop {
             return match (p1.next(), p2.next()) {
                 (None, None) => Ordering::Equal,
                 (Some(_), None) => Ordering::Greater,
                 (None, Some(_)) => Ordering::Less,
-                (Some(lv), Some(rv)) => match lv.cmp(rv) {
+                (Some(lv), Some(rv)) => match lv.cmp(&rv) {
                     Ordering::Less => Ordering::Less,
                     Ordering::Greater => Ordering::Greater,
                     Ordering::Equal => continue,
@@ -1131,6 +1277,60 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn iterators() {
+        let bag: Bag = [1, 10, 3, 4].iter().collect();
+        assert_eq!(bag.len(), 4);
+        let max = bag
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::Integer(10));
+        let _bref = Value::from(bag).as_bag_ref();
+
+        let list: List = [1, 2, 3, -4].iter().collect();
+        assert_eq!(list.len(), 4);
+        let max = list
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::Integer(3));
+        let _lref = Value::from(list).as_bag_ref();
+
+        let bag: Bag = [Value::from(5), "text".into(), true.into()]
+            .iter()
+            .map(Clone::clone)
+            .collect();
+        assert_eq!(bag.len(), 3);
+        let max = bag
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::String(Box::new("text".to_string())));
+
+        let list: List = [Value::from(5), Value::from(bag.clone()), true.into()]
+            .iter()
+            .map(Clone::clone)
+            .collect();
+        assert_eq!(list.len(), 3);
+        let max = list
+            .iter()
+            .fold(Value::Integer(0), |x, y| if y > &x { y.clone() } else { x });
+        assert_eq!(max, Value::from(bag.clone()));
+
+        let tuple: Tuple = [
+            ("list", Value::from(list.clone())),
+            ("bag", Value::from(bag.clone())),
+        ]
+        .iter()
+        .cloned()
+        .collect();
+
+        let mut pairs = tuple.pairs();
+        let list_val = Value::from(list);
+        assert_eq!(pairs.next(), Some(("list", &list_val)));
+        let bag_val = Value::from(bag);
+        assert_eq!(pairs.next(), Some(("bag", &bag_val)));
+        assert_eq!(pairs.next(), None);
     }
 
     #[test]
