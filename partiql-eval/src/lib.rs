@@ -16,8 +16,8 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, JoinKind, ListExpr, LogicalPlan,
-        PathComponent, TupleExpr, ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, CoalesceExpr, IsTypeExpr, JoinKind, ListExpr,
+        LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -102,6 +102,21 @@ mod tests {
         bindings
     }
 
+    fn case_when_data() -> MapBindings<Value> {
+        let nums = partiql_list![
+            partiql_tuple![("a", 1)],
+            partiql_tuple![("a", 2)],
+            partiql_tuple![("a", 3)],
+            partiql_tuple![("a", Null)],
+            partiql_tuple![("a", Missing)],
+            partiql_tuple![("a", "foo")],
+        ];
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("nums", nums.into());
+        bindings
+    }
+
     // Creates the plan: `SELECT <lhs> <op> <rhs> AS result FROM data` where <lhs> comes from data
     // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
     // (i.e. <<{'result': <expected_first_elem>}>>)
@@ -139,7 +154,12 @@ mod tests {
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
+        let expected_result = if expected_first_elem != Missing {
+            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+        } else {
+            // Filter tuples with `MISSING` vals
+            partiql_bag!(Tuple::new())
+        };
         assert_eq!(expected_result, result);
     }
 
@@ -813,6 +833,417 @@ mod tests {
             ];
             assert_eq!(*bag, expected);
         });
+    }
+
+    fn simple_case_expr_with_default() -> logical::SimpleCase {
+        logical::SimpleCase {
+            expr: Box::new(path_var("n", "a")),
+            cases: vec![
+                (
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                ),
+                (
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                ),
+            ],
+            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
+                "other".to_string(),
+            ))))),
+        }
+    }
+
+    fn searched_case_expr_with_default() -> logical::SearchedCase {
+        logical::SearchedCase {
+            cases: vec![
+                (
+                    Box::new(ValueExpr::BinaryExpr(
+                        BinaryOp::Eq,
+                        Box::new(path_var("n", "a")),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
+                    )),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                ),
+                (
+                    Box::new(ValueExpr::BinaryExpr(
+                        BinaryOp::Eq,
+                        Box::new(path_var("n", "a")),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    )),
+                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                ),
+            ],
+            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
+                "other".to_string(),
+            ))))),
+        }
+    }
+
+    #[test]
+    fn simple_case_when_expr_with_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE n.a WHEN 1 THEN 'one'
+        //               WHEN 2 THEN 'two'
+        //               ELSE 'other'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+
+        let project_logical = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SimpleCase(simple_case_expr_with_default()),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", "other")],
+                partiql_tuple![("a", Null), ("b", "other")],
+                partiql_tuple![("b", "other")],
+                partiql_tuple![("a", "foo"), ("b", "other")],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn simple_case_when_expr_without_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE n.a WHEN 1 THEN 'one'
+        //               WHEN 2 THEN 'two'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+        let project_logical_no_default = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SimpleCase(logical::SimpleCase {
+                        default: None,
+                        ..simple_case_expr_with_default()
+                    }),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical_no_default);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", Null)],
+                partiql_tuple![("a", Null), ("b", Null)],
+                partiql_tuple![("b", Null)],
+                partiql_tuple![("a", "foo"), ("b", Null)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn searched_case_when_expr_with_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE WHEN n.a = 1 THEN 'one'
+        //             WHEN n.a = 2 THEN 'two'
+        //             ELSE 'other'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+
+        let project_logical = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SearchedCase(searched_case_expr_with_default()),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", "other")],
+                partiql_tuple![("a", Null), ("b", "other")],
+                partiql_tuple![("b", "other")],
+                partiql_tuple![("a", "foo"), ("b", "other")],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn searched_case_when_expr_without_default() {
+        let mut lg = LogicalPlan::new();
+        // SELECT n.a,
+        //        CASE WHEN n.a = 1 THEN 'one'
+        //             WHEN n.a = 2 THEN 'two'
+        //        END AS b
+        // FROM nums AS n
+        let scan = lg.add_operator(scan("nums", "n"));
+        let project_logical_no_default = Project(logical::Project {
+            exprs: HashMap::from([
+                ("a".to_string(), path_var("n", "a")),
+                (
+                    "b".to_string(),
+                    ValueExpr::SearchedCase(logical::SearchedCase {
+                        default: None,
+                        ..searched_case_expr_with_default()
+                    }),
+                ),
+            ]),
+        });
+        let project = lg.add_operator(project_logical_no_default);
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow(scan, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, case_when_data());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1), ("b", "one")],
+                partiql_tuple![("a", 2), ("b", "two")],
+                partiql_tuple![("a", 3), ("b", Null)],
+                partiql_tuple![("a", Null), ("b", Null)],
+                partiql_tuple![("b", Null)],
+                partiql_tuple![("a", "foo"), ("b", Null)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    // Creates the plan: `SELECT <expr> IS [<not>] <is_type> AS result FROM data` where <expr> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    fn eval_is_op(not: bool, expr: Value, is_type: Type, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::IsTypeExpr(IsTypeExpr {
+                    not,
+                    expr: Box::new(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                            "data".into(),
+                        ))),
+                        vec![PathComponent::Key("expr".to_string())],
+                    )),
+                    is_type,
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("data", partiql_list![Tuple::from([("expr", expr)])].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        assert_eq!(
+            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
+            result
+        );
+    }
+
+    #[test]
+    fn is_type_null_missing() {
+        // IS MISSING
+        eval_is_op(false, Value::from(1), Type::MissingType, Value::from(false));
+        eval_is_op(false, Value::Missing, Type::MissingType, Value::from(true));
+        eval_is_op(false, Value::Null, Type::MissingType, Value::from(false));
+
+        // IS NOT MISSING
+        eval_is_op(true, Value::from(1), Type::MissingType, Value::from(true));
+        eval_is_op(true, Value::Missing, Type::MissingType, Value::from(false));
+        eval_is_op(true, Value::Null, Type::MissingType, Value::from(true));
+
+        // IS NULL
+        eval_is_op(false, Value::from(1), Type::NullType, Value::from(false));
+        eval_is_op(false, Value::Missing, Type::NullType, Value::from(true));
+        eval_is_op(false, Value::Null, Type::NullType, Value::from(true));
+
+        // IS NOT NULL
+        eval_is_op(true, Value::from(1), Type::NullType, Value::from(true));
+        eval_is_op(true, Value::Missing, Type::NullType, Value::from(false));
+        eval_is_op(true, Value::Null, Type::NullType, Value::from(false));
+    }
+
+    // Creates the plan: `SELECT NULLIF(<lhs>, <rhs>) AS result FROM data` where <lhs> comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    fn eval_null_if_op(lhs: Value, rhs: Value, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::NullIfExpr(NullIfExpr {
+                    lhs: Box::new(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                            "data".into(),
+                        ))),
+                        vec![PathComponent::Key("lhs".to_string())],
+                    )),
+                    rhs: Box::new(ValueExpr::Lit(Box::new(rhs))),
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        let expected_result = if expected_first_elem != Missing {
+            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+        } else {
+            // Filter tuples with `MISSING` vals
+            partiql_bag!(Tuple::new())
+        };
+        assert_eq!(expected_result, result);
+    }
+
+    #[test]
+    fn test_null_if_op() {
+        eval_null_if_op(Value::from(1), Value::from(1), Value::Null);
+        eval_null_if_op(Value::from(1), Value::from("foo"), Value::from(1));
+        eval_null_if_op(Value::from("foo"), Value::from(1), Value::from("foo"));
+        eval_null_if_op(Value::from(Null), Value::from(Null), Value::Null);
+        eval_null_if_op(Value::from(Missing), Value::from(Null), Value::Missing);
+        eval_null_if_op(Value::from(Null), Value::from(Missing), Value::Null);
+    }
+
+    // Creates the plan: `SELECT COALESCE(data.arg1, data.arg2, ..., argN) AS result FROM data` where arg1...argN comes from data
+    // Evaluates the plan and asserts the result is a bag of the tuple mapping to `expected_first_elem`
+    // (i.e. <<{'result': <expected_first_elem>}>>)
+    fn eval_coalesce_op(elements: Vec<Value>, expected_first_elem: Value) {
+        let mut plan = LogicalPlan::new();
+        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            as_key: "data".to_string(),
+            at_key: None,
+        }));
+
+        fn index_to_valueexpr(i: usize) -> ValueExpr {
+            ValueExpr::Path(
+                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                    "data".into(),
+                ))),
+                vec![PathComponent::Key(format!("arg{}", i))],
+            )
+        }
+
+        let project = plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "result".to_string(),
+                ValueExpr::CoalesceExpr(CoalesceExpr {
+                    elements: (0..elements.len()).map(|i| index_to_valueexpr(i)).collect(),
+                }),
+            )]),
+        }));
+
+        let sink = plan.add_operator(BindingsExpr::Sink);
+        plan.extend_with_flows(&[(scan, project), (project, sink)]);
+
+        let mut bindings = MapBindings::default();
+        let mut data = Tuple::new();
+        // Bindings created from `elements`. For each `e` in elements with index `i`, adds tuple pair ('argi', e)
+        elements
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, e)| data.insert(&*format!("arg{}", i), e));
+        bindings.insert("data", partiql_list![data].into());
+
+        let result = evaluate(plan, bindings).coerce_to_bag();
+        assert!(!&result.is_empty());
+        assert_eq!(
+            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
+            result
+        );
+    }
+
+    #[test]
+    fn test_coalesce_op() {
+        // 1 elem
+        eval_coalesce_op(vec![Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Null], Null);
+        eval_coalesce_op(vec![Missing], Null);
+
+        // Multiple elems
+        eval_coalesce_op(vec![Missing, Null, Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Missing, Null, Value::from(1)], Value::from(1));
+        eval_coalesce_op(vec![Missing, Null, Null], Null);
+        eval_coalesce_op(
+            vec![
+                Missing,
+                Null,
+                Missing,
+                Null,
+                Missing,
+                Null,
+                Value::from(1),
+                Value::from(2),
+                Missing,
+                Null,
+            ],
+            Value::from(1),
+        );
+        eval_coalesce_op(
+            vec![
+                Missing, Null, Missing, Null, Missing, Null, Missing, Null, Missing, Null,
+            ],
+            Null,
+        );
     }
 
     #[test]

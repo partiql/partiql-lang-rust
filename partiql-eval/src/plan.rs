@@ -3,15 +3,17 @@ use std::collections::HashMap;
 
 use partiql_logical as logical;
 use partiql_logical::{
-    BinaryOp, BindingsExpr, JoinKind, LogicalPlan, OpId, PathComponent, UnaryOp, ValueExpr,
+    BinaryOp, BindingsExpr, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, SearchedCase,
+    Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalJoinKind, EvalListExpr,
-    EvalLitExpr, EvalPath, EvalPlan, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
-    Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalIsTypeExpr, EvalJoinKind,
+    EvalListExpr, EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalTupleExpr,
+    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
+use partiql_value::Value::Null;
 
 pub struct EvaluatorPlanner;
 
@@ -187,6 +189,104 @@ impl EvaluatorPlanner {
                 let from = self.plan_values(*expr.from);
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
+            }
+            ValueExpr::SimpleCase(e) => {
+                let cases = e
+                    .cases
+                    .into_iter()
+                    .map(|case| {
+                        (
+                            self.plan_values(ValueExpr::BinaryExpr(
+                                BinaryOp::Eq,
+                                e.expr.clone(),
+                                case.0,
+                            )),
+                            self.plan_values(*case.1),
+                        )
+                    })
+                    .collect();
+                let default = match e.default {
+                    // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
+                    None => Box::new(EvalLitExpr {
+                        lit: Box::new(Null),
+                    }),
+                    Some(def) => self.plan_values(*def),
+                };
+                // Here, rewrite `SimpleCaseExpr`s as `SearchedCaseExpr`s
+                Box::new(EvalSearchedCaseExpr { cases, default })
+            }
+            ValueExpr::SearchedCase(e) => {
+                let cases = e
+                    .cases
+                    .into_iter()
+                    .map(|case| (self.plan_values(*case.0), self.plan_values(*case.1)))
+                    .collect();
+                let default = match e.default {
+                    // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
+                    None => Box::new(EvalLitExpr {
+                        lit: Box::new(Null),
+                    }),
+                    Some(def) => self.plan_values(*def),
+                };
+                Box::new(EvalSearchedCaseExpr { cases, default })
+            }
+            ValueExpr::IsTypeExpr(i) => {
+                let expr = self.plan_values(*i.expr);
+                match i.not {
+                    true => Box::new(EvalUnaryOpExpr {
+                        op: EvalUnaryOp::Not,
+                        operand: Box::new(EvalIsTypeExpr {
+                            expr,
+                            is_type: i.is_type,
+                        }),
+                    }),
+                    false => Box::new(EvalIsTypeExpr {
+                        expr,
+                        is_type: i.is_type,
+                    }),
+                }
+            }
+            ValueExpr::NullIfExpr(n) => {
+                // NULLIF can be rewritten using CASE WHEN expressions as per section 6.9 pg 142 of SQL-92 spec:
+                //     1) NULLIF (V1, V2) is equivalent to the following <case specification>:
+                //         CASE WHEN V1=V2 THEN NULL ELSE V1 END
+                let rewritten_as_case = ValueExpr::SearchedCase(SearchedCase {
+                    cases: vec![(
+                        Box::new(ValueExpr::BinaryExpr(
+                            BinaryOp::Eq,
+                            Box::new(*n.lhs.clone()),
+                            Box::new(*n.rhs.clone()),
+                        )),
+                        Box::new(ValueExpr::Lit(Box::new(Null))),
+                    )],
+                    default: Some(Box::new(*n.lhs)),
+                });
+                self.plan_values(rewritten_as_case)
+            }
+            ValueExpr::CoalesceExpr(c) => {
+                // COALESCE can be rewritten using CASE WHEN expressions as per section 6.9 pg 142 of SQL-92 spec:
+                //     2) COALESCE (V1, V2) is equivalent to the following <case specification>:
+                //         CASE WHEN V1 IS NOT NULL THEN V1 ELSE V2 END
+                //
+                //     3) COALESCE (V1, V2, . . . ,n ), for n >= 3, is equivalent to the following <case specification>:
+                //         CASE WHEN V1 IS NOT NULL THEN V1 ELSE COALESCE (V2, . . . ,n )
+                //         END
+                assert!(!c.elements.is_empty());
+                fn as_case(v: &ValueExpr, elems: &[ValueExpr]) -> ValueExpr {
+                    let sc = SearchedCase {
+                        cases: vec![(
+                            Box::new(ValueExpr::IsTypeExpr(IsTypeExpr {
+                                not: true,
+                                expr: Box::new(v.clone()),
+                                is_type: Type::NullType,
+                            })),
+                            Box::new(v.clone()),
+                        )],
+                        default: elems.first().map(|v2| Box::new(as_case(v2, &elems[1..]))),
+                    };
+                    ValueExpr::SearchedCase(sc)
+                }
+                self.plan_values(as_case(c.elements.first().unwrap(), &c.elements[1..]))
             }
         }
     }
