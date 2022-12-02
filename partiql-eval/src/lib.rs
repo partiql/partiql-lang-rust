@@ -487,6 +487,73 @@ mod tests {
     }
 
     #[test]
+    fn in_expr() {
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![1, 2, 3]),
+            Value::from(true),
+        );
+        // We still need to define the rules of coercion for `IN` RHS.
+        // See also:
+        // - https://github.com/partiql/partiql-docs/pull/13
+        // - https://github.com/partiql/partiql-lang-kotlin/issues/524
+        // - https://github.com/partiql/partiql-lang-kotlin/pull/621#issuecomment-1147754213
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(partiql_tuple![("a", 2)]),
+            Value::from(partiql_list![
+                partiql_tuple![("a", 6)],
+                partiql_tuple![("b", 12)],
+                partiql_tuple![("a", 2)]
+            ]),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(10),
+            Value::from(partiql_bag!["a", "b", 11]),
+            Value::from(false),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(1),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![10, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(Missing),
+            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(Null),
+            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(Null),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![1, Null, "b"]),
+            Value::from(true),
+        );
+        eval_bin_op(
+            BinaryOp::In,
+            Value::from(1),
+            Value::from(partiql_list![3, Null]),
+            Value::from(Null),
+        );
+    }
+
+    #[test]
     fn comparison_ops() {
         // Lt
         // Plan for `select lhs < rhs as result from data`
@@ -1253,7 +1320,6 @@ mod tests {
     //  Expected: <<{'a': 1, 'b': 1}, {'a': 2, 'b': 2}>>
     #[test]
     fn select_value_tuple_constructor_1() {
-        // Plan for `select value {'test': a} from data`
         let mut lg = LogicalPlan::new();
 
         let from = lg.add_operator(scan("data", "v"));
@@ -1343,7 +1409,6 @@ mod tests {
     //  Expected: <<{'legit': 1}, {}>>
     #[test]
     fn select_value_with_tuple_mistype_attr() {
-        // Plan for `select value {'test': a} from data`
         let mut lg = LogicalPlan::new();
 
         let from = lg.add_operator(scan("data", "v"));
@@ -1475,7 +1540,6 @@ mod tests {
     //  Expected: <<[2], [4], [6]>>
     #[test]
     fn select_value_with_array_constructor_2() {
-        // Plan for `select value {'test': a} from data`
         let mut lg = LogicalPlan::new();
 
         let from = lg.add_operator(scan("data", "v"));
@@ -1511,7 +1575,6 @@ mod tests {
     //  Expected: << <<1, 1>>, <<2, 2>> >>
     #[test]
     fn select_value_bag_constructor() {
-        // Plan for `select value {'test': a} from data`
         let mut lg = LogicalPlan::new();
 
         let from = lg.add_operator(scan("data", "v"));
@@ -1764,6 +1827,52 @@ mod tests {
             let expected = partiql_bag![
                 partiql_tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
                 partiql_tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_with_in_as_predicate() {
+        // Plan for `SELECT a AS b FROM data WHERE a IN [1]`
+        let mut logical = LogicalPlan::new();
+
+        let scan = logical.add_operator(scan("data", "data"));
+
+        let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::In,
+                Box::new(ValueExpr::Path(
+                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                        "data".into(),
+                    ))),
+                    vec![PathComponent::Key("a".to_string())],
+                )),
+                Box::new(ValueExpr::Lit(Box::new(partiql_list![1].into()))),
+            ),
+        }));
+
+        let project = logical.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "b".to_string(),
+                ValueExpr::Path(
+                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                        "data".into(),
+                    ))),
+                    vec![PathComponent::Key("a".to_string())],
+                ),
+            )]),
+        }));
+
+        let sink = logical.add_operator(BindingsExpr::Sink);
+
+        logical.extend_with_flows(&[(scan, filter), (filter, project), (project, sink)]);
+
+        let out = evaluate(logical, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("b", 1)],
             ];
             assert_eq!(*bag, expected);
         });
