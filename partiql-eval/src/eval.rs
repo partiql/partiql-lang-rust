@@ -684,11 +684,11 @@ impl EvalExpr for EvalBinOpExpr {
             EvalBinOp::Gteq => NullableOrd::gteq(&lhs, &rhs),
             EvalBinOp::Lt => NullableOrd::lt(&lhs, &rhs),
             EvalBinOp::Lteq => NullableOrd::lteq(&lhs, &rhs),
-            EvalBinOp::Add => lhs + rhs,
-            EvalBinOp::Sub => lhs - rhs,
-            EvalBinOp::Mul => lhs * rhs,
-            EvalBinOp::Div => lhs / rhs,
-            EvalBinOp::Mod => lhs % rhs,
+            EvalBinOp::Add => &lhs + &rhs,
+            EvalBinOp::Sub => &lhs - &rhs,
+            EvalBinOp::Mul => &lhs * &rhs,
+            EvalBinOp::Div => &lhs / &rhs,
+            EvalBinOp::Mod => &lhs % &rhs,
             // TODO apply the changes once we clarify the rules of coercion for `IN` RHS.
             // See also:
             // - https://github.com/partiql/partiql-docs/pull/13

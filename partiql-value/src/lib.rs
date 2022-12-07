@@ -37,8 +37,8 @@ pub enum Value {
     // TODO: add other supported PartiQL values -- timestamp, date, time, sexp
 }
 
-impl ops::Add for Value {
-    type Output = Self;
+impl ops::Add for &Value {
+    type Output = Value;
 
     fn add(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
@@ -50,19 +50,19 @@ impl ops::Add for Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l + r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l + *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l + r),
-            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) + rhs,
-            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Integer(_)) => self + coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self + coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self + coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) + rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
+            (Value::Real(_), Value::Integer(_)) => self + &coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
 }
 
-impl ops::Sub for Value {
-    type Output = Self;
+impl ops::Sub for &Value {
+    type Output = Value;
 
     fn sub(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
@@ -74,19 +74,19 @@ impl ops::Sub for Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l - r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l - *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l - r),
-            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) - rhs,
-            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Integer(_)) => self - coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self - coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self - coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) - rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
+            (Value::Real(_), Value::Integer(_)) => self - &coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
 }
 
-impl ops::Mul for Value {
-    type Output = Self;
+impl ops::Mul for &Value {
+    type Output = Value;
 
     fn mul(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
@@ -98,19 +98,19 @@ impl ops::Mul for Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l * r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l * *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l * r),
-            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) * rhs,
-            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Integer(_)) => self * coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self * coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self * coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) * rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
+            (Value::Real(_), Value::Integer(_)) => self * &coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
 }
 
-impl ops::Div for Value {
-    type Output = Self;
+impl ops::Div for &Value {
+    type Output = Value;
 
     fn div(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
@@ -122,19 +122,19 @@ impl ops::Div for Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l / r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l / *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l / r),
-            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) / rhs,
-            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Integer(_)) => self / coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self / coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self / coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) / rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
+            (Value::Real(_), Value::Integer(_)) => self / &coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
 }
 
-impl ops::Rem for Value {
-    type Output = Self;
+impl ops::Rem for &Value {
+    type Output = Value;
 
     fn rem(self, rhs: Self) -> Self::Output {
         match (&self, &rhs) {
@@ -146,12 +146,12 @@ impl ops::Rem for Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l % r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l % *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l % r),
-            (Value::Integer(_), Value::Real(_)) => coerce_int_to_real(&self) % rhs,
-            (Value::Integer(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Decimal(_)) => coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Integer(_)) => self % coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self % coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self % coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) % rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
+            (Value::Real(_), Value::Integer(_)) => self % &coerce_int_to_real(&rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Decimal(_), Value::Real(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -175,14 +175,30 @@ impl UnaryPlus for Value {
     }
 }
 
-impl ops::Neg for Value {
-    type Output = Self;
+impl ops::Neg for &Value {
+    type Output = Value;
 
     fn neg(self) -> Self::Output {
-        match &self {
+        match self {
             // TODO: handle overflow for negation
             Value::Null => Value::Null,
             Value::Missing => Value::Missing,
+            Value::Integer(i) => Value::from(-i),
+            Value::Real(f) => Value::Real(-f),
+            Value::Decimal(d) => Value::from(-d),
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
+impl ops::Neg for Value {
+    type Output = Value;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            // TODO: handle overflow for negation
+            Value::Null => self,
+            Value::Missing => self,
             Value::Integer(i) => Value::from(-i),
             Value::Real(f) => Value::Real(-f),
             Value::Decimal(d) => Value::from(-d),
@@ -247,11 +263,23 @@ impl BinaryOr for Value {
     }
 }
 
+impl ops::Not for &Value {
+    type Output = Value;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Value::Boolean(b) => Value::from(!b),
+            Value::Null | Value::Missing => Value::Null,
+            _ => Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
 impl ops::Not for Value {
     type Output = Self;
 
     fn not(self) -> Self::Output {
-        match &self {
+        match self {
             Value::Boolean(b) => Value::from(!b),
             Value::Null | Value::Missing => Value::Null,
             _ => Value::Missing, // data type mismatch => Missing
@@ -260,14 +288,10 @@ impl ops::Not for Value {
 }
 
 pub trait Comparable {
-    type Output;
-
     fn is_comparable_to(&self, rhs: &Self) -> bool;
 }
 
 impl Comparable for Value {
-    type Output = Self;
-
     /// Returns true if and only if `self` is comparable to `rhs`
     fn is_comparable_to(&self, rhs: &Self) -> bool {
         match (self, rhs) {
@@ -1374,185 +1398,188 @@ mod tests {
     #[test]
     fn partiql_value_arithmetic() {
         // Unary plus
-        assert_eq!(Value::Missing, Value::Missing.positive());
-        assert_eq!(Value::Null, Value::Null.positive());
-        assert_eq!(Value::Integer(123), Value::Integer(123).positive());
-        assert_eq!(Value::Decimal(dec!(3)), Value::Decimal(dec!(3)).positive());
-        assert_eq!(Value::from(4.0), Value::from(4.0).positive());
-        assert_eq!(Value::Missing, Value::from("foo").positive());
+        assert_eq!(&Value::Missing, &Value::Missing.positive());
+        assert_eq!(&Value::Null, &Value::Null.positive());
+        assert_eq!(&Value::Integer(123), &Value::Integer(123).positive());
+        assert_eq!(
+            &Value::Decimal(dec!(3)),
+            &Value::Decimal(dec!(3)).positive()
+        );
+        assert_eq!(&Value::from(4.0), &Value::from(4.0).positive());
+        assert_eq!(&Value::Missing, &Value::from("foo").positive());
 
         // Negation
-        assert_eq!(Value::Missing, -Value::Missing);
-        assert_eq!(Value::Null, -Value::Null);
-        assert_eq!(Value::Integer(-123), -Value::Integer(123));
-        assert_eq!(Value::Decimal(dec!(-3)), -Value::Decimal(dec!(3)));
-        assert_eq!(Value::from(-4.0), -Value::from(4.0));
-        assert_eq!(Value::Missing, -Value::from("foo"));
+        assert_eq!(Value::Missing, -&Value::Missing);
+        assert_eq!(Value::Null, -&Value::Null);
+        assert_eq!(Value::Integer(-123), -&Value::Integer(123));
+        assert_eq!(Value::Decimal(dec!(-3)), -&Value::Decimal(dec!(3)));
+        assert_eq!(Value::from(-4.0), -&Value::from(4.0));
+        assert_eq!(Value::Missing, -&Value::from("foo"));
 
         // Add
-        assert_eq!(Value::Missing, Value::Missing + Value::Missing);
-        assert_eq!(Value::Missing, Value::Missing + Value::Null);
-        assert_eq!(Value::Missing, Value::Null + Value::Missing);
-        assert_eq!(Value::Null, Value::Null + Value::Null);
-        assert_eq!(Value::Missing, Value::Integer(1) + Value::from("a"));
-        assert_eq!(Value::Integer(3), Value::Integer(1) + Value::Integer(2));
-        assert_eq!(Value::from(4.0), Value::from(1.5) + Value::from(2.5));
+        assert_eq!(Value::Missing, &Value::Missing + &Value::Missing);
+        assert_eq!(Value::Missing, &Value::Missing + &Value::Null);
+        assert_eq!(Value::Missing, &Value::Null + &Value::Missing);
+        assert_eq!(Value::Null, &Value::Null + &Value::Null);
+        assert_eq!(Value::Missing, &Value::Integer(1) + &Value::from("a"));
+        assert_eq!(Value::Integer(3), &Value::Integer(1) + &Value::Integer(2));
+        assert_eq!(Value::from(4.0), &Value::from(1.5) + &Value::from(2.5));
         assert_eq!(
             Value::Decimal(dec!(3)),
-            Value::Decimal(dec!(1)) + Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) + &Value::Decimal(dec!(2))
         );
-        assert_eq!(Value::from(3.5), Value::Integer(1) + Value::from(2.5));
-        assert_eq!(Value::from(3.), Value::from(1.) + Value::from(2.));
+        assert_eq!(Value::from(3.5), &Value::Integer(1) + &Value::from(2.5));
+        assert_eq!(Value::from(3.), &Value::from(1.) + &Value::from(2.));
         assert_eq!(
             Value::Decimal(dec!(3)),
-            Value::Integer(1) + Value::Decimal(dec!(2))
-        );
-        assert_eq!(
-            Value::Decimal(dec!(3)),
-            Value::Decimal(dec!(1)) + Value::Integer(2)
+            &Value::Integer(1) + &Value::Decimal(dec!(2))
         );
         assert_eq!(
             Value::Decimal(dec!(3)),
-            Value::from(1.) + Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) + &Value::Integer(2)
         );
         assert_eq!(
             Value::Decimal(dec!(3)),
-            Value::Decimal(dec!(1)) + Value::from(2.)
+            &Value::from(1.) + &Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(3)),
+            &Value::Decimal(dec!(1)) + &Value::from(2.)
         );
 
         // Sub
-        assert_eq!(Value::Missing, Value::Missing - Value::Missing);
-        assert_eq!(Value::Missing, Value::Missing - Value::Null);
-        assert_eq!(Value::Missing, Value::Null - Value::Missing);
-        assert_eq!(Value::Null, Value::Null - Value::Null);
-        assert_eq!(Value::Missing, Value::Integer(1) - Value::from("a"));
-        assert_eq!(Value::Integer(-1), Value::Integer(1) - Value::Integer(2));
-        assert_eq!(Value::from(-1.0), Value::from(1.5) - Value::from(2.5));
+        assert_eq!(Value::Missing, &Value::Missing - &Value::Missing);
+        assert_eq!(Value::Missing, &Value::Missing - &Value::Null);
+        assert_eq!(Value::Missing, &Value::Null - &Value::Missing);
+        assert_eq!(Value::Null, &Value::Null - &Value::Null);
+        assert_eq!(Value::Missing, &Value::Integer(1) - &Value::from("a"));
+        assert_eq!(Value::Integer(-1), &Value::Integer(1) - &Value::Integer(2));
+        assert_eq!(Value::from(-1.0), &Value::from(1.5) - &Value::from(2.5));
         assert_eq!(
             Value::Decimal(dec!(-1)),
-            Value::Decimal(dec!(1)) - Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) - &Value::Decimal(dec!(2))
         );
-        assert_eq!(Value::from(-1.5), Value::Integer(1) - Value::from(2.5));
-        assert_eq!(Value::from(-1.), Value::from(1.) - Value::from(2.));
+        assert_eq!(Value::from(-1.5), &Value::Integer(1) - &Value::from(2.5));
+        assert_eq!(Value::from(-1.), &Value::from(1.) - &Value::from(2.));
         assert_eq!(
             Value::Decimal(dec!(-1)),
-            Value::Integer(1) - Value::Decimal(dec!(2))
-        );
-        assert_eq!(
-            Value::Decimal(dec!(-1)),
-            Value::Decimal(dec!(1)) - Value::Integer(2)
+            &Value::Integer(1) - &Value::Decimal(dec!(2))
         );
         assert_eq!(
             Value::Decimal(dec!(-1)),
-            Value::from(1.) - Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) - &Value::Integer(2)
         );
         assert_eq!(
             Value::Decimal(dec!(-1)),
-            Value::Decimal(dec!(1)) - Value::from(2.)
+            &Value::from(1.) - &Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(-1)),
+            &Value::Decimal(dec!(1)) - &Value::from(2.)
         );
 
         // Mul
-        assert_eq!(Value::Missing, Value::Missing * Value::Missing);
-        assert_eq!(Value::Missing, Value::Missing * Value::Null);
-        assert_eq!(Value::Missing, Value::Null * Value::Missing);
-        assert_eq!(Value::Null, Value::Null * Value::Null);
-        assert_eq!(Value::Missing, Value::Integer(1) * Value::from("a"));
-        assert_eq!(Value::Integer(2), Value::Integer(1) * Value::Integer(2));
-        assert_eq!(Value::from(3.75), Value::from(1.5) * Value::from(2.5));
+        assert_eq!(Value::Missing, &Value::Missing * &Value::Missing);
+        assert_eq!(Value::Missing, &Value::Missing * &Value::Null);
+        assert_eq!(Value::Missing, &Value::Null * &Value::Missing);
+        assert_eq!(Value::Null, &Value::Null * &Value::Null);
+        assert_eq!(Value::Missing, &Value::Integer(1) * &Value::from("a"));
+        assert_eq!(Value::Integer(2), &Value::Integer(1) * &Value::Integer(2));
+        assert_eq!(Value::from(3.75), &Value::from(1.5) * &Value::from(2.5));
         assert_eq!(
             Value::Decimal(Decimal::new(2, 0)),
-            Value::Decimal(dec!(1)) * Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) * &Value::Decimal(dec!(2))
         );
-        assert_eq!(Value::from(2.5), Value::Integer(1) * Value::from(2.5));
-        assert_eq!(Value::from(2.), Value::from(1.) * Value::from(2.));
+        assert_eq!(Value::from(2.5), &Value::Integer(1) * &Value::from(2.5));
+        assert_eq!(Value::from(2.), &Value::from(1.) * &Value::from(2.));
         assert_eq!(
             Value::Decimal(Decimal::new(2, 0)),
-            Value::Integer(1) * Value::Decimal(dec!(2))
-        );
-        assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            Value::Decimal(dec!(1)) * Value::Integer(2)
+            &Value::Integer(1) * &Value::Decimal(dec!(2))
         );
         assert_eq!(
             Value::Decimal(Decimal::new(2, 0)),
-            Value::from(1.) * Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) * &Value::Integer(2)
         );
         assert_eq!(
             Value::Decimal(Decimal::new(2, 0)),
-            Value::Decimal(dec!(1)) * Value::from(2.)
+            &Value::from(1.) * &Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(Decimal::new(2, 0)),
+            &Value::Decimal(dec!(1)) * &Value::from(2.)
         );
 
         // Div
-        assert_eq!(Value::Missing, Value::Missing / Value::Missing);
-        assert_eq!(Value::Missing, Value::Missing / Value::Null);
-        assert_eq!(Value::Missing, Value::Null / Value::Missing);
-        assert_eq!(Value::Null, Value::Null / Value::Null);
-        assert_eq!(Value::Missing, Value::Integer(1) / Value::from("a"));
-        assert_eq!(Value::Integer(0), Value::Integer(1) / Value::Integer(2));
-        assert_eq!(Value::from(0.6), Value::from(1.5) / Value::from(2.5));
+        assert_eq!(Value::Missing, &Value::Missing / &Value::Missing);
+        assert_eq!(Value::Missing, &Value::Missing / &Value::Null);
+        assert_eq!(Value::Missing, &Value::Null / &Value::Missing);
+        assert_eq!(Value::Null, &Value::Null / &Value::Null);
+        assert_eq!(Value::Missing, &Value::Integer(1) / &Value::from("a"));
+        assert_eq!(Value::Integer(0), &Value::Integer(1) / &Value::Integer(2));
+        assert_eq!(Value::from(0.6), &Value::from(1.5) / &Value::from(2.5));
         assert_eq!(
             Value::Decimal(dec!(0.5)),
-            Value::Decimal(dec!(1)) / Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) / &Value::Decimal(dec!(2))
         );
-        assert_eq!(Value::from(0.4), Value::Integer(1) / Value::from(2.5));
-        assert_eq!(Value::from(0.5), Value::from(1.) / Value::from(2.));
+        assert_eq!(Value::from(0.4), &Value::Integer(1) / &Value::from(2.5));
+        assert_eq!(Value::from(0.5), &Value::from(1.) / &Value::from(2.));
         assert_eq!(
             Value::Decimal(dec!(0.5)),
-            Value::Integer(1) / Value::Decimal(dec!(2))
-        );
-        assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            Value::Decimal(dec!(1)) / Value::Integer(2)
+            &Value::Integer(1) / &Value::Decimal(dec!(2))
         );
         assert_eq!(
             Value::Decimal(dec!(0.5)),
-            Value::from(1.) / Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) / &Value::Integer(2)
         );
         assert_eq!(
             Value::Decimal(dec!(0.5)),
-            Value::Decimal(dec!(1)) / Value::from(2.)
+            &Value::from(1.) / &Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(0.5)),
+            &Value::Decimal(dec!(1)) / &Value::from(2.)
         );
 
         // Mod
-        assert_eq!(Value::Missing, Value::Missing % Value::Missing);
-        assert_eq!(Value::Missing, Value::Missing % Value::Null);
-        assert_eq!(Value::Missing, Value::Null % Value::Missing);
-        assert_eq!(Value::Null, Value::Null % Value::Null);
-        assert_eq!(Value::Missing, Value::Integer(1) % Value::from("a"));
-        assert_eq!(Value::Integer(1), Value::Integer(1) % Value::Integer(2));
-        assert_eq!(Value::from(1.5), Value::from(1.5) % Value::from(2.5));
+        assert_eq!(Value::Missing, &Value::Missing % &Value::Missing);
+        assert_eq!(Value::Missing, &Value::Missing % &Value::Null);
+        assert_eq!(Value::Missing, &Value::Null % &Value::Missing);
+        assert_eq!(Value::Null, &Value::Null % &Value::Null);
+        assert_eq!(Value::Missing, &Value::Integer(1) % &Value::from("a"));
+        assert_eq!(Value::Integer(1), &Value::Integer(1) % &Value::Integer(2));
+        assert_eq!(Value::from(1.5), &Value::from(1.5) % &Value::from(2.5));
         assert_eq!(
             Value::Decimal(dec!(1)),
-            Value::Decimal(dec!(1)) % Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) % &Value::Decimal(dec!(2))
         );
-        assert_eq!(Value::from(1.), Value::Integer(1) % Value::from(2.5));
-        assert_eq!(Value::from(1.), Value::from(1.) % Value::from(2.));
+        assert_eq!(Value::from(1.), &Value::Integer(1) % &Value::from(2.5));
+        assert_eq!(Value::from(1.), &Value::from(1.) % &Value::from(2.));
         assert_eq!(
             Value::Decimal(dec!(1)),
-            Value::Integer(1) % Value::Decimal(dec!(2))
-        );
-        assert_eq!(
-            Value::Decimal(dec!(1)),
-            Value::Decimal(dec!(1)) % Value::Integer(2)
+            &Value::Integer(1) % &Value::Decimal(dec!(2))
         );
         assert_eq!(
             Value::Decimal(dec!(1)),
-            Value::from(1.) % Value::Decimal(dec!(2))
+            &Value::Decimal(dec!(1)) % &Value::Integer(2)
         );
         assert_eq!(
             Value::Decimal(dec!(1)),
-            Value::Decimal(dec!(1)) % Value::from(2.)
+            &Value::from(1.) % &Value::Decimal(dec!(2))
+        );
+        assert_eq!(
+            Value::Decimal(dec!(1)),
+            &Value::Decimal(dec!(1)) % &Value::from(2.)
         );
     }
 
     #[test]
     fn partiql_value_logical() {
         // Unary NOT
-        assert_eq!(Value::Null, !Value::Missing);
-        assert_eq!(Value::Null, !Value::Null);
-        assert_eq!(Value::from(true), !Value::from(false));
-        assert_eq!(Value::from(false), !Value::from(true));
-        assert_eq!(Value::Missing, !Value::from("foo"));
+        assert_eq!(Value::Null, !&Value::Missing);
+        assert_eq!(Value::Null, !&Value::Null);
+        assert_eq!(Value::from(true), !&Value::from(false));
+        assert_eq!(Value::from(false), !&Value::from(true));
+        assert_eq!(Value::Missing, !&Value::from("foo"));
 
         // AND
         assert_eq!(
