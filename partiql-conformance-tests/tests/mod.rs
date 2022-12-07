@@ -1,19 +1,11 @@
 use partiql_parser::ParserResult;
+mod test_value;
+pub(crate) use test_value::TestValue;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum EvaluationMode {
     Coerce,
     Error,
-}
-
-pub(crate) struct TestValue<'a> {
-    contents: &'a str,
-}
-
-impl<'a> From<&'a str> for TestValue<'a> {
-    fn from(contents: &'a str) -> Self {
-        TestValue { contents }
-    }
 }
 
 #[track_caller]
@@ -78,7 +70,7 @@ pub(crate) fn pass_eval(
     todo!("pass_eval")
 }
 
-pub(crate) fn environment() -> Option<TestValue<'static>> {
+pub(crate) fn environment() -> Option<TestValue> {
     None
 }
 

@@ -268,7 +268,7 @@ impl Generator {
         scope.raw(
             quote! {
                 const ENV_ION_TEXT : &'static str = #envs;
-                fn environment() -> Option<TestValue<'static>> {
+                fn environment() -> Option<TestValue> {
                     Some(ENV_ION_TEXT.into())
                 }
             }
@@ -290,7 +290,7 @@ impl Generator {
         scope.raw(
             quote! {
                 const ENV_ION_TEXT : &'static str = include_str!(#data_file);
-                fn environment() -> Option<TestValue<'static>> {
+                fn environment() -> Option<TestValue> {
                     Some(ENV_ION_TEXT.into())
                 }
             }

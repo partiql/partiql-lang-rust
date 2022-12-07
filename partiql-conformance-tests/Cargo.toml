@@ -33,6 +33,11 @@ partiql-conformance-test-generator = { path = "../partiql-conformance-test-gener
 
 [dependencies]
 partiql-parser = { path = "../partiql-parser", version = "0.1.0" }
+partiql-value = { path = "../partiql-value" }
+
+ion-rs = "0.14"
+
+rust_decimal = "1.27"
 
 serde = { version = "1.*", features = ["derive"], optional = true }
 serde_json = { version = "1.*", optional = true }
