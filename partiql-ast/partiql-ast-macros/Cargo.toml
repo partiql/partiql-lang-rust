@@ -1,0 +1,28 @@
+[package]
+name = "partiql-ast-macros"
+description = "Procedural macros for PartiQL AST"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["sql", "ast", "query", "compilers", "interpreters"]
+categories = ["database", "compilers", "ast-implementations"]
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+]
+version.workspace = true
+edition.workspace = true
+
+
+[lib]
+proc-macro = true
+path = "src/lib.rs"
+
+[dependencies]
+quote = "1.0.*"
+syn = {version="1.0.*", default-features = true, features=["full"]}
+proc-macro2 = "1.0.*"
+darling = "0.14.*"
+Inflector = "0.11.*"

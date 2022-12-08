@@ -188,7 +188,7 @@ SelectClause: ast::AstNode<ast::Projection> = {
         setq: Some(strategy),
     }, lo..hi),
     <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => state.node(ast::Projection {
-        kind: ast::ProjectionKind::ProjectPivot { key, value },
+        kind: ast::ProjectionKind::ProjectPivot(ast::ProjectPivot { key, value }),
         setq: None
     }, lo..hi),
 }
@@ -223,7 +223,7 @@ FromClause: ast::AstNode<ast::FromClause> = {
         // use `reduce` to process the comma-seperated `TableReference`s
         //   as left-associative `CROSS JOIN`s
         froms.push(last);
-        froms.into_iter()
+        let source = froms.into_iter()
             .reduce(|lfrom, rfrom| {
 	            let start = state.locations.get(&lfrom.id).unwrap_or(&total).start.0.clone();
                 let end = state.locations.get(&rfrom.id).unwrap_or(&total).end.0.clone();
@@ -234,20 +234,21 @@ FromClause: ast::AstNode<ast::FromClause> = {
                     right: Box::new(rfrom),
                     predicate: None
                 }, range.clone());
-                state.node(ast::FromClause::Join( join ), range)
+                state.node(ast::FromSource::Join( join ), range)
             })
-            .unwrap() // safe, because we know there's at least 1 input
+            .unwrap(); // safe, because we know there's at least 1 input
+        state.node(ast::FromClause{source}, lo..hi)
     }
 }
 
-TableReference: ast::AstNode<ast::FromClause> = {
+TableReference: ast::AstNode<ast::FromSource> = {
     <TableNonJoin>,
     <TableJoined>,
 }
 
-TableNonJoin: ast::AstNode<ast::FromClause> = {
-    <lo:@L> <t:TableBaseReference> <hi:@R> => state.node(ast::FromClause::FromLet( t ), lo..hi),
-    <lo:@L> <t:TableUnpivot> <hi:@R> => state.node(ast::FromClause::FromLet( t ), lo..hi),
+TableNonJoin: ast::AstNode<ast::FromSource> = {
+    <lo:@L> <t:TableBaseReference> <hi:@R> => state.node(ast::FromSource::FromLet( t ), lo..hi),
+    <lo:@L> <t:TableUnpivot> <hi:@R> => state.node(ast::FromSource::FromLet( t ), lo..hi),
 }
 
 #[inline]
@@ -285,14 +286,14 @@ TableUnpivot: ast::AstNode<ast::FromLet> = {
     }
 }
 
-TableJoined: ast::AstNode<ast::FromClause> = {
+TableJoined: ast::AstNode<ast::FromSource> = {
     <TableCrossJoin>,
     <TableQualifiedJoin>,
     "(" <TableJoined> ")",
 }
 
 #[inline]
-TableCrossJoin: ast::AstNode<ast::FromClause> = {
+TableCrossJoin: ast::AstNode<ast::FromSource> = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
@@ -307,12 +308,12 @@ TableCrossJoin: ast::AstNode<ast::FromClause> = {
             right: Box::new(rtable),
             predicate: None
         }, lo..hi);
-        state.node(ast::FromClause::Join( join ), lo..hi)
+        state.node(ast::FromSource::Join( join ), lo..hi)
     }
 }
 
 #[inline]
-TableQualifiedJoin: ast::AstNode<ast::FromClause> = {
+TableQualifiedJoin: ast::AstNode<ast::FromSource> = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
@@ -323,7 +324,7 @@ TableQualifiedJoin: ast::AstNode<ast::FromClause> = {
             right: Box::new(rtable),
             predicate: Some(on),
         }, lo..hi);
-        state.node(ast::FromClause::Join( join ), lo..hi)
+        state.node(ast::FromSource::Join( join ), lo..hi)
     },
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
@@ -335,11 +336,11 @@ TableQualifiedJoin: ast::AstNode<ast::FromClause> = {
             right: Box::new(rtable),
             predicate: Some(spec)
         }, lo..hi);
-        state.node(ast::FromClause::Join( join ), lo..hi)
+        state.node(ast::FromSource::Join( join ), lo..hi)
     },
 }
 #[inline]
-JoinRhs: ast::AstNode<ast::FromClause> = {
+JoinRhs: ast::AstNode<ast::FromSource> = {
     <TableNonJoin>,
     "(" <TableJoined> ")"
 }
@@ -364,7 +365,11 @@ JoinSpec: ast::AstNode<ast::JoinSpec> = {
 // ------------------------------------------------------------------------------ //
 //                                     WHERE                                      //
 // ------------------------------------------------------------------------------ //
-WhereClause: Box<ast::Expr> = { "WHERE" <ExprQuery> }
+WhereClause: Box<ast::AstNode<ast::WhereClause>> = {
+    <lo:@L> "WHERE" <expr:ExprQuery> <hi:@R> => {
+        Box::new(state.node(ast::WhereClause{expr}, lo..hi))
+    }
+}
 
 // ------------------------------------------------------------------------------ //
 //                                   GROUP BY                                     //
@@ -403,7 +408,11 @@ GroupAlias: ast::SymbolPrimitive = {
 // ------------------------------------------------------------------------------ //
 //                                    HAVING                                      //
 // ------------------------------------------------------------------------------ //
-HavingClause: Box<ast::Expr> = { "HAVING" <ExprQuery> }
+HavingClause: Box<ast::AstNode<ast::HavingClause>> = {
+    <lo:@L> "HAVING" <expr:ExprQuery> <hi:@R> => {
+        Box::new(state.node(ast::HavingClause{expr}, lo..hi))
+    }
+}
 
 // ------------------------------------------------------------------------------ //
 //                                   ORDER BY                                     //
@@ -686,7 +695,7 @@ ExprPrecedence07: ast::Expr = {
     <lo:@L> <l:ExprPrecedence07> "-" <r:ExprPrecedence06> <hi:@R> =>
        ast::Expr::BinOp(
            state.node(ast::BinOp {
-               kind: ast::BinOpKind::Neg,
+               kind: ast::BinOpKind::Sub,
                lhs: Box::new(l),
                rhs: Box::new(r),
            }, lo..hi)
@@ -917,8 +926,8 @@ FunctionArgPositional: ast::AstNode<ast::CallArg> = {
 
 #[inline]
 FunctionArgNamed: ast::AstNode<ast::CallArg> = {
-    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named{name, value}, lo..hi),
-    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType{name, ty}, lo..hi)
+    <lo:@L> <name:FunctionArgName> ":" <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Named(ast::CallArgNamed{name, value}), lo..hi),
+    <lo:@L> <name:FunctionArgName> ":" <ty:TypeName> <hi:@R> => state.node(ast::CallArg::NamedType(ast::CallArgNamedType{name, ty}), lo..hi)
 }
 
 #[inline]

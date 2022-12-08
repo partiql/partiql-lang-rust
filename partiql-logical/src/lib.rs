@@ -111,6 +111,55 @@ pub enum PathComponent {
 }
 
 #[derive(Clone, Debug)]
+pub struct IsTypeExpr {
+    pub not: bool,
+    pub expr: Box<ValueExpr>,
+    pub is_type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    NullType,
+    BooleanType,
+    Integer2Type,
+    Integer4Type,
+    Integer8Type,
+    DecimalType,
+    NumericType,
+    RealType,
+    DoublePrecisionType,
+    TimestampType,
+    CharacterType,
+    CharacterVaryingType,
+    MissingType,
+    StringType,
+    SymbolType,
+    BlobType,
+    ClobType,
+    DateType,
+    TimeType,
+    ZonedTimestampType,
+    StructType,
+    TupleType,
+    ListType,
+    SexpType,
+    BagType,
+    AnyType,
+    // TODO CustomType
+}
+
+#[derive(Clone, Debug)]
+pub struct NullIfExpr {
+    pub lhs: Box<ValueExpr>,
+    pub rhs: Box<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CoalesceExpr {
+    pub elements: Vec<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
 #[allow(dead_code)] // TODO remove once out of PoC
 pub enum ValueExpr {
     // TODO other variants
@@ -124,6 +173,11 @@ pub enum ValueExpr {
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
     SubQueryExpr(SubQueryExpr),
+    SimpleCase(SimpleCase),
+    SearchedCase(SearchedCase),
+    IsTypeExpr(IsTypeExpr),
+    NullIfExpr(NullIfExpr),
+    CoalesceExpr(CoalesceExpr),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -165,6 +219,19 @@ pub struct BetweenExpr {
     pub value: Box<ValueExpr>,
     pub from: Box<ValueExpr>,
     pub to: Box<ValueExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SimpleCase {
+    pub expr: Box<ValueExpr>,
+    pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
+    pub default: Option<Box<ValueExpr>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchedCase {
+    pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
+    pub default: Option<Box<ValueExpr>>,
 }
 
 // Bindings -> Bindings : Where, OrderBy, Offset, Limit, Join, SetOp, Select, Distinct, GroupBy, Unpivot, Let

@@ -37,3 +37,6 @@ serde = [
   "rust_decimal/serde"
 ]
 
+[dependencies.partiql-ast-macros]
+path = "partiql-ast-macros"
+version = "*"

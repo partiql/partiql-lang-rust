@@ -18,6 +18,7 @@ use partiql_value::{
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
+use partiql_logical::Type;
 
 #[derive(Debug)]
 pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
@@ -405,7 +406,11 @@ impl Evaluable for EvalProject {
             let mut t = Tuple::new();
 
             self.exprs.iter().for_each(|(alias, expr)| {
-                t.insert(alias.as_str(), expr.evaluate(&v_as_tuple, ctx));
+                let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
+                if evaluated_val != Missing {
+                    // Per section 2 of PartiQL spec: "value MISSING may not appear as an attribute value
+                    t.insert(alias.as_str(), evaluated_val);
+                }
             });
             value.push(Value::Tuple(Box::new(t)));
         }
@@ -700,6 +705,24 @@ impl EvalExpr for EvalUnaryOpExpr {
     }
 }
 
+#[derive(Debug)]
+pub struct EvalIsTypeExpr {
+    pub expr: Box<dyn EvalExpr>,
+    pub is_type: Type,
+}
+
+impl EvalExpr for EvalIsTypeExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let expr = self.expr.evaluate(bindings, ctx);
+        let result = match self.is_type {
+            Type::NullType => matches!(expr, Missing | Null),
+            Type::MissingType => matches!(expr, Missing),
+            _ => todo!("Implement `IS` for other types"),
+        };
+        Value::from(result)
+    }
+}
+
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
 pub enum EvalBinOp {
@@ -823,6 +846,24 @@ impl EvalExpr for EvalBetweenExpr {
         let from = self.from.evaluate(bindings, ctx);
         let to = self.to.evaluate(bindings, ctx);
         value.gteq(&from).and(&value.lteq(&to))
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalSearchedCaseExpr {
+    pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
+    pub default: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalSearchedCaseExpr {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        for (when_expr, then_expr) in &self.cases {
+            let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
+            if when_expr_evaluated == Value::Boolean(true) {
+                return then_expr.evaluate(bindings, ctx);
+            }
+        }
+        self.default.evaluate(bindings, ctx)
     }
 }
 
