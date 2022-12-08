@@ -1,18 +1,19 @@
 use itertools::Itertools;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 
 use thiserror::Error;
 
 use petgraph::algo::toposort;
-use petgraph::data::DataMapMut;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
-    partiql_bag, Bag, BinaryAnd, BinaryOr, BindingsName, List, NullableEq, NullableOrd, Tuple,
-    UnaryPlus, Value,
+    partiql_bag, partiql_tuple, Bag, BinaryAnd, BinaryOr, BindingsName, List, NullableEq,
+    NullableOrd, Tuple, UnaryPlus, Value,
 };
 
 use crate::env::basic::MapBindings;
@@ -31,6 +32,53 @@ impl Default for EvalPlan {
 impl EvalPlan {
     fn new() -> Self {
         EvalPlan(StableGraph::<Box<dyn Evaluable>, u8, Directed>::new())
+    }
+
+    pub fn execute_mut(&mut self, bindings: MapBindings<Value>) -> Result<Evaluated, EvalErr> {
+        let ctx: Box<dyn EvalContext> = Box::new(BasicContext { bindings });
+        // We are only interested in DAGs that can be used as execution plans, which leads to the
+        // following definition.
+        // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
+        // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
+        // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
+        // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
+        let sorted_ops = toposort(&self.0, None);
+        match sorted_ops {
+            Ok(ops) => {
+                let mut result = None;
+                for idx in ops.into_iter() {
+                    let src = self
+                        .0
+                        .node_weight_mut(idx)
+                        .expect("Error in retrieving node");
+                    result = src.evaluate(&*ctx);
+
+                    let mut ne = self.0.neighbors_directed(idx, Outgoing).detach();
+                    while let Some((e, n)) = ne.next(&self.0) {
+                        // use the edge weight to store the `branch_num`
+                        let branch_num = *self
+                            .0
+                            .edge_weight(e)
+                            .expect("Error in retrieving weight for edge");
+                        let dst = self.0.node_weight_mut(n).expect("Error in retrieving node");
+                        dst.update_input(
+                            &result.clone().expect("Error in retrieving source value"),
+                            branch_num,
+                        );
+                    }
+                }
+                let evaluated = Evaluated {
+                    result: result.expect("Error in retrieving eval output"),
+                };
+                Ok(evaluated)
+            }
+            Err(e) => Err(EvalErr {
+                errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
+                    "Malformed evaluation plan detected: {:?}",
+                    e
+                ))],
+            }),
+        }
     }
 }
 
@@ -60,6 +108,7 @@ pub struct EvalScan {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
     pub at_key: Option<String>,
+    pub input: Option<Value>,
     pub output: Option<Value>,
 }
 
@@ -69,6 +118,7 @@ impl EvalScan {
             expr,
             as_key: as_key.to_string(),
             at_key: None,
+            input: None,
             output: None,
         }
     }
@@ -77,6 +127,7 @@ impl EvalScan {
             expr,
             as_key: as_key.to_string(),
             at_key: Some(at_key.to_string()),
+            input: None,
             output: None,
         }
     }
@@ -84,34 +135,44 @@ impl EvalScan {
 
 impl Evaluable for EvalScan {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.as_ref().unwrap_or(&Missing).clone();
+
+        let bindings = match input_value {
+            Value::Bag(t) => *t,
+            _ => partiql_bag![partiql_tuple![]],
+        };
+
         let mut value = partiql_bag![];
-        let v = self.expr.evaluate(&Tuple::new(), ctx);
-        let ordered = &v.is_ordered();
-        let mut at_index_counter: i64 = 0;
-        if let Some(at_key) = &self.at_key {
-            for t in v.into_iter() {
-                let mut out = Tuple::from([(self.as_key.as_str(), t)]);
-                let at_id = if *ordered {
-                    at_index_counter.into()
-                } else {
-                    Missing
-                };
-                out.insert(at_key, at_id);
-                value.push(Value::Tuple(Box::new(out)));
-                at_index_counter += 1;
+        bindings.iter().for_each(|binding| {
+            let v = self.expr.evaluate(&binding.as_tuple_ref(), ctx);
+            let ordered = &v.is_ordered();
+            let mut at_index_counter: i64 = 0;
+            if let Some(at_key) = &self.at_key {
+                for t in v.into_iter() {
+                    let mut out = Tuple::from([(self.as_key.as_str(), t)]);
+                    let at_id = if *ordered {
+                        at_index_counter.into()
+                    } else {
+                        Missing
+                    };
+                    out.insert(at_key, at_id);
+                    value.push(Value::Tuple(Box::new(out)));
+                    at_index_counter += 1;
+                }
+            } else {
+                for t in v.into_iter() {
+                    let out = Tuple::from([(self.as_key.as_str(), t)]);
+                    value.push(Value::Tuple(Box::new(out)));
+                }
             }
-        } else {
-            for t in v.into_iter() {
-                let out = Tuple::from([(self.as_key.as_str(), t)]);
-                value.push(Value::Tuple(Box::new(out)));
-            }
-        }
+        });
+
         self.output = Some(Value::Bag(Box::new(value)));
         self.output.clone()
     }
 
-    fn update_input(&mut self, _input: &Value, _branch_num: u8) {
-        todo!("update_input for Scan")
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
+        self.input = Some(input.clone());
     }
 }
 
@@ -122,6 +183,8 @@ pub enum EvalJoinKind {
     Right,
     Full,
     Cross,
+    // TODO revisit JOINS to consider the `Lateral` logic as part of current joins
+    CrossLateral,
 }
 
 #[derive(Debug)]
@@ -165,6 +228,21 @@ impl Evaluable for EvalJoin {
             })
         }
 
+        #[inline]
+        fn cross_lateral<'a>(
+            left: impl Iterator<Item = &'a Value> + Clone + 'a,
+            right: impl Iterator<Item = &'a Value> + Clone + 'a,
+        ) -> impl Iterator<Item = Tuple> + 'a {
+            left.zip(right).map(|(l_tuple, r_tuple)| {
+                l_tuple
+                    .as_tuple_ref()
+                    .pairs()
+                    .chain(r_tuple.as_tuple_ref().pairs())
+                    .map(|(a, v)| (a, v.clone()))
+                    .collect::<Tuple>()
+            })
+        }
+
         // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
         //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
         //  to be spec-compliant may result in changes to the DAG flows.
@@ -172,13 +250,14 @@ impl Evaluable for EvalJoin {
             EvalJoinKind::Inner => match &self.on {
                 None => cross(l_vals, r_vals).collect(),
                 Some(condition) => cross(l_vals, r_vals)
-                    .filter(|t| matches!(condition.evaluate(t, ctx), Value::Boolean(true)))
+                    .filter(|t| matches!(condition.evaluate(&t, ctx), Value::Boolean(true)))
                     .collect(),
             },
             EvalJoinKind::Left => {
                 todo!("Left JOINs")
             }
             EvalJoinKind::Cross => cross(l_vals, r_vals).collect(),
+            EvalJoinKind::CrossLateral => cross_lateral(l_vals, r_vals).collect(),
             EvalJoinKind::Full | EvalJoinKind::Right => {
                 todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
             }
@@ -396,12 +475,6 @@ impl Evaluable for EvalProjectValue {
     }
 }
 
-#[derive(Debug)]
-pub struct EvalTupleExpr {
-    pub attrs: Vec<Box<dyn EvalExpr>>,
-    pub vals: Vec<Box<dyn EvalExpr>>,
-}
-
 impl EvalExpr for EvalTupleExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let mut t = Tuple::new();
@@ -418,7 +491,7 @@ impl EvalExpr for EvalTupleExpr {
             .for_each(|(k, v)| {
                 let evaluated = v.evaluate(bindings, ctx);
                 // Spec. section 6.1.4
-                if evaluated != Value::Missing {
+                if evaluated != Missing {
                     t.insert(k.as_str(), evaluated);
                 }
             });
@@ -498,6 +571,39 @@ impl EvalExpr for EvalPath {
         }
         value
     }
+}
+
+#[derive(Debug)]
+pub struct EvalSubQueryExpr {
+    pub plan: Rc<RefCell<EvalPlan>>,
+}
+
+impl EvalSubQueryExpr {
+    pub fn new(plan: EvalPlan) -> Self {
+        EvalSubQueryExpr {
+            plan: Rc::new(RefCell::new(plan)),
+        }
+    }
+}
+
+impl EvalExpr for EvalSubQueryExpr {
+    fn evaluate(&self, bindings: &Tuple, _ctx: &dyn EvalContext) -> Value {
+        return if let Ok(evaluated) = self
+            .plan
+            .borrow_mut()
+            .execute_mut(MapBindings::from(bindings))
+        {
+            evaluated.result
+        } else {
+            Missing
+        };
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalTupleExpr {
+    pub attrs: Vec<Box<dyn EvalExpr>>,
+    pub vals: Vec<Box<dyn EvalExpr>>,
 }
 
 #[derive(Debug, Default)]
@@ -779,61 +885,5 @@ impl BasicContext {
 impl EvalContext for BasicContext {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
-    }
-}
-
-pub struct Evaluator {
-    ctx: Box<dyn EvalContext>,
-}
-
-impl Evaluator {
-    pub fn new(bindings: MapBindings<Value>) -> Self {
-        let ctx: Box<dyn EvalContext> = Box::new(BasicContext { bindings });
-        Evaluator { ctx }
-    }
-
-    pub fn execute(&mut self, plan: EvalPlan) -> Result<Evaluated, EvalErr> {
-        let mut graph = plan.0;
-        // We are only interested in DAGs that can be used as execution plans, which leads to the
-        // following definition.
-        // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
-        // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
-        // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
-        // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
-        let sorted_ops = toposort(&graph, None);
-        match sorted_ops {
-            Ok(ops) => {
-                let mut result = None;
-                for idx in ops.into_iter() {
-                    let src = graph
-                        .node_weight_mut(idx)
-                        .expect("Error in retrieving node");
-                    result = src.evaluate(&*self.ctx);
-
-                    let mut ne = graph.neighbors_directed(idx, Outgoing).detach();
-                    while let Some((e, n)) = ne.next(&graph) {
-                        // use the edge weight to store the `branch_num`
-                        let branch_num = *graph
-                            .edge_weight(e)
-                            .expect("Error in retrieving weight for edge");
-                        let dst = graph.node_weight_mut(n).expect("Error in retrieving node");
-                        dst.update_input(
-                            &result.clone().expect("Error in retrieving source value"),
-                            branch_num,
-                        );
-                    }
-                }
-                let evaluated = Evaluated {
-                    result: result.expect("Error in retrieving eval output"),
-                };
-                Ok(evaluated)
-            }
-            Err(e) => Err(EvalErr {
-                errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
-                    "Malformed evaluation plan detected: {:?}",
-                    e
-                ))],
-            }),
-        }
     }
 }

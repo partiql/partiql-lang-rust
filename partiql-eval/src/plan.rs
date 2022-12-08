@@ -10,8 +10,8 @@ use partiql_logical::{
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalIsTypeExpr, EvalJoinKind,
-    EvalListExpr, EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalTupleExpr,
-    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalListExpr, EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr,
+    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 use partiql_value::Value::Null;
 
@@ -99,6 +99,7 @@ impl EvaluatorPlanner {
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
                     JoinKind::Cross => EvalJoinKind::Cross,
+                    JoinKind::CrossLateral => EvalJoinKind::CrossLateral,
                 };
                 let on = on
                     .as_ref()
@@ -189,6 +190,9 @@ impl EvaluatorPlanner {
                 let from = self.plan_values(*expr.from);
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
+            }
+            ValueExpr::SubQueryExpr(expr) => {
+                Box::new(EvalSubQueryExpr::new(self.plan_eval(&expr.plan)))
             }
             ValueExpr::SimpleCase(e) => {
                 let cases = e

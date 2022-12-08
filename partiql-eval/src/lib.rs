@@ -11,8 +11,6 @@ mod tests {
     use crate::plan;
     use rust_decimal_macros::dec;
 
-    use crate::eval::Evaluator;
-
     use partiql_logical as logical;
     use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
     use partiql_logical::{
@@ -27,14 +25,12 @@ mod tests {
 
     fn evaluate(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
         let planner = plan::EvaluatorPlanner;
+        let mut plan = planner.compile(&logical);
 
-        let plan = planner.compile(&logical);
-        let mut evaluator = Evaluator::new(bindings);
-
-        if let Ok(out) = evaluator.execute(plan) {
+        if let Ok(out) = plan.execute_mut(bindings) {
             out.result
         } else {
-            Value::Missing
+            Missing
         }
     }
 
@@ -221,13 +217,8 @@ mod tests {
             Value::from(dec!(2.)),
             Value::from(dec!(3.)),
         );
-        eval_bin_op(BinaryOp::Add, Value::Null, Value::Null, Value::Null);
-        eval_bin_op(
-            BinaryOp::Add,
-            Value::Missing,
-            Value::Missing,
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Add, Null, Null, Null);
+        eval_bin_op(BinaryOp::Add, Missing, Missing, Missing);
 
         // Subtraction
         // Plan for `select lhs - rhs as result from data`
@@ -285,13 +276,8 @@ mod tests {
             Value::from(dec!(2.)),
             Value::from(dec!(-1.)),
         );
-        eval_bin_op(BinaryOp::Sub, Value::Null, Value::Null, Value::Null);
-        eval_bin_op(
-            BinaryOp::Sub,
-            Value::Missing,
-            Value::Missing,
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Sub, Null, Null, Null);
+        eval_bin_op(BinaryOp::Sub, Missing, Missing, Missing);
 
         // Multiplication
         // Plan for `select lhs * rhs as result from data`
@@ -349,13 +335,8 @@ mod tests {
             Value::from(dec!(2.)),
             Value::from(dec!(2.)),
         );
-        eval_bin_op(BinaryOp::Mul, Value::Null, Value::Null, Value::Null);
-        eval_bin_op(
-            BinaryOp::Mul,
-            Value::Missing,
-            Value::Missing,
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Mul, Null, Null, Null);
+        eval_bin_op(BinaryOp::Mul, Missing, Missing, Missing);
 
         // Division
         // Plan for `select lhs / rhs as result from data`
@@ -413,13 +394,8 @@ mod tests {
             Value::from(dec!(2.)),
             Value::from(dec!(0.5)),
         );
-        eval_bin_op(BinaryOp::Div, Value::Null, Value::Null, Value::Null);
-        eval_bin_op(
-            BinaryOp::Div,
-            Value::Missing,
-            Value::Missing,
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Div, Null, Null, Null);
+        eval_bin_op(BinaryOp::Div, Missing, Missing, Missing);
 
         // Modulo
         // Plan for `select lhs % rhs as result from data`
@@ -477,13 +453,8 @@ mod tests {
             Value::from(dec!(2.)),
             Value::from(dec!(1.)),
         );
-        eval_bin_op(BinaryOp::Mod, Value::Null, Value::Null, Value::Null);
-        eval_bin_op(
-            BinaryOp::Mod,
-            Value::Missing,
-            Value::Missing,
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Mod, Null, Null, Null);
+        eval_bin_op(BinaryOp::Mod, Missing, Missing, Missing);
     }
 
     #[test]
@@ -569,19 +540,9 @@ mod tests {
             Value::from("def"),
             Value::from(true),
         );
-        eval_bin_op(
-            BinaryOp::Lt,
-            Value::Missing,
-            Value::from(2.),
-            Value::Missing,
-        );
-        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
-        eval_bin_op(
-            BinaryOp::Lt,
-            Value::from(1),
-            Value::from("foo"),
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Lt, Missing, Value::from(2.), Missing);
+        eval_bin_op(BinaryOp::Lt, Null, Value::from(2.), Null);
+        eval_bin_op(BinaryOp::Lt, Value::from(1), Value::from("foo"), Missing);
 
         // Gt
         // Plan for `select lhs > rhs as result from data`
@@ -597,19 +558,9 @@ mod tests {
             Value::from("def"),
             Value::from(false),
         );
-        eval_bin_op(
-            BinaryOp::Gt,
-            Value::Missing,
-            Value::from(2.),
-            Value::Missing,
-        );
-        eval_bin_op(BinaryOp::Gt, Value::Null, Value::from(2.), Value::Null);
-        eval_bin_op(
-            BinaryOp::Gt,
-            Value::from(1),
-            Value::from("foo"),
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Gt, Missing, Value::from(2.), Missing);
+        eval_bin_op(BinaryOp::Gt, Null, Value::from(2.), Null);
+        eval_bin_op(BinaryOp::Gt, Value::from(1), Value::from("foo"), Missing);
 
         // Lteq
         // Plan for `select lhs <= rhs as result from data`
@@ -625,19 +576,9 @@ mod tests {
             Value::from("def"),
             Value::from(true),
         );
-        eval_bin_op(
-            BinaryOp::Lteq,
-            Value::Missing,
-            Value::from(2.),
-            Value::Missing,
-        );
-        eval_bin_op(BinaryOp::Lt, Value::Null, Value::from(2.), Value::Null);
-        eval_bin_op(
-            BinaryOp::Lteq,
-            Value::from(1),
-            Value::from("foo"),
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Lteq, Missing, Value::from(2.), Missing);
+        eval_bin_op(BinaryOp::Lt, Null, Value::from(2.), Null);
+        eval_bin_op(BinaryOp::Lteq, Value::from(1), Value::from("foo"), Missing);
 
         // Gteq
         // Plan for `select lhs >= rhs as result from data`
@@ -653,19 +594,9 @@ mod tests {
             Value::from("def"),
             Value::from(false),
         );
-        eval_bin_op(
-            BinaryOp::Gteq,
-            Value::Missing,
-            Value::from(2.),
-            Value::Missing,
-        );
-        eval_bin_op(BinaryOp::Gteq, Value::Null, Value::from(2.), Value::Null);
-        eval_bin_op(
-            BinaryOp::Gteq,
-            Value::from(1),
-            Value::from("foo"),
-            Value::Missing,
-        );
+        eval_bin_op(BinaryOp::Gteq, Missing, Value::from(2.), Missing);
+        eval_bin_op(BinaryOp::Gteq, Null, Value::from(2.), Null);
+        eval_bin_op(BinaryOp::Gteq, Value::from(1), Value::from("foo"), Missing);
     }
 
     #[test]
@@ -726,25 +657,15 @@ mod tests {
             Value::from(3),
             Value::from(false),
         );
-        eval_between_op(Value::Null, Value::from(1), Value::from(3), Value::Null);
-        eval_between_op(Value::from(2), Value::Null, Value::from(3), Value::Null);
-        eval_between_op(Value::from(2), Value::from(1), Value::Null, Value::Null);
-        eval_between_op(Value::Missing, Value::from(1), Value::from(3), Value::Null);
-        eval_between_op(Value::from(2), Value::Missing, Value::from(3), Value::Null);
-        eval_between_op(Value::from(2), Value::from(1), Value::Missing, Value::Null);
+        eval_between_op(Null, Value::from(1), Value::from(3), Null);
+        eval_between_op(Value::from(2), Null, Value::from(3), Null);
+        eval_between_op(Value::from(2), Value::from(1), Null, Null);
+        eval_between_op(Missing, Value::from(1), Value::from(3), Null);
+        eval_between_op(Value::from(2), Missing, Value::from(3), Null);
+        eval_between_op(Value::from(2), Value::from(1), Missing, Null);
         // left part of AND evaluates to false
-        eval_between_op(
-            Value::from(1),
-            Value::from(2),
-            Value::Null,
-            Value::from(false),
-        );
-        eval_between_op(
-            Value::from(1),
-            Value::from(2),
-            Value::Missing,
-            Value::from(false),
-        );
+        eval_between_op(Value::from(1), Value::from(2), Null, Value::from(false));
+        eval_between_op(Value::from(1), Value::from(2), Missing, Value::from(false));
     }
 
     #[test]
@@ -1873,6 +1794,149 @@ mod tests {
         assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
                 partiql_tuple![("b", 1)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn subquery_in_from() {
+        // SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s;
+        let mut subq_plan = LogicalPlan::new();
+        let subq_scan = subq_plan.add_operator(scan("t", "v"));
+        let va = path_var("v", "a");
+        let subq_project = subq_plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "u".to_string(),
+                ValueExpr::BinaryExpr(
+                    BinaryOp::Mul,
+                    Box::new(va),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                ),
+            )]),
+        }));
+        let subq_sink = subq_plan.add_operator(BindingsExpr::Sink);
+
+        subq_plan.add_flow(subq_scan, subq_project);
+        subq_plan.add_flow(subq_project, subq_sink);
+
+        let mut lg = LogicalPlan::new();
+
+        let from_lhs = lg.add_operator(scan("data", "t"));
+        let from_rhs = lg.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: subq_plan }),
+            as_key: "s".to_string(),
+            at_key: None,
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::CrossLateral,
+            on: None,
+        }));
+
+        let ta = path_var("t", "a");
+        let su = path_var("s", "u");
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([("ta".to_string(), ta), ("su".to_string(), su)]),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let data = partiql_list![
+            partiql_tuple![("a", 1)],
+            partiql_tuple![("a", 2)],
+            partiql_tuple![("a", 3)],
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![
+                    ("ta", 1),
+                    ("su", 2),
+                ],
+                partiql_tuple![
+                    ("ta", 2),
+                    ("su", 4),
+                ],
+                partiql_tuple![
+                    ("ta", 3),
+                    ("su", 6),
+                ],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn subquery_in_project() {
+        // SELECT t.a, (SELECT v.a*2 AS u FROM t AS v) AS s FROM data AS t;
+        let mut subq_plan = LogicalPlan::new();
+        let subq_scan = subq_plan.add_operator(scan("t", "v"));
+        let va = path_var("v", "a");
+        let subq_project = subq_plan.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "u".to_string(),
+                ValueExpr::BinaryExpr(
+                    BinaryOp::Mul,
+                    Box::new(va),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                ),
+            )]),
+        }));
+        let subq_sink = subq_plan.add_operator(BindingsExpr::Sink);
+
+        subq_plan.add_flow(subq_scan, subq_project);
+        subq_plan.add_flow(subq_project, subq_sink);
+
+        let mut lg = LogicalPlan::new();
+        let from = lg.add_operator(scan("data", "t"));
+        let ta = path_var("t", "a");
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([
+                ("ta".to_string(), ta),
+                (
+                    "s".to_string(),
+                    ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: subq_plan }),
+                ),
+            ]),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+
+        lg.add_flow(from, project);
+        lg.add_flow(project, sink);
+
+        let data = partiql_list![
+            partiql_tuple![("a", 1), ("b", 1)],
+            partiql_tuple![("a", 2), ("b", 2)]
+        ];
+
+        let mut bindings: MapBindings<Value> = MapBindings::default();
+        bindings.insert("data", data.into());
+
+        let out = evaluate(lg, bindings);
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![
+                    ("ta", 1),
+                    ("s", partiql_bag![partiql_tuple![("u", 2)]]),
+                ],
+                partiql_tuple![
+                    ("ta", 2),
+                    ("s", partiql_bag![partiql_tuple![("u", 4)]]),
+                ],
             ];
             assert_eq!(*bag, expected);
         });
