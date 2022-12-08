@@ -1,8 +1,5 @@
-use ion_rs::external::bigdecimal::BigDecimal;
 use ion_rs::{Integer, IonReader, IonType, Reader, StreamItem};
 use partiql_value::{Bag, List, Tuple, Value};
-use std::fs::read;
-use std::str::FromStr;
 
 pub(crate) struct TestValue {
     value: Value,
@@ -91,10 +88,7 @@ fn parse_test_value_tuple(reader: &mut Reader) -> Tuple {
                 reader.field_name().expect("field name"),
                 parse_test_value(reader, typ),
             ),
-            StreamItem::Null(_) => (
-                reader.field_name().expect("field name"),
-                parse_null(&reader),
-            ),
+            StreamItem::Null(_) => (reader.field_name().expect("field name"), parse_null(reader)),
             StreamItem::Nothing => break,
         };
         tuple.insert(key.text().unwrap(), value);
@@ -110,7 +104,7 @@ fn parse_test_value_sequence(reader: &mut Reader) -> Vec<Value> {
         let item = reader.next().expect("test value");
         let val = match item {
             StreamItem::Value(typ) => parse_test_value(reader, typ),
-            StreamItem::Null(_) => parse_null(&reader),
+            StreamItem::Null(_) => parse_null(reader),
             StreamItem::Nothing => break,
         };
         values.push(val);
@@ -123,7 +117,7 @@ fn parse_test_value_sequence(reader: &mut Reader) -> Vec<Value> {
 #[cfg(not(feature = "conformance_test"))]
 mod tests {
     use super::parse_test_value_str;
-    use ion_rs::Decimal;
+
     use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Bag, List, Tuple, Value};
 
     #[track_caller]
@@ -156,6 +150,7 @@ mod tests {
             ("d", Value::Real(2.0.into())),
             ("s", 1)
         ]]);
+        parse(test, expected);
     }
 
     #[test]
@@ -227,5 +222,6 @@ mod tests {
             ("d", Value::Real(2.0.into())),
             ("s", 1)
         ]]);
+        parse(test, expected);
     }
 }
