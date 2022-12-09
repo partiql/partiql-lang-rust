@@ -98,6 +98,26 @@ mod tests {
         bindings
     }
 
+    fn join_data_sensors() -> MapBindings<Value> {
+        let sensors = partiql_list![
+            partiql_tuple![(
+                "readings",
+                partiql_list![partiql_tuple![("v", 1.3)], partiql_tuple![("v", 2)],]
+            )],
+            partiql_tuple![(
+                "readings",
+                partiql_list![
+                    partiql_tuple![("v", 0.7)],
+                    partiql_tuple![("v", 0.8)],
+                    partiql_tuple![("v", 0.9)],
+                ]
+            )],
+        ];
+        let mut bindings = MapBindings::default();
+        bindings.insert("sensors", sensors.into());
+        bindings
+    }
+
     fn case_when_data() -> MapBindings<Value> {
         let nums = partiql_list![
             partiql_tuple![("a", 1)],
@@ -693,6 +713,7 @@ mod tests {
 
         let sink = lg.add_operator(BindingsExpr::Sink);
         lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
         lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
@@ -706,6 +727,48 @@ mod tests {
                 partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 523)],
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_with_cross_join_sensors() {
+        let mut lg = LogicalPlan::new();
+
+        let from_lhs = lg.add_operator(scan("sensors", "s"));
+        let from_rhs = lg.add_operator(BindingsExpr::Scan(logical::Scan {
+            expr: path_var("s", "readings"),
+            as_key: "r".to_string(),
+            at_key: None,
+        }));
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Cross,
+            on: None,
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
+        lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_rhs, join, 1);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data_sensors());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("v", 1.3)],
+                partiql_tuple![("v", 2)],
+                partiql_tuple![("v", 0.7)],
+                partiql_tuple![("v", 0.8)],
+                partiql_tuple![("v", 0.9)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -740,6 +803,7 @@ mod tests {
 
         let sink = lg.add_operator(BindingsExpr::Sink);
         lg.add_flow_with_branch_num(from_lhs, join, 0);
+        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
         lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
@@ -1830,7 +1894,7 @@ mod tests {
         }));
 
         let join = lg.add_operator(BindingsExpr::Join(logical::Join {
-            kind: JoinKind::CrossLateral,
+            kind: JoinKind::Cross,
             on: None,
         }));
 

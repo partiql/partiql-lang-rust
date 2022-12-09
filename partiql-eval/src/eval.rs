@@ -145,24 +145,27 @@ impl Evaluable for EvalScan {
         let mut value = partiql_bag![];
         bindings.iter().for_each(|binding| {
             let v = self.expr.evaluate(&binding.as_tuple_ref(), ctx);
-            let ordered = &v.is_ordered();
-            let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
+                let ordered = &v.is_ordered();
+                let mut at_index_counter: i64 = 0;
                 for t in v.into_iter() {
-                    let mut out = Tuple::from([(self.as_key.as_str(), t)]);
+                    let mut binding_as_tuple = binding.clone().coerce_to_tuple();
+                    binding_as_tuple.insert(self.as_key.as_str(), t);
                     let at_id = if *ordered {
                         at_index_counter.into()
                     } else {
                         Missing
                     };
-                    out.insert(at_key, at_id);
-                    value.push(Value::Tuple(Box::new(out)));
+                    binding_as_tuple.insert(at_key, at_id);
+                    // TODO: add test using `AT` to lib.rs with LATERAL JOIN
+                    value.push(Value::Tuple(Box::new(binding_as_tuple)));
                     at_index_counter += 1;
                 }
             } else {
                 for t in v.into_iter() {
-                    let out = Tuple::from([(self.as_key.as_str(), t)]);
-                    value.push(Value::Tuple(Box::new(out)));
+                    let mut binding_as_tuple = binding.clone().coerce_to_tuple();
+                    binding_as_tuple.insert(self.as_key.as_str(), t);
+                    value.push(Value::Tuple(Box::new(binding_as_tuple)));
                 }
             }
         });
@@ -183,8 +186,6 @@ pub enum EvalJoinKind {
     Right,
     Full,
     Cross,
-    // TODO revisit JOINS to consider the `Lateral` logic as part of current joins
-    CrossLateral,
 }
 
 #[derive(Debug)]
@@ -210,54 +211,21 @@ impl EvalJoin {
 
 impl Evaluable for EvalJoin {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let l_vals = self.input_l.as_ref().unwrap().iter();
-        let r_vals = self.input_r.as_ref().unwrap().iter();
+        let r_vals_as_value = self.input_r.clone().unwrap();
 
-        #[inline]
-        fn cross<'a>(
-            left: impl Iterator<Item = &'a Value> + Clone + 'a,
-            right: impl Iterator<Item = &'a Value> + Clone + 'a,
-        ) -> impl Iterator<Item = Tuple> + 'a {
-            left.cartesian_product(right).map(|(l_tuple, r_tuple)| {
-                l_tuple
-                    .as_tuple_ref()
-                    .pairs()
-                    .chain(r_tuple.as_tuple_ref().pairs())
-                    .map(|(a, v)| (a, v.clone()))
-                    .collect::<Tuple>()
-            })
-        }
-
-        #[inline]
-        fn cross_lateral<'a>(
-            left: impl Iterator<Item = &'a Value> + Clone + 'a,
-            right: impl Iterator<Item = &'a Value> + Clone + 'a,
-        ) -> impl Iterator<Item = Tuple> + 'a {
-            left.zip(right).map(|(l_tuple, r_tuple)| {
-                l_tuple
-                    .as_tuple_ref()
-                    .pairs()
-                    .chain(r_tuple.as_tuple_ref().pairs())
-                    .map(|(a, v)| (a, v.clone()))
-                    .collect::<Tuple>()
-            })
-        }
-
-        // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
-        //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
-        //  to be spec-compliant may result in changes to the DAG flows.
         let output: Bag = match self.kind {
             EvalJoinKind::Inner => match &self.on {
-                None => cross(l_vals, r_vals).collect(),
-                Some(condition) => cross(l_vals, r_vals)
-                    .filter(|t| matches!(condition.evaluate(&t, ctx), Value::Boolean(true)))
+                None => r_vals_as_value.coerce_to_bag(),
+                Some(condition) => r_vals_as_value
+                    .into_iter()
+                    .map(|v| v.coerce_to_tuple())
+                    .filter(|v| matches!(condition.evaluate(v, ctx), Value::Boolean(true)))
                     .collect(),
             },
             EvalJoinKind::Left => {
                 todo!("Left JOINs")
             }
-            EvalJoinKind::Cross => cross(l_vals, r_vals).collect(),
-            EvalJoinKind::CrossLateral => cross_lateral(l_vals, r_vals).collect(),
+            EvalJoinKind::Cross => r_vals_as_value.coerce_to_bag(),
             EvalJoinKind::Full | EvalJoinKind::Right => {
                 todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
             }

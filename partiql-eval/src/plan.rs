@@ -99,7 +99,6 @@ impl EvaluatorPlanner {
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
                     JoinKind::Cross => EvalJoinKind::Cross,
-                    JoinKind::CrossLateral => EvalJoinKind::CrossLateral,
                 };
                 let on = on
                     .as_ref()

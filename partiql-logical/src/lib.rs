@@ -287,8 +287,6 @@ pub enum JoinKind {
     Right,
     Full,
     Cross,
-    // TODO revisit JOINS to consider the `Lateral` logic as part of current joins
-    CrossLateral,
 }
 
 #[derive(Debug, Clone)]
