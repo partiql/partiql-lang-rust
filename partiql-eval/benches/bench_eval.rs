@@ -9,8 +9,8 @@ use partiql_eval::eval::{
 };
 use partiql_eval::plan;
 use partiql_logical as logical;
-use partiql_logical::BindingsExpr::Project;
-use partiql_logical::{BinaryOp, BindingsExpr, JoinKind, LogicalPlan, PathComponent, ValueExpr};
+use partiql_logical::BindingsOp::Project;
+use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
 use partiql_value::{
     partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
 };
@@ -69,8 +69,8 @@ fn join_data() -> MapBindings<Value> {
     bindings
 }
 
-fn scan(name: &str, as_key: &str) -> BindingsExpr {
-    BindingsExpr::Scan(logical::Scan {
+fn scan(name: &str, as_key: &str) -> BindingsOp {
+    BindingsOp::Scan(logical::Scan {
         expr: ValueExpr::VarRef(BindingsName::CaseInsensitive(name.into())),
         as_key: as_key.to_string(),
         at_key: None,
@@ -86,7 +86,7 @@ fn path_var(name: &str, component: &str) -> ValueExpr {
     )
 }
 
-fn logical_plan() -> LogicalPlan<BindingsExpr> {
+fn logical_plan() -> LogicalPlan<BindingsOp> {
     let mut lg = LogicalPlan::new();
 
     // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
@@ -103,7 +103,7 @@ fn logical_plan() -> LogicalPlan<BindingsExpr> {
         ]),
     }));
 
-    let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+    let join = lg.add_operator(BindingsOp::Join(logical::Join {
         kind: JoinKind::Inner,
         on: Some(ValueExpr::BinaryExpr(
             BinaryOp::Eq,
@@ -112,7 +112,7 @@ fn logical_plan() -> LogicalPlan<BindingsExpr> {
         )),
     }));
 
-    let sink = lg.add_operator(BindingsExpr::Sink);
+    let sink = lg.add_operator(BindingsOp::Sink);
     lg.add_flow_with_branch_num(from_lhs, join, 0);
     lg.add_flow_with_branch_num(from_rhs, join, 1);
     lg.add_flow_with_branch_num(join, project, 0);
@@ -121,7 +121,7 @@ fn logical_plan() -> LogicalPlan<BindingsExpr> {
     lg
 }
 
-fn eval_plan(logical: &LogicalPlan<BindingsExpr>) -> EvalPlan {
+fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     let planner = plan::EvaluatorPlanner;
 
     planner.compile(logical)
