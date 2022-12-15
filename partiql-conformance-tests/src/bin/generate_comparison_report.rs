@@ -44,8 +44,8 @@ fn main() {
     let orig_results = fs::read_to_string(orig_path).expect("read to string orig_results");
     let new_results = fs::read_to_string(new_path).expect("read to string new_results");
 
-    let orig_report: CTSReport = serde_json::from_str(&*orig_results).expect("from_str");
-    let new_report: CTSReport = serde_json::from_str(&*new_results).expect("from_str");
+    let orig_report: CTSReport = serde_json::from_str(&orig_results).expect("from_str");
+    let new_report: CTSReport = serde_json::from_str(&new_results).expect("from_str");
 
     let orig_failing: HashSet<String> = HashSet::from_iter(orig_report.failing);
     let new_failing: HashSet<String> = HashSet::from_iter(new_report.failing);
@@ -73,8 +73,8 @@ fn main() {
     let num_orig_ignored = orig_ignored.len() as i32;
     let num_new_ignored = new_ignored.len() as i32;
 
-    let total_orig = num_orig_passing + num_orig_failing + num_orig_ignored as i32;
-    let total_new = num_new_passing + num_new_failing + num_new_ignored as i32;
+    let total_orig = num_orig_passing + num_orig_failing + num_orig_ignored;
+    let total_new = num_new_passing + num_new_failing + num_new_ignored;
 
     let orig_passing = num_orig_passing as f32 / total_orig as f32 * 100.;
     let new_passing = num_new_passing as f32 / total_new as f32 * 100.;

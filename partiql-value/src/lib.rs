@@ -50,12 +50,12 @@ impl ops::Add for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l + r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l + *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l + r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) + rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Integer(_)) => self + &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) + rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
+            (Value::Real(_), Value::Integer(_)) => self + &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self + &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self + &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -74,12 +74,12 @@ impl ops::Sub for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l - r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l - *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l - r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) - rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Integer(_)) => self - &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) - rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
+            (Value::Real(_), Value::Integer(_)) => self - &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self - &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self - &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -98,12 +98,12 @@ impl ops::Mul for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l * r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l * *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l * r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) * rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Integer(_)) => self * &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) * rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
+            (Value::Real(_), Value::Integer(_)) => self * &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self * &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self * &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -122,12 +122,12 @@ impl ops::Div for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l / r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l / *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l / r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) / rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Integer(_)) => self / &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) / rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
+            (Value::Real(_), Value::Integer(_)) => self / &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self / &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self / &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -146,12 +146,12 @@ impl ops::Rem for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l % r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l % *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l % r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) % rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Integer(_)) => self % &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) % rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
+            (Value::Real(_), Value::Integer(_)) => self % &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self % &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self % &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
