@@ -239,6 +239,10 @@ impl Evaluable for EvalJoin {
 
         // Current implementations follow pseudocode defined in section 5.6 of spec
         // https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.6
+        // TODO: This isn't quite the correct behavior for binding tuple concatenation specified in
+        //  the spec section 3.4 (https://partiql.org/assets/PartiQL-Specification.pdf#subsection.3.4).
+        //  Currently using Tuple's `.add` function which doesn't remove duplicates. Will need a
+        //  separate method or Tuple data structure for binding tuple concatenation.
         match self.kind {
             EvalJoinKind::Inner => {
                 // for each binding b_l in eval(p0, p, l)
@@ -246,7 +250,7 @@ impl Evaluable for EvalJoin {
                     let env_b_l = input_env
                         .as_tuple_ref()
                         .as_ref()
-                        .tuple_concat(b_l.as_tuple_ref().borrow());
+                        .add(b_l.as_tuple_ref().borrow());
                     self.right.update_input(&Value::from(env_b_l), 0);
                     let rhs_values = self.right.evaluate(ctx);
 
@@ -259,20 +263,15 @@ impl Evaluable for EvalJoin {
                     for b_r in right_bindings.iter() {
                         match &self.on {
                             None => {
-                                let b_l_b_r = b_l
-                                    .as_tuple_ref()
-                                    .as_ref()
-                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                let b_l_b_r =
+                                    b_l.as_tuple_ref().as_ref().add(b_r.as_tuple_ref().borrow());
                                 output_bag.push(Value::from(b_l_b_r));
                             }
                             // if eval(p0, (p || b_l || b_r), c) is true, add b_l || b_r to output bag
                             Some(condition) => {
-                                let b_l_b_r = b_l
-                                    .as_tuple_ref()
-                                    .as_ref()
-                                    .tuple_concat(b_r.as_tuple_ref().borrow());
-                                let env_b_l_b_r =
-                                    &b_l_b_r.tuple_concat(input_env.as_tuple_ref().borrow());
+                                let b_l_b_r =
+                                    b_l.as_tuple_ref().as_ref().add(b_r.as_tuple_ref().borrow());
+                                let env_b_l_b_r = &b_l_b_r.add(input_env.as_tuple_ref().borrow());
                                 if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
                                     output_bag.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
@@ -289,7 +288,7 @@ impl Evaluable for EvalJoin {
                     let env_b_l = input_env
                         .as_tuple_ref()
                         .as_ref()
-                        .tuple_concat(b_l.as_tuple_ref().borrow());
+                        .add(b_l.as_tuple_ref().borrow());
                     self.right.update_input(&Value::from(env_b_l), 0);
                     let rhs_values = self.right.evaluate(ctx);
 
@@ -302,20 +301,15 @@ impl Evaluable for EvalJoin {
                     for b_r in right_bindings.iter() {
                         match &self.on {
                             None => {
-                                let b_l_b_r = b_l
-                                    .as_tuple_ref()
-                                    .as_ref()
-                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                let b_l_b_r =
+                                    b_l.as_tuple_ref().as_ref().add(b_r.as_tuple_ref().borrow());
                                 output_bag_left.push(Value::from(b_l_b_r));
                             }
                             // if eval(p0, (p || b_l || b_r), c) is true, add b_l || b_r to q_r
                             Some(condition) => {
-                                let b_l_b_r = b_l
-                                    .as_tuple_ref()
-                                    .as_ref()
-                                    .tuple_concat(b_r.as_tuple_ref().borrow());
-                                let env_b_l_b_r =
-                                    &b_l_b_r.tuple_concat(input_env.as_tuple_ref().borrow());
+                                let b_l_b_r =
+                                    b_l.as_tuple_ref().as_ref().add(b_r.as_tuple_ref().borrow());
+                                let env_b_l_b_r = &b_l_b_r.add(input_env.as_tuple_ref().borrow());
                                 if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
                                     output_bag_left.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
@@ -329,7 +323,7 @@ impl Evaluable for EvalJoin {
                         let new_binding = b_l
                             .as_tuple_ref()
                             .as_ref()
-                            .tuple_concat(&Tuple::new_with_default_val(attrs, Null));
+                            .add(&Tuple::new_with_default_val(attrs, Null));
                         // add b_l || <v_1_r: NULL, ..., v_n_r: NULL> to output bag
                         output_bag.push(Value::from(new_binding));
                     } else {
