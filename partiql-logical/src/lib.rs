@@ -292,6 +292,8 @@ pub enum JoinKind {
 #[derive(Debug, Clone)]
 pub struct Join {
     pub kind: JoinKind,
+    pub left: Box<BindingsExpr>,
+    pub right: Box<BindingsExpr>,
     pub on: Option<ValueExpr>,
 }
 

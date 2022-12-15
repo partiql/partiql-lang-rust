@@ -92,18 +92,27 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key.as_ref().unwrap(),
             )),
-            BindingsExpr::Join(logical::Join { kind, on }) => {
+            BindingsExpr::Join(logical::Join {
+                kind,
+                left,
+                right,
+                on,
+            }) => {
                 let kind = match kind {
-                    JoinKind::Inner => EvalJoinKind::Inner,
+                    JoinKind::Cross | JoinKind::Inner => EvalJoinKind::Inner,
                     JoinKind::Left => EvalJoinKind::Left,
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
-                    JoinKind::Cross => EvalJoinKind::Cross,
                 };
                 let on = on
                     .as_ref()
                     .map(|on_condition| self.plan_values(on_condition.clone()));
-                Box::new(eval::EvalJoin::new(kind, on))
+                Box::new(eval::EvalJoin::new(
+                    kind,
+                    self.get_eval_node(left),
+                    self.get_eval_node(right),
+                    on,
+                ))
             }
             _ => panic!("Unevaluable bexpr"),
         }

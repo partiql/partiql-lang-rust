@@ -118,6 +118,27 @@ mod tests {
         bindings
     }
 
+    fn join_data_sensors_with_empty_table() -> MapBindings<Value> {
+        let sensors = partiql_list![
+            partiql_tuple![(
+                "readings",
+                partiql_list![partiql_tuple![("v", 1.3)], partiql_tuple![("v", 2)],]
+            )],
+            partiql_tuple![(
+                "readings",
+                partiql_list![
+                    partiql_tuple![("v", 0.7)],
+                    partiql_tuple![("v", 0.8)],
+                    partiql_tuple![("v", 0.9)],
+                ]
+            )],
+            partiql_tuple![("readings", partiql_list![])],
+        ];
+        let mut bindings = MapBindings::default();
+        bindings.insert("sensors", sensors.into());
+        bindings
+    }
+
     fn case_when_data() -> MapBindings<Value> {
         let nums = partiql_list![
             partiql_tuple![("a", 1)],
@@ -689,14 +710,13 @@ mod tests {
     }
 
     #[test]
-    fn select_with_cross_join() {
+    fn select_with_join_and_on() {
+        // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
+        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o ON c.id = o.custId
+        let from_lhs = scan("customers", "c");
+        let from_rhs = scan("orders", "o");
+
         let mut lg = LogicalPlan::new();
-
-        // Example 9 from spec with projected columns from different tables demonstrates a cross join:
-        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o
-        let from_lhs = lg.add_operator(scan("customers", "c"));
-        let from_rhs = lg.add_operator(scan("orders", "o"));
-
         let project = lg.add_operator(Project(logical::Project {
             exprs: HashMap::from([
                 ("id".to_string(), path_var("c", "id")),
@@ -708,13 +728,16 @@ mod tests {
 
         let join = lg.add_operator(BindingsExpr::Join(logical::Join {
             kind: JoinKind::Cross,
-            on: None,
+            left: Box::new(from_lhs),
+            right: Box::new(from_rhs),
+            on: Some(ValueExpr::BinaryExpr(
+                BinaryOp::Eq,
+                Box::new(path_var("c", "id")),
+                Box::new(path_var("o", "custId")),
+            )),
         }));
 
         let sink = lg.add_operator(BindingsExpr::Sink);
-        lg.add_flow_with_branch_num(from_lhs, join, 0);
-        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
-        lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -723,8 +746,6 @@ mod tests {
 
         assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
-                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 101)],
-                partiql_tuple![("custId", 7), ("name", "Joe"), ("id", 5), ("productId", 523)],
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
                 partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
             ];
@@ -734,14 +755,18 @@ mod tests {
 
     #[test]
     fn select_with_cross_join_sensors() {
+        // Similar to example 10 from PartiQL spec. Equivalent to query:
+        //  SELECT r.v AS v FROM sensors AS s, s.readings AS r
+        // Above demonstrates LATERAL JOINs since the RHS of the JOIN uses bindings defined from the
+        // LHS scan
         let mut lg = LogicalPlan::new();
 
-        let from_lhs = lg.add_operator(scan("sensors", "s"));
-        let from_rhs = lg.add_operator(BindingsExpr::Scan(logical::Scan {
+        let from_lhs = scan("sensors", "s");
+        let from_rhs = BindingsExpr::Scan(logical::Scan {
             expr: path_var("s", "readings"),
             as_key: "r".to_string(),
             at_key: None,
-        }));
+        });
 
         let project = lg.add_operator(Project(logical::Project {
             exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
@@ -749,13 +774,12 @@ mod tests {
 
         let join = lg.add_operator(BindingsExpr::Join(logical::Join {
             kind: JoinKind::Cross,
+            left: Box::new(from_lhs),
+            right: Box::new(from_rhs),
             on: None,
         }));
 
         let sink = lg.add_operator(BindingsExpr::Sink);
-        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
-        lg.add_flow_with_branch_num(from_lhs, join, 0);
-        lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -775,46 +799,96 @@ mod tests {
     }
 
     #[test]
-    fn select_with_join_and_on() {
+    fn select_with_cross_join_sensors_with_empty_table() {
+        // Similar to example 11 from PartiQL spec. Equivalent to query:
+        //  SELECT r.v AS v FROM sensors AS s, s.readings AS r
+        // Above uses a different `sensors` table which includes an empty list for `readings` than
+        // example 10. This demonstrates that binding tuple is excluded for CROSS JOINs
         let mut lg = LogicalPlan::new();
 
-        // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
-        // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o ON c.id = o.custId
-        let from_lhs = lg.add_operator(scan("customers", "c"));
-        let from_rhs = lg.add_operator(scan("orders", "o"));
+        let from_lhs = scan("sensors", "s");
+        let from_rhs = BindingsExpr::Scan(logical::Scan {
+            expr: path_var("s", "readings"),
+            as_key: "r".to_string(),
+            at_key: None,
+        });
 
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([
-                ("id".to_string(), path_var("c", "id")),
-                ("name".to_string(), path_var("c", "name")),
-                ("custId".to_string(), path_var("o", "custId")),
-                ("productId".to_string(), path_var("o", "productId")),
-            ]),
+            exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
         }));
 
         let join = lg.add_operator(BindingsExpr::Join(logical::Join {
-            kind: JoinKind::Inner,
-            on: Some(ValueExpr::BinaryExpr(
-                BinaryOp::Eq,
-                Box::new(path_var("c", "id")),
-                Box::new(path_var("o", "custId")),
-            )),
+            kind: JoinKind::Cross,
+            left: Box::new(from_lhs),
+            right: Box::new(from_rhs),
+            on: None,
         }));
 
         let sink = lg.add_operator(BindingsExpr::Sink);
-        lg.add_flow_with_branch_num(from_lhs, join, 0);
-        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
-        lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
-        let out = evaluate(lg, join_data());
+        let out = evaluate(lg, join_data_sensors_with_empty_table());
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![
-                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
-                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+                partiql_tuple![("v", 1.3)],
+                partiql_tuple![("v", 2)],
+                partiql_tuple![("v", 0.7)],
+                partiql_tuple![("v", 0.8)],
+                partiql_tuple![("v", 0.9)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_with_left_join_sensors_with_empty_table() {
+        // Similar to example 11 from PartiQL spec. Equivalent to query:
+        //  SELECT r AS r FROM sensors AS s LEFT CROSS JOIN s.readings AS r
+        // Above uses a different `sensors` table which includes an empty list for `readings` than
+        // example 10. This demonstrates that empty binding tuples are included for LEFT (CROSS)
+        // JOINs and defined by a binding tuple with each variable mapping to NULL (see the last
+        // tuple in the result).
+        let mut lg = LogicalPlan::new();
+
+        let from_lhs = scan("sensors", "s");
+        let from_rhs = BindingsExpr::Scan(logical::Scan {
+            expr: path_var("s", "readings"),
+            as_key: "r".to_string(),
+            at_key: None,
+        });
+
+        let project = lg.add_operator(Project(logical::Project {
+            exprs: HashMap::from([(
+                "r".to_string(),
+                ValueExpr::VarRef(BindingsName::CaseInsensitive("r".into())),
+            )]),
+        }));
+
+        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+            kind: JoinKind::Left,
+            left: Box::new(from_lhs),
+            right: Box::new(from_rhs),
+            on: Some(ValueExpr::Lit(Box::new(Value::from(true)))),
+        }));
+
+        let sink = lg.add_operator(BindingsExpr::Sink);
+        lg.add_flow_with_branch_num(join, project, 0);
+        lg.add_flow_with_branch_num(project, sink, 0);
+
+        let out = evaluate(lg, join_data_sensors_with_empty_table());
+        println!("{:?}", &out);
+
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("r", partiql_tuple![("v", 1.3)])],
+                partiql_tuple![("r", partiql_tuple![("v", 2)])],
+                partiql_tuple![("r", partiql_tuple![("v", 0.7)])],
+                partiql_tuple![("r", partiql_tuple![("v", 0.8)])],
+                partiql_tuple![("r", partiql_tuple![("v", 0.9)])],
+                partiql_tuple![("r", Null)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1886,15 +1960,17 @@ mod tests {
 
         let mut lg = LogicalPlan::new();
 
-        let from_lhs = lg.add_operator(scan("data", "t"));
-        let from_rhs = lg.add_operator(BindingsExpr::Scan(logical::Scan {
+        let from_lhs = scan("data", "t");
+        let from_rhs = BindingsExpr::Scan(logical::Scan {
             expr: ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: subq_plan }),
             as_key: "s".to_string(),
             at_key: None,
-        }));
+        });
 
         let join = lg.add_operator(BindingsExpr::Join(logical::Join {
             kind: JoinKind::Cross,
+            left: Box::new(from_lhs),
+            right: Box::new(from_rhs),
             on: None,
         }));
 
@@ -1906,9 +1982,6 @@ mod tests {
 
         let sink = lg.add_operator(BindingsExpr::Sink);
 
-        lg.add_flow_with_branch_num(from_lhs, from_rhs, 0);
-        lg.add_flow_with_branch_num(from_lhs, join, 0);
-        lg.add_flow_with_branch_num(from_rhs, join, 1);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
