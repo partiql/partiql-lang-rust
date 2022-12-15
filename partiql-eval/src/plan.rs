@@ -99,6 +99,8 @@ impl EvaluatorPlanner {
                 on,
             }) => {
                 let kind = match kind {
+                    // Model CROSS JOINs as INNER JOINs as mentioned by equivalence mentioned in
+                    // section 5.3 of spec https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3
                     JoinKind::Cross | JoinKind::Inner => EvalJoinKind::Inner,
                     JoinKind::Left => EvalJoinKind::Left,
                     JoinKind::Right => EvalJoinKind::Right,

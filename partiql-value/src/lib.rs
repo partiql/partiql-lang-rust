@@ -1133,10 +1133,12 @@ impl Tuple {
     }
 
     #[inline]
-    /// Creates a `Tuple` containing all the attributes and values provided by `self` and `other`.
+    /// Creates a `Tuple` containing all the attributes and values provided by `self` and `other`
+    /// keeping duplicate attributes.
     /// TODO: This isn't quite the correct behavior for binding tuple concatenation specified in
     ///  the spec section 3.4 (https://partiql.org/assets/PartiQL-Specification.pdf#subsection.3.4).
-    ///  Duplicates should be removed but currently aren't.
+    ///  Duplicates should be removed but currently aren't. Will need a separate method or Tuple
+    ///  data structure for binding tuple concatenation.
     pub fn tuple_concat(&self, other: &Tuple) -> Self {
         self.pairs()
             .chain(other.pairs())
