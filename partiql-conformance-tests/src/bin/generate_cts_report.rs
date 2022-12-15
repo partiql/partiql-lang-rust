@@ -35,7 +35,7 @@ fn main() {
     for line in reader.lines() {
         match line {
             Ok(line) => {
-                let v: Value = serde_json::from_str(&*line).expect("from_str");
+                let v: Value = serde_json::from_str(&line).expect("from_str");
                 if v["type"] == "test" {
                     let event = v["event"].as_str().expect("as_str");
                     if event == "ok" {

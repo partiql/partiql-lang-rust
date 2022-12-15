@@ -72,7 +72,7 @@ impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
     fn next_internal(&mut self) -> Option<CommentStringResult<'input>> {
         let Span { start, .. } = self.lexer.span();
         let mut nesting = 0;
-        let nesting_inc = if self.comment_nesting { 1 } else { 0 };
+        let nesting_inc = i32::from(self.comment_nesting);
         'comment: loop {
             match self.lexer.next() {
                 Some(CommentToken::Any) => continue,
