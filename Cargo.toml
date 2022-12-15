@@ -23,11 +23,6 @@ members = [
   "partiql-value",
 ]
 
-exclude = [
-  "partiql-cli",
-  "partiql-playground",
-]
-
 [profile.dev.build-override]
 opt-level = 3
 

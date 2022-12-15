@@ -12,9 +12,9 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use partiql_logical as logical;
-    use partiql_logical::BindingsExpr::{Distinct, Project, ProjectValue};
+    use partiql_logical::BindingsOp::{Distinct, Project, ProjectValue};
     use partiql_logical::{
-        BagExpr, BetweenExpr, BinaryOp, BindingsExpr, CoalesceExpr, IsTypeExpr, JoinKind, ListExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, IsTypeExpr, JoinKind, ListExpr,
         LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
     };
     use partiql_value as value;
@@ -23,7 +23,7 @@ mod tests {
         partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
     };
 
-    fn evaluate(logical: LogicalPlan<BindingsExpr>, bindings: MapBindings<Value>) -> Value {
+    fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let planner = plan::EvaluatorPlanner;
         let mut plan = planner.compile(&logical);
 
@@ -64,8 +64,8 @@ mod tests {
         bindings
     }
 
-    fn scan(name: &str, as_key: &str) -> BindingsExpr {
-        BindingsExpr::Scan(logical::Scan {
+    fn scan(name: &str, as_key: &str) -> BindingsOp {
+        BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive(name.into())),
             as_key: as_key.to_string(),
             at_key: None,
@@ -161,7 +161,7 @@ mod tests {
     //  in evaluator output), change or delete tests using this function
     fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
-        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+        let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
@@ -183,7 +183,7 @@ mod tests {
             )]),
         }));
 
-        let sink = plan.add_operator(BindingsExpr::Sink);
+        let sink = plan.add_operator(BindingsOp::Sink);
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
@@ -644,7 +644,7 @@ mod tests {
     fn between_op() {
         fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
             let mut plan = LogicalPlan::new();
-            let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+            let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
                 expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
                 as_key: "data".to_string(),
                 at_key: None,
@@ -666,7 +666,7 @@ mod tests {
                 )]),
             }));
 
-            let sink = plan.add_operator(BindingsExpr::Sink);
+            let sink = plan.add_operator(BindingsOp::Sink);
             plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
             let mut bindings = MapBindings::default();
@@ -726,7 +726,7 @@ mod tests {
             ]),
         }));
 
-        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+        let join = lg.add_operator(BindingsOp::Join(logical::Join {
             kind: JoinKind::Cross,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
@@ -737,7 +737,7 @@ mod tests {
             )),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -762,7 +762,7 @@ mod tests {
         let mut lg = LogicalPlan::new();
 
         let from_lhs = scan("sensors", "s");
-        let from_rhs = BindingsExpr::Scan(logical::Scan {
+        let from_rhs = BindingsOp::Scan(logical::Scan {
             expr: path_var("s", "readings"),
             as_key: "r".to_string(),
             at_key: None,
@@ -772,14 +772,14 @@ mod tests {
             exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
         }));
 
-        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+        let join = lg.add_operator(BindingsOp::Join(logical::Join {
             kind: JoinKind::Cross,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
             on: None,
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -807,7 +807,7 @@ mod tests {
         let mut lg = LogicalPlan::new();
 
         let from_lhs = scan("sensors", "s");
-        let from_rhs = BindingsExpr::Scan(logical::Scan {
+        let from_rhs = BindingsOp::Scan(logical::Scan {
             expr: path_var("s", "readings"),
             as_key: "r".to_string(),
             at_key: None,
@@ -817,14 +817,14 @@ mod tests {
             exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
         }));
 
-        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+        let join = lg.add_operator(BindingsOp::Join(logical::Join {
             kind: JoinKind::Cross,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
             on: None,
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -854,7 +854,7 @@ mod tests {
         let mut lg = LogicalPlan::new();
 
         let from_lhs = scan("sensors", "s");
-        let from_rhs = BindingsExpr::Scan(logical::Scan {
+        let from_rhs = BindingsOp::Scan(logical::Scan {
             expr: path_var("s", "readings"),
             as_key: "r".to_string(),
             at_key: None,
@@ -867,14 +867,14 @@ mod tests {
             )]),
         }));
 
-        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+        let join = lg.add_operator(BindingsOp::Join(logical::Join {
             kind: JoinKind::Left,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
             on: Some(ValueExpr::Lit(Box::new(Value::from(true)))),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -960,7 +960,7 @@ mod tests {
             ]),
         });
         let project = lg.add_operator(project_logical);
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow(scan, project);
         lg.add_flow(project, sink);
 
@@ -1002,7 +1002,7 @@ mod tests {
             ]),
         });
         let project = lg.add_operator(project_logical_no_default);
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow(scan, project);
         lg.add_flow(project, sink);
 
@@ -1043,7 +1043,7 @@ mod tests {
             ]),
         });
         let project = lg.add_operator(project_logical);
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow(scan, project);
         lg.add_flow(project, sink);
 
@@ -1085,7 +1085,7 @@ mod tests {
             ]),
         });
         let project = lg.add_operator(project_logical_no_default);
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
         lg.add_flow(scan, project);
         lg.add_flow(project, sink);
 
@@ -1110,7 +1110,7 @@ mod tests {
     // (i.e. <<{'result': <expected_first_elem>}>>)
     fn eval_is_op(not: bool, expr: Value, is_type: Type, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
-        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+        let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
@@ -1132,7 +1132,7 @@ mod tests {
             )]),
         }));
 
-        let sink = plan.add_operator(BindingsExpr::Sink);
+        let sink = plan.add_operator(BindingsOp::Sink);
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
@@ -1174,7 +1174,7 @@ mod tests {
     // (i.e. <<{'result': <expected_first_elem>}>>)
     fn eval_null_if_op(lhs: Value, rhs: Value, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
-        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+        let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
@@ -1195,7 +1195,7 @@ mod tests {
             )]),
         }));
 
-        let sink = plan.add_operator(BindingsExpr::Sink);
+        let sink = plan.add_operator(BindingsOp::Sink);
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
@@ -1227,7 +1227,7 @@ mod tests {
     // (i.e. <<{'result': <expected_first_elem>}>>)
     fn eval_coalesce_op(elements: Vec<Value>, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
-        let scan = plan.add_operator(BindingsExpr::Scan(logical::Scan {
+        let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
             as_key: "data".to_string(),
             at_key: None,
@@ -1251,7 +1251,7 @@ mod tests {
             )]),
         }));
 
-        let sink = plan.add_operator(BindingsExpr::Sink);
+        let sink = plan.add_operator(BindingsOp::Sink);
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
@@ -1323,7 +1323,7 @@ mod tests {
             )]),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
@@ -1360,7 +1360,7 @@ mod tests {
             ),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1396,7 +1396,7 @@ mod tests {
             expr: ValueExpr::TupleExpr(tuple_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1445,7 +1445,7 @@ mod tests {
             expr: ValueExpr::TupleExpr(tuple_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
@@ -1483,7 +1483,7 @@ mod tests {
             expr: ValueExpr::TupleExpr(tuple_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1528,7 +1528,7 @@ mod tests {
             expr: ValueExpr::TupleExpr(tuple_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1572,7 +1572,7 @@ mod tests {
             expr: ValueExpr::ListExpr(list_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1615,7 +1615,7 @@ mod tests {
             expr: ValueExpr::ListExpr(list_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1649,7 +1649,7 @@ mod tests {
             expr: ValueExpr::BagExpr(bag_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1692,7 +1692,7 @@ mod tests {
             expr: ValueExpr::TupleExpr(tuple_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1731,7 +1731,7 @@ mod tests {
             expr: ValueExpr::ListExpr(list_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1762,7 +1762,7 @@ mod tests {
 
         let select_value = lg.add_operator(ProjectValue(logical::ProjectValue { expr: vb }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1800,7 +1800,7 @@ mod tests {
             expr: ValueExpr::BagExpr(bag_expr),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
@@ -1825,7 +1825,7 @@ mod tests {
 
         let scan = logical.add_operator(scan("customer", "customer"));
 
-        let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
+        let filter = logical.add_operator(BindingsOp::Filter(logical::Filter {
             expr: ValueExpr::BinaryExpr(
                 BinaryOp::Gt,
                 Box::new(ValueExpr::Path(
@@ -1871,7 +1871,7 @@ mod tests {
         }));
 
         let distinct = logical.add_operator(Distinct);
-        let sink = logical.add_operator(BindingsExpr::Sink);
+        let sink = logical.add_operator(BindingsOp::Sink);
 
         logical.extend_with_flows(&[
             (scan, filter),
@@ -1898,7 +1898,7 @@ mod tests {
 
         let scan = logical.add_operator(scan("data", "data"));
 
-        let filter = logical.add_operator(BindingsExpr::Filter(logical::Filter {
+        let filter = logical.add_operator(BindingsOp::Filter(logical::Filter {
             expr: ValueExpr::BinaryExpr(
                 BinaryOp::In,
                 Box::new(ValueExpr::Path(
@@ -1923,7 +1923,7 @@ mod tests {
             )]),
         }));
 
-        let sink = logical.add_operator(BindingsExpr::Sink);
+        let sink = logical.add_operator(BindingsOp::Sink);
 
         logical.extend_with_flows(&[(scan, filter), (filter, project), (project, sink)]);
 
@@ -1953,7 +1953,7 @@ mod tests {
                 ),
             )]),
         }));
-        let subq_sink = subq_plan.add_operator(BindingsExpr::Sink);
+        let subq_sink = subq_plan.add_operator(BindingsOp::Sink);
 
         subq_plan.add_flow(subq_scan, subq_project);
         subq_plan.add_flow(subq_project, subq_sink);
@@ -1961,13 +1961,13 @@ mod tests {
         let mut lg = LogicalPlan::new();
 
         let from_lhs = scan("data", "t");
-        let from_rhs = BindingsExpr::Scan(logical::Scan {
+        let from_rhs = BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: subq_plan }),
             as_key: "s".to_string(),
             at_key: None,
         });
 
-        let join = lg.add_operator(BindingsExpr::Join(logical::Join {
+        let join = lg.add_operator(BindingsOp::Join(logical::Join {
             kind: JoinKind::Cross,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
@@ -1980,7 +1980,7 @@ mod tests {
             exprs: HashMap::from([("ta".to_string(), ta), ("su".to_string(), su)]),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
@@ -2031,7 +2031,7 @@ mod tests {
                 ),
             )]),
         }));
-        let subq_sink = subq_plan.add_operator(BindingsExpr::Sink);
+        let subq_sink = subq_plan.add_operator(BindingsOp::Sink);
 
         subq_plan.add_flow(subq_scan, subq_project);
         subq_plan.add_flow(subq_project, subq_sink);
@@ -2049,7 +2049,7 @@ mod tests {
             ]),
         }));
 
-        let sink = lg.add_operator(BindingsExpr::Sink);
+        let sink = lg.add_operator(BindingsOp::Sink);
 
         lg.add_flow(from, project);
         lg.add_flow(project, sink);

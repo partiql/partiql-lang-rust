@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use partiql_logical as logical;
 use partiql_logical::{
-    BinaryOp, BindingsExpr, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, SearchedCase,
+    BinaryOp, BindingsOp, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, SearchedCase,
     Type, UnaryOp, ValueExpr,
 };
 
@@ -18,12 +18,12 @@ use partiql_value::Value::Null;
 pub struct EvaluatorPlanner;
 
 impl EvaluatorPlanner {
-    pub fn compile(&self, plan: &LogicalPlan<BindingsExpr>) -> EvalPlan {
+    pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> EvalPlan {
         self.plan_eval(plan)
     }
 
     #[inline]
-    fn plan_eval(&self, lg: &LogicalPlan<BindingsExpr>) -> EvalPlan {
+    fn plan_eval(&self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
         let ops = lg.operators();
         let flows = lg.flows();
 
@@ -45,9 +45,9 @@ impl EvaluatorPlanner {
         EvalPlan(graph)
     }
 
-    fn get_eval_node(&self, be: &BindingsExpr) -> Box<dyn Evaluable> {
+    fn get_eval_node(&self, be: &BindingsOp) -> Box<dyn Evaluable> {
         match be {
-            BindingsExpr::Scan(logical::Scan {
+            BindingsOp::Scan(logical::Scan {
                 expr,
                 as_key,
                 at_key,
@@ -62,28 +62,28 @@ impl EvaluatorPlanner {
                     Box::new(eval::EvalScan::new(self.plan_values(expr.clone()), as_key))
                 }
             }
-            BindingsExpr::Project(logical::Project { exprs }) => {
+            BindingsOp::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
                 Box::new(eval::EvalProject::new(exprs))
             }
-            BindingsExpr::ProjectValue(logical::ProjectValue { expr }) => {
+            BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_values(expr.clone());
                 Box::new(eval::EvalProjectValue::new(expr))
             }
-            BindingsExpr::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
+            BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
                 expr: self.plan_values(expr.clone()),
                 input: None,
                 output: None,
             }),
-            BindingsExpr::Distinct => Box::new(eval::EvalDistinct::new()),
-            BindingsExpr::Sink => Box::new(eval::EvalSink {
+            BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
+            BindingsOp::Sink => Box::new(eval::EvalSink {
                 input: None,
                 output: None,
             }),
-            BindingsExpr::Unpivot(logical::Unpivot {
+            BindingsOp::Unpivot(logical::Unpivot {
                 expr,
                 as_key,
                 at_key,
@@ -92,7 +92,7 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key.as_ref().unwrap(),
             )),
-            BindingsExpr::Join(logical::Join {
+            BindingsOp::Join(logical::Join {
                 kind,
                 left,
                 right,
