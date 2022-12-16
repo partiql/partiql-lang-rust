@@ -50,12 +50,12 @@ impl ops::Add for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l + r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l + *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l + r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) + rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) + rhs,
-            (Value::Real(_), Value::Integer(_)) => self + &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self + &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) + rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
+            (Value::Real(_), Value::Integer(_)) => self + &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self + &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self + &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -74,12 +74,12 @@ impl ops::Sub for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l - r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l - *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l - r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) - rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) - rhs,
-            (Value::Real(_), Value::Integer(_)) => self - &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self - &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) - rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
+            (Value::Real(_), Value::Integer(_)) => self - &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self - &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self - &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -98,12 +98,12 @@ impl ops::Mul for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l * r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l * *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l * r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) * rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) * rhs,
-            (Value::Real(_), Value::Integer(_)) => self * &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self * &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) * rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
+            (Value::Real(_), Value::Integer(_)) => self * &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self * &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self * &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -122,12 +122,12 @@ impl ops::Div for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l / r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l / *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l / r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) / rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) / rhs,
-            (Value::Real(_), Value::Integer(_)) => self / &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self / &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) / rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
+            (Value::Real(_), Value::Integer(_)) => self / &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self / &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self / &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -146,12 +146,12 @@ impl ops::Rem for &Value {
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l % r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l % *r),
             (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l % r),
-            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(&self) % rhs,
-            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(&self) % rhs,
-            (Value::Real(_), Value::Integer(_)) => self % &coerce_int_to_real(&rhs),
-            (Value::Decimal(_), Value::Integer(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
-            (Value::Decimal(_), Value::Real(_)) => self % &coerce_int_or_real_to_decimal(&rhs),
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) % rhs,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
+            (Value::Real(_), Value::Integer(_)) => self % &coerce_int_to_real(rhs),
+            (Value::Decimal(_), Value::Integer(_)) => self % &coerce_int_or_real_to_decimal(rhs),
+            (Value::Decimal(_), Value::Real(_)) => self % &coerce_int_or_real_to_decimal(rhs),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -341,14 +341,26 @@ pub trait NullableOrd {
 impl NullableEq for Value {
     type Output = Self;
 
-    // TODO: `eq` and `neq` are not quite right as implemented. Should be able to assert equality between
-    //  different comparable types (e.g. numerics)
     fn eq(&self, rhs: &Self) -> Self::Output {
         match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
+            (Value::Integer(_), Value::Real(_)) => Value::from(&coerce_int_to_real(self) == rhs),
+            (Value::Integer(_), Value::Decimal(_)) => {
+                Value::from(&coerce_int_or_real_to_decimal(self) == rhs)
+            }
+            (Value::Real(_), Value::Decimal(_)) => {
+                Value::from(&coerce_int_or_real_to_decimal(self) == rhs)
+            }
+            (Value::Real(_), Value::Integer(_)) => Value::from(self == &coerce_int_to_real(rhs)),
+            (Value::Decimal(_), Value::Integer(_)) => {
+                Value::from(self == &coerce_int_or_real_to_decimal(rhs))
+            }
+            (Value::Decimal(_), Value::Real(_)) => {
+                Value::from(self == &coerce_int_or_real_to_decimal(rhs))
+            }
             (_, _) => Value::from(self == rhs),
         }
     }
@@ -359,6 +371,20 @@ impl NullableEq for Value {
             (_, Value::Missing) => Value::Missing,
             (Value::Null, _) => Value::Null,
             (_, Value::Null) => Value::Null,
+            (Value::Integer(_), Value::Real(_)) => Value::from(&coerce_int_to_real(self) != rhs),
+            (Value::Integer(_), Value::Decimal(_)) => {
+                Value::from(&coerce_int_or_real_to_decimal(self) != rhs)
+            }
+            (Value::Real(_), Value::Decimal(_)) => {
+                Value::from(&coerce_int_or_real_to_decimal(self) != rhs)
+            }
+            (Value::Real(_), Value::Integer(_)) => Value::from(self != &coerce_int_to_real(rhs)),
+            (Value::Decimal(_), Value::Integer(_)) => {
+                Value::from(self != &coerce_int_or_real_to_decimal(rhs))
+            }
+            (Value::Decimal(_), Value::Real(_)) => {
+                Value::from(self != &coerce_int_or_real_to_decimal(rhs))
+            }
             (_, _) => Value::from(self != rhs),
         }
     }
@@ -367,8 +393,6 @@ impl NullableEq for Value {
 impl NullableOrd for Value {
     type Output = Self;
 
-    // TODO: comparison is not right for data type mismatches. Equality permits mistyped arguments
-    //  while comparison ops should return Missing
     fn lt(&self, rhs: &Self) -> Self::Output {
         match (self, rhs) {
             (Value::Missing, _) => Value::Missing,
@@ -610,7 +634,7 @@ impl Debug for Value {
             Value::Blob(s) => write!(f, "'{:?}'", s),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
-            Value::Tuple(t) => write!(f, "{:?}", t),
+            Value::Tuple(t) => t.fmt(f),
         }
     }
 }
@@ -1058,7 +1082,14 @@ impl Iterator for BagIntoIterator {
 impl Debug for Bag {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "<<")?;
-        f.debug_list().entries(&self.0).finish()?; // TODO currently outputs <<[ ... ]>>
+        let mut iter = self.iter().peekable();
+        while let Some(v) = iter.next() {
+            if iter.peek().is_some() {
+                write!(f, "{:?}, ", v)?;
+            } else {
+                write!(f, "{:?}", v)?;
+            }
+        }
         write!(f, ">>")
     }
 }
@@ -1235,13 +1266,16 @@ impl Hash for Tuple {
 
 impl Debug for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let pairs = self.pairs();
-        let mut fmt = f.debug_struct("Tuple");
-        pairs.into_iter().for_each(|(k, v)| {
-            fmt.field(k, v);
-        });
-
-        fmt.finish()
+        write!(f, "{{")?;
+        let mut iter = self.pairs().into_iter().peekable();
+        while let Some((k, v)) = iter.next() {
+            if iter.peek().is_some() {
+                write!(f, " {}: {:?},", k, v)?;
+            } else {
+                write!(f, " {}: {:?} ", k, v)?;
+            }
+        }
+        write!(f, "}}")
     }
 }
 
@@ -1320,6 +1354,7 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag!());
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
+        println!("partiql_tuple:{:?}", partiql_tuple![]);
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
     }
 
@@ -1681,6 +1716,66 @@ mod tests {
             Value::from(false),
             NullableEq::eq(&Value::from(true), &Value::from(false))
         );
+        // Container examples from spec section 7.1.1 https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.7.1.1
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(
+                &Value::from(partiql_bag![3, 2, 4, 2]),
+                &Value::from(partiql_bag![2, 2, 3, 4])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(
+                &Value::from(partiql_bag![3, 4, 2]),
+                &Value::from(partiql_bag![2, 2, 3, 4])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1)])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1, 2]), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1), ("b", Value::Null)])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![
+                    ("a", partiql_list![Value::Null, 1]),
+                    ("b", 2)
+                ])
+            )
+        );
         assert_eq!(
             Value::Null,
             NullableEq::eq(&Value::from(true), &Value::Null)
@@ -1698,7 +1793,65 @@ mod tests {
             NullableEq::eq(&Value::Missing, &Value::from(true))
         );
 
-        // different types result in boolean
+        // different, comparable types result in boolean true
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(1), &Value::from(1.0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(1.0), &Value::from(1))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(1), &Value::from(dec!(1.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(1))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(1.0), &Value::from(dec!(1.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(1.0))
+        );
+        // different, comparable types result in boolean false
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(1), &Value::from(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(1.0), &Value::from(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(1), &Value::from(f64::NEG_INFINITY))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(f64::NEG_INFINITY), &Value::from(1))
+        );
+        // different, non-comparable types result in boolean true
         assert_eq!(
             Value::from(false),
             NullableEq::eq(&Value::from(true), &Value::from("abc"))
@@ -1717,12 +1870,131 @@ mod tests {
             Value::from(true),
             Value::from(true).neq(&Value::from(false))
         );
+        // Container examples from spec section 7.1.1 https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.7.1.1
+        // (opposite result of eq cases)
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(
+                &Value::from(partiql_bag![3, 2, 4, 2]),
+                &Value::from(partiql_bag![2, 2, 3, 4])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(
+                &Value::from(partiql_bag![3, 4, 2]),
+                &Value::from(partiql_bag![2, 2, 3, 4])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1)])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1, 2]), ("b", 2)])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
+                &Value::from(partiql_tuple![("a", 1), ("b", Value::Null)])
+            )
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(
+                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
+                &Value::from(partiql_tuple![
+                    ("a", partiql_list![Value::Null, 1]),
+                    ("b", 2)
+                ])
+            )
+        );
         assert_eq!(Value::Null, Value::from(true).neq(&Value::Null));
         assert_eq!(Value::Null, Value::Null.neq(&Value::from(true)));
         assert_eq!(Value::Missing, Value::from(true).neq(&Value::Missing));
         assert_eq!(Value::Missing, Value::Missing.neq(&Value::from(true)));
 
-        // different types result in boolean
+        // different, comparable types result in boolean true
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(1), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(1.0), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(1), &Value::from(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(2))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(1.0), &Value::from(dec!(2.0)))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(2.0))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(1), &Value::from(f64::NEG_INFINITY))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::neq(&Value::from(f64::NEG_INFINITY), &Value::from(1))
+        );
+        // different, comparable types result in boolean false
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(1), &Value::from(1.0))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(1.0), &Value::from(1))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(1), &Value::from(dec!(1.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(1))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(1.0), &Value::from(dec!(1.0)))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(1.0))
+        );
+        // different, non-comparable types result in boolean true
         assert_eq!(
             Value::from(true),
             Value::from(true).neq(&Value::from("abc"))
