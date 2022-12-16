@@ -610,7 +610,7 @@ impl Debug for Value {
             Value::Blob(s) => write!(f, "'{:?}'", s),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
-            Value::Tuple(t) => write!(f, "{:?}", t),
+            Value::Tuple(t) => t.fmt(f),
         }
     }
 }
@@ -1058,7 +1058,14 @@ impl Iterator for BagIntoIterator {
 impl Debug for Bag {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "<<")?;
-        f.debug_list().entries(&self.0).finish()?; // TODO currently outputs <<[ ... ]>>
+        let mut iter = self.iter().peekable();
+        while let Some(v) = iter.next() {
+            if iter.peek().is_some() {
+                write!(f, "{:?}, ", v)?;
+            } else {
+                write!(f, "{:?}", v)?;
+            }
+        }
         write!(f, ">>")
     }
 }
@@ -1217,13 +1224,16 @@ impl Hash for Tuple {
 
 impl Debug for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let pairs = self.pairs();
-        let mut fmt = f.debug_struct("Tuple");
-        pairs.into_iter().for_each(|(k, v)| {
-            fmt.field(k, v);
-        });
-
-        fmt.finish()
+        write!(f, "{{")?;
+        let mut iter = self.pairs().into_iter().peekable();
+        while let Some((k, v)) = iter.next() {
+            if iter.peek().is_some() {
+                write!(f, " {}: {:?},", k, v)?;
+            } else {
+                write!(f, " {}: {:?} ", k, v)?;
+            }
+        }
+        write!(f, "}}")
     }
 }
 
@@ -1302,6 +1312,7 @@ mod tests {
         println!("partiql_bag:{:?}", partiql_bag!());
         println!("partiql_bag:{:?}", partiql_bag![10, 10]);
         println!("partiql_bag:{:?}", partiql_bag!(5; 3));
+        println!("partiql_tuple:{:?}", partiql_tuple![]);
         println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
     }
 
