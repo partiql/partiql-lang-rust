@@ -225,8 +225,17 @@ FromClause: ast::AstNode<ast::FromClause> = {
         froms.push(last);
         let source = froms.into_iter()
             .reduce(|lfrom, rfrom| {
-	            let start = state.locations.get(&lfrom.id).unwrap_or(&total).start.0.clone();
-                let end = state.locations.get(&rfrom.id).unwrap_or(&total).end.0.clone();
+                let start_id = match &lfrom {
+                    ast::FromSource::FromLet(node) => node.id,
+                    ast::FromSource::Join(node) => node.id,
+                };
+                let end_id = match &rfrom {
+                    ast::FromSource::FromLet(node) => node.id,
+                    ast::FromSource::Join(node) => node.id,
+                };
+
+	            let start = state.locations.get(&start_id).unwrap_or(&total).start.0.clone();
+                let end = state.locations.get(&end_id).unwrap_or(&total).end.0.clone();
                 let range = start..end;
                 let join = state.node(ast::Join {
                     kind: ast::JoinKind::Cross,
@@ -234,21 +243,21 @@ FromClause: ast::AstNode<ast::FromClause> = {
                     right: Box::new(rfrom),
                     predicate: None
                 }, range.clone());
-                state.node(ast::FromSource::Join( join ), range)
+                ast::FromSource::Join( join )
             })
             .unwrap(); // safe, because we know there's at least 1 input
         state.node(ast::FromClause{source}, lo..hi)
     }
 }
 
-TableReference: ast::AstNode<ast::FromSource> = {
+TableReference: ast::FromSource = {
     <TableNonJoin>,
     <TableJoined>,
 }
 
-TableNonJoin: ast::AstNode<ast::FromSource> = {
-    <lo:@L> <t:TableBaseReference> <hi:@R> => state.node(ast::FromSource::FromLet( t ), lo..hi),
-    <lo:@L> <t:TableUnpivot> <hi:@R> => state.node(ast::FromSource::FromLet( t ), lo..hi),
+TableNonJoin: ast::FromSource = {
+    <lo:@L> <t:TableBaseReference> <hi:@R> =>ast::FromSource::FromLet( t ),
+    <lo:@L> <t:TableUnpivot> <hi:@R> => ast::FromSource::FromLet( t ),
 }
 
 #[inline]
@@ -286,14 +295,14 @@ TableUnpivot: ast::AstNode<ast::FromLet> = {
     }
 }
 
-TableJoined: ast::AstNode<ast::FromSource> = {
+TableJoined: ast::FromSource = {
     <TableCrossJoin>,
     <TableQualifiedJoin>,
     "(" <TableJoined> ")",
 }
 
 #[inline]
-TableCrossJoin: ast::AstNode<ast::FromSource> = {
+TableCrossJoin: ast::FromSource = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
@@ -308,12 +317,12 @@ TableCrossJoin: ast::AstNode<ast::FromSource> = {
             right: Box::new(rtable),
             predicate: None
         }, lo..hi);
-        state.node(ast::FromSource::Join( join ), lo..hi)
+        ast::FromSource::Join( join )
     }
 }
 
 #[inline]
-TableQualifiedJoin: ast::AstNode<ast::FromSource> = {
+TableQualifiedJoin: ast::FromSource = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
@@ -324,7 +333,7 @@ TableQualifiedJoin: ast::AstNode<ast::FromSource> = {
             right: Box::new(rtable),
             predicate: Some(on),
         }, lo..hi);
-        state.node(ast::FromSource::Join( join ), lo..hi)
+        ast::FromSource::Join( join )
     },
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
@@ -336,11 +345,11 @@ TableQualifiedJoin: ast::AstNode<ast::FromSource> = {
             right: Box::new(rtable),
             predicate: Some(spec)
         }, lo..hi);
-        state.node(ast::FromSource::Join( join ), lo..hi)
+        ast::FromSource::Join( join )
     },
 }
 #[inline]
-JoinRhs: ast::AstNode<ast::FromSource> = {
+JoinRhs: ast::FromSource = {
     <TableNonJoin>,
     "(" <TableJoined> ")"
 }
