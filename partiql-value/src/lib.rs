@@ -1144,7 +1144,7 @@ impl Hash for Bag {
 #[derive(Default, Eq, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
-    vals: Vec<Value>,
+    pub vals: Vec<Value>,
 }
 
 impl Tuple {
@@ -1159,6 +1159,21 @@ impl Tuple {
     pub fn insert(&mut self, attr: &str, val: Value) {
         self.attrs.push(attr.to_string());
         self.vals.push(val);
+    }
+
+    #[inline]
+    /// Creates a `Tuple` containing all the attributes and values provided by `self` and `other`
+    /// removing duplicate attributes. Assumes that `self` contains unique attributes and `other`
+    /// contains unique attributes. In the case of duplicate attributes between `self` and `other`,
+    /// the result `Tuple` will contain the attribute provided by `other`. See section 3.4 of the
+    /// spec for details: https://partiql.org/assets/PartiQL-Specification.pdf#subsection.3.4.
+    pub fn tuple_concat(&self, other: &Tuple) -> Self {
+        other
+            .pairs()
+            .chain(self.pairs())
+            .map(|(a, v)| (a, v.clone()))
+            .unique_by(|(a, _)| *a)
+            .collect()
     }
 
     #[inline]
@@ -2281,6 +2296,16 @@ mod tests {
         assert_eq!(
             Value::from(false),
             NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+        );
+    }
+
+    #[test]
+    fn tuple_concat() {
+        let lhs = Tuple::from([("a", 1), ("b", 2), ("c", 3), ("d", 44)]);
+        let rhs = Tuple::from([("a", 11), ("b", 22), ("c", 33), ("e", 55)]);
+        assert_eq!(
+            Tuple::from([("a", 11), ("b", 22), ("c", 33), ("d", 44), ("e", 55)]),
+            lhs.tuple_concat(&rhs)
         );
     }
 

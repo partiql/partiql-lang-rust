@@ -92,19 +92,29 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key.as_ref().unwrap(),
             )),
-            BindingsOp::Join(logical::Join { kind, on }) => {
+            BindingsOp::Join(logical::Join {
+                kind,
+                left,
+                right,
+                on,
+            }) => {
                 let kind = match kind {
-                    JoinKind::Inner => EvalJoinKind::Inner,
+                    // Model CROSS JOINs as INNER JOINs as mentioned by equivalence mentioned in
+                    // section 5.3 of spec https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3
+                    JoinKind::Cross | JoinKind::Inner => EvalJoinKind::Inner,
                     JoinKind::Left => EvalJoinKind::Left,
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
-                    JoinKind::Cross => EvalJoinKind::Cross,
-                    JoinKind::CrossLateral => EvalJoinKind::CrossLateral,
                 };
                 let on = on
                     .as_ref()
                     .map(|on_condition| self.plan_values(on_condition.clone()));
-                Box::new(eval::EvalJoin::new(kind, on))
+                Box::new(eval::EvalJoin::new(
+                    kind,
+                    self.get_eval_node(left),
+                    self.get_eval_node(right),
+                    on,
+                ))
             }
             _ => panic!("Unevaluable bexpr"),
         }

@@ -20,6 +20,8 @@ use crate::env::basic::MapBindings;
 use crate::env::Bindings;
 use partiql_logical::Type;
 
+use std::borrow::Borrow;
+
 #[derive(Debug)]
 pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
 
@@ -101,6 +103,9 @@ pub enum EvaluationError {
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
     fn update_input(&mut self, input: &Value, branch_num: u8);
+    fn get_vars(&self) -> Vec<String> {
+        vec![]
+    }
 }
 
 #[derive(Debug)]
@@ -139,6 +144,7 @@ impl Evaluable for EvalScan {
 
         let bindings = match input_value {
             Value::Bag(t) => *t,
+            Value::Tuple(t) => partiql_bag![*t],
             _ => partiql_bag![partiql_tuple![]],
         };
 
@@ -174,6 +180,13 @@ impl Evaluable for EvalScan {
     fn update_input(&mut self, input: &Value, _branch_num: u8) {
         self.input = Some(input.clone());
     }
+
+    fn get_vars(&self) -> Vec<String> {
+        match self.at_key.clone() {
+            None => vec![self.as_key.clone()],
+            Some(at_key) => vec![self.as_key.clone(), at_key],
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -182,27 +195,31 @@ pub enum EvalJoinKind {
     Left,
     Right,
     Full,
-    Cross,
-    // TODO revisit JOINS to consider the `Lateral` logic as part of current joins
-    CrossLateral,
 }
 
 #[derive(Debug)]
 pub struct EvalJoin {
     pub kind: EvalJoinKind,
     pub on: Option<Box<dyn EvalExpr>>,
-    pub input_l: Option<Value>,
-    pub input_r: Option<Value>,
+    pub input: Option<Value>,
+    pub left: Box<dyn Evaluable>,
+    pub right: Box<dyn Evaluable>,
     pub output: Option<Value>,
 }
 
 impl EvalJoin {
-    pub fn new(kind: EvalJoinKind, on: Option<Box<dyn EvalExpr>>) -> Self {
+    pub fn new(
+        kind: EvalJoinKind,
+        left: Box<dyn Evaluable>,
+        right: Box<dyn Evaluable>,
+        on: Option<Box<dyn EvalExpr>>,
+    ) -> Self {
         EvalJoin {
             kind,
             on,
-            input_l: None,
-            input_r: None,
+            input: None,
+            left,
+            right,
             output: None,
         }
     }
@@ -210,68 +227,136 @@ impl EvalJoin {
 
 impl Evaluable for EvalJoin {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let l_vals = self.input_l.as_ref().unwrap().iter();
-        let r_vals = self.input_r.as_ref().unwrap().iter();
-
-        #[inline]
-        fn cross<'a>(
-            left: impl Iterator<Item = &'a Value> + Clone + 'a,
-            right: impl Iterator<Item = &'a Value> + Clone + 'a,
-        ) -> impl Iterator<Item = Tuple> + 'a {
-            left.cartesian_product(right).map(|(l_tuple, r_tuple)| {
-                l_tuple
-                    .as_tuple_ref()
-                    .pairs()
-                    .chain(r_tuple.as_tuple_ref().pairs())
-                    .map(|(a, v)| (a, v.clone()))
-                    .collect::<Tuple>()
-            })
+        /// Creates a `Tuple` with attributes `attrs`, each with value `Null`
+        fn tuple_with_null_vals(attrs: Vec<String>) -> Tuple {
+            let mut new_tuple = Tuple::new();
+            attrs.iter().for_each(|a| new_tuple.insert(a, Null));
+            new_tuple
         }
 
-        #[inline]
-        fn cross_lateral<'a>(
-            left: impl Iterator<Item = &'a Value> + Clone + 'a,
-            right: impl Iterator<Item = &'a Value> + Clone + 'a,
-        ) -> impl Iterator<Item = Tuple> + 'a {
-            left.zip(right).map(|(l_tuple, r_tuple)| {
-                l_tuple
-                    .as_tuple_ref()
-                    .pairs()
-                    .chain(r_tuple.as_tuple_ref().pairs())
-                    .map(|(a, v)| (a, v.clone()))
-                    .collect::<Tuple>()
-            })
-        }
+        let mut output_bag = partiql_bag![];
+        let empty_binding = Value::from(partiql_tuple![]);
+        let input_env = self.input.as_ref().unwrap_or(&empty_binding);
+        self.left.update_input(input_env, 0);
+        let lhs_values = self.left.evaluate(ctx);
+        let left_bindings = match lhs_values {
+            Some(Value::Bag(t)) => *t,
+            _ => panic!("Left side of FROM source should result in a bag of bindings"),
+        };
 
-        // TODO: PartiQL defaults to lateral JOINs (RHS can reference binding tuples defined from the LHS)
-        //  https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.3. Adding this behavior
-        //  to be spec-compliant may result in changes to the DAG flows.
-        let output: Bag = match self.kind {
-            EvalJoinKind::Inner => match &self.on {
-                None => cross(l_vals, r_vals).collect(),
-                Some(condition) => cross(l_vals, r_vals)
-                    .filter(|t| matches!(condition.evaluate(&t, ctx), Value::Boolean(true)))
-                    .collect(),
-            },
-            EvalJoinKind::Left => {
-                todo!("Left JOINs")
+        // Current implementations follow pseudocode defined in section 5.6 of spec
+        // https://partiql.org/assets/PartiQL-Specification.pdf#subsection.5.6
+        match self.kind {
+            EvalJoinKind::Inner => {
+                // for each binding b_l in eval(p0, p, l)
+                left_bindings.iter().for_each(|b_l| {
+                    let env_b_l = input_env
+                        .as_tuple_ref()
+                        .as_ref()
+                        .tuple_concat(b_l.as_tuple_ref().borrow());
+                    self.right.update_input(&Value::from(env_b_l), 0);
+                    let rhs_values = self.right.evaluate(ctx);
+
+                    let right_bindings = match rhs_values {
+                        Some(Value::Bag(t)) => *t,
+                        _ => partiql_bag![partiql_tuple![]],
+                    };
+
+                    // for each binding b_r in eval (p0, (p || b_l), r)
+                    for b_r in right_bindings.iter() {
+                        match &self.on {
+                            None => {
+                                let b_l_b_r = b_l
+                                    .as_tuple_ref()
+                                    .as_ref()
+                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                output_bag.push(Value::from(b_l_b_r));
+                            }
+                            // if eval(p0, (p || b_l || b_r), c) is true, add b_l || b_r to output bag
+                            Some(condition) => {
+                                let b_l_b_r = b_l
+                                    .as_tuple_ref()
+                                    .as_ref()
+                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                let env_b_l_b_r =
+                                    &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
+                                if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
+                                    output_bag.push(Value::Tuple(Box::new(b_l_b_r)));
+                                }
+                            }
+                        }
+                    }
+                });
             }
-            EvalJoinKind::Cross => cross(l_vals, r_vals).collect(),
-            EvalJoinKind::CrossLateral => cross_lateral(l_vals, r_vals).collect(),
+            EvalJoinKind::Left => {
+                // for each binding b_l in eval(p0, p, l)
+                left_bindings.iter().for_each(|b_l| {
+                    // define empty bag q_r
+                    let mut output_bag_left = partiql_bag![];
+                    let env_b_l = input_env
+                        .as_tuple_ref()
+                        .as_ref()
+                        .tuple_concat(b_l.as_tuple_ref().borrow());
+                    self.right.update_input(&Value::from(env_b_l), 0);
+                    let rhs_values = self.right.evaluate(ctx);
+
+                    let right_bindings = match rhs_values {
+                        Some(Value::Bag(t)) => *t,
+                        _ => partiql_bag![partiql_tuple![]],
+                    };
+
+                    // for each binding b_r in eval (p0, (p || b_l), r)
+                    for b_r in right_bindings.iter() {
+                        match &self.on {
+                            None => {
+                                let b_l_b_r = b_l
+                                    .as_tuple_ref()
+                                    .as_ref()
+                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                output_bag_left.push(Value::from(b_l_b_r));
+                            }
+                            // if eval(p0, (p || b_l || b_r), c) is true, add b_l || b_r to q_r
+                            Some(condition) => {
+                                let b_l_b_r = b_l
+                                    .as_tuple_ref()
+                                    .as_ref()
+                                    .tuple_concat(b_r.as_tuple_ref().borrow());
+                                let env_b_l_b_r =
+                                    &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
+                                if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
+                                    output_bag_left.push(Value::Tuple(Box::new(b_l_b_r)));
+                                }
+                            }
+                        }
+                    }
+
+                    // if q_r is the empty bag
+                    if output_bag_left.is_empty() {
+                        let attrs = self.right.get_vars();
+                        let new_binding = b_l
+                            .as_tuple_ref()
+                            .as_ref()
+                            .tuple_concat(&tuple_with_null_vals(attrs));
+                        // add b_l || <v_1_r: NULL, ..., v_n_r: NULL> to output bag
+                        output_bag.push(Value::from(new_binding));
+                    } else {
+                        // otherwise for each binding b_r in q_r, add b_l || b_r to output bag
+                        for elem in output_bag_left.into_iter() {
+                            output_bag.push(elem)
+                        }
+                    }
+                });
+            }
             EvalJoinKind::Full | EvalJoinKind::Right => {
                 todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
             }
         };
-        self.output = Some(output.into());
+        self.output = Some(Value::Bag(Box::new(output_bag)));
         self.output.clone()
     }
 
-    fn update_input(&mut self, input: &Value, branch_num: u8) {
-        match branch_num {
-            0 => self.input_l = Some(input.clone()),
-            1 => self.input_r = Some(input.clone()),
-            _ => panic!("EvalJoin nodes only support `0` and `1` for the `branch_num`"),
-        };
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
+        self.input = Some(input.clone());
     }
 }
 
@@ -318,6 +403,10 @@ impl Evaluable for EvalUnpivot {
 
     fn update_input(&mut self, _input: &Value, _branch_num: u8) {
         todo!()
+    }
+
+    fn get_vars(&self) -> Vec<String> {
+        vec![self.as_key.clone(), self.at_key.clone()]
     }
 }
 
