@@ -12,6 +12,8 @@ use std::{ops, slice, vec};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
 
+mod ion;
+
 #[derive(Clone, Hash, Debug)]
 pub enum BindingsName {
     CaseSensitive(String),
@@ -489,6 +491,10 @@ impl Default for Value {
 }
 
 impl Value {
+    pub fn from_ion(ion: &str) -> Self {
+        ion::parse_ion(ion)
+    }
+
     #[inline]
     pub fn is_list(&self) -> bool {
         matches!(self, Value::List(_))
@@ -1177,6 +1183,11 @@ impl Tuple {
     #[inline]
     pub fn pairs(&self) -> impl Iterator<Item = (&str, &Value)> + Clone {
         zip(&self.attrs, &self.vals).map(|(k, v)| (k.as_str(), v))
+    }
+
+    #[inline]
+    pub fn into_pairs(self) -> impl Iterator<Item = (String, Value)> {
+        zip(self.attrs, self.vals)
     }
 }
 
@@ -2271,5 +2282,32 @@ mod tests {
             Value::from(false),
             NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
         );
+    }
+
+    #[track_caller]
+    fn assert_ion(ion: &str, val: impl Into<Value>) {
+        assert_eq!(Value::from_ion(ion), val.into());
+    }
+
+    #[test]
+    fn partiql_value_from_ion() {
+        assert_ion("null", Value::Null);
+
+        // bool
+        assert_ion("true", true);
+        assert_ion("false", false);
+
+        // int
+        assert_ion("42", 42);
+        assert_ion("-5", -5);
+
+        // decimal
+        assert_ion("1.", dec!(1));
+
+        // list
+        assert_ion("[1,2,\"3\"]", partiql_list![1, 2, "3"]);
+
+        // struct
+        assert_ion("{\"k\": []}", partiql_tuple![("k", partiql_list![])]);
     }
 }
