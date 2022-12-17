@@ -38,6 +38,7 @@ impl Default for NodeIdGenerator {
 }
 
 impl IdGenerator for NodeIdGenerator {
+    #[inline]
     fn id(&mut self) -> NodeId {
         let mut next = NodeId(&self.next_id.0 + 1);
         std::mem::swap(&mut self.next_id, &mut next);
@@ -89,6 +90,7 @@ impl<'input, Id: IdGenerator> ParserState<'input, Id> {
     }
 
     /// Create a new [`AstNode`] from the inner data which it is to hold and a [`ByteOffset`] range.
+    #[inline]
     pub fn node<T>(&mut self, ast: T, Range { start, end }: Range<ByteOffset>) -> AstNode<T> {
         self.create_node(ast, start.into()..end.into())
     }

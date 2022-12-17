@@ -441,9 +441,11 @@ pub struct VarRef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ScopeQualifier {
-    /// Use the default search order.
+    /// The variable was *NOT* prefixed with `@`.
+    /// Resolve the variable by looking first in the database environment, then in the 'lexical' scope.
     Unqualified,
-    /// Skip the globals, first check within FROM sources and resolve starting with the local scope.
+    /// The variable *WAS* prefixed with `@`.
+    /// Resolve the variable by looking first in the 'lexical' scope, then in the database environment.
     Qualified,
 }
 
@@ -672,7 +674,7 @@ pub struct LetBinding {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FromClause {
-    pub source: AstNode<FromSource>,
+    pub source: FromSource,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -723,8 +725,8 @@ pub enum FromLetKind {
 pub struct Join {
     #[visit(skip)]
     pub kind: JoinKind,
-    pub left: Box<AstNode<FromSource>>,
-    pub right: Box<AstNode<FromSource>>,
+    pub left: Box<FromSource>,
+    pub right: Box<FromSource>,
     pub predicate: Option<AstNode<JoinSpec>>,
 }
 
@@ -868,7 +870,7 @@ pub struct CustomType {
     pub parts: Vec<CustomTypePart>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SymbolPrimitive {
     pub value: String,
@@ -876,7 +878,7 @@ pub struct SymbolPrimitive {
 }
 
 /// Is used to determine if variable lookup should be case-sensitive or not.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseSensitivity {
     CaseSensitive,
