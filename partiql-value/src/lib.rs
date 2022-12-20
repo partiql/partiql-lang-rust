@@ -11,6 +11,7 @@ use std::{ops, slice, vec};
 
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
+use unicase::UniCase;
 
 mod ion;
 
@@ -1144,7 +1145,7 @@ impl Hash for Bag {
 #[derive(Default, Eq, Clone)]
 pub struct Tuple {
     attrs: Vec<String>,
-    pub vals: Vec<Value>,
+    vals: Vec<Value>,
 }
 
 impl Tuple {
@@ -1177,21 +1178,46 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn get(&self, attr: &str) -> Option<&Value> {
-        match self.attrs.iter().position(|a| a.as_str() == attr) {
-            Some(i) => Some(&self.vals[i]),
-            _ => None,
+    pub fn get(&self, attr: &BindingsName) -> Option<&Value> {
+        match attr {
+            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
+            {
+                Some(i) => Some(&self.vals[i]),
+                _ => None,
+            },
+            BindingsName::CaseInsensitive(s) => match self
+                .attrs
+                .iter()
+                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
+            {
+                Some(i) => Some(&self.vals[i]),
+                _ => None,
+            },
         }
     }
 
     #[inline]
-    pub fn remove(&mut self, attr: &str) -> Option<Value> {
-        match self.attrs.iter().position(|a| a.as_str() == attr) {
-            Some(i) => {
-                self.attrs.remove(i);
-                Some(self.vals.remove(i))
-            }
-            _ => None,
+    pub fn remove(&mut self, attr: &BindingsName) -> Option<Value> {
+        match attr {
+            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
+            {
+                Some(i) => {
+                    self.attrs.remove(i);
+                    Some(self.vals.remove(i))
+                }
+                _ => None,
+            },
+            BindingsName::CaseInsensitive(s) => match self
+                .attrs
+                .iter()
+                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
+            {
+                Some(i) => {
+                    self.attrs.remove(i);
+                    Some(self.vals.remove(i))
+                }
+                _ => None,
+            },
         }
     }
 
@@ -2306,6 +2332,52 @@ mod tests {
         assert_eq!(
             Tuple::from([("a", 11), ("b", 22), ("c", 33), ("d", 44), ("e", 55)]),
             lhs.tuple_concat(&rhs)
+        );
+    }
+
+    #[test]
+    fn tuple_get() {
+        let tuple = Tuple::from([("a", 1), ("A", 2), ("a", 3), ("A", 4)]);
+        // case sensitive
+        assert_eq!(
+            Some(&Value::from(1)),
+            tuple.get(&BindingsName::CaseSensitive("a".to_string()))
+        );
+        assert_eq!(
+            Some(&Value::from(2)),
+            tuple.get(&BindingsName::CaseSensitive("A".to_string()))
+        );
+        // case insensitive
+        assert_eq!(
+            Some(&Value::from(1)),
+            tuple.get(&BindingsName::CaseInsensitive("a".to_string()))
+        );
+        assert_eq!(
+            Some(&Value::from(1)),
+            tuple.get(&BindingsName::CaseInsensitive("A".to_string()))
+        );
+    }
+
+    #[test]
+    fn tuple_remove() {
+        let mut tuple = Tuple::from([("a", 1), ("A", 2), ("a", 3), ("A", 4)]);
+        // case sensitive
+        assert_eq!(
+            Some(Value::from(2)),
+            tuple.remove(&BindingsName::CaseSensitive("A".to_string()))
+        );
+        assert_eq!(
+            Some(Value::from(1)),
+            tuple.remove(&BindingsName::CaseSensitive("a".to_string()))
+        );
+        // case insensitive
+        assert_eq!(
+            Some(Value::from(3)),
+            tuple.remove(&BindingsName::CaseInsensitive("A".to_string()))
+        );
+        assert_eq!(
+            Some(Value::from(4)),
+            tuple.remove(&BindingsName::CaseInsensitive("a".to_string()))
         );
     }
 

@@ -625,7 +625,7 @@ impl EvalExpr for EvalBagExpr {
 
 #[derive(Debug)]
 pub enum EvalPathComponent {
-    Key(String),
+    Key(BindingsName),
     Index(i64),
 }
 
@@ -640,8 +640,8 @@ impl EvalExpr for EvalPath {
         #[inline]
         fn path_into(value: Value, path: &EvalPathComponent) -> Value {
             match path {
-                EvalPathComponent::Key(s) => match value {
-                    Value::Tuple(mut tuple) => tuple.remove(s).unwrap_or(Missing),
+                EvalPathComponent::Key(k) => match value {
+                    Value::Tuple(mut tuple) => tuple.remove(k).unwrap_or(Missing),
                     _ => Missing,
                 },
                 EvalPathComponent::Index(idx) => match value {

@@ -28,7 +28,7 @@
 ///     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
 ///         "v".into(),
 ///     ))),
-///     vec![PathComponent::Key("a".to_string())],
+///     vec![PathComponent::Key(BindingsName::CaseInsensitive("a".to_string()))],
 /// );
 ///
 /// let select_value = p.add_operator(BindingsOp::ProjectValue(ProjectValue {
@@ -287,7 +287,7 @@ pub enum BinaryOp {
 /// Represents a path component in a plan.
 pub enum PathComponent {
     /// E.g. `b` in `a.b`
-    Key(String),
+    Key(BindingsName),
     /// E.g. 4 in `a[4]`
     Index(i64),
 }
