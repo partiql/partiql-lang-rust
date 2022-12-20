@@ -82,7 +82,9 @@ fn path_var(name: &str, component: &str) -> ValueExpr {
         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
             name.into(),
         ))),
-        vec![PathComponent::Key(component.to_string())],
+        vec![PathComponent::Key(BindingsName::CaseInsensitive(
+            component.to_string(),
+        ))],
     )
 }
 
@@ -91,8 +93,8 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 
     // Similar to ex 9 from spec with projected columns from different tables with an inner JOIN and ON condition
     // SELECT c.id, c.name, o.custId, o.productId FROM customers AS c, orders AS o ON c.id = o.custId
-    let from_lhs = lg.add_operator(scan("customers", "c"));
-    let from_rhs = lg.add_operator(scan("orders", "o"));
+    let from_lhs = scan("customers", "c");
+    let from_rhs = scan("orders", "o");
 
     let project = lg.add_operator(Project(logical::Project {
         exprs: HashMap::from([
@@ -105,6 +107,8 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 
     let join = lg.add_operator(BindingsOp::Join(logical::Join {
         kind: JoinKind::Inner,
+        left: Box::new(from_lhs),
+        right: Box::new(from_rhs),
         on: Some(ValueExpr::BinaryExpr(
             BinaryOp::Eq,
             Box::new(path_var("c", "id")),
@@ -113,8 +117,6 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
     }));
 
     let sink = lg.add_operator(BindingsOp::Sink);
-    lg.add_flow_with_branch_num(from_lhs, join, 0);
-    lg.add_flow_with_branch_num(from_rhs, join, 1);
     lg.add_flow_with_branch_num(join, project, 0);
     lg.add_flow_with_branch_num(project, sink, 0);
 
@@ -153,7 +155,9 @@ fn eval_bench(c: &mut Criterion) {
                 expr: Box::new(EvalVarRef {
                     name: BindingsName::CaseInsensitive("hr".to_string()),
                 }),
-                components: vec![EvalPathComponent::Key("employeesNestScalars".to_string())],
+                components: vec![EvalPathComponent::Key(BindingsName::CaseInsensitive(
+                    "employeesNestScalars".to_string(),
+                ))],
             }),
             "x",
         );

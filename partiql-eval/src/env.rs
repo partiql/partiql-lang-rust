@@ -7,13 +7,7 @@ pub trait Bindings<T> {
 
 impl Bindings<Value> for Tuple {
     fn get(&self, name: &BindingsName) -> Option<&Value> {
-        match name {
-            BindingsName::CaseSensitive(s) => self.get(s),
-            BindingsName::CaseInsensitive(s) => {
-                //TODO
-                self.get(s)
-            }
-        }
+        self.get(name)
     }
 }
 
@@ -40,11 +34,16 @@ pub mod basic {
 
     impl<T> MapBindings<T> {
         pub fn insert(&mut self, name: &str, value: T) {
-            // TODO error on duplicate insensitive
-            let idx = self.values.len();
-            self.values.push(value);
-            self.sensitive.insert(name.to_string(), idx);
-            self.insensitive.insert(UniCase::new(name.to_string()), idx);
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                self.insensitive.entry(UniCase::new(name.to_string()))
+            {
+                let idx = self.values.len();
+                self.values.push(value);
+                self.sensitive.insert(name.to_string(), idx);
+                e.insert(idx);
+            } else {
+                panic!("Cannot insert duplicate binding of name {}", name)
+            }
         }
     }
 
@@ -81,5 +80,21 @@ mod tests {
     fn test_bindings_from_tuple() {
         let t = partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)];
         println!("{:?}", MapBindings::from(&t));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_bindings_insert_panics_same_string() {
+        let mut bindings = MapBindings::default();
+        bindings.insert("foo", Value::from(1));
+        bindings.insert("foo", Value::from(2));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_bindings_insert_panics_case_insensitive_string() {
+        let mut bindings = MapBindings::default();
+        bindings.insert("foo", Value::from(1));
+        bindings.insert("FOO", Value::from(2));
     }
 }

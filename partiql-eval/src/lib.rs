@@ -77,7 +77,9 @@ mod tests {
             Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                 name.into(),
             ))),
-            vec![PathComponent::Key(component.to_string())],
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                component.to_string(),
+            ))],
         )
     }
 
@@ -176,7 +178,9 @@ mod tests {
                         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                             "data".into(),
                         ))),
-                        vec![PathComponent::Key("lhs".to_string())],
+                        vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                            "lhs".to_string(),
+                        ))],
                     )),
                     Box::new(ValueExpr::Lit(Box::new(rhs))),
                 ),
@@ -658,7 +662,9 @@ mod tests {
                             Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                                 "data".into(),
                             ))),
-                            vec![PathComponent::Key("value".to_string())],
+                            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                                "value".to_string(),
+                            ))],
                         )),
                         from: Box::new(ValueExpr::Lit(Box::new(from))),
                         to: Box::new(ValueExpr::Lit(Box::new(to))),
@@ -1125,7 +1131,9 @@ mod tests {
                         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                             "data".into(),
                         ))),
-                        vec![PathComponent::Key("expr".to_string())],
+                        vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                            "expr".to_string(),
+                        ))],
                     )),
                     is_type,
                 }),
@@ -1188,7 +1196,9 @@ mod tests {
                         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                             "data".into(),
                         ))),
-                        vec![PathComponent::Key("lhs".to_string())],
+                        vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                            "lhs".to_string(),
+                        ))],
                     )),
                     rhs: Box::new(ValueExpr::Lit(Box::new(rhs))),
                 }),
@@ -1238,7 +1248,10 @@ mod tests {
                 Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                     "data".into(),
                 ))),
-                vec![PathComponent::Key(format!("arg{}", i))],
+                vec![PathComponent::Key(BindingsName::CaseInsensitive(format!(
+                    "arg{}",
+                    i
+                )))],
             )
         }
 
@@ -1318,7 +1331,9 @@ mod tests {
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                         "data".into(),
                     ))),
-                    vec![PathComponent::Key("a".to_string())],
+                    vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                        "a".to_string(),
+                    ))],
                 ),
             )]),
         }));
@@ -1832,7 +1847,9 @@ mod tests {
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                         "customer".into(),
                     ))),
-                    vec![PathComponent::Key("balance".to_string())],
+                    vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                        "balance".to_string(),
+                    ))],
                 )),
                 Box::new(ValueExpr::Lit(Box::new(Value::Integer(0)))),
             ),
@@ -1846,7 +1863,9 @@ mod tests {
                         Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                             "customer".into(),
                         ))),
-                        vec![PathComponent::Key("firstName".to_string())],
+                        vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                            "firstName".to_string(),
+                        ))],
                     ),
                 ),
                 (
@@ -1857,13 +1876,17 @@ mod tests {
                             Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                                 "customer".into(),
                             ))),
-                            vec![PathComponent::Key("firstName".to_string())],
+                            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                                "firstName".to_string(),
+                            ))],
                         )),
                         Box::new(ValueExpr::Path(
                             Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                                 "customer".into(),
                             ))),
-                            vec![PathComponent::Key("firstName".to_string())],
+                            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                                "firstName".to_string(),
+                            ))],
                         )),
                     ),
                 ),
@@ -1905,7 +1928,9 @@ mod tests {
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                         "data".into(),
                     ))),
-                    vec![PathComponent::Key("a".to_string())],
+                    vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                        "a".to_string(),
+                    ))],
                 )),
                 Box::new(ValueExpr::Lit(Box::new(partiql_list![1].into()))),
             ),
@@ -1918,7 +1943,9 @@ mod tests {
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
                         "data".into(),
                     ))),
-                    vec![PathComponent::Key("a".to_string())],
+                    vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                        "a".to_string(),
+                    ))],
                 ),
             )]),
         }));
@@ -2174,7 +2201,7 @@ mod tests {
                 expr: Box::new(table_ref),
                 components: vec![
                     EvalPathComponent::Index(0),
-                    EvalPathComponent::Key("a".into()),
+                    EvalPathComponent::Key(BindingsName::CaseInsensitive("a".into())),
                 ],
             };
             let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
@@ -2201,7 +2228,7 @@ mod tests {
                 expr: Box::new(table_ref),
                 components: vec![
                     EvalPathComponent::Index(0),
-                    EvalPathComponent::Key("c".into()),
+                    EvalPathComponent::Key(BindingsName::CaseInsensitive("c".into())),
                 ],
             };
             let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
