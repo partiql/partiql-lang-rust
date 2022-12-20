@@ -1,7 +1,8 @@
 use partiql_value::{BindingsName, Tuple, Value};
+use std::fmt::Debug;
 use unicase::UniCase;
 
-pub trait Bindings<T> {
+pub trait Bindings<T>: Debug {
     fn get(&self, name: &BindingsName) -> Option<&T>;
 }
 
@@ -47,7 +48,10 @@ pub mod basic {
         }
     }
 
-    impl<T> Bindings<T> for MapBindings<T> {
+    impl<T> Bindings<T> for MapBindings<T>
+    where
+        T: Debug,
+    {
         #[inline]
         fn get(&self, name: &BindingsName) -> Option<&T> {
             let idx = match name {
@@ -63,9 +67,42 @@ pub mod basic {
     impl From<&Tuple> for MapBindings<Value> {
         fn from(t: &Tuple) -> Self {
             let mut bindings = MapBindings::default();
-            t.pairs().for_each(|(k, v)| bindings.insert(k, v.clone()));
-
+            for (k, v) in t.pairs() {
+                bindings.insert(k, v.clone())
+            }
             bindings
+        }
+    }
+
+    impl From<Tuple> for MapBindings<Value> {
+        fn from(t: Tuple) -> Self {
+            let mut bindings = MapBindings::default();
+            for (k, v) in t.into_pairs() {
+                bindings.insert(&k, v);
+            }
+            bindings
+        }
+    }
+
+    impl From<Value> for MapBindings<Value> {
+        fn from(val: Value) -> Self {
+            match val {
+                Value::Null => MapBindings::default(),
+                Value::Missing => MapBindings::default(),
+                Value::Tuple(t) => (*t).into(),
+                _ => todo!(),
+            }
+        }
+    }
+
+    impl From<&Value> for MapBindings<Value> {
+        fn from(val: &Value) -> Self {
+            match val {
+                Value::Null => MapBindings::default(),
+                Value::Missing => MapBindings::default(),
+                Value::Tuple(t) => t.as_ref().into(),
+                _ => todo!(),
+            }
         }
     }
 }
@@ -79,7 +116,76 @@ mod tests {
     #[test]
     fn test_bindings_from_tuple() {
         let t = partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)];
-        println!("{:?}", MapBindings::from(&t));
+
+        // by ref
+        let bindings = MapBindings::from(&t);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            Some(&Value::from(partiql_tuple![("p", 1)]))
+        );
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            Some(&Value::from(2))
+        );
+
+        // by ownership
+        let bindings = MapBindings::from(t);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            Some(&Value::from(partiql_tuple![("p", 1)]))
+        );
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            Some(&Value::from(2))
+        );
+    }
+
+    #[test]
+    fn test_bindings_from_value() {
+        let bindings = MapBindings::from(Value::Null);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            None
+        );
+        let bindings = MapBindings::from(&Value::Null);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            None
+        );
+        let bindings = MapBindings::from(Value::Missing);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            None
+        );
+        let bindings = MapBindings::from(&Value::Missing);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            None
+        );
+
+        let t = Value::from(partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)]);
+
+        // by ref
+        let bindings = MapBindings::from(&t);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            Some(&Value::from(partiql_tuple![("p", 1)]))
+        );
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            Some(&Value::from(2))
+        );
+
+        // by ownership
+        let bindings = MapBindings::from(t);
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            Some(&Value::from(partiql_tuple![("p", 1)]))
+        );
+        assert_eq!(
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            Some(&Value::from(2))
+        );
     }
 
     #[test]
