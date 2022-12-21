@@ -641,6 +641,35 @@ mod tests {
     }
 
     #[test]
+    fn and_or_null() {
+        fn eval_to_null(op: BinaryOp, lhs: Value, rhs: Value) {
+            let mut plan = LogicalPlan::new();
+            let expq = plan.add_operator(BindingsOp::ExprQuery(ExprQuery {
+                expr: ValueExpr::BinaryExpr(
+                    op,
+                    Box::new(ValueExpr::Lit(Box::new(lhs))),
+                    Box::new(ValueExpr::Lit(Box::new(rhs))),
+                ),
+            }));
+
+            let sink = plan.add_operator(BindingsOp::Sink);
+            plan.add_flow(expq, sink);
+
+            let result = evaluate(plan, MapBindings::default());
+            assert_eq!(result, Value::Null);
+        }
+
+        eval_to_null(BinaryOp::And, Value::Null, Value::Boolean(true));
+        eval_to_null(BinaryOp::And, Value::Missing, Value::Boolean(true));
+        eval_to_null(BinaryOp::And, Value::Boolean(true), Value::Null);
+        eval_to_null(BinaryOp::And, Value::Boolean(true), Value::Missing);
+        eval_to_null(BinaryOp::Or, Value::Null, Value::Boolean(false));
+        eval_to_null(BinaryOp::Or, Value::Missing, Value::Boolean(false));
+        eval_to_null(BinaryOp::Or, Value::Boolean(false), Value::Null);
+        eval_to_null(BinaryOp::Or, Value::Boolean(false), Value::Missing);
+    }
+
+    #[test]
     fn between_op() {
         fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
             let mut plan = LogicalPlan::new();
