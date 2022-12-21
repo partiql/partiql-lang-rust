@@ -168,10 +168,16 @@ impl EvaluatorPlanner {
             ValueExpr::Path(expr, components) => Box::new(EvalPath {
                 expr: self.plan_values(*expr),
                 components: components
-                    .iter()
+                    .into_iter()
                     .map(|c| match c {
-                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k.clone()),
-                        PathComponent::Index(i) => eval::EvalPathComponent::Index(*i),
+                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k),
+                        PathComponent::Index(i) => eval::EvalPathComponent::Index(i),
+                        PathComponent::KeyExpr(k) => {
+                            eval::EvalPathComponent::KeyExpr(self.plan_values(*k))
+                        }
+                        PathComponent::IndexExpr(i) => {
+                            eval::EvalPathComponent::IndexExpr(self.plan_values(*i))
+                        }
                     })
                     .collect(),
             }),

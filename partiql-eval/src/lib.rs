@@ -1364,6 +1364,51 @@ mod tests {
     }
 
     #[test]
+    fn paths() {
+        fn test(expr: ValueExpr, expected: Value) {
+            let mut lg = LogicalPlan::new();
+            let expq = lg.add_operator(BindingsOp::ExprQuery(ExprQuery { expr }));
+
+            let sink = lg.add_operator(BindingsOp::Sink);
+            lg.add_flow(expq, sink);
+
+            let out = evaluate(lg, MapBindings::default());
+            println!("{:?}", &out);
+            assert_eq!(out, expected);
+        }
+        let list = ValueExpr::Lit(Box::new(Value::List(Box::new(partiql_list![1, 2, 3]))));
+
+        // `[1,2,3][0]` -> `1`
+        let index = ValueExpr::Path(Box::new(list.clone()), vec![PathComponent::Index(0)]);
+        test(index, Value::Integer(1));
+
+        // `[1,2,3][1+1]` -> `3`
+        let index_expr = ValueExpr::BinaryExpr(
+            BinaryOp::Add,
+            Box::new(ValueExpr::Lit(Box::new(1.into()))),
+            Box::new(ValueExpr::Lit(Box::new(1.into()))),
+        );
+        let index = ValueExpr::Path(
+            Box::new(list.clone()),
+            vec![PathComponent::IndexExpr(Box::new(index_expr))],
+        );
+        test(index, Value::Integer(3));
+
+        // `{'a':10}[''||'a']` -> `10`
+        let tuple = ValueExpr::Lit(Box::new(Value::Tuple(Box::new(partiql_tuple![("a", 10)]))));
+        let index_expr = ValueExpr::BinaryExpr(
+            BinaryOp::Concat,
+            Box::new(ValueExpr::Lit(Box::new("".into()))),
+            Box::new(ValueExpr::Lit(Box::new("a".into()))),
+        );
+        let index = ValueExpr::Path(
+            Box::new(tuple.clone()),
+            vec![PathComponent::KeyExpr(Box::new(index_expr))],
+        );
+        test(index, Value::Integer(10));
+    }
+
+    #[test]
     fn select() {
         let mut lg = LogicalPlan::new();
 
