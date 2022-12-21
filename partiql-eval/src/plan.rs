@@ -70,6 +70,7 @@ impl EvaluatorPlanner {
                     .collect();
                 Box::new(eval::EvalProject::new(exprs))
             }
+            BindingsOp::ProjectAll => Box::new(eval::EvalProjectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_values(expr.clone());
                 Box::new(eval::EvalProjectValue::new(expr))

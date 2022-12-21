@@ -166,6 +166,7 @@ pub enum BindingsOp {
     Join(Join),
     SetOp,
     Project(Project),
+    ProjectAll,
     ProjectValue(ProjectValue),
     ExprQuery(ExprQuery),
     Distinct,

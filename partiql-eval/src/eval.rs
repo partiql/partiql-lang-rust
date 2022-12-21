@@ -508,6 +508,51 @@ impl Evaluable for EvalProject {
             true => Some(Value::List(Box::new(List::from(value)))),
             false => Some(Value::Bag(Box::new(Bag::from(value)))),
         };
+        self.output.clone()
+    }
+
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
+        self.input = Some(input.clone());
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct EvalProjectAll {
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+}
+
+impl EvalProjectAll {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Evaluable for EvalProjectAll {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self
+            .input
+            .as_ref()
+            .expect("Error in retrieving input value")
+            .clone();
+
+        let ordered = &input_value.is_ordered();
+
+        let seq = input_value
+            .into_iter()
+            .map(|val| {
+                let mut t = Tuple::new();
+                for (_k, val) in val.as_tuple_ref().pairs() {
+                    t = t.tuple_concat(&val.as_tuple_ref());
+                }
+                Value::Tuple(Box::new(t))
+            })
+            .collect_vec();
+
+        self.output = match ordered {
+            true => Some(Value::List(Box::new(List::from(seq)))),
+            false => Some(Value::Bag(Box::new(Bag::from(seq)))),
+        };
 
         self.output.clone()
     }
