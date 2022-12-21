@@ -1,0 +1,39 @@
+[package]
+name = "partiql-logical-planner"
+description = "PartiQL Logical Planner"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["sql", "parser", "query", "compilers", "interpreters"]
+categories = ["database", "compilers"]
+exclude = [
+  "**/.git/**",
+  "**/.github/**",
+  "**/.travis.yml",
+  "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+partiql-value = { path = "../partiql-value" }
+partiql-logical = { path = "../partiql-logical" }
+partiql-ast = { path = "../partiql-ast" }
+ordered-float = "3.*"
+itertools = "0.10.*"
+unicase = "2.*"
+indexmap = "1.9"
+petgraph = "0.6.*"
+num = "0.4"
+fnv = "1"
+assert_matches = "1.5.*"
+
+[dev-dependencies]
+partiql-parser = { path = "../partiql-parser" }
+partiql-eval = { path = "../partiql-eval" }
+
+
