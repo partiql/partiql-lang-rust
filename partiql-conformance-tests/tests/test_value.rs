@@ -2,7 +2,7 @@ use ion_rs::{Integer, IonReader, IonType, Reader, StreamItem};
 use partiql_value::{Bag, List, Tuple, Value};
 
 pub(crate) struct TestValue {
-    value: Value,
+    pub value: Value,
 }
 
 impl From<&str> for TestValue {

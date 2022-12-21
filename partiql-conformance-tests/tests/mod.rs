@@ -1,4 +1,8 @@
-use partiql_parser::ParserResult;
+use partiql_eval as eval;
+use partiql_eval::env::basic::MapBindings;
+use partiql_logical as logical;
+use partiql_parser::{Parsed, ParserResult};
+use partiql_value::Value;
 mod test_value;
 pub(crate) use test_value::TestValue;
 
@@ -16,6 +20,27 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 
 #[track_caller]
 #[inline]
+pub(crate) fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
+    todo!("lower AST to plan")
+}
+
+#[track_caller]
+#[inline]
+pub(crate) fn evaluate(
+    logical: logical::LogicalPlan<logical::BindingsOp>,
+    bindings: MapBindings<Value>,
+) -> Value {
+    let planner = eval::plan::EvaluatorPlanner;
+    let mut plan = planner.compile(&logical);
+    if let Ok(out) = plan.execute_mut(bindings) {
+        out.result
+    } else {
+        Value::Missing
+    }
+}
+
+#[track_caller]
+#[inline]
 pub(crate) fn fail_syntax(statement: &str) {
     let res = parse(statement);
     assert!(
@@ -28,7 +53,7 @@ pub(crate) fn fail_syntax(statement: &str) {
 
 #[track_caller]
 #[inline]
-pub(crate) fn pass_syntax(statement: &str) {
+pub(crate) fn pass_syntax(statement: &str) -> Parsed {
     let res = parse(statement);
     assert!(
         res.is_ok(),
@@ -36,6 +61,7 @@ pub(crate) fn pass_syntax(statement: &str) {
         statement,
         res
     );
+    res.unwrap()
 }
 
 #[track_caller]
@@ -46,16 +72,32 @@ pub(crate) fn fail_semantics(_statement: &str) {
 
 #[track_caller]
 #[inline]
-#[allow(dead_code)]
-pub(crate) fn pass_semantics(_statement: &str) {
-    todo!("pass_semantics")
+pub(crate) fn pass_semantics(statement: &str) {
+    let parsed = pass_syntax(statement);
+    // TODO add Result to lower call
+    let lowered: Result<_, ()> = Ok(lower(&parsed));
+    assert!(
+        lowered.is_ok(),
+        "For `{}`, expected `Ok(_)`, but was `{:#?}`",
+        statement,
+        lowered
+    );
 }
 
 #[track_caller]
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn fail_eval(_statement: &str, _mode: EvaluationMode, _env: &Option<TestValue>) {
-    todo!("fail_eval")
+    let parsed = parse(_statement);
+    let lowered = lower(&parsed.expect("parse"));
+    let bindings = _env
+        .as_ref()
+        .map(|e| (&e.value).into())
+        .unwrap_or_else(MapBindings::default);
+    let out = evaluate(lowered, bindings);
+
+    println!("{:?}", &out);
+    // TODO assert failure
 }
 
 #[track_caller]
@@ -67,7 +109,21 @@ pub(crate) fn pass_eval(
     _env: &Option<TestValue>,
     _expected: &TestValue,
 ) {
-    todo!("pass_eval")
+    if let EvaluationMode::Error = _mode {
+        eprintln!("EvaluationMode::Error currently unsupported");
+        return;
+    }
+
+    let parsed = parse(_statement);
+    let lowered = lower(&parsed.expect("parse"));
+    let bindings = _env
+        .as_ref()
+        .map(|e| (&e.value).into())
+        .unwrap_or_else(MapBindings::default);
+    let out = evaluate(lowered, bindings);
+
+    println!("{:?}", &out);
+    assert_eq!(out, _expected.value);
 }
 
 pub(crate) fn environment() -> Option<TestValue> {

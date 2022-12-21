@@ -167,6 +167,7 @@ impl Generator {
                 let mod_name = file_name.replace(".ion", "").escape_path();
                 let mut module = Module::new(&mod_name);
                 module.attr("allow(unused_imports)");
+                module.attr("allow(clippy::module_inception)");
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name.clone()));
@@ -192,6 +193,7 @@ impl Generator {
 
         let mut module = Module::new(&mod_name.escape_module_name());
         module.attr("allow(unused_imports)");
+        module.attr("allow(clippy::module_inception)");
         module.import("super", "*");
 
         self.push_scope(Some(mod_name.clone()));
@@ -213,6 +215,7 @@ impl Generator {
                 let mod_name = dir_name;
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
+                module.attr("allow(clippy::module_inception)");
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -228,6 +231,7 @@ impl Generator {
                 let mod_name = file_name.replace(".ion", "");
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
+                module.attr("allow(clippy::module_inception)");
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -369,6 +373,18 @@ impl Generator {
             TestStatement::Statement(s) => vec![gen(s)],
         };
 
+        if let Some(env) = &test_case.env {
+            let env = struct_to_string(env);
+            let env = quote! {
+                let env_ion_text = #env;
+                let env = Some(env_ion_text.into());
+            }
+            .to_string()
+            .replace("\\n", "\n");
+            test_fn.line(env);
+            has_env = true;
+        }
+
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
@@ -400,9 +416,6 @@ impl Generator {
                     eval_mode,
                     ..
                 }) => {
-                    // TODO evaluation success tests are not yet implemented
-                    ignore_test = true;
-
                     if !std::mem::replace(&mut has_env, true) {
                         test_fn.line("let env = environment();\n\n");
                     }
@@ -469,9 +482,6 @@ impl Generator {
                     test_fn.line(tokens.to_string().replace("\\n", "\n"));
                 }
                 Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
-                    // TODO evaluation fail tests are not yet implemented
-                    ignore_test = true;
-
                     if !std::mem::replace(&mut has_env, true) {
                         test_fn.line("let env = environment();\n\n");
                     }
