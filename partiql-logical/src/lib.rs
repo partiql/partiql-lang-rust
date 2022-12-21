@@ -298,6 +298,8 @@ pub enum PathComponent {
     Key(BindingsName),
     /// E.g. 4 in `a[4]`
     Index(i64),
+    KeyExpr(Box<ValueExpr>),
+    IndexExpr(Box<ValueExpr>),
 }
 
 /// Represents a PartiQL tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.

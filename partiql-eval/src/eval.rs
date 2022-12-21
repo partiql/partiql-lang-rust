@@ -706,7 +706,9 @@ impl EvalExpr for EvalBagExpr {
 #[derive(Debug)]
 pub enum EvalPathComponent {
     Key(BindingsName),
+    KeyExpr(Box<dyn EvalExpr>),
     Index(i64),
+    IndexExpr(Box<dyn EvalExpr>),
 }
 
 #[derive(Debug)]
@@ -718,7 +720,12 @@ pub struct EvalPath {
 impl EvalExpr for EvalPath {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         #[inline]
-        fn path_into(value: Value, path: &EvalPathComponent) -> Value {
+        fn path_into(
+            value: Value,
+            path: &EvalPathComponent,
+            bindings: &Tuple,
+            ctx: &dyn EvalContext,
+        ) -> Value {
             match path {
                 EvalPathComponent::Key(k) => match value {
                     Value::Tuple(mut tuple) => tuple.remove(k).unwrap_or(Missing),
@@ -730,13 +737,34 @@ impl EvalExpr for EvalPath {
                     }
                     _ => Missing,
                 },
+                EvalPathComponent::KeyExpr(ke) => {
+                    let key = ke.evaluate(bindings, ctx);
+                    match (value, key) {
+                        (Value::Tuple(mut tuple), Value::String(key)) => tuple
+                            .remove(&BindingsName::CaseInsensitive(key.as_ref().clone()))
+                            .unwrap_or(Value::Missing),
+                        _ => Missing,
+                    }
+                }
+                EvalPathComponent::IndexExpr(ie) => {
+                    if let Value::Integer(idx) = ie.evaluate(bindings, ctx) {
+                        match value {
+                            Value::List(mut list) if (idx as usize) < list.len() => {
+                                std::mem::take(list.get_mut(idx).unwrap())
+                            }
+                            _ => Missing,
+                        }
+                    } else {
+                        Missing
+                    }
+                }
             }
         }
 
         let mut value = self.expr.evaluate(bindings, ctx);
 
         for path in &self.components {
-            value = path_into(value, path);
+            value = path_into(value, path, bindings, ctx);
         }
         value
     }
