@@ -117,6 +117,10 @@ impl EvaluatorPlanner {
                     on,
                 ))
             }
+            BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
+                let expr = self.plan_values(expr.clone());
+                Box::new(eval::EvalExprQuery::new(expr))
+            }
             BindingsOp::OrderBy => todo!("OrderBy"),
             BindingsOp::Offset => todo!("Offset"),
             BindingsOp::Limit => todo!("Limit"),

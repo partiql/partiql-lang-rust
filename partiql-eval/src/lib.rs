@@ -13,9 +13,10 @@ mod tests {
 
     use partiql_logical as logical;
     use partiql_logical::BindingsOp::{Distinct, Project, ProjectValue};
+
     use partiql_logical::{
-        BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, IsTypeExpr, JoinKind, ListExpr,
-        LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
+        BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
+        ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -1311,6 +1312,26 @@ mod tests {
             ],
             Null,
         );
+    }
+
+    #[test]
+    fn expr_query() {
+        let mut lg = LogicalPlan::new();
+        let expq = lg.add_operator(BindingsOp::ExprQuery(ExprQuery {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::Add,
+                Box::new(ValueExpr::Lit(Box::new(40.into()))),
+                Box::new(ValueExpr::Lit(Box::new(2.into()))),
+            ),
+        }));
+
+        let sink = lg.add_operator(BindingsOp::Sink);
+
+        lg.add_flow(expq, sink);
+
+        let out = evaluate(lg, MapBindings::default());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Integer(42));
     }
 
     #[test]

@@ -565,6 +565,35 @@ impl Evaluable for EvalProjectValue {
 }
 
 #[derive(Debug)]
+pub struct EvalExprQuery {
+    pub expr: Box<dyn EvalExpr>,
+    pub input: Option<Value>,
+    pub output: Option<Value>,
+}
+
+impl EvalExprQuery {
+    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+        EvalExprQuery {
+            expr,
+            input: None,
+            output: None,
+        }
+    }
+}
+
+impl Evaluable for EvalExprQuery {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.as_ref().unwrap_or(&Value::Null);
+        self.output = Some(self.expr.evaluate(&input_value.as_tuple_ref(), ctx));
+        self.output.clone()
+    }
+
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
+        self.input = Some(input.clone());
+    }
+}
+
+#[derive(Debug)]
 pub struct EvalTupleExpr {
     pub attrs: Vec<Box<dyn EvalExpr>>,
     pub vals: Vec<Box<dyn EvalExpr>>,
