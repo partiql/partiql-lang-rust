@@ -15,7 +15,7 @@ use unicase::UniCase;
 
 mod ion;
 
-#[derive(Clone, Hash, Debug)]
+#[derive(Clone, Hash, Debug, Eq, PartialEq)]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),
@@ -1463,7 +1463,7 @@ mod tests {
             Value::from(f64::INFINITY),
             Value::from(""),
             Value::from("abc"),
-            Value::Blob(Box::new(vec![])),
+            Value::Blob(Box::default()),
             Value::Blob(Box::new(vec![1, 2, 3])),
             Value::from(partiql_list!()),
             Value::from(partiql_list!(1, 2, 3)),

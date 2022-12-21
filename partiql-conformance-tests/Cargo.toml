@@ -32,8 +32,11 @@ miette = { version ="5.*", features = ["fancy"] }
 partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.1.0" }
 
 [dependencies]
-partiql-parser = { path = "../partiql-parser", version = "0.1.0" }
+partiql-parser = { path = "../partiql-parser" }
+partiql-ast = { path = "../partiql-ast" }
+partiql-logical = { path = "../partiql-logical" }
 partiql-value = { path = "../partiql-value" }
+partiql-eval = { path = "../partiql-eval" }
 
 ion-rs = "0.14"
 
