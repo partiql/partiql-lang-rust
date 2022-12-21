@@ -872,7 +872,9 @@ impl EvalExpr for EvalBinOpExpr {
         fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
             match (op, value) {
                 (EvalBinOp::And, Boolean(false)) => Some(false.into()),
+                (EvalBinOp::And, Null) | (EvalBinOp::And, Missing) => Some(Null),
                 (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
+                (EvalBinOp::Or, Null) | (EvalBinOp::Or, Missing) => Some(Null),
                 (EvalBinOp::In, Null) | (EvalBinOp::In, Missing) => Some(Null),
                 (_, Missing) => Some(Missing),
                 _ => None,
