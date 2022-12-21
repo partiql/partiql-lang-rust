@@ -864,6 +864,7 @@ pub enum EvalBinOp {
 
     // Boolean ops
     In,
+    Is,
 }
 
 impl EvalExpr for EvalBinOpExpr {
@@ -874,6 +875,7 @@ impl EvalExpr for EvalBinOpExpr {
                 (EvalBinOp::And, Boolean(false)) => Some(false.into()),
                 (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
                 (EvalBinOp::In, Null) | (EvalBinOp::In, Missing) => Some(Null),
+                (EvalBinOp::Is, _) => None,
                 (_, Missing) => Some(Missing),
                 _ => None,
             }
@@ -945,6 +947,13 @@ impl EvalExpr for EvalBinOpExpr {
                     }
                 }
                 _ => Null,
+            },
+            EvalBinOp::Is => match (&lhs, &rhs) {
+                (Value::Null, Value::Null) => true.into(),
+                (Value::Missing, Value::Missing) => true.into(),
+                (_, Value::Null) => false.into(),
+                (_, Value::Missing) => false.into(),
+                _ => todo!(" Other `IS` cases"),
             },
             EvalBinOp::Exp => todo!("Exponentiation"),
         }

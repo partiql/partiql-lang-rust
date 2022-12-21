@@ -288,6 +288,8 @@ pub enum BinaryOp {
     Exp,
 
     In,
+
+    Is,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

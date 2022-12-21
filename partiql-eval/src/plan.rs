@@ -160,6 +160,7 @@ impl EvaluatorPlanner {
                     BinaryOp::Mod => EvalBinOp::Mod,
                     BinaryOp::Exp => EvalBinOp::Exp,
                     BinaryOp::In => EvalBinOp::In,
+                    BinaryOp::Is => EvalBinOp::Is,
                 };
                 Box::new(EvalBinOpExpr { op, lhs, rhs })
             }

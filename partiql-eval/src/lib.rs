@@ -1335,6 +1335,30 @@ mod tests {
     }
 
     #[test]
+    fn binop_is() {
+        let mut lg = LogicalPlan::new();
+        let expq = lg.add_operator(BindingsOp::ExprQuery(ExprQuery {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::Is,
+                Box::new(ValueExpr::BinaryExpr(
+                    BinaryOp::Gt,
+                    Box::new(ValueExpr::Lit(Box::new(40.into()))),
+                    Box::new(ValueExpr::Lit(Box::new("string".into()))),
+                )),
+                Box::new(ValueExpr::Lit(Box::new(Value::Missing))),
+            ),
+        }));
+
+        let sink = lg.add_operator(BindingsOp::Sink);
+
+        lg.add_flow(expq, sink);
+
+        let out = evaluate(lg, MapBindings::default());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Boolean(true));
+    }
+
+    #[test]
     fn select() {
         let mut lg = LogicalPlan::new();
 
