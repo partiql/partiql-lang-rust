@@ -15,6 +15,7 @@ use crate::eval::{
 };
 use partiql_value::Value::Null;
 
+#[derive(Default)]
 pub struct EvaluatorPlanner;
 
 impl EvaluatorPlanner {
@@ -116,7 +117,11 @@ impl EvaluatorPlanner {
                     on,
                 ))
             }
-            _ => panic!("Unevaluable bexpr"),
+            BindingsOp::OrderBy => todo!("OrderBy"),
+            BindingsOp::Offset => todo!("Offset"),
+            BindingsOp::Limit => todo!("Limit"),
+            BindingsOp::SetOp => todo!("SetOp"),
+            BindingsOp::GroupBy => todo!("GroupBy"),
         }
     }
 

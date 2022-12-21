@@ -564,6 +564,12 @@ impl Evaluable for EvalProjectValue {
     }
 }
 
+#[derive(Debug)]
+pub struct EvalTupleExpr {
+    pub attrs: Vec<Box<dyn EvalExpr>>,
+    pub vals: Vec<Box<dyn EvalExpr>>,
+}
+
 impl EvalExpr for EvalTupleExpr {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let mut t = Tuple::new();
@@ -687,12 +693,6 @@ impl EvalExpr for EvalSubQueryExpr {
             Missing
         };
     }
-}
-
-#[derive(Debug)]
-pub struct EvalTupleExpr {
-    pub attrs: Vec<Box<dyn EvalExpr>>,
-    pub vals: Vec<Box<dyn EvalExpr>>,
 }
 
 #[derive(Debug, Default)]

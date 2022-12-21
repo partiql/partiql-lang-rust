@@ -531,29 +531,24 @@ mod tests {
             Value::from(partiql_bag!["a", "b", 11]),
             Value::from(false),
         );
-        eval_bin_op(
-            BinaryOp::In,
-            Value::from(1),
-            Value::from(1),
-            Value::from(Null),
-        );
+        eval_bin_op(BinaryOp::In, Value::from(1), Value::from(1), Null);
         eval_bin_op(
             BinaryOp::In,
             Value::from(1),
             Value::from(partiql_list![10, Missing, "b"]),
-            Value::from(Null),
+            Null,
         );
         eval_bin_op(
             BinaryOp::In,
-            Value::from(Missing),
+            Missing,
             Value::from(partiql_list![1, Missing, "b"]),
-            Value::from(Null),
+            Null,
         );
         eval_bin_op(
             BinaryOp::In,
-            Value::from(Null),
+            Null,
             Value::from(partiql_list![1, Missing, "b"]),
-            Value::from(Null),
+            Null,
         );
         eval_bin_op(
             BinaryOp::In,
@@ -565,7 +560,7 @@ mod tests {
             BinaryOp::In,
             Value::from(1),
             Value::from(partiql_list![3, Null]),
-            Value::from(Null),
+            Null,
         );
     }
 
@@ -1227,9 +1222,9 @@ mod tests {
         eval_null_if_op(Value::from(1), Value::from(1), Value::Null);
         eval_null_if_op(Value::from(1), Value::from("foo"), Value::from(1));
         eval_null_if_op(Value::from("foo"), Value::from(1), Value::from("foo"));
-        eval_null_if_op(Value::from(Null), Value::from(Null), Value::Null);
-        eval_null_if_op(Value::from(Missing), Value::from(Null), Value::Missing);
-        eval_null_if_op(Value::from(Null), Value::from(Missing), Value::Null);
+        eval_null_if_op(Null, Null, Value::Null);
+        eval_null_if_op(Missing, Null, Value::Missing);
+        eval_null_if_op(Null, Missing, Value::Null);
     }
 
     // Creates the plan: `SELECT COALESCE(data.arg1, data.arg2, ..., argN) AS result FROM data` where arg1...argN comes from data
@@ -1259,7 +1254,7 @@ mod tests {
             exprs: HashMap::from([(
                 "result".to_string(),
                 ValueExpr::CoalesceExpr(CoalesceExpr {
-                    elements: (0..elements.len()).map(|i| index_to_valueexpr(i)).collect(),
+                    elements: (0..elements.len()).map(index_to_valueexpr).collect(),
                 }),
             )]),
         }));
@@ -1273,7 +1268,7 @@ mod tests {
         elements
             .into_iter()
             .enumerate()
-            .for_each(|(i, e)| data.insert(&*format!("arg{}", i), e));
+            .for_each(|(i, e)| data.insert(&format!("arg{}", i), e));
         bindings.insert("data", partiql_list![data].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
