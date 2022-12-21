@@ -52,7 +52,7 @@ use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
 
 /// Represents a PartiQL logical plan.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct LogicalPlan<T>
 where
     T: Default,
@@ -143,7 +143,7 @@ where
 }
 
 /// Represents an operator identifier in a [`LogicalPlan`]
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
 pub struct OpId(usize);
 
 impl OpId {
@@ -155,7 +155,7 @@ impl OpId {
 
 /// Represents PartiQL binding operators; A `BindingOp` is an operator that operates on
 /// binding tuples as specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub enum BindingsOp {
     Scan(Scan),
     Unpivot(Unpivot),
@@ -174,7 +174,7 @@ pub enum BindingsOp {
 }
 
 /// [`Scan`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
@@ -182,7 +182,7 @@ pub struct Scan {
 }
 
 /// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Unpivot {
     pub expr: ValueExpr,
     pub as_key: String,
@@ -190,14 +190,14 @@ pub struct Unpivot {
 }
 
 /// [`Filter`] represents a filter operator, e.g. `WHERE a = 10` in `SELECT a FROM t WHERE a = 10`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Filter {
     pub expr: ValueExpr,
 }
 
 /// ['Join`] represents a join operator, e.g. implicit `CROSS JOIN` specified by comma in `FROM`
 /// clause in `SELECT t1.a, t2.b FROM tbl1 AS t1, tbl2 AS t2`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Join {
     pub kind: JoinKind,
     pub left: Box<BindingsOp>,
@@ -206,7 +206,7 @@ pub struct Join {
 }
 
 /// Represents join types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum JoinKind {
     Inner,
     Left,
@@ -216,21 +216,21 @@ pub enum JoinKind {
 }
 
 /// Represents a projection, e.g. `SELECT a` in `SELECT a FROM t`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Project {
     pub exprs: HashMap<String, ValueExpr>,
 }
 
 /// Represents a value projection (SELECT VALUE) e.g. `SELECT VALUE t.a * 2` in
 ///`SELECT VALUE t.a * 2 IN tbl AS t`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProjectValue {
     pub expr: ValueExpr,
 }
 
 /// Represents a PartiQL value expression. Evaluation of a [`ValueExpr`] leads to a PartiQL value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ValueExpr {
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
@@ -251,7 +251,7 @@ pub enum ValueExpr {
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 /// Represents logical plan's unary operators.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum UnaryOp {
     Pos,
     Neg,
@@ -260,7 +260,7 @@ pub enum UnaryOp {
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 /// Represents logical plan's binary operators.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum BinaryOp {
     And,
     Or,
@@ -283,7 +283,7 @@ pub enum BinaryOp {
     In,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 /// Represents a path component in a plan.
 pub enum PathComponent {
     /// E.g. `b` in `a.b`
@@ -293,7 +293,7 @@ pub enum PathComponent {
 }
 
 /// Represents a PartiQL tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TupleExpr {
     pub attrs: Vec<ValueExpr>,
     pub values: Vec<ValueExpr>,
@@ -307,7 +307,7 @@ impl TupleExpr {
 }
 
 /// Represents a PartiQL list expression, e.g. `[a.c * 2, 5]`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ListExpr {
     pub elements: Vec<ValueExpr>,
 }
@@ -320,7 +320,7 @@ impl ListExpr {
 }
 
 /// Represents a PartiQL bag expression, e.g. `<<a.c * 2, 5>>`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BagExpr {
     pub elements: Vec<ValueExpr>,
 }
@@ -333,7 +333,7 @@ impl BagExpr {
 }
 
 /// Represents a PartiQL `BETWEEN` expression, e.g. `BETWEEN 500 AND 600`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BetweenExpr {
     pub value: Box<ValueExpr>,
     pub from: Box<ValueExpr>,
@@ -342,14 +342,14 @@ pub struct BetweenExpr {
 
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
 /// `SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s`
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SubQueryExpr {
     pub plan: LogicalPlan<BindingsOp>,
 }
 
 /// Represents a PartiQL's simple case expressions,
 /// e.g.`CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SimpleCase {
     pub expr: Box<ValueExpr>,
     pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
@@ -358,14 +358,14 @@ pub struct SimpleCase {
 
 /// Represents a PartiQL's searched case expressions,
 /// e.g.`CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SearchedCase {
     pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
     pub default: Option<Box<ValueExpr>>,
 }
 
 /// Represents an `IS` expression, e.g. `IS TRUE`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IsTypeExpr {
     pub not: bool,
     pub expr: Box<ValueExpr>,
@@ -373,7 +373,7 @@ pub struct IsTypeExpr {
 }
 
 /// Represents a PartiQL Type.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     NullType,
     BooleanType,
@@ -405,7 +405,7 @@ pub enum Type {
 }
 
 /// Represents a `NULLIF` expression, e.g. `NULLIF(v1, v2)` in `SELECT NULLIF(v1, v2) FROM data`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NullIfExpr {
     pub lhs: Box<ValueExpr>,
     pub rhs: Box<ValueExpr>,
@@ -413,7 +413,7 @@ pub struct NullIfExpr {
 
 /// Represents a `COALESCE` expression, e.g.
 /// `COALESCE(NULL, 10)` in `SELECT COALESCE(NULL, 10) FROM data`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CoalesceExpr {
     pub elements: Vec<ValueExpr>,
 }
