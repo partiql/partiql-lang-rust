@@ -12,7 +12,7 @@ mod tests {
     use rust_decimal_macros::dec;
 
     use partiql_logical as logical;
-    use partiql_logical::BindingsOp::{Distinct, Project, ProjectValue};
+    use partiql_logical::BindingsOp::{Distinct, Project, ProjectAll, ProjectValue};
 
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
@@ -1395,6 +1395,32 @@ mod tests {
                 partiql_tuple![("b", 1)],
                 partiql_tuple![("b", 2)],
                 partiql_tuple![("b", 3)],
+            ];
+            assert_eq!(*bag, expected);
+        });
+    }
+
+    #[test]
+    fn select_star() {
+        // TODO `SELECT *` is underspecified w.r.t. nested data
+        let mut lg = LogicalPlan::new();
+
+        let from = lg.add_operator(scan("data", "data"));
+
+        let project = lg.add_operator(ProjectAll);
+
+        let sink = lg.add_operator(BindingsOp::Sink);
+
+        lg.add_flow(from, project);
+        lg.add_flow(project, sink);
+
+        let out = evaluate(lg, data_3_tuple());
+        println!("{:?}", &out);
+        assert_matches!(out, Value::Bag(bag) => {
+            let expected = partiql_bag![
+                partiql_tuple![("a", 1)],
+                partiql_tuple![("a", 2)],
+                partiql_tuple![("a", 3)],
             ];
             assert_eq!(*bag, expected);
         });
