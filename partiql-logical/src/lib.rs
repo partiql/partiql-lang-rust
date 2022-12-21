@@ -167,6 +167,7 @@ pub enum BindingsOp {
     SetOp,
     Project(Project),
     ProjectValue(ProjectValue),
+    ExprQuery(ExprQuery),
     Distinct,
     GroupBy,
     #[default]
@@ -225,6 +226,12 @@ pub struct Project {
 ///`SELECT VALUE t.a * 2 IN tbl AS t`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProjectValue {
+    pub expr: ValueExpr,
+}
+
+/// Represents an expression query e.g. `a * 2` in `a * 2` or an expression like `2+2`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ExprQuery {
     pub expr: ValueExpr,
 }
 
