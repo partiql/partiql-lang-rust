@@ -13,6 +13,7 @@ members = [
   "partiql-conformance-tests",
   "partiql-conformance-test-generator",
   "partiql-source-map",
+  "partiql-logical-planner",
   "partiql-logical",
   "partiql-eval",
   "partiql-ir",

@@ -1389,7 +1389,7 @@ mod tests {
             Box::new(ValueExpr::Lit(Box::new(1.into()))),
         );
         let index = ValueExpr::Path(
-            Box::new(list.clone()),
+            Box::new(list),
             vec![PathComponent::IndexExpr(Box::new(index_expr))],
         );
         test(index, Value::Integer(3));
@@ -1402,7 +1402,7 @@ mod tests {
             Box::new(ValueExpr::Lit(Box::new("a".into()))),
         );
         let index = ValueExpr::Path(
-            Box::new(tuple.clone()),
+            Box::new(tuple),
             vec![PathComponent::KeyExpr(Box::new(index_expr))],
         );
         test(index, Value::Integer(10));

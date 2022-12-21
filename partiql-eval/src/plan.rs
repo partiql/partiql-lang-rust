@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
 
@@ -9,9 +10,10 @@ use partiql_logical::{
 
 use crate::eval;
 use crate::eval::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalExpr, EvalIsTypeExpr, EvalJoinKind,
-    EvalListExpr, EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr,
-    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
+    EvalIsTypeExpr, EvalJoinKind, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
+    EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
+    EvalVarRef, Evaluable,
 };
 use partiql_value::Value::Null;
 
@@ -317,6 +319,14 @@ impl EvaluatorPlanner {
                     ValueExpr::SearchedCase(sc)
                 }
                 self.plan_values(as_case(c.elements.first().unwrap(), &c.elements[1..]))
+            }
+            ValueExpr::DynamicLookup(lookups) => {
+                let lookups = lookups
+                    .into_iter()
+                    .map(|lookup| self.plan_values(lookup))
+                    .collect_vec();
+
+                Box::new(EvalDynamicLookup { lookups })
             }
         }
     }

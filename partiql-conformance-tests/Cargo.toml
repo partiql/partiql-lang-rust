@@ -29,11 +29,12 @@ required-features = ["report_tool"]
 
 [build-dependencies]
 miette = { version ="5.*", features = ["fancy"] }
-partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.1.0" }
+partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator" }
 
 [dependencies]
 partiql-parser = { path = "../partiql-parser" }
 partiql-ast = { path = "../partiql-ast" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-logical = { path = "../partiql-logical" }
 partiql-value = { path = "../partiql-value" }
 partiql-eval = { path = "../partiql-eval" }

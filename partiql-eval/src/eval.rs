@@ -7,6 +7,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use petgraph::algo::toposort;
+use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
@@ -81,6 +82,10 @@ impl EvalPlan {
                 ))],
             }),
         }
+    }
+
+    pub fn dump_graph(&self) -> Dot<&StableGraph<Box<dyn Evaluable>, u8>> {
+        Dot::with_config(&self.0, &[Config::EdgeNoLabel])
     }
 }
 
@@ -365,6 +370,7 @@ pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
     pub at_key: String,
+    pub input: Option<Value>,
     pub output: Option<Value>,
 }
 
@@ -374,6 +380,7 @@ impl EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
             at_key: at_key.to_string(),
+            input: None,
             output: None,
         }
     }
@@ -401,8 +408,8 @@ impl Evaluable for EvalUnpivot {
         self.output.clone()
     }
 
-    fn update_input(&mut self, _input: &Value, _branch_num: u8) {
-        todo!()
+    fn update_input(&mut self, input: &Value, _branch_num: u8) {
+        self.input = Some(input.clone());
     }
 
     fn get_vars(&self) -> Vec<String> {
@@ -842,6 +849,22 @@ pub trait EvalExpr: Debug {
 }
 
 #[derive(Debug)]
+pub struct EvalDynamicLookup {
+    pub lookups: Vec<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalDynamicLookup {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let result = self
+            .lookups
+            .iter()
+            .map(|lookup| lookup.evaluate(bindings, ctx))
+            .find(|res| res != &Value::Missing);
+        result.unwrap_or(Value::Missing)
+    }
+}
+
+#[derive(Debug)]
 pub struct EvalVarRef {
     pub name: BindingsName,
 }
@@ -849,7 +872,7 @@ pub struct EvalVarRef {
 impl EvalExpr for EvalVarRef {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
-        value.map_or(Null, |v| v.clone())
+        value.map_or(Missing, |v| v.clone())
     }
 }
 

@@ -1,8 +1,10 @@
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_logical as logical;
+use partiql_logical_planner::{AstToLogical, NameResolver};
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
+
 mod test_value;
 pub(crate) use test_value::TestValue;
 
@@ -21,7 +23,15 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
-    todo!("lower AST to plan")
+    if let partiql_ast::ast::Expr::Query(q) = parsed.ast.as_ref() {
+        let mut resolver = NameResolver::default();
+        let resolver = resolver.resolve(q);
+
+        let planner = AstToLogical::new(resolver);
+        planner.lower_query(q)
+    } else {
+        panic!("wrong expr type");
+    }
 }
 
 #[track_caller]
@@ -31,7 +41,10 @@ pub(crate) fn evaluate(
     bindings: MapBindings<Value>,
 ) -> Value {
     let planner = eval::plan::EvaluatorPlanner;
+
     let mut plan = planner.compile(&logical);
+    println!("{:?}", plan.dump_graph());
+
     if let Ok(out) = plan.execute_mut(bindings) {
         out.result
     } else {
