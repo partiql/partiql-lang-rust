@@ -11,7 +11,7 @@ pub(crate) fn parse_ion(contents: &str) -> Value {
     // expecting a single top-level value
     let item = reader.next().expect("test value");
     let val = match item {
-        StreamItem::Value(typ) => parse_test_value(&mut reader, typ),
+        StreamItem::Value(typ) => parse_value(&mut reader, typ),
         StreamItem::Null(_) => Value::Null,
         StreamItem::Nothing => panic!("expecting a test value"),
     };
@@ -21,7 +21,7 @@ pub(crate) fn parse_ion(contents: &str) -> Value {
     val
 }
 
-fn parse_test_value(reader: &mut Reader, typ: IonType) -> Value {
+fn parse_value(reader: &mut Reader, typ: IonType) -> Value {
     match typ {
         IonType::Null => Value::Null,
         IonType::Boolean => Value::Boolean(reader.read_bool().unwrap()),
@@ -38,17 +38,24 @@ fn parse_test_value(reader: &mut Reader, typ: IonType) -> Value {
             Value::Decimal(rust_decimal::Decimal::from_scientific(&ion_dec_str).unwrap())
         }
         IonType::Timestamp => todo!("timestamp"),
-        IonType::Symbol => Value::String(Box::new(reader.read_symbol().unwrap().to_string())),
+        IonType::Symbol => Value::String(Box::new(
+            reader
+                .read_symbol()
+                .unwrap()
+                .text()
+                .unwrap_or("")
+                .to_string(),
+        )),
         IonType::String => Value::String(Box::new(reader.read_string().unwrap())),
         IonType::Clob => todo!("clob"),
         IonType::Blob => Value::Blob(Box::new(reader.read_blob().unwrap())),
-        IonType::List => List::from(parse_test_value_sequence(reader)).into(),
+        IonType::List => List::from(parse_sequence(reader)).into(),
         IonType::SExpression => todo!("sexp"),
-        IonType::Struct => parse_test_value_tuple(reader).into(),
+        IonType::Struct => parse_tuple(reader).into(),
     }
 }
 
-fn parse_test_value_tuple(reader: &mut Reader) -> Tuple {
+fn parse_tuple(reader: &mut Reader) -> Tuple {
     let mut tuple = Tuple::new();
     reader.step_in().expect("step into struct");
     loop {
@@ -56,7 +63,7 @@ fn parse_test_value_tuple(reader: &mut Reader) -> Tuple {
         let (key, value) = match item {
             StreamItem::Value(typ) => (
                 reader.field_name().expect("field name"),
-                parse_test_value(reader, typ),
+                parse_value(reader, typ),
             ),
             StreamItem::Null(_) => (reader.field_name().expect("field name"), Value::Null),
             StreamItem::Nothing => break,
@@ -67,13 +74,13 @@ fn parse_test_value_tuple(reader: &mut Reader) -> Tuple {
     tuple
 }
 
-fn parse_test_value_sequence(reader: &mut Reader) -> Vec<Value> {
+fn parse_sequence(reader: &mut Reader) -> Vec<Value> {
     reader.step_in().expect("step into sequence");
     let mut values = vec![];
     loop {
         let item = reader.next().expect("test value");
         let val = match item {
-            StreamItem::Value(typ) => parse_test_value(reader, typ),
+            StreamItem::Value(typ) => parse_value(reader, typ),
             StreamItem::Null(_) => Value::Null,
             StreamItem::Nothing => break,
         };
