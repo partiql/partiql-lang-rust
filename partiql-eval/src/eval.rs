@@ -945,10 +945,10 @@ impl EvalExpr for EvalBinOpExpr {
         fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
             match (op, value) {
                 (EvalBinOp::And, Boolean(false)) => Some(false.into()),
-                (EvalBinOp::And, Null) | (EvalBinOp::And, Missing) => Some(Null),
                 (EvalBinOp::Or, Boolean(true)) => Some(true.into()),
-                (EvalBinOp::Or, Null) | (EvalBinOp::Or, Missing) => Some(Null),
-                (EvalBinOp::In, Null) | (EvalBinOp::In, Missing) => Some(Null),
+                (EvalBinOp::And, Missing) | (EvalBinOp::Or, Missing) | (EvalBinOp::In, Missing) => {
+                    Some(Null)
+                }
                 (_, Missing) => Some(Missing),
                 _ => None,
             }
@@ -964,18 +964,26 @@ impl EvalExpr for EvalBinOpExpr {
             EvalBinOp::And => lhs.and(&rhs),
             EvalBinOp::Or => lhs.or(&rhs),
             EvalBinOp::Concat => {
-                // TODO non-naive concat. Also doesn't properly propagate MISSING and NULL
-                let lhs = if let Value::String(s) = lhs {
-                    *s
-                } else {
-                    format!("{:?}", lhs)
-                };
-                let rhs = if let Value::String(s) = rhs {
-                    *s
-                } else {
-                    format!("{:?}", lhs)
-                };
-                Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                // TODO non-naive concat (i.e., don't just use debug print for non-strings).
+                match (&lhs, &rhs) {
+                    (Missing, _) => Missing,
+                    (_, Missing) => Missing,
+                    (Null, _) => Null,
+                    (_, Null) => Null,
+                    _ => {
+                        let lhs = if let Value::String(s) = lhs {
+                            *s
+                        } else {
+                            format!("{:?}", lhs)
+                        };
+                        let rhs = if let Value::String(s) = rhs {
+                            *s
+                        } else {
+                            format!("{:?}", rhs)
+                        };
+                        Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                    }
+                }
             }
             EvalBinOp::Eq => NullableEq::eq(&lhs, &rhs),
             EvalBinOp::Neq => lhs.neq(&rhs),
