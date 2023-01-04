@@ -139,21 +139,16 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
     match expr {
         ValueExpr::VarRef(BindingsName::CaseInsensitive(s)) => insensitive(s.clone()),
         ValueExpr::VarRef(BindingsName::CaseSensitive(s)) => sensitive(s.clone()),
-        ValueExpr::Path(_root, steps) => {
-            //
-            match steps.last() {
-                Some(PathComponent::Key(BindingsName::CaseInsensitive(s))) => {
-                    insensitive(s.clone())
-                }
-                Some(PathComponent::Key(BindingsName::CaseSensitive(s))) => sensitive(s.clone()),
-                Some(PathComponent::KeyExpr(ke)) => match &**ke {
-                    ValueExpr::VarRef(BindingsName::CaseInsensitive(s)) => insensitive(s.clone()),
-                    ValueExpr::VarRef(BindingsName::CaseSensitive(s)) => sensitive(s.clone()),
-                    _ => None,
-                },
+        ValueExpr::Path(_root, steps) => match steps.last() {
+            Some(PathComponent::Key(BindingsName::CaseInsensitive(s))) => insensitive(s.clone()),
+            Some(PathComponent::Key(BindingsName::CaseSensitive(s))) => sensitive(s.clone()),
+            Some(PathComponent::KeyExpr(ke)) => match &**ke {
+                ValueExpr::VarRef(BindingsName::CaseInsensitive(s)) => insensitive(s.clone()),
+                ValueExpr::VarRef(BindingsName::CaseSensitive(s)) => sensitive(s.clone()),
                 _ => None,
-            }
-        }
+            },
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -571,7 +566,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             }
             ProjectionKind::ProjectPivot(_) => todo!("ProjectionKind::ProjectPivot"),
             ProjectionKind::ProjectValue(_) => {
-                //
                 assert_eq!(env.len(), 1);
                 let expr = env.into_iter().next().unwrap();
                 logical::BindingsOp::ProjectValue(logical::ProjectValue { expr })
@@ -651,13 +645,13 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
-        let rhs = env.pop().unwrap();
+        let expr = env.pop().unwrap();
         let op = match _uni_op.kind {
             UniOpKind::Pos => logical::UnaryOp::Pos,
             UniOpKind::Neg => logical::UnaryOp::Neg,
             UniOpKind::Not => logical::UnaryOp::Not,
         };
-        self.push_vexpr(ValueExpr::UnExpr(op, Box::new(rhs)));
+        self.push_vexpr(ValueExpr::UnExpr(op, Box::new(expr)));
     }
 
     // Values & Value Constructors
