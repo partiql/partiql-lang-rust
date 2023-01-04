@@ -2,6 +2,10 @@ name: Code Coverage
 
 on: [push, pull_request]
 
+env:
+  RUST_TEST_TIME_UNIT: 150,5000
+  RUST_TEST_TIME_INTEGRATION: 150,5000
+
 jobs:
   build:
     name: Build and Test
@@ -33,7 +37,7 @@ jobs:
         continue-on-error: true
         with:
           command: test
-          args: --verbose --workspace --all-features --no-fail-fast
+          args: --verbose --workspace --all-features --no-fail-fast -- -Z unstable-options --ensure-time
         env:
           CARGO_INCREMENTAL: '0'
           # https://github.com/marketplace/actions/rust-grcov
