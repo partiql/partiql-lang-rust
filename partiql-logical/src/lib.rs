@@ -140,7 +140,7 @@ where
     }
 
     pub fn operator(&self, id: OpId) -> Option<&T> {
-        self.nodes.get(id.0)
+        self.nodes.get(id.0 - 1)
     }
 
     // TODO add DAG validation method.
