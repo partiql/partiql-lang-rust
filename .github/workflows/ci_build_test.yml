@@ -2,6 +2,10 @@ name: CI Build
 
 on: [push, pull_request]
 
+env:
+  RUST_TEST_TIME_UNIT: 150,5000
+  RUST_TEST_TIME_INTEGRATION: 150,5000
+
 jobs:
   build:
     name: Build and Test
@@ -38,19 +42,6 @@ jobs:
         with:
           command: test
           args: --verbose --workspace
-      # Currently just runs the conformance tests. Further conformance report generation will be part of
-      # https://github.com/partiql/partiql-lang-rust/issues/79.
-      # Uses the 'continue-on-error' workflow syntax which means the GitHub Actions build will succeed even if the
-      # workflow step failed. Results are still viewable (example run:
-      # https://github.com/partiql/partiql-lang-rust/runs/6186121711?check_suite_focus=true#step:8:686)
-      # More details on the 'continue-on-error' workflow syntax can be found here:
-      # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idcontinue-on-error
-      - name: Cargo Test of the conformance tests (can fail)
-        uses: actions-rs/cargo@v1
-        continue-on-error: true
-        with:
-          command: test
-          args: --verbose --package partiql-conformance-tests --features "conformance_test"
       - name: Rustfmt Check
         uses: actions-rs/cargo@v1
         with:
@@ -110,7 +101,7 @@ jobs:
       # to format and use the output.
       - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
-        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" -- -Z unstable-options --format json > cargo_test_results.json
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" -- -Z unstable-options --ensure-time --format json > cargo_test_results.json
       # Create a conformance report from the `cargo test` json file
       - run: cargo run --features report_tool --bin generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
       # Upload conformance report for comparison with future runs
