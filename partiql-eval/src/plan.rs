@@ -78,13 +78,9 @@ impl EvaluatorPlanner {
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
                 expr: self.plan_values(expr.clone()),
                 input: None,
-                output: None,
             }),
             BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
-            BindingsOp::Sink => Box::new(eval::EvalSink {
-                input: None,
-                output: None,
-            }),
+            BindingsOp::Sink => Box::new(eval::EvalSink { input: None }),
             BindingsOp::Unpivot(logical::Unpivot {
                 expr,
                 as_key,

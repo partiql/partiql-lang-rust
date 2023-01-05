@@ -1389,7 +1389,7 @@ mod tests {
             Box::new(ValueExpr::Lit(Box::new(1.into()))),
         );
         let index = ValueExpr::Path(
-            Box::new(list.clone()),
+            Box::new(list),
             vec![PathComponent::IndexExpr(Box::new(index_expr))],
         );
         test(index, Value::Integer(3));
@@ -1402,7 +1402,7 @@ mod tests {
             Box::new(ValueExpr::Lit(Box::new("a".into()))),
         );
         let index = ValueExpr::Path(
-            Box::new(tuple.clone()),
+            Box::new(tuple),
             vec![PathComponent::KeyExpr(Box::new(index_expr))],
         );
         test(index, Value::Integer(10));
@@ -2260,8 +2260,6 @@ mod tests {
 
             let res = scan.evaluate(&ctx);
 
-            println!("{:?}", &scan.output);
-
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
             let expected = partiql_bag![
                 partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]), ("y", 0)],
@@ -2287,8 +2285,6 @@ mod tests {
             );
 
             let res = scan.evaluate(&ctx);
-
-            println!("{:?}", &scan.output);
 
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
             let expected = partiql_bag![
@@ -2325,8 +2321,6 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let scan_res = scan.evaluate(&ctx);
 
-            println!("{:?}", &scan.output);
-
             let expected = partiql_bag![partiql_tuple![("x", 0)]];
             assert_eq!(Value::Bag(Box::new(expected)), scan_res.unwrap());
         }
@@ -2352,7 +2346,6 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = scan.evaluate(&ctx);
 
-            println!("{:?}", &scan.output.unwrap());
             let expected = partiql_bag![partiql_tuple![("x", value::Value::Missing)]];
             assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }
@@ -2386,7 +2379,6 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = unpivot.evaluate(&ctx);
 
-            println!("{:?}", &unpivot.output.unwrap());
             let expected = partiql_bag![
                 partiql_tuple![("symbol", "tdc"), ("price", 31.06)],
                 partiql_tuple![("symbol", "amzn"), ("price", 840.05)],
@@ -2411,7 +2403,6 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = unpivot.evaluate(&ctx);
 
-            println!("{:?}", &unpivot.output);
             let expected = partiql_bag![partiql_tuple![("x", 1), ("y", "_1")]];
             assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
         }

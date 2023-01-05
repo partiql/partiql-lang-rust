@@ -20,6 +20,9 @@ use crate::env::basic::MapBindings;
 use crate::env::Bindings;
 use partiql_logical::Type;
 
+use petgraph::graph::NodeIndex;
+
+use petgraph::visit::EdgeRef;
 use std::borrow::Borrow;
 
 #[derive(Debug)]
@@ -47,32 +50,37 @@ impl EvalPlan {
         let sorted_ops = toposort(&self.0, None);
         match sorted_ops {
             Ok(ops) => {
+                let plan_graph = &mut self.0;
                 let mut result = None;
                 for idx in ops.into_iter() {
-                    let src = self
-                        .0
+                    let src = plan_graph
                         .node_weight_mut(idx)
                         .expect("Error in retrieving node");
                     result = src.evaluate(&*ctx);
 
-                    let mut ne = self.0.neighbors_directed(idx, Outgoing).detach();
-                    while let Some((e, n)) = ne.next(&self.0) {
-                        // use the edge weight to store the `branch_num`
-                        let branch_num = *self
-                            .0
-                            .edge_weight(e)
-                            .expect("Error in retrieving weight for edge");
-                        let dst = self.0.node_weight_mut(n).expect("Error in retrieving node");
-                        dst.update_input(
-                            &result.clone().expect("Error in retrieving source value"),
-                            branch_num,
-                        );
+                    let destinations: Vec<(usize, (u8, NodeIndex))> = plan_graph
+                        .edges_directed(idx, Outgoing)
+                        .map(|e| (*e.weight(), e.target()))
+                        .enumerate()
+                        .collect_vec();
+                    let branches = destinations.len();
+                    for (i, (branch_num, dst_id)) in destinations {
+                        let res = if i == branches - 1 {
+                            result.take()
+                        } else {
+                            result.clone()
+                        }
+                        .expect("Error in retrieving source value");
+
+                        let dst = plan_graph
+                            .node_weight_mut(dst_id)
+                            .expect("Error in retrieving node");
+                        dst.update_input(res, branch_num);
                     }
                 }
-                let evaluated = Evaluated {
-                    result: result.expect("Error in retrieving eval output"),
-                };
-                Ok(evaluated)
+
+                let result = result.expect("Error in retrieving eval output");
+                Ok(Evaluated { result })
             }
             Err(e) => Err(EvalErr {
                 errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
@@ -102,7 +110,7 @@ pub enum EvaluationError {
 
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
-    fn update_input(&mut self, input: &Value, branch_num: u8);
+    fn update_input(&mut self, input: Value, branch_num: u8);
     fn get_vars(&self) -> Vec<String> {
         vec![]
     }
@@ -114,7 +122,6 @@ pub struct EvalScan {
     pub as_key: String,
     pub at_key: Option<String>,
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalScan {
@@ -124,7 +131,6 @@ impl EvalScan {
             as_key: as_key.to_string(),
             at_key: None,
             input: None,
-            output: None,
         }
     }
     pub fn new_with_at_key(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
@@ -133,14 +139,13 @@ impl EvalScan {
             as_key: as_key.to_string(),
             at_key: Some(at_key.to_string()),
             input: None,
-            output: None,
         }
     }
 }
 
 impl Evaluable for EvalScan {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self.input.as_ref().unwrap_or(&Missing).clone();
+        let input_value = self.input.take().unwrap_or(Missing);
 
         let bindings = match input_value {
             Value::Bag(t) => *t,
@@ -173,12 +178,11 @@ impl Evaluable for EvalScan {
             }
         });
 
-        self.output = Some(Value::Bag(Box::new(value)));
-        self.output.clone()
+        Some(Value::Bag(Box::new(value)))
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 
     fn get_vars(&self) -> Vec<String> {
@@ -204,7 +208,6 @@ pub struct EvalJoin {
     pub input: Option<Value>,
     pub left: Box<dyn Evaluable>,
     pub right: Box<dyn Evaluable>,
-    pub output: Option<Value>,
 }
 
 impl EvalJoin {
@@ -220,7 +223,6 @@ impl EvalJoin {
             input: None,
             left,
             right,
-            output: None,
         }
     }
 }
@@ -235,9 +237,11 @@ impl Evaluable for EvalJoin {
         }
 
         let mut output_bag = partiql_bag![];
-        let empty_binding = Value::from(partiql_tuple![]);
-        let input_env = self.input.as_ref().unwrap_or(&empty_binding);
-        self.left.update_input(input_env, 0);
+        let input_env = self
+            .input
+            .take()
+            .unwrap_or_else(|| Value::from(partiql_tuple![]));
+        self.left.update_input(input_env.clone(), 0);
         let lhs_values = self.left.evaluate(ctx);
         let left_bindings = match lhs_values {
             Some(Value::Bag(t)) => *t,
@@ -254,7 +258,7 @@ impl Evaluable for EvalJoin {
                         .as_tuple_ref()
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
-                    self.right.update_input(&Value::from(env_b_l), 0);
+                    self.right.update_input(Value::from(env_b_l), 0);
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
@@ -297,7 +301,7 @@ impl Evaluable for EvalJoin {
                         .as_tuple_ref()
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
-                    self.right.update_input(&Value::from(env_b_l), 0);
+                    self.right.update_input(Value::from(env_b_l), 0);
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
@@ -351,12 +355,11 @@ impl Evaluable for EvalJoin {
                 todo!("Full and Right Joins are not yet implemented for `partiql-lang-rust`")
             }
         };
-        self.output = Some(Value::Bag(Box::new(output_bag)));
-        self.output.clone()
+        Some(Value::Bag(Box::new(output_bag)))
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
@@ -365,7 +368,7 @@ pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
     pub at_key: String,
-    pub output: Option<Value>,
+    pub input: Option<Value>,
 }
 
 impl EvalUnpivot {
@@ -374,7 +377,7 @@ impl EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
             at_key: at_key.to_string(),
-            output: None,
+            input: None,
         }
     }
 }
@@ -397,12 +400,11 @@ impl Evaluable for EvalUnpivot {
             out.push(Value::Tuple(Box::new(t)));
         }
 
-        self.output = Some(Value::Bag(Box::new(Bag::from(out))));
-        self.output.clone()
+        Some(Value::Bag(Box::new(Bag::from(out))))
     }
 
-    fn update_input(&mut self, _input: &Value, _branch_num: u8) {
-        todo!()
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 
     fn get_vars(&self) -> Vec<String> {
@@ -414,16 +416,11 @@ impl Evaluable for EvalUnpivot {
 pub struct EvalFilter {
     pub expr: Box<dyn EvalExpr>,
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalFilter {
     pub fn new(expr: Box<dyn EvalExpr>) -> Self {
-        EvalFilter {
-            expr,
-            input: None,
-            output: None,
-        }
+        EvalFilter { expr, input: None }
     }
 
     #[inline]
@@ -441,11 +438,7 @@ impl EvalFilter {
 
 impl Evaluable for EvalFilter {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self
-            .input
-            .as_ref()
-            .expect("Error in retrieving input value")
-            .clone();
+        let input_value = self.input.take().expect("Error in retrieving input value");
 
         let mut out = partiql_bag![];
         for v in input_value.into_iter() {
@@ -454,11 +447,11 @@ impl Evaluable for EvalFilter {
             }
         }
 
-        self.output = Some(Value::Bag(Box::new(out)));
-        self.output.clone()
+        Some(Value::Bag(Box::new(out)))
     }
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone())
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
@@ -466,26 +459,17 @@ impl Evaluable for EvalFilter {
 pub struct EvalProject {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalProject {
     pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
-        EvalProject {
-            exprs,
-            input: None,
-            output: None,
-        }
+        EvalProject { exprs, input: None }
     }
 }
 
 impl Evaluable for EvalProject {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self
-            .input
-            .as_ref()
-            .expect("Error in retrieving input value")
-            .clone();
+        let input_value = self.input.take().expect("Error in retrieving input value");
 
         let ordered = &input_value.is_ordered();
         let mut value = vec![];
@@ -504,22 +488,20 @@ impl Evaluable for EvalProject {
             value.push(Value::Tuple(Box::new(t)));
         }
 
-        self.output = match ordered {
+        match ordered {
             true => Some(Value::List(Box::new(List::from(value)))),
             false => Some(Value::Bag(Box::new(Bag::from(value)))),
-        };
-        self.output.clone()
+        }
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
 #[derive(Debug, Default)]
 pub struct EvalProjectAll {
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalProjectAll {
@@ -530,11 +512,7 @@ impl EvalProjectAll {
 
 impl Evaluable for EvalProjectAll {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self
-            .input
-            .as_ref()
-            .expect("Error in retrieving input value")
-            .clone();
+        let input_value = self.input.take().expect("Error in retrieving input value");
 
         let ordered = &input_value.is_ordered();
 
@@ -549,16 +527,14 @@ impl Evaluable for EvalProjectAll {
             })
             .collect_vec();
 
-        self.output = match ordered {
+        match ordered {
             true => Some(Value::List(Box::new(List::from(seq)))),
             false => Some(Value::Bag(Box::new(Bag::from(seq)))),
-        };
-
-        self.output.clone()
+        }
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
@@ -566,26 +542,17 @@ impl Evaluable for EvalProjectAll {
 pub struct EvalProjectValue {
     pub expr: Box<dyn EvalExpr>,
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalProjectValue {
     pub fn new(expr: Box<dyn EvalExpr>) -> Self {
-        EvalProjectValue {
-            expr,
-            input: None,
-            output: None,
-        }
+        EvalProjectValue { expr, input: None }
     }
 }
 
 impl Evaluable for EvalProjectValue {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self
-            .input
-            .as_ref()
-            .expect("Error in retrieving input value")
-            .clone();
+        let input_value = self.input.take().expect("Error in retrieving input value");
 
         let ordered = &input_value.is_ordered();
         let mut value = vec![];
@@ -596,16 +563,14 @@ impl Evaluable for EvalProjectValue {
             value.push(evaluated);
         }
 
-        self.output = match ordered {
+        match ordered {
             true => Some(Value::List(Box::new(List::from(value)))),
             false => Some(Value::Bag(Box::new(Bag::from(value)))),
-        };
-
-        self.output.clone()
+        }
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
@@ -613,28 +578,22 @@ impl Evaluable for EvalProjectValue {
 pub struct EvalExprQuery {
     pub expr: Box<dyn EvalExpr>,
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalExprQuery {
     pub fn new(expr: Box<dyn EvalExpr>) -> Self {
-        EvalExprQuery {
-            expr,
-            input: None,
-            output: None,
-        }
+        EvalExprQuery { expr, input: None }
     }
 }
 
 impl Evaluable for EvalExprQuery {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self.input.as_ref().unwrap_or(&Value::Null);
-        self.output = Some(self.expr.evaluate(&input_value.as_tuple_ref(), ctx));
-        self.output.clone()
+        let input_value = self.input.take().unwrap_or(Value::Null);
+        Some(self.expr.evaluate(&input_value.as_tuple_ref(), ctx))
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
@@ -800,7 +759,6 @@ impl EvalExpr for EvalSubQueryExpr {
 #[derive(Debug, Default)]
 pub struct EvalDistinct {
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl EvalDistinct {
@@ -813,27 +771,26 @@ impl Evaluable for EvalDistinct {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         let out = self.input.clone().unwrap();
         let u: Vec<Value> = out.into_iter().unique().collect();
-        self.output = Some(Value::Bag(Box::new(Bag::from(u))));
-        self.output.clone()
+        Some(Value::Bag(Box::new(Bag::from(u))))
     }
 
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
 #[derive(Debug)]
 pub struct EvalSink {
     pub input: Option<Value>,
-    pub output: Option<Value>,
 }
 
 impl Evaluable for EvalSink {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         self.input.clone()
     }
-    fn update_input(&mut self, input: &Value, _branch_num: u8) {
-        self.input = Some(input.clone());
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
     }
 }
 
