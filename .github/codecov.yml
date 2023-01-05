@@ -8,6 +8,3 @@ coverage:
       default:
         target: 85%
         threshold: 5%
-
-ignore:
-  - "partiql-ast/src/experimental/ast.rs"
