@@ -92,8 +92,8 @@ impl EvalPlan {
         }
     }
 
-    pub fn dump_graph(&self) -> Dot<&StableGraph<Box<dyn Evaluable>, u8>> {
-        Dot::with_config(&self.0, &[Config::EdgeNoLabel])
+    pub fn to_dot_graph(&self) -> String {
+        format!("{:?}", Dot::with_config(&self.0, &[Config::EdgeNoLabel]))
     }
 }
 

@@ -1317,7 +1317,7 @@ mod tests {
         let planner = plan::EvaluatorPlanner;
 
         let mut plan = planner.compile(&logical);
-        println!("{:?}", plan.dump_graph());
+        println!("{}", plan.to_dot_graph());
 
         if let Ok(out) = plan.execute_mut(bindings) {
             out.result
