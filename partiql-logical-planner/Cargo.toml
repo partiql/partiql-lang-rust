@@ -33,5 +33,3 @@ assert_matches = "1.5.*"
 
 [dev-dependencies]
 partiql-eval = { path = "../partiql-eval" }
-
-
