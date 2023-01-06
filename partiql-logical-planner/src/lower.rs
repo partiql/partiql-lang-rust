@@ -6,7 +6,7 @@ use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CaseSensitivity, CreateIndex,
     CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex, DropTable, FromClause, FromLet,
-    FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, List, Lit,
+    FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
     NodeId, OnConflict, OrderByExpr, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
     Query, QuerySet, Remove, Select, Set, SetExpr, SetQuantifier, Sexp, Struct, SymbolPrimitive,
     UniOp, UniOpKind, VarRef,
@@ -14,8 +14,8 @@ use partiql_ast::ast::{
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, ListExpr, LogicalPlan, OpId, PathComponent,
-    TupleExpr, ValueExpr,
+    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch, ListExpr, LogicalPlan, OpId,
+    PathComponent, Pattern, PatternMatchExpr, TupleExpr, ValueExpr,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -148,6 +148,21 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+// TODO Error/Result
+fn require_lit(expr: &ValueExpr) -> &Value {
+    match expr {
+        ValueExpr::Lit(lit) => lit.as_ref(),
+        _ => todo!("Error on not-literal"),
+    }
+}
+
+fn require_str(lit: &Value) -> &str {
+    match lit {
+        Value::String(s) => s.as_ref(),
+        _ => todo!("Error on not-string"),
     }
 }
 
@@ -686,6 +701,27 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let from = Box::new(env.pop().unwrap());
         let value = Box::new(env.pop().unwrap());
         self.push_vexpr(ValueExpr::BetweenExpr(BetweenExpr { value, from, to }));
+    }
+
+    fn enter_like(&mut self, _like: &'ast Like) {
+        self.enter_env();
+    }
+
+    fn exit_like(&mut self, _like: &'ast Like) {
+        let mut env = self.exit_env();
+        assert!((2..=3).contains(&env.len()));
+        let escape = if env.len() == 3 {
+            require_str(require_lit(&env.pop().unwrap())).to_string()
+        } else {
+            "".to_string()
+        };
+        let pattern = require_str(require_lit(&env.pop().unwrap())).to_string();
+        let value = Box::new(env.pop().unwrap());
+        let pattern = Pattern::LIKE(LikeMatch { pattern, escape });
+        self.push_vexpr(ValueExpr::PatternMatchExpr(PatternMatchExpr {
+            value,
+            pattern,
+        }));
     }
 
     // Values & Value Constructors

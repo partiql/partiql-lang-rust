@@ -2,6 +2,8 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
+mod pattern_match;
+
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
