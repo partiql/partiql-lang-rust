@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[track_caller]
-    fn evalute_query(query: &str) -> Value {
+    fn evaluate_query(query: &str) -> Value {
         let parsed = parse(query);
         let lowered = lower(&parsed);
         evaluate(lowered, Default::default())
@@ -106,14 +106,14 @@ mod tests {
 
     #[test]
     pub fn test_5() {
-        let out = evalute_query("5");
+        let out = evaluate_query("5");
         println!("{:?}", &out);
         assert_matches!(out, Value::Integer(5));
     }
 
     #[test]
     pub fn test_from_5() {
-        let out = evalute_query("SELECT * FROM 5");
+        let out = evaluate_query("SELECT * FROM 5");
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
             let expected = partiql_bag![partiql_tuple![("_1", 5)]];
