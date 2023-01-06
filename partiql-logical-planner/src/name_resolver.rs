@@ -312,7 +312,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
         // get the "as" alias
         // 1. if explictly given
         // 2. else try to infer if a simple variable reference or path
-        // 3. else it is currently 'Unknonw'
+        // 3. else it is currently 'Unknown'
         let as_alias = if let Some(sym) = &project_expr.as_alias {
             Symbol::Known(sym.clone())
         } else if let Some(sym) = infer_alias(&project_expr.expr) {
