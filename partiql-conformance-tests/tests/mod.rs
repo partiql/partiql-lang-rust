@@ -3,6 +3,7 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
+
 mod test_value;
 pub(crate) use test_value::TestValue;
 
@@ -21,7 +22,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
-    todo!("lower AST to plan")
+    partiql_logical_planner::lower(parsed)
 }
 
 #[track_caller]
@@ -31,7 +32,9 @@ pub(crate) fn evaluate(
     bindings: MapBindings<Value>,
 ) -> Value {
     let planner = eval::plan::EvaluatorPlanner;
+
     let mut plan = planner.compile(&logical);
+
     if let Ok(out) = plan.execute_mut(bindings) {
         out.result
     } else {

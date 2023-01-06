@@ -139,6 +139,10 @@ where
         &self.edges
     }
 
+    pub fn operator(&self, id: OpId) -> Option<&T> {
+        self.nodes.get(id.0 - 1)
+    }
+
     // TODO add DAG validation method.
 }
 
@@ -243,6 +247,7 @@ pub enum ValueExpr {
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
     Lit(Box<Value>),
+    DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
     VarRef(BindingsName),
     TupleExpr(TupleExpr),

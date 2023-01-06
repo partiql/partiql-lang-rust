@@ -7,6 +7,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use petgraph::algo::toposort;
+use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
@@ -89,6 +90,10 @@ impl EvalPlan {
                 ))],
             }),
         }
+    }
+
+    pub fn to_dot_graph(&self) -> String {
+        format!("{:?}", Dot::with_config(&self.0, &[Config::EdgeNoLabel]))
     }
 }
 
@@ -799,6 +804,22 @@ pub trait EvalExpr: Debug {
 }
 
 #[derive(Debug)]
+pub struct EvalDynamicLookup {
+    pub lookups: Vec<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalDynamicLookup {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let result = self
+            .lookups
+            .iter()
+            .map(|lookup| lookup.evaluate(bindings, ctx))
+            .find(|res| res != &Value::Missing);
+        result.unwrap_or(Value::Missing)
+    }
+}
+
+#[derive(Debug)]
 pub struct EvalVarRef {
     pub name: BindingsName,
 }
@@ -806,7 +827,7 @@ pub struct EvalVarRef {
 impl EvalExpr for EvalVarRef {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
-        value.map_or(Null, |v| v.clone())
+        value.map_or(Missing, |v| v.clone())
     }
 }
 
