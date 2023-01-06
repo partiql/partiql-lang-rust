@@ -243,7 +243,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
                 .push(id);
         }
 
-        // This `FROM` item is in-scope of variables defined by any preceeding items in this `FROM` (e.g., lateral joins)
+        // This `FROM` item is in-scope of variables defined by any preceding items in this `FROM` (e.g., lateral joins)
         for in_scope in self.lateral_stack.last().unwrap() {
             self.in_scope
                 .entry(id)
@@ -260,7 +260,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let KeyRefs { consume, .. } = self.exit_keyref();
 
         // get the "as" alias
-        // 1. if explictly given
+        // 1. if explicitly given
         // 2. else try to infer if a simple variable reference or path
         // 3. else it is currently 'Unknown'
         let as_alias = if let Some(sym) = &from_let.as_alias {
@@ -310,7 +310,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
     fn exit_project_expr(&mut self, project_expr: &'ast ast::ProjectExpr) {
         let id = self.current_node();
         // get the "as" alias
-        // 1. if explictly given
+        // 1. if explicitly given
         // 2. else try to infer if a simple variable reference or path
         // 3. else it is currently 'Unknown'
         let as_alias = if let Some(sym) = &project_expr.as_alias {
