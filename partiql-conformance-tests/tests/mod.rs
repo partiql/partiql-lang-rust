@@ -1,7 +1,6 @@
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_logical as logical;
-use partiql_logical_planner::{AstToLogical, NameResolver};
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
 
@@ -23,15 +22,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
-    if let partiql_ast::ast::Expr::Query(q) = parsed.ast.as_ref() {
-        let mut resolver = NameResolver::default();
-        let resolver = resolver.resolve(q);
-
-        let planner = AstToLogical::new(resolver);
-        planner.lower_query(q)
-    } else {
-        panic!("wrong expr type");
-    }
+    partiql_logical_planner::lower(parsed)
 }
 
 #[track_caller]

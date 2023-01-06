@@ -21,6 +21,7 @@ edition.workspace = true
 partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
 partiql-ast = { path = "../partiql-ast" }
+partiql-parser = { path = "../partiql-parser" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
@@ -31,7 +32,6 @@ fnv = "1"
 assert_matches = "1.5.*"
 
 [dev-dependencies]
-partiql-parser = { path = "../partiql-parser" }
 partiql-eval = { path = "../partiql-eval" }
 
 
