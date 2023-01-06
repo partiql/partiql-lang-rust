@@ -131,23 +131,29 @@ Number failing in main but now pass: {}
 
     if !passing_orig_failing_new.is_empty() {
         comparison_report_file.write_all(
-            "\n:interrobang: CONFORMANCE REPORT REGRESSION DETECTED :interrobang:. The following test(s) were previously passing but now fail:\n".as_bytes()
+            "\n:interrobang: CONFORMANCE REPORT REGRESSION DETECTED :interrobang:. The following test(s) were previously passing but now fail:\n<details><summary>Click here to see</summary>\n\n".as_bytes()
         ).expect("write passing_orig_failing_new heading");
         for test_name in &passing_orig_failing_new {
             comparison_report_file
                 .write_all(format!("- {}\n", test_name).as_bytes())
                 .expect("write passing_orig_failing_new test case");
         }
+        comparison_report_file
+            .write_all("\n</details>".as_bytes())
+            .expect("write passing_orig_failing_new closing");
     };
 
     if !failure_orig_passing_new.is_empty() {
         comparison_report_file.write_all(
-            "\nThe following test(s) were previously failing but now pass. Before merging, confirm they are intended to pass: \n".as_bytes()
+            "\nThe following test(s) were previously failing but now pass. Before merging, confirm they are intended to pass: \n<details><summary>Click here to see</summary>\n\n".as_bytes()
         ).expect("write failure_orig_passing_new heading");
         for test_name in &failure_orig_passing_new {
             comparison_report_file
                 .write_all(format!("- {}\n", test_name).as_bytes())
                 .expect("write failure_orig_passing_new test case");
         }
+        comparison_report_file
+            .write_all("\n</details>".as_bytes())
+            .expect("write failure_orig_passing_new closing");
     }
 }
