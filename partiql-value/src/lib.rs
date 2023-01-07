@@ -799,6 +799,21 @@ impl From<i64> for Value {
     }
 }
 
+impl From<i32> for Value {
+    #[inline]
+    fn from(n: i32) -> Self {
+        (n as i64).into()
+    }
+}
+
+impl From<usize> for Value {
+    #[inline]
+    fn from(n: usize) -> Self {
+        // TODO overflow to bigint/decimal
+        Value::Integer(n as i64)
+    }
+}
+
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {

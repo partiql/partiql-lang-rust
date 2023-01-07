@@ -19,7 +19,7 @@ use partiql_value::{
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
-use partiql_logical::Type;
+use partiql_logical::{Type, ValueExpr};
 
 use petgraph::graph::NodeIndex;
 
@@ -1097,5 +1097,236 @@ impl BasicContext {
 impl EvalContext for BasicContext {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
+    }
+}
+
+pub trait EvalStrExpr: Debug {
+    fn evaluate_str(&self, s: &String) -> Value;
+    fn input(&self) -> &dyn EvalExpr;
+}
+
+impl<T> EvalExpr for T
+where
+    T: EvalStrExpr,
+{
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.input().evaluate(bindings, ctx);
+        match value {
+            Null => Value::Null,
+            Missing => Value::Missing,
+            Value::String(s) => self.evaluate_str(s.as_ref()),
+            _ => Value::Null,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnLower {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalStrExpr for EvalFnLower {
+    #[inline]
+    fn evaluate_str(&self, s: &String) -> Value {
+        s.to_lowercase().into()
+    }
+
+    #[inline]
+    fn input(&self) -> &dyn EvalExpr {
+        self.value.as_ref()
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnUpper {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalStrExpr for EvalFnUpper {
+    #[inline]
+    fn evaluate_str(&self, s: &String) -> Value {
+        s.to_uppercase().into()
+    }
+
+    #[inline]
+    fn input(&self) -> &dyn EvalExpr {
+        self.value.as_ref()
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnCharLength {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalStrExpr for EvalFnCharLength {
+    #[inline]
+    fn evaluate_str(&self, s: &String) -> Value {
+        s.chars().count().into()
+    }
+
+    #[inline]
+    fn input(&self) -> &dyn EvalExpr {
+        self.value.as_ref()
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnSubstring {
+    pub value: Box<dyn EvalExpr>,
+    pub offset: Box<dyn EvalExpr>,
+    pub length: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalFnSubstring {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => Some(s),
+            _ => None,
+        };
+        let offset = match self.offset.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::Integer(i) => Some(i),
+            _ => None,
+        };
+
+        if let Some(length) = &self.length {
+            let length = match length.evaluate(bindings, ctx) {
+                Missing => return Value::Missing,
+                Value::Integer(i) => i as usize,
+                _ => return Value::Null,
+            };
+            if let (Some(value), Some(offset)) = (value, offset) {
+                let (offset, length) = if length < 1 {
+                    (0, 0)
+                } else if offset < 1 {
+                    let length = std::cmp::max(offset + (length - 1) as i64, 0) as usize;
+                    let offset = std::cmp::max(offset, 0) as usize;
+                    (offset, length)
+                } else {
+                    ((offset - 1) as usize, length)
+                };
+                return value
+                    .chars()
+                    .skip(offset)
+                    .take(length)
+                    .collect::<String>()
+                    .into();
+            }
+        } else {
+            if let (Some(value), Some(offset)) = (value, offset) {
+                let offset = (std::cmp::max(offset, 1) - 1) as usize;
+                return value.chars().skip(offset).collect::<String>().into();
+            }
+        };
+        Value::Null
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnBtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnBtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => Some(s),
+            _ => None,
+        };
+        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => s,
+            _ => return Value::Null,
+        };
+        if let Some(s) = value {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_matches(&to_trim[..]).into()
+        } else {
+            Value::Null
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnRtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnRtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => Some(s),
+            _ => None,
+        };
+        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => s,
+            _ => return Value::Null,
+        };
+        if let Some(s) = value {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_end_matches(&to_trim[..]).into()
+        } else {
+            Value::Null
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnLtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnLtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => Some(s),
+            _ => None,
+        };
+        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
+            Missing => return Value::Missing,
+            Value::String(s) => s,
+            _ => return Value::Null,
+        };
+        if let Some(s) = value {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_start_matches(&to_trim[..]).into()
+        } else {
+            Value::Null
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnNullif {
+    pub test: Box<dyn EvalExpr>,
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnNullif {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let test = self.test.evaluate(bindings, ctx);
+        let value = self.value.evaluate(bindings, ctx);
+        match (test, value) {
+            (Null, Null) => Null,
+            (Missing, Missing) => Null,
+            (l, r) => match NullableEq::eq(&l, &r) {
+                Value::Boolean(true) => Null,
+                _ => l,
+            },
+        }
     }
 }

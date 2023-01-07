@@ -4,12 +4,12 @@ use num::Integer;
 use ordered_float::OrderedFloat;
 use partiql_ast::ast;
 use partiql_ast::ast::{
-    Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CaseSensitivity, CreateIndex,
-    CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex, DropTable, FromClause, FromLet,
-    FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
-    NodeId, OnConflict, OrderByExpr, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
-    Query, QuerySet, Remove, Select, Set, SetExpr, SetQuantifier, Sexp, Struct, SymbolPrimitive,
-    UniOp, UniOpKind, VarRef,
+    Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CallArg, CallArgNamed,
+    CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
+    DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join,
+    JoinKind, JoinSpec, Like, List, Lit, NodeId, OnConflict, OrderByExpr, Path, PathStep,
+    ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, Select, Set, SetExpr,
+    SetQuantifier, Sexp, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
@@ -22,6 +22,7 @@ use partiql_value::{BindingsName, Value};
 
 use std::collections::{HashMap, HashSet};
 
+use crate::call_defs::{function_call_def, CallArgument, FnSymTab};
 use crate::name_resolver;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -101,6 +102,7 @@ pub struct AstToLogical {
     ctx_stack: Vec<QueryContext>,
     bexpr_stack: Vec<Vec<logical::OpId>>,
     vexpr_stack: Vec<Vec<ValueExpr>>,
+    arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
 
     from_lets: HashSet<ast::NodeId>,
@@ -116,6 +118,7 @@ pub struct AstToLogical {
     plan: LogicalPlan<BindingsOp>,
 
     key_registry: name_resolver::KeyRegistry,
+    fnsym_tab: FnSymTab,
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
@@ -175,6 +178,7 @@ impl AstToLogical {
             ctx_stack: Default::default(),
             bexpr_stack: Default::default(),
             vexpr_stack: Default::default(),
+            arg_stack: Default::default(),
             path_stack: Default::default(),
 
             from_lets: Default::default(),
@@ -190,6 +194,7 @@ impl AstToLogical {
             plan: Default::default(),
 
             key_registry: registry,
+            fnsym_tab: function_call_def(),
         }
     }
 
@@ -382,6 +387,21 @@ impl AstToLogical {
     #[inline]
     fn push_value(&mut self, val: Value) {
         self.push_vexpr(ValueExpr::Lit(Box::new(val)));
+    }
+
+    #[inline]
+    fn enter_call(&mut self) {
+        self.arg_stack.push(vec![]);
+    }
+
+    #[inline]
+    fn exit_call(&mut self) -> Vec<CallArgument> {
+        self.arg_stack.pop().expect("environment level")
+    }
+
+    #[inline]
+    fn push_call_arg(&mut self, arg: CallArgument) {
+        self.arg_stack.last_mut().unwrap().push(arg);
     }
 
     #[inline]
@@ -724,6 +744,45 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         }));
     }
 
+    fn enter_call(&mut self, _call: &'ast Call) {
+        self.enter_call();
+    }
+
+    fn exit_call(&mut self, _call: &'ast Call) {
+        // TODO better argument validation/error messaging
+        let env = self.exit_call();
+        let name = _call.func_name.value.to_lowercase();
+
+        if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
+            self.push_vexpr(call_def.lookup(&env));
+            return;
+        } else {
+            todo!("Unsupported function name")
+        }
+    }
+
+    fn enter_call_arg(&mut self, _call_arg: &'ast CallArg) {
+        self.enter_env();
+    }
+
+    fn exit_call_arg(&mut self, _call_arg: &'ast CallArg) {
+        let mut env = self.exit_env();
+        match _call_arg {
+            CallArg::Star() => todo!(),
+            CallArg::Positional(_) => {
+                assert_eq!(env.len(), 1);
+                self.push_call_arg(CallArgument::Positional(env.pop().unwrap()));
+            }
+            CallArg::Named(CallArgNamed { name, .. }) => {
+                assert_eq!(env.len(), 1);
+                let name = name.value.to_lowercase();
+                self.push_call_arg(CallArgument::Named(name, env.pop().unwrap()));
+            }
+            CallArg::PositionalType(_) => todo!("CallArg::PositionalType"),
+            CallArg::NamedType(_) => todo!("CallArg::NamedType"),
+        }
+    }
+
     // Values & Value Constructors
 
     fn enter_lit(&mut self, _lit: &'ast Lit) {
@@ -797,10 +856,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_sexp(&mut self, _sexp: &'ast Sexp) {
         todo!("exit_sexp")
-    }
-
-    fn enter_call(&mut self, _call: &'ast Call) {
-        todo!("call")
     }
 
     fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) {

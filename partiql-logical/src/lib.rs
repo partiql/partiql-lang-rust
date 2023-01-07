@@ -261,6 +261,7 @@ pub enum ValueExpr {
     IsTypeExpr(IsTypeExpr),
     NullIfExpr(NullIfExpr),
     CoalesceExpr(CoalesceExpr),
+    Call(CallExpr),
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
@@ -450,6 +451,27 @@ pub struct NullIfExpr {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CoalesceExpr {
     pub elements: Vec<ValueExpr>,
+}
+
+/// Represents a `CALL` expression (i.e., a function call), e.g. `LOWER("ALL CAPS")`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CallExpr {
+    pub name: CallName,
+    pub arguments: Vec<ValueExpr>,
+}
+
+/// Represents a known function.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum CallName {
+    Lower,
+    Upper,
+    CharLength,
+    LTrim,
+    BTrim,
+    RTrim,
+    Substring,
+    Exists,
+    Nullif,
 }
 
 #[cfg(test)]
