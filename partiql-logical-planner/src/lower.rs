@@ -755,7 +755,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
             self.push_vexpr(call_def.lookup(&env));
-            return;
         } else {
             todo!("Unsupported function name")
         }

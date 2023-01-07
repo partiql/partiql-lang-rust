@@ -327,7 +327,7 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_coalesce(),
         function_call_def_nullif(),
     ] {
-        assert!(def.names.len() >= 1);
+        assert!(!def.names.is_empty());
         let primary = def.names[0];
         synonyms.insert(primary.into(), primary.into());
         for &name in &def.names[1..] {

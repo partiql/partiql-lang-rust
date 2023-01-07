@@ -19,7 +19,7 @@ use partiql_value::{
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
-use partiql_logical::{Type, ValueExpr};
+use partiql_logical::Type;
 
 use petgraph::graph::NodeIndex;
 
@@ -1215,11 +1215,9 @@ impl EvalExpr for EvalFnSubstring {
                     .collect::<String>()
                     .into();
             }
-        } else {
-            if let (Some(value), Some(offset)) = (value, offset) {
-                let offset = (std::cmp::max(offset, 1) - 1) as usize;
-                return value.chars().skip(offset).collect::<String>().into();
-            }
+        } else if let (Some(value), Some(offset)) = (value, offset) {
+            let offset = (std::cmp::max(offset, 1) - 1) as usize;
+            return value.chars().skip(offset).collect::<String>().into();
         };
         Value::Null
     }
