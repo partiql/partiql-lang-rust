@@ -254,6 +254,7 @@ pub enum ValueExpr {
     ListExpr(ListExpr),
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
+    PatternMatchExpr(PatternMatchExpr),
     SubQueryExpr(SubQueryExpr),
     SimpleCase(SimpleCase),
     SearchedCase(SearchedCase),
@@ -353,6 +354,24 @@ pub struct BetweenExpr {
     pub value: Box<ValueExpr>,
     pub from: Box<ValueExpr>,
     pub to: Box<ValueExpr>,
+}
+
+/// Represents a PartiQL Pattern Match expression, e.g. `'foo' LIKE 'foo'`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PatternMatchExpr {
+    pub value: Box<ValueExpr>,
+    pub pattern: Pattern,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Pattern {
+    LIKE(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LikeMatch {
+    pub pattern: String,
+    pub escape: String,
 }
 
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in

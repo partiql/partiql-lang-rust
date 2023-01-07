@@ -24,6 +24,7 @@ use partiql_logical::Type;
 use petgraph::graph::NodeIndex;
 
 use petgraph::visit::EdgeRef;
+use regex::{Regex, RegexBuilder};
 use std::borrow::Borrow;
 
 #[derive(Debug)]
@@ -1025,6 +1026,38 @@ impl EvalExpr for EvalBetweenExpr {
         let from = self.from.evaluate(bindings, ctx);
         let to = self.to.evaluate(bindings, ctx);
         value.gteq(&from).and(&value.lteq(&to))
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalLikeMatch {
+    pub value: Box<dyn EvalExpr>,
+    pub pattern: Regex,
+}
+
+// TODO make configurable?
+// Limit chosen somewhat arbitrarily, but to be smaller than the default of `10 * (1 << 20)`
+const RE_SIZE_LIMIT: usize = 1 << 16;
+
+impl EvalLikeMatch {
+    pub fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
+        let pattern = RegexBuilder::new(pattern)
+            .size_limit(RE_SIZE_LIMIT)
+            .build()
+            .expect("Like Pattern");
+        EvalLikeMatch { value, pattern }
+    }
+}
+
+impl EvalExpr for EvalLikeMatch {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        match value {
+            Null => Value::Null,
+            Missing => Value::Missing,
+            Value::String(s) => Value::Boolean(self.pattern.is_match(s.as_ref())),
+            _ => Value::Boolean(false),
+        }
     }
 }
 

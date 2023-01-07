@@ -4,17 +4,18 @@ use std::collections::HashMap;
 
 use partiql_logical as logical;
 use partiql_logical::{
-    BinaryOp, BindingsOp, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, SearchedCase,
-    Type, UnaryOp, ValueExpr,
+    BinaryOp, BindingsOp, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, Pattern,
+    PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
-    EvalIsTypeExpr, EvalJoinKind, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
+    EvalIsTypeExpr, EvalJoinKind, EvalLikeMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
     EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
     EvalVarRef, Evaluable,
 };
+use crate::pattern_match::like_to_re_pattern;
 use partiql_value::Value::Null;
 
 #[derive(Default)]
@@ -214,6 +215,18 @@ impl EvaluatorPlanner {
                 let from = self.plan_values(*expr.from);
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
+            }
+            ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
+                let value = self.plan_values(*value);
+                match pattern {
+                    Pattern::LIKE(logical::LikeMatch { pattern, escape }) => {
+                        // TODO statically assert escape length
+                        assert!(escape.chars().count() <= 1);
+                        let escape = escape.chars().next();
+                        let regex = like_to_re_pattern(&pattern, escape);
+                        Box::new(EvalLikeMatch::new(value, &regex))
+                    }
+                }
             }
             ValueExpr::SubQueryExpr(expr) => {
                 Box::new(EvalSubQueryExpr::new(self.plan_eval(&expr.plan)))
