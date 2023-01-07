@@ -75,7 +75,7 @@ impl EvaluatorPlanner {
             BindingsOp::ProjectAll => Box::new(eval::EvalProjectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_values(expr.clone());
-                Box::new(eval::EvalProjectValue::new(expr))
+                Box::new(eval::EvalSelectValue::new(expr))
             }
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
                 expr: self.plan_values(expr.clone()),
