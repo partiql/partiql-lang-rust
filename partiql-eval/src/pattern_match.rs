@@ -81,7 +81,6 @@ fn write_re_pattern<F>(
 mod tests {
     use super::*;
     use regex::Regex;
-    use std::collections::{BTreeSet, HashSet};
 
     #[test]
     fn like() {

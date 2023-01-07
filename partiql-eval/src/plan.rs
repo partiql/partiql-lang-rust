@@ -222,7 +222,7 @@ impl EvaluatorPlanner {
                     Pattern::LIKE(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
                         assert!(escape.chars().count() <= 1);
-                        let escape = escape.chars().nth(0);
+                        let escape = escape.chars().next();
                         let regex = like_to_re_pattern(&pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
                     }

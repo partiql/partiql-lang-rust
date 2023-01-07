@@ -1045,7 +1045,6 @@ impl EvalLikeMatch {
             .size_limit(RE_SIZE_LIMIT)
             .build()
             .expect("Like Pattern");
-        //let pattern = Regex::new(pattern).expect("Like Pattern");
         EvalLikeMatch { value, pattern }
     }
 }
