@@ -24,7 +24,7 @@ use partiql_logical::Type;
 use petgraph::graph::NodeIndex;
 
 use petgraph::visit::EdgeRef;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::borrow::Borrow;
 
 #[derive(Debug)]
@@ -1035,9 +1035,17 @@ pub struct EvalLikeMatch {
     pub pattern: Regex,
 }
 
+// TODO make configurable?
+// Limit chosen somewhat arbitrarily, but to be smaller than the default of `10 * (1 << 20)`
+const RE_SIZE_LIMIT: usize = 1 << 16;
+
 impl EvalLikeMatch {
     pub fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
-        let pattern = Regex::new(pattern).expect("Like Pattern");
+        let pattern = RegexBuilder::new(pattern)
+            .size_limit(RE_SIZE_LIMIT)
+            .build()
+            .expect("Like Pattern");
+        //let pattern = Regex::new(pattern).expect("Like Pattern");
         EvalLikeMatch { value, pattern }
     }
 }

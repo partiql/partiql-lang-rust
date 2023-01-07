@@ -145,6 +145,6 @@ mod tests {
 
         let pat = similar_to_re_pattern("%(b|d)%", Some('\\'));
         let re = Regex::new(&pat).unwrap();
-        assert!(!re.is_match("abc"));
+        assert!(re.is_match("abc"));
     }
 }
