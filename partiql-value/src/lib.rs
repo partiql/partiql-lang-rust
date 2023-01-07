@@ -866,7 +866,7 @@ impl List {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     #[inline]
@@ -1017,7 +1017,7 @@ impl Bag {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     #[inline]
@@ -1175,6 +1175,16 @@ impl Tuple {
     pub fn insert(&mut self, attr: &str, val: Value) {
         self.attrs.push(attr.to_string());
         self.vals.push(val);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.attrs.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline]

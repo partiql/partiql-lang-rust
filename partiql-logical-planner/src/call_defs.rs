@@ -289,9 +289,24 @@ fn function_call_def_nullif() -> CallDef {
         names: vec!["nullif"],
         overloads: vec![CallSpec {
             input: vec![CallSpecArg::Positional, CallSpecArg::Positional],
+            output: Box::new(|mut args| {
+                assert_eq!(args.len(), 2);
+                let rhs = Box::new(args.pop().unwrap());
+                let lhs = Box::new(args.pop().unwrap());
+                logical::ValueExpr::NullIfExpr(logical::NullIfExpr { lhs, rhs })
+            }),
+        }],
+    }
+}
+
+fn function_call_def_exists() -> CallDef {
+    CallDef {
+        names: vec!["exists"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional],
             output: Box::new(|args| {
                 logical::ValueExpr::Call(logical::CallExpr {
-                    name: logical::CallName::Nullif,
+                    name: logical::CallName::Exists,
                     arguments: args,
                 })
             }),
@@ -326,6 +341,7 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_trim(),
         function_call_def_coalesce(),
         function_call_def_nullif(),
+        function_call_def_exists(),
     ] {
         assert!(!def.names.is_empty());
         let primary = def.names[0];

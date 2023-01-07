@@ -471,7 +471,6 @@ pub enum CallName {
     RTrim,
     Substring,
     Exists,
-    Nullif,
 }
 
 #[cfg(test)]

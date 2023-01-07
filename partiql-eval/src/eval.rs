@@ -1308,23 +1308,20 @@ impl EvalExpr for EvalFnLtrim {
 }
 
 #[derive(Debug)]
-pub struct EvalFnNullif {
-    pub test: Box<dyn EvalExpr>,
+pub struct EvalFnExists {
     pub value: Box<dyn EvalExpr>,
 }
 
-impl EvalExpr for EvalFnNullif {
+impl EvalExpr for EvalFnExists {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let test = self.test.evaluate(bindings, ctx);
         let value = self.value.evaluate(bindings, ctx);
-        match (test, value) {
-            (Null, Null) => Null,
-            (Missing, Missing) => Null,
-            (l, r) => match NullableEq::eq(&l, &r) {
-                Value::Boolean(true) => Null,
-                _ => l,
-            },
-        }
+        let exists = match value {
+            Value::Bag(b) => !b.is_empty(),
+            Value::List(l) => !l.is_empty(),
+            Value::Tuple(t) => !t.is_empty(),
+            _ => false,
+        };
+        Value::Boolean(exists)
     }
 }

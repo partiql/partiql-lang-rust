@@ -11,7 +11,7 @@ use partiql_logical::{
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
-    EvalFnBtrim, EvalFnCharLength, EvalFnLower, EvalFnLtrim, EvalFnNullif, EvalFnRtrim,
+    EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim, EvalFnRtrim,
     EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalJoinKind, EvalLikeMatch, EvalListExpr,
     EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr,
     EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
@@ -397,13 +397,12 @@ impl EvaluatorPlanner {
                             length,
                         })
                     }
-                    CallName::Nullif => {
-                        assert_eq!(args.len(), 2);
-                        let value = args.pop().unwrap();
-                        let test = args.pop().unwrap();
-                        Box::new(EvalFnNullif { test, value })
+                    CallName::Exists => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExists {
+                            value: args.pop().unwrap(),
+                        })
                     }
-                    CallName::Exists => todo!(),
                 }
             }
         }
