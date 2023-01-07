@@ -4,18 +4,18 @@ use num::Integer;
 use ordered_float::OrderedFloat;
 use partiql_ast::ast;
 use partiql_ast::ast::{
-    Assignment, Bag, BinOp, BinOpKind, Call, CallAgg, CaseSensitivity, CreateIndex, CreateTable,
-    Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex, DropTable, FromClause, FromLet, FromLetKind,
-    GroupByExpr, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, List, Lit, NodeId,
-    OnConflict, OrderByExpr, Path, PathStep, ProjectExpr, Projection, ProjectionKind, Query,
-    QuerySet, Remove, Select, Set, SetExpr, SetQuantifier, Sexp, Struct, SymbolPrimitive, UniOp,
-    UniOpKind, VarRef,
+    Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CaseSensitivity, CreateIndex,
+    CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex, DropTable, FromClause, FromLet,
+    FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, List, Lit,
+    NodeId, OnConflict, OrderByExpr, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
+    Query, QuerySet, Remove, Select, Set, SetExpr, SetQuantifier, Sexp, Struct, SymbolPrimitive,
+    UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    BagExpr, BindingsOp, IsTypeExpr, ListExpr, LogicalPlan, OpId, PathComponent, TupleExpr,
-    ValueExpr,
+    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, ListExpr, LogicalPlan, OpId, PathComponent,
+    TupleExpr, ValueExpr,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -673,6 +673,19 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             UniOpKind::Not => logical::UnaryOp::Not,
         };
         self.push_vexpr(ValueExpr::UnExpr(op, Box::new(expr)));
+    }
+
+    fn enter_between(&mut self, _between: &'ast Between) {
+        self.enter_env();
+    }
+
+    fn exit_between(&mut self, _between: &'ast Between) {
+        let mut env = self.exit_env();
+        assert_eq!(env.len(), 3);
+        let to = Box::new(env.pop().unwrap());
+        let from = Box::new(env.pop().unwrap());
+        let value = Box::new(env.pop().unwrap());
+        self.push_vexpr(ValueExpr::BetweenExpr(BetweenExpr { value, from, to }));
     }
 
     // Values & Value Constructors
