@@ -1100,22 +1100,16 @@ impl EvalContext for BasicContext {
     }
 }
 
-pub trait EvalStrExpr: Debug {
-    fn evaluate_str(&self, s: &str) -> Value;
-    fn input(&self) -> &dyn EvalExpr;
-}
-
-impl<T> EvalExpr for T
+#[inline]
+#[track_caller]
+fn string_transform<FnTransform>(value: Value, transform_fn: FnTransform) -> Value
 where
-    T: EvalStrExpr,
+    FnTransform: Fn(&str) -> Value,
 {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = self.input().evaluate(bindings, ctx);
-        match value {
-            Missing => Value::Missing,
-            Value::String(s) => self.evaluate_str(s.as_ref()),
-            _ => Value::Null,
-        }
+    match value {
+        Null => Value::Null,
+        Value::String(s) => transform_fn(s.as_ref()),
+        _ => Value::Missing,
     }
 }
 
@@ -1124,15 +1118,12 @@ pub struct EvalFnLower {
     pub value: Box<dyn EvalExpr>,
 }
 
-impl EvalStrExpr for EvalFnLower {
+impl EvalExpr for EvalFnLower {
     #[inline]
-    fn evaluate_str(&self, s: &str) -> Value {
-        s.to_lowercase().into()
-    }
-
-    #[inline]
-    fn input(&self) -> &dyn EvalExpr {
-        self.value.as_ref()
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_lowercase().into()
+        })
     }
 }
 
@@ -1141,15 +1132,12 @@ pub struct EvalFnUpper {
     pub value: Box<dyn EvalExpr>,
 }
 
-impl EvalStrExpr for EvalFnUpper {
+impl EvalExpr for EvalFnUpper {
     #[inline]
-    fn evaluate_str(&self, s: &str) -> Value {
-        s.to_uppercase().into()
-    }
-
-    #[inline]
-    fn input(&self) -> &dyn EvalExpr {
-        self.value.as_ref()
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_uppercase().into()
+        })
     }
 }
 
@@ -1158,15 +1146,12 @@ pub struct EvalFnCharLength {
     pub value: Box<dyn EvalExpr>,
 }
 
-impl EvalStrExpr for EvalFnCharLength {
+impl EvalExpr for EvalFnCharLength {
     #[inline]
-    fn evaluate_str(&self, s: &str) -> Value {
-        s.chars().count().into()
-    }
-
-    #[inline]
-    fn input(&self) -> &dyn EvalExpr {
-        self.value.as_ref()
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.chars().count().into()
+        })
     }
 }
 
