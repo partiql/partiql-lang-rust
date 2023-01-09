@@ -1112,7 +1112,6 @@ where
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = self.input().evaluate(bindings, ctx);
         match value {
-            Null => Value::Null,
             Missing => Value::Missing,
             Value::String(s) => self.evaluate_str(s.as_ref()),
             _ => Value::Null,
@@ -1223,6 +1222,29 @@ impl EvalExpr for EvalFnSubstring {
     }
 }
 
+#[inline]
+#[track_caller]
+fn trim<FnTrim>(value: Value, to_trim: Value, trim_fn: FnTrim) -> Value
+where
+    FnTrim: Fn(&str, &str) -> Value,
+{
+    let value = match value {
+        Value::String(s) => Some(s),
+        Null => None,
+        _ => return Value::Missing,
+    };
+    let to_trim = match to_trim {
+        Value::String(s) => s,
+        Null => return Value::Null,
+        _ => return Value::Missing,
+    };
+    if let Some(s) = value {
+        trim_fn(&s, &to_trim)
+    } else {
+        Value::Null
+    }
+}
+
 #[derive(Debug)]
 pub struct EvalFnBtrim {
     pub value: Box<dyn EvalExpr>,
@@ -1232,22 +1254,14 @@ pub struct EvalFnBtrim {
 impl EvalExpr for EvalFnBtrim {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = match self.value.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => Some(s),
-            _ => None,
-        };
-        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => s,
-            _ => return Value::Null,
-        };
-        if let Some(s) = value {
-            let to_trim = to_trim.chars().collect_vec();
-            s.trim_matches(&to_trim[..]).into()
-        } else {
-            Value::Null
-        }
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_matches(&to_trim[..]).into()
+            },
+        )
     }
 }
 
@@ -1260,22 +1274,14 @@ pub struct EvalFnRtrim {
 impl EvalExpr for EvalFnRtrim {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = match self.value.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => Some(s),
-            _ => None,
-        };
-        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => s,
-            _ => return Value::Null,
-        };
-        if let Some(s) = value {
-            let to_trim = to_trim.chars().collect_vec();
-            s.trim_end_matches(&to_trim[..]).into()
-        } else {
-            Value::Null
-        }
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_end_matches(&to_trim[..]).into()
+            },
+        )
     }
 }
 
@@ -1288,22 +1294,14 @@ pub struct EvalFnLtrim {
 impl EvalExpr for EvalFnLtrim {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = match self.value.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => Some(s),
-            _ => None,
-        };
-        let to_trim = match self.to_trim.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
-            Value::String(s) => s,
-            _ => return Value::Null,
-        };
-        if let Some(s) = value {
-            let to_trim = to_trim.chars().collect_vec();
-            s.trim_start_matches(&to_trim[..]).into()
-        } else {
-            Value::Null
-        }
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_start_matches(&to_trim[..]).into()
+            },
+        )
     }
 }
 
