@@ -1166,21 +1166,21 @@ impl EvalExpr for EvalFnSubstring {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = match self.value.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
+            Null => None,
             Value::String(s) => Some(s),
-            _ => None,
+            _ => return Value::Missing,
         };
         let offset = match self.offset.evaluate(bindings, ctx) {
-            Missing => return Value::Missing,
+            Null => None,
             Value::Integer(i) => Some(i),
-            _ => None,
+            _ => return Value::Missing,
         };
 
         if let Some(length) = &self.length {
             let length = match length.evaluate(bindings, ctx) {
-                Missing => return Value::Missing,
                 Value::Integer(i) => i as usize,
-                _ => return Value::Null,
+                Value::Null => return Value::Null,
+                _ => return Value::Missing,
             };
             if let (Some(value), Some(offset)) = (value, offset) {
                 let (offset, length) = if length < 1 {
@@ -1192,18 +1192,23 @@ impl EvalExpr for EvalFnSubstring {
                 } else {
                     ((offset - 1) as usize, length)
                 };
-                return value
+                value
                     .chars()
                     .skip(offset)
                     .take(length)
                     .collect::<String>()
-                    .into();
+                    .into()
+            } else {
+                // either value or offset was NULL; return NULL
+                Value::Null
             }
         } else if let (Some(value), Some(offset)) = (value, offset) {
             let offset = (std::cmp::max(offset, 1) - 1) as usize;
-            return value.chars().skip(offset).collect::<String>().into();
-        };
-        Value::Null
+            value.chars().skip(offset).collect::<String>().into()
+        } else {
+            // either value or offset was NULL; return NULL
+            Value::Null
+        }
     }
 }
 
