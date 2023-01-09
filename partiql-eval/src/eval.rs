@@ -1101,7 +1101,7 @@ impl EvalContext for BasicContext {
 }
 
 pub trait EvalStrExpr: Debug {
-    fn evaluate_str(&self, s: &String) -> Value;
+    fn evaluate_str(&self, s: &str) -> Value;
     fn input(&self) -> &dyn EvalExpr;
 }
 
@@ -1127,7 +1127,7 @@ pub struct EvalFnLower {
 
 impl EvalStrExpr for EvalFnLower {
     #[inline]
-    fn evaluate_str(&self, s: &String) -> Value {
+    fn evaluate_str(&self, s: &str) -> Value {
         s.to_lowercase().into()
     }
 
@@ -1144,7 +1144,7 @@ pub struct EvalFnUpper {
 
 impl EvalStrExpr for EvalFnUpper {
     #[inline]
-    fn evaluate_str(&self, s: &String) -> Value {
+    fn evaluate_str(&self, s: &str) -> Value {
         s.to_uppercase().into()
     }
 
@@ -1161,7 +1161,7 @@ pub struct EvalFnCharLength {
 
 impl EvalStrExpr for EvalFnCharLength {
     #[inline]
-    fn evaluate_str(&self, s: &String) -> Value {
+    fn evaluate_str(&self, s: &str) -> Value {
         s.chars().count().into()
     }
 
