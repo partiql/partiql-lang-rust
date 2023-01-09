@@ -513,11 +513,13 @@ impl Value {
 
     #[inline]
     pub fn coerce_to_tuple(self) -> Tuple {
-        if let Value::Tuple(t) = self {
-            *t
-        } else {
-            let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
-            Tuple::from([(fresh_key, self)])
+        match self {
+            Value::Tuple(t) => *t,
+            Value::Missing => partiql_tuple![],
+            _ => {
+                let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
+                partiql_tuple![(fresh_key, self)]
+            }
         }
     }
 
