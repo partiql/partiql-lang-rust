@@ -1099,3 +1099,217 @@ impl EvalContext for BasicContext {
         &self.bindings
     }
 }
+
+#[inline]
+#[track_caller]
+fn string_transform<FnTransform>(value: Value, transform_fn: FnTransform) -> Value
+where
+    FnTransform: Fn(&str) -> Value,
+{
+    match value {
+        Null => Value::Null,
+        Value::String(s) => transform_fn(s.as_ref()),
+        _ => Value::Missing,
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnLower {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnLower {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_lowercase().into()
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnUpper {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnUpper {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_uppercase().into()
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnCharLength {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnCharLength {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.chars().count().into()
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnSubstring {
+    pub value: Box<dyn EvalExpr>,
+    pub offset: Box<dyn EvalExpr>,
+    pub length: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalFnSubstring {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Null => None,
+            Value::String(s) => Some(s),
+            _ => return Value::Missing,
+        };
+        let offset = match self.offset.evaluate(bindings, ctx) {
+            Null => None,
+            Value::Integer(i) => Some(i),
+            _ => return Value::Missing,
+        };
+
+        if let Some(length) = &self.length {
+            let length = match length.evaluate(bindings, ctx) {
+                Value::Integer(i) => i as usize,
+                Value::Null => return Value::Null,
+                _ => return Value::Missing,
+            };
+            if let (Some(value), Some(offset)) = (value, offset) {
+                let (offset, length) = if length < 1 {
+                    (0, 0)
+                } else if offset < 1 {
+                    let length = std::cmp::max(offset + (length - 1) as i64, 0) as usize;
+                    let offset = std::cmp::max(offset, 0) as usize;
+                    (offset, length)
+                } else {
+                    ((offset - 1) as usize, length)
+                };
+                value
+                    .chars()
+                    .skip(offset)
+                    .take(length)
+                    .collect::<String>()
+                    .into()
+            } else {
+                // either value or offset was NULL; return NULL
+                Value::Null
+            }
+        } else if let (Some(value), Some(offset)) = (value, offset) {
+            let offset = (std::cmp::max(offset, 1) - 1) as usize;
+            value.chars().skip(offset).collect::<String>().into()
+        } else {
+            // either value or offset was NULL; return NULL
+            Value::Null
+        }
+    }
+}
+
+#[inline]
+#[track_caller]
+fn trim<FnTrim>(value: Value, to_trim: Value, trim_fn: FnTrim) -> Value
+where
+    FnTrim: Fn(&str, &str) -> Value,
+{
+    let value = match value {
+        Value::String(s) => Some(s),
+        Null => None,
+        _ => return Value::Missing,
+    };
+    let to_trim = match to_trim {
+        Value::String(s) => s,
+        Null => return Value::Null,
+        _ => return Value::Missing,
+    };
+    if let Some(s) = value {
+        trim_fn(&s, &to_trim)
+    } else {
+        Value::Null
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnBtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnBtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnRtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnRtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_end_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnLtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnLtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_start_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalFnExists {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExists {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        let exists = match value {
+            Value::Bag(b) => !b.is_empty(),
+            Value::List(l) => !l.is_empty(),
+            Value::Tuple(t) => !t.is_empty(),
+            _ => false,
+        };
+        Value::Boolean(exists)
+    }
+}

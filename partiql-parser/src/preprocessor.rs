@@ -15,7 +15,7 @@ use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 /// A single "function expression" argument match.
 #[derive(Debug, Clone)]
 pub(crate) enum FnExprArgMatch<'a> {
-    /// Any 1 [`Token`] that is not function punctuation (i.e., '(', ')', ',') and not a keyword.
+    /// Any 1 [`Token`] that is not function punctuation (i.e., '(', ')', ',') and potentially not a keyword.
     ///
     /// Generally this will be followed by a [`AnyZeroOrMore`] match, in order to match 1 or more [`Token`]s
     /// `bool` tuple value denotes if keyword is allowed to be considered as match.
@@ -72,13 +72,13 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., trim(leading 'tt' from x) => trim("leading": 'tt', "from": x)
-                vec![Id(re.clone()), AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
+                vec![Id(re.clone()), AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false)],
                 // e.g., trim(trailing from x) => trim("trailing": ' ', "from": x)
-                vec![Id(re), Syn(Token::String(" ")), Kw(Token::From), AnyOne(false), AnyStar(false)],
+                vec![Id(re), Syn(Token::String(" ")), Kw(Token::From), AnyOne(true), AnyStar(false)],
                 // e.g., trim(' ' from x) => trim(' ', "from": x)
-                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
+                vec![AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false)],
                 // e.g., trim(from x) => trim("from": x)
-                vec![Kw(Token::From), AnyOne(false), AnyStar(false)],
+                vec![Kw(Token::From), AnyOne(true), AnyStar(false)],
             ],
         }
     }
@@ -93,7 +93,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., extract(day from x) => extract("day":true, "from": x)
-                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne(false), AnyStar(false)]
+                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne(true), AnyStar(false)]
             ],
         }
     }
@@ -104,7 +104,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. position('foo' in 'xyzfooxyz') => position('foo', in: 'xyzfooxyz')
-                vec![AnyOne(false), AnyStar(false), Kw(Token::In), AnyOne(false), AnyStar(false)]
+                vec![AnyOne(false), AnyStar(false), Kw(Token::In), AnyOne(true), AnyStar(false)]
             ],
         }
     }
@@ -115,9 +115,9 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., count(all x) => count("all": x)
-                vec![Kw(Token::All), AnyOne(false), AnyStar(false)],
+                vec![Kw(Token::All), AnyOne(true), AnyStar(false)],
                 // e.g., count(distinct x) => count("distinct": x)
-                vec![Kw(Token::Distinct), AnyOne(false), AnyStar(false)],
+                vec![Kw(Token::Distinct), AnyOne(true), AnyStar(false)],
             ],
         }
     }
@@ -128,11 +128,11 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. substring(x from 2 for 3) => substring(x, "from":2, "for":3)
-                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false), Kw(Token::For), AnyOne(false), AnyStar(false)],
+                vec![AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false), Kw(Token::For), AnyOne(true), AnyStar(false)],
                 // e.g. substring(x from 2) => substring(x, "from":2)
-                vec![AnyOne(false), AnyStar(false), Kw(Token::From), AnyOne(false), AnyStar(false)],
+                vec![AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false)],
                 // e.g. substring(x for 3) => substring(x, "for":3)
-                vec![AnyOne(false), AnyStar(false), Kw(Token::For), AnyOne(false), AnyStar(false)],
+                vec![AnyOne(true), AnyStar(false), Kw(Token::For), AnyOne(true), AnyStar(false)],
             ],
         }
     }
@@ -144,7 +144,7 @@ mod built_ins {
             patterns: vec![
                 // e.g., cast(9 as VARCHAR(5)) => cast(9 "as": VARCHAR(5))
                 // Note the `true` passed to Any* as we need to support type-related keywords after `AS`
-                vec![AnyOne(false), AnyStar(false), Kw(Token::As), AnyOne(true), AnyStar(true)]
+                vec![AnyOne(true), AnyStar(false), Kw(Token::As), AnyOne(true), AnyStar(true)]
             ],
         }
     }
@@ -695,6 +695,10 @@ mod tests {
             let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &BUILT_INS);
             to_tokens(lexer)
         }
+        assert_eq!(
+            preprocess(r#"trim(both from missing)"#)?,
+            lex(r#"trim(both: ' ', "from": missing)"#)?
+        );
 
         // Valid, but missing final paren
         assert_eq!(
