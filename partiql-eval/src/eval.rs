@@ -373,16 +373,16 @@ impl Evaluable for EvalJoin {
 pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
-    pub at_key: String,
+    pub at_key: Option<String>,
     pub input: Option<Value>,
 }
 
 impl EvalUnpivot {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: Option<String>) -> Self {
         EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
-            at_key: at_key.to_string(),
+            at_key,
             input: None,
         }
     }
@@ -390,21 +390,25 @@ impl EvalUnpivot {
 
 impl Evaluable for EvalUnpivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let result = self.expr.evaluate(&Tuple::new(), ctx);
-        let mut out = vec![];
-
-        let tuple = match result {
+        let tuple = match self.expr.evaluate(&Tuple::new(), ctx) {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_to_tuple(),
         };
 
-        let unpivoted = tuple.into_iter().map(|(k, v)| {
-            Tuple::from([(self.as_key.as_str(), v), (self.at_key.as_str(), k.into())])
-        });
-
-        for t in unpivoted {
-            out.push(Value::Tuple(Box::new(t)));
-        }
+        let out = tuple
+            .into_iter()
+            .filter_map(|(k, v)| match v {
+                Missing => None, // if Value is missing, don't add it to output tuple
+                _ => {
+                    let tuple = if let Some(at_key) = &self.at_key {
+                        Tuple::from([(self.as_key.as_str(), v), (at_key.as_str(), k.into())])
+                    } else {
+                        Tuple::from([(self.as_key.as_str(), v)])
+                    };
+                    Some(Value::Tuple(Box::new(tuple)))
+                }
+            })
+            .collect_vec();
 
         Some(Value::Bag(Box::new(Bag::from(out))))
     }
@@ -414,7 +418,11 @@ impl Evaluable for EvalUnpivot {
     }
 
     fn get_vars(&self) -> Vec<String> {
-        vec![self.as_key.clone(), self.at_key.clone()]
+        if let Some(at_key) = &self.at_key {
+            vec![self.as_key.clone(), at_key.clone()]
+        } else {
+            vec![self.as_key.clone()]
+        }
     }
 }
 

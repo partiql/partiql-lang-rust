@@ -92,7 +92,7 @@ impl EvaluatorPlanner {
             }) => Box::new(eval::EvalUnpivot::new(
                 self.plan_values(expr.clone()),
                 as_key,
-                at_key.as_ref().unwrap(),
+                at_key.clone(),
             )),
             BindingsOp::Join(logical::Join {
                 kind,
