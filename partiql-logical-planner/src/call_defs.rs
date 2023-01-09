@@ -40,7 +40,7 @@ impl CallDef {
             return (overload.output)(actuals);
         }
 
-        todo!("mismatched formal/actual arguements to {}", &self.names[0])
+        todo!("mismatched formal/actual arguments to {}", &self.names[0])
     }
 }
 
