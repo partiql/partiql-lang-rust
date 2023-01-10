@@ -8,6 +8,7 @@ mod test_value;
 pub(crate) use test_value::TestValue;
 
 #[derive(Debug, Copy, Clone)]
+#[allow(dead_code)]
 pub(crate) enum EvaluationMode {
     Coerce,
     Error,
@@ -44,6 +45,7 @@ pub(crate) fn evaluate(
 
 #[track_caller]
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn fail_syntax(statement: &str) {
     let res = parse(statement);
     assert!(
@@ -56,6 +58,7 @@ pub(crate) fn fail_syntax(statement: &str) {
 
 #[track_caller]
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn pass_syntax(statement: &str) -> Parsed {
     let res = parse(statement);
     assert!(
@@ -69,12 +72,14 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
 
 #[track_caller]
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn fail_semantics(_statement: &str) {
     todo!("fail_semantics")
 }
 
 #[track_caller]
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn pass_semantics(statement: &str) {
     let parsed = pass_syntax(statement);
     // TODO add Result to lower call
@@ -90,10 +95,15 @@ pub(crate) fn pass_semantics(statement: &str) {
 #[track_caller]
 #[inline]
 #[allow(dead_code)]
-pub(crate) fn fail_eval(_statement: &str, _mode: EvaluationMode, _env: &Option<TestValue>) {
-    let parsed = parse(_statement);
+pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
+    if let EvaluationMode::Error = mode {
+        eprintln!("EvaluationMode::Error currently unsupported");
+        return;
+    }
+
+    let parsed = parse(statement);
     let lowered = lower(&parsed.expect("parse"));
-    let bindings = _env
+    let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
@@ -107,28 +117,29 @@ pub(crate) fn fail_eval(_statement: &str, _mode: EvaluationMode, _env: &Option<T
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn pass_eval(
-    _statement: &str,
-    _mode: EvaluationMode,
-    _env: &Option<TestValue>,
-    _expected: &TestValue,
+    statement: &str,
+    mode: EvaluationMode,
+    env: &Option<TestValue>,
+    expected: &TestValue,
 ) {
-    if let EvaluationMode::Error = _mode {
+    if let EvaluationMode::Error = mode {
         eprintln!("EvaluationMode::Error currently unsupported");
         return;
     }
 
-    let parsed = parse(_statement);
+    let parsed = parse(statement);
     let lowered = lower(&parsed.expect("parse"));
-    let bindings = _env
+    let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
     let out = evaluate(lowered, bindings);
 
     println!("{:?}", &out);
-    assert_eq!(out, _expected.value);
+    assert_eq!(out, expected.value);
 }
 
+#[allow(dead_code)]
 pub(crate) fn environment() -> Option<TestValue> {
     None
 }
