@@ -780,7 +780,6 @@ impl EvalExpr for EvalPath {
     }
 }
 
-
 /// Represents an evaluation operator for sub-queries, e.g. `SELECT a FROM b` in
 /// `SELECT b.c, (SELECT a FROM b) FROM books AS b`.
 #[derive(Debug)]
