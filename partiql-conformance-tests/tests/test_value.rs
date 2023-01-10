@@ -1,6 +1,7 @@
 use ion_rs::{Integer, IonReader, IonType, Reader, StreamItem};
 use partiql_value::{Bag, List, Tuple, Value};
 
+#[allow(dead_code)]
 pub(crate) struct TestValue {
     pub value: Value,
 }
@@ -82,6 +83,7 @@ fn parse_test_value(reader: &mut Reader, typ: IonType) -> Value {
 fn parse_test_value_tuple(reader: &mut Reader) -> Tuple {
     let mut tuple = Tuple::new();
     reader.step_in().expect("step into struct");
+    #[allow(irrefutable_let_patterns)]
     while let item = reader.next().expect("struct value") {
         let (key, value) = match item {
             StreamItem::Value(typ) => (
