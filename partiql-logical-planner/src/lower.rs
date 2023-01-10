@@ -8,8 +8,8 @@ use partiql_ast::ast::{
     CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
     DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join,
     JoinKind, JoinSpec, Like, List, Lit, NodeId, OnConflict, OrderByExpr, Path, PathStep,
-    ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, Select, Set, SetExpr,
-    SetQuantifier, Sexp, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set,
+    SetExpr, SetQuantifier, Sexp, SimpleCase, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
@@ -24,6 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::call_defs::{function_call_def, CallArgument, FnSymTab};
 use crate::name_resolver;
+use itertools::Itertools;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -1098,5 +1099,71 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
         let _env = self.exit_env();
         todo!("order by clause");
+    }
+
+    fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+        self.enter_env();
+    }
+
+    fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+        let mut env = self.exit_env();
+        assert!(env.len() >= 2);
+
+        let default = if env.len().is_even() {
+            Some(Box::new(env.pop().unwrap()))
+        } else {
+            None
+        };
+
+        let mut params = env.into_iter();
+        let expr = Box::new(params.next().unwrap());
+
+        let cases = params
+            .chunks(2)
+            .into_iter()
+            .map(|mut c| {
+                let when = c.next().unwrap();
+                let then = c.next().unwrap();
+
+                (Box::new(when), Box::new(then))
+            })
+            .collect_vec();
+
+        self.push_vexpr(ValueExpr::SimpleCase(logical::SimpleCase {
+            expr,
+            cases,
+            default,
+        }))
+    }
+
+    fn enter_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+        self.enter_env();
+    }
+
+    fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+        let mut env = self.exit_env();
+        assert!(!env.is_empty());
+
+        let default = if env.len().is_odd() {
+            Some(Box::new(env.pop().unwrap()))
+        } else {
+            None
+        };
+
+        let cases = env
+            .into_iter()
+            .chunks(2)
+            .into_iter()
+            .map(|mut c| {
+                let when = c.next().unwrap();
+                let then = c.next().unwrap();
+
+                (Box::new(when), Box::new(then))
+            })
+            .collect_vec();
+        self.push_vexpr(ValueExpr::SearchedCase(logical::SearchedCase {
+            cases,
+            default,
+        }))
     }
 }
