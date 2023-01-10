@@ -487,7 +487,7 @@ impl Evaluable for EvalFilter {
 }
 
 /// Represents an evaluation `SelectValue` operator; `SelectValue` implements PartiQL Core's
-/// `SELECT VALUE` clause semantics. For`SelectValue` operational semantics, see section `6.1` of
+/// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
 /// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalSelectValue {
@@ -526,7 +526,7 @@ impl Evaluable for EvalSelectValue {
 }
 
 /// Represents an evaluation `Project` operator; for a given bag of input binding tuples as input
-/// the `Project` selects attributes as specified by expressions in `exprs`. For`Project`
+/// the `Project` selects attributes as specified by expressions in `exprs`. For `Project`
 /// operational semantics, see section `6` of
 /// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
@@ -614,7 +614,7 @@ impl Evaluable for EvalProjectAll {
     }
 }
 
-/// Represents and evaluation `ExprQuery` operator; in PartiQL as opposed to SQL the following
+/// Represents an evaluation `ExprQuery` operator; in PartiQL as opposed to SQL, the following
 /// expression by its own is valid: `2 * 2`. Considering this, evaluation plan designates an operator
 /// for evaluating such stand-alone expressions.
 #[derive(Debug)]
@@ -1204,7 +1204,7 @@ impl EvalExpr for EvalFnUpper {
     }
 }
 
-/// Represents a built-in character length string function, e.g. char_length('123456789').
+/// Represents a built-in character length string function, e.g. `char_length('123456789')`.
 #[derive(Debug)]
 pub struct EvalFnCharLength {
     pub value: Box<dyn EvalExpr>,

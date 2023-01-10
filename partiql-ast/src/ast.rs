@@ -1,8 +1,9 @@
 //! A PartiQL abstract syntax tree (AST).
 //!
 //! This module contains the structures for the language AST.
-//! Two main entities in the module are [`Item`] and [`ItemKind`]. `Item` represents an AST element
-//! and `ItemKind` represents a concrete type with the data specific to the type of the item.
+//! Two main entities in the module are [`Item`] and [`AstNode`]. `AstNode` represents an AST node
+//! and `Item` represents a PartiQL statement type, e.g. query, data definition language (DDL)
+//! data manipulation language (DML).
 
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
 // in this crate directly is not recommended.
