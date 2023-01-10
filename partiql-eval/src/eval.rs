@@ -212,7 +212,7 @@ impl Evaluable for EvalScan {
 
 /// Represents an evaluation `Join` operator; `Join` joins the tuples from its LHS and RHS based on a logic defined
 /// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
-/// 5.3 – 5.7 of [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalJoin {
     pub kind: EvalJoinKind,
@@ -385,7 +385,7 @@ impl Evaluable for EvalJoin {
 
 /// Represents an evaluation `Unpivot` operator; the `Unpivot` enables ranging over the
 /// attribute-value pairs of a tuple. For `Unpivot` operational semantics, see section `5.2` of
-/// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
@@ -461,7 +461,7 @@ impl EvalFilter {
             Boolean(bool_val) => bool_val,
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
-            // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
+            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 8. `WHERE clause`
             _ => false,
         }
     }
@@ -488,7 +488,7 @@ impl Evaluable for EvalFilter {
 
 /// Represents an evaluation `SelectValue` operator; `SelectValue` implements PartiQL Core's
 /// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
-/// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalSelectValue {
     pub expr: Box<dyn EvalExpr>,
@@ -528,7 +528,7 @@ impl Evaluable for EvalSelectValue {
 /// Represents an evaluation `Project` operator; for a given bag of input binding tuples as input
 /// the `Project` selects attributes as specified by expressions in `exprs`. For `Project`
 /// operational semantics, see section `6` of
-/// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalProject {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
@@ -712,7 +712,7 @@ impl EvalExpr for EvalBagExpr {
 }
 
 /// Represents an evaluation operator for path navigation expressions as outlined in Section `4` of
-/// [PartiQL Specification — 2007](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalPath {
     pub expr: Box<dyn EvalExpr>,
