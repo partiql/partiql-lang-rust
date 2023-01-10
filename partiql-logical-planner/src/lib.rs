@@ -4,6 +4,7 @@ use partiql_ast::ast;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
+mod call_defs;
 mod lower;
 mod name_resolver;
 

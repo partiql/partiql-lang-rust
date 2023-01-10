@@ -24,6 +24,7 @@ use partiql_logical::Type;
 use petgraph::graph::NodeIndex;
 
 use petgraph::visit::EdgeRef;
+use regex::{Regex, RegexBuilder};
 use std::borrow::Borrow;
 
 /// Represents a PartiQL evaluation query plan which is a plan that can be evaluated to produce
@@ -389,16 +390,16 @@ impl Evaluable for EvalJoin {
 pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
     pub as_key: String,
-    pub at_key: String,
+    pub at_key: Option<String>,
     pub input: Option<Value>,
 }
 
 impl EvalUnpivot {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: Option<String>) -> Self {
         EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
-            at_key: at_key.to_string(),
+            at_key,
             input: None,
         }
     }
@@ -406,21 +407,22 @@ impl EvalUnpivot {
 
 impl Evaluable for EvalUnpivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let result = self.expr.evaluate(&Tuple::new(), ctx);
-        let mut out = vec![];
-
-        let tuple = match result {
+        let tuple = match self.expr.evaluate(&Tuple::new(), ctx) {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_to_tuple(),
         };
 
-        let unpivoted = tuple.into_iter().map(|(k, v)| {
-            Tuple::from([(self.as_key.as_str(), v), (self.at_key.as_str(), k.into())])
-        });
-
-        for t in unpivoted {
-            out.push(Value::Tuple(Box::new(t)));
-        }
+        let out = tuple
+            .into_iter()
+            .map(|(k, v)| {
+                let tuple = if let Some(at_key) = &self.at_key {
+                    Tuple::from([(self.as_key.as_str(), v), (at_key.as_str(), k.into())])
+                } else {
+                    Tuple::from([(self.as_key.as_str(), v)])
+                };
+                Value::Tuple(Box::new(tuple))
+            })
+            .collect_vec();
 
         Some(Value::Bag(Box::new(Bag::from(out))))
     }
@@ -430,7 +432,11 @@ impl Evaluable for EvalUnpivot {
     }
 
     fn get_vars(&self) -> Vec<String> {
-        vec![self.as_key.clone(), self.at_key.clone()]
+        if let Some(at_key) = &self.at_key {
+            vec![self.as_key.clone(), at_key.clone()]
+        } else {
+            vec![self.as_key.clone()]
+        }
     }
 }
 
@@ -804,6 +810,7 @@ impl EvalExpr for EvalSubQueryExpr {
     }
 }
 
+/// Represents an SQL `DISTINCT` operator, e.g. in `SELECT DISTINCT a FROM t`.
 #[derive(Debug, Default)]
 pub struct EvalDistinct {
     pub input: Option<Value>,
@@ -827,6 +834,7 @@ impl Evaluable for EvalDistinct {
     }
 }
 
+/// Represents an operator that captures the output of a (sub)query in the plan.
 #[derive(Debug)]
 pub struct EvalSink {
     pub input: Option<Value>,
@@ -842,10 +850,12 @@ impl Evaluable for EvalSink {
     }
 }
 
+/// A trait for expressions that require evaluation, e.g. `a + b` or `c > 2`.
 pub trait EvalExpr: Debug {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value;
 }
 
+/// Represents an operator for dynamic variable name resolution of a (sub)query.
 #[derive(Debug)]
 pub struct EvalDynamicLookup {
     pub lookups: Vec<Box<dyn EvalExpr>>,
@@ -862,6 +872,7 @@ impl EvalExpr for EvalDynamicLookup {
     }
 }
 
+/// Represents a variable reference in a (sub)query, e.g. `a` in `SELECT b as a FROM`.
 #[derive(Debug)]
 pub struct EvalVarRef {
     pub name: BindingsName,
@@ -874,6 +885,7 @@ impl EvalExpr for EvalVarRef {
     }
 }
 
+/// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
 #[derive(Debug)]
 pub struct EvalLitExpr {
     pub lit: Box<Value>,
@@ -885,17 +897,11 @@ impl EvalExpr for EvalLitExpr {
     }
 }
 
+/// Represents an evaluation unary operator, e.g. `NOT` in `NOT TRUE`.
 #[derive(Debug)]
 pub struct EvalUnaryOpExpr {
     pub op: EvalUnaryOp,
     pub operand: Box<dyn EvalExpr>,
-}
-
-#[derive(Debug)]
-pub struct EvalBinOpExpr {
-    pub op: EvalBinOp,
-    pub lhs: Box<dyn EvalExpr>,
-    pub rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
@@ -917,6 +923,7 @@ impl EvalExpr for EvalUnaryOpExpr {
     }
 }
 
+/// Represents a PartiQL evaluation `IS` operator, e.g. `IS` in `a IS INT`.
 #[derive(Debug)]
 pub struct EvalIsTypeExpr {
     pub expr: Box<dyn EvalExpr>,
@@ -933,6 +940,14 @@ impl EvalExpr for EvalIsTypeExpr {
         };
         Value::from(result)
     }
+}
+
+/// Represents an evaluation binary operator, e.g. `+` in `a + b`.
+#[derive(Debug)]
+pub struct EvalBinOpExpr {
+    pub op: EvalBinOp,
+    pub lhs: Box<dyn EvalExpr>,
+    pub rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
@@ -1055,6 +1070,7 @@ impl EvalExpr for EvalBinOpExpr {
     }
 }
 
+/// Represents an evaluation PartiQL `BETWEEN` operator, e.g. in `x BETWEEN 10 AND 20`.
 #[derive(Debug)]
 pub struct EvalBetweenExpr {
     pub value: Box<dyn EvalExpr>,
@@ -1071,6 +1087,40 @@ impl EvalExpr for EvalBetweenExpr {
     }
 }
 
+/// Represents an evaluation `LIKE` operator, e.g. in `s LIKE 'h%llo'`.
+#[derive(Debug)]
+pub struct EvalLikeMatch {
+    pub value: Box<dyn EvalExpr>,
+    pub pattern: Regex,
+}
+
+// TODO make configurable?
+// Limit chosen somewhat arbitrarily, but to be smaller than the default of `10 * (1 << 20)`
+const RE_SIZE_LIMIT: usize = 1 << 16;
+
+impl EvalLikeMatch {
+    pub fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
+        let pattern = RegexBuilder::new(pattern)
+            .size_limit(RE_SIZE_LIMIT)
+            .build()
+            .expect("Like Pattern");
+        EvalLikeMatch { value, pattern }
+    }
+}
+
+impl EvalExpr for EvalLikeMatch {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        match value {
+            Null => Value::Null,
+            Missing => Value::Missing,
+            Value::String(s) => Value::Boolean(self.pattern.is_match(s.as_ref())),
+            _ => Value::Boolean(false),
+        }
+    }
+}
+
+/// Represents a searched case operator, e.g. CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END.
 #[derive(Debug)]
 pub struct EvalSearchedCaseExpr {
     pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
@@ -1089,6 +1139,7 @@ impl EvalExpr for EvalSearchedCaseExpr {
     }
 }
 
+/// Represents an evaluation context that is used during evaluation of a plan.
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
 }
@@ -1107,5 +1158,227 @@ impl BasicContext {
 impl EvalContext for BasicContext {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
+    }
+}
+
+#[inline]
+#[track_caller]
+fn string_transform<FnTransform>(value: Value, transform_fn: FnTransform) -> Value
+where
+    FnTransform: Fn(&str) -> Value,
+{
+    match value {
+        Null => Value::Null,
+        Value::String(s) => transform_fn(s.as_ref()),
+        _ => Value::Missing,
+    }
+}
+
+/// Represents a built-in `lower` string function, e.g. lower('AdBd').
+#[derive(Debug)]
+pub struct EvalFnLower {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnLower {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_lowercase().into()
+        })
+    }
+}
+
+/// Represents a built-in `upper` string function, e.g. upper('AdBd').
+#[derive(Debug)]
+pub struct EvalFnUpper {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnUpper {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.to_uppercase().into()
+        })
+    }
+}
+
+/// Represents a built-in character length string function, e.g. char_length('123456789').
+#[derive(Debug)]
+pub struct EvalFnCharLength {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnCharLength {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.chars().count().into()
+        })
+    }
+}
+
+/// Represents a built-in substring string function, e.g. `substring('123456789' FROM 2)`.
+#[derive(Debug)]
+pub struct EvalFnSubstring {
+    pub value: Box<dyn EvalExpr>,
+    pub offset: Box<dyn EvalExpr>,
+    pub length: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalFnSubstring {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = match self.value.evaluate(bindings, ctx) {
+            Null => None,
+            Value::String(s) => Some(s),
+            _ => return Value::Missing,
+        };
+        let offset = match self.offset.evaluate(bindings, ctx) {
+            Null => None,
+            Value::Integer(i) => Some(i),
+            _ => return Value::Missing,
+        };
+
+        if let Some(length) = &self.length {
+            let length = match length.evaluate(bindings, ctx) {
+                Value::Integer(i) => i as usize,
+                Value::Null => return Value::Null,
+                _ => return Value::Missing,
+            };
+            if let (Some(value), Some(offset)) = (value, offset) {
+                let (offset, length) = if length < 1 {
+                    (0, 0)
+                } else if offset < 1 {
+                    let length = std::cmp::max(offset + (length - 1) as i64, 0) as usize;
+                    let offset = std::cmp::max(offset, 0) as usize;
+                    (offset, length)
+                } else {
+                    ((offset - 1) as usize, length)
+                };
+                value
+                    .chars()
+                    .skip(offset)
+                    .take(length)
+                    .collect::<String>()
+                    .into()
+            } else {
+                // either value or offset was NULL; return NULL
+                Value::Null
+            }
+        } else if let (Some(value), Some(offset)) = (value, offset) {
+            let offset = (std::cmp::max(offset, 1) - 1) as usize;
+            value.chars().skip(offset).collect::<String>().into()
+        } else {
+            // either value or offset was NULL; return NULL
+            Value::Null
+        }
+    }
+}
+
+#[inline]
+#[track_caller]
+fn trim<FnTrim>(value: Value, to_trim: Value, trim_fn: FnTrim) -> Value
+where
+    FnTrim: Fn(&str, &str) -> Value,
+{
+    let value = match value {
+        Value::String(s) => Some(s),
+        Null => None,
+        _ => return Value::Missing,
+    };
+    let to_trim = match to_trim {
+        Value::String(s) => s,
+        Null => return Value::Null,
+        _ => return Value::Missing,
+    };
+    if let Some(s) = value {
+        trim_fn(&s, &to_trim)
+    } else {
+        Value::Null
+    }
+}
+
+/// Represents a built-in both trim string function, e.g. `trim(both from ' foobar ')`.
+#[derive(Debug)]
+pub struct EvalFnBtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnBtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+/// Represents a built-in right trim string function.
+#[derive(Debug)]
+pub struct EvalFnRtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnRtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_end_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+/// Represents a built-in left trim string function.
+#[derive(Debug)]
+pub struct EvalFnLtrim {
+    pub value: Box<dyn EvalExpr>,
+    pub to_trim: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnLtrim {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        trim(
+            self.value.evaluate(bindings, ctx),
+            self.to_trim.evaluate(bindings, ctx),
+            |s, to_trim| {
+                let to_trim = to_trim.chars().collect_vec();
+                s.trim_start_matches(&to_trim[..]).into()
+            },
+        )
+    }
+}
+
+/// Represents an `EXISTS` function, e.g. `exists(`(1)`)`.
+#[derive(Debug)]
+pub struct EvalFnExists {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExists {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        let exists = match value {
+            Value::Bag(b) => !b.is_empty(),
+            Value::List(l) => !l.is_empty(),
+            Value::Tuple(t) => !t.is_empty(),
+            _ => false,
+        };
+        Value::Boolean(exists)
     }
 }

@@ -4,17 +4,19 @@ use std::collections::HashMap;
 
 use partiql_logical as logical;
 use partiql_logical::{
-    BinaryOp, BindingsOp, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent, SearchedCase,
-    Type, UnaryOp, ValueExpr,
+    BinaryOp, BindingsOp, CallName, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent,
+    Pattern, PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
-    EvalIsTypeExpr, EvalJoinKind, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
-    EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
-    EvalVarRef, Evaluable,
+    EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim, EvalFnRtrim,
+    EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalJoinKind, EvalLikeMatch, EvalListExpr,
+    EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr,
+    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
+use crate::pattern_match::like_to_re_pattern;
 use partiql_value::Value::Null;
 
 #[derive(Default)]
@@ -90,7 +92,7 @@ impl EvaluatorPlanner {
             }) => Box::new(eval::EvalUnpivot::new(
                 self.plan_values(expr.clone()),
                 as_key,
-                at_key.as_ref().unwrap(),
+                at_key.clone(),
             )),
             BindingsOp::Join(logical::Join {
                 kind,
@@ -215,6 +217,18 @@ impl EvaluatorPlanner {
                 let to = self.plan_values(*expr.to);
                 Box::new(EvalBetweenExpr { value, from, to })
             }
+            ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
+                let value = self.plan_values(*value);
+                match pattern {
+                    Pattern::LIKE(logical::LikeMatch { pattern, escape }) => {
+                        // TODO statically assert escape length
+                        assert!(escape.chars().count() <= 1);
+                        let escape = escape.chars().next();
+                        let regex = like_to_re_pattern(&pattern, escape);
+                        Box::new(EvalLikeMatch::new(value, &regex))
+                    }
+                }
+            }
             ValueExpr::SubQueryExpr(expr) => {
                 Box::new(EvalSubQueryExpr::new(self.plan_eval(&expr.plan)))
             }
@@ -323,6 +337,73 @@ impl EvaluatorPlanner {
                     .collect_vec();
 
                 Box::new(EvalDynamicLookup { lookups })
+            }
+            ValueExpr::Call(logical::CallExpr { name, arguments }) => {
+                let mut args = arguments
+                    .into_iter()
+                    .map(|arg| self.plan_values(arg))
+                    .collect_vec();
+                match name {
+                    CallName::Lower => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnLower {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::Upper => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnUpper {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CharLength => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCharLength {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::LTrim => {
+                        assert_eq!(args.len(), 2);
+                        let value = args.pop().unwrap();
+                        let to_trim = args.pop().unwrap();
+                        Box::new(EvalFnLtrim { value, to_trim })
+                    }
+                    CallName::BTrim => {
+                        assert_eq!(args.len(), 2);
+                        let value = args.pop().unwrap();
+                        let to_trim = args.pop().unwrap();
+                        Box::new(EvalFnBtrim { value, to_trim })
+                    }
+                    CallName::RTrim => {
+                        assert_eq!(args.len(), 2);
+                        let value = args.pop().unwrap();
+                        let to_trim = args.pop().unwrap();
+                        Box::new(EvalFnRtrim { value, to_trim })
+                    }
+                    CallName::Substring => {
+                        assert!((2usize..=3).contains(&args.len()));
+
+                        let length = if args.len() == 3 {
+                            Some(args.pop().unwrap())
+                        } else {
+                            None
+                        };
+                        let offset = args.pop().unwrap();
+                        let value = args.pop().unwrap();
+
+                        Box::new(EvalFnSubstring {
+                            value,
+                            offset,
+                            length,
+                        })
+                    }
+                    CallName::Exists => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExists {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                }
             }
         }
     }

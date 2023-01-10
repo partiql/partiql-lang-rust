@@ -513,11 +513,13 @@ impl Value {
 
     #[inline]
     pub fn coerce_to_tuple(self) -> Tuple {
-        if let Value::Tuple(t) = self {
-            *t
-        } else {
-            let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
-            Tuple::from([(fresh_key, self)])
+        match self {
+            Value::Tuple(t) => *t,
+            Value::Missing => partiql_tuple![],
+            _ => {
+                let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
+                partiql_tuple![(fresh_key, self)]
+            }
         }
     }
 
@@ -799,6 +801,21 @@ impl From<i64> for Value {
     }
 }
 
+impl From<i32> for Value {
+    #[inline]
+    fn from(n: i32) -> Self {
+        (n as i64).into()
+    }
+}
+
+impl From<usize> for Value {
+    #[inline]
+    fn from(n: usize) -> Self {
+        // TODO overflow to bigint/decimal
+        Value::Integer(n as i64)
+    }
+}
+
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
@@ -851,7 +868,7 @@ impl List {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     #[inline]
@@ -1002,7 +1019,7 @@ impl Bag {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.len() == 0
     }
 
     #[inline]
@@ -1160,6 +1177,16 @@ impl Tuple {
     pub fn insert(&mut self, attr: &str, val: Value) {
         self.attrs.push(attr.to_string());
         self.vals.push(val);
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.attrs.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline]

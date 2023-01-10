@@ -254,12 +254,14 @@ pub enum ValueExpr {
     ListExpr(ListExpr),
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
+    PatternMatchExpr(PatternMatchExpr),
     SubQueryExpr(SubQueryExpr),
     SimpleCase(SimpleCase),
     SearchedCase(SearchedCase),
     IsTypeExpr(IsTypeExpr),
     NullIfExpr(NullIfExpr),
     CoalesceExpr(CoalesceExpr),
+    Call(CallExpr),
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
@@ -355,6 +357,24 @@ pub struct BetweenExpr {
     pub to: Box<ValueExpr>,
 }
 
+/// Represents a PartiQL Pattern Match expression, e.g. `'foo' LIKE 'foo'`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PatternMatchExpr {
+    pub value: Box<ValueExpr>,
+    pub pattern: Pattern,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Pattern {
+    LIKE(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LikeMatch {
+    pub pattern: String,
+    pub escape: String,
+}
+
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
 /// `SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s`
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -431,6 +451,26 @@ pub struct NullIfExpr {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CoalesceExpr {
     pub elements: Vec<ValueExpr>,
+}
+
+/// Represents a `CALL` expression (i.e., a function call), e.g. `LOWER("ALL CAPS")`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CallExpr {
+    pub name: CallName,
+    pub arguments: Vec<ValueExpr>,
+}
+
+/// Represents a known function.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum CallName {
+    Lower,
+    Upper,
+    CharLength,
+    LTrim,
+    BTrim,
+    RTrim,
+    Substring,
+    Exists,
 }
 
 #[cfg(test)]

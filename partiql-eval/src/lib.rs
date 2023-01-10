@@ -2,6 +2,8 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
+mod pattern_match;
+
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
@@ -2373,7 +2375,7 @@ mod tests {
                     name: BindingsName::CaseInsensitive("justATuple".to_string()),
                 }),
                 "price",
-                "symbol",
+                Some("symbol".into()),
             );
 
             let ctx = BasicContext::new(p0);
@@ -2397,7 +2399,7 @@ mod tests {
                     name: BindingsName::CaseInsensitive("nonTuple".to_string()),
                 }),
                 "x",
-                "y",
+                Some("y".into()),
             );
 
             let ctx = BasicContext::new(p0);
