@@ -530,18 +530,18 @@ impl Evaluable for EvalSelectValue {
 /// operational semantics, see section `6` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalProject {
+pub struct EvalSelect {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
     pub input: Option<Value>,
 }
 
-impl EvalProject {
+impl EvalSelect {
     pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
-        EvalProject { exprs, input: None }
+        EvalSelect { exprs, input: None }
     }
 }
 
-impl Evaluable for EvalProject {
+impl Evaluable for EvalSelect {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
@@ -576,17 +576,17 @@ impl Evaluable for EvalProject {
 /// Represents an evaluation `ProjectAll` operator; `ProjectAll` implements SQL's `SELECT *`
 /// semantics.
 #[derive(Debug, Default)]
-pub struct EvalProjectAll {
+pub struct EvalSelectAll {
     pub input: Option<Value>,
 }
 
-impl EvalProjectAll {
+impl EvalSelectAll {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl Evaluable for EvalProjectAll {
+impl Evaluable for EvalSelectAll {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 

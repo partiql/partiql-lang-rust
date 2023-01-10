@@ -72,9 +72,9 @@ impl EvaluatorPlanner {
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
                     .collect();
-                Box::new(eval::EvalProject::new(exprs))
+                Box::new(eval::EvalSelect::new(exprs))
             }
-            BindingsOp::ProjectAll => Box::new(eval::EvalProjectAll::new()),
+            BindingsOp::ProjectAll => Box::new(eval::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_values(expr.clone());
                 Box::new(eval::EvalSelectValue::new(expr))
