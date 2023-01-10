@@ -464,6 +464,7 @@ where
     /// * `is_init_arg` - Whether this is the first argument being considered for the function expression's
     /// parameters.
     /// * `matchers` - A slice of the remaining arguments for a single pattern for the function expression.
+    #[allow(clippy::only_used_in_recursion)]
     fn match_arg(
         &self,
         tok: &BufferedToken<'input>,

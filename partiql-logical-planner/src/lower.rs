@@ -955,7 +955,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             .replace(benv.pop().unwrap());
     }
 
-    fn enter_from_let(&mut self, _from_let: &'ast FromLet) {
+    fn enter_from_let(&mut self, from_let: &'ast FromLet) {
         self.from_lets.insert(*self.current_node());
         *self.current_ctx_mut() = QueryContext::FromLet;
         self.enter_env();
@@ -963,19 +963,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let id = *self.current_node();
         self.siblings.last_mut().unwrap().push(id);
 
-        for sym in [
-            &_from_let.as_alias,
-            &_from_let.at_alias,
-            &_from_let.by_alias,
-        ]
-        .into_iter()
-        .flatten()
+        for sym in [&from_let.as_alias, &from_let.at_alias, &from_let.by_alias]
+            .into_iter()
+            .flatten()
         {
             self.aliases.insert(id, sym.clone());
         }
     }
 
-    fn exit_from_let(&mut self, _from_let: &'ast FromLet) {
+    fn exit_from_let(&mut self, from_let: &'ast FromLet) {
         *self.current_ctx_mut() = QueryContext::Query;
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
@@ -987,7 +983,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             as_alias,
             at_alias,
             ..
-        } = _from_let;
+        } = from_let;
         let as_key = self.infer_id(&expr, as_alias).value;
         let at_key = at_alias
             .as_ref()
@@ -1014,14 +1010,14 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.enter_env();
     }
 
-    fn exit_join(&mut self, _join: &'ast Join) {
+    fn exit_join(&mut self, join: &'ast Join) {
         let mut benv = self.exit_benv();
         assert_eq!(benv.len(), 2);
 
         let mut env = self.exit_env();
         assert!((0..1).contains(&env.len()));
 
-        let Join { kind, .. } = _join;
+        let Join { kind, .. } = join;
 
         let kind = match kind {
             JoinKind::Inner => logical::JoinKind::Inner,
@@ -1047,8 +1043,8 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.push_bexpr(join);
     }
 
-    fn enter_join_spec(&mut self, _join_spec: &'ast JoinSpec) {
-        match _join_spec {
+    fn enter_join_spec(&mut self, join_spec: &'ast JoinSpec) {
+        match join_spec {
             JoinSpec::On(_) => {
                 // visitor recurse into expr will put the condition in the current env
             }
@@ -1060,8 +1056,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             }
         };
     }
-
-    fn exit_join_spec(&mut self, _join_spec: &'ast JoinSpec) {}
 
     fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {
         self.enter_env();
