@@ -923,7 +923,7 @@ impl EvalExpr for EvalUnaryOpExpr {
     }
 }
 
-/// Represents a PartiQL evaluation `IS` operator, e.g. `IS` in `a IS INT`.
+/// Represents a PartiQL evaluation `IS` operator, e.g. `a IS INT`.
 #[derive(Debug)]
 pub struct EvalIsTypeExpr {
     pub expr: Box<dyn EvalExpr>,
@@ -942,7 +942,7 @@ impl EvalExpr for EvalIsTypeExpr {
     }
 }
 
-/// Represents an evaluation binary operator, e.g. `+` in `a + b`.
+/// Represents an evaluation binary operator, e.g.`a + b`.
 #[derive(Debug)]
 pub struct EvalBinOpExpr {
     pub op: EvalBinOp,
@@ -1070,7 +1070,7 @@ impl EvalExpr for EvalBinOpExpr {
     }
 }
 
-/// Represents an evaluation PartiQL `BETWEEN` operator, e.g. in `x BETWEEN 10 AND 20`.
+/// Represents an evaluation PartiQL `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug)]
 pub struct EvalBetweenExpr {
     pub value: Box<dyn EvalExpr>,
