@@ -27,6 +27,8 @@ use petgraph::visit::EdgeRef;
 use regex::{Regex, RegexBuilder};
 use std::borrow::Borrow;
 
+/// Represents a PartiQL evaluation query plan which is a plan that can be evaluated to produce
+/// a result. The plan uses a directed `petgraph::StableGraph`.
 #[derive(Debug)]
 pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
 
@@ -37,10 +39,13 @@ impl Default for EvalPlan {
 }
 
 impl EvalPlan {
+    /// Creates a new evaluation plan.
     fn new() -> Self {
         EvalPlan(StableGraph::<Box<dyn Evaluable>, u8, Directed>::new())
     }
 
+    /// Executes the plan while mutating its state by changing the inputs and outputs of plan
+    /// operators.
     pub fn execute_mut(&mut self, bindings: MapBindings<Value>) -> Result<Evaluated, EvalErr> {
         let ctx: Box<dyn EvalContext> = Box::new(BasicContext { bindings });
         // We are only interested in DAGs that can be used as execution plans, which leads to the
@@ -98,8 +103,10 @@ impl EvalPlan {
     }
 }
 
+/// Represents an evaluation result that contains evaluated result or the error.
 pub type EvalResult = Result<Evaluated, EvalErr>;
 
+/// Represents result of evaluation as an evaluated entity.
 pub struct Evaluated {
     pub result: Value,
 }
@@ -114,6 +121,7 @@ pub enum EvaluationError {
     InvalidEvaluationPlan(String),
 }
 
+/// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
     fn update_input(&mut self, input: Value, branch_num: u8);
@@ -122,6 +130,9 @@ pub trait Evaluable: Debug {
     }
 }
 
+/// Represents an evaluation `Scan` operator; `Scan` operator scans the given bindings from its
+/// input and and the environment and outputs a bag of binding tuples for tuples/values matching the
+/// scan `expr`, e.g. an SQL expression `table1` in SQL expression `FROM table1`.
 #[derive(Debug)]
 pub struct EvalScan {
     pub expr: Box<dyn EvalExpr>,
@@ -199,14 +210,9 @@ impl Evaluable for EvalScan {
     }
 }
 
-#[derive(Debug)]
-pub enum EvalJoinKind {
-    Inner,
-    Left,
-    Right,
-    Full,
-}
-
+/// Represents an evaluation `Join` operator; `Join` joins the tuples from its LHS and RHS based on a logic defined
+/// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
+/// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalJoin {
     pub kind: EvalJoinKind,
@@ -214,6 +220,14 @@ pub struct EvalJoin {
     pub input: Option<Value>,
     pub left: Box<dyn Evaluable>,
     pub right: Box<dyn Evaluable>,
+}
+
+#[derive(Debug)]
+pub enum EvalJoinKind {
+    Inner,
+    Left,
+    Right,
+    Full,
 }
 
 impl EvalJoin {
@@ -369,6 +383,9 @@ impl Evaluable for EvalJoin {
     }
 }
 
+/// Represents an evaluation `Unpivot` operator; the `Unpivot` enables ranging over the
+/// attribute-value pairs of a tuple. For `Unpivot` operational semantics, see section `5.2` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalUnpivot {
     pub expr: Box<dyn EvalExpr>,
@@ -423,6 +440,9 @@ impl Evaluable for EvalUnpivot {
     }
 }
 
+/// Represents an evaluation `Filter` operator; for an input bag of binding tuples the `Filter`
+/// operator filters out the binding tuples that does not meet the condition expressed as `expr`,
+/// e.g.`a > 2` in `WHERE a > 2` expression.
 #[derive(Debug)]
 pub struct EvalFilter {
     pub expr: Box<dyn EvalExpr>,
@@ -441,7 +461,7 @@ impl EvalFilter {
             Boolean(bool_val) => bool_val,
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
-            // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
+            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 8. `WHERE clause`
             _ => false,
         }
     }
@@ -466,19 +486,62 @@ impl Evaluable for EvalFilter {
     }
 }
 
+/// Represents an evaluation `SelectValue` operator; `SelectValue` implements PartiQL Core's
+/// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalProject {
+pub struct EvalSelectValue {
+    pub expr: Box<dyn EvalExpr>,
+    pub input: Option<Value>,
+}
+
+impl EvalSelectValue {
+    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+        EvalSelectValue { expr, input: None }
+    }
+}
+
+impl Evaluable for EvalSelectValue {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let ordered = &input_value.is_ordered();
+        let mut value = vec![];
+
+        for v in input_value.into_iter() {
+            let out = v.coerce_to_tuple();
+            let evaluated = self.expr.evaluate(&out, ctx);
+            value.push(evaluated);
+        }
+
+        match ordered {
+            true => Some(Value::List(Box::new(List::from(value)))),
+            false => Some(Value::Bag(Box::new(Bag::from(value)))),
+        }
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
+/// Represents an evaluation `Project` operator; for a given bag of input binding tuples as input
+/// the `Project` selects attributes as specified by expressions in `exprs`. For `Project`
+/// operational semantics, see section `6` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+#[derive(Debug)]
+pub struct EvalSelect {
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
     pub input: Option<Value>,
 }
 
-impl EvalProject {
+impl EvalSelect {
     pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
-        EvalProject { exprs, input: None }
+        EvalSelect { exprs, input: None }
     }
 }
 
-impl Evaluable for EvalProject {
+impl Evaluable for EvalSelect {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
@@ -510,18 +573,20 @@ impl Evaluable for EvalProject {
     }
 }
 
+/// Represents an evaluation `ProjectAll` operator; `ProjectAll` implements SQL's `SELECT *`
+/// semantics.
 #[derive(Debug, Default)]
-pub struct EvalProjectAll {
+pub struct EvalSelectAll {
     pub input: Option<Value>,
 }
 
-impl EvalProjectAll {
+impl EvalSelectAll {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl Evaluable for EvalProjectAll {
+impl Evaluable for EvalSelectAll {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
@@ -549,42 +614,9 @@ impl Evaluable for EvalProjectAll {
     }
 }
 
-#[derive(Debug)]
-pub struct EvalProjectValue {
-    pub expr: Box<dyn EvalExpr>,
-    pub input: Option<Value>,
-}
-
-impl EvalProjectValue {
-    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
-        EvalProjectValue { expr, input: None }
-    }
-}
-
-impl Evaluable for EvalProjectValue {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self.input.take().expect("Error in retrieving input value");
-
-        let ordered = &input_value.is_ordered();
-        let mut value = vec![];
-
-        for v in input_value.into_iter() {
-            let out = v.coerce_to_tuple();
-            let evaluated = self.expr.evaluate(&out, ctx);
-            value.push(evaluated);
-        }
-
-        match ordered {
-            true => Some(Value::List(Box::new(List::from(value)))),
-            false => Some(Value::Bag(Box::new(Bag::from(value)))),
-        }
-    }
-
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
-        self.input = Some(input);
-    }
-}
-
+/// Represents an evaluation `ExprQuery` operator; in PartiQL as opposed to SQL, the following
+/// expression by its own is valid: `2 * 2`. Considering this, evaluation plan designates an operator
+/// for evaluating such stand-alone expressions.
 #[derive(Debug)]
 pub struct EvalExprQuery {
     pub expr: Box<dyn EvalExpr>,
@@ -608,6 +640,8 @@ impl Evaluable for EvalExprQuery {
     }
 }
 
+/// Represents an evaluation operator for Tuple expressions such as `{t1.a: t1.b * 2}` in
+/// `SELECT VALUE {t1.a: t1.b * 2} FROM table1 AS t1`.
 #[derive(Debug)]
 pub struct EvalTupleExpr {
     pub attrs: Vec<Box<dyn EvalExpr>>,
@@ -639,6 +673,8 @@ impl EvalExpr for EvalTupleExpr {
     }
 }
 
+/// Represents an evaluation operator for List (ordered array) expressions such as
+/// `[t1.a, t1.b * 2]` in `SELECT VALUE [t1.a, t1.b * 2] FROM table1 AS t1`.
 #[derive(Debug)]
 pub struct EvalListExpr {
     pub elements: Vec<Box<dyn EvalExpr>>,
@@ -656,6 +692,8 @@ impl EvalExpr for EvalListExpr {
     }
 }
 
+/// Represents an evaluation operator for Bag (unordered array) expressions such as
+/// `<<t1.a, t1.b * 2>>` in `SELECT VALUE <<t1.a, t1.b * 2>> FROM table1 AS t1`.
 #[derive(Debug)]
 pub struct EvalBagExpr {
     pub elements: Vec<Box<dyn EvalExpr>>,
@@ -673,18 +711,20 @@ impl EvalExpr for EvalBagExpr {
     }
 }
 
+/// Represents an evaluation operator for path navigation expressions as outlined in Section `4` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+#[derive(Debug)]
+pub struct EvalPath {
+    pub expr: Box<dyn EvalExpr>,
+    pub components: Vec<EvalPathComponent>,
+}
+
 #[derive(Debug)]
 pub enum EvalPathComponent {
     Key(BindingsName),
     KeyExpr(Box<dyn EvalExpr>),
     Index(i64),
     IndexExpr(Box<dyn EvalExpr>),
-}
-
-#[derive(Debug)]
-pub struct EvalPath {
-    pub expr: Box<dyn EvalExpr>,
-    pub components: Vec<EvalPathComponent>,
 }
 
 impl EvalExpr for EvalPath {
@@ -740,6 +780,8 @@ impl EvalExpr for EvalPath {
     }
 }
 
+/// Represents an evaluation operator for sub-queries, e.g. `SELECT a FROM b` in
+/// `SELECT b.c, (SELECT a FROM b) FROM books AS b`.
 #[derive(Debug)]
 pub struct EvalSubQueryExpr {
     pub plan: Rc<RefCell<EvalPlan>>,
@@ -767,6 +809,7 @@ impl EvalExpr for EvalSubQueryExpr {
     }
 }
 
+/// Represents an SQL `DISTINCT` operator, e.g. in `SELECT DISTINCT a FROM t`.
 #[derive(Debug, Default)]
 pub struct EvalDistinct {
     pub input: Option<Value>,
@@ -790,6 +833,7 @@ impl Evaluable for EvalDistinct {
     }
 }
 
+/// Represents an operator that captures the output of a (sub)query in the plan.
 #[derive(Debug)]
 pub struct EvalSink {
     pub input: Option<Value>,
@@ -805,10 +849,12 @@ impl Evaluable for EvalSink {
     }
 }
 
+/// A trait for expressions that require evaluation, e.g. `a + b` or `c > 2`.
 pub trait EvalExpr: Debug {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value;
 }
 
+/// Represents an operator for dynamic variable name resolution of a (sub)query.
 #[derive(Debug)]
 pub struct EvalDynamicLookup {
     pub lookups: Vec<Box<dyn EvalExpr>>,
@@ -825,6 +871,7 @@ impl EvalExpr for EvalDynamicLookup {
     }
 }
 
+/// Represents a variable reference in a (sub)query, e.g. `a` in `SELECT b as a FROM`.
 #[derive(Debug)]
 pub struct EvalVarRef {
     pub name: BindingsName,
@@ -837,6 +884,7 @@ impl EvalExpr for EvalVarRef {
     }
 }
 
+/// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
 #[derive(Debug)]
 pub struct EvalLitExpr {
     pub lit: Box<Value>,
@@ -848,17 +896,11 @@ impl EvalExpr for EvalLitExpr {
     }
 }
 
+/// Represents an evaluation unary operator, e.g. `NOT` in `NOT TRUE`.
 #[derive(Debug)]
 pub struct EvalUnaryOpExpr {
     pub op: EvalUnaryOp,
     pub operand: Box<dyn EvalExpr>,
-}
-
-#[derive(Debug)]
-pub struct EvalBinOpExpr {
-    pub op: EvalBinOp,
-    pub lhs: Box<dyn EvalExpr>,
-    pub rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
@@ -880,6 +922,7 @@ impl EvalExpr for EvalUnaryOpExpr {
     }
 }
 
+/// Represents a PartiQL evaluation `IS` operator, e.g. `a IS INT`.
 #[derive(Debug)]
 pub struct EvalIsTypeExpr {
     pub expr: Box<dyn EvalExpr>,
@@ -896,6 +939,14 @@ impl EvalExpr for EvalIsTypeExpr {
         };
         Value::from(result)
     }
+}
+
+/// Represents an evaluation binary operator, e.g.`a + b`.
+#[derive(Debug)]
+pub struct EvalBinOpExpr {
+    pub op: EvalBinOp,
+    pub lhs: Box<dyn EvalExpr>,
+    pub rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
@@ -1018,6 +1069,7 @@ impl EvalExpr for EvalBinOpExpr {
     }
 }
 
+/// Represents an evaluation PartiQL `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug)]
 pub struct EvalBetweenExpr {
     pub value: Box<dyn EvalExpr>,
@@ -1034,6 +1086,7 @@ impl EvalExpr for EvalBetweenExpr {
     }
 }
 
+/// Represents an evaluation `LIKE` operator, e.g. in `s LIKE 'h%llo'`.
 #[derive(Debug)]
 pub struct EvalLikeMatch {
     pub value: Box<dyn EvalExpr>,
@@ -1066,6 +1119,7 @@ impl EvalExpr for EvalLikeMatch {
     }
 }
 
+/// Represents a searched case operator, e.g. CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END.
 #[derive(Debug)]
 pub struct EvalSearchedCaseExpr {
     pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
@@ -1084,6 +1138,7 @@ impl EvalExpr for EvalSearchedCaseExpr {
     }
 }
 
+/// Represents an evaluation context that is used during evaluation of a plan.
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
 }
@@ -1118,6 +1173,7 @@ where
     }
 }
 
+/// Represents a built-in `lower` string function, e.g. lower('AdBd').
 #[derive(Debug)]
 pub struct EvalFnLower {
     pub value: Box<dyn EvalExpr>,
@@ -1132,6 +1188,7 @@ impl EvalExpr for EvalFnLower {
     }
 }
 
+/// Represents a built-in `upper` string function, e.g. upper('AdBd').
 #[derive(Debug)]
 pub struct EvalFnUpper {
     pub value: Box<dyn EvalExpr>,
@@ -1146,6 +1203,7 @@ impl EvalExpr for EvalFnUpper {
     }
 }
 
+/// Represents a built-in character length string function, e.g. `char_length('123456789')`.
 #[derive(Debug)]
 pub struct EvalFnCharLength {
     pub value: Box<dyn EvalExpr>,
@@ -1160,6 +1218,7 @@ impl EvalExpr for EvalFnCharLength {
     }
 }
 
+/// Represents a built-in substring string function, e.g. `substring('123456789' FROM 2)`.
 #[derive(Debug)]
 pub struct EvalFnSubstring {
     pub value: Box<dyn EvalExpr>,
@@ -1240,6 +1299,7 @@ where
     }
 }
 
+/// Represents a built-in both trim string function, e.g. `trim(both from ' foobar ')`.
 #[derive(Debug)]
 pub struct EvalFnBtrim {
     pub value: Box<dyn EvalExpr>,
@@ -1260,6 +1320,7 @@ impl EvalExpr for EvalFnBtrim {
     }
 }
 
+/// Represents a built-in right trim string function.
 #[derive(Debug)]
 pub struct EvalFnRtrim {
     pub value: Box<dyn EvalExpr>,
@@ -1280,6 +1341,7 @@ impl EvalExpr for EvalFnRtrim {
     }
 }
 
+/// Represents a built-in left trim string function.
 #[derive(Debug)]
 pub struct EvalFnLtrim {
     pub value: Box<dyn EvalExpr>,
@@ -1300,6 +1362,7 @@ impl EvalExpr for EvalFnLtrim {
     }
 }
 
+/// Represents an `EXISTS` function, e.g. `exists(`(1)`)`.
 #[derive(Debug)]
 pub struct EvalFnExists {
     pub value: Box<dyn EvalExpr>,
