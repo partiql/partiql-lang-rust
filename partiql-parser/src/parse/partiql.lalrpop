@@ -242,7 +242,7 @@ FromClause: ast::AstNode<ast::FromClause> = {
                     left: Box::new(lfrom),
                     right: Box::new(rfrom),
                     predicate: None
-                }, range.clone());
+                }, range);
                 ast::FromSource::Join( join )
             })
             .unwrap(); // safe, because we know there's at least 1 input
@@ -1084,7 +1084,7 @@ LiteralNumber: ast::Lit = {
 
     <lo:@L> <n:"Int"> <hi:@R> =>? {
         n.parse()
-	        .map(|n| ast::Lit::Int64Lit(n))
+	        .map(ast::Lit::Int64Lit)
 		    .map_err(|_| lpop::ParseError::User{
 	     	    error: ParseError::SyntaxError(
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
@@ -1092,7 +1092,7 @@ LiteralNumber: ast::Lit = {
     },
     <lo:@L> <r:"Real"> <hi:@R> =>? {
         rust_decimal::Decimal::from_str(r)
-	        .map(|n| ast::Lit::DecimalLit(n))
+	        .map(ast::Lit::DecimalLit)
 		    .map_err(|_| lpop::ParseError::User{
 	     	    error: ParseError::SyntaxError(
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
@@ -1100,7 +1100,7 @@ LiteralNumber: ast::Lit = {
     },
     <lo:@L> <r:"ExpReal"> <hi:@R> =>? {
         rust_decimal::Decimal::from_scientific(r)
-	        .map(|n| ast::Lit::DecimalLit(n))
+	        .map(ast::Lit::DecimalLit)
 		    .map_err(|_| lpop::ParseError::User{
 	     	    error: ParseError::SyntaxError(
 		            "invalid literal".to_string().to_located(BytePosition::from(lo)..BytePosition::from(hi)))
@@ -1140,7 +1140,7 @@ TypeNamePart: ast::CustomTypePart = {
 
 #[inline]
 TypeName: ast::Type = {
-    <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts: parts } ),
+    <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts } ),
 }
 
 #[inline]
