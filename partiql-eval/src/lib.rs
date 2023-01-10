@@ -2375,7 +2375,7 @@ mod tests {
                     name: BindingsName::CaseInsensitive("justATuple".to_string()),
                 }),
                 "price",
-                "symbol",
+                Some("symbol".into()),
             );
 
             let ctx = BasicContext::new(p0);
@@ -2399,7 +2399,7 @@ mod tests {
                     name: BindingsName::CaseInsensitive("nonTuple".to_string()),
                 }),
                 "x",
-                "y",
+                Some("y".into()),
             );
 
             let ctx = BasicContext::new(p0);
