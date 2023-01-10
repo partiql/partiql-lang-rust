@@ -397,16 +397,13 @@ impl Evaluable for EvalUnpivot {
 
         let out = tuple
             .into_iter()
-            .filter_map(|(k, v)| match v {
-                Missing => None, // if Value is missing, don't add it to output tuple
-                _ => {
-                    let tuple = if let Some(at_key) = &self.at_key {
-                        Tuple::from([(self.as_key.as_str(), v), (at_key.as_str(), k.into())])
-                    } else {
-                        Tuple::from([(self.as_key.as_str(), v)])
-                    };
-                    Some(Value::Tuple(Box::new(tuple)))
-                }
+            .map(|(k, v)| {
+                let tuple = if let Some(at_key) = &self.at_key {
+                    Tuple::from([(self.as_key.as_str(), v), (at_key.as_str(), k.into())])
+                } else {
+                    Tuple::from([(self.as_key.as_str(), v)])
+                };
+                Value::Tuple(Box::new(tuple))
             })
             .collect_vec();
 
