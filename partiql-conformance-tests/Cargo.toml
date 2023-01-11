@@ -32,12 +32,12 @@ miette = { version ="5.*", features = ["fancy"] }
 partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator" }
 
 [dependencies]
-partiql-parser = { path = "../partiql-parser" }
-partiql-ast = { path = "../partiql-ast" }
-partiql-logical-planner = { path = "../partiql-logical-planner" }
-partiql-logical = { path = "../partiql-logical" }
-partiql-value = { path = "../partiql-value" }
-partiql-eval = { path = "../partiql-eval" }
+partiql-parser = { path = "../partiql-parser", version = "0.2.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.2.*" }
+partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.2.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.2.*" }
+partiql-value = { path = "../partiql-value", version = "0.2.*" }
+partiql-eval = { path = "../partiql-eval", version = "0.2.*" }
 
 ion-rs = "0.14"
 
