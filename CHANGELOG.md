@@ -7,20 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Fixes
+
+## [0.2.0] - 2023-01-10
+### Changed
 - *BREAKING:* Refactors the AST
   - Removes Location from the AST, replacing with a 'node id' that gives the AST node identity; the id can be used to retrieve Location
   - Removes redundancies and extraneous nesting
+  - Refactor some AST nodes (including `FROM`, `WHERE`, and `HAVING` clauses) for better visitation
+  - Refactor `FromSource` to not wrap in `AstNode`
 
 ### Added
-- Adds the following functionalities to PartiQL Playground:
-  - Moves the project to a Node.js project
-  - Adds the capability for exporting the playground session on client side to be able to get fetched from another playground windows.
-  - Adds a REST API and exposes /parse for parsing the query over http request.
-  - Containerization using Docker.
-
-### Fixes
-- Fixes the bug with AST graph PAN and ZOOM—before this change the pan and zoom was quite flaky and very hard to work with.
-- Fixes the version value for the session and JSON output by ensuring it gets picked from the selected version in the UI.
+- Adds end-to-end PartiQL query evaluation with the following supported features
+  - SELECT-FROM-WHERE
+  - LATERAL LEFT, INNER, CROSS JOINs
+  - UNPIVOT
+  - SELECT VALUE
+  - Query expressions
+  - List, Bag, Tuple constructors
+  - Path expressions (wildcard & unpivot path are not yet supported)
+  - Subquery (supported in logical and eval plan; not yet in AST to plan conversion)
+  - DISTINCT
+  - Variable references
+  - Literals
+  - Arithmetic operators (+, -, *, /, %)
+  - Logical operators (AND, OR, NOT)
+  - Equality operators (= , !=)
+  - Comparison operators (<, >, <=, >=)
+  - IS [NOT] MISSING, IS [NOT] NULL
+  - IN
+  - BETWEEN
+  - LIKE
+  - Searched and simple case expressions
+  - COALESCE and NULLIF
+  - CONCAT
+  - And the following functions
+    - LOWER
+    - UPPER
+    - CHARACTER_LENGTH
+    - LTRIM
+    - BTRIM
+    - RTRIM
+    - SUBSTRING
+    - EXISTS
+- Adds `Visit` and `Visitor` traits for visiting AST
+- Add AST node `Visit` impls via `proc_macro`s
+- Adds PartiQL `Value`, an in-memory representation of PartiQL values
+  - Supports PartiQL values other than `DATE`, `TIME`, s-expressions
+  - Supports basic arithmetic, logical, equality, and comparison operators
+  - Supports partiql parsing of Ion into `Value`
+- Defines logical plan and evaluation DAG
+- AST lowering to logical plan with name resolution
+- `partiql-conformance-tests` support for parsing and running evaluation tests from `partiql-tests`
 
 ## [0.1.0] - 2022-08-05
 ### Added

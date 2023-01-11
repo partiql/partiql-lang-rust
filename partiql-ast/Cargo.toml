@@ -39,4 +39,4 @@ serde = [
 
 [dependencies.partiql-ast-macros]
 path = "partiql-ast-macros"
-version = "*"
+version = "0.2.*"

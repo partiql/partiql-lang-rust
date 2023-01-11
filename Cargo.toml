@@ -2,7 +2,7 @@
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
 homepage = "https://github.com/partiql/partiql-lang-rust"
 repository = "https://github.com/partiql/partiql-lang-rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [workspace]
@@ -10,6 +10,7 @@ edition = "2021"
 members = [
   "partiql",
   "partiql-ast",
+  "partiql-ast/partiql-ast-macros",
   "partiql-conformance-tests",
   "partiql-conformance-test-generator",
   "partiql-source-map",

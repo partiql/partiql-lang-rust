@@ -23,8 +23,8 @@ edition.workspace = true
 lalrpop = "0.19.8"
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.1.0" }
-partiql-source-map = { path = "../partiql-source-map", version = "0.1.0" }
+partiql-ast = { path = "../partiql-ast", version = "0.2.*" }
+partiql-source-map = { path = "../partiql-source-map", version = "0.2.*" }
 
 thiserror = "~1.0.24"
 

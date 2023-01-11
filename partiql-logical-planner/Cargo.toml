@@ -18,10 +18,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-partiql-value = { path = "../partiql-value" }
-partiql-logical = { path = "../partiql-logical" }
-partiql-ast = { path = "../partiql-ast" }
-partiql-parser = { path = "../partiql-parser" }
+partiql-value = { path = "../partiql-value", version = "0.2.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.2.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.2.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.2.*" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
@@ -32,4 +32,4 @@ fnv = "1"
 assert_matches = "1.5.*"
 
 [dev-dependencies]
-partiql-eval = { path = "../partiql-eval" }
+partiql-eval = { path = "../partiql-eval", version = "0.2.*" }
