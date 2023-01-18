@@ -17,7 +17,8 @@ exclude = [
 version.workspace = true
 edition.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+bench = false
 
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.2.*" }

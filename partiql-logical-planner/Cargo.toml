@@ -17,6 +17,9 @@ exclude = [
 version.workspace = true
 edition.workspace = true
 
+[lib]
+bench = false
+
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.2.*" }
 partiql-logical = { path = "../partiql-logical", version = "0.2.*" }
