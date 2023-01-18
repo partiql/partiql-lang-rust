@@ -20,12 +20,12 @@ edition.workspace = true
 [[bin]]
 name = "generate_comparison_report"
 required-features = ["report_tool"]
+bench = false
 
 [[bin]]
 name = "generate_cts_report"
 required-features = ["report_tool"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+bench = false
 
 [build-dependencies]
 miette = { version ="5.*", features = ["fancy"] }

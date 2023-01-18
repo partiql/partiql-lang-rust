@@ -1,3 +1,5 @@
+name: Benchmark
+
 # Do not run this workflow on pull request since this workflow has permission to modify contents.
 on:
   push:
@@ -32,9 +34,9 @@ jobs:
           # nightly can be very volatile--pin this to a version we know works well...
           toolchain: nightly-2022-08-11
           override: true
-      # Run benchmark with `cargo +nightly -bench` and stores the output to a file
+      # Run benchmark with `cargo bench` and stores the output to a file
       - name: Run benchmark
-        run: cargo +nightly bench | tee output.txt
+        run: cargo bench -- --output-format bencher | tee output.txt
       # gh-pages branch is updated and pushed automatically with extracted benchmark data
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1

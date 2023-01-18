@@ -19,6 +19,7 @@ edition.workspace = true
 [lib]
 proc-macro = true
 path = "src/lib.rs"
+bench = false
 
 [dependencies]
 quote = "1.0.*"

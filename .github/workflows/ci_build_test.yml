@@ -78,7 +78,6 @@ jobs:
   conformance-report:
     name: Create conformance report for `push` and `pull_request` events
     runs-on: ubuntu-20.04
-    needs: [build]
     steps:
       # Pull down the cached `partiql-lang-rust` build from the `Build and Test` job. This allows us to reuse without
       # needing to rebuild. If pulling the build fails, the subsequent `cargo test` will rebuild.
@@ -101,7 +100,7 @@ jobs:
       # to format and use the output.
       - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
-        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" -- -Z unstable-options --ensure-time --format json > cargo_test_results.json
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > cargo_test_results.json
       # Create a conformance report from the `cargo test` json file
       - run: cargo run --features report_tool --bin generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
       # Upload conformance report for comparison with future runs
