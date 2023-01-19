@@ -22,8 +22,6 @@ bench = false
 smallvec = { version = "1.*" }
 serde = { version = "1.*", features = ["derive"], optional = true }
 
-anymap = "1.0.0-beta.2"
-
 
 [dev-dependencies]
 
