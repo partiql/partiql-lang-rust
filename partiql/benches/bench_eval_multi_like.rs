@@ -8,7 +8,7 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::EvaluatorPlanner;
 use partiql_logical::{BindingsOp, LogicalPlan};
-use partiql_parser;
+
 use partiql_parser::{Parser, ParserResult};
 use partiql_value::{partiql_tuple, Bag, Tuple, Value};
 
@@ -270,13 +270,13 @@ fn data() -> MapBindings<Value> {
     data.into()
 }
 
-const QUERY_1: &'static str = "
+const QUERY_1: &str = "
             SELECT *
             FROM hr.employees as emp
             WHERE lower(emp.name) LIKE '%bob smith%'
             ";
 
-const QUERY_15: &'static str = "
+const QUERY_15: &str = "
             SELECT *
             FROM hr.employees as emp
             WHERE lower(emp.name) LIKE '%bob smith%'
@@ -296,7 +296,7 @@ const QUERY_15: &'static str = "
                OR lower(emp.name) LIKE '%jakobe townsend%'
             ";
 
-const QUERY_30: &'static str = "
+const QUERY_30: &str = "
             SELECT *
             FROM hr.employees as emp
             WHERE lower(emp.name) LIKE '%bob smith%'
@@ -337,11 +337,11 @@ fn parse(text: &str) -> ParserResult {
 }
 #[inline]
 fn compile(parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
-    partiql_logical_planner::lower(&parsed)
+    partiql_logical_planner::lower(parsed)
 }
 #[inline]
 fn plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    EvaluatorPlanner::default().compile(&logical)
+    EvaluatorPlanner::default().compile(logical)
 }
 #[inline]
 pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Value {
