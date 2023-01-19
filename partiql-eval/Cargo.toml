@@ -29,7 +29,7 @@ itertools = "0.10.*"
 unicase = "2.*"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.26"
-thiserror = "1.0.*"
+thiserror = "1.0"
 assert_matches = "1.5.*"
 regex = "1.7"
 regex-syntax = "0.6"
