@@ -20,6 +20,20 @@ edition.workspace = true
 [lib]
 bench = false
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+
+[dev-dependencies]
+partiql-parser = { path = "../partiql-parser" }
+partiql-ast = { path = "../partiql-ast" }
+partiql-value = { path = "../partiql-value" }
+partiql-logical = { path = "../partiql-logical" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
+partiql-eval = { path = "../partiql-eval" }
+
+itertools = "0.10"
+criterion = "0.4"
+rand = "0.8"
+
+[[bench]]
+name = "bench_eval_multi_like"
+harness = false
