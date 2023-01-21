@@ -10,7 +10,10 @@ use crate::error::LexError;
 use crate::lexer::{InternalLexResult, LexResult, PartiqlLexer, Spanned, Token};
 
 use crate::token_parser::{BufferedToken, TokenParser};
+use once_cell::sync::Lazy;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+
+pub(crate) static BUILT_INS: Lazy<FnExprSet<'static>> = Lazy::new(|| built_ins());
 
 /// A single "function expression" argument match.
 #[derive(Debug, Clone)]
@@ -581,12 +584,6 @@ mod tests {
     use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 
     use crate::ParseError;
-
-    use lazy_static::lazy_static;
-
-    lazy_static! {
-        static ref BUILT_INS: FnExprSet<'static> = built_ins();
-    }
 
     #[test]
     fn cast() -> Result<(), ParseError<'static>> {

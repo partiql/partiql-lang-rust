@@ -8,9 +8,8 @@ mod parser_state;
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
 use crate::parse::parser_state::{IdGenerator, ParserState};
-use crate::preprocessor::{built_ins, FnExprSet, PreprocessingPartiqlLexer};
+use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
-use lazy_static::lazy_static;
 use partiql_ast::ast;
 use partiql_ast::ast::NodeId;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
@@ -50,10 +49,6 @@ pub(crate) struct ErrorData<'input> {
 }
 
 pub(crate) type AstResult<'input> = Result<AstData, ErrorData<'input>>;
-
-lazy_static! {
-    static ref BUILT_INS: FnExprSet<'static> = built_ins();
-}
 
 /// Parse PartiQL query text into an AST.
 pub(crate) fn parse_partiql(s: &str) -> AstResult {
