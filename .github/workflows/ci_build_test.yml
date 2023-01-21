@@ -73,6 +73,30 @@ jobs:
         with:
           path: ./*
           key: ${{ github.sha }}
+
+  # Run cargo-deny check and report.
+  # Fails if any of the following are found used in the crate or its dependencies.
+  #  - any banned crates
+  #  - disallowed open source licenses
+  #  - use of disallowed repository sources
+  # Reports, but does not fail on:
+  #  - security advisories
+  # See: https://embarkstudios.github.io/cargo-deny/index.html
+  cargo-deny:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check ${{ matrix.checks }}
+
   # Conformance report generation and comparison report generation job will run only after the `Build and Test` job
   # succeeds.
   conformance-report:
