@@ -96,6 +96,36 @@ fn function_call_def_char_len() -> CallDef {
     }
 }
 
+fn function_call_def_octet_len() -> CallDef {
+    CallDef {
+        names: vec!["octet_length"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::OctetLength,
+                    arguments: args,
+                })
+            }),
+        }],
+    }
+}
+
+fn function_call_def_bit_len() -> CallDef {
+    CallDef {
+        names: vec!["bit_length"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::BitLength,
+                    arguments: args,
+                })
+            }),
+        }],
+    }
+}
+
 fn function_call_def_lower() -> CallDef {
     CallDef {
         names: vec!["lower"],
@@ -185,6 +215,21 @@ fn function_call_def_substring() -> CallDef {
                 }),
             },
         ],
+    }
+}
+
+fn function_call_def_position() -> CallDef {
+    CallDef {
+        names: vec!["position"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional, CallSpecArg::Named("in".into())],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::Position,
+                    arguments: args,
+                })
+            }),
+        }],
     }
 }
 
@@ -335,9 +380,12 @@ pub fn function_call_def() -> FnSymTab {
 
     for def in [
         function_call_def_char_len(),
+        function_call_def_octet_len(),
+        function_call_def_bit_len(),
         function_call_def_lower(),
         function_call_def_upper(),
         function_call_def_substring(),
+        function_call_def_position(),
         function_call_def_trim(),
         function_call_def_coalesce(),
         function_call_def_nullif(),

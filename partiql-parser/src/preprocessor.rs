@@ -107,7 +107,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. position('foo' in 'xyzfooxyz') => position('foo', in: 'xyzfooxyz')
-                vec![AnyOne(false), AnyStar(false), Kw(Token::In), AnyOne(true), AnyStar(false)]
+                vec![AnyOne(true), AnyStar(false), Kw(Token::In), AnyOne(true), AnyStar(false)]
             ],
         }
     }

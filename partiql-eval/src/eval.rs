@@ -1218,6 +1218,36 @@ impl EvalExpr for EvalFnCharLength {
     }
 }
 
+/// Represents a built-in octet length string function, e.g. `octet_length('123456789')`.
+#[derive(Debug)]
+pub struct EvalFnOctetLength {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnOctetLength {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            s.bytes().count().into()
+        })
+    }
+}
+
+/// Represents a built-in bit length string function, e.g. `bit_length('123456789')`.
+#[derive(Debug)]
+pub struct EvalFnBitLength {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnBitLength {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        string_transform(self.value.evaluate(bindings, ctx), |s| {
+            (s.bytes().count() * 8).into()
+        })
+    }
+}
+
 /// Represents a built-in substring string function, e.g. `substring('123456789' FROM 2)`.
 #[derive(Debug)]
 pub struct EvalFnSubstring {
@@ -1271,6 +1301,38 @@ impl EvalExpr for EvalFnSubstring {
             value.chars().skip(offset).collect::<String>().into()
         } else {
             // either value or offset was NULL; return NULL
+            Value::Null
+        }
+    }
+}
+
+/// Represents a built-in position string function, e.g. `position('3' IN '123456789')`.
+#[derive(Debug)]
+pub struct EvalFnPosition {
+    pub needle: Box<dyn EvalExpr>,
+    pub haystack: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnPosition {
+    #[inline]
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let needle = match self.needle.evaluate(bindings, ctx) {
+            Null => None,
+            Value::String(s) => Some(s),
+            _ => return Value::Missing,
+        };
+        let haystack = match self.haystack.evaluate(bindings, ctx) {
+            Value::Null => return Value::Null,
+            Value::String(s) => s,
+            _ => return Value::Missing,
+        };
+        if let Some(needle) = needle {
+            haystack
+                .find(needle.as_ref())
+                .map(|l| l + 1)
+                .unwrap_or(0)
+                .into()
+        } else {
             Value::Null
         }
     }
