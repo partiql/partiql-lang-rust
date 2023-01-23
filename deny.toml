@@ -1,3 +1,6 @@
+# Configuration for cargo-deny
+# See https://embarkstudios.github.io/cargo-deny/
+
 
 # This section is considered when running `cargo deny check advisories`
 # More documentation for the advisories section can be found here:
