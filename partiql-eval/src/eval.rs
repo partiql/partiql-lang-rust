@@ -1227,9 +1227,7 @@ pub struct EvalFnOctetLength {
 impl EvalExpr for EvalFnOctetLength {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| {
-            s.bytes().count().into()
-        })
+        string_transform(self.value.evaluate(bindings, ctx), |s| s.len().into())
     }
 }
 
@@ -1242,9 +1240,7 @@ pub struct EvalFnBitLength {
 impl EvalExpr for EvalFnBitLength {
     #[inline]
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| {
-            (s.bytes().count() * 8).into()
-        })
+        string_transform(self.value.evaluate(bindings, ctx), |s| (s.len() * 8).into())
     }
 }
 
