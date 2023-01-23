@@ -466,10 +466,13 @@ pub enum CallName {
     Lower,
     Upper,
     CharLength,
+    OctetLength,
+    BitLength,
     LTrim,
     BTrim,
     RTrim,
     Substring,
+    Position,
     Exists,
 }
 

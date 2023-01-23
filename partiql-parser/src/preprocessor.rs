@@ -13,7 +13,7 @@ use crate::token_parser::{BufferedToken, TokenParser};
 use once_cell::sync::Lazy;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 
-pub(crate) static BUILT_INS: Lazy<FnExprSet<'static>> = Lazy::new(|| built_ins());
+pub(crate) static BUILT_INS: Lazy<FnExprSet<'static>> = Lazy::new(built_ins);
 
 /// A single "function expression" argument match.
 #[derive(Debug, Clone)]
@@ -107,7 +107,7 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g. position('foo' in 'xyzfooxyz') => position('foo', in: 'xyzfooxyz')
-                vec![AnyOne(false), AnyStar(false), Kw(Token::In), AnyOne(true), AnyStar(false)]
+                vec![AnyOne(true), AnyStar(false), Kw(Token::In), AnyOne(true), AnyStar(false)]
             ],
         }
     }

@@ -11,10 +11,11 @@ use partiql_logical::{
 use crate::eval;
 use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
-    EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim, EvalFnRtrim,
-    EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalJoinKind, EvalLikeMatch, EvalListExpr,
-    EvalLitExpr, EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr,
-    EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalFnBitLength, EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim,
+    EvalFnOctetLength, EvalFnPosition, EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr,
+    EvalJoinKind, EvalLikeMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
+    EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
+    EvalVarRef, Evaluable,
 };
 use crate::pattern_match::like_to_re_pattern;
 use partiql_value::Value::Null;
@@ -362,6 +363,18 @@ impl EvaluatorPlanner {
                             value: args.pop().unwrap(),
                         })
                     }
+                    CallName::OctetLength => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnOctetLength {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::BitLength => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnBitLength {
+                            value: args.pop().unwrap(),
+                        })
+                    }
                     CallName::LTrim => {
                         assert_eq!(args.len(), 2);
                         let value = args.pop().unwrap();
@@ -396,6 +409,12 @@ impl EvaluatorPlanner {
                             offset,
                             length,
                         })
+                    }
+                    CallName::Position => {
+                        assert_eq!(args.len(), 2);
+                        let haystack = args.pop().unwrap();
+                        let needle = args.pop().unwrap();
+                        Box::new(EvalFnPosition { needle, haystack })
                     }
                     CallName::Exists => {
                         assert_eq!(args.len(), 1);
