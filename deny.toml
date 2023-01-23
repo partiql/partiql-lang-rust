@@ -1,0 +1,153 @@
+
+# This section is considered when running `cargo deny check advisories`
+# More documentation for the advisories section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+vulnerability = "deny"
+unsound = "deny"
+unmaintained = "deny"
+yanked = "deny"
+notice = "warn"
+
+ignore = [
+    # Advisory: https://rustsec.org/advisories/RUSTSEC-2021-0145
+    # atty potential misaligned pointer; used by some pretty-printing deps (criterion, miette, lalrpop)
+    "RUSTSEC-2021-0145",
+
+    # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
+    # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
+    "RUSTSEC-2020-0071",
+]
+
+
+
+
+# This section is considered when running `cargo deny check licenses`
+# More documentation for the licenses section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+# The lint level for crates which do not have a detectable license
+unlicensed = "deny"
+# ignores workspace crates that aren't published, or are only published to private registries.
+private = { ignore = true }
+
+# List of explicitly allowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
+#
+# This list must be manually reconciled with the `accepted` in `about.toml`
+# If you change this list, please also change `about.toml`
+#    see https://github.com/EmbarkStudios/cargo-about/issues/201
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "Zlib",
+    "ICU",
+]
+
+# Allow 1 or more licenses on a per-crate basis, so that particular licenses
+# aren't accepted for every possible crate as with the normal allow list
+#
+# This list must be manually reconciled with the `accepted` in `about.toml`
+# If you change this list, please also change `about.toml`
+#    see https://github.com/EmbarkStudios/cargo-about/issues/201
+exceptions = [
+    { allow = ["Unicode-DFS-2016"], name = "unicode-ident" },
+]
+
+# Lint level for licenses considered copyleft
+copyleft = "deny"
+
+# List of explicitly disallowed licenses
+# See https://spdx.org/licenses/ for list of possible licenses
+# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
+deny = [
+]
+
+# Blanket approval or denial for OSI-approved or FSF Free/Libre licenses
+# * both - The license will be approved if it is both OSI-approved *AND* FSF
+# * either - The license will be approved if it is either OSI-approved *OR* FSF
+# * osi-only - The license will be approved if is OSI-approved *AND NOT* FSF
+# * fsf-only - The license will be approved if is FSF *AND NOT* OSI-approved
+# * neither - This predicate is ignored and the default lint level is used
+allow-osi-fsf-free = "neither"
+
+# Lint level used when no other predicates are matched
+# 1. License isn't in the allow or deny lists
+# 2. License isn't copyleft
+# 3. License isn't OSI/FSF, or allow-osi-fsf-free = "neither"
+default = "deny"
+
+# The confidence threshold for detecting a license from license text.
+# The higher the value, the more closely the license text must be to the
+# canonical license text of a valid SPDX license file.
+# [possible values: any between 0.0 and 1.0].
+confidence-threshold = 0.93
+
+
+
+
+
+# This section is considered when running `cargo deny check bans`.
+# More documentation about the 'bans' section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+[bans]
+# Lint level for when multiple versions of the same crate are detected
+multiple-versions = "warn"
+# Lint level for when a crate version requirement is `*`
+wildcards = "warn"
+# The graph highlighting used when creating dotgraphs for crates
+# with multiple versions
+# * lowest-version - The path to the lowest versioned duplicate is highlighted
+# * simplest-path - The path to the version with the fewest edges is highlighted
+# * all - Both lowest-version and simplest-path are used
+highlight = "all"
+# The default lint level for `default` features for crates that are members of
+# the workspace that is being checked. This can be overriden by allowing/denying
+# `default` on a crate-by-crate basis if desired.
+workspace-default-features = "allow"
+# The default lint level for `default` features for external crates that are not
+# members of the workspace. This can be overriden by allowing/denying `default`
+# on a crate-by-crate basis if desired.
+external-default-features = "allow"
+# List of crates that are allowed. Use with care!
+allow = [
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+# List of crates to deny
+deny = [
+    # Use `once_cell` instead
+    #   `OnceCell`s API is under consideration for inclusion in `std`: https://github.com/rust-lang/rust/issues/74465
+    { name = "lazy_static", wrappers = ["Inflector", "criterion"]},
+
+
+    # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
+    # `time` < 0.2.23 has a potential (though unlikely) potential segfault
+    { name = "time", version ="<0.2.23", wrappers = ["chrono"]},
+    # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
+    # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
+    { name = "chrono", version ="<0.4.20"}
+]
+
+
+# This section is considered when running `cargo deny check sources`.
+# More documentation about the 'sources' section can be found here:
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+[sources]
+# Lint level for what to happen when a crate from a crate registry that is not
+# in the allow list is encountered
+unknown-registry = "deny"
+# Lint level for what to happen when a crate from a git repository that is not
+# in the allow list is encountered
+unknown-git = "deny"
+# List of URLs for allowed crate registries. Defaults to the crates.io index
+# if not specified. If it is specified but empty, no registries are allowed.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# List of URLs for allowed Git repositories
+allow-git = []
+
