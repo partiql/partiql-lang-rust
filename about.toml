@@ -1,0 +1,25 @@
+# Configuration for cargo-about
+# See https://embarkstudios.github.io/cargo-about/index.html
+
+# Don't check the licenses of our private workspace crates
+private = { ignore = true }
+
+# Acceptable licenses.
+# Order matters here, `cargo-about` "will try to satisfy the licenses in the order that they are declared in this list."
+#    as per https://embarkstudios.github.io/cargo-about/cli/generate/config.html#the-accepted-field
+#
+# This list must be manually reconciled with the `allow`s and/or `exception`s in `deny.toml`
+# If you change this list, please also change `deny.toml`
+#    see https://github.com/EmbarkStudios/cargo-about/issues/201
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "Zlib",
+    "ICU",
+    "Unicode-DFS-2016"
+]
