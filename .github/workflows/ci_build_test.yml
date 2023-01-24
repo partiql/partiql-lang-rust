@@ -191,15 +191,6 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: 'github-actions[bot]'
           body-includes: Conformance
-      # Convert the markdown comparison report to a readable form for GitHub PR comments
-      - id: get-comment-body
-        continue-on-error: true
-        run: |
-          delimiter="$(openssl rand -hex 8)"
-          body="$(cat ./cts-comparison-report.md)"
-          echo "body<<${delimiter}" >> "${GITHUB_OUTPUT}"
-          echo "$body" >> "${GITHUB_OUTPUT}"
-          echo "${delimiter}" >> "${GITHUB_OUTPUT}"
       # Create or update (if previous comment exists) with markdown version of comparison report
       - name: Create or update comment
         continue-on-error: true
@@ -207,5 +198,5 @@ jobs:
         with:
           comment-id: ${{ steps.fc.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
-          body: ${{ steps.get-comment-body.outputs.body }}
+          body-file: cts-comparison-report.md
           edit-mode: replace
