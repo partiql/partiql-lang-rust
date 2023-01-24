@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install llvm -y
       - name: Git Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
@@ -105,7 +105,7 @@ jobs:
     steps:
       # Pull down the cached `partiql-lang-rust` build from the `Build and Test` job. This allows us to reuse without
       # needing to rebuild. If pulling the build fails, the subsequent `cargo test` will rebuild.
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
@@ -147,7 +147,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       # Pull down cached `cargo build` and conformance report
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
