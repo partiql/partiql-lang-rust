@@ -61,28 +61,28 @@ impl EvaluatorPlanner {
             }) => {
                 if let Some(at_key) = at_key {
                     Box::new(eval::EvalScan::new_with_at_key(
-                        self.plan_values(&expr),
+                        self.plan_values(expr),
                         as_key,
                         at_key,
                     ))
                 } else {
-                    Box::new(eval::EvalScan::new(self.plan_values(&expr), as_key))
+                    Box::new(eval::EvalScan::new(self.plan_values(expr), as_key))
                 }
             }
             BindingsOp::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values(&v)))
+                    .map(|(k, v)| (k.clone(), self.plan_values(v)))
                     .collect();
                 Box::new(eval::EvalSelect::new(exprs))
             }
             BindingsOp::ProjectAll => Box::new(eval::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
-                let expr = self.plan_values(&expr);
+                let expr = self.plan_values(expr);
                 Box::new(eval::EvalSelectValue::new(expr))
             }
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
-                expr: self.plan_values(&expr),
+                expr: self.plan_values(expr),
                 input: None,
             }),
             BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
@@ -92,7 +92,7 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key,
             }) => Box::new(eval::EvalUnpivot::new(
-                self.plan_values(&expr),
+                self.plan_values(expr),
                 as_key,
                 at_key.clone(),
             )),
@@ -170,10 +170,10 @@ impl EvaluatorPlanner {
             ValueExpr::Path(expr, components) => Box::new(EvalPath {
                 expr: self.plan_values(expr),
                 components: components
-                    .into_iter()
+                    .iter()
                     .map(|c| match c {
                         PathComponent::Key(k) => eval::EvalPathComponent::Key(k.clone()),
-                        PathComponent::Index(i) => eval::EvalPathComponent::Index(i.clone()),
+                        PathComponent::Index(i) => eval::EvalPathComponent::Index(*i),
                         PathComponent::KeyExpr(k) => {
                             eval::EvalPathComponent::KeyExpr(self.plan_values(k))
                         }
@@ -226,7 +226,7 @@ impl EvaluatorPlanner {
                         // TODO statically assert escape length
                         assert!(escape.chars().count() <= 1);
                         let escape = escape.chars().next();
-                        let regex = like_to_re_pattern(&pattern, escape);
+                        let regex = like_to_re_pattern(pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
                     }
                 }
@@ -347,7 +347,7 @@ impl EvaluatorPlanner {
             }
             ValueExpr::Call(logical::CallExpr { name, arguments }) => {
                 let mut args = arguments
-                    .into_iter()
+                    .iter()
                     .map(|arg| self.plan_values(arg))
                     .collect_vec();
                 match name {
