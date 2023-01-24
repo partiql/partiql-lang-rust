@@ -473,7 +473,7 @@ impl Evaluable for EvalFilter {
 
         let mut out = partiql_bag![];
         for v in input_value.into_iter() {
-            if self.eval_filter(&v.clone().coerce_to_tuple(), ctx) {
+            if self.eval_filter(&v.as_tuple_ref(), ctx) {
                 out.push(v);
             }
         }
@@ -823,7 +823,7 @@ impl EvalDistinct {
 
 impl Evaluable for EvalDistinct {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
-        let out = self.input.clone().unwrap();
+        let out = self.input.take().unwrap();
         let u: Vec<Value> = out.into_iter().unique().collect();
         Some(Value::Bag(Box::new(Bag::from(u))))
     }
@@ -841,7 +841,7 @@ pub struct EvalSink {
 
 impl Evaluable for EvalSink {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
-        self.input.clone()
+        self.input.take()
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
