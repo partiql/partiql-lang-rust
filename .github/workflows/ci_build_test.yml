@@ -68,7 +68,7 @@ jobs:
       # Cache the `cargo build` so future jobs can reuse build
       - name: Cache cargo build
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: restore-build
         with:
           path: ./*
@@ -114,7 +114,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: restore-build
         with:
           path: ./*
@@ -135,7 +135,7 @@ jobs:
       # Cache the `cargo build` and conformance report for `conformance-report-comparison` job (pull_request event only)
       - name: Cache `cargo build` and conformance report
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
           path: ./*
@@ -156,7 +156,7 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
           path: ./*
