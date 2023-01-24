@@ -27,37 +27,17 @@ jobs:
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
+          components: clippy, rustfmt
       - name: Cargo Build 
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --workspace
+        run: cargo build --verbose --workspace
       - name: Cargo Test excluding conformance tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --workspace
+        run: cargo test --verbose --workspace
       - name: Rustfmt Check
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --verbose --all -- --check
-      # `clippy-check` will run `cargo clippy` on new pull requests. Due to a limitation in GitHub
-      # permissions, the behavior of the Action is different depending on the source of the PR. If the
-      # PR comes from the partiql-lang-rust project itself, any suggestions will be added to the PR as comments.
-      # If the PR comes from a fork, any suggestions will be added to the Action's STDOUT for review.
-      # For details, see: https://github.com/actions-rs/clippy-check/issues/2
-      - name: Install Clippy
-        # The clippy check depends on setup steps defined above, but we don't want it to run
-        # for every OS because it posts its comments to the PR. These `if` checks limit clippy to
-        # only running on the Linux test. (The choice of OS was arbitrary.)
         if: matrix.os == 'ubuntu-20.04'
-        run: rustup component add clippy
+        run: cargo fmt --verbose --all -- --check
       - name: Run Clippy
         if: matrix.os == 'ubuntu-20.04'
         uses: actions-rs/clippy-check@v1
@@ -109,11 +89,9 @@ jobs:
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
       - uses: actions/cache@v3
         id: restore-build
         with:
@@ -151,11 +129,9 @@ jobs:
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
       - uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
