@@ -24,6 +24,7 @@ use partiql_value::Value::Null;
 pub struct EvaluatorPlanner;
 
 impl EvaluatorPlanner {
+    #[inline]
     pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> EvalPlan {
         self.plan_eval(plan)
     }
@@ -60,28 +61,28 @@ impl EvaluatorPlanner {
             }) => {
                 if let Some(at_key) = at_key {
                     Box::new(eval::EvalScan::new_with_at_key(
-                        self.plan_values(expr.clone()),
+                        self.plan_values(expr),
                         as_key,
                         at_key,
                     ))
                 } else {
-                    Box::new(eval::EvalScan::new(self.plan_values(expr.clone()), as_key))
+                    Box::new(eval::EvalScan::new(self.plan_values(expr), as_key))
                 }
             }
             BindingsOp::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values(v.clone())))
+                    .map(|(k, v)| (k.clone(), self.plan_values(v)))
                     .collect();
                 Box::new(eval::EvalSelect::new(exprs))
             }
             BindingsOp::ProjectAll => Box::new(eval::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
-                let expr = self.plan_values(expr.clone());
+                let expr = self.plan_values(expr);
                 Box::new(eval::EvalSelectValue::new(expr))
             }
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
-                expr: self.plan_values(expr.clone()),
+                expr: self.plan_values(expr),
                 input: None,
             }),
             BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
@@ -91,7 +92,7 @@ impl EvaluatorPlanner {
                 as_key,
                 at_key,
             }) => Box::new(eval::EvalUnpivot::new(
-                self.plan_values(expr.clone()),
+                self.plan_values(expr),
                 as_key,
                 at_key.clone(),
             )),
@@ -111,7 +112,7 @@ impl EvaluatorPlanner {
                 };
                 let on = on
                     .as_ref()
-                    .map(|on_condition| self.plan_values(on_condition.clone()));
+                    .map(|on_condition| self.plan_values(on_condition));
                 Box::new(eval::EvalJoin::new(
                     kind,
                     self.get_eval_node(left),
@@ -120,7 +121,7 @@ impl EvaluatorPlanner {
                 ))
             }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
-                let expr = self.plan_values(expr.clone());
+                let expr = self.plan_values(expr);
                 Box::new(eval::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy => todo!("OrderBy"),
@@ -131,10 +132,10 @@ impl EvaluatorPlanner {
         }
     }
 
-    fn plan_values(&self, ve: ValueExpr) -> Box<dyn EvalExpr> {
+    fn plan_values(&self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
         match ve {
             ValueExpr::UnExpr(unary_op, operand) => {
-                let operand = self.plan_values(*operand);
+                let operand = self.plan_values(operand);
                 let op = match unary_op {
                     UnaryOp::Pos => EvalUnaryOp::Pos,
                     UnaryOp::Neg => EvalUnaryOp::Neg,
@@ -143,8 +144,8 @@ impl EvaluatorPlanner {
                 Box::new(EvalUnaryOpExpr { op, operand })
             }
             ValueExpr::BinaryExpr(binop, lhs, rhs) => {
-                let lhs = self.plan_values(*lhs);
-                let rhs = self.plan_values(*rhs);
+                let lhs = self.plan_values(lhs);
+                let rhs = self.plan_values(rhs);
                 let op = match binop {
                     BinaryOp::And => EvalBinOp::And,
                     BinaryOp::Or => EvalBinOp::Or,
@@ -165,33 +166,33 @@ impl EvaluatorPlanner {
                 };
                 Box::new(EvalBinOpExpr { op, lhs, rhs })
             }
-            ValueExpr::Lit(lit) => Box::new(EvalLitExpr { lit }),
+            ValueExpr::Lit(lit) => Box::new(EvalLitExpr { lit: lit.clone() }),
             ValueExpr::Path(expr, components) => Box::new(EvalPath {
-                expr: self.plan_values(*expr),
+                expr: self.plan_values(expr),
                 components: components
-                    .into_iter()
+                    .iter()
                     .map(|c| match c {
-                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k),
-                        PathComponent::Index(i) => eval::EvalPathComponent::Index(i),
+                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k.clone()),
+                        PathComponent::Index(i) => eval::EvalPathComponent::Index(*i),
                         PathComponent::KeyExpr(k) => {
-                            eval::EvalPathComponent::KeyExpr(self.plan_values(*k))
+                            eval::EvalPathComponent::KeyExpr(self.plan_values(k))
                         }
                         PathComponent::IndexExpr(i) => {
-                            eval::EvalPathComponent::IndexExpr(self.plan_values(*i))
+                            eval::EvalPathComponent::IndexExpr(self.plan_values(i))
                         }
                     })
                     .collect(),
             }),
-            ValueExpr::VarRef(name) => Box::new(EvalVarRef { name }),
+            ValueExpr::VarRef(name) => Box::new(EvalVarRef { name: name.clone() }),
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr
                     .attrs
-                    .into_iter()
+                    .iter()
                     .map(|attr| self.plan_values(attr))
                     .collect();
                 let vals: Vec<Box<dyn EvalExpr>> = expr
                     .values
-                    .into_iter()
+                    .iter()
                     .map(|attr| self.plan_values(attr))
                     .collect();
                 Box::new(EvalTupleExpr { attrs, vals })
@@ -199,7 +200,7 @@ impl EvaluatorPlanner {
             ValueExpr::ListExpr(expr) => {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
-                    .into_iter()
+                    .iter()
                     .map(|elem| self.plan_values(elem))
                     .collect();
                 Box::new(EvalListExpr { elements })
@@ -207,25 +208,25 @@ impl EvaluatorPlanner {
             ValueExpr::BagExpr(expr) => {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
-                    .into_iter()
+                    .iter()
                     .map(|elem| self.plan_values(elem))
                     .collect();
                 Box::new(EvalBagExpr { elements })
             }
             ValueExpr::BetweenExpr(expr) => {
-                let value = self.plan_values(*expr.value);
-                let from = self.plan_values(*expr.from);
-                let to = self.plan_values(*expr.to);
+                let value = self.plan_values(expr.value.as_ref());
+                let from = self.plan_values(expr.from.as_ref());
+                let to = self.plan_values(expr.to.as_ref());
                 Box::new(EvalBetweenExpr { value, from, to })
             }
             ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
-                let value = self.plan_values(*value);
+                let value = self.plan_values(value);
                 match pattern {
                     Pattern::LIKE(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
                         assert!(escape.chars().count() <= 1);
                         let escape = escape.chars().next();
-                        let regex = like_to_re_pattern(&pattern, escape);
+                        let regex = like_to_re_pattern(pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
                     }
                 }
@@ -236,24 +237,24 @@ impl EvaluatorPlanner {
             ValueExpr::SimpleCase(e) => {
                 let cases = e
                     .cases
-                    .into_iter()
+                    .iter()
                     .map(|case| {
                         (
-                            self.plan_values(ValueExpr::BinaryExpr(
+                            self.plan_values(&ValueExpr::BinaryExpr(
                                 BinaryOp::Eq,
                                 e.expr.clone(),
-                                case.0,
+                                case.0.clone(),
                             )),
-                            self.plan_values(*case.1),
+                            self.plan_values(case.1.as_ref()),
                         )
                     })
                     .collect();
-                let default = match e.default {
+                let default = match &e.default {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => Box::new(EvalLitExpr {
                         lit: Box::new(Null),
                     }),
-                    Some(def) => self.plan_values(*def),
+                    Some(def) => self.plan_values(def),
                 };
                 // Here, rewrite `SimpleCaseExpr`s as `SearchedCaseExpr`s
                 Box::new(EvalSearchedCaseExpr { cases, default })
@@ -261,31 +262,36 @@ impl EvaluatorPlanner {
             ValueExpr::SearchedCase(e) => {
                 let cases = e
                     .cases
-                    .into_iter()
-                    .map(|case| (self.plan_values(*case.0), self.plan_values(*case.1)))
+                    .iter()
+                    .map(|case| {
+                        (
+                            self.plan_values(case.0.as_ref()),
+                            self.plan_values(case.1.as_ref()),
+                        )
+                    })
                     .collect();
-                let default = match e.default {
+                let default = match &e.default {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => Box::new(EvalLitExpr {
                         lit: Box::new(Null),
                     }),
-                    Some(def) => self.plan_values(*def),
+                    Some(def) => self.plan_values(def.as_ref()),
                 };
                 Box::new(EvalSearchedCaseExpr { cases, default })
             }
             ValueExpr::IsTypeExpr(i) => {
-                let expr = self.plan_values(*i.expr);
+                let expr = self.plan_values(i.expr.as_ref());
                 match i.not {
                     true => Box::new(EvalUnaryOpExpr {
                         op: EvalUnaryOp::Not,
                         operand: Box::new(EvalIsTypeExpr {
                             expr,
-                            is_type: i.is_type,
+                            is_type: i.is_type.clone(),
                         }),
                     }),
                     false => Box::new(EvalIsTypeExpr {
                         expr,
-                        is_type: i.is_type,
+                        is_type: i.is_type.clone(),
                     }),
                 }
             }
@@ -297,14 +303,14 @@ impl EvaluatorPlanner {
                     cases: vec![(
                         Box::new(ValueExpr::BinaryExpr(
                             BinaryOp::Eq,
-                            Box::new(*n.lhs.clone()),
-                            Box::new(*n.rhs.clone()),
+                            n.lhs.clone(),
+                            n.rhs.clone(),
                         )),
                         Box::new(ValueExpr::Lit(Box::new(Null))),
                     )],
-                    default: Some(Box::new(*n.lhs)),
+                    default: Some(n.lhs.clone()),
                 });
-                self.plan_values(rewritten_as_case)
+                self.plan_values(&rewritten_as_case)
             }
             ValueExpr::CoalesceExpr(c) => {
                 // COALESCE can be rewritten using CASE WHEN expressions as per section 6.9 pg 142 of SQL-92 spec:
@@ -329,11 +335,11 @@ impl EvaluatorPlanner {
                     };
                     ValueExpr::SearchedCase(sc)
                 }
-                self.plan_values(as_case(c.elements.first().unwrap(), &c.elements[1..]))
+                self.plan_values(&as_case(c.elements.first().unwrap(), &c.elements[1..]))
             }
             ValueExpr::DynamicLookup(lookups) => {
                 let lookups = lookups
-                    .into_iter()
+                    .iter()
                     .map(|lookup| self.plan_values(lookup))
                     .collect_vec();
 
@@ -341,7 +347,7 @@ impl EvaluatorPlanner {
             }
             ValueExpr::Call(logical::CallExpr { name, arguments }) => {
                 let mut args = arguments
-                    .into_iter()
+                    .iter()
                     .map(|arg| self.plan_values(arg))
                     .collect_vec();
                 match name {

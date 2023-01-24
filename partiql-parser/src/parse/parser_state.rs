@@ -15,7 +15,7 @@ type ParseErrorRecovery<'input> =
     ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 type ParseErrors<'input> = Vec<ParseErrorRecovery<'input>>;
 
-const INIT_LOCATIONS: usize = 50;
+const INIT_LOCATIONS: usize = 100;
 
 /// A provider of 'fresh' [`NodeId`]s.
 // NOTE `pub` instead of `pub(crate)` only because LALRPop's generated code uses this in `pub trait __ToTriple`
