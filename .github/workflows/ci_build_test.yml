@@ -195,11 +195,11 @@ jobs:
       - id: get-comment-body
         continue-on-error: true
         run: |
+          delimiter="$(openssl rand -hex 8)"
           body="$(cat ./cts-comparison-report.md)"
-          body="${body//'%'/'%25'}"
-          body="${body//$'\n'/'%0A'}"
-          body="${body//$'\r'/'%0D'}"
-          echo "::set-output name=body::$body"
+          echo "body<<${delimiter}" >> "${GITHUB_OUTPUT}"
+          echo "$body" >> "${GITHUB_OUTPUT}"
+          echo "${delimiter}" >> "${GITHUB_OUTPUT}"
       # Create or update (if previous comment exists) with markdown version of comparison report
       - name: Create or update comment
         continue-on-error: true
