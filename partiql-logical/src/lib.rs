@@ -189,7 +189,9 @@ pub struct Scan {
 }
 
 /// [`Pivot`] represents a PIVOT operator, e.g. `PIVOT sp.price AT sp."symbol` in
-/// `PIVOT sp.price AT sp."symbol" FROM todaysStockPrices sp`.
+/// `PIVOT sp.price AT sp."symbol" FROM todaysStockPrices sp`. For `Pivot` operational semantics,
+/// see section `6.2` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Pivot {
     pub key: ValueExpr,

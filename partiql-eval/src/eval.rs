@@ -411,9 +411,8 @@ impl Evaluable for EvalPivot {
         for binding in input_value.into_iter() {
             let binding = binding.coerce_to_tuple();
             let key = self.key.evaluate(&binding, ctx);
-            let value = self.value.evaluate(&binding, ctx);
-
             if let Value::String(s) = key {
+                let value = self.value.evaluate(&binding, ctx);
                 out.insert(&s, value)
             }
         }
