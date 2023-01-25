@@ -621,7 +621,13 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
                 logical::BindingsOp::Project(logical::Project { exprs })
             }
-            ProjectionKind::ProjectPivot(_) => todo!("ProjectionKind::ProjectPivot"),
+            ProjectionKind::ProjectPivot(_) => {
+                assert_eq!(env.len(), 2);
+                let mut iter = env.into_iter();
+                let key = iter.next().unwrap();
+                let value = iter.next().unwrap();
+                logical::BindingsOp::Pivot(logical::Pivot { key, value })
+            }
             ProjectionKind::ProjectValue(_) => {
                 assert_eq!(env.len(), 1);
                 let expr = env.into_iter().next().unwrap();

@@ -383,6 +383,48 @@ impl Evaluable for EvalJoin {
     }
 }
 
+/// Represents an evaluation `Pivot` operator; the `Pivot` enables turning a collection into a
+/// tuple. For `Pivot` operational semantics, see section `6.2` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+#[derive(Debug)]
+pub struct EvalPivot {
+    pub input: Option<Value>,
+    pub key: Box<dyn EvalExpr>,
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalPivot {
+    pub fn new(key: Box<dyn EvalExpr>, value: Box<dyn EvalExpr>) -> Self {
+        EvalPivot {
+            input: None,
+            key,
+            value,
+        }
+    }
+}
+
+impl Evaluable for EvalPivot {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let mut out: Tuple = partiql_tuple![];
+        for binding in input_value.into_iter() {
+            let binding = binding.coerce_to_tuple();
+            let key = self.key.evaluate(&binding, ctx);
+            let value = self.value.evaluate(&binding, ctx);
+
+            if let Value::String(s) = key {
+                out.insert(&s, value)
+            }
+        }
+        Some(Value::Tuple(Box::new(out)))
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
 /// Represents an evaluation `Unpivot` operator; the `Unpivot` enables ranging over the
 /// attribute-value pairs of a tuple. For `Unpivot` operational semantics, see section `5.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).

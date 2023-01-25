@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Adds some benchmarks for parsing, compiling, planning, & evaluation
+- Implements `PIVOT` operator in evaluator
 
 ### Fixes
 

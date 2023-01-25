@@ -87,6 +87,10 @@ impl EvaluatorPlanner {
             }),
             BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::EvalSink { input: None }),
+            BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(eval::EvalPivot::new(
+                self.plan_values(key),
+                self.plan_values(value),
+            )),
             BindingsOp::Unpivot(logical::Unpivot {
                 expr,
                 as_key,
