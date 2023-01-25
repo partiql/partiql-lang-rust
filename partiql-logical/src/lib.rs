@@ -188,7 +188,7 @@ pub struct Scan {
     pub at_key: Option<String>,
 }
 
-/// [`Filter`] represents a PIVOT operator, e.g. `PIVOT sp.price AT sp."symbol` in
+/// [`Pivot`] represents a PIVOT operator, e.g. `PIVOT sp.price AT sp."symbol` in
 /// `PIVOT sp.price AT sp."symbol" FROM todaysStockPrices sp`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Pivot {
