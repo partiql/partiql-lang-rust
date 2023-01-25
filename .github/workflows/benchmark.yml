@@ -24,16 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Git Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
-          # nightly can be very volatile--pin this to a version we know works well...
-          toolchain: nightly-2022-08-11
-          override: true
+          toolchain: stable
       # Run benchmark with `cargo bench` and stores the output to a file
       - name: Run benchmark
         run: cargo bench -- --output-format bencher | tee output.txt

@@ -19,25 +19,20 @@ jobs:
 
     steps:
       - name: Git Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           # nightly can be very volatile--pin this to a version we know works well...
           toolchain: nightly-2022-08-11
-          override: true
       # Conformance tests are run with 'conformance_test' feature. Since step runs with 'all-features', the conformance
       # test are also run, which can cause `cargo test` to fail. Add 'continue-on-error' step to prevent GH Actions
       # failure.
       - name: Cargo Test
-        uses: actions-rs/cargo@v1
         continue-on-error: true
-        with:
-          command: test
-          args: --verbose --workspace --all-features --no-fail-fast -- -Z unstable-options --ensure-time
+        run: cargo test --verbose --workspace --all-features --no-fail-fast -- -Z unstable-options --ensure-time
         env:
           CARGO_INCREMENTAL: '0'
           # https://github.com/marketplace/actions/rust-grcov

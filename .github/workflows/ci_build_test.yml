@@ -23,41 +23,21 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install llvm -y
       - name: Git Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
+          components: clippy, rustfmt
       - name: Cargo Build 
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose --workspace
+        run: cargo build --verbose --workspace
       - name: Cargo Test excluding conformance tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --workspace
+        run: cargo test --verbose --workspace
       - name: Rustfmt Check
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --verbose --all -- --check
-      # `clippy-check` will run `cargo clippy` on new pull requests. Due to a limitation in GitHub
-      # permissions, the behavior of the Action is different depending on the source of the PR. If the
-      # PR comes from the partiql-lang-rust project itself, any suggestions will be added to the PR as comments.
-      # If the PR comes from a fork, any suggestions will be added to the Action's STDOUT for review.
-      # For details, see: https://github.com/actions-rs/clippy-check/issues/2
-      - name: Install Clippy
-        # The clippy check depends on setup steps defined above, but we don't want it to run
-        # for every OS because it posts its comments to the PR. These `if` checks limit clippy to
-        # only running on the Linux test. (The choice of OS was arbitrary.)
         if: matrix.os == 'ubuntu-20.04'
-        run: rustup component add clippy
+        run: cargo fmt --verbose --all -- --check
       - name: Run Clippy
         if: matrix.os == 'ubuntu-20.04'
         uses: actions-rs/clippy-check@v1
@@ -68,7 +48,7 @@ jobs:
       # Cache the `cargo build` so future jobs can reuse build
       - name: Cache cargo build
         if: matrix.os == 'ubuntu-20.04'
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: restore-build
         with:
           path: ./*
@@ -105,16 +85,14 @@ jobs:
     steps:
       # Pull down the cached `partiql-lang-rust` build from the `Build and Test` job. This allows us to reuse without
       # needing to rebuild. If pulling the build fails, the subsequent `cargo test` will rebuild.
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: restore-build
         with:
           path: ./*
@@ -135,7 +113,7 @@ jobs:
       # Cache the `cargo build` and conformance report for `conformance-report-comparison` job (pull_request event only)
       - name: Cache `cargo build` and conformance report
         if: github.event_name == 'pull_request'
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
           path: ./*
@@ -147,16 +125,14 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       # Pull down cached `cargo build` and conformance report
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
       - name: Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: stable
-          override: true
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
           path: ./*
@@ -191,15 +167,6 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: 'github-actions[bot]'
           body-includes: Conformance
-      # Convert the markdown comparison report to a readable form for GitHub PR comments
-      - id: get-comment-body
-        continue-on-error: true
-        run: |
-          body="$(cat ./cts-comparison-report.md)"
-          body="${body//'%'/'%25'}"
-          body="${body//$'\n'/'%0A'}"
-          body="${body//$'\r'/'%0D'}"
-          echo "::set-output name=body::$body"
       # Create or update (if previous comment exists) with markdown version of comparison report
       - name: Create or update comment
         continue-on-error: true
@@ -207,5 +174,5 @@ jobs:
         with:
           comment-id: ${{ steps.fc.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
-          body: ${{ steps.get-comment-body.outputs.body }}
+          body-file: cts-comparison-report.md
           edit-mode: replace
