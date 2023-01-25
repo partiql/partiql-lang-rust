@@ -162,6 +162,7 @@ impl OpId {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub enum BindingsOp {
     Scan(Scan),
+    Pivot(Pivot),
     Unpivot(Unpivot),
     Filter(Filter),
     OrderBy,
@@ -185,6 +186,16 @@ pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
     pub at_key: Option<String>,
+}
+
+/// [`Pivot`] represents a PIVOT operator, e.g. `PIVOT sp.price AT sp."symbol` in
+/// `PIVOT sp.price AT sp."symbol" FROM todaysStockPrices sp`. For `Pivot` operational semantics,
+/// see section `6.2` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Pivot {
+    pub key: ValueExpr,
+    pub value: ValueExpr,
 }
 
 /// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
