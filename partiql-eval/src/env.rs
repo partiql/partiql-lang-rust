@@ -43,7 +43,7 @@ pub mod basic {
                 self.sensitive.insert(name.to_string(), idx);
                 e.insert(idx);
             } else {
-                panic!("Cannot insert duplicate binding of name {}", name)
+                panic!("Cannot insert duplicate binding of name {name}")
             }
         }
     }

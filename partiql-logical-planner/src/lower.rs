@@ -648,7 +648,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         // TODO intern strings
         let as_key = match as_key {
             name_resolver::Symbol::Known(sym) => sym.value.clone(),
-            name_resolver::Symbol::Unknown(id) => format!("_{}", id),
+            name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
         self.push_value(as_key.into());
     }

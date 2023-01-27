@@ -34,7 +34,7 @@ fn parse_value(reader: &mut Reader, typ: IonType) -> Value {
             // TODO ion Decimal doesn't give a lot of functionality to get at the data currently
             // TODO    and it's not clear whether we'll continue with rust decimal or switch to big decimal
             let ion_dec = reader.read_decimal().unwrap();
-            let ion_dec_str = format!("{}", ion_dec).replace('d', "e");
+            let ion_dec_str = format!("{ion_dec}").replace('d', "e");
             Value::Decimal(rust_decimal::Decimal::from_scientific(&ion_dec_str).unwrap())
         }
         IonType::Timestamp => todo!("timestamp"),

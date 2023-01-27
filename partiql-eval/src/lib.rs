@@ -1276,8 +1276,7 @@ mod tests {
                     "data".into(),
                 ))),
                 vec![PathComponent::Key(BindingsName::CaseInsensitive(format!(
-                    "arg{}",
-                    i
+                    "arg{i}"
                 )))],
             )
         }
@@ -1300,7 +1299,7 @@ mod tests {
         elements
             .into_iter()
             .enumerate()
-            .for_each(|(i, e)| data.insert(&format!("arg{}", i), e));
+            .for_each(|(i, e)| data.insert(&format!("arg{i}"), e));
         bindings.insert("data", partiql_list![data].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
