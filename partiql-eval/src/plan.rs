@@ -13,9 +13,9 @@ use crate::eval::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
     EvalFnBitLength, EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim,
     EvalFnOctetLength, EvalFnPosition, EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr,
-    EvalJoinKind, EvalLikeMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalPlan,
-    EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr,
-    EvalVarRef, Evaluable,
+    EvalJoinKind, EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr,
+    EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp,
+    EvalUnaryOpExpr, EvalVarRef, Evaluable,
 };
 use crate::pattern_match::like_to_re_pattern;
 use partiql_value::Value::Null;
@@ -226,12 +226,22 @@ impl EvaluatorPlanner {
             ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
                 let value = self.plan_values(value);
                 match pattern {
-                    Pattern::LIKE(logical::LikeMatch { pattern, escape }) => {
+                    Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
                         assert!(escape.chars().count() <= 1);
                         let escape = escape.chars().next();
                         let regex = like_to_re_pattern(pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
+                    }
+                    Pattern::LikeNonStringNonLiteral(logical::LikeNonStringNonLiteralMatch {
+                        pattern,
+                        escape,
+                    }) => {
+                        let pattern = self.plan_values(pattern);
+                        let escape = self.plan_values(escape);
+                        Box::new(EvalLikeNonStringNonLiteralMatch::new(
+                            value, pattern, escape,
+                        ))
                     }
                 }
             }
