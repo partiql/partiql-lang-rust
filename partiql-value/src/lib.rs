@@ -487,8 +487,6 @@ fn coerce_int_to_real(value: &Value) -> Value {
     }
 }
 
-
-
 impl Value {
     pub fn from_ion(ion: &str) -> Self {
         ion::parse_ion(ion)
