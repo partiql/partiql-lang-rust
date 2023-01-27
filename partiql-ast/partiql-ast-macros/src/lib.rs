@@ -50,11 +50,11 @@ fn should_skip_variant(variant: &syn::Variant) -> bool {
 fn impl_visit(ast: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let visit_fn_name = &ast.ident.to_string().to_snake_case();
     let enter_fn_name = Ident::new(
-        &format!("enter_{}", visit_fn_name),
+        &format!("enter_{visit_fn_name}"),
         proc_macro2::Span::call_site(),
     );
     let exit_fn_name = Ident::new(
-        &format!("exit_{}", visit_fn_name),
+        &format!("exit_{visit_fn_name}"),
         proc_macro2::Span::call_site(),
     );
 

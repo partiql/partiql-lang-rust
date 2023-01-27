@@ -174,7 +174,7 @@ impl<'a> FnExprSet<'a> {
             } else {
                 spc.fn_names
                     .iter()
-                    .map(|n| format!("(?:{})", n))
+                    .map(|n| format!("(?:{n})"))
                     .collect::<Vec<_>>()
                     .join("|")
             }

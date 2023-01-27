@@ -25,8 +25,10 @@ pub enum BindingsName {
 // TODO have an optional-like wrapper for null/missing instead of inlined here?
 #[derive(Hash, PartialEq, Eq, Clone)]
 #[allow(dead_code)] // TODO remove once out of PoC
+#[derive(Default)]
 pub enum Value {
     Null,
+    #[default]
     Missing,
     Boolean(bool),
     Integer(i64),
@@ -485,11 +487,7 @@ fn coerce_int_to_real(value: &Value) -> Value {
     }
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::Missing
-    }
-}
+
 
 impl Value {
     pub fn from_ion(ion: &str) -> Self {
@@ -635,12 +633,12 @@ impl Debug for Value {
         match self {
             Value::Null => write!(f, "NULL"),
             Value::Missing => write!(f, "MISSING"),
-            Value::Boolean(b) => write!(f, "{}", b),
-            Value::Integer(i) => write!(f, "{}", i),
+            Value::Boolean(b) => write!(f, "{b}"),
+            Value::Integer(i) => write!(f, "{i}"),
             Value::Real(r) => write!(f, "{}", r.0),
-            Value::Decimal(d) => write!(f, "{}", d),
-            Value::String(s) => write!(f, "'{}'", s),
-            Value::Blob(s) => write!(f, "'{:?}'", s),
+            Value::Decimal(d) => write!(f, "{d}"),
+            Value::String(s) => write!(f, "'{s}'"),
+            Value::Blob(s) => write!(f, "'{s:?}'"),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
@@ -1109,9 +1107,9 @@ impl Debug for Bag {
         let mut iter = self.iter().peekable();
         while let Some(v) = iter.next() {
             if iter.peek().is_some() {
-                write!(f, "{:?}, ", v)?;
+                write!(f, "{v:?}, ")?;
             } else {
-                write!(f, "{:?}", v)?;
+                write!(f, "{v:?}")?;
             }
         }
         write!(f, ">>")
@@ -1304,8 +1302,8 @@ impl Iterator for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        let s1: HashSet<(&str, &Value)> = self.pairs().into_iter().collect();
-        let s2: HashSet<(&str, &Value)> = other.pairs().into_iter().collect();
+        let s1: HashSet<(&str, &Value)> = self.pairs().collect();
+        let s2: HashSet<(&str, &Value)> = other.pairs().collect();
         s1.eq(&s2)
     }
 }
@@ -1328,12 +1326,12 @@ impl Hash for Tuple {
 impl Debug for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{")?;
-        let mut iter = self.pairs().into_iter().peekable();
+        let mut iter = self.pairs().peekable();
         while let Some((k, v)) = iter.next() {
             if iter.peek().is_some() {
-                write!(f, " {}: {:?},", k, v)?;
+                write!(f, " {k}: {v:?},")?;
             } else {
-                write!(f, " {}: {:?} ", k, v)?;
+                write!(f, " {k}: {v:?} ")?;
             }
         }
         write!(f, "}}")

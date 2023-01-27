@@ -109,7 +109,7 @@ impl From<usize> for BytePosition {
 impl fmt::Display for BytePosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let BytePosition(ByteOffset(n)) = self;
-        write!(f, "b{}", n)
+        write!(f, "b{n}")
     }
 }
 
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(display, loc.into());
         assert_eq!(display, unsafe { LineAndColumn::new_unchecked(14, 43) });
         assert_eq!(display, LineAndColumn::new(14, 43).unwrap());
-        assert_eq!("14:43", format!("{}", display));
+        assert_eq!("14:43", format!("{display}"));
         assert_eq!("14:43", display.to_string());
     }
 }

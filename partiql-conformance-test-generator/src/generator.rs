@@ -290,7 +290,7 @@ impl Generator {
             .join("___")
             + ".env.ion";
 
-        let data_file = format!("{}/{}", TEST_DATA_DIR, env_file);
+        let data_file = format!("{TEST_DATA_DIR}/{env_file}");
         scope.raw(
             quote! {
                 const ENV_ION_TEXT : &'static str = include_str!(#data_file);
@@ -446,7 +446,7 @@ impl Generator {
                                 Node::Value(TestValueNode { value: expected }),
                             );
 
-                            let data_file = format!("{}/{}", TEST_DATA_DIR, expected_file);
+                            let data_file = format!("{TEST_DATA_DIR}/{expected_file}");
                             quote! {include_str!(#data_file)}
                         } else {
                             quote! {#expected}

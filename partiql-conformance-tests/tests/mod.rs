@@ -50,9 +50,7 @@ pub(crate) fn fail_syntax(statement: &str) {
     let res = parse(statement);
     assert!(
         res.is_err(),
-        "For `{}`, expected `Err(_)`, but was `{:#?}`",
-        statement,
-        res
+        "For `{statement}`, expected `Err(_)`, but was `{res:#?}`"
     );
 }
 
@@ -63,9 +61,7 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
     let res = parse(statement);
     assert!(
         res.is_ok(),
-        "For `{}`, expected `Ok(_)`, but was `{:#?}`",
-        statement,
-        res
+        "For `{statement}`, expected `Ok(_)`, but was `{res:#?}`"
     );
     res.unwrap()
 }
@@ -86,9 +82,7 @@ pub(crate) fn pass_semantics(statement: &str) {
     let lowered: Result<_, ()> = Ok(lower(&parsed));
     assert!(
         lowered.is_ok(),
-        "For `{}`, expected `Ok(_)`, but was `{:#?}`",
-        statement,
-        lowered
+        "For `{statement}`, expected `Ok(_)`, but was `{lowered:#?}`"
     );
 }
 
