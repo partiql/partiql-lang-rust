@@ -737,16 +737,16 @@ impl<'input> fmt::Display for Token<'input> {
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
             Token::DblPipe => write!(f, "||"),
-            Token::UnquotedIdent(id) => write!(f, "<{}:UNQUOTED_IDENT>", id),
-            Token::QuotedIdent(id) => write!(f, "<{}:QUOTED_IDENT>", id),
-            Token::UnquotedAtIdentifier(id) => write!(f, "<{}:UNQUOTED_ATIDENT>", id),
-            Token::QuotedAtIdentifier(id) => write!(f, "<{}:QUOTED_ATIDENT>", id),
-            Token::Int(txt) => write!(f, "<{}:INT>", txt),
-            Token::ExpReal(txt) => write!(f, "<{}:REAL>", txt),
-            Token::Real(txt) => write!(f, "<{}:REAL>", txt),
-            Token::String(txt) => write!(f, "<{}:STRING>", txt),
+            Token::UnquotedIdent(id) => write!(f, "<{id}:UNQUOTED_IDENT>"),
+            Token::QuotedIdent(id) => write!(f, "<{id}:QUOTED_IDENT>"),
+            Token::UnquotedAtIdentifier(id) => write!(f, "<{id}:UNQUOTED_ATIDENT>"),
+            Token::QuotedAtIdentifier(id) => write!(f, "<{id}:QUOTED_ATIDENT>"),
+            Token::Int(txt) => write!(f, "<{txt}:INT>"),
+            Token::ExpReal(txt) => write!(f, "<{txt}:REAL>"),
+            Token::Real(txt) => write!(f, "<{txt}:REAL>"),
+            Token::String(txt) => write!(f, "<{txt}:STRING>"),
             Token::EmbeddedIonQuote => write!(f, "<ION>"),
-            Token::Ion(txt) => write!(f, "<{}:ION>", txt),
+            Token::Ion(txt) => write!(f, "<{txt}:ION>"),
 
             Token::All
             | Token::Asc
@@ -811,7 +811,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::With
             | Token::Without
             | Token::Zone => {
-                write!(f, "{}", format!("{:?}", self).to_uppercase())
+                write!(f, "{}", format!("{self:?}").to_uppercase())
             }
         }
     }

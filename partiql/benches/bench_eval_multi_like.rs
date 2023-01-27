@@ -233,7 +233,7 @@ fn employee_data() -> Vec<Value> {
     let combined = name1
         .iter()
         .cartesian_product(name2.iter())
-        .map(|(n1, n2)| format!("{} {}", n1, n2));
+        .map(|(n1, n2)| format!("{n1} {n2}"));
 
     // seed the rng with a known value to assure same data across runs
     let mut rng = rand::rngs::StdRng::from_seed([42; 32]);
@@ -253,7 +253,7 @@ fn employee_data() -> Vec<Value> {
             let suffix: String = (0..suffix_size)
                 .map(|_| rng.sample(chars) as char)
                 .collect();
-            let full_name = format!("{} {} {}", prefix, person, suffix);
+            let full_name = format!("{prefix} {person} {suffix}");
             partiql_tuple![("id", id), ("name", full_name)].into()
         })
         .collect_vec();

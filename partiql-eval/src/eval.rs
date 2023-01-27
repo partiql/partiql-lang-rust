@@ -92,8 +92,7 @@ impl EvalPlan {
             }
             Err(e) => Err(EvalErr {
                 errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
-                    "Malformed evaluation plan detected: {:?}",
-                    e
+                    "Malformed evaluation plan detected: {e:?}"
                 ))],
             }),
         }
@@ -1051,14 +1050,14 @@ impl EvalExpr for EvalBinOpExpr {
                         let lhs = if let Value::String(s) = lhs {
                             *s
                         } else {
-                            format!("{:?}", lhs)
+                            format!("{lhs:?}")
                         };
                         let rhs = if let Value::String(s) = rhs {
                             *s
                         } else {
-                            format!("{:?}", rhs)
+                            format!("{rhs:?}")
                         };
-                        Value::String(Box::new(format!("{}{}", lhs, rhs)))
+                        Value::String(Box::new(format!("{lhs}{rhs}")))
                     }
                 }
             }
