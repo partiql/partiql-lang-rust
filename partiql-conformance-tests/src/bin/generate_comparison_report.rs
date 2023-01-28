@@ -135,7 +135,7 @@ Number failing in main but now pass: {}
         ).expect("write passing_orig_failing_new heading");
         for test_name in &passing_orig_failing_new {
             comparison_report_file
-                .write_all(format!("- {}\n", test_name).as_bytes())
+                .write_all(format!("- {test_name}\n").as_bytes())
                 .expect("write passing_orig_failing_new test case");
         }
         comparison_report_file
@@ -149,7 +149,7 @@ Number failing in main but now pass: {}
         ).expect("write failure_orig_passing_new heading");
         for test_name in &failure_orig_passing_new {
             comparison_report_file
-                .write_all(format!("- {}\n", test_name).as_bytes())
+                .write_all(format!("- {test_name}\n").as_bytes())
                 .expect("write failure_orig_passing_new test case");
         }
         comparison_report_file
