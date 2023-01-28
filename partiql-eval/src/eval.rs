@@ -1152,10 +1152,10 @@ impl EvalExpr for EvalLikeMatch {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = self.value.evaluate(bindings, ctx);
         match value {
-            Null => Value::Null,
-            Missing => Value::Missing,
-            Value::String(s) => Value::Boolean(self.pattern.is_match(s.as_ref())),
-            _ => Value::Missing,
+            Null => Null,
+            Missing => Missing,
+            Value::String(s) => Boolean(self.pattern.is_match(s.as_ref())),
+            _ => Missing,
         }
     }
 }
@@ -1186,17 +1186,16 @@ impl EvalLikeNonStringNonLiteralMatch {
 impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = self.value.evaluate(bindings, ctx);
-        // TODO: could do some short-circuiting here if `value` is MISSING/NULL/non-string
         let pattern = self.pattern.evaluate(bindings, ctx);
         let escape = self.escape.evaluate(bindings, ctx);
 
         match (value, pattern, escape) {
-            (Missing, _, _) => Value::Missing, // TODO: 3-value logic here? or 4-value logic?
-            (_, Missing, _) => Value::Missing,
-            (_, _, Missing) => Value::Missing,
-            (Null, _, _) => Value::Null,
-            (_, Null, _) => Value::Null,
-            (_, _, Null) => Value::Null,
+            (Missing, _, _) => Missing,
+            (_, Missing, _) => Missing,
+            (_, _, Missing) => Missing,
+            (Null, _, _) => Null,
+            (_, Null, _) => Null,
+            (_, _, Null) => Null,
             (Value::String(v), Value::String(p), Value::String(e)) => {
                 assert!(e.chars().count() <= 1);
                 let escape = e.chars().next();
@@ -1204,9 +1203,9 @@ impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
                     .size_limit(RE_SIZE_LIMIT)
                     .build()
                     .expect("Like Pattern");
-                Value::Boolean(regex_pattern.is_match(v.as_ref()))
+                Boolean(regex_pattern.is_match(v.as_ref()))
             }
-            _ => Value::Missing,
+            _ => Missing,
         }
     }
 }

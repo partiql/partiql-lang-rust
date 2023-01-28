@@ -381,12 +381,16 @@ pub enum Pattern {
     LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch),
 }
 
+/// Represents a LIKE expression where both the `pattern` and `escape` are string literals,
+/// e.g. `'foo%' ESCAPE '/'`
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LikeMatch {
     pub pattern: String,
     pub escape: String,
 }
 
+/// Represents a LIKE expression where one of `pattern` and `escape` is not a string literal,
+/// e.g. `some_pattern ESCAPE '/'`
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LikeNonStringNonLiteralMatch {
     pub pattern: Box<ValueExpr>,
