@@ -730,27 +730,27 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let pattern_ve = env.pop().unwrap();
         let value = Box::new(env.pop().unwrap());
 
-      let pattern = match (&pattern_ve, &escape_ve) {
-          (ValueExpr::Lit(pattern_lit), ValueExpr::Lit(escape_lit)) => {
-              match (pattern_lit.as_ref(), escape_lit.as_ref()) {
-                  (Value::String(pattern), Value::String(escape)) => Pattern::Like(LikeMatch {
-                      pattern: pattern.to_string(),
-                      escape: escape.to_string(),
-                  }),
-                  _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
-                      pattern: Box::new(pattern_ve),
-                      escape: Box::new(escape_ve),
-                  }),
-              }
-          }
-          _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
-              pattern: Box::new(pattern_ve),
-              escape: Box::new(escape_ve),
-          }),
-      };
+        let pattern = match (&pattern_ve, &escape_ve) {
+            (ValueExpr::Lit(pattern_lit), ValueExpr::Lit(escape_lit)) => {
+                match (pattern_lit.as_ref(), escape_lit.as_ref()) {
+                    (Value::String(pattern), Value::String(escape)) => Pattern::Like(LikeMatch {
+                        pattern: pattern.to_string(),
+                        escape: escape.to_string(),
+                    }),
+                    _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
+                        pattern: Box::new(pattern_ve),
+                        escape: Box::new(escape_ve),
+                    }),
+                }
+            }
+            _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
+                pattern: Box::new(pattern_ve),
+                escape: Box::new(escape_ve),
+            }),
+        };
 
-      let pattern = ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern });
-      self.push_vexpr(pattern);
+        let pattern = ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern });
+        self.push_vexpr(pattern);
     }
 
     fn enter_call(&mut self, _call: &'ast Call) {
