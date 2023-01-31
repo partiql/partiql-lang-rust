@@ -23,6 +23,7 @@ use partiql_logical::Type;
 
 use petgraph::graph::NodeIndex;
 
+use crate::pattern_match::like_to_re_pattern;
 use petgraph::visit::EdgeRef;
 use regex::{Regex, RegexBuilder};
 use std::borrow::Borrow;
@@ -1151,10 +1152,60 @@ impl EvalExpr for EvalLikeMatch {
     fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
         let value = self.value.evaluate(bindings, ctx);
         match value {
-            Null => Value::Null,
-            Missing => Value::Missing,
-            Value::String(s) => Value::Boolean(self.pattern.is_match(s.as_ref())),
-            _ => Value::Boolean(false),
+            Null => Null,
+            Missing => Missing,
+            Value::String(s) => Boolean(self.pattern.is_match(s.as_ref())),
+            _ => Missing,
+        }
+    }
+}
+
+/// Represents an evaluation `LIKE` operator without string literals in the match and/or escape
+/// pattern, e.g. in `s LIKE match_str ESCAPE escape_char`.
+#[derive(Debug)]
+pub struct EvalLikeNonStringNonLiteralMatch {
+    pub value: Box<dyn EvalExpr>,
+    pub pattern: Box<dyn EvalExpr>,
+    pub escape: Box<dyn EvalExpr>,
+}
+
+impl EvalLikeNonStringNonLiteralMatch {
+    pub fn new(
+        value: Box<dyn EvalExpr>,
+        pattern: Box<dyn EvalExpr>,
+        escape: Box<dyn EvalExpr>,
+    ) -> Self {
+        EvalLikeNonStringNonLiteralMatch {
+            value,
+            pattern,
+            escape,
+        }
+    }
+}
+
+impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
+    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+        let value = self.value.evaluate(bindings, ctx);
+        let pattern = self.pattern.evaluate(bindings, ctx);
+        let escape = self.escape.evaluate(bindings, ctx);
+
+        match (value, pattern, escape) {
+            (Missing, _, _) => Missing,
+            (_, Missing, _) => Missing,
+            (_, _, Missing) => Missing,
+            (Null, _, _) => Null,
+            (_, Null, _) => Null,
+            (_, _, Null) => Null,
+            (Value::String(v), Value::String(p), Value::String(e)) => {
+                assert!(e.chars().count() <= 1);
+                let escape = e.chars().next();
+                let regex_pattern = RegexBuilder::new(&like_to_re_pattern(&p, escape))
+                    .size_limit(RE_SIZE_LIMIT)
+                    .build()
+                    .expect("Like Pattern");
+                Boolean(regex_pattern.is_match(v.as_ref()))
+            }
+            _ => Missing,
         }
     }
 }

@@ -14,8 +14,8 @@ use partiql_ast::ast::{
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch, ListExpr, LogicalPlan, OpId,
-    PathComponent, Pattern, PatternMatchExpr, TupleExpr, ValueExpr,
+    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch, LikeNonStringNonLiteralMatch,
+    ListExpr, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, TupleExpr, ValueExpr,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -152,21 +152,6 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-// TODO Error/Result
-fn require_lit(expr: &ValueExpr) -> &Value {
-    match expr {
-        ValueExpr::Lit(lit) => lit.as_ref(),
-        _ => todo!("Error on not-literal"),
-    }
-}
-
-fn require_str(lit: &Value) -> &str {
-    match lit {
-        Value::String(s) => s.as_ref(),
-        _ => todo!("Error on not-string"),
     }
 }
 
@@ -737,18 +722,35 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn exit_like(&mut self, _like: &'ast Like) {
         let mut env = self.exit_env();
         assert!((2..=3).contains(&env.len()));
-        let escape = if env.len() == 3 {
-            require_str(require_lit(&env.pop().unwrap())).to_string()
+        let escape_ve = if env.len() == 3 {
+            env.pop().unwrap()
         } else {
-            "".to_string()
+            ValueExpr::Lit(Box::new(Value::String(Box::new("".to_string()))))
         };
-        let pattern = require_str(require_lit(&env.pop().unwrap())).to_string();
+        let pattern_ve = env.pop().unwrap();
         let value = Box::new(env.pop().unwrap());
-        let pattern = Pattern::LIKE(LikeMatch { pattern, escape });
-        self.push_vexpr(ValueExpr::PatternMatchExpr(PatternMatchExpr {
-            value,
-            pattern,
-        }));
+
+        let pattern = match (&pattern_ve, &escape_ve) {
+            (ValueExpr::Lit(pattern_lit), ValueExpr::Lit(escape_lit)) => {
+                match (pattern_lit.as_ref(), escape_lit.as_ref()) {
+                    (Value::String(pattern), Value::String(escape)) => Pattern::Like(LikeMatch {
+                        pattern: pattern.to_string(),
+                        escape: escape.to_string(),
+                    }),
+                    _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
+                        pattern: Box::new(pattern_ve),
+                        escape: Box::new(escape_ve),
+                    }),
+                }
+            }
+            _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
+                pattern: Box::new(pattern_ve),
+                escape: Box::new(escape_ve),
+            }),
+        };
+
+        let pattern = ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern });
+        self.push_vexpr(pattern);
     }
 
     fn enter_call(&mut self, _call: &'ast Call) {

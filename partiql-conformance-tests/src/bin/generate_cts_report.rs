@@ -47,7 +47,7 @@ fn main() {
                     }
                 }
             }
-            Err(e) => panic!("Error reading line: {}", e),
+            Err(e) => panic!("Error reading line: {e}"),
         }
     }
 

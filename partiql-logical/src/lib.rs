@@ -377,13 +377,24 @@ pub struct PatternMatchExpr {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Pattern {
-    LIKE(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
+    Like(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
+    LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch),
 }
 
+/// Represents a LIKE expression where both the `pattern` and `escape` are string literals,
+/// e.g. `'foo%' ESCAPE '/'`
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LikeMatch {
     pub pattern: String,
     pub escape: String,
+}
+
+/// Represents a LIKE expression where one of `pattern` and `escape` is not a string literal,
+/// e.g. `some_pattern ESCAPE '/'`
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LikeNonStringNonLiteralMatch {
+    pub pattern: Box<ValueExpr>,
+    pub escape: Box<ValueExpr>,
 }
 
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
