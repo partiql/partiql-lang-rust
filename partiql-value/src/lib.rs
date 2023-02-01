@@ -15,6 +15,9 @@ use unicase::UniCase;
 
 mod ion;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
 pub enum BindingsName {
     CaseSensitive(String),
@@ -26,6 +29,7 @@ pub enum BindingsName {
 #[derive(Hash, PartialEq, Eq, Clone)]
 #[allow(dead_code)] // TODO remove once out of PoC
 #[derive(Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     Null,
     #[default]
@@ -848,6 +852,7 @@ impl From<Bag> for Value {
 }
 
 #[derive(Default, Hash, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
 
@@ -999,6 +1004,7 @@ impl Ord for List {
 }
 
 #[derive(Default, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL BAG value, e.g.: <<1, 'two', 4>>
 pub struct Bag(Vec<Value>);
 
@@ -1156,6 +1162,7 @@ impl Hash for Bag {
 }
 
 #[derive(Default, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Tuple {
     attrs: Vec<String>,
     vals: Vec<Value>,
