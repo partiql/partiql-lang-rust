@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Adds some benchmarks for parsing, compiling, planning, & evaluation
 - Implements `PIVOT` operator in evaluator
+- `serde` feature to `partiql-value` with `Serialize` and `Deserialize` json serde.
 
 ### Fixes
 
