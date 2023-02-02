@@ -26,4 +26,11 @@ ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
 
+serde = { version = "1.*", features = ["derive"], optional = true }
 
+[features]
+default = []
+serde = [
+  "dep:serde",
+  "ordered-float/serde"
+]

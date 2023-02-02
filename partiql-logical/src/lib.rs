@@ -51,8 +51,12 @@
 use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Represents a PartiQL logical plan.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogicalPlan<T>
 where
     T: Default,
@@ -148,6 +152,7 @@ where
 
 /// Represents an operator identifier in a [`LogicalPlan`]
 #[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OpId(usize);
 
 impl OpId {
