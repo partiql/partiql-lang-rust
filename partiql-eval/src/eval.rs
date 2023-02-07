@@ -26,7 +26,7 @@ use petgraph::graph::NodeIndex;
 use crate::pattern_match::like_to_re_pattern;
 use petgraph::visit::EdgeRef;
 use regex::{Regex, RegexBuilder};
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 
 /// Represents a PartiQL evaluation query plan which is a plan that can be evaluated to produce
 /// a result. The plan uses a directed `petgraph::StableGraph`.
@@ -172,7 +172,8 @@ impl Evaluable for EvalScan {
 
         let mut value = partiql_bag![];
         bindings.iter().for_each(|binding| {
-            let v = self.expr.evaluate(&binding.as_tuple_ref(), ctx);
+            let binding_tuple = binding.as_tuple_ref();
+            let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
             let ordered = &v.is_ordered();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
@@ -304,7 +305,8 @@ impl Evaluable for EvalJoin {
                                     .tuple_concat(b_r.as_tuple_ref().borrow());
                                 let env_b_l_b_r =
                                     &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
-                                if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
+                                let cond = condition.evaluate(env_b_l_b_r, ctx);
+                                if cond.as_ref() == &Value::Boolean(true) {
                                     output_bag.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
                             }
@@ -347,7 +349,8 @@ impl Evaluable for EvalJoin {
                                     .tuple_concat(b_r.as_tuple_ref().borrow());
                                 let env_b_l_b_r =
                                     &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
-                                if condition.evaluate(env_b_l_b_r, ctx) == Value::Boolean(true) {
+                                let cond = condition.evaluate(env_b_l_b_r, ctx);
+                                if cond.as_ref() == &Value::Boolean(true) {
                                     output_bag_left.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
                             }
@@ -411,9 +414,9 @@ impl Evaluable for EvalPivot {
         for binding in input_value.into_iter() {
             let binding = binding.coerce_to_tuple();
             let key = self.key.evaluate(&binding, ctx);
-            if let Value::String(s) = key {
+            if let Value::String(s) = key.as_ref() {
                 let value = self.value.evaluate(&binding, ctx);
-                out.insert(&s, value)
+                out.insert(&s, value.into_owned())
             }
         }
         Some(Value::Tuple(Box::new(out)))
@@ -448,7 +451,7 @@ impl EvalUnpivot {
 
 impl Evaluable for EvalUnpivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let tuple = match self.expr.evaluate(&Tuple::new(), ctx) {
+        let tuple = match self.expr.evaluate(&Tuple::new(), ctx).into_owned() {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_to_tuple(),
         };
@@ -498,8 +501,8 @@ impl EvalFilter {
     #[inline]
     fn eval_filter(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> bool {
         let result = self.expr.evaluate(bindings, ctx);
-        match result {
-            Boolean(bool_val) => bool_val,
+        match result.as_ref() {
+            Boolean(bool_val) => *bool_val,
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
             // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 8. `WHERE clause`
@@ -552,7 +555,7 @@ impl Evaluable for EvalSelectValue {
         for v in input_value.into_iter() {
             let out = v.coerce_to_tuple();
             let evaluated = self.expr.evaluate(&out, ctx);
-            value.push(evaluated);
+            value.push(evaluated.into_owned());
         }
 
         match ordered {
@@ -594,7 +597,7 @@ impl Evaluable for EvalSelect {
             let mut t = Tuple::new();
 
             self.exprs.iter().for_each(|(alias, expr)| {
-                let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
+                let evaluated_val = expr.evaluate(&v_as_tuple, ctx).into_owned();
                 if evaluated_val != Missing {
                     // Per section 2 of PartiQL spec: "value MISSING may not appear as an attribute value
                     t.insert(alias.as_str(), evaluated_val);
@@ -673,7 +676,11 @@ impl EvalExprQuery {
 impl Evaluable for EvalExprQuery {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().unwrap_or(Value::Null);
-        Some(self.expr.evaluate(&input_value.as_tuple_ref(), ctx))
+        Some(
+            self.expr
+                .evaluate(&input_value.as_tuple_ref(), ctx)
+                .into_owned(),
+        )
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -690,12 +697,12 @@ pub struct EvalTupleExpr {
 }
 
 impl EvalExpr for EvalTupleExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let mut t = Tuple::new();
         self.attrs
             .iter()
             .filter_map(|attr| {
-                let expr = attr.evaluate(bindings, ctx);
+                let expr = attr.evaluate(bindings, ctx).into_owned();
                 match expr {
                     Value::String(s) => Some(*s),
                     _ => None,
@@ -703,14 +710,14 @@ impl EvalExpr for EvalTupleExpr {
             })
             .zip(self.vals.iter())
             .for_each(|(k, v)| {
-                let evaluated = v.evaluate(bindings, ctx);
+                let evaluated = v.evaluate(bindings, ctx).into_owned();
                 // Spec. section 6.1.4
                 if evaluated != Missing {
                     t.insert(k.as_str(), evaluated);
                 }
             });
 
-        Value::Tuple(Box::new(t))
+        Cow::Owned(Value::from(t))
     }
 }
 
@@ -722,14 +729,14 @@ pub struct EvalListExpr {
 }
 
 impl EvalExpr for EvalListExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let evaluated_elements: Vec<Value> = self
             .elements
             .iter()
-            .map(|val| val.evaluate(bindings, ctx))
+            .map(|val| val.evaluate(bindings, ctx).into_owned())
             .collect();
 
-        Value::List(Box::new(List::from(evaluated_elements)))
+        Cow::Owned(Value::List(Box::new(List::from(evaluated_elements))))
     }
 }
 
@@ -741,14 +748,14 @@ pub struct EvalBagExpr {
 }
 
 impl EvalExpr for EvalBagExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let evaluated_elements: Vec<Value> = self
             .elements
             .iter()
-            .map(|val| val.evaluate(bindings, ctx))
+            .map(|val| val.evaluate(bindings, ctx).into_owned())
             .collect();
 
-        Value::Bag(Box::new(Bag::from(evaluated_elements)))
+        Cow::Owned(Value::Bag(Box::new(Bag::from(evaluated_elements))))
     }
 }
 
@@ -769,55 +776,51 @@ pub enum EvalPathComponent {
 }
 
 impl EvalExpr for EvalPath {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         #[inline]
-        fn path_into(
-            value: Value,
+        fn path_into<'a>(
+            value: &'a Value,
             path: &EvalPathComponent,
-            bindings: &Tuple,
+            bindings: &'a Tuple,
             ctx: &dyn EvalContext,
-        ) -> Value {
+        ) -> Option<&'a Value> {
             match path {
                 EvalPathComponent::Key(k) => match value {
-                    Value::Tuple(mut tuple) => tuple.remove(k).unwrap_or(Missing),
-                    _ => Missing,
+                    Value::Tuple(tuple) => tuple.get(k),
+                    _ => None,
                 },
                 EvalPathComponent::Index(idx) => match value {
-                    Value::List(mut list) if (*idx as usize) < list.len() => {
-                        std::mem::take(list.get_mut(*idx).unwrap())
-                    }
-                    _ => Missing,
+                    Value::List(list) if (*idx as usize) < list.len() => list.get(*idx),
+                    _ => None,
                 },
                 EvalPathComponent::KeyExpr(ke) => {
                     let key = ke.evaluate(bindings, ctx);
-                    match (value, key) {
-                        (Value::Tuple(mut tuple), Value::String(key)) => tuple
-                            .remove(&BindingsName::CaseInsensitive(key.as_ref().clone()))
-                            .unwrap_or(Value::Missing),
-                        _ => Missing,
+                    match (value, key.as_ref()) {
+                        (Value::Tuple(tuple), Value::String(key)) => {
+                            tuple.get(&BindingsName::CaseInsensitive(key.as_ref().clone()))
+                        }
+                        _ => None,
                     }
                 }
                 EvalPathComponent::IndexExpr(ie) => {
-                    if let Value::Integer(idx) = ie.evaluate(bindings, ctx) {
+                    if let Value::Integer(idx) = ie.evaluate(bindings, ctx).as_ref() {
                         match value {
-                            Value::List(mut list) if (idx as usize) < list.len() => {
-                                std::mem::take(list.get_mut(idx).unwrap())
-                            }
-                            _ => Missing,
+                            Value::List(list) if (*idx as usize) < list.len() => list.get(*idx),
+                            _ => None,
                         }
                     } else {
-                        Missing
+                        None
                     }
                 }
             }
         }
-
         let mut value = self.expr.evaluate(bindings, ctx);
-
-        for path in &self.components {
-            value = path_into(value, path, bindings, ctx);
-        }
-        value
+        self.components
+            .iter()
+            .fold(Some(value.as_ref()), |v, path| {
+                v.and_then(|v| path_into(v, path, bindings, ctx))
+            })
+            .map_or_else(|| Cow::Owned(Value::Missing), |v| Cow::Owned(v.clone()))
     }
 }
 
@@ -837,8 +840,8 @@ impl EvalSubQueryExpr {
 }
 
 impl EvalExpr for EvalSubQueryExpr {
-    fn evaluate(&self, bindings: &Tuple, _ctx: &dyn EvalContext) -> Value {
-        return if let Ok(evaluated) = self
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, _ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = if let Ok(evaluated) = self
             .plan
             .borrow_mut()
             .execute_mut(MapBindings::from(bindings))
@@ -847,6 +850,7 @@ impl EvalExpr for EvalSubQueryExpr {
         } else {
             Missing
         };
+        Cow::Owned(value)
     }
 }
 
@@ -892,7 +896,7 @@ impl Evaluable for EvalSink {
 
 /// A trait for expressions that require evaluation, e.g. `a + b` or `c > 2`.
 pub trait EvalExpr: Debug {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value;
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value>;
 }
 
 /// Represents an operator for dynamic variable name resolution of a (sub)query.
@@ -902,13 +906,13 @@ pub struct EvalDynamicLookup {
 }
 
 impl EvalExpr for EvalDynamicLookup {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let result = self
             .lookups
             .iter()
             .map(|lookup| lookup.evaluate(bindings, ctx))
-            .find(|res| res != &Value::Missing);
-        result.unwrap_or(Value::Missing)
+            .find(|res| res.as_ref() != &Value::Missing);
+        result.unwrap_or(Cow::Owned(Value::Missing))
     }
 }
 
@@ -919,9 +923,9 @@ pub struct EvalVarRef {
 }
 
 impl EvalExpr for EvalVarRef {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
-        value.map_or(Missing, |v| v.clone())
+        value.map_or_else(|| Cow::Owned(Missing), |v| Cow::Borrowed(v))
     }
 }
 
@@ -932,8 +936,8 @@ pub struct EvalLitExpr {
 }
 
 impl EvalExpr for EvalLitExpr {
-    fn evaluate(&self, _bindings: &Tuple, _ctx: &dyn EvalContext) -> Value {
-        *self.lit.clone()
+    fn evaluate<'a>(&'a self, _bindings: &'a Tuple, _ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        Cow::Borrowed(self.lit.as_ref())
     }
 }
 
@@ -953,13 +957,14 @@ pub enum EvalUnaryOp {
 }
 
 impl EvalExpr for EvalUnaryOpExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = self.operand.evaluate(bindings, ctx);
-        match self.op {
-            EvalUnaryOp::Pos => value.positive(),
-            EvalUnaryOp::Neg => -value,
-            EvalUnaryOp::Not => !value,
-        }
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let operand = self.operand.evaluate(bindings, ctx);
+        let result = match self.op {
+            EvalUnaryOp::Pos => operand.into_owned().positive(),
+            EvalUnaryOp::Neg => -operand.as_ref(),
+            EvalUnaryOp::Not => !operand.as_ref(),
+        };
+        Cow::Owned(result)
     }
 }
 
@@ -971,14 +976,16 @@ pub struct EvalIsTypeExpr {
 }
 
 impl EvalExpr for EvalIsTypeExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let expr = self.expr.evaluate(bindings, ctx);
+        let expr = expr.as_ref();
         let result = match self.is_type {
             Type::NullType => matches!(expr, Missing | Null),
             Type::MissingType => matches!(expr, Missing),
             _ => todo!("Implement `IS` for other types"),
         };
-        Value::from(result)
+
+        Cow::Owned(result.into())
     }
 }
 
@@ -1016,7 +1023,7 @@ pub enum EvalBinOp {
 }
 
 impl EvalExpr for EvalBinOpExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         #[inline]
         fn short_circuit(op: &EvalBinOp, value: &Value) -> Option<Value> {
             match (op, value) {
@@ -1032,11 +1039,12 @@ impl EvalExpr for EvalBinOpExpr {
 
         let lhs = self.lhs.evaluate(bindings, ctx);
         if let Some(propagate) = short_circuit(&self.op, &lhs) {
-            return propagate;
+            return Cow::Owned(propagate);
         }
 
         let rhs = self.rhs.evaluate(bindings, ctx);
-        match self.op {
+        let (lhs, rhs) = (lhs.as_ref(), rhs.as_ref());
+        let result = match self.op {
             EvalBinOp::And => lhs.and(&rhs),
             EvalBinOp::Or => lhs.or(&rhs),
             EvalBinOp::Concat => {
@@ -1048,12 +1056,12 @@ impl EvalExpr for EvalBinOpExpr {
                     (_, Null) => Null,
                     _ => {
                         let lhs = if let Value::String(s) = lhs {
-                            *s
+                            s.as_ref().clone()
                         } else {
                             format!("{lhs:?}")
                         };
                         let rhs = if let Value::String(s) = rhs {
-                            *s
+                            s.as_ref().clone()
                         } else {
                             format!("{rhs:?}")
                         };
@@ -1061,17 +1069,17 @@ impl EvalExpr for EvalBinOpExpr {
                     }
                 }
             }
-            EvalBinOp::Eq => NullableEq::eq(&lhs, &rhs),
+            EvalBinOp::Eq => NullableEq::eq(lhs, rhs),
             EvalBinOp::Neq => lhs.neq(&rhs),
-            EvalBinOp::Gt => NullableOrd::gt(&lhs, &rhs),
-            EvalBinOp::Gteq => NullableOrd::gteq(&lhs, &rhs),
-            EvalBinOp::Lt => NullableOrd::lt(&lhs, &rhs),
-            EvalBinOp::Lteq => NullableOrd::lteq(&lhs, &rhs),
-            EvalBinOp::Add => &lhs + &rhs,
-            EvalBinOp::Sub => &lhs - &rhs,
-            EvalBinOp::Mul => &lhs * &rhs,
-            EvalBinOp::Div => &lhs / &rhs,
-            EvalBinOp::Mod => &lhs % &rhs,
+            EvalBinOp::Gt => NullableOrd::gt(lhs, rhs),
+            EvalBinOp::Gteq => NullableOrd::gteq(lhs, rhs),
+            EvalBinOp::Lt => NullableOrd::lt(lhs, rhs),
+            EvalBinOp::Lteq => NullableOrd::lteq(lhs, rhs),
+            EvalBinOp::Add => lhs + rhs,
+            EvalBinOp::Sub => lhs - rhs,
+            EvalBinOp::Mul => lhs * rhs,
+            EvalBinOp::Div => lhs / rhs,
+            EvalBinOp::Mod => lhs % rhs,
             // TODO apply the changes once we clarify the rules of coercion for `IN` RHS.
             // See also:
             // - https://github.com/partiql/partiql-docs/pull/13
@@ -1087,13 +1095,13 @@ impl EvalExpr for EvalBinOpExpr {
                 true => {
                     let mut has_missing = false;
                     let mut has_null = false;
-                    for elem in rhs.into_iter() {
+                    for elem in rhs.iter() {
                         // b/c of short_circuiting as we've reached this branch, we know LHS is neither MISSING nor NULL.
                         if elem == lhs {
-                            return Boolean(true);
-                        } else if elem == Missing {
+                            return Cow::Owned(Boolean(true));
+                        } else if elem == &Missing {
                             has_missing = true;
-                        } else if elem == Null {
+                        } else if elem == &Null {
                             has_null = true;
                         }
                     }
@@ -1106,7 +1114,8 @@ impl EvalExpr for EvalBinOpExpr {
                 _ => Null,
             },
             EvalBinOp::Exp => todo!("Exponentiation"),
-        }
+        };
+        Cow::Owned(result)
     }
 }
 
@@ -1119,11 +1128,13 @@ pub struct EvalBetweenExpr {
 }
 
 impl EvalExpr for EvalBetweenExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
         let from = self.from.evaluate(bindings, ctx);
         let to = self.to.evaluate(bindings, ctx);
-        value.gteq(&from).and(&value.lteq(&to))
+        let gteq = value.gteq(from.as_ref());
+        let lteq = value.lteq(to.as_ref());
+        Cow::Owned(gteq.and(&lteq))
     }
 }
 
@@ -1149,14 +1160,15 @@ impl EvalLikeMatch {
 }
 
 impl EvalExpr for EvalLikeMatch {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
-        match value {
+        let result = match value.as_ref() {
             Null => Null,
             Missing => Missing,
             Value::String(s) => Boolean(self.pattern.is_match(s.as_ref())),
             _ => Missing,
-        }
+        };
+        Cow::Owned(result)
     }
 }
 
@@ -1184,12 +1196,12 @@ impl EvalLikeNonStringNonLiteralMatch {
 }
 
 impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
         let pattern = self.pattern.evaluate(bindings, ctx);
         let escape = self.escape.evaluate(bindings, ctx);
 
-        match (value, pattern, escape) {
+        let result = match (value.as_ref(), pattern.as_ref(), escape.as_ref()) {
             (Missing, _, _) => Missing,
             (_, Missing, _) => Missing,
             (_, _, Missing) => Missing,
@@ -1206,7 +1218,8 @@ impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
                 Boolean(regex_pattern.is_match(v.as_ref()))
             }
             _ => Missing,
-        }
+        };
+        Cow::Owned(result)
     }
 }
 
@@ -1218,10 +1231,10 @@ pub struct EvalSearchedCaseExpr {
 }
 
 impl EvalExpr for EvalSearchedCaseExpr {
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         for (when_expr, then_expr) in &self.cases {
             let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
-            if when_expr_evaluated == Value::Boolean(true) {
+            if when_expr_evaluated.as_ref() == &Value::Boolean(true) {
                 return then_expr.evaluate(bindings, ctx);
             }
         }
@@ -1253,7 +1266,7 @@ impl EvalContext for BasicContext {
 
 #[inline]
 #[track_caller]
-fn string_transform<FnTransform>(value: Value, transform_fn: FnTransform) -> Value
+fn string_transform<FnTransform>(value: &Value, transform_fn: FnTransform) -> Value
 where
     FnTransform: Fn(&str) -> Value,
 {
@@ -1272,10 +1285,11 @@ pub struct EvalFnLower {
 
 impl EvalExpr for EvalFnLower {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
             s.to_lowercase().into()
-        })
+        });
+        Cow::Owned(transformed)
     }
 }
 
@@ -1287,10 +1301,11 @@ pub struct EvalFnUpper {
 
 impl EvalExpr for EvalFnUpper {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
             s.to_uppercase().into()
-        })
+        });
+        Cow::Owned(transformed)
     }
 }
 
@@ -1302,10 +1317,11 @@ pub struct EvalFnCharLength {
 
 impl EvalExpr for EvalFnCharLength {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
             s.chars().count().into()
-        })
+        });
+        Cow::Owned(transformed)
     }
 }
 
@@ -1317,8 +1333,11 @@ pub struct EvalFnOctetLength {
 
 impl EvalExpr for EvalFnOctetLength {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| s.len().into())
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
+            s.len().into()
+        });
+        Cow::Owned(transformed)
     }
 }
 
@@ -1330,8 +1349,11 @@ pub struct EvalFnBitLength {
 
 impl EvalExpr for EvalFnBitLength {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        string_transform(self.value.evaluate(bindings, ctx), |s| (s.len() * 8).into())
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
+            (s.len() * 8).into()
+        });
+        Cow::Owned(transformed)
     }
 }
 
@@ -1345,25 +1367,27 @@ pub struct EvalFnSubstring {
 
 impl EvalExpr for EvalFnSubstring {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let value = match self.value.evaluate(bindings, ctx) {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let value = match value.as_ref() {
             Null => None,
             Value::String(s) => Some(s),
-            _ => return Value::Missing,
+            _ => return Cow::Owned(Value::Missing),
         };
-        let offset = match self.offset.evaluate(bindings, ctx) {
+        let offset = self.offset.evaluate(bindings, ctx);
+        let offset = match offset.as_ref() {
             Null => None,
             Value::Integer(i) => Some(i),
-            _ => return Value::Missing,
+            _ => return Cow::Owned(Value::Missing),
         };
 
-        if let Some(length) = &self.length {
-            let length = match length.evaluate(bindings, ctx) {
-                Value::Integer(i) => i as usize,
-                Value::Null => return Value::Null,
-                _ => return Value::Missing,
+        let result = if let Some(length) = &self.length {
+            let length = match length.evaluate(bindings, ctx).as_ref() {
+                Value::Integer(i) => *i as usize,
+                Value::Null => return Cow::Owned(Value::Null),
+                _ => return Cow::Owned(Value::Missing),
             };
-            if let (Some(value), Some(offset)) = (value, offset) {
+            if let (Some(value), Some(&offset)) = (value, offset) {
                 let (offset, length) = if length < 1 {
                     (0, 0)
                 } else if offset < 1 {
@@ -1383,13 +1407,14 @@ impl EvalExpr for EvalFnSubstring {
                 // either value or offset was NULL; return NULL
                 Value::Null
             }
-        } else if let (Some(value), Some(offset)) = (value, offset) {
+        } else if let (Some(value), Some(&offset)) = (value, offset) {
             let offset = (std::cmp::max(offset, 1) - 1) as usize;
             value.chars().skip(offset).collect::<String>().into()
         } else {
             // either value or offset was NULL; return NULL
             Value::Null
-        }
+        };
+        Cow::Owned(result)
     }
 }
 
@@ -1402,18 +1427,20 @@ pub struct EvalFnPosition {
 
 impl EvalExpr for EvalFnPosition {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        let needle = match self.needle.evaluate(bindings, ctx) {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let needle = self.needle.evaluate(bindings, ctx);
+        let needle = match needle.as_ref() {
             Null => None,
             Value::String(s) => Some(s),
-            _ => return Value::Missing,
+            _ => return Cow::Owned(Value::Missing),
         };
-        let haystack = match self.haystack.evaluate(bindings, ctx) {
-            Value::Null => return Value::Null,
+        let haystack = self.haystack.evaluate(bindings, ctx);
+        let haystack = match haystack.as_ref() {
+            Value::Null => return Cow::Owned(Value::Null),
             Value::String(s) => s,
-            _ => return Value::Missing,
+            _ => return Cow::Owned(Value::Missing),
         };
-        if let Some(needle) = needle {
+        let result = if let Some(needle) = needle {
             haystack
                 .find(needle.as_ref())
                 .map(|l| l + 1)
@@ -1421,15 +1448,16 @@ impl EvalExpr for EvalFnPosition {
                 .into()
         } else {
             Value::Null
-        }
+        };
+        Cow::Owned(result)
     }
 }
 
 #[inline]
 #[track_caller]
-fn trim<FnTrim>(value: Value, to_trim: Value, trim_fn: FnTrim) -> Value
+fn trim<'a, FnTrim>(value: &'a Value, to_trim: &'a Value, trim_fn: FnTrim) -> Value
 where
-    FnTrim: Fn(&str, &str) -> Value,
+    FnTrim: Fn(&'a str, &'a str) -> &'a str,
 {
     let value = match value {
         Value::String(s) => Some(s),
@@ -1442,7 +1470,8 @@ where
         _ => return Value::Missing,
     };
     if let Some(s) = value {
-        trim_fn(&s, &to_trim)
+        let trimmed = trim_fn(&s, &to_trim);
+        Value::from(trimmed)
     } else {
         Value::Null
     }
@@ -1457,15 +1486,14 @@ pub struct EvalFnBtrim {
 
 impl EvalExpr for EvalFnBtrim {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        trim(
-            self.value.evaluate(bindings, ctx),
-            self.to_trim.evaluate(bindings, ctx),
-            |s, to_trim| {
-                let to_trim = to_trim.chars().collect_vec();
-                s.trim_matches(&to_trim[..]).into()
-            },
-        )
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let to_trim = self.to_trim.evaluate(bindings, ctx);
+        let trimmed = trim(value.as_ref(), to_trim.as_ref(), |s, to_trim| {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_matches(&to_trim[..])
+        });
+        Cow::Owned(trimmed)
     }
 }
 
@@ -1478,15 +1506,14 @@ pub struct EvalFnRtrim {
 
 impl EvalExpr for EvalFnRtrim {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        trim(
-            self.value.evaluate(bindings, ctx),
-            self.to_trim.evaluate(bindings, ctx),
-            |s, to_trim| {
-                let to_trim = to_trim.chars().collect_vec();
-                s.trim_end_matches(&to_trim[..]).into()
-            },
-        )
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let to_trim = self.to_trim.evaluate(bindings, ctx);
+        let trimmed = trim(value.as_ref(), to_trim.as_ref(), |s, to_trim| {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_end_matches(&to_trim[..])
+        });
+        Cow::Owned(trimmed)
     }
 }
 
@@ -1499,15 +1526,14 @@ pub struct EvalFnLtrim {
 
 impl EvalExpr for EvalFnLtrim {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
-        trim(
-            self.value.evaluate(bindings, ctx),
-            self.to_trim.evaluate(bindings, ctx),
-            |s, to_trim| {
-                let to_trim = to_trim.chars().collect_vec();
-                s.trim_start_matches(&to_trim[..]).into()
-            },
-        )
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let to_trim = self.to_trim.evaluate(bindings, ctx);
+        let trimmed = trim(value.as_ref(), to_trim.as_ref(), |s, to_trim| {
+            let to_trim = to_trim.chars().collect_vec();
+            s.trim_start_matches(&to_trim[..])
+        });
+        Cow::Owned(trimmed)
     }
 }
 
@@ -1519,14 +1545,14 @@ pub struct EvalFnExists {
 
 impl EvalExpr for EvalFnExists {
     #[inline]
-    fn evaluate(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
-        let exists = match value {
+        let exists = match value.borrow() {
             Value::Bag(b) => !b.is_empty(),
             Value::List(l) => !l.is_empty(),
             Value::Tuple(t) => !t.is_empty(),
             _ => false,
         };
-        Value::Boolean(exists)
+        Cow::Owned(Value::Boolean(exists))
     }
 }
