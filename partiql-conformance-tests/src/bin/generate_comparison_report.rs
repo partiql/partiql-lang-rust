@@ -26,7 +26,7 @@ struct CTSReport {
 ///   - also lists out these tests
 ///
 /// Requires the 3 following arguments
-/// 1. path to first conformance report (will most commonly refer to the `main` branch's report)
+/// 1. path to first conformance report (will most commonly refer to the target branch's report)
 /// 2. path to second conformance report
 /// 3. path to output comparison report
 fn main() {
@@ -83,7 +83,7 @@ fn main() {
         .write_all(
             format!(
                 "### Conformance comparison report
-| | main ({}) | {} | +/- |
+| | Base ({}) | {} | +/- |
 | --- | ---: | ---: | ---: |
 | % Passing | {:.2}% | {:.2}% | {:.2}% |
 | :white_check_mark: Passing | {} | {} | {} |
@@ -117,12 +117,14 @@ fn main() {
             format!(
                 "\nNumber passing in both: {}\n
 Number failing in both: {}\n
-Number passing in main but now fail: {}\n
-Number failing in main but now pass: {}
+Number passing in Base ({}) but now fail: {}\n
+Number failing in Base ({}) but now pass: {}
 ",
                 passing_in_both.count(),
                 failing_in_both.count(),
+                &orig_report.commit_hash,
                 passing_orig_failing_new.len(),
+                &orig_report.commit_hash,
                 failure_orig_passing_new.len()
             )
             .as_bytes(),

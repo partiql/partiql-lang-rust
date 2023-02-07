@@ -3,6 +3,9 @@ name: CI Build
 on: [push, pull_request]
 
 env:
+  CARGO_TEST_RESULT_NAME: cargo_test_results.json
+  CONFORMANCE_REPORT_NAME: cts_report.json
+  COMPARISON_REPORT_NAME: cts-comparison-report.md
   RUST_TEST_TIME_UNIT: 150,5000
   RUST_TEST_TIME_INTEGRATION: 150,5000
 
@@ -102,14 +105,14 @@ jobs:
       # to format and use the output.
       - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
-        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > cargo_test_results.json
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
       # Create a conformance report from the `cargo test` json file
-      - run: cargo run --features report_tool --bin generate_cts_report cargo_test_results.json ${GITHUB_SHA} cts_report.json
+      - run: cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
       # Upload conformance report for comparison with future runs
-      - name: Upload cts_report.json
+      - name: Upload conformance report
         uses: actions/upload-artifact@v3
         with:
-          path: cts_report.json
+          path: ${{ env.CONFORMANCE_REPORT_NAME }}
       # Cache the `cargo build` and conformance report for `conformance-report-comparison` job (pull_request event only)
       - name: Cache `cargo build` and conformance report
         if: github.event_name == 'pull_request'
@@ -137,27 +140,41 @@ jobs:
         with:
           path: ./*
           key: ${{ github.sha }}-conformance-report
-      # Download conformance report from `main` to create comparison report. If `main` has no report, use a backup
-      # report (stored in partiql-conformance-tests/backup_conformance_report.json). Alternatively, we could consider
-      # - pulling `main` branch and rerun the tests
-      # - pulling latest release and rerun the tests
-      # - compare to an empty file
-      # - don't perform comparisons
-      - name: Download cts_report.json from `main` branch
+      # Download conformance report from target branch to create comparison report. If target branch has no conformance
+      # report, pull down target branch and rebuild conformance report.
+      - name: Download conformance report from target branch
         uses: dawidd6/action-download-artifact@v2
         id: download-report
         continue-on-error: true
         with:
           workflow: ci_build_test.yml
-          branch: main
-      - name: backup case if download fails
+          commit: ${{ github.event.pull_request.base.sha }}
+      # (If download of target branch report fails) Run the conformance tests (i.e. `cargo test`) and save to a JSON file.
+      - name: (If download of target branch conformance report fails) Checkout target branch
+        uses: actions/checkout@v3
         if: ${{ steps.download-report.outcome == 'failure' }}
-        run: mkdir -p artifact && cp -r ./partiql-conformance-tests/backup_conformance_report.json ./artifact/cts_report.json
-      # Run conformance report comparison. Generates cts-comparison-report.md
-      - run: cargo run --features report_tool --bin generate_comparison_report ./artifact/cts_report.json cts_report.json cts-comparison-report.md
+        with:
+          submodules: recursive
+          path: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: (If download of target branch conformance report fails) Generate conformance test report for target branch
+        if: ${{ steps.download-report.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          cd ${{ github.event.pull_request.base.sha }}
+          cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
+          cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
+      - name: (If download of target branch conformance report fails) Move conformance test report of target branch to ./artifact directory
+        if: ${{ steps.download-report.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/artifact
+          cp -r $GITHUB_WORKSPACE/${{ github.event.pull_request.base.sha }}/$CONFORMANCE_REPORT_NAME $GITHUB_WORKSPACE/artifact/$CONFORMANCE_REPORT_NAME
+      # Run conformance report comparison. Generates comparison report
+      - run: cargo run --features report_tool --bin generate_comparison_report ./artifact/${{ env.CONFORMANCE_REPORT_NAME }} ${{ env.CONFORMANCE_REPORT_NAME }} ${{ env.COMPARISON_REPORT_NAME }}
       # Print conformance report to GitHub actions workflow summary page
       - name: print markdown in run
-        run: cat cts-comparison-report.md >> $GITHUB_STEP_SUMMARY
+        run: cat ${{ env.COMPARISON_REPORT_NAME }} >> $GITHUB_STEP_SUMMARY
       # Find comment w/ conformance comparison if previous comment published
       - name: Find Comment
         uses: peter-evans/find-comment@v2
@@ -174,5 +191,5 @@ jobs:
         with:
           comment-id: ${{ steps.fc.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
-          body-file: cts-comparison-report.md
+          body-file: ${{ env.COMPARISON_REPORT_NAME }}
           edit-mode: replace
