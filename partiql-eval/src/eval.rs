@@ -416,7 +416,7 @@ impl Evaluable for EvalPivot {
             let key = self.key.evaluate(&binding, ctx);
             if let Value::String(s) = key.as_ref() {
                 let value = self.value.evaluate(&binding, ctx);
-                out.insert(&s, value.into_owned())
+                out.insert(s, value.into_owned())
             }
         }
         Some(Value::Tuple(Box::new(out)))
@@ -814,7 +814,7 @@ impl EvalExpr for EvalPath {
                 }
             }
         }
-        let mut value = self.expr.evaluate(bindings, ctx);
+        let value = self.expr.evaluate(bindings, ctx);
         self.components
             .iter()
             .fold(Some(value.as_ref()), |v, path| {
@@ -925,7 +925,7 @@ pub struct EvalVarRef {
 impl EvalExpr for EvalVarRef {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
-        value.map_or_else(|| Cow::Owned(Missing), |v| Cow::Borrowed(v))
+        value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
     }
 }
 
@@ -1045,8 +1045,8 @@ impl EvalExpr for EvalBinOpExpr {
         let rhs = self.rhs.evaluate(bindings, ctx);
         let (lhs, rhs) = (lhs.as_ref(), rhs.as_ref());
         let result = match self.op {
-            EvalBinOp::And => lhs.and(&rhs),
-            EvalBinOp::Or => lhs.or(&rhs),
+            EvalBinOp::And => lhs.and(rhs),
+            EvalBinOp::Or => lhs.or(rhs),
             EvalBinOp::Concat => {
                 // TODO non-naive concat (i.e., don't just use debug print for non-strings).
                 match (&lhs, &rhs) {
@@ -1070,7 +1070,7 @@ impl EvalExpr for EvalBinOpExpr {
                 }
             }
             EvalBinOp::Eq => NullableEq::eq(lhs, rhs),
-            EvalBinOp::Neq => lhs.neq(&rhs),
+            EvalBinOp::Neq => lhs.neq(rhs),
             EvalBinOp::Gt => NullableOrd::gt(lhs, rhs),
             EvalBinOp::Gteq => NullableOrd::gteq(lhs, rhs),
             EvalBinOp::Lt => NullableOrd::lt(lhs, rhs),
@@ -1211,7 +1211,7 @@ impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
             (Value::String(v), Value::String(p), Value::String(e)) => {
                 assert!(e.chars().count() <= 1);
                 let escape = e.chars().next();
-                let regex_pattern = RegexBuilder::new(&like_to_re_pattern(&p, escape))
+                let regex_pattern = RegexBuilder::new(&like_to_re_pattern(p, escape))
                     .size_limit(RE_SIZE_LIMIT)
                     .build()
                     .expect("Like Pattern");
@@ -1470,7 +1470,7 @@ where
         _ => return Value::Missing,
     };
     if let Some(s) = value {
-        let trimmed = trim_fn(&s, &to_trim);
+        let trimmed = trim_fn(s, to_trim);
         Value::from(trimmed)
     } else {
         Value::Null
