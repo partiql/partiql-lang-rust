@@ -157,12 +157,17 @@ jobs:
           submodules: recursive
           path: ${{ github.event.pull_request.base.sha }}
           ref: ${{ github.event.pull_request.base.sha }}
-      - name: (If download of target branch conformance report fails) Generate conformance test report for target branch
+      - name: (If download of target branch conformance report fails) Run conformance tests for target branch
         if: ${{ steps.download-report.outcome == 'failure' }}
         continue-on-error: true
         run: |
           cd ${{ github.event.pull_request.base.sha }}
           cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
+      - name: (If download of target branch conformance report fails) Generate conformance test report for target branch
+        if: ${{ steps.download-report.outcome == 'failure' }}
+        continue-on-error: true
+        run: |
+          cd ${{ github.event.pull_request.base.sha }}
           cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
       - name: (If download of target branch conformance report fails) Move conformance test report of target branch to ./artifact directory
         if: ${{ steps.download-report.outcome == 'failure' }}
