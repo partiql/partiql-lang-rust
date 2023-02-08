@@ -50,13 +50,13 @@
 /// ```
 use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Represents a PartiQL logical plan.
-#[derive(Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogicalPlan<T>
 where
@@ -163,7 +163,7 @@ impl OpId {
     }
 }
 
-impl<T> Debug for LogicalPlan<T>
+impl<T> Display for LogicalPlan<T>
 where
     T: Default + Debug,
 {
