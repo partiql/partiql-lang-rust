@@ -171,12 +171,12 @@ where
         let flows = self.flows();
         writeln!(f, "LogicalPlan")?;
         writeln!(f, "---")?;
-        for (s, d, w) in flows {
+        for (s, d, _w) in flows {
             let src_node = self.operator(*s).unwrap();
             let dst_node = self.operator(*d).unwrap();
             writeln!(f, ">>> [{src_node:?}] -> [{dst_node:?}]")?;
         }
-        writeln!(f, "")
+        writeln!(f)
     }
 }
 
