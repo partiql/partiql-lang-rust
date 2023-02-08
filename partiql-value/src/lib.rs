@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
 use std::{ops, slice, vec};
@@ -19,6 +19,7 @@ mod ion;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),
