@@ -19,6 +19,7 @@ mod ion;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BindingsName {
     CaseSensitive(String),
     CaseInsensitive(String),

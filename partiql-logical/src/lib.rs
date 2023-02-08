@@ -50,6 +50,7 @@
 /// ```
 use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
+use std::fmt::{Debug, Display, Formatter};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -162,9 +163,27 @@ impl OpId {
     }
 }
 
+impl<T> Display for LogicalPlan<T>
+where
+    T: Default + Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let flows = self.flows();
+        writeln!(f, "LogicalPlan")?;
+        writeln!(f, "---")?;
+        for (s, d, _w) in flows {
+            let src_node = self.operator(*s).expect("Unable to get the src operator");
+            let dst_node = self.operator(*d).expect("Unable to get the dst operator");
+            writeln!(f, ">>> [{src_node:?}] -> [{dst_node:?}]")?;
+        }
+        writeln!(f)
+    }
+}
+
 /// Represents PartiQL binding operators; A `BindingOp` is an operator that operates on
 /// binding tuples as specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BindingsOp {
     Scan(Scan),
     Pivot(Pivot),
@@ -187,6 +206,7 @@ pub enum BindingsOp {
 
 /// [`Scan`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Scan {
     pub expr: ValueExpr,
     pub as_key: String,
@@ -198,6 +218,7 @@ pub struct Scan {
 /// see section `6.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Pivot {
     pub key: ValueExpr,
     pub value: ValueExpr,
@@ -205,6 +226,7 @@ pub struct Pivot {
 
 /// [`Unpivot`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Unpivot {
     pub expr: ValueExpr,
     pub as_key: String,
@@ -213,6 +235,7 @@ pub struct Unpivot {
 
 /// [`Filter`] represents a filter operator, e.g. `WHERE a = 10` in `SELECT a FROM t WHERE a = 10`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Filter {
     pub expr: ValueExpr,
 }
@@ -220,6 +243,7 @@ pub struct Filter {
 /// ['Join`] represents a join operator, e.g. implicit `CROSS JOIN` specified by comma in `FROM`
 /// clause in `SELECT t1.a, t2.b FROM tbl1 AS t1, tbl2 AS t2`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Join {
     pub kind: JoinKind,
     pub left: Box<BindingsOp>,
@@ -229,6 +253,7 @@ pub struct Join {
 
 /// Represents join types.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum JoinKind {
     Inner,
     Left,
@@ -239,6 +264,7 @@ pub enum JoinKind {
 
 /// Represents a projection, e.g. `SELECT a` in `SELECT a FROM t`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Project {
     pub exprs: HashMap<String, ValueExpr>,
 }
@@ -246,12 +272,14 @@ pub struct Project {
 /// Represents a value projection (SELECT VALUE) e.g. `SELECT VALUE t.a * 2` in
 ///`SELECT VALUE t.a * 2 IN tbl AS t`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProjectValue {
     pub expr: ValueExpr,
 }
 
 /// Represents an expression query e.g. `a * 2` in `a * 2` or an expression like `2+2`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExprQuery {
     pub expr: ValueExpr,
 }
@@ -259,6 +287,7 @@ pub struct ExprQuery {
 /// Represents a PartiQL value expression. Evaluation of a [`ValueExpr`] leads to a PartiQL value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ValueExpr {
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
@@ -283,6 +312,7 @@ pub enum ValueExpr {
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 /// Represents logical plan's unary operators.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UnaryOp {
     Pos,
     Neg,
@@ -292,6 +322,7 @@ pub enum UnaryOp {
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 /// Represents logical plan's binary operators.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BinaryOp {
     And,
     Or,
@@ -315,6 +346,7 @@ pub enum BinaryOp {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a path component in a plan.
 pub enum PathComponent {
     /// E.g. `b` in `a.b`
@@ -327,6 +359,7 @@ pub enum PathComponent {
 
 /// Represents a PartiQL tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TupleExpr {
     pub attrs: Vec<ValueExpr>,
     pub values: Vec<ValueExpr>,
@@ -341,6 +374,7 @@ impl TupleExpr {
 
 /// Represents a PartiQL list expression, e.g. `[a.c * 2, 5]`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ListExpr {
     pub elements: Vec<ValueExpr>,
 }
@@ -354,6 +388,7 @@ impl ListExpr {
 
 /// Represents a PartiQL bag expression, e.g. `<<a.c * 2, 5>>`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BagExpr {
     pub elements: Vec<ValueExpr>,
 }
@@ -367,6 +402,7 @@ impl BagExpr {
 
 /// Represents a PartiQL `BETWEEN` expression, e.g. `BETWEEN 500 AND 600`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BetweenExpr {
     pub value: Box<ValueExpr>,
     pub from: Box<ValueExpr>,
@@ -375,12 +411,14 @@ pub struct BetweenExpr {
 
 /// Represents a PartiQL Pattern Match expression, e.g. `'foo' LIKE 'foo'`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PatternMatchExpr {
     pub value: Box<ValueExpr>,
     pub pattern: Pattern,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Pattern {
     Like(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
     LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch),
@@ -389,6 +427,7 @@ pub enum Pattern {
 /// Represents a LIKE expression where both the `pattern` and `escape` are string literals,
 /// e.g. `'foo%' ESCAPE '/'`
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LikeMatch {
     pub pattern: String,
     pub escape: String,
@@ -397,6 +436,7 @@ pub struct LikeMatch {
 /// Represents a LIKE expression where one of `pattern` and `escape` is not a string literal,
 /// e.g. `some_pattern ESCAPE '/'`
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LikeNonStringNonLiteralMatch {
     pub pattern: Box<ValueExpr>,
     pub escape: Box<ValueExpr>,
@@ -405,6 +445,7 @@ pub struct LikeNonStringNonLiteralMatch {
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
 /// `SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s`
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SubQueryExpr {
     pub plan: LogicalPlan<BindingsOp>,
 }
@@ -412,6 +453,7 @@ pub struct SubQueryExpr {
 /// Represents a PartiQL's simple case expressions,
 /// e.g.`CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SimpleCase {
     pub expr: Box<ValueExpr>,
     pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
@@ -421,6 +463,7 @@ pub struct SimpleCase {
 /// Represents a PartiQL's searched case expressions,
 /// e.g.`CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SearchedCase {
     pub cases: Vec<(Box<ValueExpr>, Box<ValueExpr>)>,
     pub default: Option<Box<ValueExpr>>,
@@ -428,6 +471,7 @@ pub struct SearchedCase {
 
 /// Represents an `IS` expression, e.g. `IS TRUE`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IsTypeExpr {
     pub not: bool,
     pub expr: Box<ValueExpr>,
@@ -436,6 +480,7 @@ pub struct IsTypeExpr {
 
 /// Represents a PartiQL Type.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Type {
     NullType,
     BooleanType,
@@ -468,6 +513,7 @@ pub enum Type {
 
 /// Represents a `NULLIF` expression, e.g. `NULLIF(v1, v2)` in `SELECT NULLIF(v1, v2) FROM data`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NullIfExpr {
     pub lhs: Box<ValueExpr>,
     pub rhs: Box<ValueExpr>,
@@ -476,12 +522,14 @@ pub struct NullIfExpr {
 /// Represents a `COALESCE` expression, e.g.
 /// `COALESCE(NULL, 10)` in `SELECT COALESCE(NULL, 10) FROM data`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CoalesceExpr {
     pub elements: Vec<ValueExpr>,
 }
 
 /// Represents a `CALL` expression (i.e., a function call), e.g. `LOWER("ALL CAPS")`.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CallExpr {
     pub name: CallName,
     pub arguments: Vec<ValueExpr>,
@@ -489,6 +537,7 @@ pub struct CallExpr {
 
 /// Represents a known function.
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CallName {
     Lower,
     Upper,
