@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
 use std::{ops, slice, vec};
