@@ -173,7 +173,7 @@ where
         writeln!(f, "---")?;
         for (s, d, _w) in flows {
             let src_node = self.operator(*s).expect("Unable to get the src operator");
-            let dst_node = self.operator(*d).expect("Unable to get the src operator");
+            let dst_node = self.operator(*d).expect("Unable to get the dst operator");
             writeln!(f, ">>> [{src_node:?}] -> [{dst_node:?}]")?;
         }
         writeln!(f)
