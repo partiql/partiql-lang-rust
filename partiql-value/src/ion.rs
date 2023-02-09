@@ -3,7 +3,8 @@ use ion_rs::{Integer, IonReader, IonType, Reader, StreamItem};
 
 // TODO handle errors more gracefully than `expect`/`unwrap`
 
-pub(crate) fn parse_ion(contents: &str) -> Value {
+/// For a given `contents` as Ion text produces a PartiQL Value
+pub fn parse_ion(contents: &str) -> Value {
     let mut reader = ion_rs::ReaderBuilder::new()
         .build(contents)
         .expect("reading contents");
