@@ -13,7 +13,7 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
 use unicase::UniCase;
 
-mod ion;
+pub mod ion;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

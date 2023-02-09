@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds some benchmarks for parsing, compiling, planning, & evaluation
 - Implements `PIVOT` operator in evaluator
 - `serde` feature to `partiql-value` and `partiql-logical` with `Serialize` and `Deserialize` traits.
+- Adds `Display` for `LogicalPlan`
+- Expose `partiql_value::parse_ion` as a public API.
 
 ### Fixes
 
