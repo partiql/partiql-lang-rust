@@ -152,5 +152,9 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    # Allow running iai benchmarks on MacOS
+    # Cf. "https://github.com/bheisler/iai/issues/25#issuecomment-1378856308"
+    "https://github.com/bheisler/iai.git",
+]
 
