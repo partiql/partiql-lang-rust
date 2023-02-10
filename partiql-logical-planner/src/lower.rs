@@ -1024,7 +1024,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         assert_eq!(benv.len(), 2);
 
         let mut env = self.exit_env();
-        assert!((0..1).contains(&env.len()));
+        assert!((0..=1).contains(&env.len()));
 
         let Join { kind, .. } = join;
 
