@@ -417,16 +417,20 @@ impl Evaluable for EvalPivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
-        let mut out: Tuple = partiql_tuple![];
-        for binding in input_value.into_iter() {
-            let binding = binding.coerce_to_tuple();
-            let key = self.key.evaluate(&binding, ctx);
-            if let Value::String(s) = key.as_ref() {
-                let value = self.value.evaluate(&binding, ctx);
-                out.insert(s, value.into_owned())
-            }
-        }
-        Some(Value::Tuple(Box::new(out)))
+        let tuple: Tuple = input_value
+            .into_iter()
+            .filter_map(|binding| {
+                let binding = binding.coerce_to_tuple();
+                let key = self.key.evaluate(&binding, ctx);
+                if let Value::String(s) = key.as_ref() {
+                    let value = self.value.evaluate(&binding, ctx);
+                    Some((s.to_string(), value.into_owned()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Some(Value::from(tuple))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -473,19 +477,18 @@ impl Evaluable for EvalUnpivot {
             other => other.coerce_to_tuple(),
         };
 
-        let out = tuple
-            .into_iter()
-            .map(|(k, v)| {
-                let tuple = if let Some(at_key) = &self.at_key {
-                    Tuple::from([(self.as_key.as_str(), v), (at_key.as_str(), k.into())])
-                } else {
-                    Tuple::from([(self.as_key.as_str(), v)])
-                };
-                Value::Tuple(Box::new(tuple))
-            })
-            .collect_vec();
-
-        Some(Value::Bag(Box::new(Bag::from(out))))
+        let as_key = self.as_key.as_str();
+        let pairs = tuple;
+        let unpivoted = if let Some(at_key) = &self.at_key {
+            pairs
+                .map(|(k, v)| Tuple::from([(as_key, v), (at_key.as_str(), k.into())]))
+                .collect::<Bag>()
+        } else {
+            pairs
+                .map(|(_, v)| Tuple::from([(as_key, v)]))
+                .collect::<Bag>()
+        };
+        Some(Value::from(unpivoted))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -528,14 +531,11 @@ impl Evaluable for EvalFilter {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
-        let mut out = partiql_bag![];
-        for v in input_value.into_iter() {
-            if self.eval_filter(&v.as_tuple_ref(), ctx) {
-                out.push(v);
-            }
-        }
-
-        Some(Value::Bag(Box::new(out)))
+        let filtered = input_value
+            .into_iter()
+            .map(Value::coerce_to_tuple)
+            .filter_map(|v| self.eval_filter(&v, ctx).then_some(v));
+        Some(Value::from(filtered.collect::<Bag>()))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -562,18 +562,16 @@ impl Evaluable for EvalSelectValue {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
-        let ordered = &input_value.is_ordered();
-        let mut value = vec![];
+        let ordered = input_value.is_ordered();
 
-        for v in input_value.into_iter() {
-            let out = v.coerce_to_tuple();
-            let evaluated = self.expr.evaluate(&out, ctx);
-            value.push(evaluated.into_owned());
-        }
+        let values = input_value.into_iter().map(|v| {
+            let v_as_tuple = v.coerce_to_tuple();
+            self.expr.evaluate(&v_as_tuple, ctx).into_owned()
+        });
 
         match ordered {
-            true => Some(Value::List(Box::new(List::from(value)))),
-            false => Some(Value::Bag(Box::new(Bag::from(value)))),
+            true => Some(Value::from(values.collect::<List>())),
+            false => Some(Value::from(values.collect::<Bag>())),
         }
     }
 
@@ -602,26 +600,25 @@ impl Evaluable for EvalSelect {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
-        let ordered = &input_value.is_ordered();
-        let mut value = vec![];
+        let ordered = input_value.is_ordered();
 
-        for v in input_value.into_iter() {
+        let values = input_value.into_iter().map(|v| {
             let v_as_tuple = v.coerce_to_tuple();
-            let mut t = Tuple::new();
 
-            self.exprs.iter().for_each(|(alias, expr)| {
-                let evaluated_val = expr.evaluate(&v_as_tuple, ctx).into_owned();
-                if evaluated_val != Missing {
-                    // Per section 2 of PartiQL spec: "value MISSING may not appear as an attribute value
-                    t.insert(alias.as_str(), evaluated_val);
+            let tuple_pairs = self.exprs.iter().filter_map(|(alias, expr)| {
+                let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
+                match evaluated_val.as_ref() {
+                    Missing => None,
+                    _ => Some((alias.as_str(), evaluated_val.into_owned())),
                 }
             });
-            value.push(Value::Tuple(Box::new(t)));
-        }
+
+            tuple_pairs.collect::<Tuple>()
+        });
 
         match ordered {
-            true => Some(Value::List(Box::new(List::from(value)))),
-            false => Some(Value::Bag(Box::new(Bag::from(value)))),
+            true => Some(Value::from(values.collect::<List>())),
+            false => Some(Value::from(values.collect::<Bag>())),
         }
     }
 
@@ -647,22 +644,18 @@ impl Evaluable for EvalSelectAll {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
         let input_value = self.input.take().expect("Error in retrieving input value");
 
-        let ordered = &input_value.is_ordered();
+        let ordered = input_value.is_ordered();
 
-        let seq = input_value
-            .into_iter()
-            .map(|val| {
-                let mut t = Tuple::new();
-                for (_k, val) in val.as_tuple_ref().pairs() {
-                    t = t.tuple_concat(&val.as_tuple_ref());
-                }
-                Value::Tuple(Box::new(t))
-            })
-            .collect_vec();
+        let values = input_value.into_iter().map(|val| {
+            val.coerce_to_tuple()
+                .into_values()
+                .flat_map(|v| v.coerce_to_tuple().into_pairs())
+                .collect::<Tuple>()
+        });
 
         match ordered {
-            true => Some(Value::List(Box::new(List::from(seq)))),
-            false => Some(Value::Bag(Box::new(Bag::from(seq)))),
+            true => Some(Value::from(values.collect::<List>())),
+            false => Some(Value::from(values.collect::<Bag>())),
         }
     }
 
@@ -688,12 +681,9 @@ impl EvalExprQuery {
 
 impl Evaluable for EvalExprQuery {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
-        let input_value = self.input.take().unwrap_or(Value::Null);
-        Some(
-            self.expr
-                .evaluate(&input_value.as_tuple_ref(), ctx)
-                .into_owned(),
-        )
+        let input_value = self.input.take().unwrap_or(Value::Null).coerce_to_tuple();
+
+        Some(self.expr.evaluate(&input_value, ctx).into_owned())
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -711,26 +701,26 @@ pub struct EvalTupleExpr {
 
 impl EvalExpr for EvalTupleExpr {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let mut t = Tuple::new();
-        self.attrs
+        let tuple = self
+            .attrs
             .iter()
-            .filter_map(|attr| {
-                let expr = attr.evaluate(bindings, ctx).into_owned();
-                match expr {
-                    Value::String(s) => Some(*s),
+            .zip(self.vals.iter())
+            .filter_map(|(attr, val)| {
+                let key = attr.evaluate(bindings, ctx);
+                match key.as_ref() {
+                    Value::String(key) => {
+                        let val = val.evaluate(bindings, ctx);
+                        match val.as_ref() {
+                            Missing => None,
+                            _ => Some((key.to_string(), val.into_owned())),
+                        }
+                    }
                     _ => None,
                 }
             })
-            .zip(self.vals.iter())
-            .for_each(|(k, v)| {
-                let evaluated = v.evaluate(bindings, ctx).into_owned();
-                // Spec. section 6.1.4
-                if evaluated != Missing {
-                    t.insert(k.as_str(), evaluated);
-                }
-            });
+            .collect::<Tuple>();
 
-        Cow::Owned(Value::from(t))
+        Cow::Owned(Value::from(tuple))
     }
 }
 
@@ -743,13 +733,12 @@ pub struct EvalListExpr {
 
 impl EvalExpr for EvalListExpr {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let evaluated_elements: Vec<Value> = self
+        let values = self
             .elements
             .iter()
-            .map(|val| val.evaluate(bindings, ctx).into_owned())
-            .collect();
+            .map(|val| val.evaluate(bindings, ctx).into_owned());
 
-        Cow::Owned(Value::List(Box::new(List::from(evaluated_elements))))
+        Cow::Owned(Value::from(values.collect::<List>()))
     }
 }
 
@@ -762,13 +751,12 @@ pub struct EvalBagExpr {
 
 impl EvalExpr for EvalBagExpr {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let evaluated_elements: Vec<Value> = self
+        let values = self
             .elements
             .iter()
-            .map(|val| val.evaluate(bindings, ctx).into_owned())
-            .collect();
+            .map(|val| val.evaluate(bindings, ctx).into_owned());
 
-        Cow::Owned(Value::Bag(Box::new(Bag::from(evaluated_elements))))
+        Cow::Owned(Value::from(values.collect::<Bag>()))
     }
 }
 
@@ -881,9 +869,14 @@ impl EvalDistinct {
 
 impl Evaluable for EvalDistinct {
     fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
-        let out = self.input.take().unwrap();
-        let u: Vec<Value> = out.into_iter().unique().collect();
-        Some(Value::Bag(Box::new(Bag::from(u))))
+        let input_value = self.input.take().expect("Error in retrieving input value");
+        let ordered = input_value.is_ordered();
+
+        let values = input_value.into_iter().unique();
+        match ordered {
+            true => Some(Value::from(values.collect::<List>())),
+            false => Some(Value::from(values.collect::<Bag>())),
+        }
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -920,12 +913,15 @@ pub struct EvalDynamicLookup {
 
 impl EvalExpr for EvalDynamicLookup {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let result = self
-            .lookups
-            .iter()
-            .map(|lookup| lookup.evaluate(bindings, ctx))
-            .find(|res| res.as_ref() != &Value::Missing);
-        result.unwrap_or(Cow::Owned(Value::Missing))
+        let mut lookups = self.lookups.iter().filter_map(|lookup| {
+            let val = lookup.evaluate(bindings, ctx);
+            match val.as_ref() {
+                Missing => None,
+                _ => Some(val),
+            }
+        });
+
+        lookups.next().unwrap_or_else(|| Cow::Owned(Value::Missing))
     }
 }
 
@@ -938,7 +934,11 @@ pub struct EvalVarRef {
 impl EvalExpr for EvalVarRef {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
-        value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
+
+        match value {
+            None => Cow::Owned(Missing),
+            Some(v) => Cow::Borrowed(v),
+        }
     }
 }
 
