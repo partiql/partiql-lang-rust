@@ -125,8 +125,8 @@ pub enum EvaluationError {
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
     fn update_input(&mut self, input: Value, branch_num: u8);
-    fn get_vars(&self) -> Vec<String> {
-        vec![]
+    fn get_vars(&self) -> Option<&[String]> {
+        None
     }
 }
 
@@ -139,23 +139,30 @@ pub struct EvalScan {
     pub as_key: String,
     pub at_key: Option<String>,
     pub input: Option<Value>,
+
+    // cached values
+    attrs: Vec<String>,
 }
 
 impl EvalScan {
     pub fn new(expr: Box<dyn EvalExpr>, as_key: &str) -> Self {
+        let attrs = vec![as_key.to_string()];
         EvalScan {
             expr,
             as_key: as_key.to_string(),
             at_key: None,
             input: None,
+            attrs,
         }
     }
     pub fn new_with_at_key(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+        let attrs = vec![as_key.to_string(), at_key.to_string()];
         EvalScan {
             expr,
             as_key: as_key.to_string(),
             at_key: Some(at_key.to_string()),
             input: None,
+            attrs,
         }
     }
 }
@@ -203,11 +210,8 @@ impl Evaluable for EvalScan {
         self.input = Some(input);
     }
 
-    fn get_vars(&self) -> Vec<String> {
-        match self.at_key.clone() {
-            None => vec![self.as_key.clone()],
-            Some(at_key) => vec![self.as_key.clone(), at_key],
-        }
+    fn get_vars(&self) -> Option<&[String]> {
+        Some(&self.attrs)
     }
 }
 
@@ -251,10 +255,13 @@ impl EvalJoin {
 impl Evaluable for EvalJoin {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
         /// Creates a `Tuple` with attributes `attrs`, each with value `Null`
-        fn tuple_with_null_vals(attrs: Vec<String>) -> Tuple {
-            let mut new_tuple = Tuple::new();
-            attrs.iter().for_each(|a| new_tuple.insert(a, Null));
-            new_tuple
+        #[inline]
+        fn tuple_with_null_vals<I, S>(attrs: I) -> Tuple
+        where
+            S: Into<String>,
+            I: IntoIterator<Item = S>,
+        {
+            attrs.into_iter().map(|k| (k.into(), Null)).collect()
         }
 
         let mut output_bag = partiql_bag![];
@@ -359,7 +366,7 @@ impl Evaluable for EvalJoin {
 
                     // if q_r is the empty bag
                     if output_bag_left.is_empty() {
-                        let attrs = self.right.get_vars();
+                        let attrs = self.right.get_vars().unwrap_or(&[]);
                         let new_binding = b_l
                             .as_tuple_ref()
                             .as_ref()
@@ -436,15 +443,25 @@ pub struct EvalUnpivot {
     pub as_key: String,
     pub at_key: Option<String>,
     pub input: Option<Value>,
+
+    // cached values
+    attrs: Vec<String>,
 }
 
 impl EvalUnpivot {
     pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: Option<String>) -> Self {
+        let attrs = if let Some(at_key) = &at_key {
+            vec![as_key.to_string(), at_key.clone()]
+        } else {
+            vec![as_key.to_string()]
+        };
+
         EvalUnpivot {
             expr,
             as_key: as_key.to_string(),
             at_key,
             input: None,
+            attrs,
         }
     }
 }
@@ -475,12 +492,8 @@ impl Evaluable for EvalUnpivot {
         self.input = Some(input);
     }
 
-    fn get_vars(&self) -> Vec<String> {
-        if let Some(at_key) = &self.at_key {
-            vec![self.as_key.clone(), at_key.clone()]
-        } else {
-            vec![self.as_key.clone()]
-        }
+    fn get_vars(&self) -> Option<&[String]> {
+        Some(&self.attrs)
     }
 }
 
