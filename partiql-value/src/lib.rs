@@ -498,6 +498,11 @@ impl Value {
     }
 
     #[inline]
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, Value::Tuple(_))
+    }
+
+    #[inline]
     pub fn is_list(&self) -> bool {
         matches!(self, Value::List(_))
     }
@@ -887,6 +892,21 @@ impl List {
     pub fn iter(&self) -> ListIter {
         ListIter(self.0.iter())
     }
+
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.0.reserve(additional);
+    }
+}
+
+impl Extend<Value> for List {
+    #[inline]
+    fn extend<Iter: IntoIterator<Item = Value>>(&mut self, iter: Iter) {
+        let iterator = iter.into_iter();
+        let (lower_bound, _) = iterator.size_hint();
+        self.reserve(lower_bound);
+        iterator.for_each(move |v| self.push(v));
+    }
 }
 
 impl From<Vec<Value>> for List {
@@ -1029,6 +1049,21 @@ impl Bag {
     pub fn iter(&self) -> BagIter {
         BagIter(self.0.iter())
     }
+
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.0.reserve(additional);
+    }
+}
+
+impl Extend<Value> for Bag {
+    #[inline]
+    fn extend<Iter: IntoIterator<Item = Value>>(&mut self, iter: Iter) {
+        let iterator = iter.into_iter();
+        let (lower_bound, _) = iterator.size_hint();
+        self.reserve(lower_bound);
+        iterator.for_each(move |v| self.push(v));
+    }
 }
 
 impl From<Vec<Value>> for Bag {
@@ -1129,12 +1164,7 @@ impl PartialEq for Bag {
 
         let lhs = self.0.iter().sorted();
         let rhs = other.0.iter().sorted();
-        for (l, r) in lhs.zip(rhs) {
-            if l != r {
-                return false;
-            }
-        }
-        true
+        lhs.zip(rhs).all(|(l, r)| l == r)
     }
 }
 
@@ -1261,6 +1291,16 @@ impl Tuple {
     pub fn into_pairs(self) -> impl Iterator<Item = (String, Value)> {
         zip(self.attrs, self.vals)
     }
+
+    #[inline]
+    pub fn values(&self) -> impl Iterator<Item = &Value> + Clone {
+        self.vals.iter()
+    }
+
+    #[inline]
+    pub fn into_values(self) -> impl Iterator<Item = Value> {
+        self.vals.into_iter()
+    }
 }
 
 impl<const N: usize, T> From<[(&str, T); N]> for Tuple
@@ -1277,12 +1317,13 @@ where
     }
 }
 
-impl<'a, T> FromIterator<(&'a str, T)> for Tuple
+impl<S, T> FromIterator<(S, T)> for Tuple
 where
+    S: Into<String>,
     T: Into<Value>,
 {
     #[inline]
-    fn from_iter<I: IntoIterator<Item = (&'a str, T)>>(iter: I) -> Tuple {
+    fn from_iter<I: IntoIterator<Item = (S, T)>>(iter: I) -> Tuple {
         let iterator = iter.into_iter();
         let (lower, _) = iterator.size_hint();
         let mut attrs = Vec::with_capacity(lower);
