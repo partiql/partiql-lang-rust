@@ -2,8 +2,6 @@ pub mod env;
 pub mod eval;
 pub mod plan;
 
-mod pattern_match;
-
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
@@ -2224,11 +2222,10 @@ mod tests {
     }
 
     mod clause_from {
+        use crate::eval::evaluable::{EvalScan, Evaluable};
+        use crate::eval::expr::{EvalPath, EvalPathComponent, EvalVarRef};
+        use crate::eval::BasicContext;
         use partiql_value::{partiql_bag, partiql_list, BindingsName};
-
-        use crate::eval::{
-            BasicContext, EvalPath, EvalPathComponent, EvalScan, EvalVarRef, Evaluable,
-        };
 
         use super::*;
 
@@ -2355,7 +2352,9 @@ mod tests {
     mod clause_unpivot {
         use partiql_value::{partiql_bag, BindingsName, Tuple};
 
-        use crate::eval::{BasicContext, EvalUnpivot, EvalVarRef, Evaluable};
+        use crate::eval::evaluable::{EvalUnpivot, Evaluable};
+        use crate::eval::expr::EvalVarRef;
+        use crate::eval::BasicContext;
 
         use super::*;
 

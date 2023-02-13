@@ -9,15 +9,16 @@ use partiql_logical::{
 };
 
 use crate::eval;
-use crate::eval::{
+use crate::eval::evaluable::{EvalJoinKind, EvalSubQueryExpr, Evaluable};
+use crate::eval::expr::pattern_match::like_to_re_pattern;
+use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
     EvalFnBitLength, EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim,
     EvalFnOctetLength, EvalFnPosition, EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr,
-    EvalJoinKind, EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr,
-    EvalPath, EvalPlan, EvalSearchedCaseExpr, EvalSubQueryExpr, EvalTupleExpr, EvalUnaryOp,
-    EvalUnaryOpExpr, EvalVarRef, Evaluable,
+    EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath,
+    EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
 };
-use crate::pattern_match::like_to_re_pattern;
+use crate::eval::EvalPlan;
 use partiql_value::Value::Null;
 
 #[derive(Default)]
@@ -60,13 +61,16 @@ impl EvaluatorPlanner {
                 at_key,
             }) => {
                 if let Some(at_key) = at_key {
-                    Box::new(eval::EvalScan::new_with_at_key(
+                    Box::new(eval::evaluable::EvalScan::new_with_at_key(
                         self.plan_values(expr),
                         as_key,
                         at_key,
                     ))
                 } else {
-                    Box::new(eval::EvalScan::new(self.plan_values(expr), as_key))
+                    Box::new(eval::evaluable::EvalScan::new(
+                        self.plan_values(expr),
+                        as_key,
+                    ))
                 }
             }
             BindingsOp::Project(logical::Project { exprs }) => {
@@ -74,28 +78,27 @@ impl EvaluatorPlanner {
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v)))
                     .collect();
-                Box::new(eval::EvalSelect::new(exprs))
+                Box::new(eval::evaluable::EvalSelect::new(exprs))
             }
-            BindingsOp::ProjectAll => Box::new(eval::EvalSelectAll::new()),
+            BindingsOp::ProjectAll => Box::new(eval::evaluable::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_values(expr);
-                Box::new(eval::EvalSelectValue::new(expr))
+                Box::new(eval::evaluable::EvalSelectValue::new(expr))
             }
-            BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::EvalFilter {
+            BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::evaluable::EvalFilter {
                 expr: self.plan_values(expr),
                 input: None,
             }),
-            BindingsOp::Distinct => Box::new(eval::EvalDistinct::new()),
-            BindingsOp::Sink => Box::new(eval::EvalSink { input: None }),
-            BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(eval::EvalPivot::new(
-                self.plan_values(key),
-                self.plan_values(value),
-            )),
+            BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
+            BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
+            BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(
+                eval::evaluable::EvalPivot::new(self.plan_values(key), self.plan_values(value)),
+            ),
             BindingsOp::Unpivot(logical::Unpivot {
                 expr,
                 as_key,
                 at_key,
-            }) => Box::new(eval::EvalUnpivot::new(
+            }) => Box::new(eval::evaluable::EvalUnpivot::new(
                 self.plan_values(expr),
                 as_key,
                 at_key.clone(),
@@ -117,7 +120,7 @@ impl EvaluatorPlanner {
                 let on = on
                     .as_ref()
                     .map(|on_condition| self.plan_values(on_condition));
-                Box::new(eval::EvalJoin::new(
+                Box::new(eval::evaluable::EvalJoin::new(
                     kind,
                     self.get_eval_node(left),
                     self.get_eval_node(right),
@@ -126,7 +129,7 @@ impl EvaluatorPlanner {
             }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
                 let expr = self.plan_values(expr);
-                Box::new(eval::EvalExprQuery::new(expr))
+                Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy => todo!("OrderBy"),
             BindingsOp::Offset => todo!("Offset"),
@@ -176,13 +179,13 @@ impl EvaluatorPlanner {
                 components: components
                     .iter()
                     .map(|c| match c {
-                        PathComponent::Key(k) => eval::EvalPathComponent::Key(k.clone()),
-                        PathComponent::Index(i) => eval::EvalPathComponent::Index(*i),
+                        PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
+                        PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
                         PathComponent::KeyExpr(k) => {
-                            eval::EvalPathComponent::KeyExpr(self.plan_values(k))
+                            eval::expr::EvalPathComponent::KeyExpr(self.plan_values(k))
                         }
                         PathComponent::IndexExpr(i) => {
-                            eval::EvalPathComponent::IndexExpr(self.plan_values(i))
+                            eval::expr::EvalPathComponent::IndexExpr(self.plan_values(i))
                         }
                     })
                     .collect(),
