@@ -4,9 +4,9 @@ use std::time::Duration;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::{
-    BasicContext, EvalPath, EvalPathComponent, EvalPlan, EvalScan, EvalVarRef, Evaluable,
-};
+use partiql_eval::eval::evaluable::{EvalScan, Evaluable};
+use partiql_eval::eval::expr::{EvalPath, EvalPathComponent, EvalVarRef};
+use partiql_eval::eval::{BasicContext, EvalPlan};
 use partiql_eval::plan;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::Project;
