@@ -9,7 +9,7 @@ use partiql_ast::ast;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_query};
+use crate::parse::parse_util::{strip_query, CallSite};
 use crate::parse::parser_state::{ParserState, IdGenerator};
 
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
@@ -819,7 +819,12 @@ PathExpr: ast::Path = {
 
 #[inline]
 ExprPrecedence01: ast::Expr = {
-    <lo:@L> <call:FunctionCall> <hi:@R> => ast::Expr::Call( state.node(call, lo..hi) ),
+    <lo:@L> <call:FunctionCall> <hi:@R> => {
+        match call {
+            CallSite::Call(call) => ast::Expr::Call( state.node(call, lo..hi) ),
+            CallSite::CallAgg(call_agg)  => ast::Expr::CallAgg( state.node(call_agg, lo..hi) ),
+        }
+    },
     <ExprTerm>,
 }
 
@@ -910,9 +915,14 @@ ExprPair: ast::ExprPair = {
 }
 
 #[inline]
-FunctionCall: ast::Call = {
-    <func_name:FunctionName> "(" <args:CommaSepStar<FunctionCallArg>> ")" =>
-        ast::Call{ func_name, args }
+FunctionCall: CallSite = {
+    <func_name:FunctionName> "(" <args:CommaSepStar<FunctionCallArg>> ")" => {
+        if state.is_agg_fn(&func_name) {
+            CallSite::CallAgg(ast::CallAgg{ func_name, args })
+        } else {
+            CallSite::Call(ast::Call{ func_name, args })
+        }
+    },
 }
 
 #[inline]

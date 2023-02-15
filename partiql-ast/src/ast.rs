@@ -582,6 +582,14 @@ pub struct Sexp {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CallAgg {
+    #[visit(skip)]
+    pub func_name: SymbolPrimitive,
+    pub args: Vec<AstNode<CallArg>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Call {
     #[visit(skip)]
     pub func_name: SymbolPrimitive,
@@ -620,16 +628,6 @@ pub struct CallArgNamedType {
     pub name: SymbolPrimitive,
     #[visit(skip)]
     pub ty: Type,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CallAgg {
-    #[visit(skip)]
-    pub func_name: SymbolPrimitive,
-    #[visit(skip)]
-    pub setq: Option<SetQuantifier>,
-    pub args: Vec<AstNode<CallArg>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
