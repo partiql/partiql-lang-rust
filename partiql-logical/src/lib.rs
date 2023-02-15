@@ -273,6 +273,7 @@ pub enum JoinKind {
 
 /// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupBy {
     pub strategy: GroupingStrategy,
     pub exprs: HashMap<String, ValueExpr>,
@@ -281,6 +282,7 @@ pub struct GroupBy {
 
 /// <expr> [AS <as_alias>]
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupKey {
     pub expr: ValueExpr,
     pub as_alias: Option<ValueExpr>,
@@ -288,6 +290,7 @@ pub struct GroupKey {
 
 /// Grouping qualifier: ALL or PARTIAL
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GroupingStrategy {
     GroupFull,
     GroupPartial,
