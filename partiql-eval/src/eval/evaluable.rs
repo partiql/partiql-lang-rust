@@ -282,6 +282,79 @@ impl Evaluable for EvalJoin {
     }
 }
 
+#[derive(Debug)]
+pub struct EvalGroupBy {
+    pub strategy: EvalGroupingStrategy,
+    pub exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub group_as_alias: Option<String>,
+    pub input: Option<Value>,
+}
+
+#[derive(Debug)]
+pub enum EvalGroupingStrategy {
+    GroupFull,
+    GroupPartial,
+}
+
+#[derive(Debug)]
+pub struct GroupKey {
+    pub expr: Box<dyn EvalExpr>,
+    pub as_alias: Option<Box<dyn EvalExpr>>,
+}
+
+impl Evaluable for EvalGroupBy {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let group_as_alias = &self.group_as_alias;
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        match self.strategy {
+            EvalGroupingStrategy::GroupPartial => todo!(),
+            EvalGroupingStrategy::GroupFull => {
+                let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
+                for v in input_value.into_iter() {
+                    let v_as_tuple = v.coerce_to_tuple();
+                    let mut evaluated_values = Tuple::new();
+
+                    self.exprs.iter().for_each(|(alias, expr)| {
+                        let evaluated_val = expr.evaluate(&v_as_tuple, ctx).into_owned();
+                        if evaluated_val == Missing {
+                            evaluated_values.insert(alias.as_str(), Null);
+                        } else {
+                            evaluated_values.insert(alias.as_str(), evaluated_val);
+                        }
+                    });
+                    if groups.contains_key(&evaluated_values) {
+                        let mut group: Vec<Value> =
+                            groups.get(&evaluated_values).unwrap().to_owned();
+                        group.push(Value::Tuple(Box::new(v_as_tuple)));
+                        groups.insert(evaluated_values, group);
+                    } else {
+                        let group = vec![Value::Tuple(Box::new(v_as_tuple))];
+                        groups.insert(evaluated_values, group);
+                    }
+                }
+
+                let bag = groups
+                    .into_iter()
+                    .map(|(k, v)| match group_as_alias {
+                        None => Value::from(k),
+                        Some(alias) => {
+                            let mut tuple_with_group = k;
+                            tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
+                            Value::from(tuple_with_group)
+                        }
+                    })
+                    .collect::<Bag>();
+                Some(Value::from(bag))
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
 /// Represents an evaluation `Pivot` operator; the `Pivot` enables turning a collection into a
 /// tuple. For `Pivot` operational semantics, see section `6.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).

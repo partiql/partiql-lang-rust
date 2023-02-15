@@ -1,6 +1,7 @@
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
+use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Visit, Visitor};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -326,6 +327,36 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .unwrap()
             .produce_required
             .insert(as_alias);
+    }
+
+    fn exit_group_key(&mut self, group_key: &'ast GroupKey) {
+        let id = *self.current_node();
+        // get the "as" alias for each `GROUP BY` expr
+        // 1. if explicitly given
+        // 2. else try to infer if a simple variable reference or path
+        // 3. else it is currently 'Unknown'
+        let as_alias = if let Some(sym) = &group_key.as_alias {
+            Symbol::Known(sym.clone())
+        } else if let Some(sym) = infer_alias(&group_key.expr) {
+            Symbol::Known(sym)
+        } else {
+            Symbol::Unknown(self.id_gen.next_id())
+        };
+        self.aliases.insert(id, as_alias.clone());
+        self.keyref_stack
+            .last_mut()
+            .unwrap()
+            .produce_required
+            .insert(as_alias);
+    }
+
+    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) {
+        // add the `GROUP AS` alias
+        if let Some(sym) = &group_by_expr.group_as_alias {
+            let id = *self.current_node();
+            let as_alias = Symbol::Known(sym.clone());
+            self.aliases.insert(id, as_alias);
+        }
     }
 }
 

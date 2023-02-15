@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 
+use ion_rs::Timestamp;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 
@@ -52,7 +53,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
-    // TODO: add other supported PartiQL values -- timestamp, date, time, sexp
+    // TODO: add other supported PartiQL values -- sexp
 }
 
 impl ops::Add for &Value {

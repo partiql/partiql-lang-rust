@@ -6,10 +6,11 @@ use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CallArg, CallArgNamed,
     CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
-    DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, Insert, InsertValue, Item, Join,
-    JoinKind, JoinSpec, Like, List, Lit, NodeId, OnConflict, OrderByExpr, Path, PathStep,
-    ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set,
-    SetExpr, SetQuantifier, Sexp, SimpleCase, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey, GroupingStrategy, Insert,
+    InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, OnConflict, OrderByExpr,
+    Path, PathStep, ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase,
+    Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase, Struct, SymbolPrimitive, UniOp,
+    UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
@@ -1092,12 +1093,60 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+        self.enter_benv();
         self.enter_env();
     }
 
     fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
-        let _env = self.exit_env();
-        todo!("group by clause");
+        let benv = self.exit_benv();
+        assert_eq!(benv.len(), 0); // TODO sub-query
+        let env = self.exit_env();
+
+        let group_as_alias = _group_by_expr
+            .group_as_alias
+            .as_ref()
+            .map(|SymbolPrimitive { value, case: _ }| value.clone());
+
+        let strategy = match _group_by_expr.strategy {
+            GroupingStrategy::GroupFull => logical::GroupingStrategy::GroupFull,
+            GroupingStrategy::GroupPartial => logical::GroupingStrategy::GroupPartial,
+        };
+        let mut exprs = HashMap::with_capacity(env.len() / 2);
+        let mut iter = env.into_iter();
+        while let Some(value) = iter.next() {
+            let alias = iter.next().unwrap();
+            let alias = match alias {
+                ValueExpr::Lit(lit) => match *lit {
+                    Value::String(s) => (*s).clone(),
+                    _ => panic!("unexpected literal"),
+                },
+                _ => panic!("unexpected alias type"),
+            };
+            exprs.insert(alias, value);
+        }
+        let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
+            strategy,
+            exprs,
+            group_as_alias,
+        });
+
+        let id = self.plan.add_operator(group_by);
+        self.current_clauses_mut().group_by_clause.replace(id);
+    }
+
+    fn exit_group_key(&mut self, _group_key: &'ast GroupKey) {
+        println!("group key_registry: {:?}", self.key_registry);
+        let as_key: &name_resolver::Symbol = self
+            .key_registry
+            .aliases
+            .get(self.current_node())
+            .expect("alias");
+        // TODO intern strings
+        let as_key = match as_key {
+            name_resolver::Symbol::Known(sym) => sym.value.clone(),
+            name_resolver::Symbol::Unknown(id) => format!("_{id}"),
+        };
+        self.push_value(as_key.into());
     }
 
     fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
