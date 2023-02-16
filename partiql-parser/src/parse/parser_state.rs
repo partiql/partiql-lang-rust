@@ -5,6 +5,7 @@ use std::ops::Range;
 use partiql_ast::ast;
 
 use lalrpop_util::ErrorRecovery;
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 use partiql_ast::ast::{AstNode, NodeId, SymbolPrimitive};
@@ -57,7 +58,7 @@ pub(crate) struct ParserState<'input, Id: IdGenerator> {
     pub errors: ParseErrors<'input>,
 
     /// Pattern to match names of aggregate functions.
-    aggregates_pat: Regex,
+    aggregates_pat: &'static Regex,
 }
 
 impl<'input> Default for ParserState<'input, NodeIdGenerator> {
@@ -69,20 +70,18 @@ impl<'input> Default for ParserState<'input, NodeIdGenerator> {
 // TODO: currently needs to be manually kept in-sync with preprocessor's `built_in_aggs`
 // TODO: make extensible
 const KNOWN_AGGREGATES: &str = "(?i:count)|(?i:avg)|(?i:min)|(?i:max)|(?i:sum)";
+static KNOWN_AGGREGATE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(KNOWN_AGGREGATES).unwrap());
 
 impl<'input, I> ParserState<'input, I>
 where
     I: IdGenerator,
 {
     pub fn with_id_gen(id_gen: I) -> Self {
-        // TODO make extensible
-        let aggregates_pat = Regex::new(KNOWN_AGGREGATES).unwrap();
-
         ParserState {
             id_gen,
             locations: LocationMap::with_capacity(INIT_LOCATIONS),
             errors: ParseErrors::default(),
-            aggregates_pat,
+            aggregates_pat: &KNOWN_AGGREGATE_PATTERN,
         }
     }
 }
