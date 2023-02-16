@@ -306,7 +306,7 @@ TableCrossJoin: ast::FromSource = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" "JOIN" <rtable:JoinRhs> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType?> "CROSS" KW_JOIN <rtable:JoinRhs> <hi:@R> => {
         let kind = match j {
             Some(j) => j,
             None => ast::JoinKind::Cross
@@ -326,9 +326,9 @@ TableQualifiedJoin: ast::FromSource = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <j:JoinType?> KW_JOIN <rtable:JoinRhs> <on:JoinSpec> <hi:@R> => {
         let join = state.node(ast::Join {
-            kind: j,
+            kind: j.unwrap_or(ast::JoinKind::Inner),
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(on),
@@ -338,15 +338,21 @@ TableQualifiedJoin: ast::FromSource = {
     // Note the `TableReference` on the lhs and the `JoinRhs` on the rhs of the `JOIN`.
     // This is to prevent ambiguity in the grammar and effectively treats `JOIN` like
     //    a left-associative operator
-    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType> "JOIN" "LATERAL"? <rtable:JoinRhs> <hi:@R> => {
+    <lo:@L> <ltable:TableReference> <spec:JoinSpecNatural> <j:JoinType?> KW_JOIN <rtable:JoinRhs> <hi:@R> => {
         let join = state.node(ast::Join {
-            kind: j,
+            kind: j.unwrap_or(ast::JoinKind::Inner),
             left: Box::new(ltable),
             right: Box::new(rtable),
             predicate: Some(spec)
         }, lo..hi);
         ast::FromSource::Join( join )
     },
+}
+#[inline]
+KW_JOIN: () = {
+    "JOIN",
+    "LATERAL",
+    "JOIN" "LATERAL",
 }
 #[inline]
 JoinRhs: ast::FromSource = {
