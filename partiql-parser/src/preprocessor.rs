@@ -359,6 +359,10 @@ where
                             nesting -= 1;
                             self.parser.consume();
                         }
+                        Token::CommentBlock(_) | Token::CommentLine(_) => {
+                            patterns.iter_mut().for_each(|(_, subs)| subs.push(None));
+                            self.parser.consume();
+                        }
                         Token::UnquotedIdent(id) | Token::QuotedIdent(id)
                             if self.fn_exprs.contains(id) =>
                         {
@@ -708,6 +712,20 @@ mod tests {
         assert_eq!(
             preprocess(r#"trim(LEADING 'Foo' from 'FooBar')"#)?,
             lex(r#"trim(LEADING : 'Foo', "from" : 'FooBar')"#)?
+        );
+
+        assert_eq!(
+            preprocess(r#"trim(LEADING /*blah*/ 'Foo' from 'FooBar')"#)?,
+            lex(r#"trim(LEADING : /*blah*/ 'Foo', "from" : 'FooBar')"#)?
+        );
+
+        assert_eq!(
+            preprocess(
+                r#"trim(LEADING --blah
+                                             'Foo' from 'FooBar')"#
+            )?,
+            lex(r#"trim(LEADING : --blah
+                                         'Foo', "from" : 'FooBar')"#)?
         );
 
         // Trim Specification in all 3 spots
