@@ -114,6 +114,7 @@ mod built_ins {
 
     pub(crate) fn built_in_aggs() -> FnExpr<'static> {
         FnExpr {
+            // TODO: currently needs to be manually kept in-sync with parsers's `KNOWN_AGGREGATES`
             fn_names: vec!["count", "avg", "min", "max", "sum"],
             #[rustfmt::skip]
             patterns: vec![
@@ -865,6 +866,17 @@ mod tests {
         assert_eq!(preprocess(q_count_1)?, lex(q_count_1)?);
         let q_count_star = r#"count(*)"#;
         assert_eq!(preprocess(q_count_star)?, lex(q_count_star)?);
+
+        assert_eq!(preprocess(r#"sum(a)"#)?, lex(r#"sum(a)"#)?);
+        assert_eq!(
+            preprocess(r#"sum(DISTINCT a)"#)?,
+            lex(r#"sum("DISTINCT": a)"#)?
+        );
+        assert_eq!(preprocess(r#"sum(all a)"#)?, lex(r#"sum("all": a)"#)?);
+        let q_sum_1 = r#"sum(1)"#;
+        assert_eq!(preprocess(q_sum_1)?, lex(q_sum_1)?);
+        let q_sum_star = r#"sum(*)"#;
+        assert_eq!(preprocess(q_sum_star)?, lex(q_sum_star)?);
 
         let empty_q = "";
         assert_eq!(preprocess(empty_q)?, lex(empty_q)?);

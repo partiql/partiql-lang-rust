@@ -5,8 +5,9 @@ use std::ops::Range;
 use partiql_ast::ast;
 
 use lalrpop_util::ErrorRecovery;
+use regex::Regex;
 
-use partiql_ast::ast::{AstNode, NodeId};
+use partiql_ast::ast::{AstNode, NodeId, SymbolPrimitive};
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location};
 use partiql_source_map::metadata::LocationMap;
@@ -54,6 +55,9 @@ pub(crate) struct ParserState<'input, Id: IdGenerator> {
     pub locations: LocationMap<NodeId>,
     /// Any errors accumulated during parse.
     pub errors: ParseErrors<'input>,
+
+    /// Pattern to match names of aggregate functions.
+    aggregates_pat: Regex,
 }
 
 impl<'input> Default for ParserState<'input, NodeIdGenerator> {
@@ -62,15 +66,23 @@ impl<'input> Default for ParserState<'input, NodeIdGenerator> {
     }
 }
 
+// TODO: currently needs to be manually kept in-sync with preprocessor's `built_in_aggs`
+// TODO: make extensible
+const KNOWN_AGGREGATES: &str = "(?i:count)|(?i:avg)|(?i:min)|(?i:max)|(?i:sum)";
+
 impl<'input, I> ParserState<'input, I>
 where
     I: IdGenerator,
 {
     pub fn with_id_gen(id_gen: I) -> Self {
+        // TODO make extensible
+        let aggregates_pat = Regex::new(KNOWN_AGGREGATES).unwrap();
+
         ParserState {
             id_gen,
             locations: LocationMap::with_capacity(INIT_LOCATIONS),
             errors: ParseErrors::default(),
+            aggregates_pat,
         }
     }
 }
@@ -93,5 +105,11 @@ impl<'input, Id: IdGenerator> ParserState<'input, Id> {
     #[inline]
     pub fn node<T>(&mut self, ast: T, Range { start, end }: Range<ByteOffset>) -> AstNode<T> {
         self.create_node(ast, start.into()..end.into())
+    }
+
+    /// Check if a given `name` corresponds to a known aggregate function.
+    #[inline]
+    pub fn is_agg_fn(&self, name: &SymbolPrimitive) -> bool {
+        self.aggregates_pat.is_match(&name.value)
     }
 }
