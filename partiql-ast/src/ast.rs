@@ -266,6 +266,9 @@ pub enum SetOperator {
     Union,
     Except,
     Intersect,
+    OuterUnion,
+    OuterExcept,
+    OuterIntersect,
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.

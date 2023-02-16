@@ -33,7 +33,7 @@ grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'
 
 pub(crate) Query: Box<ast::Expr> = {
     <lo:@L>
-    <set:QuerySetPrec02>
+    <set:QuerySet>
     <order_by:OrderByClause?>
     <limit:LimitClause?>
     <offset:OffsetByClause?>
@@ -42,8 +42,8 @@ pub(crate) Query: Box<ast::Expr> = {
     }
 }
 
-QuerySetPrec02: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:QuerySetPrec02> <setop:SetOpUnionExcept> <setq:SetQuantifier> <rhs:QuerySetPrec01> <hi:@R> => {
+QuerySet: ast::AstNode<ast::QuerySet> = {
+    <lo:@L> <lhs:QuerySet> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
         let set_expr = state.node(ast::SetExpr {
              setop,
              setq,
@@ -52,31 +52,18 @@ QuerySetPrec02: ast::AstNode<ast::QuerySet> = {
         }, lo..hi);
         state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
 	},
-    <QuerySetPrec01>
-}
-
-QuerySetPrec01: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:QuerySetPrec01> <setop:SetOpIntersect> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
-        let set_expr = state.node(ast::SetExpr {
-            setop,
-            setq,
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs)
-        }, lo..hi);
-        state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
-	},
-    <SingleQuery>
+    <SingleQuery>,
 }
 
 #[inline]
-SetOpUnionExcept: ast::SetOperator = {
+SetOp: ast::SetOperator = {
     "UNION" => ast::SetOperator::Union,
+    "OUTER" "UNION" => ast::SetOperator::OuterUnion,
     "EXCEPT" => ast::SetOperator::Except,
-}
+    "OUTER" "EXCEPT" => ast::SetOperator::OuterExcept,
+    "INTERSECT" => ast::SetOperator::Intersect,
+    "OUTER" "INTERSECT" => ast::SetOperator::OuterIntersect,
 
-#[inline]
-SetOpIntersect: ast::SetOperator = {
-    "INTERSECT" => ast::SetOperator::Intersect
 }
 
 #[inline]
@@ -363,7 +350,6 @@ JoinType: ast::JoinKind = {
     "LEFT" "OUTER"? => ast::JoinKind::Left,
     "RIGHT" "OUTER"? => ast::JoinKind::Right,
     "FULL" "OUTER"? => ast::JoinKind::Full,
-    "OUTER" => ast::JoinKind::Full,
 }
 #[inline]
 JoinSpec: ast::AstNode<ast::JoinSpec> = {
