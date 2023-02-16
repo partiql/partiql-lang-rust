@@ -916,7 +916,7 @@ ExprPair: ast::ExprPair = {
 
 #[inline]
 FunctionCall: CallSite = {
-    <func_name:FunctionName> "(" <args:CommaSepStar<FunctionCallArg>> ")" => {
+    <func_name:FunctionName> "(" <args:FunctionCallArgs> ")" => {
         if state.is_agg_fn(&func_name) {
             CallSite::CallAgg(ast::CallAgg{ func_name, args })
         } else {
@@ -931,6 +931,17 @@ FunctionName: ast::SymbolPrimitive = {
 }
 
 #[inline]
+FunctionCallArgs: Vec<ast::AstNode<ast::CallArg>> = {
+    CommaSepStar<FunctionCallArg>,
+    // Special case subquery when it is the only sub-expression of a function call (e.g., `SELECT AVG(SELECT VALUE price FROM g AS v))... `)
+    <lo:@L> <subq:SfwQuery> <hi:@R> => {
+        let qset = state.node(ast::QuerySet::Select(Box::new(subq)), lo..hi);
+        let query = state.node(ast::Query{ set: qset, order_by: None, limit: None, offset:None }, lo..hi);
+        vec![state.node(ast::CallArg::Positional(Box::new(ast::Expr::Query(query))), lo..hi)]
+    },
+}
+
+#[inline]
 FunctionCallArg: ast::AstNode<ast::CallArg> = {
     <FunctionArgPositional>,
     <FunctionArgNamed>,
@@ -939,7 +950,7 @@ FunctionCallArg: ast::AstNode<ast::CallArg> = {
 #[inline]
 FunctionArgPositional: ast::AstNode<ast::CallArg> = {
     <lo:@L> "*" <hi:@R> => state.node(ast::CallArg::Star(), lo..hi),
-    <lo:@L> <value:ExprQuery> <hi:@R> => state.node(ast::CallArg::Positional(value), lo..hi),
+    <lo:@L> <expr:ExprQuery> <hi:@R> => state.node(ast::CallArg::Positional(expr), lo..hi),
     <lo:@L> <ty:TypeName> <hi:@R> => state.node(ast::CallArg::PositionalType(ty), lo..hi),
 }
 
