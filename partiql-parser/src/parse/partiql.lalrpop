@@ -384,7 +384,8 @@ WhereClause: Box<ast::AstNode<ast::WhereClause>> = {
 //                                   GROUP BY                                     //
 // ------------------------------------------------------------------------------ //
 GroupClause: Box<ast::AstNode<ast::GroupByExpr>> = {
-    <lo:@L> "GROUP" <strategy: GroupStrategy> "BY" <keys:CommaSepPlus<GroupKey>> <group_as_alias:GroupAlias?> <hi:@R> => {
+    <lo:@L> "GROUP" <strategy: GroupStrategy>  <keys:GroupByKeys?> <group_as_alias:GroupAlias?> <hi:@R> => {
+        let keys = keys.unwrap_or_else(Vec::new);
         Box::new(state.node(ast::GroupByExpr{
             strategy,
             keys,
@@ -401,6 +402,10 @@ GroupStrategy: ast::GroupingStrategy = {
             None => ast::GroupingStrategy::GroupFull,
         }
     }
+}
+#[inline]
+GroupByKeys: Vec<ast::AstNode<ast::GroupKey>> = {
+    "BY" <CommaSepPlus<GroupKey>>
 }
 #[inline]
 GroupKey: ast::AstNode<ast::GroupKey> = {
