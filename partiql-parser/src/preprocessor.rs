@@ -349,12 +349,18 @@ where
                         Some(range) => Some(range.start..*e),
                     };
                     match tok {
-                        Token::OpenParen => {
+                        Token::OpenParen
+                        | Token::OpenSquare
+                        | Token::OpenDblAngle
+                        | Token::OpenCurly => {
                             patterns.iter_mut().for_each(|(_, subs)| subs.push(None));
                             nesting += 1;
                             self.parser.consume();
                         }
-                        Token::CloseParen => {
+                        Token::CloseParen
+                        | Token::CloseSquare
+                        | Token::CloseDblAngle
+                        | Token::CloseCurly => {
                             patterns.iter_mut().for_each(|(_, subs)| subs.push(None));
                             nesting -= 1;
                             self.parser.consume();
@@ -834,6 +840,18 @@ mod tests {
             preprocess(r#"CAST( (4 in (1,2,3,4))  AS INTEGER)"#)?,
             lex(r#"CAST( (4 in (1,2,3,4)) , "AS": INTEGER)"#)?
         );
+        assert_eq!(
+            preprocess(r#"cast([1, 2] as INT)"#)?,
+            lex(r#"cast([1, 2] , "as": INT)"#)?
+        );
+        assert_eq!(
+            preprocess(r#"cast(<<1, 2>> as INT)"#)?,
+            lex(r#"cast(<<1, 2>> , "as": INT)"#)?
+        );
+        assert_eq!(
+            preprocess(r#"cast({a:1} as INT)"#)?,
+            lex(r#"cast({a:1} , "as": INT)"#)?
+        );
 
         assert_eq!(
             preprocess(r#"extract(timezone_minute from a)"#)?,
@@ -895,6 +913,11 @@ mod tests {
         assert_eq!(preprocess(q_sum_1)?, lex(q_sum_1)?);
         let q_sum_star = r#"sum(*)"#;
         assert_eq!(preprocess(q_sum_star)?, lex(q_sum_star)?);
+
+        assert_eq!(
+            preprocess(r#"COUNT(DISTINCT [1,1,1,1,2])"#)?,
+            lex(r#"COUNT("DISTINCT" : [1,1,1,1,2])"#)?
+        );
 
         let empty_q = "";
         assert_eq!(preprocess(empty_q)?, lex(empty_q)?);
