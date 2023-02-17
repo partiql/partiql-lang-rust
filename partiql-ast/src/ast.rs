@@ -234,10 +234,29 @@ pub enum ConflictAction {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Query {
+    pub with: Option<AstNode<WithClause>>,
     pub set: AstNode<QuerySet>,
     pub order_by: Option<Box<AstNode<OrderByExpr>>>,
     pub limit: Option<Box<Expr>>,
     pub offset: Option<Box<Expr>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WithClause {
+    #[visit(skip)]
+    pub recursive: bool,
+    pub withs: Vec<AstNode<WithElement>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WithElement {
+    #[visit(skip)]
+    pub query_name: SymbolPrimitive,
+    #[visit(skip)]
+    pub columns: Option<Vec<SymbolPrimitive>>,
+    pub subquery: AstNode<Expr>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]

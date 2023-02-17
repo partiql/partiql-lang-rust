@@ -118,6 +118,10 @@ pub trait Visitor<'ast> {
 
     fn enter_query(&mut self, _query: &'ast ast::Query) {}
     fn exit_query(&mut self, _query: &'ast ast::Query) {}
+    fn enter_with_clause(&mut self, _query: &'ast ast::WithClause) {}
+    fn exit_with_clause(&mut self, _query: &'ast ast::WithClause) {}
+    fn enter_with_element(&mut self, _query: &'ast ast::WithElement) {}
+    fn exit_with_element(&mut self, _query: &'ast ast::WithElement) {}
     fn enter_query_set(&mut self, _query_set: &'ast ast::QuerySet) {}
     fn exit_query_set(&mut self, _query_set: &'ast ast::QuerySet) {}
     fn enter_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) {}
