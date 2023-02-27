@@ -7,6 +7,7 @@ fn test_ast_init() {
     common::setup();
 
     let _i = Item::Query(Query {
+        with: None,
         set: AstNode {
             id: NodeId(2),
             node: QuerySet::Expr(Box::new(Expr::Lit(AstNode {

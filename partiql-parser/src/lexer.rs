@@ -528,6 +528,8 @@ pub enum Token<'input> {
     Case,
     #[regex("(?i:Cross)")]
     Cross,
+    #[regex("(?i:Cycle)")]
+    Cycle,
     #[regex("(?i:Date)")]
     Date,
     #[regex("(?i:Desc)")]
@@ -604,8 +606,12 @@ pub enum Token<'input> {
     Preserve,
     #[regex("(?i:Right)")]
     Right,
+    #[regex("(?i:Recursive)")]
+    Recursive,
     #[regex("(?i:Select)")]
     Select,
+    #[regex("(?i:Search)")]
+    Search,
     #[regex("(?i:Table)")]
     Table,
     #[regex("(?i:Time)")]
@@ -649,7 +655,9 @@ impl<'input> Token<'input> {
                 | Token::At
                 | Token::Between
                 | Token::By
+                | Token::Case
                 | Token::Cross
+                | Token::Cycle
                 | Token::Date
                 | Token::Desc
                 | Token::Distinct
@@ -685,6 +693,8 @@ impl<'input> Token<'input> {
                 | Token::Pivot
                 | Token::Preserve
                 | Token::Right
+                | Token::Recursive
+                | Token::Search
                 | Token::Select
                 | Token::Table
                 | Token::Time
@@ -757,6 +767,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::By
             | Token::Case
             | Token::Cross
+            | Token::Cycle
             | Token::Date
             | Token::Desc
             | Token::Distinct
@@ -795,6 +806,8 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::Pivot
             | Token::Preserve
             | Token::Right
+            | Token::Recursive
+            | Token::Search
             | Token::Select
             | Token::Table
             | Token::Time

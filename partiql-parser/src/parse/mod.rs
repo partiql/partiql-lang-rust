@@ -23,6 +23,7 @@ use partiql_source_map::metadata::LocationMap;
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::ptr_arg)]
 #[allow(clippy::vec_box)]
+#[allow(clippy::let_unit_value)]
 #[allow(unused_variables)]
 #[allow(dead_code)]
 mod grammar {

@@ -11,6 +11,7 @@ pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
     if let ast::Expr::Query(ast::AstNode {
         node:
             ast::Query {
+                with: None,
                 set:
                     ast::AstNode {
                         node: ast::QuerySet::Expr(e),
