@@ -549,7 +549,11 @@ pub enum CallName {
     RTrim,
     Substring,
     Position,
+    Overlay,
     Exists,
+    Abs,
+    Mod,
+    Cardinality,
 }
 
 #[cfg(test)]

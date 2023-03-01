@@ -112,6 +112,21 @@ mod built_ins {
         }
     }
 
+    const PLACING: &str = "(?i:placing)";
+    pub(crate) fn built_in_overlay() -> FnExpr<'static> {
+        let re = Regex::new(PLACING).unwrap();
+        FnExpr {
+            fn_names: vec!["overlay"],
+            #[rustfmt::skip]
+            patterns: vec![
+                // `OVERLAY('hello' PLACING 'XX' FROM 2 FOR 3)` => overlay('hello', PLACING: 'XX', from: 2, for: 3)
+                vec![AnyOne(true), AnyStar(false), Id(re.clone()), AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false), Kw(Token::For), AnyOne(true), AnyStar(false)],
+                // `OVERLAY('hello' PLACING 'XX' FROM 2)` => overlay('hello', PLACING: 'XX', from: 2)
+                vec![AnyOne(true), AnyStar(false), Id(re), AnyOne(true), AnyStar(false), Kw(Token::From), AnyOne(true), AnyStar(false)],
+            ],
+        }
+    }
+
     pub(crate) fn built_in_aggs() -> FnExpr<'static> {
         FnExpr {
             // TODO: currently needs to be manually kept in-sync with parsers's `KNOWN_AGGREGATES`
@@ -210,6 +225,7 @@ pub(crate) fn built_ins() -> FnExprSet<'static> {
         built_ins::built_in_aggs(),
         built_ins::built_in_extract(),
         built_ins::built_in_position(),
+        built_ins::built_in_overlay(),
         built_ins::built_in_substring(),
         built_ins::built_in_cast(),
     ])
