@@ -691,6 +691,71 @@ impl EvalExpr for EvalFnPosition {
     }
 }
 
+/// Represents a built-in overlay string function, e.g. `OVERLAY('hello' PLACING 'XX' FROM 2 FOR 3)`.
+#[derive(Debug)]
+pub struct EvalFnOverlay {
+    pub value: Box<dyn EvalExpr>,
+    pub replacement: Box<dyn EvalExpr>,
+    pub offset: Box<dyn EvalExpr>,
+    pub length: Option<Box<dyn EvalExpr>>,
+}
+
+impl EvalExpr for EvalFnOverlay {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let value = match value.as_ref() {
+            Null => None,
+            Value::String(s) => Some(s),
+            _ => return Cow::Owned(Value::Missing),
+        };
+        let replacement = self.replacement.evaluate(bindings, ctx);
+        let replacement = match replacement.as_ref() {
+            Null => None,
+            Value::String(s) => Some(s),
+            _ => return Cow::Owned(Value::Missing),
+        };
+        let offset = self.offset.evaluate(bindings, ctx);
+        let offset = match offset.as_ref() {
+            Null => None,
+            Value::Integer(i) => Some(i),
+            _ => return Cow::Owned(Value::Missing),
+        };
+
+        let length = if let Some(length) = &self.length {
+            match length.evaluate(bindings, ctx).as_ref() {
+                Value::Integer(i) => *i as usize,
+                Value::Null => return Cow::Owned(Value::Null),
+                _ => return Cow::Owned(Value::Missing),
+            }
+        } else if let Some(replacement) = &replacement {
+            replacement.len()
+        } else {
+            // either replacement or length was NULL; return NULL
+            return Cow::Owned(Value::Null);
+        };
+
+        let result =
+            if let (Some(value), Some(replacement), Some(&offset)) = (value, replacement, offset) {
+                let mut value = *value.clone();
+                let start = std::cmp::max(offset - 1, 0) as usize;
+                if start > value.len() {
+                    value += replacement;
+                } else {
+                    let end = std::cmp::min(start + length, value.len());
+                    value.replace_range(start..end, replacement);
+                }
+
+                Value::from(value)
+            } else {
+                // either value, replacement, or offset was NULL; return NULL
+                Value::Null
+            };
+
+        Cow::Owned(result)
+    }
+}
+
 #[inline]
 #[track_caller]
 fn trim<'a, FnTrim>(value: &'a Value, to_trim: &'a Value, trim_fn: FnTrim) -> Value
@@ -792,5 +857,81 @@ impl EvalExpr for EvalFnExists {
             _ => false,
         };
         Cow::Owned(Value::Boolean(exists))
+    }
+}
+
+/// Represents an `ABS` function, e.g. `abs(-1)`.
+#[derive(Debug)]
+pub struct EvalFnAbs {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnAbs {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let lhs: &Value = value.borrow();
+        let rhs = 0.into();
+        match NullableOrd::lt(lhs, &rhs) {
+            Null => Cow::Owned(Null),
+            Missing => Cow::Owned(Missing),
+            Value::Boolean(true) => Cow::Owned(-value.into_owned()),
+            _ => Cow::Owned(value.into_owned()),
+        }
+    }
+}
+
+/// Represents an `MOD` function, e.g. `MOD(10, 1)`.
+#[derive(Debug)]
+pub struct EvalFnModulus {
+    pub lhs: Box<dyn EvalExpr>,
+    pub rhs: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnModulus {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let lhs = self.lhs.evaluate(bindings, ctx);
+        let lhs = match lhs.as_ref() {
+            Null => None,
+            Missing => return Cow::Owned(Value::Missing),
+            _ => Some(lhs),
+        };
+        let rhs = self.rhs.evaluate(bindings, ctx);
+        let rhs = match rhs.as_ref() {
+            Value::Null => return Cow::Owned(Value::Null),
+            Missing => return Cow::Owned(Value::Missing),
+            _ => rhs,
+        };
+
+        if let Some(lhs) = lhs {
+            let lhs: &Value = lhs.borrow();
+            let rhs: &Value = rhs.borrow();
+            Cow::Owned(lhs % rhs)
+        } else {
+            Cow::Owned(Value::Null)
+        }
+    }
+}
+
+/// Represents an `CARDINALITY` function, e.g. `cardinality([1,2,3])`.
+#[derive(Debug)]
+pub struct EvalFnCardinality {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnCardinality {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Missing => Missing,
+            Value::List(l) => Value::from(l.len()),
+            Value::Bag(b) => Value::from(b.len()),
+            Value::Tuple(t) => Value::from(t.len()),
+            _ => Missing,
+        };
+        Cow::Owned(result)
     }
 }

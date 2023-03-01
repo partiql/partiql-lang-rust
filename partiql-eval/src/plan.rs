@@ -12,11 +12,12 @@ use crate::eval;
 use crate::eval::evaluable::{EvalJoinKind, EvalSubQueryExpr, Evaluable};
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr,
-    EvalFnBitLength, EvalFnBtrim, EvalFnCharLength, EvalFnExists, EvalFnLower, EvalFnLtrim,
-    EvalFnOctetLength, EvalFnPosition, EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr,
-    EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath,
-    EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
+    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
+    EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength, EvalFnExists, EvalFnLower,
+    EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition, EvalFnRtrim,
+    EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch, EvalLikeNonStringNonLiteralMatch,
+    EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp,
+    EvalUnaryOpExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_value::Value::Null;
@@ -439,9 +440,46 @@ impl EvaluatorPlanner {
                         let needle = args.pop().unwrap();
                         Box::new(EvalFnPosition { needle, haystack })
                     }
+                    CallName::Overlay => {
+                        assert!((3usize..=4).contains(&args.len()));
+
+                        let length = if args.len() == 4 {
+                            Some(args.pop().unwrap())
+                        } else {
+                            None
+                        };
+                        let offset = args.pop().unwrap();
+                        let replacement = args.pop().unwrap();
+                        let value = args.pop().unwrap();
+
+                        Box::new(EvalFnOverlay {
+                            value,
+                            replacement,
+                            offset,
+                            length,
+                        })
+                    }
                     CallName::Exists => {
                         assert_eq!(args.len(), 1);
                         Box::new(EvalFnExists {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::Abs => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnAbs {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::Mod => {
+                        assert_eq!(args.len(), 2);
+                        let rhs = args.pop().unwrap();
+                        let lhs = args.pop().unwrap();
+                        Box::new(EvalFnModulus { lhs, rhs })
+                    }
+                    CallName::Cardinality => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCardinality {
                             value: args.pop().unwrap(),
                         })
                     }

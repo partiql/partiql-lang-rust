@@ -218,6 +218,41 @@ fn function_call_def_substring() -> CallDef {
     }
 }
 
+fn function_call_def_overlay() -> CallDef {
+    CallDef {
+        names: vec!["overlay"],
+        overloads: vec![
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Positional,
+                    CallSpecArg::Named("placing".into()),
+                    CallSpecArg::Named("from".into()),
+                    CallSpecArg::Named("for".into()),
+                ],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::Overlay,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Positional,
+                    CallSpecArg::Named("placing".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::Overlay,
+                        arguments: args,
+                    })
+                }),
+            },
+        ],
+    }
+}
+
 fn function_call_def_position() -> CallDef {
     CallDef {
         names: vec!["position"],
@@ -359,6 +394,51 @@ fn function_call_def_exists() -> CallDef {
     }
 }
 
+fn function_call_def_abs() -> CallDef {
+    CallDef {
+        names: vec!["abs"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::Abs,
+                    arguments: args,
+                })
+            }),
+        }],
+    }
+}
+
+fn function_call_def_mod() -> CallDef {
+    CallDef {
+        names: vec!["mod"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional, CallSpecArg::Positional],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::Mod,
+                    arguments: args,
+                })
+            }),
+        }],
+    }
+}
+
+fn function_call_def_cardinality() -> CallDef {
+    CallDef {
+        names: vec!["cardinality"],
+        overloads: vec![CallSpec {
+            input: vec![CallSpecArg::Positional],
+            output: Box::new(|args| {
+                logical::ValueExpr::Call(logical::CallExpr {
+                    name: logical::CallName::Cardinality,
+                    arguments: args,
+                })
+            }),
+        }],
+    }
+}
+
 /// Function symbol table
 #[derive(Debug)]
 pub struct FnSymTab {
@@ -386,10 +466,14 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_upper(),
         function_call_def_substring(),
         function_call_def_position(),
+        function_call_def_overlay(),
         function_call_def_trim(),
         function_call_def_coalesce(),
         function_call_def_nullif(),
         function_call_def_exists(),
+        function_call_def_abs(),
+        function_call_def_mod(),
+        function_call_def_cardinality(),
     ] {
         assert!(!def.names.is_empty());
         let primary = def.names[0];
