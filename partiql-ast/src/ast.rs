@@ -237,8 +237,7 @@ pub struct Query {
     pub with: Option<AstNode<WithClause>>,
     pub set: AstNode<QuerySet>,
     pub order_by: Option<Box<AstNode<OrderByExpr>>>,
-    pub limit: Option<Box<Expr>>,
-    pub offset: Option<Box<Expr>>,
+    pub limit_offset: Option<Box<AstNode<LimitOffsetClause>>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -805,6 +804,13 @@ pub struct GroupKey {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OrderByExpr {
     pub sort_specs: Vec<AstNode<SortSpec>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct LimitOffsetClause {
+    pub limit: Option<Box<Expr>>,
+    pub offset: Option<Box<Expr>>,
 }
 
 /// <expr> [ASC | DESC] ?

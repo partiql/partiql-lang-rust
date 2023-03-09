@@ -44,8 +44,7 @@ struct QueryClauses {
     group_by_clause: Option<logical::OpId>,
     having_clause: Option<logical::OpId>,
     order_by_clause: Option<logical::OpId>,
-    limit_clause: Option<logical::OpId>,
-    offset_clause: Option<logical::OpId>,
+    limit_offset_clause: Option<logical::OpId>,
     select_clause: Option<logical::OpId>,
     distinct: Option<logical::OpId>,
 }
@@ -59,8 +58,7 @@ impl QueryClauses {
             self.group_by_clause,
             self.having_clause,
             self.order_by_clause,
-            self.limit_clause,
-            self.offset_clause,
+            self.limit_offset_clause,
             self.select_clause,
             self.distinct,
         ]
@@ -497,10 +495,24 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn enter_query(&mut self, _query: &'ast Query) {
         self.enter_benv();
         self.siblings.push(vec![]);
+        self.enter_q();
     }
 
     fn exit_query(&mut self, _query: &'ast Query) {
+        let clauses = self.exit_q();
+
+        let mut clauses = clauses.evaluation_order().into_iter();
+        if let Some(mut src_id) = clauses.next() {
+            for dst_id in clauses {
+                self.plan.add_flow(src_id, dst_id);
+                src_id = dst_id;
+            }
+
+            self.push_bexpr(src_id);
+        }
+
         self.siblings.pop();
+
         let mut benv = self.exit_benv();
         assert_eq!(benv.len(), 1);
 
@@ -543,22 +555,9 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) {}
 
-    fn enter_select(&mut self, _select: &'ast Select) {
-        self.enter_q();
-    }
+    fn enter_select(&mut self, _select: &'ast Select) {}
 
-    fn exit_select(&mut self, _select: &'ast Select) {
-        let clauses = self.exit_q();
-
-        let mut clauses = clauses.evaluation_order().into_iter();
-        let mut src_id = clauses.next().expect("no from clause");
-        for dst_id in clauses {
-            self.plan.add_flow(src_id, dst_id);
-            src_id = dst_id;
-        }
-
-        self.push_bexpr(src_id);
-    }
+    fn exit_select(&mut self, _select: &'ast Select) {}
 
     fn enter_projection(&mut self, _projection: &'ast Projection) {
         self.enter_benv();
@@ -1107,6 +1106,30 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
         let _env = self.exit_env();
         todo!("order by clause");
+    }
+
+    fn enter_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {
+        self.enter_env();
+    }
+
+    fn exit_limit_offset_clause(&mut self, limit_offset: &'ast ast::LimitOffsetClause) {
+        let mut env = self.exit_env();
+        assert!((1..=2).contains(&env.len()));
+
+        let offset = if limit_offset.offset.is_some() {
+            env.pop()
+        } else {
+            None
+        };
+        let limit = if limit_offset.limit.is_some() {
+            env.pop()
+        } else {
+            None
+        };
+
+        let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
+        let id = self.plan.add_operator(limit_offset);
+        self.current_clauses_mut().limit_offset_clause.replace(id);
     }
 
     fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) {

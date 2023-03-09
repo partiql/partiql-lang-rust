@@ -15,8 +15,7 @@ fn test_ast_init() {
                 node: Lit::Int32Lit(23),
             }))),
         },
-        offset: None,
         order_by: None,
-        limit: None,
+        limit_offset: None,
     });
 }

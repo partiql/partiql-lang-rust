@@ -18,8 +18,7 @@ pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
                         ..
                     },
                 order_by: None,
-                limit: None,
-                offset: None,
+                limit_offset: None,
             },
         ..
     }) = *q

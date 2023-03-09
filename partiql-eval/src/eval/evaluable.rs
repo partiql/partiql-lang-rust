@@ -432,6 +432,68 @@ impl Evaluable for EvalFilter {
     }
 }
 
+/// Represents an evaluation `LIMIT` and/or `OFFSET` operator.
+#[derive(Debug)]
+pub struct EvalLimitOffset {
+    pub limit: Option<Box<dyn EvalExpr>>,
+    pub offset: Option<Box<dyn EvalExpr>>,
+    pub input: Option<Value>,
+}
+
+impl Evaluable for EvalLimitOffset {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let empty_bindings = Tuple::new();
+
+        let offset = match &self.offset {
+            None => 0,
+            Some(expr) => match expr.evaluate(&empty_bindings, ctx).as_ref() {
+                Value::Integer(i) => {
+                    if *i >= 0 {
+                        *i as usize
+                    } else {
+                        0
+                    }
+                }
+                _ => 0,
+            },
+        };
+
+        let limit = match &self.limit {
+            None => None,
+            Some(expr) => match expr.evaluate(&empty_bindings, ctx).as_ref() {
+                Value::Integer(i) => {
+                    if *i >= 0 {
+                        Some(*i as usize)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+        };
+
+        let ordered = input_value.is_ordered();
+        fn collect(values: impl Iterator<Item = Value>, ordered: bool) -> Value {
+            match ordered {
+                true => Value::from(values.collect::<List>()),
+                false => Value::from(values.collect::<Bag>()),
+            }
+        }
+
+        let offsetted = input_value.into_iter().skip(offset);
+        match limit {
+            Some(n) => Some(collect(offsetted.take(n), ordered)),
+            None => Some(collect(offsetted, ordered)),
+        }
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
 /// Represents an evaluation `SelectValue` operator; `SelectValue` implements PartiQL Core's
 /// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).

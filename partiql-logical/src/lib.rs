@@ -108,20 +108,18 @@ where
     /// Extends the logical plan with the given data flows.
     /// #Examples:
     /// ```
-    /// use partiql_logical::{BindingsOp, LogicalPlan};
+    /// use partiql_logical::{BindingsOp, LimitOffset, LogicalPlan};
     /// let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
     ///
     /// let a = p.add_operator(BindingsOp::OrderBy);
     /// let b = p.add_operator(BindingsOp::Sink);
-    /// let c = p.add_operator(BindingsOp::Limit);
+    /// let c = p.add_operator(BindingsOp::LimitOffset(LimitOffset{limit:None, offset:None}));
     /// let d = p.add_operator(BindingsOp::GroupBy);
-    /// let e = p.add_operator(BindingsOp::Offset);
     ///
     /// p.add_flow(a, b);
-    /// p.add_flow(a, c);
     ///
-    /// p.extend_with_flows(&[(c, d), (d, e)]);
-    /// assert_eq!(4, p.flows().len());
+    /// p.extend_with_flows(&[(a,c), (c, d)]);
+    /// assert_eq!(3, p.flows().len());
     /// ```
     #[inline]
     pub fn extend_with_flows(&mut self, flows: &[(OpId, OpId)]) {
@@ -190,8 +188,7 @@ pub enum BindingsOp {
     Unpivot(Unpivot),
     Filter(Filter),
     OrderBy,
-    Offset,
-    Limit,
+    LimitOffset(LimitOffset),
     Join(Join),
     SetOp,
     Project(Project),
@@ -238,6 +235,14 @@ pub struct Unpivot {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Filter {
     pub expr: ValueExpr,
+}
+
+/// [`LimitOffset`] represents a possible limit and/or offset operator, e.g. `LIMIT 10 OFFSET 5` in `SELECT a FROM t LIMIT 10 OFFSET 5`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct LimitOffset {
+    pub limit: Option<ValueExpr>,
+    pub offset: Option<ValueExpr>,
 }
 
 /// ['Join`] represents a join operator, e.g. implicit `CROSS JOIN` specified by comma in `FROM`
@@ -565,14 +570,15 @@ mod tests {
         let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
         let a = p.add_operator(BindingsOp::OrderBy);
         let b = p.add_operator(BindingsOp::Sink);
-        let c = p.add_operator(BindingsOp::Limit);
+        let c = p.add_operator(BindingsOp::LimitOffset(LimitOffset {
+            limit: None,
+            offset: None,
+        }));
         let d = p.add_operator(BindingsOp::GroupBy);
-        let e = p.add_operator(BindingsOp::Offset);
         p.add_flow(a, b);
         p.add_flow(a, c);
-        p.add_flow(b, c);
-        p.extend_with_flows(&[(c, d), (d, e)]);
-        assert_eq!(5, p.operators().len());
-        assert_eq!(5, p.flows().len());
+        p.extend_with_flows(&[(c, d), (b, c)]);
+        assert_eq!(4, p.operators().len());
+        assert_eq!(4, p.flows().len());
     }
 }
