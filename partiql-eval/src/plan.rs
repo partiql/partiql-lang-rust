@@ -3,6 +3,7 @@ use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
 
 use partiql_logical as logical;
+
 use partiql_logical::{
     BinaryOp, BindingsOp, CallName, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent,
     Pattern, PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
@@ -133,8 +134,14 @@ impl EvaluatorPlanner {
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy => todo!("OrderBy"),
-            BindingsOp::Offset => todo!("Offset"),
-            BindingsOp::Limit => todo!("Limit"),
+            BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
+                Box::new(eval::evaluable::EvalLimitOffset {
+                    limit: limit.as_ref().map(|e| self.plan_values(e)),
+                    offset: offset.as_ref().map(|e| self.plan_values(e)),
+                    input: None,
+                })
+            }
+
             BindingsOp::SetOp => todo!("SetOp"),
             BindingsOp::GroupBy => todo!("GroupBy"),
         }

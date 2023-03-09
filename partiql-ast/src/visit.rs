@@ -212,6 +212,8 @@ pub trait Visitor<'ast> {
     fn exit_group_key(&mut self, _group_key: &'ast ast::GroupKey) {}
     fn enter_order_by_expr(&mut self, _order_by_expr: &'ast ast::OrderByExpr) {}
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast ast::OrderByExpr) {}
+    fn enter_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {}
+    fn exit_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {}
     fn enter_sort_spec(&mut self, _sort_spec: &'ast ast::SortSpec) {}
     fn exit_sort_spec(&mut self, _sort_spec: &'ast ast::SortSpec) {}
     fn enter_custom_type(&mut self, _custom_type: &'ast ast::CustomType) {}
