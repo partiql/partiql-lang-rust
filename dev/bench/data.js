@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1678401821899,
+  "lastUpdate": 1678473905361,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -5105,6 +5105,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 40305,
             "range": "± 1751",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "josh@pschorr.dev",
+            "name": "Josh Pschorr",
+            "username": "jpschorr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9a0e15c392fb038f835617217e5c15752fc5cd2",
+          "message": "Update to latest `partiql-tests` (#315)",
+          "timestamp": "2023-03-10T10:33:19-08:00",
+          "tree_id": "29e310c89cf51413a04d51d6147b4eb7ff98a89c",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/f9a0e15c392fb038f835617217e5c15752fc5cd2"
+        },
+        "date": 1678473904188,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6986,
+            "range": "± 103",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 68269,
+            "range": "± 1551",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 136505,
+            "range": "± 1849",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 28910,
+            "range": "± 428",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 68825,
+            "range": "± 1137",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 119155,
+            "range": "± 1793",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 22632,
+            "range": "± 206",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 427920,
+            "range": "± 1483",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 863276,
+            "range": "± 1711",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 27122720,
+            "range": "± 393078",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 141676344,
+            "range": "± 688764",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 269309910,
+            "range": "± 1245059",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 16939,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 6147,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 2609,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 173,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 789,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 3006,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 10108,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 27247,
+            "range": "± 73",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 41934,
+            "range": "± 91",
             "unit": "ns/iter"
           }
         ]
