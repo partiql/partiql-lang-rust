@@ -22,7 +22,7 @@ use partiql_value::{BindingsName, Value};
 
 use std::collections::{HashMap, HashSet};
 
-use crate::call_defs::{function_call_def, CallArgument, FnSymTab};
+use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -117,7 +117,7 @@ pub struct AstToLogical {
     plan: LogicalPlan<BindingsOp>,
 
     key_registry: name_resolver::KeyRegistry,
-    fnsym_tab: FnSymTab,
+    fnsym_tab: &'static FnSymTab,
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
@@ -155,6 +155,7 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
 
 impl AstToLogical {
     pub fn new(registry: name_resolver::KeyRegistry) -> Self {
+        let fnsym_tab: &FnSymTab = &FN_SYM_TAB;
         AstToLogical {
             id_stack: Default::default(),
 
@@ -178,7 +179,7 @@ impl AstToLogical {
             plan: Default::default(),
 
             key_registry: registry,
-            fnsym_tab: function_call_def(),
+            fnsym_tab,
         }
     }
 
