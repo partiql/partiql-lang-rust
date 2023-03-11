@@ -1,9 +1,11 @@
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use partiql_logical as logical;
 use partiql_logical::ValueExpr;
 use partiql_value::Value;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+
 use unicase::UniCase;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -72,7 +74,7 @@ impl CallSpecArg {}
 
 pub struct CallSpec {
     input: Vec<CallSpecArg>,
-    output: Box<dyn Fn(Vec<ValueExpr>) -> logical::ValueExpr>,
+    output: Box<dyn Fn(Vec<ValueExpr>) -> logical::ValueExpr + Send + Sync>,
 }
 
 impl Debug for CallSpec {
@@ -438,6 +440,8 @@ fn function_call_def_cardinality() -> CallDef {
         }],
     }
 }
+
+pub(crate) static FN_SYM_TAB: Lazy<FnSymTab> = Lazy::new(function_call_def);
 
 /// Function symbol table
 #[derive(Debug)]
