@@ -1135,7 +1135,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn exit_group_key(&mut self, _group_key: &'ast GroupKey) {
-        println!("group key_registry: {:?}", self.key_registry);
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases

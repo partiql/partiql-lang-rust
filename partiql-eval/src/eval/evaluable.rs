@@ -672,8 +672,13 @@ impl Evaluable for EvalSelectAll {
 
         let values = input_value.into_iter().map(|val| {
             val.coerce_to_tuple()
-                .into_values()
-                .flat_map(|v| v.coerce_to_tuple().into_pairs())
+                .into_pairs()
+                .flat_map(|(k, v)| {
+                    match v {
+                        Value::Tuple(_) => v.coerce_to_tuple().into_pairs().collect::<Tuple>(), // unnest tuples
+                        _ => Tuple::from([(&*k, v)]),
+                    }
+                })
                 .collect::<Tuple>()
         });
 
