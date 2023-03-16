@@ -12,11 +12,13 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::{Decimal as RustDecimal, Decimal};
 
 mod bag;
+mod datetime;
 pub mod ion;
 mod list;
 mod tuple;
 
 pub use bag::*;
+pub use datetime::*;
 pub use list::*;
 pub use tuple::*;
 
@@ -46,6 +48,7 @@ pub enum Value {
     Decimal(RustDecimal),
     String(Box<String>),
     Blob(Box<Vec<u8>>),
+    DateTime(Box<DateTime>),
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
@@ -652,6 +655,7 @@ impl Debug for Value {
             Value::Decimal(d) => write!(f, "{d}"),
             Value::String(s) => write!(f, "'{s}'"),
             Value::Blob(s) => write!(f, "'{s:?}'"),
+            Value::DateTime(t) => t.fmt(f),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
@@ -752,6 +756,10 @@ impl Ord for Value {
             (_, Value::Real(_)) => Ordering::Greater,
             (_, Value::Decimal(_)) => Ordering::Greater,
 
+            (Value::DateTime(l), Value::DateTime(r)) => l.cmp(r),
+            (Value::DateTime(_), _) => Ordering::Less,
+            (_, Value::DateTime(_)) => Ordering::Greater,
+
             (Value::String(l), Value::String(r)) => l.cmp(r),
             (Value::String(_), _) => Ordering::Less,
             (_, Value::String(_)) => Ordering::Greater,
@@ -838,6 +846,13 @@ impl From<RustDecimal> for Value {
     #[inline]
     fn from(d: RustDecimal) -> Self {
         Value::Decimal(d)
+    }
+}
+
+impl From<DateTime> for Value {
+    #[inline]
+    fn from(t: DateTime) -> Self {
+        Value::DateTime(Box::new(t))
     }
 }
 

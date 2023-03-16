@@ -1,7 +1,4 @@
-use ion_rs::value::owned::{Element, Struct};
-use ion_rs::value::reader::{element_reader, ElementReader};
-use ion_rs::value::{IonElement, IonSequence, IonStruct};
-use ion_rs::IonType;
+use ion_rs::{IonType, ReaderBuilder};
 use miette::{miette, IntoDiagnostic};
 use std::ffi::OsStr;
 use std::fs;
@@ -9,6 +6,8 @@ use std::fs::DirEntry;
 
 use crate::schema::spec::*;
 use crate::schema::structure::*;
+use ion_rs::element::reader::ElementReader;
+use ion_rs::element::{Element, Struct};
 use std::path::Path;
 
 macro_rules! expect_value {
@@ -28,7 +27,7 @@ macro_rules! expect_value {
 macro_rules! expect_str {
     ($val:expr, $msg:literal $(,)?) => {
         expect_value!(
-            expect_value!($val, $msg).as_str(), "{} to be a string", $msg)
+            expect_value!($val, $msg).as_text(), "{} to be a string", $msg)
     };
     ($val:expr, $fmt:expr, $($arg:tt)*) => {
         expect_value!(
@@ -111,7 +110,8 @@ impl TryFrom<&[u8]> for PartiQLTestDocument {
     type Error = miette::Report;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let elements = element_reader().read_all(value).into_diagnostic()?;
+        let mut reader = ReaderBuilder::new().build(value).into_diagnostic()?;
+        let elements = reader.read_all_elements().into_diagnostic()?;
         elements.as_slice().try_into()
     }
 }
@@ -169,7 +169,7 @@ impl TryFrom<&Element> for Namespace {
             ));
         };
         let list = expect_list!(Some(value), "Namespace");
-        let contents: Result<Vec<_>, _> = list.iter().map(|e| e.try_into()).collect();
+        let contents: Result<Vec<_>, _> = list.elements().map(|e| e.try_into()).collect();
         Ok(Namespace {
             name,
             contents: contents?,
@@ -208,7 +208,7 @@ impl TryFrom<&Struct> for TestCase {
         let assert = match assert_elt.ion_type() {
             IonType::List => {
                 let list = assert_elt.as_sequence().unwrap();
-                let asserts: Result<Vec<_>, _> = list.iter().map(|e| e.try_into()).collect();
+                let asserts: Result<Vec<_>, _> = list.elements().map(|e| e.try_into()).collect();
                 asserts?
             }
             IonType::Struct => {
@@ -291,7 +291,7 @@ impl TryFrom<&Element> for EvaluationModeList {
             IonType::Symbol | IonType::String => Ok(eval_mode(value)?.into()),
             IonType::List => {
                 let list = value.as_sequence().unwrap();
-                let eval_modes: Result<Vec<_>, _> = list.iter().map(|e| eval_mode(e)).collect();
+                let eval_modes: Result<Vec<_>, _> = list.elements().map(|e| eval_mode(e)).collect();
                 Ok(eval_modes?.into())
             }
             _ => Err(miette!(
@@ -320,7 +320,7 @@ impl TryFrom<&Struct> for EquivalenceClass {
         let stmt_list = expect_list!(value.get("statements"), "EquivalenceClass statements");
 
         let mut statements = vec![];
-        for stmt in stmt_list.iter() {
+        for stmt in stmt_list.elements() {
             statements.push(expect_str!(Some(stmt), "EquivalenceClass statement").into())
         }
 

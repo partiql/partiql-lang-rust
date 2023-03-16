@@ -3,11 +3,10 @@ use crate::schema::structure::*;
 
 use crate::util::Escaper;
 use codegen::{Function, Module, Scope};
-use ion_rs::value::native_writer::NativeElementWriter;
-use ion_rs::value::owned::{Element, Struct};
-use ion_rs::value::writer::ElementWriter;
 use ion_rs::TextWriterBuilder;
 
+use ion_rs::element::writer::ElementWriter;
+use ion_rs::element::{Element, Struct};
 use quote::quote;
 use std::collections::{HashMap, HashSet};
 
@@ -531,11 +530,11 @@ fn struct_to_string(elt: &Struct) -> String {
 fn elt_to_string(elt: &Element) -> String {
     let mut buffer = Vec::new();
     {
-        let writer = TextWriterBuilder::pretty()
+        let mut writer = TextWriterBuilder::pretty()
             .build(&mut buffer)
             .expect("ion text builder");
-        let mut element_writer = NativeElementWriter::new(writer);
-        element_writer.write(elt).expect("element write");
+
+        writer.write_element(elt).expect("element write");
     }
     String::from_utf8(buffer).expect("utf8")
 }

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Added
+- `DATE`/`TIME`/`TIMESTAMP` values
 - Implements `LIMIT` and `OFFSET` operators in evaluator
 - Adds some benchmarks for parsing, compiling, planning, & evaluation
 - Implements `PIVOT` operator in evaluator

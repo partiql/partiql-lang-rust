@@ -39,7 +39,10 @@ partiql-logical = { path = "../partiql-logical", version = "0.2.*" }
 partiql-value = { path = "../partiql-value", version = "0.2.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.2.*" }
 
-ion-rs = "0.14"
+ion-rs = "0.16"
+
+regex = "1.7"
+once_cell = "1"
 
 rust_decimal = "1.27"
 
