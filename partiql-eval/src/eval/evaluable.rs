@@ -676,6 +676,7 @@ impl Evaluable for EvalSelectAll {
                 .flat_map(|(k, v)| {
                     match v {
                         Value::Tuple(_) => v.coerce_to_tuple().into_pairs().collect::<Tuple>(), // unnest tuples
+                        Value::Missing => partiql_tuple![],
                         _ => Tuple::from([(&*k, v)]),
                     }
                 })
