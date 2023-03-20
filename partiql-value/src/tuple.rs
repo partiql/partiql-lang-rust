@@ -2,7 +2,6 @@ use itertools::Itertools;
 
 use std::cmp::Ordering;
 
-use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
@@ -171,9 +170,7 @@ impl Iterator for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        let s1: HashSet<(&str, &Value)> = self.pairs().collect();
-        let s2: HashSet<(&str, &Value)> = other.pairs().collect();
-        s1.eq(&s2)
+        self.pairs().sorted().eq(other.pairs().sorted())
     }
 }
 
@@ -185,7 +182,7 @@ impl PartialOrd for Tuple {
 
 impl Hash for Tuple {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for (k, v) in self.pairs() {
+        for (k, v) in self.pairs().sorted() {
             k.hash(state);
             v.hash(state);
         }

@@ -868,6 +868,7 @@ mod tests {
     use rust_decimal_macros::dec;
     use std::borrow::Cow;
     use std::cell::RefCell;
+    use std::collections::HashSet;
     use std::mem;
     use std::rc::Rc;
 
@@ -1896,6 +1897,64 @@ mod tests {
             Some(Value::from(4)),
             tuple.remove(&BindingsName::CaseInsensitive("a".to_string()))
         );
+    }
+
+    #[test]
+    fn bag_of_tuple_equality() {
+        // Asserts the following PartiQL Values are equal
+        // <<{
+        //   'outer_elem_1': 1,
+        //   'outer_elem_2': <<{
+        //      'inner_elem_1': {'bar': 4},
+        //      'inner_elem_2': {'foo': 3},
+        //   }>>
+        // }>>
+        // with
+        // <<{
+        //   'outer_elem_2': <<{
+        //      'inner_elem_2': {'foo': 3},
+        //      'inner_elem_1': {'bar': 4},
+        //   }>>
+        //   'outer_elem_1': 1,
+        // }>>
+        let bag1 = partiql_bag!(partiql_tuple![
+            ("outer_elem_1", 1),
+            (
+                "outer_elem_2",
+                partiql_bag![partiql_tuple![
+                    ("inner_elem_1", partiql_tuple![("bar", 3)]),
+                    ("inner_elem_2", partiql_tuple![("foo", 4)])
+                ]]
+            )
+        ]);
+        let bag2 = partiql_bag!(partiql_tuple![
+            (
+                "outer_elem_2",
+                partiql_bag![partiql_tuple![
+                    ("inner_elem_2", partiql_tuple![("foo", 4)]),
+                    ("inner_elem_1", partiql_tuple![("bar", 3)])
+                ]]
+            ),
+            ("outer_elem_1", 1)
+        ]);
+        assert_eq!(bag1, bag2);
+    }
+
+    #[test]
+    fn duplicate_tuple_elems() {
+        let tuple1 = partiql_tuple![("a", 1), ("a", 1), ("b", 2)];
+        let tuple2 = partiql_tuple![("a", 1), ("b", 2)];
+        assert_ne!(tuple1, tuple2);
+    }
+
+    #[test]
+    fn tuple_hashing() {
+        let tuple1 = partiql_tuple![("a", 1), ("b", 2)];
+        let mut s: HashSet<Tuple> = HashSet::from([tuple1]);
+        assert_eq!(1, s.len());
+        let tuple2 = partiql_tuple![("b", 2), ("a", 1)];
+        s.insert(tuple2);
+        assert_eq!(1, s.len());
     }
 
     #[track_caller]

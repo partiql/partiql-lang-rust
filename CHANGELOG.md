@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expose `partiql_value::parse_ion` as a public API.
 
 ### Fixes
+- Fixes Tuple value duplicate equality and hashing
 
 ## [0.2.0] - 2023-01-10
 ### Changed
