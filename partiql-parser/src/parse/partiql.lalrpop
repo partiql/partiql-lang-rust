@@ -411,7 +411,7 @@ WhereClause: Box<ast::AstNode<ast::WhereClause>> = {
 // ------------------------------------------------------------------------------ //
 GroupClause: Box<ast::AstNode<ast::GroupByExpr>> = {
     <lo:@L> "GROUP" <strategy: GroupStrategy>  <keys:GroupByKeys?> <group_as_alias:GroupAlias?> <hi:@R> => {
-        let keys = keys.unwrap_or_else(Vec::new);
+        let keys = keys.unwrap_or_default();
         Box::new(state.node(ast::GroupByExpr{
             strategy,
             keys,
