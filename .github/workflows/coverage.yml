@@ -25,8 +25,11 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@master
         with:
+          # Coverage requires the nightly toolchain because it uses the presently unstable `-Z profile` feature
+          # See: https://github.com/rust-lang/rust/issues/42524
+          # See also: https://github.com/actions-rs/grcov#usage
           # nightly can be very volatile--pin this to a version we know works well...
-          toolchain: nightly-2022-08-11
+          toolchain: nightly-2023-03-09
       # Conformance tests are run with 'conformance_test' feature. Since step runs with 'all-features', the conformance
       # test are also run, which can cause `cargo test` to fail. Add 'continue-on-error' step to prevent GH Actions
       # failure.
