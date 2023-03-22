@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 
-use ion_rs::Timestamp;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 

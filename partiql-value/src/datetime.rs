@@ -82,19 +82,19 @@ impl Debug for DateTime {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             DateTime::Date(d) => {
-                write!(f, "DATE '{:?}'", d)
+                write!(f, "DATE '{d:?}'")
             }
             DateTime::Time(t) => {
-                write!(f, "TIME '{:?}'", t)
+                write!(f, "TIME '{t:?}'")
             }
             DateTime::TimeWithTz(t, tz) => {
-                write!(f, "TIME WITH TIME ZONE '{:?} {:?}'", t, tz)
+                write!(f, "TIME WITH TIME ZONE '{t:?} {tz:?}'")
             }
             DateTime::Timestamp(dt) => {
-                write!(f, "TIMESTAMP '{:?}'", dt)
+                write!(f, "TIMESTAMP '{dt:?}'")
             }
             DateTime::TimestampWithTz(dt) => {
-                write!(f, "TIMESTAMP WITH TIME ZONE '{:?}'", dt)
+                write!(f, "TIMESTAMP WITH TIME ZONE '{dt:?}'")
             }
         }
     }
