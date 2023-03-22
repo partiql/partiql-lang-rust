@@ -11,16 +11,29 @@ pub trait Escaper {
     fn escape_module_name(&self) -> String;
 }
 
+fn escape_str(s: &str) -> String {
+    match s.chars().next() {
+        None => "_".to_string(),
+        Some(c) => {
+            if c.is_numeric() {
+                format!("_{}", s.to_snake_case())
+            } else {
+                s.to_snake_case()
+            }
+        }
+    }
+}
+
 impl Escaper for &str {
     fn escape_path(&self) -> String {
-        self.to_snake_case()
+        escape_str(self)
     }
 
     fn escape_test_name(&self) -> String {
-        format!("r#{}", self.to_snake_case())
+        format!("r#{}", escape_str(self))
     }
     fn escape_module_name(&self) -> String {
-        format!("r#{}", self.to_snake_case())
+        format!("r#{}", escape_str(self))
     }
 }
 
