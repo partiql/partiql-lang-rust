@@ -282,6 +282,9 @@ impl Evaluable for EvalJoin {
     }
 }
 
+/// Represents an evaluation `GROUP BY` operator. For `GROUP BY` operational semantics, see section
+/// `11` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub struct EvalGroupBy {
     pub strategy: EvalGroupingStrategy,
@@ -290,12 +293,14 @@ pub struct EvalGroupBy {
     pub input: Option<Value>,
 }
 
+/// Represents the grouping qualifier: ALL or PARTIAL.
 #[derive(Debug)]
 pub enum EvalGroupingStrategy {
     GroupFull,
     GroupPartial,
 }
 
+/// Represents the items in a `GROUP BY` list. e.g. `t.a AS a` in `... GROUP BY t.a AS a`.
 #[derive(Debug)]
 pub struct GroupKey {
     pub expr: Box<dyn EvalExpr>,
