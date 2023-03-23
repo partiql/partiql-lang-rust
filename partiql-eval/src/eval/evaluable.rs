@@ -328,15 +328,10 @@ impl Evaluable for EvalGroupBy {
                             evaluated_values.insert(alias.as_str(), evaluated_val);
                         }
                     });
-                    if groups.contains_key(&evaluated_values) {
-                        let mut group: Vec<Value> =
-                            groups.get(&evaluated_values).unwrap().to_owned();
-                        group.push(Value::Tuple(Box::new(v_as_tuple)));
-                        groups.insert(evaluated_values, group);
-                    } else {
-                        let group = vec![Value::Tuple(Box::new(v_as_tuple))];
-                        groups.insert(evaluated_values, group);
-                    }
+                    groups
+                        .entry(evaluated_values)
+                        .or_insert(vec![])
+                        .push(Value::Tuple(Box::new(v_as_tuple)));
                 }
 
                 let bag = groups
