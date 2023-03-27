@@ -505,6 +505,51 @@ impl Evaluable for EvalFilter {
     }
 }
 
+/// Represents an evaluation `Having` operator; for an input bag of binding tuples the `Having`
+/// operator filters out the binding tuples that does not meet the condition expressed as `expr`,
+/// e.g. `a = 10` in `HAVING a = 10` expression.
+#[derive(Debug)]
+pub struct EvalHaving {
+    pub expr: Box<dyn EvalExpr>,
+    pub input: Option<Value>,
+}
+
+impl EvalHaving {
+    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+        EvalHaving { expr, input: None }
+    }
+
+    #[inline]
+    fn eval_having(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> bool {
+        let result = self.expr.evaluate(bindings, ctx);
+        match result.as_ref() {
+            Boolean(bool_val) => *bool_val,
+            // Alike SQL, when the expression of the HAVING clause expression evaluates to
+            // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
+            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 11.1.
+            // > HAVING behaves identical to a WHERE, once groups are already formulated earlier
+            // See Section 8 on WHERE semantics
+            _ => false,
+        }
+    }
+}
+
+impl Evaluable for EvalHaving {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let filtered = input_value
+            .into_iter()
+            .map(Value::coerce_to_tuple)
+            .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
+        Some(Value::from(filtered.collect::<Bag>()))
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
 /// Represents an evaluation `LIMIT` and/or `OFFSET` operator.
 #[derive(Debug)]
 pub struct EvalLimitOffset {
