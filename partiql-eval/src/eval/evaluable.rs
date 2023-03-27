@@ -483,7 +483,7 @@ impl EvalFilter {
             Boolean(bool_val) => *bool_val,
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
-            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 8. `WHERE clause`
+            // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
             _ => false,
         }
     }
@@ -526,7 +526,7 @@ impl EvalHaving {
             Boolean(bool_val) => *bool_val,
             // Alike SQL, when the expression of the HAVING clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
-            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 11.1.
+            // binding. PartiQL Specification August 1, 2019 Draft, Section 11.1.
             // > HAVING behaves identical to a WHERE, once groups are already formulated earlier
             // See Section 8 on WHERE semantics
             _ => false,
