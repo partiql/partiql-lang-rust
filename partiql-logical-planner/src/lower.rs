@@ -1088,8 +1088,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {
-        let _env = self.exit_env();
-        todo!("having clause");
+        let mut env = self.exit_env();
+        assert_eq!(env.len(), 1);
+
+        let having = BindingsOp::Having(logical::Having {
+            expr: env.pop().unwrap(),
+        });
+        let id = self.plan.add_operator(having);
+
+        self.current_clauses_mut().having_clause.replace(id);
     }
 
     fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {

@@ -201,6 +201,7 @@ pub enum BindingsOp {
     ExprQuery(ExprQuery),
     Distinct,
     GroupBy(GroupBy),
+    Having(Having),
     #[default]
     Sink,
 }
@@ -238,6 +239,13 @@ pub struct Unpivot {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Filter {
+    pub expr: ValueExpr,
+}
+
+/// [`Having`] represents the having operator, e.g. `HAVING a = 10` in `SELECT b FROM t GROUP BY a, b HAVING a = 10`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Having {
     pub expr: ValueExpr,
 }
 

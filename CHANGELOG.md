@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds `Display` for `LogicalPlan`
 - Expose `partiql_value::parse_ion` as a public API.
 - Implements `GROUP BY` operator in evaluator
+- Implements `HAVING` operator in evaluator
 
 ### Fixes
 - Fixes Tuple value duplicate equality and hashing

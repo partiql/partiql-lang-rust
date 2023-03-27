@@ -91,6 +91,10 @@ impl EvaluatorPlanner {
                 expr: self.plan_values(expr),
                 input: None,
             }),
+            BindingsOp::Having(logical::Having { expr }) => Box::new(eval::evaluable::EvalHaving {
+                expr: self.plan_values(expr),
+                input: None,
+            }),
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
             BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(
