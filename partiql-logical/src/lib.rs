@@ -288,14 +288,6 @@ pub struct GroupBy {
     pub group_as_alias: Option<String>,
 }
 
-/// <expr> [AS <as_alias>]
-#[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GroupKey {
-    pub expr: ValueExpr,
-    pub as_alias: Option<ValueExpr>,
-}
-
 /// Grouping qualifier: ALL or PARTIAL
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

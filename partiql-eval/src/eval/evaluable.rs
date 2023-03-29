@@ -300,11 +300,19 @@ pub enum EvalGroupingStrategy {
     GroupPartial,
 }
 
-/// Represents the items in a `GROUP BY` list. e.g. `t.a AS a` in `... GROUP BY t.a AS a`.
-#[derive(Debug)]
-pub struct GroupKey {
-    pub expr: Box<dyn EvalExpr>,
-    pub as_alias: Option<Box<dyn EvalExpr>>,
+impl EvalGroupBy {
+    #[inline]
+    fn eval_group(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Tuple {
+        self.exprs
+            .iter()
+            .map(
+                |(alias, expr)| match expr.evaluate(bindings, ctx).into_owned() {
+                    Missing => (alias.as_str(), Value::Null),
+                    val => (alias.as_str(), val),
+                },
+            )
+            .collect::<Tuple>()
+    }
 }
 
 impl Evaluable for EvalGroupBy {
@@ -318,18 +326,8 @@ impl Evaluable for EvalGroupBy {
                 let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
                 for v in input_value.into_iter() {
                     let v_as_tuple = v.coerce_to_tuple();
-                    let mut evaluated_values = Tuple::new();
-
-                    self.exprs.iter().for_each(|(alias, expr)| {
-                        let evaluated_val = expr.evaluate(&v_as_tuple, ctx).into_owned();
-                        if evaluated_val == Missing {
-                            evaluated_values.insert(alias.as_str(), Null);
-                        } else {
-                            evaluated_values.insert(alias.as_str(), evaluated_val);
-                        }
-                    });
                     groups
-                        .entry(evaluated_values)
+                        .entry(self.eval_group(&v_as_tuple, ctx))
                         .or_insert(vec![])
                         .push(Value::Tuple(Box::new(v_as_tuple)));
                 }
@@ -337,7 +335,7 @@ impl Evaluable for EvalGroupBy {
                 let bag = groups
                     .into_iter()
                     .map(|(k, v)| match group_as_alias {
-                        None => Value::from(k),
+                        None => Value::from(k), // TODO: removing the values here will be insufficient for when aggregations are added since they may have nothing to aggregate over
                         Some(alias) => {
                             let mut tuple_with_group = k;
                             tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
