@@ -282,6 +282,77 @@ impl Evaluable for EvalJoin {
     }
 }
 
+/// Represents an evaluation `GROUP BY` operator. For `GROUP BY` operational semantics, see section
+/// `11` of
+/// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+#[derive(Debug)]
+pub struct EvalGroupBy {
+    pub strategy: EvalGroupingStrategy,
+    pub exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub group_as_alias: Option<String>,
+    pub input: Option<Value>,
+}
+
+/// Represents the grouping qualifier: ALL or PARTIAL.
+#[derive(Debug)]
+pub enum EvalGroupingStrategy {
+    GroupFull,
+    GroupPartial,
+}
+
+impl EvalGroupBy {
+    #[inline]
+    fn eval_group(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Tuple {
+        self.exprs
+            .iter()
+            .map(
+                |(alias, expr)| match expr.evaluate(bindings, ctx).into_owned() {
+                    Missing => (alias.as_str(), Value::Null),
+                    val => (alias.as_str(), val),
+                },
+            )
+            .collect::<Tuple>()
+    }
+}
+
+impl Evaluable for EvalGroupBy {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let group_as_alias = &self.group_as_alias;
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        match self.strategy {
+            EvalGroupingStrategy::GroupPartial => todo!(),
+            EvalGroupingStrategy::GroupFull => {
+                let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
+                for v in input_value.into_iter() {
+                    let v_as_tuple = v.coerce_to_tuple();
+                    groups
+                        .entry(self.eval_group(&v_as_tuple, ctx))
+                        .or_insert(vec![])
+                        .push(Value::Tuple(Box::new(v_as_tuple)));
+                }
+
+                let bag = groups
+                    .into_iter()
+                    .map(|(k, v)| match group_as_alias {
+                        None => Value::from(k), // TODO: removing the values here will be insufficient for when aggregations are added since they may have nothing to aggregate over
+                        Some(alias) => {
+                            let mut tuple_with_group = k;
+                            tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
+                            Value::from(tuple_with_group)
+                        }
+                    })
+                    .collect::<Bag>();
+                Some(Value::from(bag))
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
 /// Represents an evaluation `Pivot` operator; the `Pivot` enables turning a collection into a
 /// tuple. For `Pivot` operational semantics, see section `6.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
@@ -410,7 +481,7 @@ impl EvalFilter {
             Boolean(bool_val) => *bool_val,
             // Alike SQL, when the expression of the WHERE clause expression evaluates to
             // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
-            // binding. PartiQL Specification August 1, August 1, 2019 Draft, Section 8. `WHERE clause`
+            // binding. PartiQL Specification August 1, 2019 Draft, Section 8. `WHERE clause`
             _ => false,
         }
     }
@@ -424,6 +495,51 @@ impl Evaluable for EvalFilter {
             .into_iter()
             .map(Value::coerce_to_tuple)
             .filter_map(|v| self.eval_filter(&v, ctx).then_some(v));
+        Some(Value::from(filtered.collect::<Bag>()))
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
+/// Represents an evaluation `Having` operator; for an input bag of binding tuples the `Having`
+/// operator filters out the binding tuples that does not meet the condition expressed as `expr`,
+/// e.g. `a = 10` in `HAVING a = 10` expression.
+#[derive(Debug)]
+pub struct EvalHaving {
+    pub expr: Box<dyn EvalExpr>,
+    pub input: Option<Value>,
+}
+
+impl EvalHaving {
+    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+        EvalHaving { expr, input: None }
+    }
+
+    #[inline]
+    fn eval_having(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> bool {
+        let result = self.expr.evaluate(bindings, ctx);
+        match result.as_ref() {
+            Boolean(bool_val) => *bool_val,
+            // Alike SQL, when the expression of the HAVING clause expression evaluates to
+            // absent value or a value that is not a Boolean, PartiQL eliminates the corresponding
+            // binding. PartiQL Specification August 1, 2019 Draft, Section 11.1.
+            // > HAVING behaves identical to a WHERE, once groups are already formulated earlier
+            // See Section 8 on WHERE semantics
+            _ => false,
+        }
+    }
+}
+
+impl Evaluable for EvalHaving {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let filtered = input_value
+            .into_iter()
+            .map(Value::coerce_to_tuple)
+            .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
         Some(Value::from(filtered.collect::<Bag>()))
     }
 

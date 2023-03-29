@@ -108,13 +108,17 @@ where
     /// Extends the logical plan with the given data flows.
     /// #Examples:
     /// ```
-    /// use partiql_logical::{BindingsOp, LimitOffset, LogicalPlan};
+    /// use partiql_logical::{BindingsOp, GroupBy, GroupingStrategy, LimitOffset, LogicalPlan};
     /// let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
     ///
     /// let a = p.add_operator(BindingsOp::OrderBy);
     /// let b = p.add_operator(BindingsOp::Sink);
     /// let c = p.add_operator(BindingsOp::LimitOffset(LimitOffset{limit:None, offset:None}));
-    /// let d = p.add_operator(BindingsOp::GroupBy);
+    /// let d = p.add_operator(BindingsOp::GroupBy(GroupBy {
+    ///     strategy: GroupingStrategy::GroupFull,
+    ///     exprs: Default::default(),
+    ///     group_as_alias: None,
+    /// }));
     ///
     /// p.add_flow(a, b);
     ///
@@ -196,7 +200,8 @@ pub enum BindingsOp {
     ProjectValue(ProjectValue),
     ExprQuery(ExprQuery),
     Distinct,
-    GroupBy,
+    GroupBy(GroupBy),
+    Having(Having),
     #[default]
     Sink,
 }
@@ -237,6 +242,13 @@ pub struct Filter {
     pub expr: ValueExpr,
 }
 
+/// [`Having`] represents the having operator, e.g. `HAVING a = 10` in `SELECT b FROM t GROUP BY a, b HAVING a = 10`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Having {
+    pub expr: ValueExpr,
+}
+
 /// [`LimitOffset`] represents a possible limit and/or offset operator, e.g. `LIMIT 10 OFFSET 5` in `SELECT a FROM t LIMIT 10 OFFSET 5`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -265,6 +277,23 @@ pub enum JoinKind {
     Right,
     Full,
     Cross,
+}
+
+/// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GroupBy {
+    pub strategy: GroupingStrategy,
+    pub exprs: HashMap<String, ValueExpr>,
+    pub group_as_alias: Option<String>,
+}
+
+/// Grouping qualifier: ALL or PARTIAL
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GroupingStrategy {
+    GroupFull,
+    GroupPartial,
 }
 
 /// Represents a projection, e.g. `SELECT a` in `SELECT a FROM t`.
@@ -574,7 +603,11 @@ mod tests {
             limit: None,
             offset: None,
         }));
-        let d = p.add_operator(BindingsOp::GroupBy);
+        let d = p.add_operator(BindingsOp::GroupBy(GroupBy {
+            strategy: GroupingStrategy::GroupFull,
+            exprs: Default::default(),
+            group_as_alias: None,
+        }));
         p.add_flow(a, b);
         p.add_flow(a, c);
         p.extend_with_flows(&[(c, d), (b, c)]);

@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use partiql_logical as logical;
 
 use partiql_logical::{
-    BinaryOp, BindingsOp, CallName, IsTypeExpr, JoinKind, LogicalPlan, OpId, PathComponent,
-    Pattern, PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
+    BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan, OpId,
+    PathComponent, Pattern, PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
-use crate::eval::evaluable::{EvalJoinKind, EvalSubQueryExpr, Evaluable};
+use crate::eval::evaluable::{EvalGroupingStrategy, EvalJoinKind, EvalSubQueryExpr, Evaluable};
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
@@ -91,6 +91,10 @@ impl EvaluatorPlanner {
                 expr: self.plan_values(expr),
                 input: None,
             }),
+            BindingsOp::Having(logical::Having { expr }) => Box::new(eval::evaluable::EvalHaving {
+                expr: self.plan_values(expr),
+                input: None,
+            }),
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
             BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(
@@ -129,6 +133,27 @@ impl EvaluatorPlanner {
                     on,
                 ))
             }
+            BindingsOp::GroupBy(logical::GroupBy {
+                strategy,
+                exprs,
+                group_as_alias,
+            }) => {
+                let strategy = match strategy {
+                    GroupingStrategy::GroupFull => EvalGroupingStrategy::GroupFull,
+                    GroupingStrategy::GroupPartial => EvalGroupingStrategy::GroupPartial,
+                };
+                let exprs: HashMap<_, _> = exprs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), self.plan_values(v)))
+                    .collect();
+                let group_as_alias = group_as_alias.as_ref().map(|alias| alias.to_string());
+                Box::new(eval::evaluable::EvalGroupBy {
+                    strategy,
+                    exprs,
+                    group_as_alias,
+                    input: None,
+                })
+            }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
                 let expr = self.plan_values(expr);
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
@@ -143,7 +168,6 @@ impl EvaluatorPlanner {
             }
 
             BindingsOp::SetOp => todo!("SetOp"),
-            BindingsOp::GroupBy => todo!("GroupBy"),
         }
     }
 
