@@ -128,6 +128,8 @@ pub trait Visitor<'ast> {
     fn exit_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) {}
     fn enter_select(&mut self, _select: &'ast ast::Select) {}
     fn exit_select(&mut self, _select: &'ast ast::Select) {}
+    fn enter_query_table(&mut self, _table: &'ast ast::QueryTable) {}
+    fn exit_query_table(&mut self, _table: &'ast ast::QueryTable) {}
     fn enter_projection(&mut self, _projection: &'ast ast::Projection) {}
     fn exit_projection(&mut self, _projection: &'ast ast::Projection) {}
     fn enter_projection_kind(&mut self, _projection_kind: &'ast ast::ProjectionKind) {}

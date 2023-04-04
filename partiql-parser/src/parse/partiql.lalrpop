@@ -139,6 +139,7 @@ SingleQuery: ast::AstNode<ast::QuerySet> = {
     },
     <lo:@L> <sfw:SfwQuery> <hi:@R> => state.node(ast::QuerySet::Select( Box::new(sfw)), lo..hi),
     <lo:@L> <values:Values> <hi:@R> => values,
+    <lo:@L> <table:ExplicitTable> <hi:@R> => table,
 }
 
 Values: ast::AstNode<ast::QuerySet> = {
@@ -149,6 +150,11 @@ Values: ast::AstNode<ast::QuerySet> = {
 ValueRow: Box<ast::Expr> = {
     "(" <e:ExprQuery> ")" => Box::new(*e),
     <array:ExprTermCollection> => Box::new(array)
+}
+
+#[inline]
+ExplicitTable: ast::AstNode<ast::QuerySet> = {
+    <lo:@L> "TABLE" <table_name:SymbolPrimitive> <hi:@R> => state.node(ast::QuerySet::Table( ast::QueryTable{table_name} ), lo..hi)
 }
 
 // ------------------------------------------------------------------------------ //

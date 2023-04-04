@@ -532,6 +532,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {}
             QuerySet::Values(_) => todo!("QuerySet::Values"),
+            QuerySet::Table(_) => todo!("QuerySet::Table"),
         }
     }
 
@@ -550,6 +551,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 self.push_bexpr(id);
             }
             QuerySet::Values(_) => todo!("QuerySet::Values"),
+            QuerySet::Table(_) => todo!("QuerySet::Table"),
         }
     }
 

@@ -265,6 +265,7 @@ pub enum QuerySet {
     Select(Box<AstNode<Select>>),
     Expr(Box<Expr>),
     Values(Vec<Box<Expr>>),
+    Table(QueryTable),
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -306,6 +307,13 @@ pub struct Select {
     pub where_clause: Option<Box<AstNode<WhereClause>>>,
     pub group_by: Option<Box<AstNode<GroupByExpr>>>,
     pub having: Option<Box<AstNode<HavingClause>>>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct QueryTable {
+    #[visit(skip)]
+    pub table_name: SymbolPrimitive,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
