@@ -830,6 +830,46 @@ impl<'input> fmt::Display for Token<'input> {
     }
 }
 
+/// A lexer that wraps another lexer and skips comments.
+pub(crate) struct CommentSkippingLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    lexer: L,
+}
+
+impl<'input, L> CommentSkippingLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    /// Creates a new CommentSkippingLexer wrapping `lexer`
+    #[inline]
+    pub fn new(lexer: L) -> Self {
+        Self { lexer }
+    }
+}
+
+impl<'input, L> Iterator for CommentSkippingLexer<'input, L>
+where
+    L: Iterator<Item = LexResult<'input>>,
+{
+    type Item = LexResult<'input>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        'next_tok: loop {
+            let next = self.lexer.next();
+            if matches!(
+                next,
+                Some(Ok((_, Token::CommentBlock(_) | Token::CommentLine(_), _)))
+            ) {
+                continue 'next_tok;
+            }
+            return next;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

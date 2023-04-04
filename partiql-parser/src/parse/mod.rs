@@ -7,6 +7,7 @@ mod parser_state;
 
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
+use crate::lexer::CommentSkippingLexer;
 use crate::parse::parser_state::{IdGenerator, ParserState};
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
@@ -63,6 +64,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
 ) -> AstResult<'input> {
     let mut offsets = LineOffsetTracker::default();
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
+    let lexer = CommentSkippingLexer::new(lexer);
 
     let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
 
@@ -519,6 +521,15 @@ mod tests {
         #[test]
         fn select_with_at_and_cross_join_and_at() {
             parse!(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
+        }
+
+        #[test]
+        fn multiline_with_comments() {
+            parse!(
+                r#"SELECT * FROM hr.employees               -- T1
+                                  UNION
+                                  SELECT title FROM engineering.employees  -- T2"#
+            );
         }
     }
 
