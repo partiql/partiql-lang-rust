@@ -108,10 +108,10 @@ where
     /// Extends the logical plan with the given data flows.
     /// #Examples:
     /// ```
-    /// use partiql_logical::{BindingsOp, GroupBy, GroupingStrategy, LimitOffset, LogicalPlan};
+    /// use partiql_logical::{BindingsOp, GroupBy, GroupingStrategy, LimitOffset, LogicalPlan, OrderBy};
     /// let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
     ///
-    /// let a = p.add_operator(BindingsOp::OrderBy);
+    /// let a = p.add_operator(BindingsOp::OrderBy(OrderBy{specs: vec![]}));
     /// let b = p.add_operator(BindingsOp::Sink);
     /// let c = p.add_operator(BindingsOp::LimitOffset(LimitOffset{limit:None, offset:None}));
     /// let d = p.add_operator(BindingsOp::GroupBy(GroupBy {
@@ -191,7 +191,7 @@ pub enum BindingsOp {
     Pivot(Pivot),
     Unpivot(Unpivot),
     Filter(Filter),
-    OrderBy,
+    OrderBy(OrderBy),
     LimitOffset(LimitOffset),
     Join(Join),
     SetOp,
@@ -247,6 +247,36 @@ pub struct Filter {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Having {
     pub expr: ValueExpr,
+}
+
+/// [`OrderBy`] represents a sort operatyion, e.g. `ORDER BY a DESC NULLS LAST` in `SELECT a FROM t ORDER BY a DESC NULLS LAST`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct OrderBy {
+    pub specs: Vec<SortSpec>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SortSpecOrder {
+    Asc,
+    Desc,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SortSpecNullOrder {
+    First,
+    Last,
+}
+
+/// Represents a PartiQL sort specification.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SortSpec {
+    pub expr: ValueExpr,
+    pub order: SortSpecOrder,
+    pub null_order: SortSpecNullOrder,
 }
 
 /// [`LimitOffset`] represents a possible limit and/or offset operator, e.g. `LIMIT 10 OFFSET 5` in `SELECT a FROM t LIMIT 10 OFFSET 5`.
@@ -597,7 +627,7 @@ mod tests {
     #[test]
     fn test_plan() {
         let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
-        let a = p.add_operator(BindingsOp::OrderBy);
+        let a = p.add_operator(BindingsOp::OrderBy(OrderBy { specs: vec![] }));
         let b = p.add_operator(BindingsOp::Sink);
         let c = p.add_operator(BindingsOp::LimitOffset(LimitOffset {
             limit: None,

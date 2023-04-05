@@ -7,16 +7,17 @@ use partiql_ast::ast::{
     Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CallArg, CallArgNamed,
     CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
     DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey, GroupingStrategy, Insert,
-    InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, OnConflict, OrderByExpr,
-    Path, PathStep, ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase,
-    Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase, Struct, SymbolPrimitive, UniOp,
-    UniOpKind, VarRef,
+    InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, NullOrderingSpec,
+    OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
+    Query, QuerySet, Remove, SearchedCase, Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase,
+    SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
     BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch, LikeNonStringNonLiteralMatch,
-    ListExpr, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, TupleExpr, ValueExpr,
+    ListExpr, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SortSpecOrder,
+    TupleExpr, ValueExpr,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -26,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -34,6 +36,7 @@ type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 enum QueryContext {
     FromLet,
     Path,
+    Order,
     Query,
 }
 
@@ -104,6 +107,7 @@ pub struct AstToLogical {
     vexpr_stack: Vec<Vec<ValueExpr>>,
     arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
+    sort_stack: Vec<Vec<logical::SortSpec>>,
 
     from_lets: HashSet<ast::NodeId>,
 
@@ -166,6 +170,7 @@ impl AstToLogical {
             vexpr_stack: Default::default(),
             arg_stack: Default::default(),
             path_stack: Default::default(),
+            sort_stack: Default::default(),
 
             from_lets: Default::default(),
 
@@ -405,6 +410,23 @@ impl AstToLogical {
     #[inline]
     fn push_path_step(&mut self, step: PathComponent) {
         self.path_stack.last_mut().unwrap().push(step);
+    }
+
+    #[inline]
+    fn enter_sort(&mut self) {
+        self.sort_stack.push(vec![]);
+        self.ctx_stack.push(QueryContext::Order);
+    }
+
+    #[inline]
+    fn exit_sort(&mut self) -> Vec<logical::SortSpec> {
+        self.ctx_stack.pop();
+        self.sort_stack.pop().expect("sort specs")
+    }
+
+    #[inline]
+    fn push_sort_spec(&mut self, spec: logical::SortSpec) {
+        self.sort_stack.last_mut().unwrap().push(spec);
     }
 }
 
@@ -1158,12 +1180,48 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
-        self.enter_env();
+        self.enter_sort();
     }
 
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
-        let _env = self.exit_env();
-        todo!("order by clause");
+        let specs = self.exit_sort();
+        let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
+        let id = self.plan.add_operator(order_by);
+        self.current_clauses_mut().order_by_clause.replace(id);
+    }
+
+    fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) {
+        self.enter_env();
+    }
+
+    fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) {
+        let mut env = self.exit_env();
+        assert_eq!(env.len(), 1);
+
+        let expr = env.pop().unwrap();
+        let order = match sort_spec
+            .ordering_spec
+            .as_ref()
+            .unwrap_or(&OrderingSpec::Asc)
+        {
+            OrderingSpec::Asc => logical::SortSpecOrder::Asc,
+            OrderingSpec::Desc => logical::SortSpecOrder::Desc,
+        };
+
+        let null_order = match sort_spec.null_ordering_spec {
+            None => match order {
+                SortSpecOrder::Asc => logical::SortSpecNullOrder::Last,
+                SortSpecOrder::Desc => logical::SortSpecNullOrder::First,
+            },
+            Some(NullOrderingSpec::First) => logical::SortSpecNullOrder::First,
+            Some(NullOrderingSpec::Last) => logical::SortSpecNullOrder::Last,
+        };
+
+        self.push_sort_spec(logical::SortSpec {
+            expr,
+            order,
+            null_order,
+        });
     }
 
     fn enter_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {
