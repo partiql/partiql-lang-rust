@@ -117,6 +117,7 @@ where
     /// let d = p.add_operator(BindingsOp::GroupBy(GroupBy {
     ///     strategy: GroupingStrategy::GroupFull,
     ///     exprs: Default::default(),
+    ///     aggregate_exprs: vec![],
     ///     group_as_alias: None,
     /// }));
     ///
@@ -148,6 +149,10 @@ where
 
     pub fn operator(&self, id: OpId) -> Option<&T> {
         self.nodes.get(id.0 - 1)
+    }
+
+    pub fn operator_as_mut(&mut self, id: OpId) -> Option<&mut T> {
+        self.nodes.get_mut(id.0 - 1)
     }
 
     // TODO add DAG validation method.
@@ -309,12 +314,33 @@ pub enum JoinKind {
     Cross,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AggregateExpression {
+    pub name: String,
+    pub expr: ValueExpr,
+    pub func: AggFunc,
+    pub setq: SetQuantifier,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AggFunc {
+    // TODO: modeling of COUNT(*)
+    AggAvg,
+    AggCount,
+    AggMax,
+    AggMin,
+    AggSum,
+}
+
 /// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupBy {
     pub strategy: GroupingStrategy,
     pub exprs: HashMap<String, ValueExpr>,
+    pub aggregate_exprs: Vec<AggregateExpression>,
     pub group_as_alias: Option<String>,
 }
 
@@ -620,6 +646,14 @@ pub enum CallName {
     Cardinality,
 }
 
+/// Indicates if a set should be reduced to its distinct elements or not.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetQuantifier {
+    All,
+    Distinct,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,6 +670,7 @@ mod tests {
         let d = p.add_operator(BindingsOp::GroupBy(GroupBy {
             strategy: GroupingStrategy::GroupFull,
             exprs: Default::default(),
+            aggregate_exprs: vec![],
             group_as_alias: None,
         }));
         p.add_flow(a, b);

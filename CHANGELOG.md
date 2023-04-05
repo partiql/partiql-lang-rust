@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implements `GROUP BY` operator in evaluator
 - Implements `HAVING` operator in evaluator
 - Implements `ORDER BY` operator in evaluator
+- Implements SQL Aggregation functions -- AVG, COUNT, MAX, MIN, SUM
 
 ### Fixes
 - Fixes Tuple value duplicate equality and hashing

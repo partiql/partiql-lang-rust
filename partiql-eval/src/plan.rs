@@ -5,15 +5,15 @@ use std::collections::HashMap;
 use partiql_logical as logical;
 
 use partiql_logical::{
-    BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan, OpId,
-    PathComponent, Pattern, PatternMatchExpr, SearchedCase, SortSpecNullOrder, SortSpecOrder, Type,
-    UnaryOp, ValueExpr,
+    AggFunc, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan,
+    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SortSpecNullOrder, SortSpecOrder,
+    Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
 use crate::eval::evaluable::{
-    EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition, EvalOrderBySortSpec,
-    EvalSubQueryExpr, Evaluable,
+    AggAvg, AggCount, AggMax, AggMin, AggSum, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy,
+    EvalOrderBySortCondition, EvalOrderBySortSpec, EvalSubQueryExpr, Evaluable,
 };
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
@@ -140,6 +140,7 @@ impl EvaluatorPlanner {
             BindingsOp::GroupBy(logical::GroupBy {
                 strategy,
                 exprs,
+                aggregate_exprs,
                 group_as_alias,
             }) => {
                 let strategy = match strategy {
@@ -150,10 +151,53 @@ impl EvaluatorPlanner {
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values(v)))
                     .collect();
+                let aggregate_exprs = aggregate_exprs
+                    .iter()
+                    .map(|a_e| {
+                        let func = match (a_e.func.clone(), a_e.setq.clone()) {
+                            (AggFunc::AggAvg, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::AggAvg(AggAvg::new_all())
+                            }
+                            (AggFunc::AggCount, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::AggCount(AggCount::new_all())
+                            }
+                            (AggFunc::AggMax, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::AggMax(AggMax::new_all())
+                            }
+                            (AggFunc::AggMin, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::AggMin(AggMin::new_all())
+                            }
+                            (AggFunc::AggSum, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::AggSum(AggSum::new_all())
+                            }
+                            (AggFunc::AggAvg, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::AggAvg(AggAvg::new_distinct())
+                            }
+                            (AggFunc::AggCount, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::AggCount(AggCount::new_distinct())
+                            }
+                            (AggFunc::AggMax, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::AggMax(AggMax::new_distinct())
+                            }
+                            (AggFunc::AggMin, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::AggMin(AggMin::new_distinct())
+                            }
+                            (AggFunc::AggSum, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::AggSum(AggSum::new_distinct())
+                            }
+                        };
+                        eval::evaluable::AggregateExpression {
+                            name: a_e.name.to_string(),
+                            expr: self.plan_values(&a_e.expr),
+                            func,
+                        }
+                    })
+                    .collect();
                 let group_as_alias = group_as_alias.as_ref().map(|alias| alias.to_string());
                 Box::new(eval::evaluable::EvalGroupBy {
                     strategy,
                     exprs,
+                    aggregate_exprs,
                     group_as_alias,
                     input: None,
                 })

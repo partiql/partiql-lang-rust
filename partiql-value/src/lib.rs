@@ -521,6 +521,16 @@ impl Value {
     }
 
     #[inline]
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
+    }
+
+    #[inline]
+    pub fn is_null_or_missing(&self) -> bool {
+        matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
     pub fn is_ordered(&self) -> bool {
         self.is_list()
     }
