@@ -284,15 +284,16 @@ impl Evaluable for EvalJoin {
 }
 
 /// An SQL aggregation function call that has been rewritten to be evaluated with the `GROUP BY`
-/// clause. The `[name]` is the string (generated in lowering step) that replaces the
+/// clause. The `[name]` is the string (generated in AST lowering step) that replaces the
 /// aggregation call expression. This name will be used as the field in the binding tuple output
 /// by `GROUP BY`. `[expr]` corresponds to the expression within the aggregation function. And
 /// `[func]` corresponds to the aggregation function that's being called (e.g. sum, count, avg).
 ///
 /// For example, `SELECT a AS a, SUM(b) AS b FROM t GROUP BY a` is rewritten to the following form
-///              `SELECT a AS a, __agg1 AS b FROM t GROUP BY a`
-/// In the above example, `name` corresponds to '__agg1', expr refers to the variable reference `b`,
-/// and `func` corresponds to the sum aggregation function, `[AggSum]`.
+///              `SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a`
+/// In the above example, `name` corresponds to '$__agg_1', `expr` refers to the expression within
+/// the aggregation function, `b`, and `func` corresponds to the sum aggregation function,
+/// `[AggSum]`.
 #[derive(Debug)]
 pub struct AggregateExpression {
     pub name: String,
@@ -300,8 +301,11 @@ pub struct AggregateExpression {
     pub func: AggFunc,
 }
 
+/// Represents an SQL aggregation function computed on a collection of input values.
 pub trait AggregateFunction {
+    /// Provides the next value for the given `group`.
     fn next_value(&mut self, input_value: &Value, group: &Tuple);
+    /// Returns the result of the aggregation function for a given `group`.
     fn compute(&self, group: &Tuple) -> Value;
 }
 
@@ -337,14 +341,19 @@ impl AggregateFunction for AggFunc {
     }
 }
 
+/// Filter values based on the given condition
 #[derive(Debug, Default)]
 pub enum AggFilterFn {
+    /// Keeps only distinct values in each group
     Distinct(AggFilterDistinct),
+    /// Keeps all values
     #[default]
     All,
 }
 
 impl AggFilterFn {
+    /// Returns true if and only if for the given `group`, `input_value` should be processed
+    /// by the aggregation function
     fn filter_value(&mut self, input_value: Value, group: &Tuple) -> bool {
         match self {
             AggFilterFn::Distinct(d) => d.filter_value(input_value, group),
@@ -386,6 +395,7 @@ impl AggFilterDistinct {
     }
 }
 
+/// Represents SQL's `AVG` aggregation function
 #[derive(Debug)]
 pub struct AggAvg {
     avgs: HashMap<Tuple, (usize, Value)>,
@@ -433,6 +443,7 @@ impl AggregateFunction for AggAvg {
     }
 }
 
+/// Represents SQL's `COUNT` aggregation function
 #[derive(Debug)]
 pub struct AggCount {
     counts: HashMap<Tuple, usize>,
@@ -480,6 +491,7 @@ impl AggregateFunction for AggCount {
     }
 }
 
+/// Represents SQL's `MAX` aggregation function
 #[derive(Debug)]
 pub struct AggMax {
     maxes: HashMap<Tuple, Value>,
@@ -526,6 +538,7 @@ impl AggregateFunction for AggMax {
     }
 }
 
+/// Represents SQL's `MIN` aggregation function
 #[derive(Debug)]
 pub struct AggMin {
     mins: HashMap<Tuple, Value>,
@@ -572,6 +585,7 @@ impl AggregateFunction for AggMin {
     }
 }
 
+/// Represents SQL's `SUM` aggregation function
 #[derive(Debug)]
 pub struct AggSum {
     sums: HashMap<Tuple, Value>,
@@ -621,7 +635,7 @@ impl AggregateFunction for AggSum {
 /// Represents an evaluation `GROUP BY` operator. For `GROUP BY` operational semantics, see section
 /// `11` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-/// TODO: some docs on `aggregate_exprs`
+/// `aggregate_exprs` represents the set of aggregate expressions to compute.
 #[derive(Debug)]
 pub struct EvalGroupBy {
     pub strategy: EvalGroupingStrategy,
@@ -665,6 +679,7 @@ impl Evaluable for EvalGroupBy {
                 for v in input_value.into_iter() {
                     let v_as_tuple = v.coerce_to_tuple();
                     let group = self.eval_group(&v_as_tuple, ctx);
+                    // Compute next aggregation result for each of the aggregation expressions
                     for aggregate_expr in self.aggregate_exprs.iter_mut() {
                         let evaluated_val =
                             aggregate_expr.expr.evaluate(&v_as_tuple, ctx).into_owned();
@@ -679,6 +694,8 @@ impl Evaluable for EvalGroupBy {
                 let bag = groups
                     .into_iter()
                     .map(|(mut k, v)| {
+                        // Finalize aggregation computation and include result in output binding
+                        // tuple
                         let mut agg_results: Vec<(&str, Value)> = vec![];
                         for aggregate_expr in &self.aggregate_exprs {
                             let agg_result = aggregate_expr.func.compute(&k);

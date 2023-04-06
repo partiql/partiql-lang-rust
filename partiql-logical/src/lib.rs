@@ -314,6 +314,7 @@ pub enum JoinKind {
     Cross,
 }
 
+/// An SQL aggregation function call with its arguments
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AggregateExpression {
@@ -323,14 +324,20 @@ pub struct AggregateExpression {
     pub setq: SetQuantifier,
 }
 
+/// SQL aggregate function
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AggFunc {
     // TODO: modeling of COUNT(*)
+    /// Represents SQL's `AVG` aggregation function
     AggAvg,
+    /// Represents SQL's `COUNT` aggregation function
     AggCount,
+    /// Represents SQL's `MAX` aggregation function
     AggMax,
+    /// Represents SQL's `MIN` aggregation function
     AggMin,
+    /// Represents SQL's `SUM` aggregation function
     AggSum,
 }
 

@@ -901,16 +901,21 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) {
-        // TODO distinguishing between PartiQL/top-level aggregation function calls and SQL
-        //  aggregation functions. Currently only handles SQL aggregation functions.
+        // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
+        // functions
         let env = self.exit_call();
         let name = call_agg.func_name.value.to_lowercase();
 
-        let new_name = "__agg".to_owned() + &self.agg_id.id();
+        // Rewrites the SQL aggregation function call to be a variable reference that the `GROUP BY`
+        // clause will add to the binding tuples.
+        // E.g. SELECT a, SUM(b) FROM t GROUP BY a
+        //      SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a
+        let new_name = "$__agg".to_owned() + &self.agg_id.id();
         let new_binding_name = BindingsName::CaseSensitive(new_name.clone());
         let new_expr = ValueExpr::VarRef(new_binding_name);
         self.push_vexpr(new_expr);
 
+        // Default set quantifier if the set quantifier keyword is omitted will be `ALL`
         let mut setq = logical::SetQuantifier::All;
 
         let arg = match env.last().unwrap() {
@@ -958,11 +963,11 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         };
         self.aggregate_exprs.push(agg_expr);
         // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
-        // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS __gk`
+        // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
         if self.current_clauses_mut().group_by_clause.is_none() {
             let mut exprs = HashMap::new();
             exprs.insert(
-                "__gk".to_string(),
+                "$__gk".to_string(),
                 ValueExpr::Lit(Box::new(Value::from(true))),
             );
             let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
@@ -1223,6 +1228,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             GroupingStrategy::GroupPartial => logical::GroupingStrategy::GroupPartial,
         };
 
+        // What follows is an approach to implement section 11.2.1 of the PartiQL spec
+        // (https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.11.2.1)
+        // "Grouping Attributes and Direct Use of Grouping Expressions"
+        // Consider the query:
+        //   SELECT t.a + 1 AS a FROM t GROUP BY t.a + 1 AS some_alias
+        // Since the group by key expression (t.a + 1) is the same as the select list expression, we
+        // can replace the query to be `SELECT some_alias AS a FROM t GROUP BY t.a + 1 AS some_alias`
+        // This isn't quite correct as it doesn't deal with SELECT VALUE expressions and expressions
+        // that are in the `HAVING` and `ORDER BY` clauses.
         let select_clause_op_id = self.current_clauses_mut().select_clause.unwrap();
         let select_clause = self.plan.operator_as_mut(select_clause_op_id).unwrap();
         let mut binding = HashMap::new();
