@@ -903,7 +903,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) {
         // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
         // functions
-        let env = self.exit_call();
+        let mut env = self.exit_call();
         let name = call_agg.func_name.value.to_lowercase();
 
         // Rewrites the SQL aggregation function call to be a variable reference that the `GROUP BY`
@@ -916,16 +916,13 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.push_vexpr(new_expr);
 
         // Default set quantifier if the set quantifier keyword is omitted will be `ALL`
-        let mut setq = logical::SetQuantifier::All;
-
-        let arg = match env.last().unwrap() {
-            CallArgument::Positional(ve) => ve.clone(),
-            CallArgument::Named(s, ve) => {
-                if s == "distinct" {
-                    setq = logical::SetQuantifier::Distinct
-                }
-                ve.clone()
-            }
+        let (setq, arg) = match env.pop().unwrap() {
+            CallArgument::Positional(ve) => (logical::SetQuantifier::All, ve),
+            CallArgument::Named(name, ve) => match name.as_ref() {
+                "all" => (logical::SetQuantifier::All, ve),
+                "distinct" => (logical::SetQuantifier::Distinct, ve),
+                _ => todo!("Unknown quantifier"),
+            },
         };
 
         let agg_expr = match name.as_str() {
@@ -965,11 +962,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
         // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
         if self.current_clauses_mut().group_by_clause.is_none() {
-            let mut exprs = HashMap::new();
-            exprs.insert(
+            let exprs = HashMap::from([(
                 "$__gk".to_string(),
                 ValueExpr::Lit(Box::new(Value::from(true))),
-            );
+            )]);
             let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
                 strategy: logical::GroupingStrategy::GroupFull,
                 exprs,
