@@ -15,9 +15,9 @@ use partiql_ast::ast::{
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch, LikeNonStringNonLiteralMatch,
-    ListExpr, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SortSpecOrder,
-    TupleExpr, ValueExpr,
+    AggregateExpression, BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
+    LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
+    PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -28,6 +28,7 @@ use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
 
+use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -108,6 +109,7 @@ pub struct AstToLogical {
     arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
     sort_stack: Vec<Vec<logical::SortSpec>>,
+    aggregate_exprs: Vec<AggregateExpression>,
 
     from_lets: HashSet<ast::NodeId>,
 
@@ -117,6 +119,7 @@ pub struct AstToLogical {
 
     // generator of 'fresh' ids
     id: IdGenerator,
+    agg_id: IdGenerator,
 
     // output
     plan: LogicalPlan<BindingsOp>,
@@ -171,6 +174,7 @@ impl AstToLogical {
             arg_stack: Default::default(),
             path_stack: Default::default(),
             sort_stack: Default::default(),
+            aggregate_exprs: Default::default(),
 
             from_lets: Default::default(),
 
@@ -180,6 +184,7 @@ impl AstToLogical {
 
             // generator of 'fresh' ids
             id: Default::default(),
+            agg_id: Default::default(),
 
             // output
             plan: Default::default(),
@@ -892,10 +897,85 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) {
-        todo!("call_agg")
+        self.enter_call();
     }
 
-    fn exit_call_agg(&mut self, _call_agg: &'ast CallAgg) {}
+    fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) {
+        // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
+        // functions
+        let mut env = self.exit_call();
+        let name = call_agg.func_name.value.to_lowercase();
+
+        // Rewrites the SQL aggregation function call to be a variable reference that the `GROUP BY`
+        // clause will add to the binding tuples.
+        // E.g. SELECT a, SUM(b) FROM t GROUP BY a
+        //      SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a
+        let new_name = "$__agg".to_owned() + &self.agg_id.id();
+        let new_binding_name = BindingsName::CaseSensitive(new_name.clone());
+        let new_expr = ValueExpr::VarRef(new_binding_name);
+        self.push_vexpr(new_expr);
+
+        // Default set quantifier if the set quantifier keyword is omitted will be `ALL`
+        let (setq, arg) = match env.pop().unwrap() {
+            CallArgument::Positional(ve) => (logical::SetQuantifier::All, ve),
+            CallArgument::Named(name, ve) => match name.as_ref() {
+                "all" => (logical::SetQuantifier::All, ve),
+                "distinct" => (logical::SetQuantifier::Distinct, ve),
+                _ => todo!("Unknown quantifier"),
+            },
+        };
+
+        let agg_expr = match name.as_str() {
+            "avg" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggAvg,
+                setq,
+            },
+            "count" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggCount,
+                setq,
+            },
+            "max" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggMax,
+                setq,
+            },
+            "min" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggMin,
+                setq,
+            },
+            "sum" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggSum,
+                setq,
+            },
+            _ => panic!("Unsupported aggregation function name."),
+        };
+        self.aggregate_exprs.push(agg_expr);
+        // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
+        // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
+        if self.current_clauses_mut().group_by_clause.is_none() {
+            let exprs = HashMap::from([(
+                "$__gk".to_string(),
+                ValueExpr::Lit(Box::new(Value::from(true))),
+            )]);
+            let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
+                strategy: logical::GroupingStrategy::GroupFull,
+                exprs,
+                aggregate_exprs: self.aggregate_exprs.clone(),
+                group_as_alias: None,
+            });
+            let id = self.plan.add_operator(group_by);
+            self.current_clauses_mut().group_by_clause.replace(id);
+        }
+    }
 
     fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) {
         let is_from_path = matches!(self.current_ctx(), Some(QueryContext::FromLet));
@@ -1129,6 +1209,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+        let aggregate_exprs = self.aggregate_exprs.clone();
         let benv = self.exit_benv();
         assert_eq!(benv.len(), 0); // TODO sub-query
         let env = self.exit_env();
@@ -1142,6 +1223,27 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             GroupingStrategy::GroupFull => logical::GroupingStrategy::GroupFull,
             GroupingStrategy::GroupPartial => logical::GroupingStrategy::GroupPartial,
         };
+
+        // What follows is an approach to implement section 11.2.1 of the PartiQL spec
+        // (https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.11.2.1)
+        // "Grouping Attributes and Direct Use of Grouping Expressions"
+        // Consider the query:
+        //   SELECT t.a + 1 AS a FROM t GROUP BY t.a + 1 AS some_alias
+        // Since the group by key expression (t.a + 1) is the same as the select list expression, we
+        // can replace the query to be `SELECT some_alias AS a FROM t GROUP BY t.a + 1 AS some_alias`
+        // This isn't quite correct as it doesn't deal with SELECT VALUE expressions and expressions
+        // that are in the `HAVING` and `ORDER BY` clauses.
+        let select_clause_op_id = self.current_clauses_mut().select_clause.unwrap();
+        let select_clause = self.plan.operator_as_mut(select_clause_op_id).unwrap();
+        let mut binding = HashMap::new();
+        let select_clause_exprs = match select_clause {
+            BindingsOp::Project(ref mut project) => &mut project.exprs,
+            BindingsOp::ProjectAll => &mut binding,
+            BindingsOp::ProjectValue(_) => &mut binding, // TODO: replacement of SELECT VALUE expressions
+            _ => panic!("Unexpected project type"),
+        };
+        let mut exprs_to_replace: Vec<(String, ValueExpr)> = Vec::new();
+
         let mut exprs = HashMap::with_capacity(env.len() / 2);
         let mut iter = env.into_iter();
         while let Some(value) = iter.next() {
@@ -1153,11 +1255,24 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 },
                 _ => panic!("unexpected alias type"),
             };
+            for (alias, expr) in select_clause_exprs.iter() {
+                if *expr == value {
+                    let new_binding_name = BindingsName::CaseSensitive(alias.clone());
+                    let new_expr = ValueExpr::VarRef(new_binding_name);
+                    exprs_to_replace.push((alias.to_owned(), new_expr));
+                }
+            }
             exprs.insert(alias, value);
         }
+
+        for (k, v) in exprs_to_replace {
+            select_clause_exprs.insert(k, v);
+        }
+
         let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
             strategy,
             exprs,
+            aggregate_exprs,
             group_as_alias,
         });
 

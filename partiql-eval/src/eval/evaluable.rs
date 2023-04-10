@@ -6,8 +6,8 @@ use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{partiql_bag, partiql_tuple, Bag, List, Tuple, Value};
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::cmp::{max, min, Ordering};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::rc::Rc;
 
@@ -283,13 +283,364 @@ impl Evaluable for EvalJoin {
     }
 }
 
+/// An SQL aggregation function call that has been rewritten to be evaluated with the `GROUP BY`
+/// clause. The `[name]` is the string (generated in AST lowering step) that replaces the
+/// aggregation call expression. This name will be used as the field in the binding tuple output
+/// by `GROUP BY`. `[expr]` corresponds to the expression within the aggregation function. And
+/// `[func]` corresponds to the aggregation function that's being called (e.g. sum, count, avg).
+///
+/// For example, `SELECT a AS a, SUM(b) AS b FROM t GROUP BY a` is rewritten to the following form
+///              `SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a`
+/// In the above example, `name` corresponds to '$__agg_1', `expr` refers to the expression within
+/// the aggregation function, `b`, and `func` corresponds to the sum aggregation function,
+/// `[AggSum]`.
+#[derive(Debug)]
+pub struct AggregateExpression {
+    pub name: String,
+    pub expr: Box<dyn EvalExpr>,
+    pub func: AggFunc,
+}
+
+/// Represents an SQL aggregation function computed on a collection of input values.
+pub trait AggregateFunction {
+    /// Provides the next value for the given `group`.
+    fn next_value(&mut self, input_value: &Value, group: &Tuple);
+    /// Returns the result of the aggregation function for a given `group`.
+    fn compute(&self, group: &Tuple) -> Value;
+}
+
+#[derive(Debug)]
+pub enum AggFunc {
+    // TODO: modeling COUNT(*)
+    AggAvg(AggAvg),
+    AggCount(AggCount),
+    AggMax(AggMax),
+    AggMin(AggMin),
+    AggSum(AggSum),
+}
+
+impl AggregateFunction for AggFunc {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        match self {
+            AggFunc::AggAvg(v) => v.next_value(input_value, group),
+            AggFunc::AggCount(v) => v.next_value(input_value, group),
+            AggFunc::AggMax(v) => v.next_value(input_value, group),
+            AggFunc::AggMin(v) => v.next_value(input_value, group),
+            AggFunc::AggSum(v) => v.next_value(input_value, group),
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        match self {
+            AggFunc::AggAvg(v) => v.compute(group),
+            AggFunc::AggCount(v) => v.compute(group),
+            AggFunc::AggMax(v) => v.compute(group),
+            AggFunc::AggMin(v) => v.compute(group),
+            AggFunc::AggSum(v) => v.compute(group),
+        }
+    }
+}
+
+/// Filter values based on the given condition
+#[derive(Debug, Default)]
+pub enum AggFilterFn {
+    /// Keeps only distinct values in each group
+    Distinct(AggFilterDistinct),
+    /// Keeps all values
+    #[default]
+    All,
+}
+
+impl AggFilterFn {
+    /// Returns true if and only if for the given `group`, `input_value` should be processed
+    /// by the aggregation function
+    fn filter_value(&mut self, input_value: Value, group: &Tuple) -> bool {
+        match self {
+            AggFilterFn::Distinct(d) => d.filter_value(input_value, group),
+            AggFilterFn::All => true,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AggFilterDistinct {
+    seen_vals: HashMap<Tuple, HashSet<Value>>,
+}
+
+impl AggFilterDistinct {
+    pub fn new() -> Self {
+        AggFilterDistinct {
+            seen_vals: HashMap::new(),
+        }
+    }
+}
+
+impl Default for AggFilterDistinct {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AggFilterDistinct {
+    fn filter_value(&mut self, input_value: Value, group: &Tuple) -> bool {
+        if let Some(seen_vals_in_group) = self.seen_vals.get_mut(group) {
+            seen_vals_in_group.insert(input_value)
+        } else {
+            let mut new_seen_vals = HashSet::new();
+            new_seen_vals.insert(input_value);
+            self.seen_vals
+                .insert(group.clone(), new_seen_vals)
+                .is_none()
+        }
+    }
+}
+
+/// Represents SQL's `AVG` aggregation function
+#[derive(Debug)]
+pub struct AggAvg {
+    avgs: HashMap<Tuple, (usize, Value)>,
+    aggregator: AggFilterFn,
+}
+
+impl AggAvg {
+    pub fn new_distinct() -> Self {
+        AggAvg {
+            avgs: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub fn new_all() -> Self {
+        AggAvg {
+            avgs: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for AggAvg {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if !input_value.is_null_or_missing()
+            && self.aggregator.filter_value(input_value.clone(), group)
+        {
+            match self.avgs.get_mut(group) {
+                None => {
+                    self.avgs.insert(group.clone(), (1, input_value.clone()));
+                }
+                Some((count, sum)) => {
+                    *count += 1;
+                    *sum = &sum.clone() + input_value;
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        match self.avgs.get(group).expect("Expect group to exist in avgs") {
+            (0, _) => Null,
+            (c, s) => s / &Value::Decimal(rust_decimal::Decimal::from(*c)),
+        }
+    }
+}
+
+/// Represents SQL's `COUNT` aggregation function
+#[derive(Debug)]
+pub struct AggCount {
+    counts: HashMap<Tuple, usize>,
+    aggregator: AggFilterFn,
+}
+
+impl AggCount {
+    pub fn new_distinct() -> Self {
+        AggCount {
+            counts: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub fn new_all() -> Self {
+        AggCount {
+            counts: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for AggCount {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if !input_value.is_null_or_missing()
+            && self.aggregator.filter_value(input_value.clone(), group)
+        {
+            match self.counts.get_mut(group) {
+                None => {
+                    self.counts.insert(group.clone(), 1);
+                }
+                Some(count) => {
+                    *count += 1;
+                }
+            };
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        Value::from(
+            self.counts
+                .get(group)
+                .expect("Expect group to exist in counts"),
+        )
+    }
+}
+
+/// Represents SQL's `MAX` aggregation function
+#[derive(Debug)]
+pub struct AggMax {
+    maxes: HashMap<Tuple, Value>,
+    aggregator: AggFilterFn,
+}
+
+impl AggMax {
+    pub fn new_distinct() -> Self {
+        AggMax {
+            maxes: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub fn new_all() -> Self {
+        AggMax {
+            maxes: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for AggMax {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if !input_value.is_null_or_missing()
+            && self.aggregator.filter_value(input_value.clone(), group)
+        {
+            match self.maxes.get_mut(group) {
+                None => {
+                    self.maxes.insert(group.clone(), input_value.clone());
+                }
+                Some(m) => {
+                    *m = max(m.clone(), input_value.clone());
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        self.maxes
+            .get(group)
+            .expect("Expect group to exist in sums")
+            .clone()
+    }
+}
+
+/// Represents SQL's `MIN` aggregation function
+#[derive(Debug)]
+pub struct AggMin {
+    mins: HashMap<Tuple, Value>,
+    aggregator: AggFilterFn,
+}
+
+impl AggMin {
+    pub fn new_distinct() -> Self {
+        AggMin {
+            mins: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub fn new_all() -> Self {
+        AggMin {
+            mins: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for AggMin {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if !input_value.is_null_or_missing()
+            && self.aggregator.filter_value(input_value.clone(), group)
+        {
+            match self.mins.get_mut(group) {
+                None => {
+                    self.mins.insert(group.clone(), input_value.clone());
+                }
+                Some(m) => {
+                    *m = min(m.clone(), input_value.clone());
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        self.mins
+            .get(group)
+            .expect("Expect group to exist in mins")
+            .clone()
+    }
+}
+
+/// Represents SQL's `SUM` aggregation function
+#[derive(Debug)]
+pub struct AggSum {
+    sums: HashMap<Tuple, Value>,
+    aggregator: AggFilterFn,
+}
+
+impl AggSum {
+    pub fn new_distinct() -> Self {
+        AggSum {
+            sums: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub fn new_all() -> Self {
+        AggSum {
+            sums: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for AggSum {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if !input_value.is_null_or_missing()
+            && self.aggregator.filter_value(input_value.clone(), group)
+        {
+            match self.sums.get_mut(group) {
+                None => {
+                    self.sums.insert(group.clone(), input_value.clone());
+                }
+                Some(s) => {
+                    *s = &s.clone() + input_value;
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Value {
+        self.sums
+            .get(group)
+            .expect("Expect group to exist in sums")
+            .clone()
+    }
+}
+
 /// Represents an evaluation `GROUP BY` operator. For `GROUP BY` operational semantics, see section
 /// `11` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
+/// `aggregate_exprs` represents the set of aggregate expressions to compute.
 #[derive(Debug)]
 pub struct EvalGroupBy {
     pub strategy: EvalGroupingStrategy,
     pub exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub aggregate_exprs: Vec<AggregateExpression>,
     pub group_as_alias: Option<String>,
     pub input: Option<Value>,
 }
@@ -327,20 +678,40 @@ impl Evaluable for EvalGroupBy {
                 let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
                 for v in input_value.into_iter() {
                     let v_as_tuple = v.coerce_to_tuple();
+                    let group = self.eval_group(&v_as_tuple, ctx);
+                    // Compute next aggregation result for each of the aggregation expressions
+                    for aggregate_expr in self.aggregate_exprs.iter_mut() {
+                        let evaluated_val =
+                            aggregate_expr.expr.evaluate(&v_as_tuple, ctx).into_owned();
+                        aggregate_expr.func.next_value(&evaluated_val, &group);
+                    }
                     groups
-                        .entry(self.eval_group(&v_as_tuple, ctx))
+                        .entry(group)
                         .or_insert(vec![])
-                        .push(Value::Tuple(Box::new(v_as_tuple)));
+                        .push(Value::Tuple(Box::new(v_as_tuple.clone())));
                 }
 
                 let bag = groups
                     .into_iter()
-                    .map(|(k, v)| match group_as_alias {
-                        None => Value::from(k), // TODO: removing the values here will be insufficient for when aggregations are added since they may have nothing to aggregate over
-                        Some(alias) => {
-                            let mut tuple_with_group = k;
-                            tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
-                            Value::from(tuple_with_group)
+                    .map(|(mut k, v)| {
+                        // Finalize aggregation computation and include result in output binding
+                        // tuple
+                        let mut agg_results: Vec<(&str, Value)> = vec![];
+                        for aggregate_expr in &self.aggregate_exprs {
+                            let agg_result = aggregate_expr.func.compute(&k);
+                            agg_results.push((aggregate_expr.name.as_str(), agg_result));
+                        }
+                        agg_results
+                            .into_iter()
+                            .for_each(|(agg_name, agg_result)| k.insert(agg_name, agg_result));
+
+                        match group_as_alias {
+                            None => Value::from(k),
+                            Some(alias) => {
+                                let mut tuple_with_group = k;
+                                tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
+                                Value::from(tuple_with_group)
+                            }
                         }
                     })
                     .collect::<Bag>();
