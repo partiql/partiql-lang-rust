@@ -6,6 +6,7 @@ use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{partiql_bag, partiql_tuple, Bag, List, Tuple, Value};
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -541,6 +542,84 @@ impl Evaluable for EvalHaving {
             .map(Value::coerce_to_tuple)
             .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
         Some(Value::from(filtered.collect::<Bag>()))
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8) {
+        self.input = Some(input);
+    }
+}
+
+#[derive(Debug)]
+pub struct EvalOrderBySortCondition {
+    pub expr: Box<dyn EvalExpr>,
+    pub spec: EvalOrderBySortSpec,
+}
+
+#[derive(Debug)]
+pub enum EvalOrderBySortSpec {
+    AscNullsFirst,
+    AscNullsLast,
+    DescNullsFirst,
+    DescNullsLast,
+}
+
+/// Represents an evaluation `Order By` operator; e.g. `ORDER BY a DESC NULLS LAST` in `SELECT a FROM t ORDER BY a DESC NULLS LAST`.
+#[derive(Debug)]
+pub struct EvalOrderBy {
+    pub cmp: Vec<EvalOrderBySortCondition>,
+    pub input: Option<Value>,
+}
+
+impl EvalOrderBy {
+    #[inline]
+    fn compare(&self, l: &Value, r: &Value, ctx: &dyn EvalContext) -> Ordering {
+        let l = l.as_tuple_ref();
+        let r = r.as_tuple_ref();
+        self.cmp
+            .iter()
+            .map(|spec| {
+                let l = spec.expr.evaluate(&l, ctx);
+                let r = spec.expr.evaluate(&r, ctx);
+
+                match spec.spec {
+                    EvalOrderBySortSpec::AscNullsFirst => l.as_ref().cmp(r.as_ref()),
+                    EvalOrderBySortSpec::AscNullsLast => match (l.as_ref(), r.as_ref()) {
+                        (Null, Null) => Ordering::Equal,
+                        (Null, Missing) => Ordering::Less,
+                        (Missing, Missing) => Ordering::Equal,
+                        (Missing, Null) => Ordering::Greater,
+                        (Null, _) => Ordering::Greater,
+                        (Missing, _) => Ordering::Greater,
+                        (_, Null) => Ordering::Less,
+                        (_, Missing) => Ordering::Less,
+                        (l, r) => l.cmp(r),
+                    },
+                    EvalOrderBySortSpec::DescNullsFirst => match (l.as_ref(), r.as_ref()) {
+                        (Null, Null) => Ordering::Equal,
+                        (Null, Missing) => Ordering::Less,
+                        (Missing, Missing) => Ordering::Equal,
+                        (Missing, Null) => Ordering::Greater,
+                        (Null, _) => Ordering::Less,
+                        (Missing, _) => Ordering::Less,
+                        (_, Null) => Ordering::Greater,
+                        (_, Missing) => Ordering::Greater,
+                        (l, r) => r.cmp(l),
+                    },
+                    EvalOrderBySortSpec::DescNullsLast => r.as_ref().cmp(l.as_ref()),
+                }
+            })
+            .find_or_last(|o| o != &Ordering::Equal)
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+impl Evaluable for EvalOrderBy {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+        let input_value = self.input.take().expect("Error in retrieving input value");
+
+        let mut values = input_value.into_iter().collect_vec();
+        values.sort_by(|l, r| self.compare(l, r, ctx));
+        Some(Value::from(List::from(values)))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {

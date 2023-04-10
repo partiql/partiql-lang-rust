@@ -6,11 +6,15 @@ use partiql_logical as logical;
 
 use partiql_logical::{
     BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan, OpId,
-    PathComponent, Pattern, PatternMatchExpr, SearchedCase, Type, UnaryOp, ValueExpr,
+    PathComponent, Pattern, PatternMatchExpr, SearchedCase, SortSpecNullOrder, SortSpecOrder, Type,
+    UnaryOp, ValueExpr,
 };
 
 use crate::eval;
-use crate::eval::evaluable::{EvalGroupingStrategy, EvalJoinKind, EvalSubQueryExpr, Evaluable};
+use crate::eval::evaluable::{
+    EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition, EvalOrderBySortSpec,
+    EvalSubQueryExpr, Evaluable,
+};
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
@@ -158,7 +162,30 @@ impl EvaluatorPlanner {
                 let expr = self.plan_values(expr);
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
-            BindingsOp::OrderBy => todo!("OrderBy"),
+            BindingsOp::OrderBy(logical::OrderBy { specs }) => {
+                let cmp = specs
+                    .iter()
+                    .map(|spec| {
+                        let expr = self.plan_values(&spec.expr);
+                        let spec = match (&spec.order, &spec.null_order) {
+                            (SortSpecOrder::Asc, SortSpecNullOrder::First) => {
+                                EvalOrderBySortSpec::AscNullsFirst
+                            }
+                            (SortSpecOrder::Asc, SortSpecNullOrder::Last) => {
+                                EvalOrderBySortSpec::AscNullsLast
+                            }
+                            (SortSpecOrder::Desc, SortSpecNullOrder::First) => {
+                                EvalOrderBySortSpec::DescNullsFirst
+                            }
+                            (SortSpecOrder::Desc, SortSpecNullOrder::Last) => {
+                                EvalOrderBySortSpec::DescNullsFirst
+                            }
+                        };
+                        EvalOrderBySortCondition { expr, spec }
+                    })
+                    .collect_vec();
+                Box::new(EvalOrderBy { cmp, input: None })
+            }
             BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
                 Box::new(eval::evaluable::EvalLimitOffset {
                     limit: limit.as_ref().map(|e| self.plan_values(e)),
