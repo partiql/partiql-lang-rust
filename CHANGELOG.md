@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+### Added
+### Fixes
+
+## [0.3.0] - 2023-04-11
+### Changed
 - `EvalExpr.evaluate` function now returns a [Cow](https://doc.rust-lang.org/std/borrow/enum.Cow.html) of `Value`
 - `Evaluable` trait's `get_vars` function returns by ref
 - Refactor of `partiql-eval` crate
@@ -110,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.2.0...HEAD
-[0.1.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.1.0
-[0.2.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.2.0
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.3.0
+[0.2.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.2.0
+[0.1.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.1.0
