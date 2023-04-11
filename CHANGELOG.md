@@ -7,22 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- `EvalExpr.evaluate` function now returns a [Cow](https://doc.rust-lang.org/std/borrow/enum.Cow.html) of `Value`
+- `Evaluable` trait's `get_vars` function returns by ref
+- Refactor of `partiql-eval` crate
+  - Operators previously implementing `Evaluable` (e.g. `EvalScan`, `EvalFilter`) are under the `eval::evaluable` module
+  - Expressions previously implementing `EvalExpr` (e.g. `EvalBinOpExpr`, `EvalLitExpr`) are under the `eval::expr` module
+- Refactor `CallAgg` `partiql-ast` node
 
 ### Added
-- `DATE`/`TIME`/`TIMESTAMP` values
-- Implements `LIMIT` and `OFFSET` operators in evaluator
 - Adds some benchmarks for parsing, compiling, planning, & evaluation
+- Implements more built-in functions -- `POSITION`, `OCTET_LEN`, `BIT_LEN`, `ABS`, `MOD`, `CARDINALITY`, `OVERLAY`
 - Implements `PIVOT` operator in evaluator
-- `serde` feature to `partiql-value` and `partiql-logical` with `Serialize` and `Deserialize` traits.
+- Implements `LIKE` for non-string, non-literals
+- `serde` feature to `partiql-value` and `partiql-logical` with `Serialize` and `Deserialize` traits
 - Adds `Display` for `LogicalPlan`
-- Expose `partiql_value::parse_ion` as a public API.
+- Expose `partiql_value::parse_ion` as a public API
+- Adds some convenience methods on `Value`
+  - Add `Extend` implementations for `List` and `Bag`
+  - Add methods to iterate a `Tuple`'s values without zipping its names
+  - Allow `collect()` into a `Tuple` with any `Into<String>`
+- Parse `OUTER UNION`/`INTERSECT`/`EXCEPT`
+- Parse `WITH` clause
+- Implements `LIMIT` and `OFFSET` operators in evaluator
+- `DATE`/`TIME`/`TIMESTAMP` values
+- Parse `TABLE <id>` references
 - Implements `GROUP BY` operator in evaluator
 - Implements `HAVING` operator in evaluator
 - Implements `ORDER BY` operator in evaluator
-- Implements SQL Aggregation functions -- AVG, COUNT, MAX, MIN, SUM
+- Implements SQL aggregation functions (`AVG`, `COUNT`, `MAX`, `MIN`, `SUM`) in evaluator
 
 ### Fixes
+- Some performance improvements from removing extraneous `clone`s and tweaking buffer sizes
+- Fix off by one error when checking preconditions to lower join `ON`
+- Recognize aggregate fn names in parser
+- Pass-through comments when processing special forms
+- Make `BY <x>` optional in `GROUP` clause
+- Fix `JOIN` parsing by defaulting to `INNER` and allowing elision of keywords
+- Allow un-parenthesized subquery as the only argument of a function in parser
+- Fix handling of List/Bag/Tuple in keyword argument preprocessing in parser
 - Fixes Tuple value duplicate equality and hashing
+- Properly skip comments when parsing
 
 ## [0.2.0] - 2023-01-10
 ### Changed
@@ -89,3 +113,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.2.0...HEAD
 [0.1.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.1.0
 [0.2.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.2.0
+[0.3.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.3.0
