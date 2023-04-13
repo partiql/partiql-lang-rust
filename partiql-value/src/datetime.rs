@@ -48,19 +48,26 @@ impl DateTime {
         DateTime::Date(date)
     }
 
-    pub fn from_ymdhms(
+    pub fn from_ymdhms_offset_minutes(
         year: i32,
         month: NonZeroU8,
         day: u8,
         hour: u8,
         minute: u8,
         second: f64,
+        offset: Option<i32>,
     ) -> Self {
         let month: time::Month = month.get().try_into().expect("valid month");
         let date = time::Date::from_calendar_date(year, month, day).expect("valid ymd");
         let time = time_from_hmfs(hour, minute, second);
-        let date = date.with_time(time);
-        DateTime::Timestamp(date)
+        match offset {
+            None => DateTime::Timestamp(date.with_time(time)),
+            Some(o) => {
+                let offset = UtcOffset::from_whole_seconds(o * 60).expect("offset in range");
+                let date = date.with_time(time).assume_offset(offset);
+                DateTime::TimestampWithTz(date)
+            }
+        }
     }
 
     fn from_hmfs_offset(hour: u8, minute: u8, second: f64, offset: Option<UtcOffset>) -> Self {

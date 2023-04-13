@@ -199,14 +199,16 @@ fn parse_time(reader: &mut Reader) -> DateTime {
 
 fn parse_datetime(reader: &mut Reader) -> DateTime {
     let ts = reader.read_timestamp().unwrap();
+    let offset = ts.offset();
     // TODO: fractional seconds Cf. https://github.com/amazon-ion/ion-rust/pull/482#issuecomment-1470615286
-    DateTime::from_ymdhms(
+    DateTime::from_ymdhms_offset_minutes(
         ts.year(),
         NonZeroU8::new(ts.month() as u8).unwrap(),
         ts.day() as u8,
         ts.hour() as u8,
         ts.minute() as u8,
         ts.second() as f64,
+        offset,
     )
 }
 

@@ -18,11 +18,13 @@ use crate::eval::evaluable::{
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
-    EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength, EvalFnExists, EvalFnLower,
-    EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition, EvalFnRtrim,
-    EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch, EvalLikeNonStringNonLiteralMatch,
-    EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr, EvalTupleExpr, EvalUnaryOp,
-    EvalUnaryOpExpr, EvalVarRef,
+    EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength, EvalFnExists,
+    EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
+    EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
+    EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
+    EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
+    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr,
+    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_value::Value::Null;
@@ -582,6 +584,54 @@ impl EvaluatorPlanner {
                     CallName::Cardinality => {
                         assert_eq!(args.len(), 1);
                         Box::new(EvalFnCardinality {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractYear => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractYear {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractMonth => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractMonth {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractDay => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractDay {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractHour => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractHour {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractMinute => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractMinute {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractSecond => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractSecond {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractTimezoneHour => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractTimezoneHour {
+                            value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ExtractTimezoneMinute => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
                         })
                     }
