@@ -9,6 +9,7 @@ use partiql_value::{
     UnaryPlus, Value,
 };
 use regex::{Regex, RegexBuilder};
+use rust_decimal::prelude::FromPrimitive;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
@@ -1074,22 +1075,26 @@ pub struct EvalFnExtractSecond {
 }
 
 impl EvalExpr for EvalFnExtractSecond {
+    // TODO: doesn't currently extract fractional seconds
     #[inline]
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
-        let result = match value.borrow() {
-            Null => Null,
-            Missing => Missing,
+        let (second, nanosecond) = match value.borrow() {
+            Null => return Cow::Owned(Null),
+            Missing => return Cow::Owned(Missing),
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => Value::from(t.second()),
-                DateTime::TimeWithTz(t, _) => Value::from(t.second()),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.second()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.second()),
-                DateTime::Date(_) => Missing,
+                DateTime::Time(t) => (t.second(), t.nanosecond()),
+                DateTime::TimeWithTz(t, _) => (t.second(), t.nanosecond()),
+                DateTime::Timestamp(tstamp) => (tstamp.second(), tstamp.nanosecond()),
+                DateTime::TimestampWithTz(tstamp) => (tstamp.second(), tstamp.nanosecond()),
+                DateTime::Date(_) => return Cow::Owned(Missing),
             },
-            _ => Missing,
+            _ => return Cow::Owned(Missing),
         };
-        Cow::Owned(result)
+        let result =
+            rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
+                .expect("time as decimal");
+        Cow::Owned(Value::from(result))
     }
 }
 
