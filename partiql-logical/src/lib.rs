@@ -651,6 +651,14 @@ pub enum CallName {
     Abs,
     Mod,
     Cardinality,
+    ExtractYear,
+    ExtractMonth,
+    ExtractDay,
+    ExtractHour,
+    ExtractMinute,
+    ExtractSecond,
+    ExtractTimezoneHour,
+    ExtractTimezoneMinute,
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.

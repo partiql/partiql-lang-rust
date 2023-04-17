@@ -839,11 +839,32 @@ impl From<i32> for Value {
     }
 }
 
+impl From<i16> for Value {
+    #[inline]
+    fn from(n: i16) -> Self {
+        (n as i64).into()
+    }
+}
+
+impl From<i8> for Value {
+    #[inline]
+    fn from(n: i8) -> Self {
+        (n as i64).into()
+    }
+}
+
 impl From<usize> for Value {
     #[inline]
     fn from(n: usize) -> Self {
         // TODO overflow to bigint/decimal
         Value::Integer(n as i64)
+    }
+}
+
+impl From<u8> for Value {
+    #[inline]
+    fn from(n: u8) -> Self {
+        (n as usize).into()
     }
 }
 

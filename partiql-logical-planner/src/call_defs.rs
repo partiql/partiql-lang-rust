@@ -441,6 +441,118 @@ fn function_call_def_cardinality() -> CallDef {
     }
 }
 
+fn function_call_def_extract() -> CallDef {
+    CallDef {
+        names: vec!["extract"],
+        overloads: vec![
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("year".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractYear,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("month".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractMonth,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("day".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractDay,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("hour".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractHour,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("minute".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractMinute,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("second".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractSecond,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("timezone_hour".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractTimezoneHour,
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![
+                    CallSpecArg::Named("timezone_minute".into()),
+                    CallSpecArg::Named("from".into()),
+                ],
+                output: Box::new(|mut args| {
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::ExtractTimezoneMinute,
+                        arguments: args,
+                    })
+                }),
+            },
+        ],
+    }
+}
+
 pub(crate) static FN_SYM_TAB: Lazy<FnSymTab> = Lazy::new(function_call_def);
 
 /// Function symbol table
@@ -478,6 +590,7 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_abs(),
         function_call_def_mod(),
         function_call_def_cardinality(),
+        function_call_def_extract(),
     ] {
         assert!(!def.names.is_empty());
         let primary = def.names[0];

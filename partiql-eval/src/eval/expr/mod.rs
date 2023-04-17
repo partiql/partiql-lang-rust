@@ -5,9 +5,11 @@ use itertools::Itertools;
 use partiql_logical::Type;
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
-    Bag, BinaryAnd, BinaryOr, BindingsName, List, NullableEq, NullableOrd, Tuple, UnaryPlus, Value,
+    Bag, BinaryAnd, BinaryOr, BindingsName, DateTime, List, NullableEq, NullableOrd, Tuple,
+    UnaryPlus, Value,
 };
 use regex::{Regex, RegexBuilder};
+use rust_decimal::prelude::FromPrimitive;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
@@ -930,6 +932,216 @@ impl EvalExpr for EvalFnCardinality {
             Value::List(l) => Value::from(l.len()),
             Value::Bag(b) => Value::from(b.len()),
             Value::Tuple(t) => Value::from(t.len()),
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a year `EXTRACT` function, e.g. `extract(YEAR FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractYear {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractYear {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Date(d) => Value::from(d.year()),
+                DateTime::Timestamp(tstamp) => Value::from(tstamp.year()),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.year()),
+                DateTime::Time(_) => Missing,
+                DateTime::TimeWithTz(_, _) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a month `EXTRACT` function, e.g. `extract(MONTH FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractMonth {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractMonth {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Date(d) => Value::from(d.month() as u8),
+                DateTime::Timestamp(tstamp) => Value::from(tstamp.month() as u8),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.month() as u8),
+                DateTime::Time(_) => Missing,
+                DateTime::TimeWithTz(_, _) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a day `EXTRACT` function, e.g. `extract(DAY FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractDay {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractDay {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Date(d) => Value::from(d.day()),
+                DateTime::Timestamp(tstamp) => Value::from(tstamp.day()),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.day()),
+                DateTime::Time(_) => Missing,
+                DateTime::TimeWithTz(_, _) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents an hour `EXTRACT` function, e.g. `extract(HOUR FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractHour {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractHour {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Time(t) => Value::from(t.hour()),
+                DateTime::TimeWithTz(t, _) => Value::from(t.hour()),
+                DateTime::Timestamp(tstamp) => Value::from(tstamp.hour()),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.hour()),
+                DateTime::Date(_) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a minute `EXTRACT` function, e.g. `extract(MINUTE FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractMinute {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractMinute {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Time(t) => Value::from(t.minute()),
+                DateTime::TimeWithTz(t, _) => Value::from(t.minute()),
+                DateTime::Timestamp(tstamp) => Value::from(tstamp.minute()),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.minute()),
+                DateTime::Date(_) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a second `EXTRACT` function, e.g. `extract(SECOND FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractSecond {
+    pub value: Box<dyn EvalExpr>,
+}
+
+fn total_seconds(second: u8, nanosecond: u32) -> Value {
+    let result = rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
+        .expect("time as decimal");
+    Value::from(result)
+}
+
+impl EvalExpr for EvalFnExtractSecond {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::Time(t) => total_seconds(t.second(), t.nanosecond()),
+                DateTime::TimeWithTz(t, _) => total_seconds(t.second(), t.nanosecond()),
+                DateTime::Timestamp(tstamp) => total_seconds(tstamp.second(), tstamp.nanosecond()),
+                DateTime::TimestampWithTz(tstamp) => {
+                    total_seconds(tstamp.second(), tstamp.nanosecond())
+                }
+                DateTime::Date(_) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a timezone hour `EXTRACT` function, e.g. `extract(TIMEZONE_HOUR FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractTimezoneHour {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractTimezoneHour {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::TimeWithTz(_, tz) => Value::from(tz.whole_hours()),
+                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.offset().whole_hours()),
+                DateTime::Date(_) => Missing,
+                DateTime::Time(_) => Missing,
+                DateTime::Timestamp(_) => Missing,
+            },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a timezone minute `EXTRACT` function, e.g. `extract(TIMEZONE_MINUTE FROM t)`.
+#[derive(Debug)]
+pub struct EvalFnExtractTimezoneMinute {
+    pub value: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnExtractTimezoneMinute {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let value = self.value.evaluate(bindings, ctx);
+        let result = match value.borrow() {
+            Null => Null,
+            Value::DateTime(dt) => match dt.as_ref() {
+                DateTime::TimeWithTz(_, tz) => Value::from(tz.minutes_past_hour()),
+                DateTime::TimestampWithTz(tstamp) => {
+                    Value::from(tstamp.offset().minutes_past_hour())
+                }
+                DateTime::Date(_) => Missing,
+                DateTime::Time(_) => Missing,
+                DateTime::Timestamp(_) => Missing,
+            },
             _ => Missing,
         };
         Cow::Owned(result)

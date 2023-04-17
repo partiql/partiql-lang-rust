@@ -188,10 +188,11 @@ fn parse_time(reader: &mut Reader) -> DateTime {
     }
     reader.step_out().expect("step out of struct");
 
-    DateTime::from_hmfs_tz(
+    DateTime::from_hms_nano_tz(
         time.hour.expect("hour"),
         time.minute.expect("minute"),
-        time.second.expect("second"),
+        time.second.expect("second").trunc() as u8,
+        time.second.expect("second").fract() as u32,
         time.tz_hour,
         time.tz_minute,
     )
@@ -199,14 +200,16 @@ fn parse_time(reader: &mut Reader) -> DateTime {
 
 fn parse_datetime(reader: &mut Reader) -> DateTime {
     let ts = reader.read_timestamp().unwrap();
-    // TODO: fractional seconds Cf. https://github.com/amazon-ion/ion-rust/pull/482#issuecomment-1470615286
-    DateTime::from_ymdhms(
+    let offset = ts.offset();
+    DateTime::from_ymdhms_nano_offset_minutes(
         ts.year(),
         NonZeroU8::new(ts.month() as u8).unwrap(),
         ts.day() as u8,
         ts.hour() as u8,
         ts.minute() as u8,
-        ts.second() as f64,
+        ts.second() as u8,
+        ts.nanoseconds(),
+        offset,
     )
 }
 

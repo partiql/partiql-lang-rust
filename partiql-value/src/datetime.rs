@@ -21,14 +21,15 @@ impl DateTime {
         DateTime::Time(time::Time::from_hms(hour, minute, second).expect("valid time value"))
     }
 
-    pub fn from_hmfs(hour: u8, minute: u8, second: f64) -> Self {
-        Self::from_hmfs_offset(hour, minute, second, None)
+    pub fn from_hms_nano(hour: u8, minute: u8, second: u8, nanosecond: u32) -> Self {
+        Self::from_hms_nano_offset(hour, minute, second, nanosecond, None)
     }
 
-    pub fn from_hmfs_tz(
+    pub fn from_hms_nano_tz(
         hour: u8,
         minute: u8,
-        second: f64,
+        second: u8,
+        nanosecond: u32,
         tz_hours: Option<i8>,
         tz_minutes: Option<i8>,
     ) -> Self {
@@ -39,7 +40,7 @@ impl DateTime {
             _ => None,
         };
 
-        Self::from_hmfs_offset(hour, minute, second, offset)
+        Self::from_hms_nano_offset(hour, minute, second, nanosecond, offset)
     }
 
     pub fn from_ymd(year: i32, month: NonZeroU8, day: u8) -> Self {
@@ -48,23 +49,37 @@ impl DateTime {
         DateTime::Date(date)
     }
 
-    pub fn from_ymdhms(
+    pub fn from_ymdhms_nano_offset_minutes(
         year: i32,
         month: NonZeroU8,
         day: u8,
         hour: u8,
         minute: u8,
-        second: f64,
+        second: u8,
+        nanosecond: u32,
+        offset: Option<i32>,
     ) -> Self {
         let month: time::Month = month.get().try_into().expect("valid month");
         let date = time::Date::from_calendar_date(year, month, day).expect("valid ymd");
-        let time = time_from_hmfs(hour, minute, second);
-        let date = date.with_time(time);
-        DateTime::Timestamp(date)
+        let time = time_from_hms_nano(hour, minute, second, nanosecond);
+        match offset {
+            None => DateTime::Timestamp(date.with_time(time)),
+            Some(o) => {
+                let offset = UtcOffset::from_whole_seconds(o * 60).expect("offset in range");
+                let date = date.with_time(time).assume_offset(offset);
+                DateTime::TimestampWithTz(date)
+            }
+        }
     }
 
-    fn from_hmfs_offset(hour: u8, minute: u8, second: f64, offset: Option<UtcOffset>) -> Self {
-        let time = time_from_hmfs(hour, minute, second);
+    fn from_hms_nano_offset(
+        hour: u8,
+        minute: u8,
+        second: u8,
+        nanosecond: u32,
+        offset: Option<UtcOffset>,
+    ) -> Self {
+        let time = time_from_hms_nano(hour, minute, second, nanosecond);
         match offset {
             Some(offset) => DateTime::TimeWithTz(time, offset),
             None => DateTime::Time(time),
@@ -72,10 +87,8 @@ impl DateTime {
     }
 }
 
-fn time_from_hmfs(hour: u8, minute: u8, second: f64) -> time::Time {
-    let millis = (second.fract() * 1e9) as u32;
-    let second = second.trunc() as u8;
-    time::Time::from_hms_nano(hour, minute, second, millis).expect("valid time value")
+fn time_from_hms_nano(hour: u8, minute: u8, second: u8, nanosecond: u32) -> time::Time {
+    time::Time::from_hms_nano(hour, minute, second, nanosecond).expect("valid time value")
 }
 
 impl Debug for DateTime {

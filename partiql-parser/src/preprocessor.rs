@@ -87,7 +87,7 @@ mod built_ins {
     }
 
     const EXTRACT_SPECIFIER: &str =
-        "(?i:second)|(?i:minute)|(?i:hour)|(?i:day)|(?i:month)|(?:year)|(?:timezone_hour)|(?:timezone_minute)";
+        "(?i:second)|(?i:minute)|(?i:hour)|(?i:day)|(?i:month)|(?i:year)|(?i:timezone_hour)|(?i:timezone_minute)";
 
     pub(crate) fn built_in_extract() -> FnExpr<'static> {
         let re = Regex::new(EXTRACT_SPECIFIER).unwrap();
