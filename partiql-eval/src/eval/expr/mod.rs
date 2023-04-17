@@ -950,7 +950,6 @@ impl EvalExpr for EvalFnExtractYear {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.year()),
                 DateTime::Timestamp(tstamp) => Value::from(tstamp.year()),
@@ -976,7 +975,6 @@ impl EvalExpr for EvalFnExtractMonth {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.month() as u8),
                 DateTime::Timestamp(tstamp) => Value::from(tstamp.month() as u8),
@@ -990,7 +988,7 @@ impl EvalExpr for EvalFnExtractMonth {
     }
 }
 
-/// Represents a day `EXTRACT` function, e.g. `extract(DAT FROM t)`.
+/// Represents a day `EXTRACT` function, e.g. `extract(DAY FROM t)`.
 #[derive(Debug)]
 pub struct EvalFnExtractDay {
     pub value: Box<dyn EvalExpr>,
@@ -1002,7 +1000,6 @@ impl EvalExpr for EvalFnExtractDay {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.day()),
                 DateTime::Timestamp(tstamp) => Value::from(tstamp.day()),
@@ -1028,7 +1025,6 @@ impl EvalExpr for EvalFnExtractHour {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Time(t) => Value::from(t.hour()),
                 DateTime::TimeWithTz(t, _) => Value::from(t.hour()),
@@ -1054,7 +1050,6 @@ impl EvalExpr for EvalFnExtractMinute {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Time(t) => Value::from(t.minute()),
                 DateTime::TimeWithTz(t, _) => Value::from(t.minute()),
@@ -1074,27 +1069,30 @@ pub struct EvalFnExtractSecond {
     pub value: Box<dyn EvalExpr>,
 }
 
+fn total_seconds(second: u8, nanosecond: u32) -> Value {
+    let result = rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
+        .expect("time as decimal");
+    Value::from(result)
+}
+
 impl EvalExpr for EvalFnExtractSecond {
-    // TODO: doesn't currently extract fractional seconds
     #[inline]
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.value.evaluate(bindings, ctx);
-        let (second, nanosecond) = match value.borrow() {
-            Null => return Cow::Owned(Null),
-            Missing => return Cow::Owned(Missing),
+        let result = match value.borrow() {
+            Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => (t.second(), t.nanosecond()),
-                DateTime::TimeWithTz(t, _) => (t.second(), t.nanosecond()),
-                DateTime::Timestamp(tstamp) => (tstamp.second(), tstamp.nanosecond()),
-                DateTime::TimestampWithTz(tstamp) => (tstamp.second(), tstamp.nanosecond()),
-                DateTime::Date(_) => return Cow::Owned(Missing),
+                DateTime::Time(t) => total_seconds(t.second(), t.nanosecond()),
+                DateTime::TimeWithTz(t, _) => total_seconds(t.second(), t.nanosecond()),
+                DateTime::Timestamp(tstamp) => total_seconds(tstamp.second(), tstamp.nanosecond()),
+                DateTime::TimestampWithTz(tstamp) => {
+                    total_seconds(tstamp.second(), tstamp.nanosecond())
+                }
+                DateTime::Date(_) => Missing,
             },
-            _ => return Cow::Owned(Missing),
+            _ => Missing,
         };
-        let result =
-            rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
-                .expect("time as decimal");
-        Cow::Owned(Value::from(result))
+        Cow::Owned(result)
     }
 }
 
@@ -1110,7 +1108,6 @@ impl EvalExpr for EvalFnExtractTimezoneHour {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::TimeWithTz(_, tz) => Value::from(tz.whole_hours()),
                 DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.offset().whole_hours()),
@@ -1136,7 +1133,6 @@ impl EvalExpr for EvalFnExtractTimezoneMinute {
         let value = self.value.evaluate(bindings, ctx);
         let result = match value.borrow() {
             Null => Null,
-            Missing => Missing,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::TimeWithTz(_, tz) => Value::from(tz.minutes_past_hour()),
                 DateTime::TimestampWithTz(tstamp) => {
