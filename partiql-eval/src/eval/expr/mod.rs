@@ -1136,7 +1136,7 @@ impl EvalExpr for EvalFnExtractTimezoneMinute {
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::TimeWithTz(_, tz) => Value::from(tz.minutes_past_hour()),
                 DateTime::TimestampWithTz(tstamp) => {
-                    Value::from(tstamp.offset().minutes_past_hour() % 60)
+                    Value::from(tstamp.offset().minutes_past_hour())
                 }
                 DateTime::Date(_) => Missing,
                 DateTime::Time(_) => Missing,

@@ -214,7 +214,7 @@ fn parse_test_value_datetime(reader: &mut Reader) -> DateTime {
         ts.hour() as u8,
         ts.minute() as u8,
         ts.second() as u8,
-        ts.nanoseconds() as u32,
+        ts.nanoseconds(),
         offset,
     )
 }

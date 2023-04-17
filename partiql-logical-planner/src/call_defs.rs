@@ -451,7 +451,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractYear,
                         arguments: args,
@@ -464,7 +464,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractMonth,
                         arguments: args,
@@ -477,7 +477,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractDay,
                         arguments: args,
@@ -490,7 +490,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractHour,
                         arguments: args,
@@ -503,7 +503,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractMinute,
                         arguments: args,
@@ -516,7 +516,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractSecond,
                         arguments: args,
@@ -529,7 +529,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractTimezoneHour,
                         arguments: args,
@@ -542,7 +542,7 @@ fn function_call_def_extract() -> CallDef {
                     CallSpecArg::Named("from".into()),
                 ],
                 output: Box::new(|mut args| {
-                    args.remove(0); // remove first default synthesized argument
+                    args.remove(0); // remove first default synthesized argument from parser preprocessor
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::ExtractTimezoneMinute,
                         arguments: args,
