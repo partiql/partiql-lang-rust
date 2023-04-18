@@ -4,12 +4,10 @@ use std::time::Duration;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::evaluable::{EvalScan, Evaluable};
-use partiql_eval::eval::expr::{EvalPath, EvalPathComponent, EvalVarRef};
-use partiql_eval::eval::{BasicContext, EvalPlan};
+use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan;
 use partiql_logical as logical;
-use partiql_logical::BindingsOp::Project;
+use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
 use partiql_value::{
     partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
@@ -149,22 +147,30 @@ fn eval_bench(c: &mut Criterion) {
     });
 
     fn eval(eval: bool) {
-        // eval plan for SELECT * FROM hr.employeesNestScalars
-        let mut from = EvalScan::new(
-            Box::new(EvalPath {
-                expr: Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("hr".to_string()),
-                }),
-                components: vec![EvalPathComponent::Key(BindingsName::CaseInsensitive(
+        // logical plan for SELECT * FROM hr.employeesNestScalars
+        let mut logical_plan = LogicalPlan::new();
+
+        let from = logical_plan.add_operator(BindingsOp::Scan(logical::Scan {
+            expr: ValueExpr::Path(
+                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
+                    "hr".to_string(),
+                ))),
+                vec![PathComponent::Key(BindingsName::CaseInsensitive(
                     "employeesNestScalars".to_string(),
                 ))],
-            }),
-            "x",
-        );
+            ),
+            as_key: "x".to_string(),
+            at_key: None,
+        }));
+        let project_all = logical_plan.add_operator(ProjectAll);
+        let sink = logical_plan.add_operator(BindingsOp::Sink);
 
-        let ctx = BasicContext::new(data());
+        logical_plan.add_flow(from, project_all);
+        logical_plan.add_flow(project_all, sink);
+
+        let eval_plan = eval_plan(black_box(&logical_plan));
         if eval {
-            from.evaluate(&ctx);
+            evaluate(eval_plan, data());
         }
     }
 

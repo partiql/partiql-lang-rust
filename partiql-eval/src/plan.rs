@@ -12,8 +12,8 @@ use partiql_logical::{
 
 use crate::eval;
 use crate::eval::evaluable::{
-    AggAvg, AggCount, AggMax, AggMin, AggSum, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy,
-    EvalOrderBySortCondition, EvalOrderBySortSpec, EvalSubQueryExpr, Evaluable,
+    Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
+    EvalOrderBySortSpec, EvalSubQueryExpr, Evaluable, Max, Min, Sum,
 };
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
@@ -93,14 +93,12 @@ impl EvaluatorPlanner {
                 let expr = self.plan_values(expr);
                 Box::new(eval::evaluable::EvalSelectValue::new(expr))
             }
-            BindingsOp::Filter(logical::Filter { expr }) => Box::new(eval::evaluable::EvalFilter {
-                expr: self.plan_values(expr),
-                input: None,
-            }),
-            BindingsOp::Having(logical::Having { expr }) => Box::new(eval::evaluable::EvalHaving {
-                expr: self.plan_values(expr),
-                input: None,
-            }),
+            BindingsOp::Filter(logical::Filter { expr }) => {
+                Box::new(eval::evaluable::EvalFilter::new(self.plan_values(expr)))
+            }
+            BindingsOp::Having(logical::Having { expr }) => {
+                Box::new(eval::evaluable::EvalHaving::new(self.plan_values(expr)))
+            }
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
             BindingsOp::Pivot(logical::Pivot { key, value }) => Box::new(
@@ -158,34 +156,34 @@ impl EvaluatorPlanner {
                     .map(|a_e| {
                         let func = match (a_e.func.clone(), a_e.setq.clone()) {
                             (AggFunc::AggAvg, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::AggAvg(AggAvg::new_all())
+                                eval::evaluable::AggFunc::Avg(Avg::new_all())
                             }
                             (AggFunc::AggCount, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::AggCount(AggCount::new_all())
+                                eval::evaluable::AggFunc::Count(Count::new_all())
                             }
                             (AggFunc::AggMax, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::AggMax(AggMax::new_all())
+                                eval::evaluable::AggFunc::Max(Max::new_all())
                             }
                             (AggFunc::AggMin, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::AggMin(AggMin::new_all())
+                                eval::evaluable::AggFunc::Min(Min::new_all())
                             }
                             (AggFunc::AggSum, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::AggSum(AggSum::new_all())
+                                eval::evaluable::AggFunc::Sum(Sum::new_all())
                             }
                             (AggFunc::AggAvg, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::AggAvg(AggAvg::new_distinct())
+                                eval::evaluable::AggFunc::Avg(Avg::new_distinct())
                             }
                             (AggFunc::AggCount, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::AggCount(AggCount::new_distinct())
+                                eval::evaluable::AggFunc::Count(Count::new_distinct())
                             }
                             (AggFunc::AggMax, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::AggMax(AggMax::new_distinct())
+                                eval::evaluable::AggFunc::Max(Max::new_distinct())
                             }
                             (AggFunc::AggMin, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::AggMin(AggMin::new_distinct())
+                                eval::evaluable::AggFunc::Min(Min::new_distinct())
                             }
                             (AggFunc::AggSum, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::AggSum(AggSum::new_distinct())
+                                eval::evaluable::AggFunc::Sum(Sum::new_distinct())
                             }
                         };
                         eval::evaluable::AggregateExpression {
@@ -224,7 +222,7 @@ impl EvaluatorPlanner {
                                 EvalOrderBySortSpec::DescNullsFirst
                             }
                             (SortSpecOrder::Desc, SortSpecNullOrder::Last) => {
-                                EvalOrderBySortSpec::DescNullsFirst
+                                EvalOrderBySortSpec::DescNullsLast
                             }
                         };
                         EvalOrderBySortCondition { expr, spec }

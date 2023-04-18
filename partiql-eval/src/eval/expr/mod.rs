@@ -23,9 +23,9 @@ pub trait EvalExpr: Debug {
 /// Represents an evaluation operator for Tuple expressions such as `{t1.a: t1.b * 2}` in
 /// `SELECT VALUE {t1.a: t1.b * 2} FROM table1 AS t1`.
 #[derive(Debug)]
-pub struct EvalTupleExpr {
-    pub attrs: Vec<Box<dyn EvalExpr>>,
-    pub vals: Vec<Box<dyn EvalExpr>>,
+pub(crate) struct EvalTupleExpr {
+    pub(crate) attrs: Vec<Box<dyn EvalExpr>>,
+    pub(crate) vals: Vec<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalTupleExpr {
@@ -56,8 +56,8 @@ impl EvalExpr for EvalTupleExpr {
 /// Represents an evaluation operator for List (ordered array) expressions such as
 /// `[t1.a, t1.b * 2]` in `SELECT VALUE [t1.a, t1.b * 2] FROM table1 AS t1`.
 #[derive(Debug)]
-pub struct EvalListExpr {
-    pub elements: Vec<Box<dyn EvalExpr>>,
+pub(crate) struct EvalListExpr {
+    pub(crate) elements: Vec<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalListExpr {
@@ -74,8 +74,8 @@ impl EvalExpr for EvalListExpr {
 /// Represents an evaluation operator for Bag (unordered array) expressions such as
 /// `<<t1.a, t1.b * 2>>` in `SELECT VALUE <<t1.a, t1.b * 2>> FROM table1 AS t1`.
 #[derive(Debug)]
-pub struct EvalBagExpr {
-    pub elements: Vec<Box<dyn EvalExpr>>,
+pub(crate) struct EvalBagExpr {
+    pub(crate) elements: Vec<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalBagExpr {
@@ -92,13 +92,13 @@ impl EvalExpr for EvalBagExpr {
 /// Represents an evaluation operator for path navigation expressions as outlined in Section `4` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalPath {
-    pub expr: Box<dyn EvalExpr>,
-    pub components: Vec<EvalPathComponent>,
+pub(crate) struct EvalPath {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) components: Vec<EvalPathComponent>,
 }
 
 #[derive(Debug)]
-pub enum EvalPathComponent {
+pub(crate) enum EvalPathComponent {
     Key(BindingsName),
     KeyExpr(Box<dyn EvalExpr>),
     Index(i64),
@@ -156,8 +156,8 @@ impl EvalExpr for EvalPath {
 
 /// Represents an operator for dynamic variable name resolution of a (sub)query.
 #[derive(Debug)]
-pub struct EvalDynamicLookup {
-    pub lookups: Vec<Box<dyn EvalExpr>>,
+pub(crate) struct EvalDynamicLookup {
+    pub(crate) lookups: Vec<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalDynamicLookup {
@@ -176,8 +176,8 @@ impl EvalExpr for EvalDynamicLookup {
 
 /// Represents a variable reference in a (sub)query, e.g. `a` in `SELECT b as a FROM`.
 #[derive(Debug)]
-pub struct EvalVarRef {
-    pub name: BindingsName,
+pub(crate) struct EvalVarRef {
+    pub(crate) name: BindingsName,
 }
 
 impl EvalExpr for EvalVarRef {
@@ -193,8 +193,8 @@ impl EvalExpr for EvalVarRef {
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
 #[derive(Debug)]
-pub struct EvalLitExpr {
-    pub lit: Box<Value>,
+pub(crate) struct EvalLitExpr {
+    pub(crate) lit: Box<Value>,
 }
 
 impl EvalExpr for EvalLitExpr {
@@ -205,14 +205,14 @@ impl EvalExpr for EvalLitExpr {
 
 /// Represents an evaluation unary operator, e.g. `NOT` in `NOT TRUE`.
 #[derive(Debug)]
-pub struct EvalUnaryOpExpr {
-    pub op: EvalUnaryOp,
-    pub operand: Box<dyn EvalExpr>,
+pub(crate) struct EvalUnaryOpExpr {
+    pub(crate) op: EvalUnaryOp,
+    pub(crate) operand: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
-pub enum EvalUnaryOp {
+pub(crate) enum EvalUnaryOp {
     Pos,
     Neg,
     Not,
@@ -232,9 +232,9 @@ impl EvalExpr for EvalUnaryOpExpr {
 
 /// Represents a PartiQL evaluation `IS` operator, e.g. `a IS INT`.
 #[derive(Debug)]
-pub struct EvalIsTypeExpr {
-    pub expr: Box<dyn EvalExpr>,
-    pub is_type: Type,
+pub(crate) struct EvalIsTypeExpr {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) is_type: Type,
 }
 
 impl EvalExpr for EvalIsTypeExpr {
@@ -253,15 +253,15 @@ impl EvalExpr for EvalIsTypeExpr {
 
 /// Represents an evaluation binary operator, e.g.`a + b`.
 #[derive(Debug)]
-pub struct EvalBinOpExpr {
-    pub op: EvalBinOp,
-    pub lhs: Box<dyn EvalExpr>,
-    pub rhs: Box<dyn EvalExpr>,
+pub(crate) struct EvalBinOpExpr {
+    pub(crate) op: EvalBinOp,
+    pub(crate) lhs: Box<dyn EvalExpr>,
+    pub(crate) rhs: Box<dyn EvalExpr>,
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry
 #[derive(Debug)]
-pub enum EvalBinOp {
+pub(crate) enum EvalBinOp {
     And,
     Or,
     Concat,
@@ -383,10 +383,10 @@ impl EvalExpr for EvalBinOpExpr {
 
 /// Represents an evaluation PartiQL `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug)]
-pub struct EvalBetweenExpr {
-    pub value: Box<dyn EvalExpr>,
-    pub from: Box<dyn EvalExpr>,
-    pub to: Box<dyn EvalExpr>,
+pub(crate) struct EvalBetweenExpr {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) from: Box<dyn EvalExpr>,
+    pub(crate) to: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalBetweenExpr {
@@ -402,9 +402,9 @@ impl EvalExpr for EvalBetweenExpr {
 
 /// Represents an evaluation `LIKE` operator, e.g. in `s LIKE 'h%llo'`.
 #[derive(Debug)]
-pub struct EvalLikeMatch {
-    pub value: Box<dyn EvalExpr>,
-    pub pattern: Regex,
+pub(crate) struct EvalLikeMatch {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) pattern: Regex,
 }
 
 // TODO make configurable?
@@ -412,7 +412,7 @@ pub struct EvalLikeMatch {
 const RE_SIZE_LIMIT: usize = 1 << 16;
 
 impl EvalLikeMatch {
-    pub fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
+    pub(crate) fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
         let pattern = RegexBuilder::new(pattern)
             .size_limit(RE_SIZE_LIMIT)
             .build()
@@ -437,14 +437,14 @@ impl EvalExpr for EvalLikeMatch {
 /// Represents an evaluation `LIKE` operator without string literals in the match and/or escape
 /// pattern, e.g. in `s LIKE match_str ESCAPE escape_char`.
 #[derive(Debug)]
-pub struct EvalLikeNonStringNonLiteralMatch {
-    pub value: Box<dyn EvalExpr>,
-    pub pattern: Box<dyn EvalExpr>,
-    pub escape: Box<dyn EvalExpr>,
+pub(crate) struct EvalLikeNonStringNonLiteralMatch {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) pattern: Box<dyn EvalExpr>,
+    pub(crate) escape: Box<dyn EvalExpr>,
 }
 
 impl EvalLikeNonStringNonLiteralMatch {
-    pub fn new(
+    pub(crate) fn new(
         value: Box<dyn EvalExpr>,
         pattern: Box<dyn EvalExpr>,
         escape: Box<dyn EvalExpr>,
@@ -487,9 +487,9 @@ impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
 
 /// Represents a searched case operator, e.g. CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END.
 #[derive(Debug)]
-pub struct EvalSearchedCaseExpr {
-    pub cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
-    pub default: Box<dyn EvalExpr>,
+pub(crate) struct EvalSearchedCaseExpr {
+    pub(crate) cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
+    pub(crate) default: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalSearchedCaseExpr {
@@ -519,8 +519,8 @@ where
 
 /// Represents a built-in `lower` string function, e.g. lower('AdBd').
 #[derive(Debug)]
-pub struct EvalFnLower {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnLower {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnLower {
@@ -535,8 +535,8 @@ impl EvalExpr for EvalFnLower {
 
 /// Represents a built-in `upper` string function, e.g. upper('AdBd').
 #[derive(Debug)]
-pub struct EvalFnUpper {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnUpper {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnUpper {
@@ -551,8 +551,8 @@ impl EvalExpr for EvalFnUpper {
 
 /// Represents a built-in character length string function, e.g. `char_length('123456789')`.
 #[derive(Debug)]
-pub struct EvalFnCharLength {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnCharLength {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnCharLength {
@@ -567,8 +567,8 @@ impl EvalExpr for EvalFnCharLength {
 
 /// Represents a built-in octet length string function, e.g. `octet_length('123456789')`.
 #[derive(Debug)]
-pub struct EvalFnOctetLength {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnOctetLength {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnOctetLength {
@@ -583,8 +583,8 @@ impl EvalExpr for EvalFnOctetLength {
 
 /// Represents a built-in bit length string function, e.g. `bit_length('123456789')`.
 #[derive(Debug)]
-pub struct EvalFnBitLength {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnBitLength {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnBitLength {
@@ -599,10 +599,10 @@ impl EvalExpr for EvalFnBitLength {
 
 /// Represents a built-in substring string function, e.g. `substring('123456789' FROM 2)`.
 #[derive(Debug)]
-pub struct EvalFnSubstring {
-    pub value: Box<dyn EvalExpr>,
-    pub offset: Box<dyn EvalExpr>,
-    pub length: Option<Box<dyn EvalExpr>>,
+pub(crate) struct EvalFnSubstring {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) offset: Box<dyn EvalExpr>,
+    pub(crate) length: Option<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalFnSubstring {
@@ -660,9 +660,9 @@ impl EvalExpr for EvalFnSubstring {
 
 /// Represents a built-in position string function, e.g. `position('3' IN '123456789')`.
 #[derive(Debug)]
-pub struct EvalFnPosition {
-    pub needle: Box<dyn EvalExpr>,
-    pub haystack: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnPosition {
+    pub(crate) needle: Box<dyn EvalExpr>,
+    pub(crate) haystack: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnPosition {
@@ -695,11 +695,11 @@ impl EvalExpr for EvalFnPosition {
 
 /// Represents a built-in overlay string function, e.g. `OVERLAY('hello' PLACING 'XX' FROM 2 FOR 3)`.
 #[derive(Debug)]
-pub struct EvalFnOverlay {
-    pub value: Box<dyn EvalExpr>,
-    pub replacement: Box<dyn EvalExpr>,
-    pub offset: Box<dyn EvalExpr>,
-    pub length: Option<Box<dyn EvalExpr>>,
+pub(crate) struct EvalFnOverlay {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) replacement: Box<dyn EvalExpr>,
+    pub(crate) offset: Box<dyn EvalExpr>,
+    pub(crate) length: Option<Box<dyn EvalExpr>>,
 }
 
 impl EvalExpr for EvalFnOverlay {
@@ -784,9 +784,9 @@ where
 
 /// Represents a built-in both trim string function, e.g. `trim(both from ' foobar ')`.
 #[derive(Debug)]
-pub struct EvalFnBtrim {
-    pub value: Box<dyn EvalExpr>,
-    pub to_trim: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnBtrim {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) to_trim: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnBtrim {
@@ -804,9 +804,9 @@ impl EvalExpr for EvalFnBtrim {
 
 /// Represents a built-in right trim string function.
 #[derive(Debug)]
-pub struct EvalFnRtrim {
-    pub value: Box<dyn EvalExpr>,
-    pub to_trim: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnRtrim {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) to_trim: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnRtrim {
@@ -824,9 +824,9 @@ impl EvalExpr for EvalFnRtrim {
 
 /// Represents a built-in left trim string function.
 #[derive(Debug)]
-pub struct EvalFnLtrim {
-    pub value: Box<dyn EvalExpr>,
-    pub to_trim: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnLtrim {
+    pub(crate) value: Box<dyn EvalExpr>,
+    pub(crate) to_trim: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnLtrim {
@@ -844,8 +844,8 @@ impl EvalExpr for EvalFnLtrim {
 
 /// Represents an `EXISTS` function, e.g. `exists(`(1)`)`.
 #[derive(Debug)]
-pub struct EvalFnExists {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExists {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExists {
@@ -864,8 +864,8 @@ impl EvalExpr for EvalFnExists {
 
 /// Represents an `ABS` function, e.g. `abs(-1)`.
 #[derive(Debug)]
-pub struct EvalFnAbs {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnAbs {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnAbs {
@@ -885,9 +885,9 @@ impl EvalExpr for EvalFnAbs {
 
 /// Represents an `MOD` function, e.g. `MOD(10, 1)`.
 #[derive(Debug)]
-pub struct EvalFnModulus {
-    pub lhs: Box<dyn EvalExpr>,
-    pub rhs: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnModulus {
+    pub(crate) lhs: Box<dyn EvalExpr>,
+    pub(crate) rhs: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnModulus {
@@ -918,8 +918,8 @@ impl EvalExpr for EvalFnModulus {
 
 /// Represents an `CARDINALITY` function, e.g. `cardinality([1,2,3])`.
 #[derive(Debug)]
-pub struct EvalFnCardinality {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnCardinality {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnCardinality {
@@ -940,8 +940,8 @@ impl EvalExpr for EvalFnCardinality {
 
 /// Represents a year `EXTRACT` function, e.g. `extract(YEAR FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractYear {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractYear {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractYear {
@@ -965,8 +965,8 @@ impl EvalExpr for EvalFnExtractYear {
 
 /// Represents a month `EXTRACT` function, e.g. `extract(MONTH FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractMonth {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractMonth {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractMonth {
@@ -990,8 +990,8 @@ impl EvalExpr for EvalFnExtractMonth {
 
 /// Represents a day `EXTRACT` function, e.g. `extract(DAY FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractDay {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractDay {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractDay {
@@ -1015,8 +1015,8 @@ impl EvalExpr for EvalFnExtractDay {
 
 /// Represents an hour `EXTRACT` function, e.g. `extract(HOUR FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractHour {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractHour {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractHour {
@@ -1040,8 +1040,8 @@ impl EvalExpr for EvalFnExtractHour {
 
 /// Represents a minute `EXTRACT` function, e.g. `extract(MINUTE FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractMinute {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractMinute {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractMinute {
@@ -1065,8 +1065,8 @@ impl EvalExpr for EvalFnExtractMinute {
 
 /// Represents a second `EXTRACT` function, e.g. `extract(SECOND FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractSecond {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractSecond {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 fn total_seconds(second: u8, nanosecond: u32) -> Value {
@@ -1098,8 +1098,8 @@ impl EvalExpr for EvalFnExtractSecond {
 
 /// Represents a timezone hour `EXTRACT` function, e.g. `extract(TIMEZONE_HOUR FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractTimezoneHour {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractTimezoneHour {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractTimezoneHour {
@@ -1123,8 +1123,8 @@ impl EvalExpr for EvalFnExtractTimezoneHour {
 
 /// Represents a timezone minute `EXTRACT` function, e.g. `extract(TIMEZONE_MINUTE FROM t)`.
 #[derive(Debug)]
-pub struct EvalFnExtractTimezoneMinute {
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalFnExtractTimezoneMinute {
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalExpr for EvalFnExtractTimezoneMinute {
