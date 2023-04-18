@@ -24,18 +24,18 @@ pub trait Evaluable: Debug {
 /// input and and the environment and outputs a bag of binding tuples for tuples/values matching the
 /// scan `expr`, e.g. an SQL expression `table1` in SQL expression `FROM table1`.
 #[derive(Debug)]
-pub struct EvalScan {
-    pub expr: Box<dyn EvalExpr>,
-    pub as_key: String,
-    pub at_key: Option<String>,
-    pub input: Option<Value>,
+pub(crate) struct EvalScan {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) as_key: String,
+    pub(crate) at_key: Option<String>,
+    pub(crate) input: Option<Value>,
 
     // cached values
     attrs: Vec<String>,
 }
 
 impl EvalScan {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>, as_key: &str) -> Self {
         let attrs = vec![as_key.to_string()];
         EvalScan {
             expr,
@@ -45,7 +45,7 @@ impl EvalScan {
             attrs,
         }
     }
-    pub fn new_with_at_key(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
+    pub(crate) fn new_with_at_key(expr: Box<dyn EvalExpr>, as_key: &str, at_key: &str) -> Self {
         let attrs = vec![as_key.to_string(), at_key.to_string()];
         EvalScan {
             expr,
@@ -109,16 +109,16 @@ impl Evaluable for EvalScan {
 /// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
 /// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalJoin {
-    pub kind: EvalJoinKind,
-    pub on: Option<Box<dyn EvalExpr>>,
-    pub input: Option<Value>,
-    pub left: Box<dyn Evaluable>,
-    pub right: Box<dyn Evaluable>,
+pub(crate) struct EvalJoin {
+    pub(crate) kind: EvalJoinKind,
+    pub(crate) on: Option<Box<dyn EvalExpr>>,
+    pub(crate) input: Option<Value>,
+    pub(crate) left: Box<dyn Evaluable>,
+    pub(crate) right: Box<dyn Evaluable>,
 }
 
 #[derive(Debug)]
-pub enum EvalJoinKind {
+pub(crate) enum EvalJoinKind {
     Inner,
     Left,
     Right,
@@ -126,7 +126,7 @@ pub enum EvalJoinKind {
 }
 
 impl EvalJoin {
-    pub fn new(
+    pub(crate) fn new(
         kind: EvalJoinKind,
         left: Box<dyn Evaluable>,
         right: Box<dyn Evaluable>,
@@ -295,10 +295,10 @@ impl Evaluable for EvalJoin {
 /// the aggregation function, `b`, and `func` corresponds to the sum aggregation function,
 /// `[AggSum]`.
 #[derive(Debug)]
-pub struct AggregateExpression {
-    pub name: String,
-    pub expr: Box<dyn EvalExpr>,
-    pub func: AggFunc,
+pub(crate) struct AggregateExpression {
+    pub(crate) name: String,
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) func: AggFunc,
 }
 
 /// Represents an SQL aggregation function computed on a collection of input values.
@@ -310,40 +310,40 @@ pub trait AggregateFunction {
 }
 
 #[derive(Debug)]
-pub enum AggFunc {
+pub(crate) enum AggFunc {
     // TODO: modeling COUNT(*)
-    AggAvg(AggAvg),
-    AggCount(AggCount),
-    AggMax(AggMax),
-    AggMin(AggMin),
-    AggSum(AggSum),
+    Avg(Avg),
+    Count(Count),
+    Max(Max),
+    Min(Min),
+    Sum(Sum),
 }
 
 impl AggregateFunction for AggFunc {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         match self {
-            AggFunc::AggAvg(v) => v.next_value(input_value, group),
-            AggFunc::AggCount(v) => v.next_value(input_value, group),
-            AggFunc::AggMax(v) => v.next_value(input_value, group),
-            AggFunc::AggMin(v) => v.next_value(input_value, group),
-            AggFunc::AggSum(v) => v.next_value(input_value, group),
+            AggFunc::Avg(v) => v.next_value(input_value, group),
+            AggFunc::Count(v) => v.next_value(input_value, group),
+            AggFunc::Max(v) => v.next_value(input_value, group),
+            AggFunc::Min(v) => v.next_value(input_value, group),
+            AggFunc::Sum(v) => v.next_value(input_value, group),
         }
     }
 
     fn compute(&self, group: &Tuple) -> Value {
         match self {
-            AggFunc::AggAvg(v) => v.compute(group),
-            AggFunc::AggCount(v) => v.compute(group),
-            AggFunc::AggMax(v) => v.compute(group),
-            AggFunc::AggMin(v) => v.compute(group),
-            AggFunc::AggSum(v) => v.compute(group),
+            AggFunc::Avg(v) => v.compute(group),
+            AggFunc::Count(v) => v.compute(group),
+            AggFunc::Max(v) => v.compute(group),
+            AggFunc::Min(v) => v.compute(group),
+            AggFunc::Sum(v) => v.compute(group),
         }
     }
 }
 
 /// Filter values based on the given condition
 #[derive(Debug, Default)]
-pub enum AggFilterFn {
+pub(crate) enum AggFilterFn {
     /// Keeps only distinct values in each group
     Distinct(AggFilterDistinct),
     /// Keeps all values
@@ -363,12 +363,12 @@ impl AggFilterFn {
 }
 
 #[derive(Debug)]
-pub struct AggFilterDistinct {
+pub(crate) struct AggFilterDistinct {
     seen_vals: HashMap<Tuple, HashSet<Value>>,
 }
 
 impl AggFilterDistinct {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         AggFilterDistinct {
             seen_vals: HashMap::new(),
         }
@@ -397,28 +397,28 @@ impl AggFilterDistinct {
 
 /// Represents SQL's `AVG` aggregation function
 #[derive(Debug)]
-pub struct AggAvg {
+pub(crate) struct Avg {
     avgs: HashMap<Tuple, (usize, Value)>,
     aggregator: AggFilterFn,
 }
 
-impl AggAvg {
-    pub fn new_distinct() -> Self {
-        AggAvg {
+impl Avg {
+    pub(crate) fn new_distinct() -> Self {
+        Avg {
             avgs: HashMap::new(),
             aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
     }
 
-    pub fn new_all() -> Self {
-        AggAvg {
+    pub(crate) fn new_all() -> Self {
+        Avg {
             avgs: HashMap::new(),
             aggregator: AggFilterFn::default(),
         }
     }
 }
 
-impl AggregateFunction for AggAvg {
+impl AggregateFunction for Avg {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         if !input_value.is_null_or_missing()
             && self.aggregator.filter_value(input_value.clone(), group)
@@ -445,28 +445,28 @@ impl AggregateFunction for AggAvg {
 
 /// Represents SQL's `COUNT` aggregation function
 #[derive(Debug)]
-pub struct AggCount {
+pub(crate) struct Count {
     counts: HashMap<Tuple, usize>,
     aggregator: AggFilterFn,
 }
 
-impl AggCount {
-    pub fn new_distinct() -> Self {
-        AggCount {
+impl Count {
+    pub(crate) fn new_distinct() -> Self {
+        Count {
             counts: HashMap::new(),
             aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
     }
 
-    pub fn new_all() -> Self {
-        AggCount {
+    pub(crate) fn new_all() -> Self {
+        Count {
             counts: HashMap::new(),
             aggregator: AggFilterFn::default(),
         }
     }
 }
 
-impl AggregateFunction for AggCount {
+impl AggregateFunction for Count {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         if !input_value.is_null_or_missing()
             && self.aggregator.filter_value(input_value.clone(), group)
@@ -493,28 +493,28 @@ impl AggregateFunction for AggCount {
 
 /// Represents SQL's `MAX` aggregation function
 #[derive(Debug)]
-pub struct AggMax {
+pub(crate) struct Max {
     maxes: HashMap<Tuple, Value>,
     aggregator: AggFilterFn,
 }
 
-impl AggMax {
-    pub fn new_distinct() -> Self {
-        AggMax {
+impl Max {
+    pub(crate) fn new_distinct() -> Self {
+        Max {
             maxes: HashMap::new(),
             aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
     }
 
-    pub fn new_all() -> Self {
-        AggMax {
+    pub(crate) fn new_all() -> Self {
+        Max {
             maxes: HashMap::new(),
             aggregator: AggFilterFn::default(),
         }
     }
 }
 
-impl AggregateFunction for AggMax {
+impl AggregateFunction for Max {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         if !input_value.is_null_or_missing()
             && self.aggregator.filter_value(input_value.clone(), group)
@@ -540,28 +540,28 @@ impl AggregateFunction for AggMax {
 
 /// Represents SQL's `MIN` aggregation function
 #[derive(Debug)]
-pub struct AggMin {
+pub(crate) struct Min {
     mins: HashMap<Tuple, Value>,
     aggregator: AggFilterFn,
 }
 
-impl AggMin {
-    pub fn new_distinct() -> Self {
-        AggMin {
+impl Min {
+    pub(crate) fn new_distinct() -> Self {
+        Min {
             mins: HashMap::new(),
             aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
     }
 
-    pub fn new_all() -> Self {
-        AggMin {
+    pub(crate) fn new_all() -> Self {
+        Min {
             mins: HashMap::new(),
             aggregator: AggFilterFn::default(),
         }
     }
 }
 
-impl AggregateFunction for AggMin {
+impl AggregateFunction for Min {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         if !input_value.is_null_or_missing()
             && self.aggregator.filter_value(input_value.clone(), group)
@@ -587,28 +587,28 @@ impl AggregateFunction for AggMin {
 
 /// Represents SQL's `SUM` aggregation function
 #[derive(Debug)]
-pub struct AggSum {
+pub(crate) struct Sum {
     sums: HashMap<Tuple, Value>,
     aggregator: AggFilterFn,
 }
 
-impl AggSum {
-    pub fn new_distinct() -> Self {
-        AggSum {
+impl Sum {
+    pub(crate) fn new_distinct() -> Self {
+        Sum {
             sums: HashMap::new(),
             aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
     }
 
-    pub fn new_all() -> Self {
-        AggSum {
+    pub(crate) fn new_all() -> Self {
+        Sum {
             sums: HashMap::new(),
             aggregator: AggFilterFn::default(),
         }
     }
 }
 
-impl AggregateFunction for AggSum {
+impl AggregateFunction for Sum {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
         if !input_value.is_null_or_missing()
             && self.aggregator.filter_value(input_value.clone(), group)
@@ -637,17 +637,17 @@ impl AggregateFunction for AggSum {
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 /// `aggregate_exprs` represents the set of aggregate expressions to compute.
 #[derive(Debug)]
-pub struct EvalGroupBy {
-    pub strategy: EvalGroupingStrategy,
-    pub exprs: HashMap<String, Box<dyn EvalExpr>>,
-    pub aggregate_exprs: Vec<AggregateExpression>,
-    pub group_as_alias: Option<String>,
-    pub input: Option<Value>,
+pub(crate) struct EvalGroupBy {
+    pub(crate) strategy: EvalGroupingStrategy,
+    pub(crate) exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub(crate) aggregate_exprs: Vec<AggregateExpression>,
+    pub(crate) group_as_alias: Option<String>,
+    pub(crate) input: Option<Value>,
 }
 
 /// Represents the grouping qualifier: ALL or PARTIAL.
 #[derive(Debug)]
-pub enum EvalGroupingStrategy {
+pub(crate) enum EvalGroupingStrategy {
     GroupFull,
     GroupPartial,
 }
@@ -729,14 +729,14 @@ impl Evaluable for EvalGroupBy {
 /// tuple. For `Pivot` operational semantics, see section `6.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalPivot {
-    pub input: Option<Value>,
-    pub key: Box<dyn EvalExpr>,
-    pub value: Box<dyn EvalExpr>,
+pub(crate) struct EvalPivot {
+    pub(crate) input: Option<Value>,
+    pub(crate) key: Box<dyn EvalExpr>,
+    pub(crate) value: Box<dyn EvalExpr>,
 }
 
 impl EvalPivot {
-    pub fn new(key: Box<dyn EvalExpr>, value: Box<dyn EvalExpr>) -> Self {
+    pub(crate) fn new(key: Box<dyn EvalExpr>, value: Box<dyn EvalExpr>) -> Self {
         EvalPivot {
             input: None,
             key,
@@ -774,18 +774,18 @@ impl Evaluable for EvalPivot {
 /// attribute-value pairs of a tuple. For `Unpivot` operational semantics, see section `5.2` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalUnpivot {
-    pub expr: Box<dyn EvalExpr>,
-    pub as_key: String,
-    pub at_key: Option<String>,
-    pub input: Option<Value>,
+pub(crate) struct EvalUnpivot {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) as_key: String,
+    pub(crate) at_key: Option<String>,
+    pub(crate) input: Option<Value>,
 
     // cached values
     attrs: Vec<String>,
 }
 
 impl EvalUnpivot {
-    pub fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: Option<String>) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>, as_key: &str, at_key: Option<String>) -> Self {
         let attrs = if let Some(at_key) = &at_key {
             vec![as_key.to_string(), at_key.clone()]
         } else {
@@ -836,13 +836,13 @@ impl Evaluable for EvalUnpivot {
 /// operator filters out the binding tuples that does not meet the condition expressed as `expr`,
 /// e.g.`a > 2` in `WHERE a > 2` expression.
 #[derive(Debug)]
-pub struct EvalFilter {
-    pub expr: Box<dyn EvalExpr>,
-    pub input: Option<Value>,
+pub(crate) struct EvalFilter {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalFilter {
-    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>) -> Self {
         EvalFilter { expr, input: None }
     }
 
@@ -879,13 +879,13 @@ impl Evaluable for EvalFilter {
 /// operator filters out the binding tuples that does not meet the condition expressed as `expr`,
 /// e.g. `a = 10` in `HAVING a = 10` expression.
 #[derive(Debug)]
-pub struct EvalHaving {
-    pub expr: Box<dyn EvalExpr>,
-    pub input: Option<Value>,
+pub(crate) struct EvalHaving {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalHaving {
-    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>) -> Self {
         EvalHaving { expr, input: None }
     }
 
@@ -921,13 +921,13 @@ impl Evaluable for EvalHaving {
 }
 
 #[derive(Debug)]
-pub struct EvalOrderBySortCondition {
-    pub expr: Box<dyn EvalExpr>,
-    pub spec: EvalOrderBySortSpec,
+pub(crate) struct EvalOrderBySortCondition {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) spec: EvalOrderBySortSpec,
 }
 
 #[derive(Debug)]
-pub enum EvalOrderBySortSpec {
+pub(crate) enum EvalOrderBySortSpec {
     AscNullsFirst,
     AscNullsLast,
     DescNullsFirst,
@@ -936,9 +936,9 @@ pub enum EvalOrderBySortSpec {
 
 /// Represents an evaluation `Order By` operator; e.g. `ORDER BY a DESC NULLS LAST` in `SELECT a FROM t ORDER BY a DESC NULLS LAST`.
 #[derive(Debug)]
-pub struct EvalOrderBy {
-    pub cmp: Vec<EvalOrderBySortCondition>,
-    pub input: Option<Value>,
+pub(crate) struct EvalOrderBy {
+    pub(crate) cmp: Vec<EvalOrderBySortCondition>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalOrderBy {
@@ -1000,10 +1000,10 @@ impl Evaluable for EvalOrderBy {
 
 /// Represents an evaluation `LIMIT` and/or `OFFSET` operator.
 #[derive(Debug)]
-pub struct EvalLimitOffset {
-    pub limit: Option<Box<dyn EvalExpr>>,
-    pub offset: Option<Box<dyn EvalExpr>>,
-    pub input: Option<Value>,
+pub(crate) struct EvalLimitOffset {
+    pub(crate) limit: Option<Box<dyn EvalExpr>>,
+    pub(crate) offset: Option<Box<dyn EvalExpr>>,
+    pub(crate) input: Option<Value>,
 }
 
 impl Evaluable for EvalLimitOffset {
@@ -1064,13 +1064,13 @@ impl Evaluable for EvalLimitOffset {
 /// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalSelectValue {
-    pub expr: Box<dyn EvalExpr>,
-    pub input: Option<Value>,
+pub(crate) struct EvalSelectValue {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalSelectValue {
-    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>) -> Self {
         EvalSelectValue { expr, input: None }
     }
 }
@@ -1102,13 +1102,13 @@ impl Evaluable for EvalSelectValue {
 /// operational semantics, see section `6` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
-pub struct EvalSelect {
-    pub exprs: HashMap<String, Box<dyn EvalExpr>>,
-    pub input: Option<Value>,
+pub(crate) struct EvalSelect {
+    pub(crate) exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalSelect {
-    pub fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
+    pub(crate) fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
         EvalSelect { exprs, input: None }
     }
 }
@@ -1147,12 +1147,12 @@ impl Evaluable for EvalSelect {
 /// Represents an evaluation `ProjectAll` operator; `ProjectAll` implements SQL's `SELECT *`
 /// semantics.
 #[derive(Debug, Default)]
-pub struct EvalSelectAll {
-    pub input: Option<Value>,
+pub(crate) struct EvalSelectAll {
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalSelectAll {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 }
@@ -1185,13 +1185,13 @@ impl Evaluable for EvalSelectAll {
 /// expression by its own is valid: `2 * 2`. Considering this, evaluation plan designates an operator
 /// for evaluating such stand-alone expressions.
 #[derive(Debug)]
-pub struct EvalExprQuery {
-    pub expr: Box<dyn EvalExpr>,
-    pub input: Option<Value>,
+pub(crate) struct EvalExprQuery {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalExprQuery {
-    pub fn new(expr: Box<dyn EvalExpr>) -> Self {
+    pub(crate) fn new(expr: Box<dyn EvalExpr>) -> Self {
         EvalExprQuery { expr, input: None }
     }
 }
@@ -1210,12 +1210,12 @@ impl Evaluable for EvalExprQuery {
 
 /// Represents an SQL `DISTINCT` operator, e.g. in `SELECT DISTINCT a FROM t`.
 #[derive(Debug, Default)]
-pub struct EvalDistinct {
-    pub input: Option<Value>,
+pub(crate) struct EvalDistinct {
+    pub(crate) input: Option<Value>,
 }
 
 impl EvalDistinct {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 }
@@ -1239,8 +1239,8 @@ impl Evaluable for EvalDistinct {
 
 /// Represents an operator that captures the output of a (sub)query in the plan.
 #[derive(Debug)]
-pub struct EvalSink {
-    pub input: Option<Value>,
+pub(crate) struct EvalSink {
+    pub(crate) input: Option<Value>,
 }
 
 impl Evaluable for EvalSink {
@@ -1256,12 +1256,12 @@ impl Evaluable for EvalSink {
 /// Represents an evaluation operator for sub-queries, e.g. `SELECT a FROM b` in
 /// `SELECT b.c, (SELECT a FROM b) FROM books AS b`.
 #[derive(Debug)]
-pub struct EvalSubQueryExpr {
-    pub plan: Rc<RefCell<EvalPlan>>,
+pub(crate) struct EvalSubQueryExpr {
+    pub(crate) plan: Rc<RefCell<EvalPlan>>,
 }
 
 impl EvalSubQueryExpr {
-    pub fn new(plan: EvalPlan) -> Self {
+    pub(crate) fn new(plan: EvalPlan) -> Self {
         EvalSubQueryExpr {
             plan: Rc::new(RefCell::new(plan)),
         }
