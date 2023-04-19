@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`
+- Fix parsing of `EXTRACT` to allow keywords after the `FROM`
 
 ## [0.3.0] - 2023-04-11
 ### Changed
