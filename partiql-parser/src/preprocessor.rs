@@ -96,7 +96,9 @@ mod built_ins {
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., extract(day from x) => extract("day":true, "from": x)
-                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne(true), AnyStar(false)]
+                // Note the `true` passed to Any* as we need to support type-related keywords after `FROM`
+                // such as `TIME WITH TIME ZONE`
+                vec![Id(re), Syn(Token::True), Kw(Token::From), AnyOne(true), AnyStar(true)]
             ],
         }
     }
@@ -906,6 +908,60 @@ mod tests {
         assert_eq!(
             preprocess(r#"extract(second from a)"#)?,
             lex(r#"extract(second:True, "from" : a)"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(hour from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(hour:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(minute from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(minute:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(second from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(second:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(timezone_hour from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(
+                r#"extract(timezone_hour:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?
+        );
+        assert_eq!(
+            preprocess(
+                r#"extract(timezone_minute from TIME WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?,
+            lex(
+                r#"extract(timezone_minute:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?
+        );
+        assert_eq!(
+            preprocess(r#"extract(hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(hour:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(minute:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(r#"extract(second from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            lex(r#"extract(second:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
+        );
+        assert_eq!(
+            preprocess(
+                r#"extract(timezone_hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?,
+            lex(
+                r#"extract(timezone_hour:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?
+        );
+        assert_eq!(
+            preprocess(
+                r#"extract(timezone_minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?,
+            lex(
+                r#"extract(timezone_minute:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+            )?
         );
 
         assert_eq!(preprocess(r#"count(a)"#)?, lex(r#"count(a)"#)?);
