@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-eval: modifies visibility of types implementing `EvalExpr` and `Evaluable`
 ### Added
 - Implements built-in function `EXTRACT`
+- Adds lowering `DATE`/`TIME`/`TIMESTAMP` literals to logical plan
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`

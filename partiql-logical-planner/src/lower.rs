@@ -10,7 +10,7 @@ use partiql_ast::ast::{
     InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, NullOrderingSpec,
     OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
     Query, QuerySet, Remove, SearchedCase, Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase,
-    SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    SortSpec, Struct, SymbolPrimitive, Type, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Visit, Visitor};
 use partiql_logical as logical;
@@ -20,7 +20,7 @@ use partiql_logical::{
     PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr,
 };
 
-use partiql_value::{BindingsName, Value};
+use partiql_value::{BindingsName, DateTime, Value};
 
 use std::collections::{HashMap, HashSet};
 
@@ -843,7 +843,18 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::BitStringLit(_) => todo!("BitStringLit"),
             Lit::HexStringLit(_) => todo!("HexStringLit"),
             Lit::CollectionLit(_) => todo!("CollectionLit"),
-            Lit::TypedLit(_, _) => todo!("TypedLit"),
+            Lit::TypedLit(s, t) => match t {
+                Type::DateType => Value::DateTime(Box::new(DateTime::from_yyyy_mm_dd(s))),
+                Type::TimeType(p) => Value::DateTime(Box::new(DateTime::from_hh_mm_ss(s, p))),
+                Type::TimeTypeWithTimeZone(p) => {
+                    Value::DateTime(Box::new(DateTime::from_hh_mm_ss_time_zone(s, p)))
+                }
+                Type::TimestampType(p) => Value::DateTime(Box::new(DateTime::from_hh_mm_ss(s, p))),
+                Type::ZonedTimestampType(p) => {
+                    Value::DateTime(Box::new(DateTime::from_hh_mm_ss_time_zone(s, p)))
+                }
+                _ => todo!("Other types"),
+            },
         };
         self.push_value(val);
     }
