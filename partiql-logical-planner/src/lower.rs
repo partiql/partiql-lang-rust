@@ -849,9 +849,11 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 Type::TimeTypeWithTimeZone(p) => {
                     Value::DateTime(Box::new(DateTime::from_hh_mm_ss_time_zone(s, p)))
                 }
-                Type::TimestampType(p) => Value::DateTime(Box::new(DateTime::from_hh_mm_ss(s, p))),
+                Type::TimestampType(p) => {
+                    Value::DateTime(Box::new(DateTime::from_yyyy_mm_dd_hh_mm_ss(s, p)))
+                }
                 Type::ZonedTimestampType(p) => {
-                    Value::DateTime(Box::new(DateTime::from_hh_mm_ss_time_zone(s, p)))
+                    Value::DateTime(Box::new(DateTime::from_yyyy_mm_dd_hh_mm_ss_time_zone(s, p)))
                 }
                 _ => todo!("Other types"),
             },

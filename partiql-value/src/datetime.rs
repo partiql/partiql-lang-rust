@@ -5,7 +5,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::num::NonZeroU8;
 use time::macros::format_description;
-use time::{Duration, UtcOffset};
+use time::UtcOffset;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -91,39 +91,42 @@ impl DateTime {
     }
 
     pub fn from_yyyy_mm_dd(date: &str) -> Self {
+        // TODO: for better error mesaging, perhaps could include in our parser or create separate
+        //  parser for these date, time, and timestamp strings
         let format = format_description!("[year]-[month]-[day]");
         let date = time::Date::parse(date, &format).expect("valid date string");
         DateTime::Date(date)
     }
 
     pub fn from_hh_mm_ss(time: &str, precision: &Option<u32>) -> Self {
-        let format = format_description!("[hour]:[minute]:[second].[subsecond]");
+        let format = format_description!("[hour]:[minute]:[second][optional [.[subsecond]]]");
         let time = time::Time::parse(time, &format).expect("valid time string");
         DateTime::Time(time, *precision)
     }
 
     pub fn from_hh_mm_ss_time_zone(time: &str, precision: &Option<u32>) -> Self {
         let time_format = format_description!(
-            "[hour]:[minute]:[second].[subsecond][offset_hour]:[offset_minute]"
+            "[hour]:[minute]:[second][optional [.[subsecond]]][offset_hour]:[offset_minute]"
         );
         let time_part = time::Time::parse(time, &time_format).expect("valid time with time zone");
         let time_format = format_description!(
-            "[hour]:[minute]:[second].[subsecond][offset_hour]:[offset_minute]"
+            "[hour]:[minute]:[second][optional [.[subsecond]]][offset_hour]:[offset_minute]"
         );
         let offset_part = time::UtcOffset::parse(time, &time_format).expect("valid time zone");
         DateTime::TimeWithTz(time_part, *precision, offset_part)
     }
 
     pub fn from_yyyy_mm_dd_hh_mm_ss(timestamp: &str, precision: &Option<u32>) -> Self {
-        let format =
-            format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
+        let format = format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second][optional [.[subsecond]]]"
+        );
         let time =
             time::PrimitiveDateTime::parse(timestamp, &format).expect("valid timestamp string");
         DateTime::Timestamp(time, *precision)
     }
 
     pub fn from_yyyy_mm_dd_hh_mm_ss_time_zone(timestamp: &str, precision: &Option<u32>) -> Self {
-        let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond][offset_hour]:[offset_minute]");
+        let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second][optional [.[subsecond]]][offset_hour]:[offset_minute]");
         let time = time::OffsetDateTime::parse(timestamp, &format)
             .expect("valid timestamp string with time zone");
         DateTime::TimestampWithTz(time, *precision)
@@ -174,29 +177,30 @@ impl Ord for DateTime {
             (DateTime::Date(_), _) => Ordering::Less,
             (_, DateTime::Date(_)) => Ordering::Greater,
 
-            (DateTime::Time(l, _lp), DateTime::Time(r, _rp)) => l.cmp(r),
-            // TODO: sorting using the time precisions
+            // follow convention of timestamp mentioned in section 12.2 to ignore precision and local utc offset
+            (DateTime::Time(l, _), DateTime::Time(r, _)) => l.cmp(r),
             (DateTime::Time(_, _), _) => Ordering::Less,
             (_, DateTime::Time(_, _)) => Ordering::Greater,
 
-            (DateTime::TimeWithTz(l, _lp, lo), DateTime::TimeWithTz(r, _rp, ro)) => {
-                // TODO: sorting using the time precisions
-                let lod = Duration::new(lo.whole_seconds() as i64, 0);
-                let rod = Duration::new(ro.whole_seconds() as i64, 0);
-                let l_adjusted = *l + lod;
-                let r_adjusted = *r + rod;
-                l_adjusted.cmp(&r_adjusted)
-            }
+            // follow convention of timestamp mentioned in section 12.2 to ignore precision and local utc offset
+            (DateTime::TimeWithTz(l, _, _), DateTime::TimeWithTz(r, _, _)) => l.cmp(r),
             (DateTime::TimeWithTz(_, _, _), _) => Ordering::Less,
             (_, DateTime::TimeWithTz(_, _, _)) => Ordering::Greater,
 
-            // TODO: sorting using the timestamp precisions
-            (DateTime::Timestamp(l, _lp), DateTime::Timestamp(r, _rp)) => l.cmp(r),
+            // per section 12.2 of spec, timestamp values are compared irrespective of precision or local UTC offset
+            (DateTime::Timestamp(l, _), DateTime::Timestamp(r, _)) => l.cmp(r),
             (DateTime::Timestamp(_, _), _) => Ordering::Less,
             (_, DateTime::Timestamp(_, _)) => Ordering::Greater,
 
-            // TODO: sorting using the timestamp precisions
-            (DateTime::TimestampWithTz(l, _lp), DateTime::TimestampWithTz(r, _rp)) => l.cmp(r),
+            // per section 12.2 of spec, timestamp values are compared irrespective of precision or local UTC offset
+            (DateTime::TimestampWithTz(l, _), DateTime::TimestampWithTz(r, _)) => {
+                let date_ord = l.date().cmp(&r.date());
+                if date_ord != Ordering::Equal {
+                    date_ord
+                } else {
+                    l.time().cmp(&r.time())
+                }
+            }
         }
     }
 }
