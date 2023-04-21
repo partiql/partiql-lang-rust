@@ -1184,14 +1184,7 @@ LiteralIon: ast::Lit = {
 }
 
 #[inline]
-TypeKeywordStr: &'static str = {
-    "DATE" => "DATE",
-    "TIME" => "TIME",
-    "TIMESTAMP" => "TIMESTAMP",
-    "WITH" => "WITH",
-    "WITHOUT" => "WITHOUT",
-    "ZONE" => "ZONE",
-}
+TypeKeywordStr: &'static str = {}
 
 #[inline]
 TypeKeyword: ast::SymbolPrimitive = {
@@ -1210,7 +1203,67 @@ TypeNamePart: ast::CustomTypePart = {
 }
 
 #[inline]
+TimePrecision: &'input str = {
+    "(" <p:"Int"> ")" => p
+}
+
+#[inline]
 TypeName: ast::Type = {
+    "DATE" => ast::Type::DateType,
+    "TIME" <p:TimePrecision?> => {
+        match p {
+            None => ast::Type::TimeType(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::TimeType(Some(precision))
+            }
+        }
+    },
+    "TIME" <p:TimePrecision?> "WITH" "TIME" "ZONE" => {
+        match p {
+            None => ast::Type::TimeTypeWithTimeZone(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::TimeTypeWithTimeZone(Some(precision))
+            }
+        }
+    },
+    "TIME" <p:TimePrecision?> "WITHOUT" "TIME" "ZONE" => {
+        match p {
+            None => ast::Type::TimeType(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::TimeType(Some(precision))
+            }
+        }
+    },
+    "TIMESTAMP" <p:TimePrecision?> => {
+        match p {
+            None => ast::Type::TimestampType(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::TimestampType(Some(precision))
+            }
+        }
+    },
+    "TIMESTAMP" <p:TimePrecision?> "WITH" "TIME" "ZONE" => {
+        match p {
+            None => ast::Type::ZonedTimestampType(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::ZonedTimestampType(Some(precision))
+            }
+        }
+    },
+    "TIMESTAMP" <p:TimePrecision?> "WITHOUT" "TIME" "ZONE" => {
+        match p {
+            None => ast::Type::TimestampType(None),
+            Some(p) => {
+                let precision = p.parse::<u32>().unwrap();
+                ast::Type::TimestampType(Some(precision))
+            }
+        }
+    },
     <parts:TypeNamePart+> => ast::Type::CustomType( ast::CustomType{ parts } ),
 }
 

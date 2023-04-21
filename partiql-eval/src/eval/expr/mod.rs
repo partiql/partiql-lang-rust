@@ -10,6 +10,7 @@ use partiql_value::{
 };
 use regex::{Regex, RegexBuilder};
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::RoundingStrategy;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
@@ -952,10 +953,10 @@ impl EvalExpr for EvalFnExtractYear {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.year()),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.year()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.year()),
-                DateTime::Time(_) => Missing,
-                DateTime::TimeWithTz(_, _) => Missing,
+                DateTime::Timestamp(tstamp, _) => Value::from(tstamp.year()),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.year()),
+                DateTime::Time(_, _) => Missing,
+                DateTime::TimeWithTz(_, _, _) => Missing,
             },
             _ => Missing,
         };
@@ -977,10 +978,10 @@ impl EvalExpr for EvalFnExtractMonth {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.month() as u8),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.month() as u8),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.month() as u8),
-                DateTime::Time(_) => Missing,
-                DateTime::TimeWithTz(_, _) => Missing,
+                DateTime::Timestamp(tstamp, _) => Value::from(tstamp.month() as u8),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.month() as u8),
+                DateTime::Time(_, _) => Missing,
+                DateTime::TimeWithTz(_, _, _) => Missing,
             },
             _ => Missing,
         };
@@ -1002,10 +1003,10 @@ impl EvalExpr for EvalFnExtractDay {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
                 DateTime::Date(d) => Value::from(d.day()),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.day()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.day()),
-                DateTime::Time(_) => Missing,
-                DateTime::TimeWithTz(_, _) => Missing,
+                DateTime::Timestamp(tstamp, _) => Value::from(tstamp.day()),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.day()),
+                DateTime::Time(_, _) => Missing,
+                DateTime::TimeWithTz(_, _, _) => Missing,
             },
             _ => Missing,
         };
@@ -1026,10 +1027,10 @@ impl EvalExpr for EvalFnExtractHour {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => Value::from(t.hour()),
-                DateTime::TimeWithTz(t, _) => Value::from(t.hour()),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.hour()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.hour()),
+                DateTime::Time(t, _) => Value::from(t.hour()),
+                DateTime::TimeWithTz(t, _, _) => Value::from(t.hour()),
+                DateTime::Timestamp(tstamp, _) => Value::from(tstamp.hour()),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.hour()),
                 DateTime::Date(_) => Missing,
             },
             _ => Missing,
@@ -1051,10 +1052,10 @@ impl EvalExpr for EvalFnExtractMinute {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => Value::from(t.minute()),
-                DateTime::TimeWithTz(t, _) => Value::from(t.minute()),
-                DateTime::Timestamp(tstamp) => Value::from(tstamp.minute()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.minute()),
+                DateTime::Time(t, _) => Value::from(t.minute()),
+                DateTime::TimeWithTz(t, _, _) => Value::from(t.minute()),
+                DateTime::Timestamp(tstamp, _) => Value::from(tstamp.minute()),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.minute()),
                 DateTime::Date(_) => Missing,
             },
             _ => Missing,
@@ -1069,10 +1070,17 @@ pub(crate) struct EvalFnExtractSecond {
     pub(crate) value: Box<dyn EvalExpr>,
 }
 
-fn total_seconds(second: u8, nanosecond: u32) -> Value {
+fn total_seconds(second: u8, nanosecond: u32, precision: Option<u32>) -> Value {
     let result = rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
         .expect("time as decimal");
-    Value::from(result)
+    match precision {
+        None => Value::from(result),
+        Some(p) => {
+            // TODO: currently using `RoundingStrategy::MidpointAwayFromZero`, which follows what
+            //  Kotlin does. Need to determine if this strategy is what we want or some configurability
+            Value::from(result.round_dp_with_strategy(p, RoundingStrategy::MidpointAwayFromZero))
+        }
+    }
 }
 
 impl EvalExpr for EvalFnExtractSecond {
@@ -1082,11 +1090,13 @@ impl EvalExpr for EvalFnExtractSecond {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => total_seconds(t.second(), t.nanosecond()),
-                DateTime::TimeWithTz(t, _) => total_seconds(t.second(), t.nanosecond()),
-                DateTime::Timestamp(tstamp) => total_seconds(tstamp.second(), tstamp.nanosecond()),
-                DateTime::TimestampWithTz(tstamp) => {
-                    total_seconds(tstamp.second(), tstamp.nanosecond())
+                DateTime::Time(t, p) => total_seconds(t.second(), t.nanosecond(), *p),
+                DateTime::TimeWithTz(t, p, _) => total_seconds(t.second(), t.nanosecond(), *p),
+                DateTime::Timestamp(tstamp, p) => {
+                    total_seconds(tstamp.second(), tstamp.nanosecond(), *p)
+                }
+                DateTime::TimestampWithTz(tstamp, p) => {
+                    total_seconds(tstamp.second(), tstamp.nanosecond(), *p)
                 }
                 DateTime::Date(_) => Missing,
             },
@@ -1109,11 +1119,11 @@ impl EvalExpr for EvalFnExtractTimezoneHour {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::TimeWithTz(_, tz) => Value::from(tz.whole_hours()),
-                DateTime::TimestampWithTz(tstamp) => Value::from(tstamp.offset().whole_hours()),
+                DateTime::TimeWithTz(_, _, tz) => Value::from(tz.whole_hours()),
+                DateTime::TimestampWithTz(tstamp, _) => Value::from(tstamp.offset().whole_hours()),
                 DateTime::Date(_) => Missing,
-                DateTime::Time(_) => Missing,
-                DateTime::Timestamp(_) => Missing,
+                DateTime::Time(_, _) => Missing,
+                DateTime::Timestamp(_, _) => Missing,
             },
             _ => Missing,
         };
@@ -1134,13 +1144,13 @@ impl EvalExpr for EvalFnExtractTimezoneMinute {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::TimeWithTz(_, tz) => Value::from(tz.minutes_past_hour()),
-                DateTime::TimestampWithTz(tstamp) => {
+                DateTime::TimeWithTz(_, _, tz) => Value::from(tz.minutes_past_hour()),
+                DateTime::TimestampWithTz(tstamp, _) => {
                     Value::from(tstamp.offset().minutes_past_hour())
                 }
                 DateTime::Date(_) => Missing,
-                DateTime::Time(_) => Missing,
-                DateTime::Timestamp(_) => Missing,
+                DateTime::Time(_, _) => Missing,
+                DateTime::Timestamp(_, _) => Missing,
             },
             _ => Missing,
         };
