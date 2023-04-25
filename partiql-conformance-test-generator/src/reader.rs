@@ -140,9 +140,9 @@ impl TryFrom<&Element> for TestVariant {
                 }
                 IonType::Struct => {
                     let strct = value.as_struct().unwrap();
-                    if value.has_annotation("envs") {
+                    if value.annotations().contains("envs") {
                         Ok(TestVariant::Environments(strct.try_into()?))
-                    } else if value.has_annotation("equiv_class") {
+                    } else if value.annotations().contains("equiv_class") {
                         Ok(TestVariant::EquivalenceClass(strct.try_into()?))
                     } else {
                         Ok(TestVariant::TestCase(strct.try_into()?))
@@ -161,8 +161,8 @@ impl TryFrom<&Element> for Namespace {
     type Error = miette::Report;
 
     fn try_from(value: &Element) -> Result<Self, Self::Error> {
-        let name = if let Some(sym) = value.annotations().next() {
-            sym.text().unwrap().to_string()
+        let name = if let Some(sym) = value.annotations().first() {
+            sym.to_string()
         } else {
             return Err(miette!(
                 "expected annotation for name when parsing Namespace"

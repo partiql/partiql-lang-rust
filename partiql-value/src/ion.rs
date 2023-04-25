@@ -64,9 +64,11 @@ fn parse_value(reader: &mut Reader, typ: IonType) -> Value {
                 .unwrap_or("")
                 .to_string(),
         )),
-        IonType::String => Value::String(Box::new(reader.read_string().unwrap())),
-        IonType::Clob => Value::Blob(Box::new(reader.read_clob().unwrap())),
-        IonType::Blob => Value::Blob(Box::new(reader.read_blob().unwrap())),
+        IonType::String => {
+            Value::String(Box::new(reader.read_string().unwrap().text().to_string()))
+        }
+        IonType::Clob => Value::Blob(Box::new(reader.read_clob().unwrap().as_slice().into())),
+        IonType::Blob => Value::Blob(Box::new(reader.read_blob().unwrap().as_slice().into())),
         IonType::List => {
             if has_annotation(reader, BAG_ANNOT) {
                 Bag::from(parse_sequence(reader)).into()
