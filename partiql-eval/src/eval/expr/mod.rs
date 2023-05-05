@@ -1,4 +1,5 @@
 use crate::env::Bindings;
+use crate::eval::evaluable::SetQuantifier;
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::EvalContext;
 use itertools::Itertools;
@@ -1143,6 +1144,255 @@ impl EvalExpr for EvalFnExtractTimezoneMinute {
                 DateTime::Time(_) => Missing,
                 DateTime::Timestamp(_) => Missing,
             },
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents the `COLL_AVG` function, e.g. `COLL_AVG(DISTINCT [1, 2, 2, 3])`.
+#[derive(Debug)]
+pub(crate) struct EvalFnCollAvg {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) elems: Box<dyn EvalExpr>,
+}
+
+#[inline]
+#[track_caller]
+fn coll_avg(elems: Vec<&Value>) -> Value {
+    if elems.is_empty() {
+        Null
+    } else {
+        let count = elems.len();
+        let mut sum = Value::from(0);
+        for e in elems {
+            if e.is_number() {
+                sum = &sum + e
+            } else {
+                return Missing;
+            }
+        }
+        &sum / &Value::Decimal(rust_decimal::Decimal::from(count))
+    }
+}
+
+impl EvalExpr for EvalFnCollAvg {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let elems = self.elems.evaluate(bindings, ctx);
+        let result = match elems.borrow() {
+            Null => Null,
+            Value::List(l) => {
+                let l_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => l.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => l
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_avg(l_nums)
+            }
+            Value::Bag(b) => {
+                let b_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => b.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => b
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_avg(b_nums)
+            }
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents the `COLL_COUNT` function, e.g. `COLL_COUNT(DISTINCT [1, 2, 2, 3])`.
+#[derive(Debug)]
+pub(crate) struct EvalFnCollCount {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) elems: Box<dyn EvalExpr>,
+}
+
+impl EvalExpr for EvalFnCollCount {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let elems = self.elems.evaluate(bindings, ctx);
+        let result = match elems.borrow() {
+            Null => Null,
+            Value::List(l) => {
+                let l_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => l.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => l
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                Value::from(l_nums.len())
+            }
+            Value::Bag(b) => {
+                let b_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => b.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => b
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                Value::from(b_nums.len())
+            }
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents the `COLL_MAX` function, e.g. `COLL_MAX(DISTINCT [1, 2, 2, 3])`.
+#[derive(Debug)]
+pub(crate) struct EvalFnCollMax {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) elems: Box<dyn EvalExpr>,
+}
+
+#[inline]
+#[track_caller]
+fn coll_max(elems: Vec<&Value>) -> Value {
+    elems.into_iter().max().unwrap_or(&Null).to_owned()
+}
+
+impl EvalExpr for EvalFnCollMax {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let elems = self.elems.evaluate(bindings, ctx);
+        let result = match elems.borrow() {
+            Null => Null,
+            Value::List(l) => {
+                let l_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => l.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => l
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_max(l_nums)
+            }
+            Value::Bag(b) => {
+                let b_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => b.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => b
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_max(b_nums)
+            }
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents the `COLL_MIN` function, e.g. `COLL_MIN(DISTINCT [1, 2, 2, 3])`.
+#[derive(Debug)]
+pub(crate) struct EvalFnCollMin {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) elems: Box<dyn EvalExpr>,
+}
+
+#[inline]
+#[track_caller]
+fn coll_min(elems: Vec<&Value>) -> Value {
+    elems.into_iter().min().unwrap_or(&Null).to_owned()
+}
+
+impl EvalExpr for EvalFnCollMin {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let elems = self.elems.evaluate(bindings, ctx);
+        let result = match elems.borrow() {
+            Null => Null,
+            Value::List(l) => {
+                let l_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => l.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => l
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_min(l_nums)
+            }
+            Value::Bag(b) => {
+                let b_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => b.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => b
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_min(b_nums)
+            }
+            _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents the `COLL_SUM` function, e.g. `COLL_SUM(DISTINCT [1, 2, 2, 3])`.
+#[derive(Debug)]
+pub(crate) struct EvalFnCollSum {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) elems: Box<dyn EvalExpr>,
+}
+
+#[inline]
+#[track_caller]
+fn coll_sum(elems: Vec<&Value>) -> Value {
+    if elems.is_empty() {
+        Null
+    } else {
+        let mut sum = Value::from(0);
+        for e in elems {
+            if e.is_number() {
+                sum = &sum + e
+            } else {
+                return Missing;
+            }
+        }
+        sum
+    }
+}
+
+impl EvalExpr for EvalFnCollSum {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let elems = self.elems.evaluate(bindings, ctx);
+        let result = match elems.borrow() {
+            Null => Null,
+            Value::List(l) => {
+                let l_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => l.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => l
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_sum(l_nums)
+            }
+            Value::Bag(b) => {
+                let b_nums: Vec<&Value> = match self.setq {
+                    SetQuantifier::All => b.iter().filter(|&e| !e.is_null_or_missing()).collect(),
+                    SetQuantifier::Distinct => b
+                        .iter()
+                        .filter(|&e| !e.is_null_or_missing())
+                        .unique()
+                        .collect(),
+                };
+                coll_sum(b_nums)
+            }
             _ => Missing,
         };
         Cow::Owned(result)

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-extension-ion` extension for encoding/decoding `Value` to/from Ion data
 - Add `partiql-extension-ion-functions` extension which contains an extension function for reading from an Ion file
 - Add `partiql-catalog` including an experimental `Catalog` interface and implementation
+- Implements the `COLL_*` functions -- `COLL_AVG`, `COLL_COUNT`, `COLL_MAX`, `COLL_MIN`, `COLL_SUM`
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`
