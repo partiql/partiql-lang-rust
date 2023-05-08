@@ -94,13 +94,13 @@ where
 #[macro_export]
 macro_rules! partiql_bag {
     () => (
-         Bag::from(vec![])
+        $crate::Bag::from(vec![])
     );
     ($elem:expr; $n:expr) => (
-        Bag::from(vec![Value::from($elem); $n])
+        $crate::Bag::from(vec![Value::from($elem); $n])
     );
     ($($x:expr),+ $(,)?) => (
-        Bag::from(vec![$(Value::from($x)),+])
+        $crate::Bag::from(vec![$(Value::from($x)),+])
     );
 }
 

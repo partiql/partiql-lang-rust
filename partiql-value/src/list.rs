@@ -94,13 +94,13 @@ where
 #[macro_export]
 macro_rules! partiql_list {
     () => (
-         List::from(vec![])
+        $crate::List::from(vec![])
     );
     ($elem:expr; $n:expr) => (
-        List::from(vec![Value::from($elem); $n])
+        $crate::List::from(vec![Value::from($elem); $n])
     );
     ($($x:expr),+ $(,)?) => (
-        List::from(vec![$(Value::from($x)),+])
+        $crate::List::from(vec![$(Value::from($x)),+])
     );
 }
 
