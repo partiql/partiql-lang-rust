@@ -229,9 +229,9 @@ impl Ord for Tuple {
 #[macro_export]
 macro_rules! partiql_tuple {
     () => (
-         Tuple::new()
+        $crate::Tuple::new()
     );
     ($(($x:expr, $y:expr)),+ $(,)?) => (
-        Tuple::from([$(($x, Value::from($y))),+])
+        $crate::Tuple::from([$(($x, Value::from($y))),+])
     );
 }
