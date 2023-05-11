@@ -1,3 +1,4 @@
+use crate::error::LowerError;
 use crate::lower::AstToLogical;
 use crate::name_resolver::NameResolver;
 use partiql_ast::ast;
@@ -10,7 +11,7 @@ mod lower;
 mod name_resolver;
 
 // TODO better encapsulate and add error types.
-pub fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
+pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
     if let ast::Expr::Query(q) = parsed.ast.as_ref() {
         let mut resolver = NameResolver::default();
         let resolver = resolver.resolve(q);
@@ -18,7 +19,9 @@ pub fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
         let planner = AstToLogical::new(resolver);
         planner.lower_query(q)
     } else {
-        panic!("wrong expr type");
+        Err(LowerError::NotYetImplemented(
+            "Expr type not supported yet".to_string(),
+        ))
     }
 }
 
@@ -34,6 +37,7 @@ mod tests {
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
     use partiql_value::{partiql_bag, partiql_tuple, Value};
+    use crate::error::LowerError;
 
     #[track_caller]
     fn parse(text: &str) -> Parsed {
@@ -41,7 +45,7 @@ mod tests {
     }
 
     #[track_caller]
-    fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
+    fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
         super::lower(parsed)
     }
 
@@ -62,7 +66,7 @@ mod tests {
     #[track_caller]
     fn evaluate_query(query: &str) -> Value {
         let parsed = parse(query);
-        let lowered = lower(&parsed);
+        let lowered = lower(&parsed).expect("Expect no lower error");
         evaluate(lowered, Default::default())
     }
 
@@ -92,7 +96,7 @@ mod tests {
         FROM customer \
         WHERE balance > 0";
         let parsed = parse(query);
-        let lowered = lower(&parsed);
+        let lowered = lower(&parsed).expect("Expect no lower error");
         let out = evaluate(lowered, data_customer());
 
         println!("{:?}", &out);

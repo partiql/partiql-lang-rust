@@ -688,7 +688,7 @@ mod tests {
         let mut acc = Accum::default();
 
         use super::Visit;
-        ast.visit(&mut acc);
+        ast.visit(&mut acc).expect("Expect no error to occur");
 
         let val = acc.val;
         assert!(matches!(val, Some(2989)));
