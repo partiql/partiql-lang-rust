@@ -32,6 +32,7 @@ use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
+use crate::error::LowerError;
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 
@@ -452,8 +453,11 @@ impl AstToLogical {
 // By convention, processing for them is done in the `enter_<x>` calls here.
 //
 impl<'ast> Visitor<'ast> for AstToLogical {
-    fn enter_ast_node(&mut self, id: NodeId) {
+    type Error = LowerError;
+
+    fn enter_ast_node(&mut self, id: NodeId) -> Result<(), LowerError> {
         self.id_stack.push(id);
+        Ok(())
     }
     fn exit_ast_node(&mut self, id: NodeId) {
         assert_eq!(self.id_stack.pop(), Some(id))

@@ -7,6 +7,7 @@ use partiql_parser::Parsed;
 mod call_defs;
 mod lower;
 mod name_resolver;
+pub mod error;
 
 // TODO better encapsulate and add error types.
 pub fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {

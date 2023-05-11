@@ -63,13 +63,13 @@ fn impl_visit(ast: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let ast_name = &ast.ident;
     quote! {
         impl crate::visit::Visit for #ast_name {
-            fn visit<'v, V>(&'v self, v: &mut V)
+            fn visit<'v, V>(&'v self, v: &mut V) -> Result<(), V::Error>
             where
                 V: crate::visit::Visitor<'v>,
             {
-                v.#enter_fn_name(self);
-                #visit_children;
-                v.#exit_fn_name(self);
+                v.#enter_fn_name(self)?;
+                #visit_children
+                v.#exit_fn_name(self)
             }
         }
     }
@@ -89,7 +89,7 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
             let non_exhaustive = variants.len() < e.variants.len();
             let else_clause = non_exhaustive.then(|| {
                 quote! {
-                    _ => {}
+                    _ => Ok({})
                 }
             });
 
@@ -97,7 +97,7 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
                 match &self {
                     #(#enum_name::#variants(child) => child.visit(v),)*
                     #else_clause
-                }
+                }?;
             }
         }
         Data::Struct(s) => {
@@ -128,7 +128,7 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
                 Fields::Unit => vec![],
             };
             quote! {
-                #(self.#fields.visit(v);)*
+                #(self.#fields.visit(v)?;)*
             }
         }
         Data::Union(_) => panic!("Union not supported"),

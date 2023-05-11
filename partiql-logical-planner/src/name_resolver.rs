@@ -4,6 +4,7 @@ use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Visit, Visitor};
 use std::sync::atomic::{AtomicU32, Ordering};
+use crate::error::LowerError;
 
 type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
 
@@ -171,11 +172,12 @@ impl NameResolver {
 }
 
 impl<'ast> Visitor<'ast> for NameResolver {
-    fn enter_ast_node(&mut self, id: ast::NodeId) {
+    fn enter_ast_node(&mut self, id: ast::NodeId) -> Result<(), LowerError> {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {
             children.push(id);
         }
+        Ok(())
     }
     fn exit_ast_node(&mut self, id: ast::NodeId) {
         assert_eq!(self.id_path_to_root.pop(), Some(id))
@@ -358,6 +360,8 @@ impl<'ast> Visitor<'ast> for NameResolver {
             self.aliases.insert(id, as_alias);
         }
     }
+
+    type Error = LowerError;
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
