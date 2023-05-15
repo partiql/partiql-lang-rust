@@ -23,6 +23,7 @@ members = [
   "partiql-rewriter",
   "partiql-types",
   "partiql-value",
+  "extension/partiql-extension-ion",
 ]
 
 [profile.dev.build-override]
