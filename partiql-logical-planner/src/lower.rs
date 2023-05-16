@@ -28,6 +28,8 @@ use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
 
+use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
+use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -837,7 +839,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::FloatLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
             Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
             Lit::BoolLit(b) => Value::Boolean(*b),
-            Lit::IonStringLit(s) => Value::from_ion(s),
+            Lit::IonStringLit(s) => parse_embedded_ion_str(s),
             Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::BitStringLit(_) => todo!("BitStringLit"),
@@ -1428,4 +1430,22 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             default,
         }))
     }
+}
+
+// TODO should this support partiql encoded in ion or only straight ion
+// TODO remove expects
+fn parse_embedded_ion_str(contents: &str) -> Value {
+    let mut reader = ion_rs::ReaderBuilder::new()
+        .build(contents)
+        .expect("reading contents");
+    let mut iter = IonDecoderBuilder::new(
+        IonDecoderConfig::default().with_mode(Encoding::PartiqlEncodedAsIon),
+    )
+    .build(reader)
+    .expect("building decoder");
+
+    let val = iter.next();
+
+    val.expect("test value to exist")
+        .expect("value decode to succeed")
 }
