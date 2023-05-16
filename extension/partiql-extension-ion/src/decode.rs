@@ -53,13 +53,16 @@ impl From<rust_decimal::Error> for IonDecodeError {
     }
 }
 
+/// Result of attempts to decode a [`Value`] from Ion.
 pub type IonDecodeResult = Result<Value, IonDecodeError>;
 
+/// Config for construction an Ion decoder.
 pub struct IonDecoderConfig {
     mode: Encoding,
 }
 
 impl IonDecoderConfig {
+    /// Set the mode to `mode`
     pub fn with_mode(mut self, mode: crate::Encoding) -> Self {
         self.mode = mode;
         self
@@ -74,15 +77,18 @@ impl Default for IonDecoderConfig {
     }
 }
 
+/// Builder for creating a decoder.
 pub struct IonDecoderBuilder {
     config: IonDecoderConfig,
 }
 
 impl IonDecoderBuilder {
+    /// Create the builder from 'config'
     pub fn new(config: IonDecoderConfig) -> Self {
         Self { config }
     }
 
+    /// Create a decoder given the previously specified config and an ion [`Reader`].
     pub fn build(self, reader: Reader) -> Result<IonValueIter, IonDecodeError> {
         let decoder = SimpleIonValueDecoder {};
         let inner: Box<dyn Iterator<Item = IonDecodeResult>> = match self.config.mode {
@@ -103,6 +109,7 @@ impl Default for IonDecoderBuilder {
     }
 }
 
+/// An Iterator over [`IonDecodeResult`] corresponding to the decoded top-level Ion stream values.
 pub struct IonValueIter<'a> {
     inner: Box<dyn Iterator<Item = IonDecodeResult> + 'a>,
 }

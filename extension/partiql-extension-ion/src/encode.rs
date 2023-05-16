@@ -36,13 +36,16 @@ impl From<IonError> for IonEncodeError {
     }
 }
 
+/// Result of attempts to encode a [`Value`] to Ion.
 pub type IonEncodeResult = Result<(), IonEncodeError>;
 
+/// Config for construction an Ion encoder.
 pub struct IonEncoderConfig {
     mode: Encoding,
 }
 
 impl IonEncoderConfig {
+    /// Set the mode to `mode`
     pub fn with_mode(mut self, mode: crate::Encoding) -> Self {
         self.mode = mode;
         self
@@ -56,25 +59,29 @@ impl Default for IonEncoderConfig {
         }
     }
 }
+
+/// Builder for creating an encoder.
 pub struct IonEncoderBuilder {
     config: IonEncoderConfig,
 }
 
 impl IonEncoderBuilder {
+    /// Create the builder from 'config'
     pub fn new(config: IonEncoderConfig) -> Self {
         Self { config }
     }
 
+    /// Create a encoder given the previously specified config and an ion [`IonWriter`].
     pub fn build<'a, W, I>(
         self,
         writer: &'a mut I,
-    ) -> Result<Box<dyn IonValueEncoder<W, I> + 'a>, IonEncodeError>
+    ) -> Result<Box<dyn ValueEncoder<W, I> + 'a>, IonEncodeError>
     where
         W: Write + 'a,
         I: IonWriter<Output = W> + 'a,
     {
         let encoder = SimpleIonValueEncoder { writer };
-        let encoder: Box<dyn IonValueEncoder<W, I>> = match self.config.mode {
+        let encoder: Box<dyn ValueEncoder<W, I>> = match self.config.mode {
             crate::Encoding::Ion => Box::new(encoder),
             crate::Encoding::PartiqlEncodedAsIon => {
                 Box::new(PartiqlEncodedIonValueEncoder { inner: encoder })
@@ -91,12 +98,25 @@ impl Default for IonEncoderBuilder {
     }
 }
 
-pub trait IonValueEncoder<W, I>
+/// An encoder which will write [`Value`]s as Ion stream values.
+pub trait ValueEncoder<W, I>
 where
     W: Write,
     I: IonWriter<Output = W>,
 {
+    /// A reference to the writer used by this encoder.
     fn writer(&mut self) -> &mut I;
+
+    /// Write a Ion stream value from the given [`Value`]
+    fn write_value(&mut self, value: &Value) -> IonEncodeResult;
+}
+
+trait IonValueEncoder<W, I>: ValueEncoder<W, I>
+where
+    W: Write,
+    I: IonWriter<Output = W>,
+{
+    fn get_writer(&mut self) -> &mut I;
 
     #[inline]
     fn encode_value(&mut self, value: &Value) -> IonEncodeResult {
@@ -130,6 +150,36 @@ where
     fn encode_tuple(&mut self, val: &Tuple) -> IonEncodeResult;
 }
 
+impl<'a, W, I> ValueEncoder<W, I> for SimpleIonValueEncoder<'a, W, I>
+where
+    W: Write,
+    I: IonWriter<Output = W>,
+{
+    fn writer(&mut self) -> &mut I {
+        self.get_writer()
+    }
+
+    #[inline]
+    fn write_value(&mut self, value: &Value) -> IonEncodeResult {
+        self.encode_value(value)
+    }
+}
+
+impl<'a, W, I> ValueEncoder<W, I> for PartiqlEncodedIonValueEncoder<'a, W, I>
+where
+    W: Write,
+    I: IonWriter<Output = W>,
+{
+    fn writer(&mut self) -> &mut I {
+        self.get_writer()
+    }
+
+    #[inline]
+    fn write_value(&mut self, value: &Value) -> IonEncodeResult {
+        self.encode_value(value)
+    }
+}
+
 struct SimpleIonValueEncoder<'a, W, I>
 where
     W: Write,
@@ -143,7 +193,7 @@ where
     W: Write,
     I: IonWriter<Output = W>,
 {
-    fn writer(&mut self) -> &mut I {
+    fn get_writer(&mut self) -> &mut I {
         self.writer
     }
 
@@ -317,7 +367,7 @@ where
     W: Write,
     I: IonWriter<Output = W>,
 {
-    fn writer(&mut self) -> &mut I {
+    fn get_writer(&mut self) -> &mut I {
         self.inner.writer
     }
 

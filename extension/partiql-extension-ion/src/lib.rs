@@ -10,7 +10,7 @@ mod tests {
     use crate::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
     use crate::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
     use itertools::Itertools;
-    use ordered_float::OrderedFloat;
+
     use partiql_value::{partiql_bag, partiql_list, partiql_tuple, DateTime, Value};
     use rust_decimal_macros::dec;
     use std::num::NonZeroU8;
@@ -33,7 +33,7 @@ mod tests {
         let mut encoder = IonEncoderBuilder::new(IonEncoderConfig::default().with_mode(encoding))
             .build(&mut writer)?;
 
-        encoder.encode_value(value)?;
+        encoder.write_value(value)?;
 
         drop(encoder);
         drop(writer);
