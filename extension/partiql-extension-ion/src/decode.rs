@@ -9,6 +9,7 @@ use std::num::NonZeroU8;
 use std::str::FromStr;
 
 use thiserror::Error;
+use time::Duration;
 
 use crate::common::*;
 
@@ -436,11 +437,12 @@ impl PartiqlEncodedIonValueDecoder {
         let second = time.second.ok_or_else(|| {
             IonDecodeError::ConversionError("expected `second` key for DateTime".into())
         })?;
+        let seconds = Duration::seconds_f64(second);
         let datetime = DateTime::from_hms_nano_tz(
             hour,
             minute,
-            second.trunc() as u8,
-            second.fract() as u32,
+            seconds.whole_seconds() as u8,
+            seconds.subsec_nanoseconds() as u32,
             time.tz_hour,
             time.tz_minute,
         );

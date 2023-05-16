@@ -9,8 +9,11 @@ mod tests {
     use super::*;
     use crate::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
     use crate::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
-    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Value};
+    use itertools::Itertools;
+    use ordered_float::OrderedFloat;
+    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, DateTime, Value};
     use rust_decimal_macros::dec;
+    use std::num::NonZeroU8;
 
     pub fn decode_ion(contents: &str, encoding: Encoding) -> IonDecodeResult {
         let reader = ion_rs::ReaderBuilder::new().build(contents)?;
@@ -71,8 +74,50 @@ mod tests {
         assert_ion("42", 42);
         assert_ion("-5", -5);
 
+        // float
+        assert_ion("1.1e0", 1.1);
+
         // decimal
         assert_ion("1.", dec!(1));
+
+        // text
+        assert_ion("'foo'", "foo");
+        assert_ion("\"foo\"", "foo");
+
+        // datetime
+        assert_ion(
+            "2017-01-01T01:02:03.4+00:30",
+            DateTime::from_ymdhms_nano_offset_minutes(
+                2017,
+                NonZeroU8::new(1).unwrap(),
+                1,
+                1,
+                2,
+                3,
+                400000000,
+                Some(30),
+            ),
+        );
+        assert_ion(
+            "2017-01-01T01:02:03.4-00:00",
+            DateTime::from_ymdhms_nano_offset_minutes(
+                2017,
+                NonZeroU8::new(1).unwrap(),
+                1,
+                1,
+                2,
+                3,
+                400000000,
+                None,
+            ),
+        );
+
+        // lob
+        assert_ion("{{ +AB/ }}", Value::Blob(Box::new(vec![248, 0, 127])));
+        assert_ion(
+            "{{ \"CLOB of text.\" }}",
+            Value::Blob(Box::new("CLOB of text.".bytes().collect_vec())),
+        );
 
         // list
         assert_ion("[1,2,\"3\"]", partiql_list![1, 2, "3"]);
@@ -94,8 +139,62 @@ mod tests {
         assert_partiql_encoded_ion("42", 42);
         assert_partiql_encoded_ion("-5", -5);
 
+        // float
+        assert_partiql_encoded_ion("1.1e0", 1.1);
+
         // decimal
         assert_partiql_encoded_ion("1.", dec!(1));
+
+        // text
+        assert_partiql_encoded_ion("'foo'", "foo");
+        assert_partiql_encoded_ion("\"foo\"", "foo");
+
+        // datetime
+        assert_partiql_encoded_ion(
+            "2017-01-01T01:02:03.4+00:30",
+            DateTime::from_ymdhms_nano_offset_minutes(
+                2017,
+                NonZeroU8::new(1).unwrap(),
+                1,
+                1,
+                2,
+                3,
+                400000000,
+                Some(30),
+            ),
+        );
+        assert_partiql_encoded_ion(
+            "2017-01-01T01:02:03.4-00:00",
+            DateTime::from_ymdhms_nano_offset_minutes(
+                2017,
+                NonZeroU8::new(1).unwrap(),
+                1,
+                1,
+                2,
+                3,
+                400000000,
+                None,
+            ),
+        );
+        assert_partiql_encoded_ion(
+            "$time::{ hour: 12, minute: 11, second: 10.08}",
+            DateTime::from_hms_nano(12, 11, 10, 80000000),
+        );
+        assert_partiql_encoded_ion(
+            "$time::{ hour: 12, minute: 11, second: 10.08, timezone_hour: 0, timezone_minute: 30}",
+            DateTime::from_hms_nano_tz(12, 11, 10, 80000000, None, Some(30)),
+        );
+        assert_partiql_encoded_ion(
+            "$date::1957-05-25T",
+            DateTime::from_ymd(1957, NonZeroU8::new(5).unwrap(), 25),
+        );
+
+        // lob
+        assert_partiql_encoded_ion("{{ +AB/ }}", Value::Blob(Box::new(vec![248, 0, 127])));
+        assert_partiql_encoded_ion(
+            "{{ \"CLOB of text.\" }}",
+            Value::Blob(Box::new("CLOB of text.".bytes().collect_vec())),
+        );
 
         // list
         assert_partiql_encoded_ion("[1,2,\"3\"]", partiql_list![1, 2, "3"]);

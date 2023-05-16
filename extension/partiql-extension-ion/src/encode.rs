@@ -285,6 +285,7 @@ where
 
         Ok(self.inner.writer.write_timestamp(&ts)?)
     }
+
     fn write_timestamp(&mut self, time: &Time, offset: Option<&UtcOffset>) -> IonEncodeResult {
         let writer = &mut self.inner.writer;
         writer.set_annotations(std::iter::once(TIME_ANNOT));
