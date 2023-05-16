@@ -15,7 +15,7 @@ mod tests {
     use rust_decimal_macros::dec;
     use std::num::NonZeroU8;
 
-    pub fn decode_ion(contents: &str, encoding: Encoding) -> IonDecodeResult {
+    fn decode_ion(contents: &str, encoding: Encoding) -> IonDecodeResult {
         let reader = ion_rs::ReaderBuilder::new().build(contents)?;
         let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(encoding))
             .build(reader)?;

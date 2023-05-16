@@ -107,7 +107,7 @@ where
     /// A reference to the writer used by this encoder.
     fn writer(&mut self) -> &mut I;
 
-    /// Write a Ion stream value from the given [`Value`]
+    /// Write an Ion stream value from the given [`Value`]
     fn write_value(&mut self, value: &Value) -> IonEncodeResult;
 }
 

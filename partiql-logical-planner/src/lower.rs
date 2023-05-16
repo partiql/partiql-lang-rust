@@ -1438,11 +1438,9 @@ fn parse_embedded_ion_str(contents: &str) -> Value {
     let reader = ion_rs::ReaderBuilder::new()
         .build(contents)
         .expect("reading contents");
-    let mut iter = IonDecoderBuilder::new(
-        IonDecoderConfig::default().with_mode(Encoding::PartiqlEncodedAsIon),
-    )
-    .build(reader)
-    .expect("building decoder");
+    let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
+        .build(reader)
+        .expect("building decoder");
 
     let val = iter.next();
 
