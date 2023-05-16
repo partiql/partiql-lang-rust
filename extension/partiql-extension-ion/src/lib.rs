@@ -1,19 +1,3 @@
-use ordered_float::OrderedFloat;
-use std::cmp::Ordering;
-
-use std::borrow::Cow;
-
-use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
-
-use std::{ops, vec};
-
-use rust_decimal::prelude::FromPrimitive;
-use rust_decimal::{Decimal as RustDecimal, Decimal};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 mod common;
 pub mod decode;
 pub mod encode;
@@ -23,20 +7,13 @@ pub use common::Encoding;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decode::{IonDecodeError, IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
-    use crate::encode::{
-        IonEncodeError, IonEncodeResult, IonEncoderBuilder, IonEncoderConfig, IonValueEncoder,
-    };
+    use crate::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
+    use crate::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
     use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Value};
     use rust_decimal_macros::dec;
-    use std::borrow::Cow;
-    use std::cell::RefCell;
-    use std::collections::HashSet;
-    use std::mem;
-    use std::rc::Rc;
 
     pub fn decode_ion(contents: &str, encoding: Encoding) -> IonDecodeResult {
-        let mut reader = ion_rs::ReaderBuilder::new().build(contents)?;
+        let reader = ion_rs::ReaderBuilder::new().build(contents)?;
         let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(encoding))
             .build(reader)?;
 
@@ -53,7 +30,7 @@ mod tests {
         let mut encoder = IonEncoderBuilder::new(IonEncoderConfig::default().with_mode(encoding))
             .build(&mut writer)?;
 
-        encoder.encode_value(&value)?;
+        encoder.encode_value(value)?;
 
         drop(encoder);
         drop(writer);
@@ -74,12 +51,12 @@ mod tests {
 
     #[track_caller]
     fn assert_ion(ion: &str, val: impl Into<Value>) {
-        assert_decode_encode(&ion, val, Encoding::Ion);
+        assert_decode_encode(ion, val, Encoding::Ion);
     }
 
     #[track_caller]
     fn assert_partiql_encoded_ion(ion: &str, val: impl Into<Value>) {
-        assert_decode_encode(&ion, val, Encoding::PartiqlEncodedAsIon);
+        assert_decode_encode(ion, val, Encoding::PartiqlEncodedAsIon);
     }
 
     #[test]

@@ -1435,7 +1435,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 // TODO should this support partiql encoded in ion or only straight ion
 // TODO remove expects
 fn parse_embedded_ion_str(contents: &str) -> Value {
-    let mut reader = ion_rs::ReaderBuilder::new()
+    let reader = ion_rs::ReaderBuilder::new()
         .build(contents)
         .expect("reading contents");
     let mut iter = IonDecoderBuilder::new(

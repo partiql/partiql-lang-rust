@@ -49,6 +49,7 @@ impl DateTime {
         DateTime::Date(date)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_ymdhms_nano_offset_minutes(
         year: i32,
         month: NonZeroU8,

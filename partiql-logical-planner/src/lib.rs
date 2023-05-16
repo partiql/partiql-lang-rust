@@ -33,7 +33,6 @@ mod tests {
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
     use partiql_value::{partiql_bag, partiql_tuple, Value};
-    use partiql_value::{Bag, Tuple};
 
     #[track_caller]
     fn parse(text: &str) -> Parsed {

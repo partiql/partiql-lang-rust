@@ -1,10 +1,10 @@
 use delegate::delegate;
-use ion_rs::{Decimal, Int, IonError, IonReader, IonResult, IonType, Reader, StreamItem};
+use ion_rs::{Decimal, Int, IonError, IonReader, IonType, Reader, StreamItem};
 use once_cell::sync::Lazy;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use regex::RegexSet;
 use rust_decimal::prelude::ToPrimitive;
-use std::array::IntoIter;
+
 use std::num::NonZeroU8;
 use std::str::FromStr;
 
@@ -17,7 +17,6 @@ use crate::common::*;
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum IonDecodeError {
     /// Ion Reader error.
@@ -86,10 +85,7 @@ impl IonDecoderBuilder {
     pub fn build(self, reader: Reader) -> Result<IonValueIter, IonDecodeError> {
         let decoder = SimpleIonValueDecoder {};
         let inner: Box<dyn Iterator<Item = IonDecodeResult>> = match self.config.mode {
-            crate::Encoding::Ion => Box::new(IonValueIterInner {
-                reader,
-                decoder: decoder,
-            }),
+            crate::Encoding::Ion => Box::new(IonValueIterInner { reader, decoder }),
             crate::Encoding::PartiqlEncodedAsIon => {
                 let decoder = PartiqlEncodedIonValueDecoder { inner: decoder };
                 Box::new(IonValueIterInner { reader, decoder })
@@ -423,9 +419,9 @@ impl PartiqlEncodedIonValueDecoder {
                 Some(TIME_PARTS_TZ_HOUR) => time.tz_hour = maybe_i8(reader, typ, "tz_hour")?,
                 Some(TIME_PARTS_TZ_MINUTE) => time.tz_minute = maybe_i8(reader, typ, "tz_minute")?,
                 _ => {
-                    return Err(IonDecodeError::ConversionError(format!(
-                        "unexpected field name for time"
-                    )))
+                    return Err(IonDecodeError::ConversionError(
+                        "unexpected field name for time".to_string(),
+                    ))
                 }
             }
         }

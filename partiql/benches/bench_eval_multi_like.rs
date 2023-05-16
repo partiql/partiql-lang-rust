@@ -10,7 +10,7 @@ use partiql_eval::plan::EvaluatorPlanner;
 use partiql_logical::{BindingsOp, LogicalPlan};
 
 use partiql_parser::{Parser, ParserResult};
-use partiql_value::{partiql_tuple, Bag, Tuple, Value};
+use partiql_value::{partiql_tuple, Bag, Value};
 
 // Benchmarks:
 //  - parsing,

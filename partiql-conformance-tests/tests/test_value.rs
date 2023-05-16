@@ -1,13 +1,7 @@
-use ion_rs::external::bigdecimal::ToPrimitive;
-use ion_rs::{Int, IonReader, IonType, Reader, StreamItem};
-use once_cell::sync::Lazy;
-use partiql_value::{Bag, DateTime, List, Tuple, Value};
-use regex::RegexSet;
+use partiql_value::Value;
 
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use std::num::NonZeroU8;
-use std::str::FromStr;
 
 #[allow(dead_code)]
 pub(crate) struct TestValue {
@@ -23,7 +17,7 @@ impl From<&str> for TestValue {
 }
 
 fn parse_test_value_str(contents: &str) -> Value {
-    let mut reader = ion_rs::ReaderBuilder::new()
+    let reader = ion_rs::ReaderBuilder::new()
         .build(contents)
         .expect("reading contents");
     let mut iter = IonDecoderBuilder::new(
@@ -43,7 +37,7 @@ fn parse_test_value_str(contents: &str) -> Value {
 mod tests {
     use super::parse_test_value_str;
 
-    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Bag, List, Tuple, Value};
+    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Value};
 
     #[track_caller]
     fn parse(test: &str, expected: Value) {

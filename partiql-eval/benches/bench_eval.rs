@@ -9,9 +9,7 @@ use partiql_eval::plan;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
-use partiql_value::{
-    partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
-};
+use partiql_value::{partiql_bag, partiql_list, partiql_tuple, BindingsName, Value};
 
 fn data() -> MapBindings<Value> {
     let hr = partiql_tuple![(

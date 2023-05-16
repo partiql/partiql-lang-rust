@@ -1,5 +1,5 @@
 use delegate::delegate;
-use ion_rs::IonType::Timestamp;
+
 use ion_rs::{IonError, IonType, IonWriter};
 use ordered_float::OrderedFloat;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
@@ -19,7 +19,6 @@ use time::{Date, Duration, Time, UtcOffset};
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum IonEncodeError {
     /// Ion Writer error.
@@ -144,8 +143,8 @@ where
     W: Write,
     I: IonWriter<Output = W>,
 {
-    fn writer<'b>(&'b mut self) -> &'b mut I {
-        &mut self.writer
+    fn writer(&mut self) -> &mut I {
+        self.writer
     }
 
     fn encode_null(&mut self) -> IonEncodeResult {
@@ -219,7 +218,7 @@ where
         encode_list(self, val.iter())
     }
 
-    fn encode_bag(&mut self, val: &Bag) -> IonEncodeResult {
+    fn encode_bag(&mut self, _val: &Bag) -> IonEncodeResult {
         Err(IonEncodeError::UnsupportedType("bag"))
     }
 
@@ -318,14 +317,14 @@ where
     I: IonWriter<Output = W>,
 {
     fn writer(&mut self) -> &mut I {
-        &mut self.inner.writer
+        self.inner.writer
     }
 
     fn encode_missing(&mut self) -> IonEncodeResult {
         self.inner
             .writer
             .set_annotations(std::iter::once(MISSING_ANNOT));
-        self.inner.writer.write_null(IonType::Null);
+        self.inner.writer.write_null(IonType::Null)?;
         Ok(())
     }
 
