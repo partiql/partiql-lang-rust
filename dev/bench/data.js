@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1683591846546,
+  "lastUpdate": 1684283772340,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -8255,6 +8255,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 33471,
             "range": "± 117",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "josh@pschorr.dev",
+            "name": "Josh Pschorr",
+            "username": "jpschorr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "72c5ae9d3665be6bf81cf7c802faba437a1a7f0b",
+          "message": "Add `partiql-extension-ion` extension for encoding/decoding Ion from/into PartiQL `Value`s (#362)\n\n- Extracts ion decoding into `Value` from the various places it was in the codebase and centralizes it into `partiql-extension-ion`\r\n- Updates the decoding to remove panics and instead return `Result` types\r\n- Adds encoding of `Value` back into Ion\r\n- Supports both 'unlifted' Ion to Value as well as the 'partiql encoded in ion' used by both the conformance tests and the partiql-lang-kotlin implementation\r\n- Abstracts encoding/decoding to/from IonWriter/IonReader",
+          "timestamp": "2023-05-16T17:25:19-07:00",
+          "tree_id": "cb0b7de76c3259fadf8e40c8a21d6c0d93eeb5f4",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/72c5ae9d3665be6bf81cf7c802faba437a1a7f0b"
+        },
+        "date": 1684283771368,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6483,
+            "range": "± 622",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 55397,
+            "range": "± 4778",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 113625,
+            "range": "± 11218",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4577,
+            "range": "± 315",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 35973,
+            "range": "± 3041",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 71133,
+            "range": "± 7706",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 23618,
+            "range": "± 2105",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 404804,
+            "range": "± 39939",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 826707,
+            "range": "± 54614",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 21570786,
+            "range": "± 1553055",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 121322681,
+            "range": "± 10381113",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 235943878,
+            "range": "± 16741227",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 15194,
+            "range": "± 1839",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 6795,
+            "range": "± 646",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 637,
+            "range": "± 62",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 141,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 884,
+            "range": "± 83",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 3363,
+            "range": "± 207",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 11524,
+            "range": "± 1170",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 30279,
+            "range": "± 2223",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 47774,
+            "range": "± 3359",
             "unit": "ns/iter"
           }
         ]
