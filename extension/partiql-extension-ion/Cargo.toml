@@ -1,6 +1,6 @@
 [package]
-name = "partiql-value"
-description = "PartiQL Values"
+name = "partiql-extension-ion"
+description = "PartiQL Ion extensions"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -21,6 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
+partiql-value = { path = "../../partiql-value", version = "0.3.*" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.*"
@@ -30,18 +31,11 @@ ion-rs = "0.17"
 time = { version = "0.3", features = ["macros"] }
 once_cell = "1"
 regex = "1.7"
-
-serde = { version = "1.*", features = ["derive"], optional = true }
+thiserror = "1.0"
+delegate = "0.9"
 
 [dev-dependencies]
 criterion = "0.4"
 
 [features]
 default = []
-serde = [
-  "dep:serde",
-  "time/serde",
-  "rust_decimal/serde-with-str",
-  "rust_decimal/serde",
-  "ordered-float/serde"
-]

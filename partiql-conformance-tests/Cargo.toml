@@ -38,6 +38,7 @@ partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.3.
 partiql-logical = { path = "../partiql-logical", version = "0.3.*" }
 partiql-value = { path = "../partiql-value", version = "0.3.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.3.*" }
+partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.3.*"}
 
 ion-rs = "0.17"
 

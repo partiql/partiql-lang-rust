@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING:* partiql-eval: modifies visibility of types implementing `EvalExpr` and `Evaluable`
+- *BREAKING:* removed `from_ion` method on `Value`
 ### Added
 - Implements built-in function `EXTRACT`
+- Add `partiql-extension-ion` extension for encoding/decoding `Value` to/from Ion data
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`

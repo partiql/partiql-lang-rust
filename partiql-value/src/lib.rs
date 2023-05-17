@@ -13,7 +13,6 @@ use rust_decimal::{Decimal as RustDecimal, Decimal};
 
 mod bag;
 mod datetime;
-pub mod ion;
 mod list;
 mod tuple;
 
@@ -501,10 +500,6 @@ fn coerce_int_to_real(value: &Value) -> Value {
 }
 
 impl Value {
-    pub fn from_ion(ion: &str) -> Self {
-        ion::parse_ion(ion)
-    }
-
     #[inline]
     pub fn is_tuple(&self) -> bool {
         matches!(self, Value::Tuple(_))
@@ -2003,32 +1998,5 @@ mod tests {
         let tuple2 = partiql_tuple![("b", 2), ("a", 1)];
         s.insert(tuple2);
         assert_eq!(1, s.len());
-    }
-
-    #[track_caller]
-    fn assert_ion(ion: &str, val: impl Into<Value>) {
-        assert_eq!(Value::from_ion(ion), val.into());
-    }
-
-    #[test]
-    fn partiql_value_from_ion() {
-        assert_ion("null", Value::Null);
-
-        // bool
-        assert_ion("true", true);
-        assert_ion("false", false);
-
-        // int
-        assert_ion("42", 42);
-        assert_ion("-5", -5);
-
-        // decimal
-        assert_ion("1.", dec!(1));
-
-        // list
-        assert_ion("[1,2,\"3\"]", partiql_list![1, 2, "3"]);
-
-        // struct
-        assert_ion("{\"k\": []}", partiql_tuple![("k", partiql_list![])]);
     }
 }
