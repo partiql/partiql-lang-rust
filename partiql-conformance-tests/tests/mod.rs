@@ -1,6 +1,7 @@
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_logical as logical;
+use partiql_logical_planner::error::LoweringError;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
 
@@ -22,7 +23,9 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 
 #[track_caller]
 #[inline]
-pub(crate) fn lower(parsed: &Parsed) -> logical::LogicalPlan<logical::BindingsOp> {
+pub(crate) fn lower(
+    parsed: &Parsed,
+) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     partiql_logical_planner::lower(parsed)
 }
 
@@ -96,7 +99,8 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
     }
 
     let parsed = parse(statement);
-    let lowered = lower(&parsed.expect("parse"));
+    let lowered_result = lower(&parsed.expect("parse"));
+    let lowered = lowered_result.expect("lower");
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
@@ -122,7 +126,8 @@ pub(crate) fn pass_eval(
     }
 
     let parsed = parse(statement);
-    let lowered = lower(&parsed.expect("parse"));
+    let lowered_result = lower(&parsed.expect("parse"));
+    let lowered = lowered_result.expect("lower");
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())

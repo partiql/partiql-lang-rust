@@ -1,8 +1,9 @@
+use crate::error::{LowerError, LoweringError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
-use partiql_ast::visit::{Visit, Visitor};
+use partiql_ast::visit::{Traverse, Visit, Visitor};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
@@ -95,20 +96,31 @@ pub struct NameResolver {
     in_scope: FnvIndexMap<ast::NodeId, Vec<ast::NodeId>>,
     schema: FnvIndexMap<ast::NodeId, KeySchema>,
     aliases: FnvIndexMap<ast::NodeId, Symbol>,
+
+    // errors that occur during name resolution
+    errors: Vec<LowerError>,
 }
 
 impl NameResolver {
-    pub fn resolve(&mut self, query: &ast::AstNode<ast::Query>) -> KeyRegistry {
+    pub fn resolve(
+        &mut self,
+        query: &ast::AstNode<ast::Query>,
+    ) -> Result<KeyRegistry, LoweringError> {
         query.visit(self);
+        if !self.errors.is_empty() {
+            return Err(LoweringError {
+                errors: std::mem::take(&mut self.errors),
+            });
+        }
 
         let in_scope = std::mem::take(&mut self.in_scope);
         let schema = std::mem::take(&mut self.schema);
         let aliases = std::mem::take(&mut self.aliases);
-        KeyRegistry {
+        Ok(KeyRegistry {
             in_scope,
             schema,
             aliases,
-        }
+        })
     }
 
     #[inline]
@@ -140,8 +152,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_lateral(&mut self) -> Vec<ast::NodeId> {
-        self.lateral_stack.pop().expect("lateral level")
+    fn exit_lateral(&mut self) -> Result<Vec<ast::NodeId>, LowerError> {
+        self.lateral_stack
+            .pop()
+            .ok_or_else(|| LowerError::IllegalState("Expected non-empty lateral stack".to_string()))
     }
 
     #[inline]
@@ -150,8 +164,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_child_stack(&mut self) -> Vec<ast::NodeId> {
-        self.id_child_stack.pop().expect("child level")
+    fn exit_child_stack(&mut self) -> Result<Vec<ast::NodeId>, LowerError> {
+        self.id_child_stack
+            .pop()
+            .ok_or_else(|| LowerError::IllegalState("Expected non-empty child stack".to_string()))
     }
 
     #[inline]
@@ -160,8 +176,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_keyref(&mut self) -> KeyRefs {
-        self.keyref_stack.pop().expect("io level")
+    fn exit_keyref(&mut self) -> Result<KeyRefs, LowerError> {
+        self.keyref_stack
+            .pop()
+            .ok_or_else(|| LowerError::IllegalState("Expected non-empty keyrefs".to_string()))
     }
 
     #[inline]
@@ -171,28 +189,37 @@ impl NameResolver {
 }
 
 impl<'ast> Visitor<'ast> for NameResolver {
-    fn enter_ast_node(&mut self, id: ast::NodeId) {
+    fn enter_ast_node(&mut self, id: ast::NodeId) -> Traverse {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {
             children.push(id);
         }
+        Traverse::Continue
     }
-    fn exit_ast_node(&mut self, id: ast::NodeId) {
-        assert_eq!(self.id_path_to_root.pop(), Some(id))
+    fn exit_ast_node(&mut self, id: ast::NodeId) -> Traverse {
+        assert_eq!(self.id_path_to_root.pop(), Some(id));
+        Traverse::Continue
     }
 
-    fn enter_query(&mut self, _query: &'ast ast::Query) {
+    fn enter_query(&mut self, _query: &'ast ast::Query) -> Traverse {
         let id = *self.current_node();
         self.enclosing_clause
             .entry(EnclosingClause::Query)
             .or_insert_with(Vec::new)
             .push(id);
         self.enter_keyref();
+        Traverse::Continue
     }
 
-    fn exit_query(&mut self, _query: &'ast ast::Query) {
+    fn exit_query(&mut self, _query: &'ast ast::Query) -> Traverse {
         let id = *self.current_node();
-        let keyrefs = self.exit_keyref();
+        let keyrefs = match self.exit_keyref() {
+            Ok(kr) => kr,
+            Err(e) => {
+                self.errors.push(e);
+                return Traverse::Stop;
+            }
+        };
 
         // Collect the variables produced & consumed by this (sub)query.
         let KeyRefs {
@@ -206,27 +233,41 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let schema = KeySchema { consume, produce };
 
         self.schema.insert(id, schema);
+        Traverse::Continue
     }
 
-    fn enter_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {
+    fn enter_from_clause(&mut self, _from_clause: &'ast ast::FromClause) -> Traverse {
         self.enter_lateral();
         self.enter_child_stack();
+        Traverse::Continue
     }
 
-    fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {
-        self.exit_lateral();
-        self.exit_child_stack();
+    fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) -> Traverse {
+        if let Err(e) = self.exit_lateral() {
+            self.errors.push(e);
+            return Traverse::Stop;
+        };
+        if let Err(e) = self.exit_child_stack() {
+            self.errors.push(e);
+            return Traverse::Stop;
+        };
+        Traverse::Continue
     }
 
-    fn enter_join(&mut self, _join: &'ast ast::Join) {
+    fn enter_join(&mut self, _join: &'ast ast::Join) -> Traverse {
         self.enter_child_stack();
+        Traverse::Continue
     }
 
-    fn exit_join(&mut self, _join: &'ast ast::Join) {
-        self.exit_child_stack();
+    fn exit_join(&mut self, _join: &'ast ast::Join) -> Traverse {
+        if let Err(e) = self.exit_child_stack() {
+            self.errors.push(e);
+            return Traverse::Stop;
+        };
+        Traverse::Continue
     }
 
-    fn enter_from_let(&mut self, _from_let: &'ast ast::FromLet) {
+    fn enter_from_let(&mut self, _from_let: &'ast ast::FromLet) -> Traverse {
         self.enter_child_stack();
 
         let id = *self.current_node();
@@ -253,12 +294,22 @@ impl<'ast> Visitor<'ast> for NameResolver {
         }
 
         self.lateral_stack.last_mut().unwrap().push(id);
+        Traverse::Continue
     }
 
-    fn exit_from_let(&mut self, from_let: &'ast ast::FromLet) {
-        self.exit_child_stack();
+    fn exit_from_let(&mut self, from_let: &'ast ast::FromLet) -> Traverse {
+        if let Err(e) = self.exit_child_stack() {
+            self.errors.push(e);
+            return Traverse::Stop;
+        };
         let id = *self.current_node();
-        let KeyRefs { consume, .. } = self.exit_keyref();
+        let KeyRefs { consume, .. } = match self.exit_keyref() {
+            Ok(kr) => kr,
+            Err(e) => {
+                self.errors.push(e);
+                return Traverse::Stop;
+            }
+        };
 
         // get the "as" alias
         // 1. if explicitly given
@@ -281,9 +332,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
         }
 
         self.schema.insert(id, KeySchema { consume, produce });
+        Traverse::Continue
     }
 
-    fn enter_var_ref(&mut self, var_ref: &'ast ast::VarRef) {
+    fn enter_var_ref(&mut self, var_ref: &'ast ast::VarRef) -> Traverse {
         let is_from_path = self.is_from_path();
 
         // in a From path, a prefix `@` means to look locally before globally Cf. specification section 10
@@ -306,9 +358,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
         };
 
         self.push_consume_name(name);
+        Traverse::Continue
     }
 
-    fn exit_project_expr(&mut self, project_expr: &'ast ast::ProjectExpr) {
+    fn exit_project_expr(&mut self, project_expr: &'ast ast::ProjectExpr) -> Traverse {
         let id = self.current_node();
         // get the "as" alias
         // 1. if explicitly given
@@ -327,9 +380,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .unwrap()
             .produce_required
             .insert(as_alias);
+        Traverse::Continue
     }
 
-    fn exit_group_key(&mut self, group_key: &'ast GroupKey) {
+    fn exit_group_key(&mut self, group_key: &'ast GroupKey) -> Traverse {
         let id = *self.current_node();
         // get the "as" alias for each `GROUP BY` expr
         // 1. if explicitly given
@@ -348,15 +402,17 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .unwrap()
             .produce_required
             .insert(as_alias);
+        Traverse::Continue
     }
 
-    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) {
+    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Traverse {
         // add the `GROUP AS` alias
         if let Some(sym) = &group_by_expr.group_as_alias {
             let id = *self.current_node();
             let as_alias = Symbol::Known(sym.clone());
             self.aliases.insert(id, as_alias);
         }
+        Traverse::Continue
     }
 }
 

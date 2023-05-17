@@ -12,7 +12,7 @@ use partiql_ast::ast::{
     Query, QuerySet, Remove, SearchedCase, Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase,
     SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
-use partiql_ast::visit::{Visit, Visitor};
+use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
     AggregateExpression, BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
@@ -28,12 +28,54 @@ use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
 
+use crate::error::{LowerError, LoweringError};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
+
+#[macro_export]
+macro_rules! eq_or_fault {
+    ($self:ident, $lhs:expr, $rhs:expr, $msg:expr) => {
+        if $lhs != $rhs {
+            $self
+                .errors
+                .push(LowerError::IllegalState($msg.to_string()));
+            return partiql_ast::visit::Traverse::Stop;
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! true_or_fault {
+    ($self:ident, $expr:expr, $msg:expr) => {
+        if !$expr {
+            $self
+                .errors
+                .push(LowerError::IllegalState($msg.to_string()));
+            return partiql_ast::visit::Traverse::Stop;
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! not_yet_implemented_fault {
+    ($self:ident, $msg:expr) => {
+        not_yet_implemented_err!($self, $msg);
+        return partiql_ast::visit::Traverse::Stop;
+    };
+}
+
+#[macro_export]
+macro_rules! not_yet_implemented_err {
+    ($self:ident, $msg:expr) => {
+        $self
+            .errors
+            .push(LowerError::NotYetImplemented($msg.to_string()));
+    };
+}
 
 #[derive(Copy, Clone, Debug)]
 enum QueryContext {
@@ -128,6 +170,9 @@ pub struct AstToLogical {
 
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
+
+    // list of errors encountered during AST lowering
+    errors: Vec<LowerError>,
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
@@ -193,15 +238,22 @@ impl AstToLogical {
 
             key_registry: registry,
             fnsym_tab,
+
+            errors: vec![],
         }
     }
 
     pub fn lower_query(
         mut self,
         query: &ast::AstNode<ast::Query>,
-    ) -> logical::LogicalPlan<logical::BindingsOp> {
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
         query.visit(&mut self);
-        self.plan
+        if !self.errors.is_empty() {
+            return Err(LoweringError {
+                errors: self.errors,
+            });
+        }
+        Ok(self.plan)
     }
 
     #[inline]
@@ -452,84 +504,88 @@ impl AstToLogical {
 // By convention, processing for them is done in the `enter_<x>` calls here.
 //
 impl<'ast> Visitor<'ast> for AstToLogical {
-    fn enter_ast_node(&mut self, id: NodeId) {
+    fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_stack.push(id);
+        Traverse::Continue
     }
-    fn exit_ast_node(&mut self, id: NodeId) {
-        assert_eq!(self.id_stack.pop(), Some(id))
-    }
-
-    fn enter_item(&mut self, _item: &'ast Item) {
-        panic!("Only query is currently supported")
-    }
-
-    fn enter_ddl(&mut self, _ddl: &'ast Ddl) {
-        panic!("Only query is currently supported")
+    fn exit_ast_node(&mut self, id: NodeId) -> Traverse {
+        let cur_node = self.id_stack.pop();
+        eq_or_fault!(self, cur_node, Some(id), "id_stack node id != id");
+        Traverse::Continue
     }
 
-    fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) {
-        panic!("Only query is currently supported")
+    fn enter_item(&mut self, _item: &'ast Item) -> Traverse {
+        not_yet_implemented_fault!(self, "Item");
     }
 
-    fn enter_create_table(&mut self, _create_table: &'ast CreateTable) {
-        panic!("Only query is currently supported")
+    fn enter_ddl(&mut self, _ddl: &'ast Ddl) -> Traverse {
+        not_yet_implemented_fault!(self, "Ddl".to_string());
     }
 
-    fn enter_drop_table(&mut self, _drop_table: &'ast DropTable) {
-        panic!("Only query is currently supported")
+    fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) -> Traverse {
+        not_yet_implemented_fault!(self, "DdlOp".to_string());
     }
 
-    fn enter_create_index(&mut self, _create_index: &'ast CreateIndex) {
-        panic!("Only query is currently supported")
+    fn enter_create_table(&mut self, _create_table: &'ast CreateTable) -> Traverse {
+        not_yet_implemented_fault!(self, "CreateTable".to_string());
     }
 
-    fn enter_drop_index(&mut self, _drop_index: &'ast DropIndex) {
-        panic!("Only query is currently supported")
+    fn enter_drop_table(&mut self, _drop_table: &'ast DropTable) -> Traverse {
+        not_yet_implemented_fault!(self, "DropTable".to_string());
     }
 
-    fn enter_dml(&mut self, _dml: &'ast Dml) {
-        panic!("Only query is currently supported")
+    fn enter_create_index(&mut self, _create_index: &'ast CreateIndex) -> Traverse {
+        not_yet_implemented_fault!(self, "CreateIndex".to_string());
     }
 
-    fn enter_dml_op(&mut self, _dml_op: &'ast DmlOp) {
-        panic!("Only query is currently supported")
+    fn enter_drop_index(&mut self, _drop_index: &'ast DropIndex) -> Traverse {
+        not_yet_implemented_fault!(self, "DropIndex".to_string());
     }
 
-    fn enter_insert(&mut self, _insert: &'ast Insert) {
-        panic!("Only query is currently supported")
+    fn enter_dml(&mut self, _dml: &'ast Dml) -> Traverse {
+        not_yet_implemented_fault!(self, "Dml".to_string());
     }
 
-    fn enter_insert_value(&mut self, _insert_value: &'ast InsertValue) {
-        panic!("Only query is currently supported")
+    fn enter_dml_op(&mut self, _dml_op: &'ast DmlOp) -> Traverse {
+        not_yet_implemented_fault!(self, "DmlOp".to_string());
     }
 
-    fn enter_set(&mut self, _set: &'ast Set) {
-        panic!("Only query is currently supported")
+    fn enter_insert(&mut self, _insert: &'ast Insert) -> Traverse {
+        not_yet_implemented_fault!(self, "Insert".to_string());
     }
 
-    fn enter_assignment(&mut self, _assignment: &'ast Assignment) {
-        panic!("Only query is currently supported")
+    fn enter_insert_value(&mut self, _insert_value: &'ast InsertValue) -> Traverse {
+        not_yet_implemented_fault!(self, "InsertValue".to_string());
     }
 
-    fn enter_remove(&mut self, _remove: &'ast Remove) {
-        panic!("Only query is currently supported")
+    fn enter_set(&mut self, _set: &'ast Set) -> Traverse {
+        not_yet_implemented_fault!(self, "Set".to_string());
     }
 
-    fn enter_delete(&mut self, _delete: &'ast Delete) {
-        panic!("Only query is currently supported")
+    fn enter_assignment(&mut self, _assignment: &'ast Assignment) -> Traverse {
+        not_yet_implemented_fault!(self, "Assignment".to_string());
     }
 
-    fn enter_on_conflict(&mut self, _on_conflict: &'ast OnConflict) {
-        panic!("Only query is currently supported")
+    fn enter_remove(&mut self, _remove: &'ast Remove) -> Traverse {
+        not_yet_implemented_fault!(self, "Remove".to_string());
     }
 
-    fn enter_query(&mut self, _query: &'ast Query) {
+    fn enter_delete(&mut self, _delete: &'ast Delete) -> Traverse {
+        not_yet_implemented_fault!(self, "Delete".to_string());
+    }
+
+    fn enter_on_conflict(&mut self, _on_conflict: &'ast OnConflict) -> Traverse {
+        not_yet_implemented_fault!(self, "OnConflict".to_string());
+    }
+
+    fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
         self.enter_benv();
         self.siblings.push(vec![]);
         self.enter_q();
+        Traverse::Continue
     }
 
-    fn exit_query(&mut self, _query: &'ast Query) {
+    fn exit_query(&mut self, _query: &'ast Query) -> Traverse {
         let clauses = self.exit_q();
 
         let mut clauses = clauses.evaluation_order().into_iter();
@@ -545,83 +601,112 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.siblings.pop();
 
         let mut benv = self.exit_benv();
-        assert_eq!(benv.len(), 1);
+        eq_or_fault!(self, benv.len(), 1, "Expect benv.len() == 1");
 
         let out = benv.pop().unwrap();
 
         let sink_id = self.plan.add_operator(BindingsOp::Sink);
         self.plan.add_flow(out, sink_id);
+        Traverse::Continue
     }
 
-    fn enter_query_set(&mut self, _query_set: &'ast QuerySet) {
+    fn enter_query_set(&mut self, _query_set: &'ast QuerySet) -> Traverse {
         self.enter_env();
 
         match _query_set {
-            QuerySet::SetOp(_) => todo!("QuerySet::SetOp"),
+            QuerySet::SetOp(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::SetOp".to_string());
+            }
             QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {}
-            QuerySet::Values(_) => todo!("QuerySet::Values"),
-            QuerySet::Table(_) => todo!("QuerySet::Table"),
+            QuerySet::Values(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::Values".to_string());
+            }
+            QuerySet::Table(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::Table".to_string());
+            }
         }
+        Traverse::Continue
     }
 
-    fn exit_query_set(&mut self, _query_set: &'ast QuerySet) {
+    fn exit_query_set(&mut self, _query_set: &'ast QuerySet) -> Traverse {
         let env = self.exit_env();
 
         match _query_set {
-            QuerySet::SetOp(_) => todo!("QuerySet::SetOp"),
+            QuerySet::SetOp(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::SetOp".to_string());
+            }
             QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {
-                //
-                assert_eq!(env.len(), 1);
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
                 let expr = env.into_iter().next().unwrap();
                 let op = BindingsOp::ExprQuery(logical::ExprQuery { expr });
                 let id = self.plan.add_operator(op);
                 self.push_bexpr(id);
             }
-            QuerySet::Values(_) => todo!("QuerySet::Values"),
-            QuerySet::Table(_) => todo!("QuerySet::Table"),
+            QuerySet::Values(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::Values".to_string());
+            }
+            QuerySet::Table(_) => {
+                not_yet_implemented_fault!(self, "QuerySet::Table".to_string());
+            }
         }
+        Traverse::Continue
     }
 
-    fn enter_set_expr(&mut self, _set_expr: &'ast SetExpr) {}
+    fn enter_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Traverse {
+        Traverse::Continue
+    }
 
-    fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) {}
+    fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Traverse {
+        Traverse::Continue
+    }
 
-    fn enter_select(&mut self, _select: &'ast Select) {}
+    fn enter_select(&mut self, _select: &'ast Select) -> Traverse {
+        Traverse::Continue
+    }
 
-    fn exit_select(&mut self, _select: &'ast Select) {}
+    fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
+        Traverse::Continue
+    }
 
-    fn enter_projection(&mut self, _projection: &'ast Projection) {
+    fn enter_projection(&mut self, _projection: &'ast Projection) -> Traverse {
         self.enter_benv();
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_projection(&mut self, _projection: &'ast Projection) {
+    fn exit_projection(&mut self, _projection: &'ast Projection) -> Traverse {
         let benv = self.exit_benv();
-        assert_eq!(benv.len(), 0);
+        eq_or_fault!(self, benv.len(), 0, "benv.len() != 0");
+
         let env = self.exit_env();
-        assert_eq!(env.len(), 0);
+        eq_or_fault!(self, env.len(), 0, "env.len() != 0");
 
         if let Some(SetQuantifier::Distinct) = _projection.setq {
             let id = self.plan.add_operator(BindingsOp::Distinct);
             self.current_clauses_mut().distinct.replace(id);
         }
+        Traverse::Continue
     }
 
-    fn enter_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) {
+    fn enter_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) -> Traverse {
         self.enter_benv();
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) {
+    fn exit_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) -> Traverse {
         let benv = self.exit_benv();
-        assert_eq!(benv.len(), 0); // TODO sub-query
+        if !benv.is_empty() {
+            not_yet_implemented_fault!(self, "Subquery within project".to_string());
+        }
         let env = self.exit_env();
 
         let select: BindingsOp = match _projection_kind {
             ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll,
             ProjectionKind::ProjectList(_) => {
+                true_or_fault!(self, env.len().is_even(), "env.len() is not even");
                 let mut exprs = HashMap::with_capacity(env.len() / 2);
                 let mut iter = env.into_iter();
                 while let Some(value) = iter.next() {
@@ -629,9 +714,20 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                     let alias = match alias {
                         ValueExpr::Lit(lit) => match *lit {
                             Value::String(s) => (*s).clone(),
-                            _ => panic!("unexpected literal"),
+                            _ => {
+                                // Report error but allow visitor to continue
+                                self.errors.push(LowerError::IllegalState(
+                                    "Unexpected literal type".to_string(),
+                                ));
+                                "".to_string()
+                            }
                         },
-                        _ => panic!("unexpected alias type"),
+                        _ => {
+                            // Report error but allow visitor to continue
+                            self.errors
+                                .push(LowerError::IllegalState("Invalid alias type".to_string()));
+                            "".to_string()
+                        }
                     };
                     exprs.insert(alias, value);
                 }
@@ -639,24 +735,26 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 logical::BindingsOp::Project(logical::Project { exprs })
             }
             ProjectionKind::ProjectPivot(_) => {
-                assert_eq!(env.len(), 2);
+                eq_or_fault!(self, env.len(), 2, "env.len() != 2");
+
                 let mut iter = env.into_iter();
                 let key = iter.next().unwrap();
                 let value = iter.next().unwrap();
                 logical::BindingsOp::Pivot(logical::Pivot { key, value })
             }
             ProjectionKind::ProjectValue(_) => {
-                assert_eq!(env.len(), 1);
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+
                 let expr = env.into_iter().next().unwrap();
                 logical::BindingsOp::ProjectValue(logical::ProjectValue { expr })
             }
         };
         let id = self.plan.add_operator(select);
         self.current_clauses_mut().select_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) {
-        let _expr = self.vexpr_stack.last().unwrap().last().unwrap();
+    fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) -> Traverse {
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases
@@ -668,15 +766,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
         self.push_value(as_key.into());
+        Traverse::Continue
     }
 
-    fn enter_bin_op(&mut self, _bin_op: &'ast BinOp) {
+    fn enter_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) {
+    fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 2);
+        eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
         let rhs = env.pop().unwrap();
         let lhs = env.pop().unwrap();
@@ -685,9 +785,16 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 ValueExpr::Lit(lit) => match lit.as_ref() {
                     Value::Null => logical::Type::NullType,
                     Value::Missing => logical::Type::MissingType,
-                    _ => todo!("unsupported rhs literal for `IS`"),
+                    _ => {
+                        not_yet_implemented_fault!(
+                            self,
+                            "Unsupported rhs literal for `IS`".to_string()
+                        );
+                    }
                 },
-                _ => todo!("unsupported rhs for `IS`"),
+                _ => {
+                    not_yet_implemented_fault!(self, "Unsupported rhs for `IS`".to_string());
+                }
             };
             self.push_vexpr(ValueExpr::IsTypeExpr(IsTypeExpr {
                 not: false,
@@ -715,15 +822,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             };
             self.push_vexpr(ValueExpr::BinaryExpr(op, Box::new(lhs), Box::new(rhs)));
         }
+        Traverse::Continue
     }
 
-    fn enter_uni_op(&mut self, _uni_op: &'ast UniOp) {
+    fn enter_uni_op(&mut self, _uni_op: &'ast UniOp) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) {
+    fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let expr = env.pop().unwrap();
         let op = match _uni_op.kind {
@@ -732,28 +841,37 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             UniOpKind::Not => logical::UnaryOp::Not,
         };
         self.push_vexpr(ValueExpr::UnExpr(op, Box::new(expr)));
+        Traverse::Continue
     }
 
-    fn enter_between(&mut self, _between: &'ast Between) {
+    fn enter_between(&mut self, _between: &'ast Between) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_between(&mut self, _between: &'ast Between) {
+    fn exit_between(&mut self, _between: &'ast Between) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 3);
+        eq_or_fault!(self, env.len(), 3, "env.len() != 3");
+
         let to = Box::new(env.pop().unwrap());
         let from = Box::new(env.pop().unwrap());
         let value = Box::new(env.pop().unwrap());
         self.push_vexpr(ValueExpr::BetweenExpr(BetweenExpr { value, from, to }));
+        Traverse::Continue
     }
 
-    fn enter_like(&mut self, _like: &'ast Like) {
+    fn enter_like(&mut self, _like: &'ast Like) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_like(&mut self, _like: &'ast Like) {
+    fn exit_like(&mut self, _like: &'ast Like) -> Traverse {
         let mut env = self.exit_env();
-        assert!((2..=3).contains(&env.len()));
+        true_or_fault!(
+            self,
+            (2..=3).contains(&env.len()),
+            "env.len() is not between 2 and 3"
+        );
         let escape_ve = if env.len() == 3 {
             env.pop().unwrap()
         } else {
@@ -783,13 +901,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let pattern = ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern });
         self.push_vexpr(pattern);
+        Traverse::Continue
     }
 
-    fn enter_call(&mut self, _call: &'ast Call) {
+    fn enter_call(&mut self, _call: &'ast Call) -> Traverse {
         self.enter_call();
+        Traverse::Continue
     }
 
-    fn exit_call(&mut self, _call: &'ast Call) {
+    fn exit_call(&mut self, _call: &'ast Call) -> Traverse {
         // TODO better argument validation/error messaging
         let env = self.exit_call();
         let name = _call.func_name.value.to_lowercase();
@@ -797,35 +917,47 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
             self.push_vexpr(call_def.lookup(&env));
         } else {
-            todo!("Unsupported function name")
+            // Include as an error but allow lowering to proceed for multiple error reporting
+            self.errors.push(LowerError::UnsupportedFunction(name));
         }
+        Traverse::Continue
     }
 
-    fn enter_call_arg(&mut self, _call_arg: &'ast CallArg) {
+    fn enter_call_arg(&mut self, _call_arg: &'ast CallArg) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_call_arg(&mut self, _call_arg: &'ast CallArg) {
+    fn exit_call_arg(&mut self, _call_arg: &'ast CallArg) -> Traverse {
         let mut env = self.exit_env();
         match _call_arg {
-            CallArg::Star() => todo!(),
+            CallArg::Star() => {
+                not_yet_implemented_fault!(self, "* as a call argument".to_string());
+            }
             CallArg::Positional(_) => {
-                assert_eq!(env.len(), 1);
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+
                 self.push_call_arg(CallArgument::Positional(env.pop().unwrap()));
             }
             CallArg::Named(CallArgNamed { name, .. }) => {
-                assert_eq!(env.len(), 1);
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+
                 let name = name.value.to_lowercase();
                 self.push_call_arg(CallArgument::Named(name, env.pop().unwrap()));
             }
-            CallArg::PositionalType(_) => todo!("CallArg::PositionalType"),
-            CallArg::NamedType(_) => todo!("CallArg::NamedType"),
+            CallArg::PositionalType(_) => {
+                not_yet_implemented_fault!(self, "PositionalType call argument".to_string());
+            }
+            CallArg::NamedType(_) => {
+                not_yet_implemented_fault!(self, "PositionalType call argument".to_string());
+            }
         }
+        Traverse::Continue
     }
 
     // Values & Value Constructors
 
-    fn enter_lit(&mut self, _lit: &'ast Lit) {
+    fn enter_lit(&mut self, _lit: &'ast Lit) -> Traverse {
         let val = match _lit {
             Lit::Null => Value::Null,
             Lit::Missing => Value::Missing,
@@ -842,21 +974,39 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::IonStringLit(s) => parse_embedded_ion_str(s),
             Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
-            Lit::BitStringLit(_) => todo!("BitStringLit"),
-            Lit::HexStringLit(_) => todo!("HexStringLit"),
-            Lit::CollectionLit(_) => todo!("CollectionLit"),
-            Lit::TypedLit(_, _) => todo!("TypedLit"),
+            Lit::BitStringLit(_) => {
+                // Report error but allow visitor to continue
+                not_yet_implemented_err!(self, "Lit::BitStringLit".to_string());
+                Value::Missing
+            }
+            Lit::HexStringLit(_) => {
+                // Report error but allow visitor to continue
+                not_yet_implemented_err!(self, "Lit::HexStringLit".to_string());
+                Value::Missing
+            }
+            Lit::CollectionLit(_) => {
+                // Report error but allow visitor to continue
+                not_yet_implemented_err!(self, "Lit::CollectionLit".to_string());
+                Value::Missing
+            }
+            Lit::TypedLit(_, _) => {
+                // Report error but allow visitor to continue
+                not_yet_implemented_err!(self, "Lit::TypedLit".to_string());
+                Value::Missing
+            }
         };
         self.push_value(val);
+        Traverse::Continue
     }
 
-    fn enter_struct(&mut self, _struct: &'ast Struct) {
-        self.enter_env()
+    fn enter_struct(&mut self, _struct: &'ast Struct) -> Traverse {
+        self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_struct(&mut self, _struct: &'ast Struct) {
+    fn exit_struct(&mut self, _struct: &'ast Struct) -> Traverse {
         let env = self.exit_env();
-        assert!(env.len().is_even());
+        true_or_fault!(self, env.len().is_even(), "env.len() is not even");
 
         let len = env.len() / 2;
         let mut attrs = Vec::with_capacity(len);
@@ -870,39 +1020,46 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         }
 
         self.push_vexpr(ValueExpr::TupleExpr(TupleExpr { attrs, values }));
+        Traverse::Continue
     }
 
-    fn enter_bag(&mut self, _bag: &'ast Bag) {
-        self.enter_env()
+    fn enter_bag(&mut self, _bag: &'ast Bag) -> Traverse {
+        self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_bag(&mut self, _bag: &'ast Bag) {
+    fn exit_bag(&mut self, _bag: &'ast Bag) -> Traverse {
         let elements = self.exit_env();
         self.push_vexpr(ValueExpr::BagExpr(BagExpr { elements }));
+        Traverse::Continue
     }
 
-    fn enter_list(&mut self, _list: &'ast List) {
-        self.enter_env()
+    fn enter_list(&mut self, _list: &'ast List) -> Traverse {
+        self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_list(&mut self, _list: &'ast List) {
+    fn exit_list(&mut self, _list: &'ast List) -> Traverse {
         let elements = self.exit_env();
         self.push_vexpr(ValueExpr::ListExpr(ListExpr { elements }));
+        Traverse::Continue
     }
 
-    fn enter_sexp(&mut self, _sexp: &'ast Sexp) {
-        self.enter_env()
+    fn enter_sexp(&mut self, _sexp: &'ast Sexp) -> Traverse {
+        self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_sexp(&mut self, _sexp: &'ast Sexp) {
-        todo!("exit_sexp")
+    fn exit_sexp(&mut self, _sexp: &'ast Sexp) -> Traverse {
+        not_yet_implemented_fault!(self, "Sexp".to_string());
     }
 
-    fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) {
+    fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) -> Traverse {
         self.enter_call();
+        Traverse::Continue
     }
 
-    fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) {
+    fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) -> Traverse {
         // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
         // functions
         let mut env = self.exit_call();
@@ -917,13 +1074,19 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let new_expr = ValueExpr::VarRef(new_binding_name);
         self.push_vexpr(new_expr);
 
+        true_or_fault!(self, !env.is_empty(), "env is empty");
         // Default set quantifier if the set quantifier keyword is omitted will be `ALL`
         let (setq, arg) = match env.pop().unwrap() {
             CallArgument::Positional(ve) => (logical::SetQuantifier::All, ve),
             CallArgument::Named(name, ve) => match name.as_ref() {
                 "all" => (logical::SetQuantifier::All, ve),
                 "distinct" => (logical::SetQuantifier::Distinct, ve),
-                _ => todo!("Unknown quantifier"),
+                _ => {
+                    self.errors.push(LowerError::IllegalState(
+                        "Invalid set quantifier".to_string(),
+                    ));
+                    return Traverse::Stop;
+                }
             },
         };
 
@@ -958,7 +1121,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 func: AggSum,
                 setq,
             },
-            _ => panic!("Unsupported aggregation function name."),
+            _ => {
+                // Include as an error but allow lowering to proceed for multiple error reporting
+                self.errors.push(LowerError::UnsupportedFunction(name));
+                // continue lowering with `AggAvg` aggregation function
+                AggregateExpression {
+                    name: new_name,
+                    expr: arg,
+                    func: AggAvg,
+                    setq,
+                }
+            }
         };
         self.aggregate_exprs.push(agg_expr);
         // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
@@ -977,9 +1150,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             let id = self.plan.add_operator(group_by);
             self.current_clauses_mut().group_by_clause.replace(id);
         }
+        Traverse::Continue
     }
 
-    fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) {
+    fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) -> Traverse {
         let is_from_path = matches!(self.current_ctx(), Some(QueryContext::FromLet));
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
         let should_resolve = !is_from_path && !is_path;
@@ -999,36 +1173,42 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             };
             self.push_vexpr(ValueExpr::VarRef(name));
         }
+        Traverse::Continue
     }
 
-    fn exit_var_ref(&mut self, _var_ref: &'ast VarRef) {}
+    fn exit_var_ref(&mut self, _var_ref: &'ast VarRef) -> Traverse {
+        Traverse::Continue
+    }
 
-    fn enter_path(&mut self, _path: &'ast Path) {
+    fn enter_path(&mut self, _path: &'ast Path) -> Traverse {
         self.enter_env();
         self.enter_path();
+        Traverse::Continue
     }
 
-    fn exit_path(&mut self, _path: &'ast Path) {
+    fn exit_path(&mut self, _path: &'ast Path) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let steps = self.exit_path();
         let root = env.pop().unwrap();
 
         self.push_vexpr(ValueExpr::Path(Box::new(root), steps));
+        Traverse::Continue
     }
 
-    fn enter_path_step(&mut self, _path_step: &'ast PathStep) {
+    fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
         if let PathStep::PathExpr(_) = _path_step {
             self.enter_env();
         }
+        Traverse::Continue
     }
 
-    fn exit_path_step(&mut self, _path_step: &'ast PathStep) {
+    fn exit_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
         let step = match _path_step {
             PathStep::PathExpr(_s) => {
                 let mut env = self.exit_env();
-                assert_eq!(env.len(), 1);
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
                 let path = env.pop().unwrap();
                 match path {
@@ -1048,35 +1228,44 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                     }
                 }
             }
-            PathStep::PathWildCard => todo!("PathWildCard"),
-            PathStep::PathUnpivot => todo!("PathUnpivot"),
+            PathStep::PathWildCard => {
+                not_yet_implemented_fault!(self, "PathStep::PathWildCard".to_string());
+            }
+            PathStep::PathUnpivot => {
+                not_yet_implemented_fault!(self, "PathStep::PathUnpivot".to_string());
+            }
         };
 
         self.push_path_step(step);
+        Traverse::Continue
     }
 
-    fn enter_from_clause(&mut self, _from_clause: &'ast FromClause) {
+    fn enter_from_clause(&mut self, _from_clause: &'ast FromClause) -> Traverse {
         self.enter_benv();
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_from_clause(&mut self, _from_clause: &'ast FromClause) {
+    fn exit_from_clause(&mut self, _from_clause: &'ast FromClause) -> Traverse {
         let mut benv = self.exit_benv();
-        assert_eq!(benv.len(), 1);
+        eq_or_fault!(self, benv.len(), 1, "benv.len() != 1");
+
         let env = self.exit_env();
-        assert_eq!(env.len(), 0);
+        eq_or_fault!(self, env.len(), 0, "env.len() != 0");
 
         self.current_clauses_mut()
             .from_clause
             .replace(benv.pop().unwrap());
+        Traverse::Continue
     }
 
-    fn enter_from_let(&mut self, from_let: &'ast FromLet) {
+    fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
         self.from_lets.insert(*self.current_node());
         *self.current_ctx_mut() = QueryContext::FromLet;
         self.enter_env();
 
         let id = *self.current_node();
+        true_or_fault!(self, !self.siblings.is_empty(), "self.siblings is empty");
         self.siblings.last_mut().unwrap().push(id);
 
         for sym in [&from_let.as_alias, &from_let.at_alias, &from_let.by_alias]
@@ -1085,12 +1274,13 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         {
             self.aliases.insert(id, sym.clone());
         }
+        Traverse::Continue
     }
 
-    fn exit_from_let(&mut self, from_let: &'ast FromLet) {
+    fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
         *self.current_ctx_mut() = QueryContext::Query;
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let expr = env.pop().unwrap();
 
@@ -1119,19 +1309,25 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         };
         let id = self.plan.add_operator(bexpr);
         self.push_bexpr(id);
+        Traverse::Continue
     }
 
-    fn enter_join(&mut self, _join: &'ast Join) {
+    fn enter_join(&mut self, _join: &'ast Join) -> Traverse {
         self.enter_benv();
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_join(&mut self, join: &'ast Join) {
+    fn exit_join(&mut self, join: &'ast Join) -> Traverse {
         let mut benv = self.exit_benv();
-        assert_eq!(benv.len(), 2);
+        eq_or_fault!(self, benv.len(), 2, "benv.len() != 2");
 
         let mut env = self.exit_env();
-        assert!((0..=1).contains(&env.len()));
+        true_or_fault!(
+            self,
+            (0..=1).contains(&env.len()),
+            "env.len() is not between 0 and 1"
+        );
 
         let Join { kind, .. } = join;
 
@@ -1157,29 +1353,32 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         });
         let join = self.plan.add_operator(join);
         self.push_bexpr(join);
+        Traverse::Continue
     }
 
-    fn enter_join_spec(&mut self, join_spec: &'ast JoinSpec) {
+    fn enter_join_spec(&mut self, join_spec: &'ast JoinSpec) -> Traverse {
         match join_spec {
             JoinSpec::On(_) => {
                 // visitor recurse into expr will put the condition in the current env
             }
             JoinSpec::Using(_) => {
-                todo!("JoinSpec::Using")
+                not_yet_implemented_fault!(self, "JoinSpec::Using".to_string());
             }
             JoinSpec::Natural => {
-                todo!("JoinSpec::Natural")
+                not_yet_implemented_fault!(self, "JoinSpec::Natural".to_string());
             }
         };
+        Traverse::Continue
     }
 
-    fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {
+    fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {
+    fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let filter = logical::BindingsOp::Filter(logical::Filter {
             expr: env.pop().unwrap(),
@@ -1187,15 +1386,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let id = self.plan.add_operator(filter);
 
         self.current_clauses_mut().where_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn enter_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {
+    fn enter_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {
+    fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
         let having = BindingsOp::Having(logical::Having {
             expr: env.pop().unwrap(),
@@ -1203,18 +1404,25 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let id = self.plan.add_operator(having);
 
         self.current_clauses_mut().having_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+    fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
         self.enter_benv();
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
         let aggregate_exprs = self.aggregate_exprs.clone();
         let benv = self.exit_benv();
-        assert_eq!(benv.len(), 0); // TODO sub-query
+        if !benv.is_empty() {
+            {
+                not_yet_implemented_fault!(self, "Subquery in group by".to_string());
+            }
+        }
         let env = self.exit_env();
+        true_or_fault!(self, env.len().is_even(), "env.len() is not even");
 
         let group_as_alias = _group_by_expr
             .group_as_alias
@@ -1235,27 +1443,53 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         // can replace the query to be `SELECT some_alias AS a FROM t GROUP BY t.a + 1 AS some_alias`
         // This isn't quite correct as it doesn't deal with SELECT VALUE expressions and expressions
         // that are in the `HAVING` and `ORDER BY` clauses.
-        let select_clause_op_id = self.current_clauses_mut().select_clause.unwrap();
-        let select_clause = self.plan.operator_as_mut(select_clause_op_id).unwrap();
+        let select_clause_op_id = self.current_clauses_mut().select_clause;
+        if select_clause_op_id.is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "select_clause_op_id is None".to_string(),
+            ));
+            return Traverse::Stop;
+        }
+        let select_clause = self
+            .plan
+            .operator_as_mut(select_clause_op_id.expect("select_clause_op_id not None"))
+            .unwrap();
         let mut binding = HashMap::new();
         let select_clause_exprs = match select_clause {
             BindingsOp::Project(ref mut project) => &mut project.exprs,
             BindingsOp::ProjectAll => &mut binding,
             BindingsOp::ProjectValue(_) => &mut binding, // TODO: replacement of SELECT VALUE expressions
-            _ => panic!("Unexpected project type"),
+            _ => {
+                self.errors.push(LowerError::IllegalState(
+                    "Unexpected project type".to_string(),
+                ));
+                return Traverse::Stop;
+            }
         };
         let mut exprs_to_replace: Vec<(String, ValueExpr)> = Vec::new();
 
         let mut exprs = HashMap::with_capacity(env.len() / 2);
         let mut iter = env.into_iter();
+
         while let Some(value) = iter.next() {
             let alias = iter.next().unwrap();
             let alias = match alias {
                 ValueExpr::Lit(lit) => match *lit {
                     Value::String(s) => (*s).clone(),
-                    _ => panic!("unexpected literal"),
+                    _ => {
+                        // Report error but allow visitor to continue
+                        self.errors.push(LowerError::IllegalState(
+                            "Unexpected literal type".to_string(),
+                        ));
+                        "".to_string()
+                    }
                 },
-                _ => panic!("unexpected alias type"),
+                _ => {
+                    self.errors.push(LowerError::IllegalState(
+                        "Unexpected alias type".to_string(),
+                    ));
+                    return Traverse::Stop;
+                }
             };
             for (alias, expr) in select_clause_exprs.iter() {
                 if *expr == value {
@@ -1280,9 +1514,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let id = self.plan.add_operator(group_by);
         self.current_clauses_mut().group_by_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn exit_group_key(&mut self, _group_key: &'ast GroupKey) {
+    fn exit_group_key(&mut self, _group_key: &'ast GroupKey) -> Traverse {
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases
@@ -1294,26 +1529,30 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
         self.push_value(as_key.into());
+        Traverse::Continue
     }
 
-    fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
+    fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) -> Traverse {
         self.enter_sort();
+        Traverse::Continue
     }
 
-    fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
+    fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) -> Traverse {
         let specs = self.exit_sort();
         let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
         let id = self.plan.add_operator(order_by);
         self.current_clauses_mut().order_by_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) {
+    fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) {
+    fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) -> Traverse {
         let mut env = self.exit_env();
-        assert_eq!(env.len(), 1);
+        eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
         let expr = env.pop().unwrap();
         let order = match sort_spec
@@ -1339,15 +1578,24 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             order,
             null_order,
         });
+        Traverse::Continue
     }
 
-    fn enter_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {
+    fn enter_limit_offset_clause(
+        &mut self,
+        _limit_offset: &'ast ast::LimitOffsetClause,
+    ) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_limit_offset_clause(&mut self, limit_offset: &'ast ast::LimitOffsetClause) {
+    fn exit_limit_offset_clause(&mut self, limit_offset: &'ast ast::LimitOffsetClause) -> Traverse {
         let mut env = self.exit_env();
-        assert!((1..=2).contains(&env.len()));
+        true_or_fault!(
+            self,
+            (1..=2).contains(&env.len()),
+            "env.len() is  not between 1 and 2"
+        );
 
         let offset = if limit_offset.offset.is_some() {
             env.pop()
@@ -1363,15 +1611,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
         let id = self.plan.add_operator(limit_offset);
         self.current_clauses_mut().limit_offset_clause.replace(id);
+        Traverse::Continue
     }
 
-    fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+    fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+    fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Traverse {
         let mut env = self.exit_env();
-        assert!(env.len() >= 2);
+        true_or_fault!(self, env.len() >= 2, "env.len < 2");
 
         let default = if env.len().is_even() {
             Some(Box::new(env.pop().unwrap()))
@@ -1397,16 +1647,18 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             expr,
             cases,
             default,
-        }))
+        }));
+        Traverse::Continue
     }
 
-    fn enter_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+    fn enter_searched_case(&mut self, _searched_case: &'ast SearchedCase) -> Traverse {
         self.enter_env();
+        Traverse::Continue
     }
 
-    fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+    fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) -> Traverse {
         let mut env = self.exit_env();
-        assert!(!env.is_empty());
+        true_or_fault!(self, !env.is_empty(), "env is empty");
 
         let default = if env.len().is_odd() {
             Some(Box::new(env.pop().unwrap()))
@@ -1428,7 +1680,8 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.push_vexpr(ValueExpr::SearchedCase(logical::SearchedCase {
             cases,
             default,
-        }))
+        }));
+        Traverse::Continue
     }
 }
 

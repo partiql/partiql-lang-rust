@@ -337,7 +337,7 @@ fn parse(text: &str) -> ParserResult {
 }
 #[inline]
 fn compile(parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
-    partiql_logical_planner::lower(parsed)
+    partiql_logical_planner::lower(parsed).expect("Expect no lower error")
 }
 #[inline]
 fn plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
