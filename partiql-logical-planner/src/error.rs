@@ -1,7 +1,13 @@
 use thiserror::Error;
 
+/// Contains the errors that occur during AST to logical plan conversion
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LoweringError {
+    pub errors: Vec<LowerError>,
+}
+
+/// An error that can happen during the AST to logical plan conversion
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum LowerError {
     /// Indicates that AST lowering has not yet been implemented for this feature.

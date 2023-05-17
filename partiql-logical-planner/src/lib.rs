@@ -1,4 +1,4 @@
-use crate::error::LowerError;
+use crate::error::{LowerError, LoweringError};
 use crate::lower::AstToLogical;
 use crate::name_resolver::NameResolver;
 use partiql_ast::ast;
@@ -11,17 +11,23 @@ mod lower;
 mod name_resolver;
 
 // TODO better encapsulate and add error types.
-pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
+pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     if let ast::Expr::Query(q) = parsed.ast.as_ref() {
         let mut resolver = NameResolver::default();
-        let resolver = resolver.resolve(q);
-
-        let planner = AstToLogical::new(resolver);
-        planner.lower_query(q)
+        let key_resolver = resolver.resolve(q);
+        match key_resolver {
+            Ok(kr) => {
+                let planner = AstToLogical::new(kr);
+                planner.lower_query(q)
+            }
+            Err(e) => Err(e),
+        }
     } else {
-        Err(LowerError::NotYetImplemented(
-            "Expr type not supported yet".to_string(),
-        ))
+        Err(LoweringError {
+            errors: vec![LowerError::NotYetImplemented(
+                "Expr type not supported yet".to_string(),
+            )],
+        })
     }
 }
 
@@ -33,11 +39,11 @@ mod tests {
 
     use partiql_eval::plan;
 
+    use crate::error::LoweringError;
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
     use partiql_value::{partiql_bag, partiql_tuple, Value};
-    use crate::error::LowerError;
 
     #[track_caller]
     fn parse(text: &str) -> Parsed {
@@ -45,7 +51,7 @@ mod tests {
     }
 
     #[track_caller]
-    fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
+    fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
         super::lower(parsed)
     }
 

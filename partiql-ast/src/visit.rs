@@ -1,9 +1,12 @@
 use crate::ast;
 use crate::ast::NodeId;
 
-#[derive(PartialEq)]
+/// Indicates if children nodes should be visited
+#[derive(PartialEq, Debug)]
 pub enum Recurse {
+    /// Signals visiting children nodes should continue
     Continue,
+    /// Signals visiting children nodes should stop
     Stop,
 }
 
@@ -584,8 +587,7 @@ mod tests {
         let mut acc = Accum::default();
 
         use super::Visit;
-        ast.visit(&mut acc);
-        // todo error handling
+        assert_eq!(Recurse::Continue, ast.visit(&mut acc));
 
         let val = acc.val;
         assert!(matches!(val, Some(2989)));

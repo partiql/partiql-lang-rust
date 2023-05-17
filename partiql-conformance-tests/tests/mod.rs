@@ -1,7 +1,7 @@
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_logical as logical;
-use partiql_logical_planner::error::LowerError;
+use partiql_logical_planner::error::LoweringError;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
 
@@ -25,7 +25,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[inline]
 pub(crate) fn lower(
     parsed: &Parsed,
-) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
+) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     partiql_logical_planner::lower(parsed)
 }
 

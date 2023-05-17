@@ -28,9 +28,9 @@ use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
 
+use crate::error::{LowerError, LoweringError};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use crate::error::LowerError;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -130,6 +130,7 @@ pub struct AstToLogical {
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
 
+    // list of errors encountered during AST lowering
     errors: Vec<LowerError>,
 }
 
@@ -204,9 +205,13 @@ impl AstToLogical {
     pub fn lower_query(
         mut self,
         query: &ast::AstNode<ast::Query>,
-    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LowerError> {
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
         query.visit(&mut self);
-        // todo error handling
+        if !self.errors.is_empty() {
+            return Err(LoweringError {
+                errors: self.errors,
+            });
+        }
         Ok(self.plan)
     }
 
@@ -488,8 +493,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         if self.eq_or_error(cur_node, Some(id), "id_stack node id != id") == Recurse::Stop {
             return Recurse::Stop;
         }
-        // todo error handling
-
         Recurse::Continue
     }
 
@@ -660,7 +663,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             }
             QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {
-                if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
                     return Recurse::Stop;
                 }
                 let expr = env.into_iter().next().unwrap();
@@ -707,12 +710,12 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_projection(&mut self, _projection: &'ast Projection) -> Recurse {
         let benv = self.exit_benv();
-        if self.eq_or_error(benv.len(), 0, "benv len != 0") == Recurse::Stop {
+        if self.eq_or_error(benv.len(), 0, "benv.len() != 0") == Recurse::Stop {
             return Recurse::Stop;
         }
 
         let env = self.exit_env();
-        if self.eq_or_error(env.len(), 0, "env len != 0") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 0, "env.len() != 0") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -742,6 +745,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let select: BindingsOp = match _projection_kind {
             ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll,
             ProjectionKind::ProjectList(_) => {
+                if self.true_or_error(env.len().is_even(), "env.len() is not even") == Recurse::Stop
+                {
+                    return Recurse::Stop;
+                }
                 let mut exprs = HashMap::with_capacity(env.len() / 2);
                 let mut iter = env.into_iter();
                 while let Some(value) = iter.next() {
@@ -750,16 +757,18 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                         ValueExpr::Lit(lit) => match *lit {
                             Value::String(s) => (*s).clone(),
                             _ => {
+                                // Report error but allow visitor to continue
                                 self.errors.push(LowerError::IllegalState(
                                     "Unexpected literal type".to_string(),
                                 ));
-                                return Recurse::Stop;
+                                "".to_string()
                             }
                         },
                         _ => {
+                            // Report error but allow visitor to continue
                             self.errors
                                 .push(LowerError::IllegalState("Invalid alias type".to_string()));
-                            return Recurse::Stop;
+                            "".to_string()
                         }
                     };
                     exprs.insert(alias, value);
@@ -768,7 +777,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 logical::BindingsOp::Project(logical::Project { exprs })
             }
             ProjectionKind::ProjectPivot(_) => {
-                if self.eq_or_error(env.len(), 2, "env len != 2") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 2, "env.len() != 2") == Recurse::Stop {
                     return Recurse::Stop;
                 }
 
@@ -778,7 +787,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 logical::BindingsOp::Pivot(logical::Pivot { key, value })
             }
             ProjectionKind::ProjectValue(_) => {
-                if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
                     return Recurse::Stop;
                 }
 
@@ -792,7 +801,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 
     fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) -> Recurse {
-        let _expr = self.vexpr_stack.last().unwrap().last().unwrap();
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases
@@ -814,7 +822,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 2, "env len != 2") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 2, "env.len() != 2") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -875,7 +883,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -896,7 +904,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_between(&mut self, _between: &'ast Between) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 3, "env len != 3") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 3, "env.len() != 3") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -916,7 +924,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let mut env = self.exit_env();
         if self.true_or_error(
             (2..=3).contains(&env.len()),
-            "env len is not between 2 and 3",
+            "env.len() is not between 2 and 3",
         ) == Recurse::Stop
         {
             return Recurse::Stop;
@@ -966,8 +974,8 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
             self.push_vexpr(call_def.lookup(&env));
         } else {
+            // Include as an error but allow lowering to proceed for multiple error reporting
             self.errors.push(LowerError::UnsupportedFunction(name));
-            return Recurse::Stop;
         }
         Recurse::Continue
     }
@@ -987,14 +995,14 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 return Recurse::Stop;
             }
             CallArg::Positional(_) => {
-                if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
                     return Recurse::Stop;
                 }
 
                 self.push_call_arg(CallArgument::Positional(env.pop().unwrap()));
             }
             CallArg::Named(CallArgNamed { name, .. }) => {
-                if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
                     return Recurse::Stop;
                 }
 
@@ -1037,27 +1045,31 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::BitStringLit(_) => {
+                // Report error but allow visitor to continue
                 self.errors.push(LowerError::NotYetImplemented(
                     "Lit::BitStringLit".to_string(),
                 ));
-                return Recurse::Stop;
+                Value::Missing
             }
             Lit::HexStringLit(_) => {
+                // Report error but allow visitor to continue
                 self.errors.push(LowerError::NotYetImplemented(
                     "Lit::HexStringLit".to_string(),
                 ));
-                return Recurse::Stop;
+                Value::Missing
             }
             Lit::CollectionLit(_) => {
+                // Report error but allow visitor to continue
                 self.errors.push(LowerError::NotYetImplemented(
                     "Lit::CollectionLit".to_string(),
                 ));
-                return Recurse::Stop;
+                Value::Missing
             }
             Lit::TypedLit(_, _) => {
+                // Report error but allow visitor to continue
                 self.errors
                     .push(LowerError::NotYetImplemented("Lit::TypedLit".to_string()));
-                return Recurse::Stop;
+                Value::Missing
             }
         };
         self.push_value(val);
@@ -1071,7 +1083,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_struct(&mut self, _struct: &'ast Struct) -> Recurse {
         let env = self.exit_env();
-        if self.true_or_error(env.len().is_even(), "env len is not even") == Recurse::Stop {
+        if self.true_or_error(env.len().is_even(), "env.len() is not even") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1143,6 +1155,9 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let new_expr = ValueExpr::VarRef(new_binding_name);
         self.push_vexpr(new_expr);
 
+        if self.true_or_error(!env.is_empty(), "env is empty") == Recurse::Stop {
+            return Recurse::Stop;
+        }
         // Default set quantifier if the set quantifier keyword is omitted will be `ALL`
         let (setq, arg) = match env.pop().unwrap() {
             CallArgument::Positional(ve) => (logical::SetQuantifier::All, ve),
@@ -1190,8 +1205,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 setq,
             },
             _ => {
+                // Include as an error but allow lowering to proceed for multiple error reporting
                 self.errors.push(LowerError::UnsupportedFunction(name));
-                return Recurse::Stop;
+                // continue lowering with `AggAvg` aggregation function
+                AggregateExpression {
+                    name: new_name,
+                    expr: arg,
+                    func: AggAvg,
+                    setq,
+                }
             }
         };
         self.aggregate_exprs.push(agg_expr);
@@ -1249,7 +1271,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_path(&mut self, _path: &'ast Path) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1271,7 +1293,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let step = match _path_step {
             PathStep::PathExpr(_s) => {
                 let mut env = self.exit_env();
-                if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+                if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
                     return Recurse::Stop;
                 }
 
@@ -1319,12 +1341,12 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_from_clause(&mut self, _from_clause: &'ast FromClause) -> Recurse {
         let mut benv = self.exit_benv();
-        if self.eq_or_error(benv.len(), 1, "benv len != 1") == Recurse::Stop {
+        if self.eq_or_error(benv.len(), 1, "benv.len() != 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
         let env = self.exit_env();
-        if self.eq_or_error(env.len(), 0, "env len != 0") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 0, "env.len() != 0") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1340,6 +1362,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.enter_env();
 
         let id = *self.current_node();
+        if self.true_or_error(!self.siblings.is_empty(), "self.siblings is empty") == Recurse::Stop
+        {
+            return Recurse::Stop;
+        }
         self.siblings.last_mut().unwrap().push(id);
 
         for sym in [&from_let.as_alias, &from_let.at_alias, &from_let.by_alias]
@@ -1354,7 +1380,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Recurse {
         *self.current_ctx_mut() = QueryContext::Query;
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1396,14 +1422,14 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_join(&mut self, join: &'ast Join) -> Recurse {
         let mut benv = self.exit_benv();
-        if self.eq_or_error(benv.len(), 2, "benv len != 2") == Recurse::Stop {
+        if self.eq_or_error(benv.len(), 2, "benv.len() != 2") == Recurse::Stop {
             return Recurse::Stop;
         }
 
         let mut env = self.exit_env();
         if self.true_or_error(
             (0..=1).contains(&env.len()),
-            "env len is not between 0 and 1",
+            "env.len() is not between 0 and 1",
         ) == Recurse::Stop
         {
             return Recurse::Stop;
@@ -1463,7 +1489,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len != 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() != 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1483,7 +1509,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len is 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() is 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1514,6 +1540,9 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             }
         }
         let env = self.exit_env();
+        if self.true_or_error(env.len().is_even(), "env.len() is not even") == Recurse::Stop {
+            return Recurse::Stop;
+        }
 
         let group_as_alias = _group_by_expr
             .group_as_alias
@@ -1534,8 +1563,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         // can replace the query to be `SELECT some_alias AS a FROM t GROUP BY t.a + 1 AS some_alias`
         // This isn't quite correct as it doesn't deal with SELECT VALUE expressions and expressions
         // that are in the `HAVING` and `ORDER BY` clauses.
-        let select_clause_op_id = self.current_clauses_mut().select_clause.unwrap();
-        let select_clause = self.plan.operator_as_mut(select_clause_op_id).unwrap();
+        let select_clause_op_id = self.current_clauses_mut().select_clause;
+        if select_clause_op_id.is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "select_clause_op_id is None".to_string(),
+            ));
+            return Recurse::Stop;
+        }
+        let select_clause = self
+            .plan
+            .operator_as_mut(select_clause_op_id.expect("select_clause_op_id not None"))
+            .unwrap();
         let mut binding = HashMap::new();
         let select_clause_exprs = match select_clause {
             BindingsOp::Project(ref mut project) => &mut project.exprs,
@@ -1552,16 +1590,18 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let mut exprs = HashMap::with_capacity(env.len() / 2);
         let mut iter = env.into_iter();
+
         while let Some(value) = iter.next() {
             let alias = iter.next().unwrap();
             let alias = match alias {
                 ValueExpr::Lit(lit) => match *lit {
                     Value::String(s) => (*s).clone(),
                     _ => {
+                        // Report error but allow visitor to continue
                         self.errors.push(LowerError::IllegalState(
                             "Unexpected literal type".to_string(),
                         ));
-                        return Recurse::Stop;
+                        "".to_string()
                     }
                 },
                 _ => {
@@ -1632,7 +1672,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) -> Recurse {
         let mut env = self.exit_env();
-        if self.eq_or_error(env.len(), 1, "env len is 1") == Recurse::Stop {
+        if self.eq_or_error(env.len(), 1, "env.len() is 1") == Recurse::Stop {
             return Recurse::Stop;
         }
 
@@ -1675,7 +1715,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let mut env = self.exit_env();
         if self.true_or_error(
             (1..=2).contains(&env.len()),
-            "env length is  notbetween 1 and 2",
+            "env.len() is  not between 1 and 2",
         ) == Recurse::Stop
         {
             return Recurse::Stop;
@@ -1705,7 +1745,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Recurse {
         let mut env = self.exit_env();
-        if self.true_or_error(env.len() >= 2, "env len < 2") == Recurse::Stop {
+        if self.true_or_error(env.len() >= 2, "env.len < 2") == Recurse::Stop {
             return Recurse::Stop;
         }
 

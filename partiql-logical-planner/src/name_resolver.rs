@@ -1,3 +1,4 @@
+use crate::error::{LowerError, LoweringError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
@@ -95,21 +96,31 @@ pub struct NameResolver {
     in_scope: FnvIndexMap<ast::NodeId, Vec<ast::NodeId>>,
     schema: FnvIndexMap<ast::NodeId, KeySchema>,
     aliases: FnvIndexMap<ast::NodeId, Symbol>,
+
+    // errors that occur during name resolution
+    errors: Vec<LowerError>,
 }
 
 impl NameResolver {
-    pub fn resolve(&mut self, query: &ast::AstNode<ast::Query>) -> KeyRegistry {
+    pub fn resolve(
+        &mut self,
+        query: &ast::AstNode<ast::Query>,
+    ) -> Result<KeyRegistry, LoweringError> {
         query.visit(self);
-        // todo error handling
+        if !self.errors.is_empty() {
+            return Err(LoweringError {
+                errors: self.errors.clone(),
+            });
+        }
 
         let in_scope = std::mem::take(&mut self.in_scope);
         let schema = std::mem::take(&mut self.schema);
         let aliases = std::mem::take(&mut self.aliases);
-        KeyRegistry {
+        Ok(KeyRegistry {
             in_scope,
             schema,
             aliases,
-        }
+        })
     }
 
     #[inline]
@@ -141,8 +152,8 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_lateral(&mut self) -> Vec<ast::NodeId> {
-        self.lateral_stack.pop().expect("lateral level")
+    fn exit_lateral(&mut self) -> Option<Vec<ast::NodeId>> {
+        self.lateral_stack.pop()
     }
 
     #[inline]
@@ -151,8 +162,8 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_child_stack(&mut self) -> Vec<ast::NodeId> {
-        self.id_child_stack.pop().expect("child level")
+    fn exit_child_stack(&mut self) -> Option<Vec<ast::NodeId>> {
+        self.id_child_stack.pop()
     }
 
     #[inline]
@@ -161,8 +172,8 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_keyref(&mut self) -> KeyRefs {
-        self.keyref_stack.pop().expect("io level")
+    fn exit_keyref(&mut self) -> Option<KeyRefs> {
+        self.keyref_stack.pop()
     }
 
     #[inline]
@@ -196,7 +207,15 @@ impl<'ast> Visitor<'ast> for NameResolver {
 
     fn exit_query(&mut self, _query: &'ast ast::Query) -> Recurse {
         let id = *self.current_node();
-        let keyrefs = self.exit_keyref();
+        let keyrefs = match self.exit_keyref() {
+            None => {
+                self.errors.push(LowerError::IllegalState(
+                    "Expected non-empty keyrefs".to_string(),
+                ));
+                return Recurse::Stop;
+            }
+            Some(kr) => kr,
+        };
 
         // Collect the variables produced & consumed by this (sub)query.
         let KeyRefs {
@@ -220,8 +239,18 @@ impl<'ast> Visitor<'ast> for NameResolver {
     }
 
     fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) -> Recurse {
-        self.exit_lateral();
-        self.exit_child_stack();
+        if self.exit_lateral().is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "Expected non-empty lateral stack".to_string(),
+            ));
+            return Recurse::Stop;
+        };
+        if self.exit_child_stack().is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "Expected non-empty child stack".to_string(),
+            ));
+            return Recurse::Stop;
+        };
         Recurse::Continue
     }
 
@@ -231,7 +260,12 @@ impl<'ast> Visitor<'ast> for NameResolver {
     }
 
     fn exit_join(&mut self, _join: &'ast ast::Join) -> Recurse {
-        self.exit_child_stack();
+        if self.exit_child_stack().is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "Expected non-empty child stack".to_string(),
+            ));
+            return Recurse::Stop;
+        };
         Recurse::Continue
     }
 
@@ -266,9 +300,22 @@ impl<'ast> Visitor<'ast> for NameResolver {
     }
 
     fn exit_from_let(&mut self, from_let: &'ast ast::FromLet) -> Recurse {
-        self.exit_child_stack();
+        if self.exit_child_stack().is_none() {
+            self.errors.push(LowerError::IllegalState(
+                "Expected non-empty child stack".to_string(),
+            ));
+            return Recurse::Stop;
+        };
         let id = *self.current_node();
-        let KeyRefs { consume, .. } = self.exit_keyref();
+        let KeyRefs { consume, .. } = match self.exit_keyref() {
+            None => {
+                self.errors.push(LowerError::IllegalState(
+                    "Expected non-empty keyrefs".to_string(),
+                ));
+                return Recurse::Stop;
+            }
+            Some(kr) => kr,
+        };
 
         // get the "as" alias
         // 1. if explicitly given
