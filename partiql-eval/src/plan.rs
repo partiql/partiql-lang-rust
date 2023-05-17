@@ -10,6 +10,7 @@ use partiql_logical::{
     Type, UnaryOp, ValueExpr,
 };
 
+use crate::error::{ErrorNode, EvalErr, EvaluationError};
 use crate::eval;
 use crate::eval::evaluable::{
     Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
@@ -30,16 +31,27 @@ use crate::eval::EvalPlan;
 use partiql_value::Value::Null;
 
 #[derive(Default)]
-pub struct EvaluatorPlanner;
+pub struct EvaluatorPlanner {
+    errors: Vec<EvaluationError>,
+}
 
 impl EvaluatorPlanner {
-    #[inline]
-    pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> EvalPlan {
-        self.plan_eval(plan)
+    pub fn new() -> EvaluatorPlanner {
+        EvaluatorPlanner { errors: vec![] }
     }
 
     #[inline]
-    fn plan_eval(&self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
+    pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<EvalPlan, EvalErr> {
+        if !self.errors.is_empty() {
+            return Err(EvalErr {
+                errors: self.errors.clone(),
+            });
+        }
+        Ok(self.plan_eval(plan))
+    }
+
+    #[inline]
+    fn plan_eval(&mut self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
         let ops = lg.operators();
         let flows = lg.flows();
 
@@ -61,7 +73,7 @@ impl EvaluatorPlanner {
         EvalPlan(graph)
     }
 
-    fn get_eval_node(&self, be: &BindingsOp) -> Box<dyn Evaluable> {
+    fn get_eval_node(&mut self, be: &BindingsOp) -> Box<dyn Evaluable> {
         match be {
             BindingsOp::Scan(logical::Scan {
                 expr,
@@ -237,12 +249,16 @@ impl EvaluatorPlanner {
                     input: None,
                 })
             }
-
-            BindingsOp::SetOp => todo!("SetOp"),
+            BindingsOp::SetOp => {
+                self.errors.push(EvaluationError::NotYetImplemented(
+                    "BindingsOp::SetOp not yet implemented in evaluator".to_string(),
+                ));
+                Box::new(ErrorNode::new())
+            }
         }
     }
 
-    fn plan_values(&self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
+    fn plan_values(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
         match ve {
             ValueExpr::UnExpr(unary_op, operand) => {
                 let operand = self.plan_values(operand);
@@ -334,7 +350,10 @@ impl EvaluatorPlanner {
                 match pattern {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
-                        assert!(escape.chars().count() <= 1);
+                        if escape.chars().count() > 1 {
+                            self.errors
+                                .push(EvaluationError::InvalidLikeEscape(escape.to_string()));
+                        }
                         let escape = escape.chars().next();
                         let regex = like_to_re_pattern(pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
@@ -440,7 +459,12 @@ impl EvaluatorPlanner {
                 //     3) COALESCE (V1, V2, . . . ,n ), for n >= 3, is equivalent to the following <case specification>:
                 //         CASE WHEN V1 IS NOT NULL THEN V1 ELSE COALESCE (V2, . . . ,n )
                 //         END
-                assert!(!c.elements.is_empty());
+                if c.elements.is_empty() {
+                    self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                        "coalesce".to_string(),
+                    ));
+                    return Box::new(ErrorNode::new());
+                }
                 fn as_case(v: &ValueExpr, elems: &[ValueExpr]) -> ValueExpr {
                     let sc = SearchedCase {
                         cases: vec![(
@@ -472,56 +496,100 @@ impl EvaluatorPlanner {
                     .collect_vec();
                 match name {
                     CallName::Lower => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "lower".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnLower {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Upper => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "upper".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnUpper {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::CharLength => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "char_length".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnCharLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::OctetLength => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "octet_length".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnOctetLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::BitLength => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "bit_length".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnBitLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::LTrim => {
-                        assert_eq!(args.len(), 2);
+                        if args.len() != 2 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "trim".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnLtrim { value, to_trim })
                     }
                     CallName::BTrim => {
-                        assert_eq!(args.len(), 2);
+                        if args.len() != 2 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "trim".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnBtrim { value, to_trim })
                     }
                     CallName::RTrim => {
-                        assert_eq!(args.len(), 2);
+                        if args.len() != 2 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "trim".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnRtrim { value, to_trim })
                     }
                     CallName::Substring => {
-                        assert!((2usize..=3).contains(&args.len()));
-
+                        if !(2usize..=3).contains(&args.len()) {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "substring".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let length = if args.len() == 3 {
                             Some(args.pop().unwrap())
                         } else {
@@ -537,14 +605,23 @@ impl EvaluatorPlanner {
                         })
                     }
                     CallName::Position => {
-                        assert_eq!(args.len(), 2);
+                        if args.len() != 2 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "position".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let haystack = args.pop().unwrap();
                         let needle = args.pop().unwrap();
                         Box::new(EvalFnPosition { needle, haystack })
                     }
                     CallName::Overlay => {
-                        assert!((3usize..=4).contains(&args.len()));
-
+                        if !(3usize..=4).contains(&args.len()) {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "overlay".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         let length = if args.len() == 4 {
                             Some(args.pop().unwrap())
                         } else {
@@ -562,73 +639,131 @@ impl EvaluatorPlanner {
                         })
                     }
                     CallName::Exists => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "exists".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExists {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Abs => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors
+                                .push(EvaluationError::InvalidNumberOfArguments("abs".to_string()));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnAbs {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Mod => {
-                        assert_eq!(args.len(), 2);
+                        if args.len() != 2 {
+                            self.errors
+                                .push(EvaluationError::InvalidNumberOfArguments("mod".to_string()));
+                            return Box::new(ErrorNode::new());
+                        }
                         let rhs = args.pop().unwrap();
                         let lhs = args.pop().unwrap();
                         Box::new(EvalFnModulus { lhs, rhs })
                     }
                     CallName::Cardinality => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "cardinality".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnCardinality {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractYear => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractYear {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMonth => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractMonth {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractDay => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractDay {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractHour => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMinute => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractMinute {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractSecond => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractSecond {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneHour => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractTimezoneHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneMinute => {
-                        assert_eq!(args.len(), 1);
+                        if args.len() != 1 {
+                            self.errors.push(EvaluationError::InvalidNumberOfArguments(
+                                "extract".to_string(),
+                            ));
+                            return Box::new(ErrorNode::new());
+                        }
                         Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
                         })

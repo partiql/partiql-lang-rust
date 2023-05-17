@@ -120,9 +120,8 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 }
 
 fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    let planner = plan::EvaluatorPlanner;
-
-    planner.compile(logical)
+    let mut planner = plan::EvaluatorPlanner::new();
+    planner.compile(logical).expect("Expect no plan error")
 }
 
 fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> Value {

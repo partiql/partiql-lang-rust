@@ -2,8 +2,6 @@ use itertools::Itertools;
 
 use std::fmt::Debug;
 
-use thiserror::Error;
-
 use petgraph::algo::toposort;
 use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
@@ -16,6 +14,7 @@ use crate::env::Bindings;
 
 use petgraph::graph::NodeIndex;
 
+use crate::error::{EvalErr, EvaluationError};
 use petgraph::visit::EdgeRef;
 
 use crate::eval::evaluable::Evaluable;
@@ -56,10 +55,15 @@ impl EvalPlan {
                 let plan_graph = &mut self.0;
                 let mut result = None;
                 for idx in ops.into_iter() {
-                    let src = plan_graph
-                        .node_weight_mut(idx)
-                        .expect("Error in retrieving node");
-                    result = src.evaluate(&*ctx);
+                    let src = plan_graph.node_weight_mut(idx);
+                    if src.is_none() {
+                        return Err(EvalErr {
+                            errors: vec![EvaluationError::IllegalState(
+                                "Error in retrieving node".to_string(),
+                            )],
+                        });
+                    }
+                    result = src.unwrap().evaluate(&*ctx);
 
                     let destinations: Vec<(usize, (u8, NodeIndex))> = plan_graph
                         .edges_directed(idx, Outgoing)
@@ -72,17 +76,32 @@ impl EvalPlan {
                             result.take()
                         } else {
                             result.clone()
+                        };
+                        match res {
+                            None => {
+                                return Err(EvalErr {
+                                    errors: vec![EvaluationError::IllegalState(
+                                        "Error in retrieving source value".to_string(),
+                                    )],
+                                })
+                            }
+                            Some(res) => {
+                                let dst = plan_graph.node_weight_mut(dst_id);
+                                if dst.is_none() {
+                                    return Err(EvalErr {
+                                        errors: vec![EvaluationError::IllegalState(
+                                            "Error in retrieving node".to_string(),
+                                        )],
+                                    });
+                                }
+                                dst.unwrap().update_input(res, branch_num);
+                            }
                         }
-                        .expect("Error in retrieving source value");
-
-                        let dst = plan_graph
-                            .node_weight_mut(dst_id)
-                            .expect("Error in retrieving node");
-                        dst.update_input(res, branch_num);
                     }
                 }
 
                 let result = result.expect("Error in retrieving eval output");
+                // TODO: decide on `evaluate`'s type. Currently returns an `Option`. For error handling, perhaps a `Result` type is better here.
                 Ok(Evaluated { result })
             }
             Err(e) => Err(EvalErr {
@@ -104,16 +123,6 @@ pub type EvalResult = Result<Evaluated, EvalErr>;
 /// Represents result of evaluation as an evaluated entity.
 pub struct Evaluated {
     pub result: Value,
-}
-
-pub struct EvalErr {
-    pub errors: Vec<EvaluationError>,
-}
-
-#[derive(Error, Debug)]
-pub enum EvaluationError {
-    #[error("Evaluation Error: malformed evaluation plan detected `{}`", _0)]
-    InvalidEvaluationPlan(String),
 }
 
 /// Represents an evaluation context that is used during evaluation of a plan.

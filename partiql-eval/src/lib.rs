@@ -1,4 +1,5 @@
 pub mod env;
+mod error;
 pub mod eval;
 pub mod plan;
 
@@ -25,8 +26,8 @@ mod tests {
     };
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let planner = plan::EvaluatorPlanner;
-        let mut plan = planner.compile(&logical);
+        let mut planner = plan::EvaluatorPlanner::new();
+        let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
         if let Ok(out) = plan.execute_mut(bindings) {
             out.result

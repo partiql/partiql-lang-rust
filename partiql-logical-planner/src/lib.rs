@@ -52,9 +52,8 @@ mod tests {
 
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let planner = plan::EvaluatorPlanner;
-
-        let mut plan = planner.compile(&logical);
+        let mut planner = plan::EvaluatorPlanner::new();
+        let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
 
         if let Ok(out) = plan.execute_mut(bindings) {
