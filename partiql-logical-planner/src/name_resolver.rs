@@ -109,7 +109,7 @@ impl NameResolver {
         query.visit(self);
         if !self.errors.is_empty() {
             return Err(LoweringError {
-                errors: self.errors.clone(),
+                errors: std::mem::take(&mut self.errors),
             });
         }
 

@@ -10,18 +10,14 @@ pub mod error;
 mod lower;
 mod name_resolver;
 
-// TODO better encapsulate and add error types.
+// TODO better encapsulate.
 pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     if let ast::Expr::Query(q) = parsed.ast.as_ref() {
         let mut resolver = NameResolver::default();
-        let key_resolver = resolver.resolve(q);
-        match key_resolver {
-            Ok(kr) => {
-                let planner = AstToLogical::new(kr);
-                planner.lower_query(q)
-            }
-            Err(e) => Err(e),
-        }
+        let mut resolver = NameResolver::default();
+        let registry = resolver.resolve(q)?;
+        let planner = AstToLogical::new(registry);
+        planner.lower_query(q)
     } else {
         Err(LoweringError {
             errors: vec![LowerError::NotYetImplemented(
