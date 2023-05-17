@@ -29,6 +29,7 @@ use crate::name_resolver;
 use itertools::Itertools;
 
 use crate::error::{LowerError, LoweringError};
+
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
@@ -971,7 +972,14 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::FloatLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
             Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
             Lit::BoolLit(b) => Value::Boolean(*b),
-            Lit::IonStringLit(s) => parse_embedded_ion_str(s),
+            Lit::IonStringLit(s) => match parse_embedded_ion_str(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    // Report error but allow visitor to continue
+                    self.errors.push(e);
+                    Value::Missing
+                }
+            },
             Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
             Lit::BitStringLit(_) => {
@@ -1685,18 +1693,25 @@ impl<'ast> Visitor<'ast> for AstToLogical {
     }
 }
 
-// TODO should this support partiql encoded in ion or only straight ion
-// TODO remove expects
-fn parse_embedded_ion_str(contents: &str) -> Value {
+fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
+    fn lit_err(literal: &str, err: impl std::error::Error) -> LowerError {
+        LowerError::Literal {
+            literal: literal.into(),
+            error: err.to_string(),
+        }
+    }
+
     let reader = ion_rs::ReaderBuilder::new()
         .build(contents)
-        .expect("reading contents");
+        .map_err(|e| lit_err(contents, e))?;
     let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
         .build(reader)
-        .expect("building decoder");
+        .map_err(|e| lit_err(contents, e))?;
 
-    let val = iter.next();
-
-    val.expect("test value to exist")
-        .expect("value decode to succeed")
+    iter.next()
+        .ok_or_else(|| LowerError::Literal {
+            literal: contents.into(),
+            error: "Contains no value".into(),
+        })?
+        .map_err(|e| lit_err(contents, e))
 }
