@@ -29,7 +29,7 @@ pub struct AstNode<T> {
     pub node: T,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Item {
     // Data Definition Language statements

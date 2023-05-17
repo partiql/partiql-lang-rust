@@ -14,7 +14,6 @@ mod name_resolver;
 pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     if let ast::Expr::Query(q) = parsed.ast.as_ref() {
         let mut resolver = NameResolver::default();
-        let mut resolver = NameResolver::default();
         let registry = resolver.resolve(q)?;
         let planner = AstToLogical::new(registry);
         planner.lower_query(q)

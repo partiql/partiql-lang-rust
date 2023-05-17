@@ -63,12 +63,12 @@ fn impl_visit(ast: &syn::DeriveInput) -> proc_macro2::TokenStream {
     let ast_name = &ast.ident;
     quote! {
         impl crate::visit::Visit for #ast_name {
-            fn visit<'v, V>(&'v self, v: &mut V) -> crate::visit::Recurse
+            fn visit<'v, V>(&'v self, v: &mut V) -> crate::visit::Traverse
             where
                 V: crate::visit::Visitor<'v>,
             {
-                if v.#enter_fn_name(self) == crate::visit::Recurse::Stop {
-                    return crate::visit::Recurse::Stop
+                if v.#enter_fn_name(self) == crate::visit::Traverse::Stop {
+                    return crate::visit::Traverse::Stop
                 }
                 #visit_children
                 v.#exit_fn_name(self)
@@ -91,7 +91,7 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
             let non_exhaustive = variants.len() < e.variants.len();
             let else_clause = non_exhaustive.then(|| {
                 quote! {
-                    _ => crate::visit::Recurse::Continue
+                    _ => crate::visit::Traverse::Continue
                 }
             });
 
@@ -99,8 +99,8 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
                 if match &self {
                     #(#enum_name::#variants(child) => child.visit(v),)*
                     #else_clause
-                } == crate::visit::Recurse::Stop {
-                    return crate::visit::Recurse::Stop
+                } == crate::visit::Traverse::Stop {
+                    return crate::visit::Traverse::Stop
                 }
             }
         }
@@ -132,8 +132,8 @@ fn impl_visit_children(ast: &&DeriveInput) -> TokenStream {
                 Fields::Unit => vec![],
             };
             quote! {
-                #(if self.#fields.visit(v) == crate::visit::Recurse::Stop {
-                    return crate::visit::Recurse::Stop
+                #(if self.#fields.visit(v) == crate::visit::Traverse::Stop {
+                    return crate::visit::Traverse::Stop
                 })*
             }
         }
