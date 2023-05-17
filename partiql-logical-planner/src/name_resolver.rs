@@ -1,10 +1,10 @@
+use crate::error::LowerError;
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Visit, Visitor};
 use std::sync::atomic::{AtomicU32, Ordering};
-use crate::error::LowerError;
 
 type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
 
@@ -100,7 +100,7 @@ pub struct NameResolver {
 
 impl NameResolver {
     pub fn resolve(&mut self, query: &ast::AstNode<ast::Query>) -> KeyRegistry {
-        query.visit(self);
+        query.visit(self).expect("todo error handling");
 
         let in_scope = std::mem::take(&mut self.in_scope);
         let schema = std::mem::take(&mut self.schema);
@@ -172,6 +172,8 @@ impl NameResolver {
 }
 
 impl<'ast> Visitor<'ast> for NameResolver {
+    type Error = LowerError;
+
     fn enter_ast_node(&mut self, id: ast::NodeId) -> Result<(), LowerError> {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {
@@ -179,20 +181,22 @@ impl<'ast> Visitor<'ast> for NameResolver {
         }
         Ok(())
     }
-    fn exit_ast_node(&mut self, id: ast::NodeId) {
-        assert_eq!(self.id_path_to_root.pop(), Some(id))
+    fn exit_ast_node(&mut self, id: ast::NodeId) -> Result<(), LowerError> {
+        assert_eq!(self.id_path_to_root.pop(), Some(id));
+        Ok(())
     }
 
-    fn enter_query(&mut self, _query: &'ast ast::Query) {
+    fn enter_query(&mut self, _query: &'ast ast::Query) -> Result<(), LowerError> {
         let id = *self.current_node();
         self.enclosing_clause
             .entry(EnclosingClause::Query)
             .or_insert_with(Vec::new)
             .push(id);
         self.enter_keyref();
+        Ok(())
     }
 
-    fn exit_query(&mut self, _query: &'ast ast::Query) {
+    fn exit_query(&mut self, _query: &'ast ast::Query) -> Result<(), LowerError> {
         let id = *self.current_node();
         let keyrefs = self.exit_keyref();
 
@@ -208,27 +212,32 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let schema = KeySchema { consume, produce };
 
         self.schema.insert(id, schema);
+        Ok(())
     }
 
-    fn enter_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {
+    fn enter_from_clause(&mut self, _from_clause: &'ast ast::FromClause) -> Result<(), LowerError> {
         self.enter_lateral();
         self.enter_child_stack();
+        Ok(())
     }
 
-    fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) {
+    fn exit_from_clause(&mut self, _from_clause: &'ast ast::FromClause) -> Result<(), LowerError> {
         self.exit_lateral();
         self.exit_child_stack();
+        Ok(())
     }
 
-    fn enter_join(&mut self, _join: &'ast ast::Join) {
+    fn enter_join(&mut self, _join: &'ast ast::Join) -> Result<(), LowerError> {
         self.enter_child_stack();
+        Ok(())
     }
 
-    fn exit_join(&mut self, _join: &'ast ast::Join) {
+    fn exit_join(&mut self, _join: &'ast ast::Join) -> Result<(), LowerError> {
         self.exit_child_stack();
+        Ok(())
     }
 
-    fn enter_from_let(&mut self, _from_let: &'ast ast::FromLet) {
+    fn enter_from_let(&mut self, _from_let: &'ast ast::FromLet) -> Result<(), LowerError> {
         self.enter_child_stack();
 
         let id = *self.current_node();
@@ -255,9 +264,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
         }
 
         self.lateral_stack.last_mut().unwrap().push(id);
+        Ok(())
     }
 
-    fn exit_from_let(&mut self, from_let: &'ast ast::FromLet) {
+    fn exit_from_let(&mut self, from_let: &'ast ast::FromLet) -> Result<(), LowerError> {
         self.exit_child_stack();
         let id = *self.current_node();
         let KeyRefs { consume, .. } = self.exit_keyref();
@@ -283,9 +293,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
         }
 
         self.schema.insert(id, KeySchema { consume, produce });
+        Ok(())
     }
 
-    fn enter_var_ref(&mut self, var_ref: &'ast ast::VarRef) {
+    fn enter_var_ref(&mut self, var_ref: &'ast ast::VarRef) -> Result<(), LowerError> {
         let is_from_path = self.is_from_path();
 
         // in a From path, a prefix `@` means to look locally before globally Cf. specification section 10
@@ -308,9 +319,13 @@ impl<'ast> Visitor<'ast> for NameResolver {
         };
 
         self.push_consume_name(name);
+        Ok(())
     }
 
-    fn exit_project_expr(&mut self, project_expr: &'ast ast::ProjectExpr) {
+    fn exit_project_expr(
+        &mut self,
+        project_expr: &'ast ast::ProjectExpr,
+    ) -> Result<(), LowerError> {
         let id = self.current_node();
         // get the "as" alias
         // 1. if explicitly given
@@ -329,9 +344,10 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .unwrap()
             .produce_required
             .insert(as_alias);
+        Ok(())
     }
 
-    fn exit_group_key(&mut self, group_key: &'ast GroupKey) {
+    fn exit_group_key(&mut self, group_key: &'ast GroupKey) -> Result<(), LowerError> {
         let id = *self.current_node();
         // get the "as" alias for each `GROUP BY` expr
         // 1. if explicitly given
@@ -350,18 +366,18 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .unwrap()
             .produce_required
             .insert(as_alias);
+        Ok(())
     }
 
-    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) {
+    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Result<(), LowerError> {
         // add the `GROUP AS` alias
         if let Some(sym) = &group_by_expr.group_as_alias {
             let id = *self.current_node();
             let as_alias = Symbol::Known(sym.clone());
             self.aliases.insert(id, as_alias);
         }
+        Ok(())
     }
-
-    type Error = LowerError;
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.

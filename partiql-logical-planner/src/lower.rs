@@ -30,9 +30,9 @@ use itertools::Itertools;
 
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
+use crate::error::LowerError;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
-use crate::error::LowerError;
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 
@@ -201,7 +201,7 @@ impl AstToLogical {
         mut self,
         query: &ast::AstNode<ast::Query>,
     ) -> logical::LogicalPlan<logical::BindingsOp> {
-        query.visit(&mut self);
+        query.visit(&mut self).expect("todo error handling");
         self.plan
     }
 
@@ -459,81 +459,83 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.id_stack.push(id);
         Ok(())
     }
-    fn exit_ast_node(&mut self, id: NodeId) {
-        assert_eq!(self.id_stack.pop(), Some(id))
+    fn exit_ast_node(&mut self, id: NodeId) -> Result<(), LowerError> {
+        assert_eq!(self.id_stack.pop(), Some(id));
+        Ok(())
     }
 
-    fn enter_item(&mut self, _item: &'ast Item) {
+    fn enter_item(&mut self, _item: &'ast Item) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_ddl(&mut self, _ddl: &'ast Ddl) {
+    fn enter_ddl(&mut self, _ddl: &'ast Ddl) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) {
+    fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_create_table(&mut self, _create_table: &'ast CreateTable) {
+    fn enter_create_table(&mut self, _create_table: &'ast CreateTable) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_drop_table(&mut self, _drop_table: &'ast DropTable) {
+    fn enter_drop_table(&mut self, _drop_table: &'ast DropTable) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_create_index(&mut self, _create_index: &'ast CreateIndex) {
+    fn enter_create_index(&mut self, _create_index: &'ast CreateIndex) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_drop_index(&mut self, _drop_index: &'ast DropIndex) {
+    fn enter_drop_index(&mut self, _drop_index: &'ast DropIndex) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_dml(&mut self, _dml: &'ast Dml) {
+    fn enter_dml(&mut self, _dml: &'ast Dml) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_dml_op(&mut self, _dml_op: &'ast DmlOp) {
+    fn enter_dml_op(&mut self, _dml_op: &'ast DmlOp) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_insert(&mut self, _insert: &'ast Insert) {
+    fn enter_insert(&mut self, _insert: &'ast Insert) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_insert_value(&mut self, _insert_value: &'ast InsertValue) {
+    fn enter_insert_value(&mut self, _insert_value: &'ast InsertValue) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_set(&mut self, _set: &'ast Set) {
+    fn enter_set(&mut self, _set: &'ast Set) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_assignment(&mut self, _assignment: &'ast Assignment) {
+    fn enter_assignment(&mut self, _assignment: &'ast Assignment) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_remove(&mut self, _remove: &'ast Remove) {
+    fn enter_remove(&mut self, _remove: &'ast Remove) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_delete(&mut self, _delete: &'ast Delete) {
+    fn enter_delete(&mut self, _delete: &'ast Delete) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_on_conflict(&mut self, _on_conflict: &'ast OnConflict) {
+    fn enter_on_conflict(&mut self, _on_conflict: &'ast OnConflict) -> Result<(), LowerError> {
         panic!("Only query is currently supported")
     }
 
-    fn enter_query(&mut self, _query: &'ast Query) {
+    fn enter_query(&mut self, _query: &'ast Query) -> Result<(), LowerError> {
         self.enter_benv();
         self.siblings.push(vec![]);
         self.enter_q();
+        Ok(())
     }
 
-    fn exit_query(&mut self, _query: &'ast Query) {
+    fn exit_query(&mut self, _query: &'ast Query) -> Result<(), LowerError> {
         let clauses = self.exit_q();
 
         let mut clauses = clauses.evaluation_order().into_iter();
@@ -555,9 +557,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let sink_id = self.plan.add_operator(BindingsOp::Sink);
         self.plan.add_flow(out, sink_id);
+        Ok(())
     }
 
-    fn enter_query_set(&mut self, _query_set: &'ast QuerySet) {
+    fn enter_query_set(&mut self, _query_set: &'ast QuerySet) -> Result<(), LowerError> {
         self.enter_env();
 
         match _query_set {
@@ -567,9 +570,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             QuerySet::Values(_) => todo!("QuerySet::Values"),
             QuerySet::Table(_) => todo!("QuerySet::Table"),
         }
+        Ok(())
     }
 
-    fn exit_query_set(&mut self, _query_set: &'ast QuerySet) {
+    fn exit_query_set(&mut self, _query_set: &'ast QuerySet) -> Result<(), LowerError> {
         let env = self.exit_env();
 
         match _query_set {
@@ -586,22 +590,32 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             QuerySet::Values(_) => todo!("QuerySet::Values"),
             QuerySet::Table(_) => todo!("QuerySet::Table"),
         }
+        Ok(())
     }
 
-    fn enter_set_expr(&mut self, _set_expr: &'ast SetExpr) {}
+    fn enter_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Result<(), LowerError> {
+        Ok(())
+    }
 
-    fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) {}
+    fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Result<(), LowerError> {
+        Ok(())
+    }
 
-    fn enter_select(&mut self, _select: &'ast Select) {}
+    fn enter_select(&mut self, _select: &'ast Select) -> Result<(), LowerError> {
+        Ok(())
+    }
 
-    fn exit_select(&mut self, _select: &'ast Select) {}
+    fn exit_select(&mut self, _select: &'ast Select) -> Result<(), LowerError> {
+        Ok(())
+    }
 
-    fn enter_projection(&mut self, _projection: &'ast Projection) {
+    fn enter_projection(&mut self, _projection: &'ast Projection) -> Result<(), LowerError> {
         self.enter_benv();
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_projection(&mut self, _projection: &'ast Projection) {
+    fn exit_projection(&mut self, _projection: &'ast Projection) -> Result<(), LowerError> {
         let benv = self.exit_benv();
         assert_eq!(benv.len(), 0);
         let env = self.exit_env();
@@ -611,14 +625,22 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             let id = self.plan.add_operator(BindingsOp::Distinct);
             self.current_clauses_mut().distinct.replace(id);
         }
+        Ok(())
     }
 
-    fn enter_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) {
+    fn enter_projection_kind(
+        &mut self,
+        _projection_kind: &'ast ProjectionKind,
+    ) -> Result<(), LowerError> {
         self.enter_benv();
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_projection_kind(&mut self, _projection_kind: &'ast ProjectionKind) {
+    fn exit_projection_kind(
+        &mut self,
+        _projection_kind: &'ast ProjectionKind,
+    ) -> Result<(), LowerError> {
         let benv = self.exit_benv();
         assert_eq!(benv.len(), 0); // TODO sub-query
         let env = self.exit_env();
@@ -657,9 +679,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         };
         let id = self.plan.add_operator(select);
         self.current_clauses_mut().select_clause.replace(id);
+        Ok(())
     }
 
-    fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) {
+    fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) -> Result<(), LowerError> {
         let _expr = self.vexpr_stack.last().unwrap().last().unwrap();
         let as_key: &name_resolver::Symbol = self
             .key_registry
@@ -672,13 +695,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
         self.push_value(as_key.into());
+        Ok(())
     }
 
-    fn enter_bin_op(&mut self, _bin_op: &'ast BinOp) {
+    fn enter_bin_op(&mut self, _bin_op: &'ast BinOp) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) {
+    fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 2);
 
@@ -719,13 +744,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             };
             self.push_vexpr(ValueExpr::BinaryExpr(op, Box::new(lhs), Box::new(rhs)));
         }
+        Ok(())
     }
 
-    fn enter_uni_op(&mut self, _uni_op: &'ast UniOp) {
+    fn enter_uni_op(&mut self, _uni_op: &'ast UniOp) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) {
+    fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
@@ -736,26 +763,30 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             UniOpKind::Not => logical::UnaryOp::Not,
         };
         self.push_vexpr(ValueExpr::UnExpr(op, Box::new(expr)));
+        Ok(())
     }
 
-    fn enter_between(&mut self, _between: &'ast Between) {
+    fn enter_between(&mut self, _between: &'ast Between) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_between(&mut self, _between: &'ast Between) {
+    fn exit_between(&mut self, _between: &'ast Between) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 3);
         let to = Box::new(env.pop().unwrap());
         let from = Box::new(env.pop().unwrap());
         let value = Box::new(env.pop().unwrap());
         self.push_vexpr(ValueExpr::BetweenExpr(BetweenExpr { value, from, to }));
+        Ok(())
     }
 
-    fn enter_like(&mut self, _like: &'ast Like) {
+    fn enter_like(&mut self, _like: &'ast Like) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_like(&mut self, _like: &'ast Like) {
+    fn exit_like(&mut self, _like: &'ast Like) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert!((2..=3).contains(&env.len()));
         let escape_ve = if env.len() == 3 {
@@ -787,13 +818,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let pattern = ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern });
         self.push_vexpr(pattern);
+        Ok(())
     }
 
-    fn enter_call(&mut self, _call: &'ast Call) {
+    fn enter_call(&mut self, _call: &'ast Call) -> Result<(), LowerError> {
         self.enter_call();
+        Ok(())
     }
 
-    fn exit_call(&mut self, _call: &'ast Call) {
+    fn exit_call(&mut self, _call: &'ast Call) -> Result<(), LowerError> {
         // TODO better argument validation/error messaging
         let env = self.exit_call();
         let name = _call.func_name.value.to_lowercase();
@@ -803,13 +836,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         } else {
             todo!("Unsupported function name")
         }
+        Ok(())
     }
 
-    fn enter_call_arg(&mut self, _call_arg: &'ast CallArg) {
+    fn enter_call_arg(&mut self, _call_arg: &'ast CallArg) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_call_arg(&mut self, _call_arg: &'ast CallArg) {
+    fn exit_call_arg(&mut self, _call_arg: &'ast CallArg) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         match _call_arg {
             CallArg::Star() => todo!(),
@@ -825,11 +860,12 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             CallArg::PositionalType(_) => todo!("CallArg::PositionalType"),
             CallArg::NamedType(_) => todo!("CallArg::NamedType"),
         }
+        Ok(())
     }
 
     // Values & Value Constructors
 
-    fn enter_lit(&mut self, _lit: &'ast Lit) {
+    fn enter_lit(&mut self, _lit: &'ast Lit) -> Result<(), LowerError> {
         let val = match _lit {
             Lit::Null => Value::Null,
             Lit::Missing => Value::Missing,
@@ -852,13 +888,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             Lit::TypedLit(_, _) => todo!("TypedLit"),
         };
         self.push_value(val);
+        Ok(())
     }
 
-    fn enter_struct(&mut self, _struct: &'ast Struct) {
-        self.enter_env()
+    fn enter_struct(&mut self, _struct: &'ast Struct) -> Result<(), LowerError> {
+        self.enter_env();
+        Ok(())
     }
 
-    fn exit_struct(&mut self, _struct: &'ast Struct) {
+    fn exit_struct(&mut self, _struct: &'ast Struct) -> Result<(), LowerError> {
         let env = self.exit_env();
         assert!(env.len().is_even());
 
@@ -874,39 +912,46 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         }
 
         self.push_vexpr(ValueExpr::TupleExpr(TupleExpr { attrs, values }));
+        Ok(())
     }
 
-    fn enter_bag(&mut self, _bag: &'ast Bag) {
-        self.enter_env()
+    fn enter_bag(&mut self, _bag: &'ast Bag) -> Result<(), LowerError> {
+        self.enter_env();
+        Ok(())
     }
 
-    fn exit_bag(&mut self, _bag: &'ast Bag) {
+    fn exit_bag(&mut self, _bag: &'ast Bag) -> Result<(), LowerError> {
         let elements = self.exit_env();
         self.push_vexpr(ValueExpr::BagExpr(BagExpr { elements }));
+        Ok(())
     }
 
-    fn enter_list(&mut self, _list: &'ast List) {
-        self.enter_env()
+    fn enter_list(&mut self, _list: &'ast List) -> Result<(), LowerError> {
+        self.enter_env();
+        Ok(())
     }
 
-    fn exit_list(&mut self, _list: &'ast List) {
+    fn exit_list(&mut self, _list: &'ast List) -> Result<(), LowerError> {
         let elements = self.exit_env();
         self.push_vexpr(ValueExpr::ListExpr(ListExpr { elements }));
+        Ok(())
     }
 
-    fn enter_sexp(&mut self, _sexp: &'ast Sexp) {
-        self.enter_env()
+    fn enter_sexp(&mut self, _sexp: &'ast Sexp) -> Result<(), LowerError> {
+        self.enter_env();
+        Ok(())
     }
 
-    fn exit_sexp(&mut self, _sexp: &'ast Sexp) {
+    fn exit_sexp(&mut self, _sexp: &'ast Sexp) -> Result<(), LowerError> {
         todo!("exit_sexp")
     }
 
-    fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) {
+    fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) -> Result<(), LowerError> {
         self.enter_call();
+        Ok(())
     }
 
-    fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) {
+    fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) -> Result<(), LowerError> {
         // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
         // functions
         let mut env = self.exit_call();
@@ -981,9 +1026,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             let id = self.plan.add_operator(group_by);
             self.current_clauses_mut().group_by_clause.replace(id);
         }
+        Ok(())
     }
 
-    fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) {
+    fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) -> Result<(), LowerError> {
         let is_from_path = matches!(self.current_ctx(), Some(QueryContext::FromLet));
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
         let should_resolve = !is_from_path && !is_path;
@@ -1003,16 +1049,20 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             };
             self.push_vexpr(ValueExpr::VarRef(name));
         }
+        Ok(())
     }
 
-    fn exit_var_ref(&mut self, _var_ref: &'ast VarRef) {}
+    fn exit_var_ref(&mut self, _var_ref: &'ast VarRef) -> Result<(), LowerError> {
+        Ok(())
+    }
 
-    fn enter_path(&mut self, _path: &'ast Path) {
+    fn enter_path(&mut self, _path: &'ast Path) -> Result<(), LowerError> {
         self.enter_env();
         self.enter_path();
+        Ok(())
     }
 
-    fn exit_path(&mut self, _path: &'ast Path) {
+    fn exit_path(&mut self, _path: &'ast Path) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
@@ -1020,15 +1070,17 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let root = env.pop().unwrap();
 
         self.push_vexpr(ValueExpr::Path(Box::new(root), steps));
+        Ok(())
     }
 
-    fn enter_path_step(&mut self, _path_step: &'ast PathStep) {
+    fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Result<(), LowerError> {
         if let PathStep::PathExpr(_) = _path_step {
             self.enter_env();
         }
+        Ok(())
     }
 
-    fn exit_path_step(&mut self, _path_step: &'ast PathStep) {
+    fn exit_path_step(&mut self, _path_step: &'ast PathStep) -> Result<(), LowerError> {
         let step = match _path_step {
             PathStep::PathExpr(_s) => {
                 let mut env = self.exit_env();
@@ -1057,14 +1109,16 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         };
 
         self.push_path_step(step);
+        Ok(())
     }
 
-    fn enter_from_clause(&mut self, _from_clause: &'ast FromClause) {
+    fn enter_from_clause(&mut self, _from_clause: &'ast FromClause) -> Result<(), LowerError> {
         self.enter_benv();
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_from_clause(&mut self, _from_clause: &'ast FromClause) {
+    fn exit_from_clause(&mut self, _from_clause: &'ast FromClause) -> Result<(), LowerError> {
         let mut benv = self.exit_benv();
         assert_eq!(benv.len(), 1);
         let env = self.exit_env();
@@ -1073,9 +1127,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.current_clauses_mut()
             .from_clause
             .replace(benv.pop().unwrap());
+        Ok(())
     }
 
-    fn enter_from_let(&mut self, from_let: &'ast FromLet) {
+    fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Result<(), LowerError> {
         self.from_lets.insert(*self.current_node());
         *self.current_ctx_mut() = QueryContext::FromLet;
         self.enter_env();
@@ -1089,9 +1144,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         {
             self.aliases.insert(id, sym.clone());
         }
+        Ok(())
     }
 
-    fn exit_from_let(&mut self, from_let: &'ast FromLet) {
+    fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Result<(), LowerError> {
         *self.current_ctx_mut() = QueryContext::Query;
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
@@ -1123,14 +1179,16 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         };
         let id = self.plan.add_operator(bexpr);
         self.push_bexpr(id);
+        Ok(())
     }
 
-    fn enter_join(&mut self, _join: &'ast Join) {
+    fn enter_join(&mut self, _join: &'ast Join) -> Result<(), LowerError> {
         self.enter_benv();
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_join(&mut self, join: &'ast Join) {
+    fn exit_join(&mut self, join: &'ast Join) -> Result<(), LowerError> {
         let mut benv = self.exit_benv();
         assert_eq!(benv.len(), 2);
 
@@ -1161,9 +1219,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         });
         let join = self.plan.add_operator(join);
         self.push_bexpr(join);
+        Ok(())
     }
 
-    fn enter_join_spec(&mut self, join_spec: &'ast JoinSpec) {
+    fn enter_join_spec(&mut self, join_spec: &'ast JoinSpec) -> Result<(), LowerError> {
         match join_spec {
             JoinSpec::On(_) => {
                 // visitor recurse into expr will put the condition in the current env
@@ -1175,13 +1234,21 @@ impl<'ast> Visitor<'ast> for AstToLogical {
                 todo!("JoinSpec::Natural")
             }
         };
+        Ok(())
     }
 
-    fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {
+    fn enter_where_clause(
+        &mut self,
+        _where_clause: &'ast ast::WhereClause,
+    ) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) {
+    fn exit_where_clause(
+        &mut self,
+        _where_clause: &'ast ast::WhereClause,
+    ) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
@@ -1191,13 +1258,21 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let id = self.plan.add_operator(filter);
 
         self.current_clauses_mut().where_clause.replace(id);
+        Ok(())
     }
 
-    fn enter_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {
+    fn enter_having_clause(
+        &mut self,
+        _having_clause: &'ast ast::HavingClause,
+    ) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) {
+    fn exit_having_clause(
+        &mut self,
+        _having_clause: &'ast ast::HavingClause,
+    ) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
@@ -1207,14 +1282,16 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let id = self.plan.add_operator(having);
 
         self.current_clauses_mut().having_clause.replace(id);
+        Ok(())
     }
 
-    fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+    fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Result<(), LowerError> {
         self.enter_benv();
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) {
+    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Result<(), LowerError> {
         let aggregate_exprs = self.aggregate_exprs.clone();
         let benv = self.exit_benv();
         assert_eq!(benv.len(), 0); // TODO sub-query
@@ -1284,9 +1361,10 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
         let id = self.plan.add_operator(group_by);
         self.current_clauses_mut().group_by_clause.replace(id);
+        Ok(())
     }
 
-    fn exit_group_key(&mut self, _group_key: &'ast GroupKey) {
+    fn exit_group_key(&mut self, _group_key: &'ast GroupKey) -> Result<(), LowerError> {
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases
@@ -1298,24 +1376,28 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
         self.push_value(as_key.into());
+        Ok(())
     }
 
-    fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
+    fn enter_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) -> Result<(), LowerError> {
         self.enter_sort();
+        Ok(())
     }
 
-    fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) {
+    fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) -> Result<(), LowerError> {
         let specs = self.exit_sort();
         let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
         let id = self.plan.add_operator(order_by);
         self.current_clauses_mut().order_by_clause.replace(id);
+        Ok(())
     }
 
-    fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) {
+    fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) {
+    fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert_eq!(env.len(), 1);
 
@@ -1343,13 +1425,21 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             order,
             null_order,
         });
+        Ok(())
     }
 
-    fn enter_limit_offset_clause(&mut self, _limit_offset: &'ast ast::LimitOffsetClause) {
+    fn enter_limit_offset_clause(
+        &mut self,
+        _limit_offset: &'ast ast::LimitOffsetClause,
+    ) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_limit_offset_clause(&mut self, limit_offset: &'ast ast::LimitOffsetClause) {
+    fn exit_limit_offset_clause(
+        &mut self,
+        limit_offset: &'ast ast::LimitOffsetClause,
+    ) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert!((1..=2).contains(&env.len()));
 
@@ -1367,13 +1457,15 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
         let id = self.plan.add_operator(limit_offset);
         self.current_clauses_mut().limit_offset_clause.replace(id);
+        Ok(())
     }
 
-    fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+    fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) {
+    fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert!(env.len() >= 2);
 
@@ -1401,14 +1493,19 @@ impl<'ast> Visitor<'ast> for AstToLogical {
             expr,
             cases,
             default,
-        }))
+        }));
+        Ok(())
     }
 
-    fn enter_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+    fn enter_searched_case(
+        &mut self,
+        _searched_case: &'ast SearchedCase,
+    ) -> Result<(), LowerError> {
         self.enter_env();
+        Ok(())
     }
 
-    fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) {
+    fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) -> Result<(), LowerError> {
         let mut env = self.exit_env();
         assert!(!env.is_empty());
 
@@ -1432,7 +1529,8 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         self.push_vexpr(ValueExpr::SearchedCase(logical::SearchedCase {
             cases,
             default,
-        }))
+        }));
+        Ok(())
     }
 }
 
