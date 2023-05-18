@@ -6,6 +6,7 @@ use partiql_value::Value;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
+use crate::error::LowerError;
 use unicase::UniCase;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -21,7 +22,11 @@ pub struct CallDef {
 }
 
 impl CallDef {
-    pub(crate) fn lookup(&self, args: &Vec<CallArgument>) -> ValueExpr {
+    pub(crate) fn lookup(
+        &self,
+        args: &Vec<CallArgument>,
+        name: String,
+    ) -> Result<ValueExpr, LowerError> {
         'overload: for overload in &self.overloads {
             let formals = &overload.input;
             if formals.len() != args.len() {
@@ -39,10 +44,9 @@ impl CallDef {
                 }
             }
 
-            return (overload.output)(actuals);
+            return Ok((overload.output)(actuals));
         }
-
-        todo!("mismatched formal/actual arguments to {}", &self.names[0])
+        Err(LowerError::InvalidNumberOfArguments(name))
     }
 }
 
