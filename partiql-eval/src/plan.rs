@@ -63,12 +63,13 @@ impl EvaluatorPlanner {
 
     #[inline]
     pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<EvalPlan, EvalErr> {
+        let plan = self.plan_eval(plan);
         if !self.errors.is_empty() {
             return Err(EvalErr {
-                errors: self.errors.clone(),
+                errors: std::mem::take(&mut self.errors),
             });
         }
-        Ok(self.plan_eval(plan))
+        Ok(plan)
     }
 
     #[inline]
