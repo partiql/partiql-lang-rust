@@ -25,9 +25,6 @@ pub enum EvaluationError {
     /// Internal error that was not due to user input or API violation.
     #[error("Illegal State: {0}")]
     IllegalState(String),
-    /// Invalid number of arguments to the function call.
-    #[error("Invalid number of arguments: {0}")]
-    InvalidNumberOfArguments(String),
     /// Invalid escape pattern.
     #[error("Invalid LIKE expression pattern: {0}")]
     InvalidLikeEscape(String),
