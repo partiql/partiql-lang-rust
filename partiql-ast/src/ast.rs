@@ -8,6 +8,7 @@
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
 // in this crate directly is not recommended.
 
+use indexmap::IndexMap;
 use rust_decimal::Decimal as RustDecimal;
 
 use std::fmt;
@@ -16,6 +17,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use partiql_ast_macros::Visit;
+
+pub type AstTypeMap<T> = IndexMap<NodeId, T>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

@@ -28,6 +28,7 @@ partiql-ast = { path = "../partiql-ast", version = "0.5.*" }
 partiql-parser = { path = "../partiql-parser", version = "0.5.*" }
 partiql-catalog = { path = "../partiql-catalog", version = "0.5.*" }
 partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.5.*" }
+
 ion-rs = "0.17"
 ordered-float = "3.*"
 itertools = "0.10.*"
