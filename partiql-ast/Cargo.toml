@@ -21,6 +21,7 @@ bench = false
 
 [dependencies]
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
+partiql-types = { path = "../partiql-types", version = "0.3.*" }
 
 serde = { version = "1.*", features = ["derive"], optional = true }
 

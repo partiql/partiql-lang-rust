@@ -25,6 +25,7 @@ pub struct NodeId(pub u32);
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstNode<T> {
+    // pub typ: Option<Box<dyn partiql_types::Typ>>,
     pub id: NodeId,
     pub node: T,
 }
