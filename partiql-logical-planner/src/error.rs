@@ -22,6 +22,10 @@ pub enum LowerError {
     #[error("Error with literal: {literal}: {error}")]
     Literal { literal: String, error: String },
 
+    /// Invalid number of arguments to the function call.
+    #[error("Invalid number of arguments: {0}")]
+    InvalidNumberOfArguments(String),
+
     /// Indicates that this function is not supported.
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),

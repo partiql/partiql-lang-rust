@@ -777,6 +777,7 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
         let mut env = self.exit_env();
+        println!("{env:?}");
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
         let rhs = env.pop().unwrap();
@@ -916,10 +917,18 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let name = _call.func_name.value.to_lowercase();
 
         if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
-            self.push_vexpr(call_def.lookup(&env));
+            match call_def.lookup(&env, name) {
+                Ok(lookup) => self.push_vexpr(lookup),
+                Err(err) => {
+                    // Include as error but allow lowering to proceed for multiple error reporting
+                    self.errors.push(err);
+                    self.push_vexpr(ValueExpr::Lit(Box::new(Value::Missing)))
+                }
+            }
         } else {
             // Include as an error but allow lowering to proceed for multiple error reporting
             self.errors.push(LowerError::UnsupportedFunction(name));
+            self.push_vexpr(ValueExpr::Lit(Box::new(Value::Missing)))
         }
         Traverse::Continue
     }
@@ -1714,4 +1723,50 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
             error: "Contains no value".into(),
         })?
         .map_err(|e| lit_err(contents, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lower;
+
+    #[test]
+    fn test_plan_non_existent_fns() {
+        let statement = "foo(1, 2) + bar(3)";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let logical = lower(&parsed);
+        assert!(logical.is_err());
+        let lowering_errs = logical.expect_err("Expect errs").errors;
+        assert_eq!(lowering_errs.len(), 2);
+        assert_eq!(
+            lowering_errs.get(0),
+            Some(&LowerError::UnsupportedFunction("foo".to_string()))
+        );
+        assert_eq!(
+            lowering_errs.get(1),
+            Some(&LowerError::UnsupportedFunction("bar".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_plan_bad_num_arguments() {
+        let statement = "abs(1, 2) + mod(3)";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let logical = lower(&parsed);
+        assert!(logical.is_err());
+        let lowering_errs = logical.expect_err("Expect errs").errors;
+        assert_eq!(lowering_errs.len(), 2);
+        assert_eq!(
+            lowering_errs.get(0),
+            Some(&LowerError::InvalidNumberOfArguments("abs".to_string()))
+        );
+        assert_eq!(
+            lowering_errs.get(1),
+            Some(&LowerError::InvalidNumberOfArguments("mod".to_string()))
+        );
+    }
 }
