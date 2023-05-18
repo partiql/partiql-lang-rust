@@ -777,7 +777,6 @@ impl<'ast> Visitor<'ast> for AstToLogical {
 
     fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
         let mut env = self.exit_env();
-        println!("{env:?}");
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
         let rhs = env.pop().unwrap();
@@ -911,25 +910,24 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         Traverse::Continue
     }
 
-    fn exit_call(&mut self, _call: &'ast Call) -> Traverse {
+    fn exit_call(&mut self, call: &'ast Call) -> Traverse {
         // TODO better argument validation/error messaging
-        let env = self.exit_call();
-        let name = _call.func_name.value.to_lowercase();
+        let args = self.exit_call();
+        let name = call.func_name.value.to_lowercase();
 
-        if let Some(call_def) = self.fnsym_tab.lookup(name.as_str()) {
-            match call_def.lookup(&env, name) {
-                Ok(lookup) => self.push_vexpr(lookup),
-                Err(err) => {
-                    // Include as error but allow lowering to proceed for multiple error reporting
-                    self.errors.push(err);
-                    self.push_vexpr(ValueExpr::Lit(Box::new(Value::Missing)))
-                }
+        let call_expr = self
+            .fnsym_tab
+            .lookup(name.as_ref())
+            .ok_or_else(|| LowerError::UnsupportedFunction(name.clone()))
+            .and_then(|c| c.lookup(&args, name));
+        let expr = match call_expr {
+            Ok(expr) => expr,
+            Err(err) => {
+                self.errors.push(err);
+                ValueExpr::Lit(Box::new(Value::Missing)) // dummy expression to allow lowering to continue
             }
-        } else {
-            // Include as an error but allow lowering to proceed for multiple error reporting
-            self.errors.push(LowerError::UnsupportedFunction(name));
-            self.push_vexpr(ValueExpr::Lit(Box::new(Value::Missing)))
-        }
+        };
+        self.push_vexpr(expr);
         Traverse::Continue
     }
 
