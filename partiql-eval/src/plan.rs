@@ -31,7 +31,7 @@ use crate::eval::EvalPlan;
 use partiql_value::Value::Null;
 
 #[macro_export]
-macro_rules! correct_num_args_or_error {
+macro_rules! correct_num_args_or_err {
     ($self:expr, $args:expr, $exact_num:literal, $name:expr) => {
         if $args.len() != $exact_num {
             $self.errors.push(EvaluationError::IllegalState(format!(
@@ -517,55 +517,55 @@ impl EvaluatorPlanner {
                     .collect_vec();
                 match name {
                     CallName::Lower => {
-                        correct_num_args_or_error!(self, args, 1, "lower");
+                        correct_num_args_or_err!(self, args, 1, "lower");
                         Box::new(EvalFnLower {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Upper => {
-                        correct_num_args_or_error!(self, args, 1, "upper");
+                        correct_num_args_or_err!(self, args, 1, "upper");
                         Box::new(EvalFnUpper {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::CharLength => {
-                        correct_num_args_or_error!(self, args, 1, "char_length");
+                        correct_num_args_or_err!(self, args, 1, "char_length");
                         Box::new(EvalFnCharLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::OctetLength => {
-                        correct_num_args_or_error!(self, args, 1, "octet_length");
+                        correct_num_args_or_err!(self, args, 1, "octet_length");
                         Box::new(EvalFnOctetLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::BitLength => {
-                        correct_num_args_or_error!(self, args, 1, "bit_length");
+                        correct_num_args_or_err!(self, args, 1, "bit_length");
                         Box::new(EvalFnBitLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::LTrim => {
-                        correct_num_args_or_error!(self, args, 2, "ltrim");
+                        correct_num_args_or_err!(self, args, 2, "ltrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnLtrim { value, to_trim })
                     }
                     CallName::BTrim => {
-                        correct_num_args_or_error!(self, args, 2, "btrim");
+                        correct_num_args_or_err!(self, args, 2, "btrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnBtrim { value, to_trim })
                     }
                     CallName::RTrim => {
-                        correct_num_args_or_error!(self, args, 2, "rtrim");
+                        correct_num_args_or_err!(self, args, 2, "rtrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnRtrim { value, to_trim })
                     }
                     CallName::Substring => {
-                        correct_num_args_or_error!(self, args, 2, 3, "substring");
+                        correct_num_args_or_err!(self, args, 2, 3, "substring");
                         let length = if args.len() == 3 {
                             Some(args.pop().unwrap())
                         } else {
@@ -581,13 +581,13 @@ impl EvaluatorPlanner {
                         })
                     }
                     CallName::Position => {
-                        correct_num_args_or_error!(self, args, 2, "position");
+                        correct_num_args_or_err!(self, args, 2, "position");
                         let haystack = args.pop().unwrap();
                         let needle = args.pop().unwrap();
                         Box::new(EvalFnPosition { needle, haystack })
                     }
                     CallName::Overlay => {
-                        correct_num_args_or_error!(self, args, 3, 4, "overlay");
+                        correct_num_args_or_err!(self, args, 3, 4, "overlay");
                         let length = if args.len() == 4 {
                             Some(args.pop().unwrap())
                         } else {
@@ -605,73 +605,73 @@ impl EvaluatorPlanner {
                         })
                     }
                     CallName::Exists => {
-                        correct_num_args_or_error!(self, args, 1, "exists");
+                        correct_num_args_or_err!(self, args, 1, "exists");
                         Box::new(EvalFnExists {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Abs => {
-                        correct_num_args_or_error!(self, args, 1, "abs");
+                        correct_num_args_or_err!(self, args, 1, "abs");
                         Box::new(EvalFnAbs {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Mod => {
-                        correct_num_args_or_error!(self, args, 2, "mod");
+                        correct_num_args_or_err!(self, args, 2, "mod");
                         let rhs = args.pop().unwrap();
                         let lhs = args.pop().unwrap();
                         Box::new(EvalFnModulus { lhs, rhs })
                     }
                     CallName::Cardinality => {
-                        correct_num_args_or_error!(self, args, 1, "cardinality");
+                        correct_num_args_or_err!(self, args, 1, "cardinality");
                         Box::new(EvalFnCardinality {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractYear => {
-                        correct_num_args_or_error!(self, args, 1, "extract year");
+                        correct_num_args_or_err!(self, args, 1, "extract year");
                         Box::new(EvalFnExtractYear {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMonth => {
-                        correct_num_args_or_error!(self, args, 1, "extract month");
+                        correct_num_args_or_err!(self, args, 1, "extract month");
                         Box::new(EvalFnExtractMonth {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractDay => {
-                        correct_num_args_or_error!(self, args, 1, "extract day");
+                        correct_num_args_or_err!(self, args, 1, "extract day");
                         Box::new(EvalFnExtractDay {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractHour => {
-                        correct_num_args_or_error!(self, args, 1, "extract hour");
+                        correct_num_args_or_err!(self, args, 1, "extract hour");
                         Box::new(EvalFnExtractHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMinute => {
-                        correct_num_args_or_error!(self, args, 1, "extract minute");
+                        correct_num_args_or_err!(self, args, 1, "extract minute");
                         Box::new(EvalFnExtractMinute {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractSecond => {
-                        correct_num_args_or_error!(self, args, 1, "extract second");
+                        correct_num_args_or_err!(self, args, 1, "extract second");
                         Box::new(EvalFnExtractSecond {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneHour => {
-                        correct_num_args_or_error!(self, args, 1, "extract timezone_hour");
+                        correct_num_args_or_err!(self, args, 1, "extract timezone_hour");
                         Box::new(EvalFnExtractTimezoneHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneMinute => {
-                        correct_num_args_or_error!(self, args, 1, "extract timezone_minute");
+                        correct_num_args_or_err!(self, args, 1, "extract timezone_minute");
                         Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
                         })
