@@ -122,8 +122,8 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
                 ParseError::Unknown(location.into())
             }
 
-            // TODO do something with UnrecognizedEOF.expected
-            lalrpop_util::ParseError::UnrecognizedEOF { expected: _, .. } => {
+            // TODO do something with UnrecognizedEof.expected
+            lalrpop_util::ParseError::UnrecognizedEof { expected: _, .. } => {
                 ParseError::UnexpectedEndOfInput
             }
 
