@@ -10,7 +10,7 @@ use partiql_logical::{
     Type, UnaryOp, ValueExpr,
 };
 
-use crate::error::{ErrorNode, EvalErr, EvaluationError};
+use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
 use crate::eval::evaluable::{
     Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
@@ -34,7 +34,7 @@ use partiql_value::Value::Null;
 macro_rules! correct_num_args_or_err {
     ($self:expr, $args:expr, $exact_num:literal, $name:expr) => {
         if $args.len() != $exact_num {
-            $self.errors.push(EvaluationError::IllegalState(format!(
+            $self.errors.push(PlanningError::IllegalState(format!(
                 "Wrong number of arguments for {}",
                 $name.to_string()
             )));
@@ -45,7 +45,7 @@ macro_rules! correct_num_args_or_err {
         if !($min_num..=$max_num).contains(&$args.len()) {
             $self
                 .errors
-                .push(EvaluationError::IllegalState($name.to_string()));
+                .push(PlanningError::IllegalState($name.to_string()));
             return Box::new(ErrorNode::new());
         }
     };
@@ -53,7 +53,7 @@ macro_rules! correct_num_args_or_err {
 
 #[derive(Default)]
 pub struct EvaluatorPlanner {
-    errors: Vec<EvaluationError>,
+    errors: Vec<PlanningError>,
 }
 
 impl EvaluatorPlanner {
@@ -62,10 +62,10 @@ impl EvaluatorPlanner {
     }
 
     #[inline]
-    pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<EvalPlan, EvalErr> {
+    pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<EvalPlan, PlanErr> {
         let plan = self.plan_eval(plan);
         if !self.errors.is_empty() {
-            return Err(EvalErr {
+            return Err(PlanErr {
                 errors: std::mem::take(&mut self.errors),
             });
         }
@@ -272,7 +272,7 @@ impl EvaluatorPlanner {
                 })
             }
             BindingsOp::SetOp => {
-                self.errors.push(EvaluationError::NotYetImplemented(
+                self.errors.push(PlanningError::NotYetImplemented(
                     "BindingsOp::SetOp not yet implemented in evaluator".to_string(),
                 ));
                 Box::new(ErrorNode::new())
@@ -373,8 +373,9 @@ impl EvaluatorPlanner {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
                         if escape.chars().count() > 1 {
-                            self.errors
-                                .push(EvaluationError::InvalidLikeEscape(escape.to_string()));
+                            self.errors.push(PlanningError::IllegalState(format!(
+                                "Invalid LIKE expression pattern: {escape}"
+                            )));
                         }
                         let escape = escape.chars().next();
                         let regex = like_to_re_pattern(pattern, escape);
@@ -482,7 +483,7 @@ impl EvaluatorPlanner {
                 //         CASE WHEN V1 IS NOT NULL THEN V1 ELSE COALESCE (V2, . . . ,n )
                 //         END
                 if c.elements.is_empty() {
-                    self.errors.push(EvaluationError::IllegalState(
+                    self.errors.push(PlanningError::IllegalState(
                         "Wrong number of arguments to coalesce".to_string(),
                     ));
                     return Box::new(ErrorNode::new());
@@ -680,5 +681,49 @@ impl EvaluatorPlanner {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partiql_logical::CallExpr;
+    use partiql_logical::ExprQuery;
+    use partiql_value::Value;
+
+    #[test]
+    fn test_logical_to_eval_plan_bad_num_arguments() {
+        // Tests that the logical to eval plan can report multiple errors.
+        // The following is a logical plan with two functions with the wrong number of arguments.
+        // Equivalent query: ABS(1, 2) + MOD(3)
+        // We define the logical plan manually because the AST to logical lowering will detect and
+        // report the error.
+        let mut logical = LogicalPlan::new();
+        fn lit_int(i: usize) -> ValueExpr {
+            ValueExpr::Lit(Box::new(Value::from(i)))
+        }
+
+        let expq = logical.add_operator(BindingsOp::ExprQuery(ExprQuery {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::Add,
+                Box::new(ValueExpr::Call(CallExpr {
+                    name: CallName::Abs,
+                    arguments: vec![lit_int(1), lit_int(2)],
+                })),
+                Box::new(ValueExpr::Call(CallExpr {
+                    name: CallName::Mod,
+                    arguments: vec![lit_int(3)],
+                })),
+            ),
+        }));
+        let sink = logical.add_operator(BindingsOp::Sink);
+        logical.add_flow(expq, sink);
+
+        let mut planner = EvaluatorPlanner::new();
+        let plan = planner.compile(&logical);
+
+        assert!(plan.is_err());
+        let planning_errs = plan.expect_err("Expect errs").errors;
+        assert_eq!(planning_errs.len(), 2);
     }
 }

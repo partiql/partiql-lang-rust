@@ -1,6 +1,7 @@
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::EvalResult;
+use partiql_eval::error::PlanErr;
+use partiql_eval::eval::{EvalPlan, EvalResult};
 use partiql_logical as logical;
 use partiql_logical_planner::error::LoweringError;
 use partiql_parser::{Parsed, ParserResult};
@@ -32,12 +33,16 @@ pub(crate) fn lower(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate(
+pub(crate) fn compile(
     logical: logical::LogicalPlan<logical::BindingsOp>,
-    bindings: MapBindings<Value>,
-) -> EvalResult {
+) -> Result<EvalPlan, PlanErr> {
     let mut planner = eval::plan::EvaluatorPlanner::new();
-    let mut plan = planner.compile(&logical)?;
+    planner.compile(&logical)
+}
+
+#[track_caller]
+#[inline]
+pub(crate) fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
     plan.execute_mut(bindings)
 }
 
@@ -100,7 +105,8 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let out = evaluate(lowered, bindings);
+    let plan = compile(lowered).expect("compile");
+    let out = evaluate(plan, bindings);
 
     assert!(out.is_err());
 }
@@ -126,7 +132,8 @@ pub(crate) fn pass_eval(
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let out = evaluate(lowered, bindings);
+    let plan = compile(lowered).expect("compile");
+    let out = evaluate(plan, bindings);
 
     match out {
         Ok(v) => assert_eq!(v.result, expected.value),

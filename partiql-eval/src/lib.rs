@@ -1,5 +1,5 @@
 pub mod env;
-mod error;
+pub mod error;
 pub mod eval;
 pub mod plan;
 
