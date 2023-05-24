@@ -5,24 +5,39 @@ use partiql_ast::ast;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
-mod call_defs;
+use partiql_catalog::Catalog;
+
+mod builtins;
 pub mod error;
 mod lower;
 mod name_resolver;
 
-// TODO better encapsulate.
-pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
-    if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-        let mut resolver = NameResolver::default();
-        let registry = resolver.resolve(q)?;
-        let planner = AstToLogical::new(registry);
-        planner.lower_query(q)
-    } else {
-        Err(LoweringError {
-            errors: vec![LowerError::NotYetImplemented(
-                "Expr type not supported yet".to_string(),
-            )],
-        })
+pub struct LogicalPlanner<'c> {
+    catalog: &'c Box<dyn Catalog>,
+}
+
+impl<'c> LogicalPlanner<'c> {
+    pub fn new(catalog: &'c Box<dyn Catalog>) -> Self {
+        LogicalPlanner { catalog }
+    }
+
+    #[inline]
+    pub fn lower(
+        &self,
+        parsed: &Parsed,
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
+            let mut resolver = NameResolver::default();
+            let registry = resolver.resolve(q)?;
+            let planner = AstToLogical::new(self.catalog, registry);
+            planner.lower_query(q)
+        } else {
+            Err(LoweringError {
+                errors: vec![LowerError::NotYetImplemented(
+                    "Expr type not supported yet".to_string(),
+                )],
+            })
+        }
     }
 }
 

@@ -7,85 +7,8 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
 use crate::error::LowerError;
+use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use unicase::UniCase;
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum CallArgument {
-    Positional(ValueExpr),
-    Named(String, ValueExpr),
-}
-
-#[derive(Debug)]
-pub struct CallDef {
-    names: Vec<&'static str>,
-    overloads: Vec<CallSpec>,
-}
-
-impl CallDef {
-    pub(crate) fn lookup(
-        &self,
-        args: &Vec<CallArgument>,
-        name: String,
-    ) -> Result<ValueExpr, LowerError> {
-        'overload: for overload in &self.overloads {
-            let formals = &overload.input;
-            if formals.len() != args.len() {
-                continue 'overload;
-            }
-
-            let mut actuals = vec![];
-            for i in 0..formals.len() {
-                let formal = &formals[i];
-                let actual = &args[i];
-                if let Some(vexpr) = formal.transform(actual) {
-                    actuals.push(vexpr);
-                } else {
-                    continue 'overload;
-                }
-            }
-
-            return Ok((overload.output)(actuals));
-        }
-        Err(LowerError::InvalidNumberOfArguments(name))
-    }
-}
-
-impl CallDef {}
-
-#[derive(Debug, Copy, Clone)]
-pub enum CallSpecArg {
-    Positional,
-    Named(UniCase<&'static str>),
-}
-
-impl CallSpecArg {
-    pub(crate) fn transform(&self, arg: &CallArgument) -> Option<ValueExpr> {
-        match (self, arg) {
-            (CallSpecArg::Positional, CallArgument::Positional(ve)) => Some(ve.clone()),
-            (CallSpecArg::Named(formal_name), CallArgument::Named(arg_name, ve)) => {
-                if formal_name == &UniCase::new(arg_name.as_str()) {
-                    Some(ve.clone())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-}
-
-impl CallSpecArg {}
-
-pub struct CallSpec {
-    input: Vec<CallSpecArg>,
-    output: Box<dyn Fn(Vec<ValueExpr>) -> logical::ValueExpr + Send + Sync>,
-}
-
-impl Debug for CallSpec {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CallSpec [{:?}]", &self.input)
-    }
-}
 
 fn function_call_def_char_len() -> CallDef {
     CallDef {

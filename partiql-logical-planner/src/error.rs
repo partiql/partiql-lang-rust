@@ -1,3 +1,4 @@
+use partiql_catalog::call_defs::CallLookupError;
 use thiserror::Error;
 
 /// Contains the errors that occur during AST to logical plan conversion
@@ -33,4 +34,17 @@ pub enum LowerError {
     /// Indicates that this aggregation function is not supported.
     #[error("Unsupported aggregation function: {0}")]
     UnsupportedAggregationFunction(String),
+
+    /// Any other lowering error.
+    #[error("Lowering error: {0}")]
+    Unknown(String),
+}
+
+impl From<CallLookupError> for LowerError {
+    fn from(err: CallLookupError) -> Self {
+        match err {
+            CallLookupError::InvalidNumberOfArguments(e) => LowerError::InvalidNumberOfArguments(e),
+            e => LowerError::Unknown(e.to_string()),
+        }
+    }
 }

@@ -2,6 +2,7 @@ use crate::env::Bindings;
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::EvalContext;
 use itertools::Itertools;
+use partiql_catalog::{BaseTableExpr, BaseTableExprResult, BaseTableExprResultError};
 use partiql_logical::Type;
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
@@ -1143,6 +1144,42 @@ impl EvalExpr for EvalFnExtractTimezoneMinute {
                 DateTime::Timestamp(_) => Missing,
             },
             _ => Missing,
+        };
+        Cow::Owned(result)
+    }
+}
+
+/// Represents a Base Table Expr
+#[derive(Debug)]
+pub(crate) struct EvalFnBaseTableExpr {
+    pub(crate) args: Vec<Box<dyn EvalExpr>>,
+    pub(crate) expr: Box<dyn BaseTableExpr>,
+}
+
+impl EvalExpr for EvalFnBaseTableExpr {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.evaluate(bindings, ctx))
+            .collect_vec();
+        let results = self.expr.evaluate(&args);
+        let result = match results {
+            Ok(it) => {
+                let bag: Result<Bag, _> = it.collect();
+                match bag {
+                    Ok(b) => Value::from(b),
+                    Err(_) => {
+                        // TODO hook into pending eval errors
+                        Missing
+                    }
+                }
+            }
+            Err(_) => {
+                // TODO hook into pending eval errors
+                Missing
+            }
         };
         Cow::Owned(result)
     }
