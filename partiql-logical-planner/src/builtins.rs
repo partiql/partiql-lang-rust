@@ -4,9 +4,8 @@ use partiql_logical as logical;
 use partiql_logical::ValueExpr;
 use partiql_value::Value;
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 
-use crate::error::LowerError;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use unicase::UniCase;
 

@@ -13,11 +13,11 @@ mod lower;
 mod name_resolver;
 
 pub struct LogicalPlanner<'c> {
-    catalog: &'c Box<dyn Catalog>,
+    catalog: &'c dyn Catalog,
 }
 
 impl<'c> LogicalPlanner<'c> {
-    pub fn new(catalog: &'c Box<dyn Catalog>) -> Self {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
         LogicalPlanner { catalog }
     }
 
@@ -44,12 +44,14 @@ impl<'c> LogicalPlanner<'c> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
 
     use partiql_eval::plan;
 
     use crate::error::LoweringError;
+    use crate::LogicalPlanner;
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
@@ -62,12 +64,15 @@ mod tests {
 
     #[track_caller]
     fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
-        super::lower(parsed)
+        let catalog = PartiqlCatalog::default();
+        let planner = LogicalPlanner::new(&catalog);
+        planner.lower(parsed)
     }
 
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let planner = plan::EvaluatorPlanner;
+        let catalog = PartiqlCatalog::default();
+        let planner = plan::EvaluatorPlanner::new(&catalog);
 
         let mut plan = planner.compile(&logical);
         println!("{}", plan.to_dot_graph());

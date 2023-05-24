@@ -1,8 +1,6 @@
-use itertools::Itertools;
 use partiql_logical as logical;
 use partiql_logical::ValueExpr;
-use partiql_value::Value;
-use std::collections::HashMap;
+
 use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 

@@ -25,7 +25,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(
-    catalog: &Box<dyn Catalog>,
+    catalog: &dyn Catalog,
     parsed: &Parsed,
 ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -35,7 +35,7 @@ pub(crate) fn lower(
 #[track_caller]
 #[inline]
 pub(crate) fn evaluate(
-    catalog: &Box<dyn Catalog>,
+    catalog: &dyn Catalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
     bindings: MapBindings<Value>,
 ) -> Value {
@@ -84,7 +84,7 @@ pub(crate) fn fail_semantics(_statement: &str) {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn pass_semantics(statement: &str) {
-    let mut catalog = Box::new(PartiqlCatalog::default()) as Box<dyn Catalog>;
+    let catalog = PartiqlCatalog::default();
     let parsed = pass_syntax(statement);
     // TODO add Result to lower call
     let lowered: Result<_, ()> = Ok(lower(&catalog, &parsed));
@@ -98,7 +98,7 @@ pub(crate) fn pass_semantics(statement: &str) {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
-    let mut catalog = Box::new(PartiqlCatalog::default()) as Box<dyn Catalog>;
+    let catalog = PartiqlCatalog::default();
     if let EvaluationMode::Error = mode {
         eprintln!("EvaluationMode::Error currently unsupported");
         return;
@@ -126,7 +126,7 @@ pub(crate) fn pass_eval(
     env: &Option<TestValue>,
     expected: &TestValue,
 ) {
-    let mut catalog = Box::new(PartiqlCatalog::default()) as Box<dyn Catalog>;
+    let catalog = PartiqlCatalog::default();
     if let EvaluationMode::Error = mode {
         eprintln!("EvaluationMode::Error currently unsupported");
         return;

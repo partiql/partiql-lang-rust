@@ -1,7 +1,7 @@
 use crate::call_defs::CallDef;
 use partiql_value::Value;
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -13,7 +13,7 @@ pub mod call_defs;
 
 pub trait Extension: Debug {
     fn name(&self) -> String;
-    fn load(&self, catalog: &mut Box<dyn Catalog>) -> Result<(), Box<dyn Error>>;
+    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>>;
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
@@ -57,7 +57,6 @@ pub trait BaseTableFunctionInfo: Debug {
     fn plan_eval(&self) -> Box<dyn BaseTableExpr>;
 }
 
-// TODO
 #[derive(Debug)]
 pub struct TableFunction {
     info: Box<dyn BaseTableFunctionInfo>,
@@ -96,6 +95,7 @@ pub trait Catalog: Debug {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,
     function: &'a FunctionEntryFunction,
@@ -152,15 +152,15 @@ impl Catalog for PartiqlCatalog {
         if let Some((name, aliases)) = names.split_first() {
             let id = self
                 .functions
-                .add(&name, &aliases, FunctionEntryFunction::Table(info))?;
+                .add(name, aliases, FunctionEntryFunction::Table(info))?;
             Ok(ObjectId {
                 catalog_id: self.id,
                 entry_id: id,
             })
         } else {
-            return Err(CatalogError::EntryError(
+            Err(CatalogError::EntryError(
                 "Function definition has no name".into(),
-            ));
+            ))
         }
     }
 
@@ -197,14 +197,14 @@ impl<T> Default for CatalogEntrySet<T> {
 }
 
 impl<T> CatalogEntrySet<T> {
-    fn add(&mut self, name: &str, aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
+    fn add(&mut self, name: &str, _aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
         let name = UniCase::from(name);
         if self.by_name.contains_key(&name) {
             return Err(CatalogError::EntryExists(name.to_string()));
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).into();
-        if let Some(old_val) = self.entries.insert(id, info) {
+        if let Some(_old_val) = self.entries.insert(id, info) {
             return Err(CatalogError::Unknown);
         }
 

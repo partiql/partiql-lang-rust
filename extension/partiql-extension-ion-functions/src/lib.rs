@@ -1,21 +1,20 @@
 use ion_rs::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
+use partiql_catalog::TableFunction;
 use partiql_catalog::{
     BaseTableExpr, BaseTableExprResult, BaseTableExprResultError, BaseTableExprResultValueIter,
     BaseTableFunctionInfo, Catalog,
 };
-use partiql_catalog::{CatalogError, ObjectId, TableFunction};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical as logical;
 use partiql_value::Value;
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::HashMap;
+
 use std::error::Error;
 use std::fmt::Debug;
-use std::fs::{read, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -43,7 +42,7 @@ impl partiql_catalog::Extension for IonExtension {
         "ion".into()
     }
 
-    fn load(&self, catalog: &mut Box<dyn Catalog>) -> Result<(), Box<dyn Error>> {
+    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>> {
         match catalog.add_table_function(TableFunction::new(Box::new(ReadIonFunction::new()))) {
             Ok(_) => Ok(()),
             Err(e) => Err(Box::new(e) as Box<dyn Error>),
@@ -92,7 +91,7 @@ impl BaseTableExpr for EvalFnReadIon {
     fn evaluate(&self, args: &[Cow<Value>]) -> BaseTableExprResult {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
-                Value::String(path) => parse_ion_file(&path),
+                Value::String(path) => parse_ion_file(path),
                 _ => {
                     let error = IonExtensionError::FunctionError(
                         "expected string path argument".to_string(),
@@ -109,14 +108,14 @@ impl BaseTableExpr for EvalFnReadIon {
 
 fn parse_ion_file<'a>(path: &str) -> BaseTableExprResult<'a> {
     let path = PathBuf::from(path).canonicalize().unwrap();
-    let mut file = File::open(path).unwrap();
+    let file = File::open(path).unwrap();
 
     parse_ion_read(file)
 }
 
 fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> BaseTableExprResult<'a> {
     let mut header: [u8; 4] = [0; 4];
-    reader.read(&mut header).expect("file header");
+    reader.read_exact(&mut header).expect("file header");
     reader.seek(SeekFrom::Start(0)).expect("file seek");
 
     if header.starts_with(&[0x1f, 0x8b]) {
@@ -135,24 +134,21 @@ fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> BaseTableExprResult<
 
 fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<'a> {
     let err_map = |e| Box::new(e) as BaseTableExprResultError;
-    let mut reader = ion_rs::ReaderBuilder::new().build(input).unwrap();
+    let reader = ion_rs::ReaderBuilder::new().build(input).unwrap();
     let decoder =
         IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion)).build(reader);
-    let mut decoder = decoder.map_err(err_map)?.map(move |it| it.map_err(err_map));
+    let decoder = decoder.map_err(err_map)?.map(move |it| it.map_err(err_map));
     Ok(Box::new(decoder) as BaseTableExprResultValueIter)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use itertools::Itertools;
 
     use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
     use partiql_parser::{Parsed, ParserResult};
-    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, DateTime, Value};
-    use rust_decimal_macros::dec;
-    use std::num::NonZeroU8;
+    use partiql_value::{partiql_bag, partiql_tuple, Value};
 
     #[track_caller]
     #[inline]
@@ -163,7 +159,7 @@ mod tests {
     #[track_caller]
     #[inline]
     pub(crate) fn lower(
-        catalog: &Box<dyn Catalog>,
+        catalog: &dyn Catalog,
         parsed: &Parsed,
     ) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
         let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -173,7 +169,7 @@ mod tests {
     #[track_caller]
     #[inline]
     pub(crate) fn evaluate(
-        catalog: &Box<dyn Catalog>,
+        catalog: &dyn Catalog,
         logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
     ) -> Value {
@@ -192,9 +188,10 @@ mod tests {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn pass_eval(statement: &str, env: &Option<Value>, expected: &Value) {
-        let mut catalog = Box::new(PartiqlCatalog::default()) as Box<dyn Catalog>;
+        let mut catalog = PartiqlCatalog::default();
         let ext = IonExtension {};
-        ext.load(&mut catalog);
+        ext.load(&mut catalog)
+            .expect("ion extension load to succeed");
 
         let parsed = parse(statement);
         let lowered = lower(&catalog, &parsed.expect("parse"));

@@ -31,11 +31,11 @@ use partiql_catalog::Catalog;
 use partiql_value::Value::Null;
 
 pub struct EvaluatorPlanner<'c> {
-    catalog: &'c Box<dyn Catalog>,
+    catalog: &'c dyn Catalog,
 }
 
 impl<'c> EvaluatorPlanner<'c> {
-    pub fn new(catalog: &'c Box<dyn Catalog>) -> Self {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
         EvaluatorPlanner { catalog }
     }
 
@@ -642,14 +642,11 @@ impl<'c> EvaluatorPlanner<'c> {
                     CallName::ByName(name) => {
                         let function = self
                             .catalog
-                            .get_function(&name)
+                            .get_function(name)
                             .expect("function to exist in catalog");
 
                         let eval = function.plan_eval();
-                        Box::new(EvalFnBaseTableExpr {
-                            args: args,
-                            expr: eval,
-                        })
+                        Box::new(EvalFnBaseTableExpr { args, expr: eval })
                     }
                 }
             }

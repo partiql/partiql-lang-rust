@@ -174,7 +174,7 @@ pub struct AstToLogical<'a> {
     // catalog & data flow data
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
-    catalog: &'a Box<dyn Catalog>,
+    catalog: &'a dyn Catalog,
 
     // list of errors encountered during AST lowering
     errors: Vec<LowerError>,
@@ -214,7 +214,7 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
 }
 
 impl<'a> AstToLogical<'a> {
-    pub fn new(catalog: &'a Box<dyn Catalog>, registry: name_resolver::KeyRegistry) -> Self {
+    pub fn new(catalog: &'a dyn Catalog, registry: name_resolver::KeyRegistry) -> Self {
         let fnsym_tab: &FnSymTab = &FN_SYM_TAB;
         AstToLogical {
             id_stack: Default::default(),
@@ -926,11 +926,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let call_expr = self
             .fnsym_tab
             .lookup(&name)
-            .and_then(|cd| Some(call_def_to_vexpr(cd)))
+            .map(|cd| call_def_to_vexpr(cd))
             .or_else(|| {
                 self.catalog
                     .get_function(&name)
-                    .and_then(|e| Some(call_def_to_vexpr(e.call_def())))
+                    .map(|e| call_def_to_vexpr(e.call_def()))
             })
             .unwrap_or_else(|| Err(LowerError::UnsupportedFunction(name.clone())));
 
@@ -1740,15 +1740,18 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower;
+    use crate::LogicalPlanner;
+    use partiql_catalog::PartiqlCatalog;
 
     #[test]
     fn test_plan_non_existent_fns() {
+        let catalog = PartiqlCatalog::default();
         let statement = "foo(1, 2) + bar(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
             .expect("Expect successful parse");
-        let logical = lower(&parsed);
+        let planner = LogicalPlanner::new(&catalog);
+        let logical = planner.lower(&parsed);
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
@@ -1764,11 +1767,13 @@ mod tests {
 
     #[test]
     fn test_plan_bad_num_arguments() {
+        let catalog = PartiqlCatalog::default();
         let statement = "abs(1, 2) + mod(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
             .expect("Expect successful parse");
-        let logical = lower(&parsed);
+        let planner = LogicalPlanner::new(&catalog);
+        let logical = planner.lower(&parsed);
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);

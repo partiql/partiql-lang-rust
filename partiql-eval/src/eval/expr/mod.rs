@@ -2,7 +2,7 @@ use crate::env::Bindings;
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::EvalContext;
 use itertools::Itertools;
-use partiql_catalog::{BaseTableExpr, BaseTableExprResult, BaseTableExprResultError};
+use partiql_catalog::BaseTableExpr;
 use partiql_logical::Type;
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{

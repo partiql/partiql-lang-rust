@@ -2,12 +2,14 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
+use partiql_catalog::{Catalog, PartiqlCatalog};
 use rand::{Rng, SeedableRng};
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::EvaluatorPlanner;
 use partiql_logical::{BindingsOp, LogicalPlan};
+use partiql_logical_planner::LogicalPlanner;
 
 use partiql_parser::{Parser, ParserResult};
 use partiql_value::{partiql_tuple, Bag, Value};
@@ -336,12 +338,13 @@ fn parse(text: &str) -> ParserResult {
     Parser::default().parse(text)
 }
 #[inline]
-fn compile(parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
-    partiql_logical_planner::lower(parsed).expect("Expect no lower error")
+fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
+    let planner = LogicalPlanner::new(catalog);
+    planner.lower(parsed).expect("Expect no lower error")
 }
 #[inline]
-fn plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    EvaluatorPlanner::default().compile(logical)
+fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
+    EvaluatorPlanner::new(catalog).compile(logical)
 }
 #[inline]
 pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Value {
@@ -372,66 +375,84 @@ fn bench_parse(c: &mut Criterion) {
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_compile(c: &mut Criterion) {
+    let catalog = PartiqlCatalog::default();
+
     let parsed_1 = parse(QUERY_1).unwrap();
     let parsed_15 = parse(QUERY_15).unwrap();
     let parsed_30 = parse(QUERY_30).unwrap();
 
-    let compiled_1 = compile(&parsed_1);
+    let compiled_1 = compile(&catalog, &parsed_1);
     assert_eq!(compiled_1.operator_count(), 4);
-    let compiled_15 = compile(&parsed_15);
+    let compiled_15 = compile(&catalog, &parsed_15);
     assert_eq!(compiled_15.operator_count(), 4);
-    let compiled_30 = compile(&parsed_30);
+    let compiled_30 = compile(&catalog, &parsed_30);
     assert_eq!(compiled_30.operator_count(), 4);
 
-    c.bench_function("compile-1", |b| b.iter(|| compile(black_box(&parsed_1))));
-    c.bench_function("compile-15", |b| b.iter(|| compile(black_box(&parsed_15))));
-    c.bench_function("compile-30", |b| b.iter(|| compile(black_box(&parsed_30))));
+    c.bench_function("compile-1", |b| {
+        b.iter(|| compile(&catalog, black_box(&parsed_1)))
+    });
+    c.bench_function("compile-15", |b| {
+        b.iter(|| compile(&catalog, black_box(&parsed_15)))
+    });
+    c.bench_function("compile-30", |b| {
+        b.iter(|| compile(&catalog, black_box(&parsed_30)))
+    });
 }
 
 /// benchmark planning of queries that
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_plan(c: &mut Criterion) {
-    let compiled_1 = compile(&parse(QUERY_1).unwrap());
-    let compiled_15 = compile(&parse(QUERY_15).unwrap());
-    let compiled_30 = compile(&parse(QUERY_30).unwrap());
+    let catalog = PartiqlCatalog::default();
 
-    let _planned_1 = plan(&compiled_1);
-    let _planned_15 = plan(&compiled_15);
-    let _planned_30 = plan(&compiled_30);
+    let compiled_1 = compile(&catalog, &parse(QUERY_1).unwrap());
+    let compiled_15 = compile(&catalog, &parse(QUERY_15).unwrap());
+    let compiled_30 = compile(&catalog, &parse(QUERY_30).unwrap());
 
-    c.bench_function("plan-1", |b| b.iter(|| plan(black_box(&compiled_1))));
-    c.bench_function("plan-15", |b| b.iter(|| plan(black_box(&compiled_15))));
-    c.bench_function("plan-30", |b| b.iter(|| plan(black_box(&compiled_30))));
+    let _planned_1 = plan(&catalog, &compiled_1);
+    let _planned_15 = plan(&catalog, &compiled_15);
+    let _planned_30 = plan(&catalog, &compiled_30);
+
+    c.bench_function("plan-1", |b| {
+        b.iter(|| plan(&catalog, black_box(&compiled_1)))
+    });
+    c.bench_function("plan-15", |b| {
+        b.iter(|| plan(&catalog, black_box(&compiled_15)))
+    });
+    c.bench_function("plan-30", |b| {
+        b.iter(|| plan(&catalog, black_box(&compiled_30)))
+    });
 }
 
 /// benchmark evaluation of queries that
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_eval(c: &mut Criterion) {
-    let compiled_1 = compile(&parse(QUERY_1).unwrap());
-    let compiled_15 = compile(&parse(QUERY_15).unwrap());
-    let compiled_30 = compile(&parse(QUERY_30).unwrap());
+    let catalog = PartiqlCatalog::default();
+
+    let compiled_1 = compile(&catalog, &parse(QUERY_1).unwrap());
+    let compiled_15 = compile(&catalog, &parse(QUERY_15).unwrap());
+    let compiled_30 = compile(&catalog, &parse(QUERY_30).unwrap());
 
     let bindings = data();
 
     c.bench_function("eval-1", |b| {
         b.iter(|| {
-            let plan = plan(&compiled_1);
+            let plan = plan(&catalog, &compiled_1);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })
     });
     c.bench_function("eval-15", |b| {
         b.iter(|| {
-            let plan = plan(&compiled_15);
+            let plan = plan(&catalog, &compiled_15);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })
     });
     c.bench_function("eval-30", |b| {
         b.iter(|| {
-            let plan = plan(&compiled_30);
+            let plan = plan(&catalog, &compiled_30);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })
