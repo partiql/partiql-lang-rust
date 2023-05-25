@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* removed `from_ion` method on `Value`
 - *BREAKING:* partiql-ast: `visit` fn returns a `partiql-ast::Recurse` type to indicate if visitation of children nodes should continue
 - *BREAKING:* partiql-logical-planner: modifies `lower(parsed: &Parsed)` to return a Result type of `Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError>` rather than a `logical::LogicalPlan<logical::BindingsOp>`
+- *BREAKING:* partiql-eval: modifies `compile(&mut self, plan: &LogicalPlan<BindingsOp>)` to return a Result type of `Result<EvalPlan, PlanErr>` rather than an `EvalPlan`
   - This is part of an effort to replace `panic`s with `Result`s
 - *BREAKING:* partiql-logical-planner: Adds a `LogicalPlanner` to encapsulate the `lower` method
 - *BREAKING:* partiql-eval: Adds a `EvaluatorPlanner` now requires a `Catalog` to be supplied at initialization

@@ -344,7 +344,9 @@ fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPla
 }
 #[inline]
 fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    EvaluatorPlanner::new(catalog).compile(logical)
+    EvaluatorPlanner::new(catalog)
+        .compile(logical)
+        .expect("Expect no plan error")
 }
 #[inline]
 pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Value {

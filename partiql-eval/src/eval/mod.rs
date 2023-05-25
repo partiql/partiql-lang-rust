@@ -2,8 +2,6 @@ use itertools::Itertools;
 
 use std::fmt::Debug;
 
-use thiserror::Error;
-
 use petgraph::algo::toposort;
 use petgraph::dot::{Config, Dot};
 use petgraph::prelude::StableGraph;
@@ -16,6 +14,7 @@ use crate::env::Bindings;
 
 use petgraph::graph::NodeIndex;
 
+use crate::error::{EvalErr, EvaluationError};
 use petgraph::visit::EdgeRef;
 
 use crate::eval::evaluable::Evaluable;
@@ -104,16 +103,6 @@ pub type EvalResult = Result<Evaluated, EvalErr>;
 /// Represents result of evaluation as an evaluated entity.
 pub struct Evaluated {
     pub result: Value,
-}
-
-pub struct EvalErr {
-    pub errors: Vec<EvaluationError>,
-}
-
-#[derive(Error, Debug)]
-pub enum EvaluationError {
-    #[error("Evaluation Error: malformed evaluation plan detected `{}`", _0)]
-    InvalidEvaluationPlan(String),
 }
 
 /// Represents an evaluation context that is used during evaluation of a plan.

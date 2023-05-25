@@ -72,9 +72,8 @@ mod tests {
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
-        let planner = plan::EvaluatorPlanner::new(&catalog);
-
-        let mut plan = planner.compile(&logical);
+        let mut planner = plan::EvaluatorPlanner::new(&catalog);
+        let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
 
         if let Ok(out) = plan.execute_mut(bindings) {

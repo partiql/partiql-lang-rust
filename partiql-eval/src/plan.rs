@@ -10,6 +10,7 @@ use partiql_logical::{
     SortSpecOrder, Type, UnaryOp, ValueExpr,
 };
 
+use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
 use crate::eval::evaluable::{
     Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
@@ -31,8 +32,30 @@ use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
 use partiql_value::Value::Null;
 
+#[macro_export]
+macro_rules! correct_num_args_or_err {
+    ($self:expr, $args:expr, $exact_num:literal, $name:expr) => {
+        if $args.len() != $exact_num {
+            $self.errors.push(PlanningError::IllegalState(format!(
+                "Wrong number of arguments for {}",
+                $name.to_string()
+            )));
+            return Box::new(ErrorNode::new());
+        }
+    };
+    ($self:expr, $args:expr, $min_num:literal, $max_num:literal, $name:expr) => {
+        if !($min_num..=$max_num).contains(&$args.len()) {
+            $self
+                .errors
+                .push(PlanningError::IllegalState($name.to_string()));
+            return Box::new(ErrorNode::new());
+        }
+    };
+}
+
 pub struct EvaluatorPlanner<'c> {
     catalog: &'c dyn Catalog,
+    errors: Vec<PlanningError>,
 }
 
 fn plan_set_quantifier(setq: &logical::SetQuantifier) -> eval::evaluable::SetQuantifier {
@@ -44,16 +67,25 @@ fn plan_set_quantifier(setq: &logical::SetQuantifier) -> eval::evaluable::SetQua
 
 impl<'c> EvaluatorPlanner<'c> {
     pub fn new(catalog: &'c dyn Catalog) -> Self {
-        EvaluatorPlanner { catalog }
+        EvaluatorPlanner {
+            catalog,
+            errors: vec![],
+        }
     }
 
     #[inline]
-    pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> EvalPlan {
-        self.plan_eval(plan)
+    pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<EvalPlan, PlanErr> {
+        let plan = self.plan_eval(plan);
+        if !self.errors.is_empty() {
+            return Err(PlanErr {
+                errors: std::mem::take(&mut self.errors),
+            });
+        }
+        Ok(plan)
     }
 
     #[inline]
-    fn plan_eval(&self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
+    fn plan_eval(&mut self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
         let ops = lg.operators();
         let flows = lg.flows();
 
@@ -75,7 +107,7 @@ impl<'c> EvaluatorPlanner<'c> {
         EvalPlan(graph)
     }
 
-    fn get_eval_node(&self, be: &BindingsOp) -> Box<dyn Evaluable> {
+    fn get_eval_node(&mut self, be: &BindingsOp) -> Box<dyn Evaluable> {
         match be {
             BindingsOp::Scan(logical::Scan {
                 expr,
@@ -251,12 +283,16 @@ impl<'c> EvaluatorPlanner<'c> {
                     input: None,
                 })
             }
-
-            BindingsOp::SetOp => todo!("SetOp"),
+            BindingsOp::SetOp => {
+                self.errors.push(PlanningError::NotYetImplemented(
+                    "BindingsOp::SetOp not yet implemented in evaluator".to_string(),
+                ));
+                Box::new(ErrorNode::new())
+            }
         }
     }
 
-    fn plan_values(&self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
+    fn plan_values(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
         match ve {
             ValueExpr::UnExpr(unary_op, operand) => {
                 let operand = self.plan_values(operand);
@@ -348,7 +384,11 @@ impl<'c> EvaluatorPlanner<'c> {
                 match pattern {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         // TODO statically assert escape length
-                        assert!(escape.chars().count() <= 1);
+                        if escape.chars().count() > 1 {
+                            self.errors.push(PlanningError::IllegalState(format!(
+                                "Invalid LIKE expression pattern: {escape}"
+                            )));
+                        }
                         let escape = escape.chars().next();
                         let regex = like_to_re_pattern(pattern, escape);
                         Box::new(EvalLikeMatch::new(value, &regex))
@@ -454,7 +494,12 @@ impl<'c> EvaluatorPlanner<'c> {
                 //     3) COALESCE (V1, V2, . . . ,n ), for n >= 3, is equivalent to the following <case specification>:
                 //         CASE WHEN V1 IS NOT NULL THEN V1 ELSE COALESCE (V2, . . . ,n )
                 //         END
-                assert!(!c.elements.is_empty());
+                if c.elements.is_empty() {
+                    self.errors.push(PlanningError::IllegalState(
+                        "Wrong number of arguments to coalesce".to_string(),
+                    ));
+                    return Box::new(ErrorNode::new());
+                }
                 fn as_case(v: &ValueExpr, elems: &[ValueExpr]) -> ValueExpr {
                     let sc = SearchedCase {
                         cases: vec![(
@@ -486,56 +531,55 @@ impl<'c> EvaluatorPlanner<'c> {
                     .collect_vec();
                 match name {
                     CallName::Lower => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "lower");
                         Box::new(EvalFnLower {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Upper => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "upper");
                         Box::new(EvalFnUpper {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::CharLength => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "char_length");
                         Box::new(EvalFnCharLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::OctetLength => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "octet_length");
                         Box::new(EvalFnOctetLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::BitLength => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "bit_length");
                         Box::new(EvalFnBitLength {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::LTrim => {
-                        assert_eq!(args.len(), 2);
+                        correct_num_args_or_err!(self, args, 2, "ltrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnLtrim { value, to_trim })
                     }
                     CallName::BTrim => {
-                        assert_eq!(args.len(), 2);
+                        correct_num_args_or_err!(self, args, 2, "btrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnBtrim { value, to_trim })
                     }
                     CallName::RTrim => {
-                        assert_eq!(args.len(), 2);
+                        correct_num_args_or_err!(self, args, 2, "rtrim");
                         let value = args.pop().unwrap();
                         let to_trim = args.pop().unwrap();
                         Box::new(EvalFnRtrim { value, to_trim })
                     }
                     CallName::Substring => {
-                        assert!((2usize..=3).contains(&args.len()));
-
+                        correct_num_args_or_err!(self, args, 2, 3, "substring");
                         let length = if args.len() == 3 {
                             Some(args.pop().unwrap())
                         } else {
@@ -551,14 +595,13 @@ impl<'c> EvaluatorPlanner<'c> {
                         })
                     }
                     CallName::Position => {
-                        assert_eq!(args.len(), 2);
+                        correct_num_args_or_err!(self, args, 2, "position");
                         let haystack = args.pop().unwrap();
                         let needle = args.pop().unwrap();
                         Box::new(EvalFnPosition { needle, haystack })
                     }
                     CallName::Overlay => {
-                        assert!((3usize..=4).contains(&args.len()));
-
+                        correct_num_args_or_err!(self, args, 3, 4, "overlay");
                         let length = if args.len() == 4 {
                             Some(args.pop().unwrap())
                         } else {
@@ -576,123 +619,172 @@ impl<'c> EvaluatorPlanner<'c> {
                         })
                     }
                     CallName::Exists => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "exists");
                         Box::new(EvalFnExists {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Abs => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "abs");
                         Box::new(EvalFnAbs {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::Mod => {
-                        assert_eq!(args.len(), 2);
+                        correct_num_args_or_err!(self, args, 2, "mod");
                         let rhs = args.pop().unwrap();
                         let lhs = args.pop().unwrap();
                         Box::new(EvalFnModulus { lhs, rhs })
                     }
                     CallName::Cardinality => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "cardinality");
                         Box::new(EvalFnCardinality {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractYear => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract year");
                         Box::new(EvalFnExtractYear {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMonth => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract month");
                         Box::new(EvalFnExtractMonth {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractDay => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract day");
                         Box::new(EvalFnExtractDay {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractHour => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract hour");
                         Box::new(EvalFnExtractHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractMinute => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract minute");
                         Box::new(EvalFnExtractMinute {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractSecond => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract second");
                         Box::new(EvalFnExtractSecond {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneHour => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract timezone_hour");
                         Box::new(EvalFnExtractTimezoneHour {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::ExtractTimezoneMinute => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "extract timezone_minute");
                         Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
                         })
                     }
                     CallName::CollAvg(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_avg");
                         Box::new(EvalFnCollAvg {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollCount(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_count");
                         Box::new(EvalFnCollCount {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollMax(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_max");
                         Box::new(EvalFnCollMax {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollMin(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_min");
                         Box::new(EvalFnCollMin {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollSum(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_sum");
                         Box::new(EvalFnCollSum {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
-                    CallName::ByName(name) => {
-                        let function = self
-                            .catalog
-                            .get_function(name)
-                            .expect("function to exist in catalog");
-
-                        let eval = function.plan_eval();
-                        Box::new(EvalFnBaseTableExpr { args, expr: eval })
-                    }
+                    CallName::ByName(name) => match self.catalog.get_function(name) {
+                        None => {
+                            self.errors.push(PlanningError::IllegalState(format!(
+                                "Function to exist in catalog {name}",
+                            )));
+                            Box::new(ErrorNode::new())
+                        }
+                        Some(function) => {
+                            let eval = function.plan_eval();
+                            Box::new(EvalFnBaseTableExpr { args, expr: eval })
+                        }
+                    },
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partiql_catalog::PartiqlCatalog;
+    use partiql_logical::CallExpr;
+    use partiql_logical::ExprQuery;
+    use partiql_value::Value;
+
+    #[test]
+    fn test_logical_to_eval_plan_bad_num_arguments() {
+        // Tests that the logical to eval plan can report multiple errors.
+        // The following is a logical plan with two functions with the wrong number of arguments.
+        // Equivalent query: ABS(1, 2) + MOD(3)
+        // We define the logical plan manually because the AST to logical lowering will detect and
+        // report the error.
+        let mut logical = LogicalPlan::new();
+        fn lit_int(i: usize) -> ValueExpr {
+            ValueExpr::Lit(Box::new(Value::from(i)))
+        }
+
+        let expq = logical.add_operator(BindingsOp::ExprQuery(ExprQuery {
+            expr: ValueExpr::BinaryExpr(
+                BinaryOp::Add,
+                Box::new(ValueExpr::Call(CallExpr {
+                    name: CallName::Abs,
+                    arguments: vec![lit_int(1), lit_int(2)],
+                })),
+                Box::new(ValueExpr::Call(CallExpr {
+                    name: CallName::Mod,
+                    arguments: vec![lit_int(3)],
+                })),
+            ),
+        }));
+        let sink = logical.add_operator(BindingsOp::Sink);
+        logical.add_flow(expq, sink);
+
+        let catalog = PartiqlCatalog::default();
+        let mut planner = EvaluatorPlanner::new(&catalog);
+        let plan = planner.compile(&logical);
+
+        assert!(plan.is_err());
+        let planning_errs = plan.expect_err("Expect errs").errors;
+        assert_eq!(planning_errs.len(), 2);
     }
 }

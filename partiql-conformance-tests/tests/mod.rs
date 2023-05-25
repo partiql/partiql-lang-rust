@@ -1,6 +1,8 @@
 use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
+use partiql_eval::error::PlanErr;
+use partiql_eval::eval::{EvalPlan, EvalResult};
 use partiql_logical as logical;
 use partiql_logical_planner::error::LoweringError;
 use partiql_parser::{Parsed, ParserResult};
@@ -34,20 +36,18 @@ pub(crate) fn lower(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate(
+pub(crate) fn compile(
     catalog: &dyn Catalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
-    bindings: MapBindings<Value>,
-) -> Value {
-    let planner = eval::plan::EvaluatorPlanner::new(catalog);
+) -> Result<EvalPlan, PlanErr> {
+    let mut planner = eval::plan::EvaluatorPlanner::new(catalog);
+    planner.compile(&logical)
+}
 
-    let mut plan = planner.compile(&logical);
-
-    if let Ok(out) = plan.execute_mut(bindings) {
-        out.result
-    } else {
-        Value::Missing
-    }
+#[track_caller]
+#[inline]
+pub(crate) fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
+    plan.execute_mut(bindings)
 }
 
 #[track_caller]
@@ -111,10 +111,10 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let out = evaluate(&catalog, lowered, bindings);
+    let plan = compile(&catalog, lowered).expect("compile");
+    let out = evaluate(plan, bindings);
 
-    println!("{:?}", &out);
-    // TODO assert failure
+    assert!(out.is_err());
 }
 
 #[track_caller]
@@ -139,10 +139,13 @@ pub(crate) fn pass_eval(
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let out = evaluate(&catalog, lowered, bindings);
+    let plan = compile(&catalog, lowered).expect("compile");
+    let out = evaluate(plan, bindings);
 
-    println!("{:?}", &out);
-    assert_eq!(out, expected.value);
+    match out {
+        Ok(v) => assert_eq!(v.result, expected.value),
+        Err(err) => panic!("Encountered error: {err:?}"),
+    }
 }
 
 #[allow(dead_code)]

@@ -183,9 +183,9 @@ mod tests {
         logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
     ) -> Value {
-        let planner = partiql_eval::plan::EvaluatorPlanner::new(catalog);
+        let mut planner = partiql_eval::plan::EvaluatorPlanner::new(catalog);
 
-        let mut plan = planner.compile(&logical);
+        let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
         if let Ok(out) = plan.execute_mut(bindings) {
             out.result
