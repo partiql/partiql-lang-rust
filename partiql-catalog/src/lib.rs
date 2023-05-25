@@ -40,8 +40,6 @@ pub struct ObjectId {
     entry_id: EntryId,
 }
 
-// Table Function
-
 pub type BaseTableExprResultError = Box<dyn Error>;
 pub type BaseTableExprResultValueIter<'a> =
     Box<dyn 'a + Iterator<Item = Result<Value, BaseTableExprResultError>>>;
@@ -165,16 +163,15 @@ impl Catalog for PartiqlCatalog {
     }
 
     fn get_function(&self, name: &str) -> Option<FunctionEntry> {
-        self.functions.find_by_name(name).map(|(eid, entry)| {
-            //
-            FunctionEntry {
+        self.functions
+            .find_by_name(name)
+            .map(|(eid, entry)| FunctionEntry {
                 id: ObjectId {
                     catalog_id: self.id,
                     entry_id: eid,
                 },
                 function: entry,
-            }
-        })
+            })
     }
 }
 

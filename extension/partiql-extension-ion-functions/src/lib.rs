@@ -22,16 +22,26 @@ use thiserror::Error;
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum IonExtensionError {
-    /// Stream error.
+    /// Function error.
     #[error("`read_ion` function error: `{}`", .0)]
     FunctionError(String),
+
+    /// Io error.
+    #[error("`read_ion` io error: `{}`", .0)]
+    IoError(std::io::Error),
 
     /// Any other reading error.
     #[error("Ion read error: unknown error")]
     Unknown,
+}
+
+impl From<std::io::Error> for IonExtensionError {
+    fn from(e: std::io::Error) -> Self {
+        IonExtensionError::IoError(e)
+    }
 }
 
 #[derive(Debug)]
@@ -107,8 +117,8 @@ impl BaseTableExpr for EvalFnReadIon {
 }
 
 fn parse_ion_file<'a>(path: &str) -> BaseTableExprResult<'a> {
-    let path = PathBuf::from(path).canonicalize().unwrap();
-    let file = File::open(path).unwrap();
+    let path = PathBuf::from(path).canonicalize()?;
+    let file = File::open(path)?;
 
     parse_ion_read(file)
 }
