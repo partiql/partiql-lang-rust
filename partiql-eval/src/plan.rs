@@ -6,8 +6,8 @@ use partiql_logical as logical;
 
 use partiql_logical::{
     AggFunc, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan,
-    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SortSpecNullOrder, SortSpecOrder,
-    Type, UnaryOp, ValueExpr,
+    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier, SortSpecNullOrder,
+    SortSpecOrder, Type, UnaryOp, ValueExpr,
 };
 
 use crate::eval;
@@ -19,7 +19,8 @@ use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
     EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength,
-    EvalFnExists, EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
+    EvalFnCollAvg, EvalFnCollCount, EvalFnCollMax, EvalFnCollMin, EvalFnCollSum, EvalFnExists,
+    EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
     EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
     EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
     EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
@@ -32,6 +33,13 @@ use partiql_value::Value::Null;
 
 pub struct EvaluatorPlanner<'c> {
     catalog: &'c dyn Catalog,
+}
+
+fn plan_set_quantifier(setq: &logical::SetQuantifier) -> eval::evaluable::SetQuantifier {
+    match setq {
+        SetQuantifier::All => eval::evaluable::SetQuantifier::All,
+        SetQuantifier::Distinct => eval::evaluable::SetQuantifier::Distinct,
+    }
 }
 
 impl<'c> EvaluatorPlanner<'c> {
@@ -637,6 +645,41 @@ impl<'c> EvaluatorPlanner<'c> {
                         assert_eq!(args.len(), 1);
                         Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollAvg(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollAvg {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollCount(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollCount {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollMax(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollMax {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollMin(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollMin {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollSum(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollSum {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
                         })
                     }
                     CallName::ByName(name) => {

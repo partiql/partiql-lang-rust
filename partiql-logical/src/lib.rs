@@ -659,6 +659,11 @@ pub enum CallName {
     ExtractSecond,
     ExtractTimezoneHour,
     ExtractTimezoneMinute,
+    CollAvg(SetQuantifier),
+    CollCount(SetQuantifier),
+    CollMax(SetQuantifier),
+    CollMin(SetQuantifier),
+    CollSum(SetQuantifier),
     ByName(String),
 }
 

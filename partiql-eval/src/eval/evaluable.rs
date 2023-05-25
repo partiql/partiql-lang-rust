@@ -1282,3 +1282,10 @@ impl EvalExpr for EvalSubQueryExpr {
         Cow::Owned(value)
     }
 }
+
+/// Indicates if a set should be reduced to its distinct elements or not.
+#[derive(Debug)]
+pub(crate) enum SetQuantifier {
+    All,
+    Distinct,
+}
