@@ -691,49 +691,52 @@ impl<'c> EvaluatorPlanner<'c> {
                         })
                     }
                     CallName::CollAvg(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_avg");
                         Box::new(EvalFnCollAvg {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollCount(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_count");
                         Box::new(EvalFnCollCount {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollMax(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_max");
                         Box::new(EvalFnCollMax {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollMin(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_min");
                         Box::new(EvalFnCollMin {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
                     CallName::CollSum(setq) => {
-                        assert_eq!(args.len(), 1);
+                        correct_num_args_or_err!(self, args, 1, "coll_sum");
                         Box::new(EvalFnCollSum {
                             setq: plan_set_quantifier(setq),
                             elems: args.pop().unwrap(),
                         })
                     }
-                    CallName::ByName(name) => {
-                        let function = self
-                            .catalog
-                            .get_function(name)
-                            .expect("function to exist in catalog");
-
-                        let eval = function.plan_eval();
-                        Box::new(EvalFnBaseTableExpr { args, expr: eval })
-                    }
+                    CallName::ByName(name) => match self.catalog.get_function(name) {
+                        None => {
+                            self.errors.push(PlanningError::IllegalState(format!(
+                                "Function to exist in catalog {name}",
+                            )));
+                            Box::new(ErrorNode::new())
+                        }
+                        Some(function) => {
+                            let eval = function.plan_eval();
+                            Box::new(EvalFnBaseTableExpr { args, expr: eval })
+                        }
+                    },
                 }
             }
         }
