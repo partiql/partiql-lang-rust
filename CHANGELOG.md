@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+### Added
+### Fixes
+
+## [0.4.1] - 2023-05-25
+### Changed
 - partiql-extension-ion-functions : Made `IonExtension` `pub`
 ### Added
 ### Fixes
@@ -138,7 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.1
 [0.4.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.0
 [0.3.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.3.0
 [0.2.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.2.0
