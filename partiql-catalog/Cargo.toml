@@ -1,6 +1,6 @@
 [package]
-name = "partiql-types"
-description = "PartiQL Type Definitions"
+name = "partiql-catalog"
+description = "PartiQL Catalog Definitions"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
@@ -21,6 +21,10 @@ edition.workspace = true
 bench = false
 
 [dependencies]
+partiql-value = { path = "../partiql-value", version = "0.3.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.3.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.3.*" }
+thiserror = "1.0"
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.6"

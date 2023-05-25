@@ -659,6 +659,7 @@ pub enum CallName {
     ExtractSecond,
     ExtractTimezoneHour,
     ExtractTimezoneMinute,
+    ByName(String),
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.

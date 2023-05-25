@@ -22,8 +22,8 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-quote = "1.0.*"
-syn = {version="1.0.*", default-features = true, features=["full"]}
+quote = "1.0"
+syn = {version="2.0", default-features = true, features=["full"]}
 proc-macro2 = "1.0.*"
-darling = "0.14.*"
+darling = "0.20"
 Inflector = "0.11.*"

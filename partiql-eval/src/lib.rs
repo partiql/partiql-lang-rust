@@ -9,6 +9,7 @@ mod tests {
 
     use crate::env::basic::MapBindings;
     use crate::plan;
+    use partiql_catalog::PartiqlCatalog;
     use rust_decimal_macros::dec;
 
     use partiql_logical as logical;
@@ -25,7 +26,8 @@ mod tests {
     };
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let planner = plan::EvaluatorPlanner;
+        let catalog = PartiqlCatalog::default();
+        let planner = plan::EvaluatorPlanner::new(&catalog);
         let mut plan = planner.compile(&logical);
 
         if let Ok(out) = plan.execute_mut(bindings) {

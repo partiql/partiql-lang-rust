@@ -18,8 +18,8 @@ use crate::eval::evaluable::{
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
-    EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength, EvalFnExists,
-    EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
+    EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength,
+    EvalFnExists, EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
     EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
     EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
     EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
@@ -27,12 +27,18 @@ use crate::eval::expr::{
     EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
+use partiql_catalog::Catalog;
 use partiql_value::Value::Null;
 
-#[derive(Default)]
-pub struct EvaluatorPlanner;
+pub struct EvaluatorPlanner<'c> {
+    catalog: &'c dyn Catalog,
+}
 
-impl EvaluatorPlanner {
+impl<'c> EvaluatorPlanner<'c> {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
+        EvaluatorPlanner { catalog }
+    }
+
     #[inline]
     pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> EvalPlan {
         self.plan_eval(plan)
@@ -632,6 +638,15 @@ impl EvaluatorPlanner {
                         Box::new(EvalFnExtractTimezoneMinute {
                             value: args.pop().unwrap(),
                         })
+                    }
+                    CallName::ByName(name) => {
+                        let function = self
+                            .catalog
+                            .get_function(name)
+                            .expect("function to exist in catalog");
+
+                        let eval = function.plan_eval();
+                        Box::new(EvalFnBaseTableExpr { args, expr: eval })
                     }
                 }
             }

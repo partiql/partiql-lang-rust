@@ -24,7 +24,7 @@ bench = false
 partiql-value = { path = "../partiql-value", version = "0.3.*" }
 ordered-float = "3.*"
 itertools = "0.10.*"
-unicase = "2.*"
+unicase = "2.6"
 
 serde = { version = "1.*", features = ["derive"], optional = true }
 

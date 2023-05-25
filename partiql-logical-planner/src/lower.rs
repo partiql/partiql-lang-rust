@@ -24,12 +24,14 @@ use partiql_value::{BindingsName, Value};
 
 use std::collections::{HashMap, HashSet};
 
-use crate::call_defs::{CallArgument, FnSymTab, FN_SYM_TAB};
+use crate::builtins::{FnSymTab, FN_SYM_TAB};
 use crate::name_resolver;
 use itertools::Itertools;
+use partiql_catalog::call_defs::{CallArgument, CallDef};
 
 use crate::error::{LowerError, LoweringError};
 
+use partiql_catalog::Catalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
@@ -143,7 +145,7 @@ impl IdGenerator {
 }
 
 #[derive(Debug)]
-pub struct AstToLogical {
+pub struct AstToLogical<'a> {
     // current stack of node ids
     id_stack: Vec<NodeId>,
 
@@ -169,8 +171,10 @@ pub struct AstToLogical {
     // output
     plan: LogicalPlan<BindingsOp>,
 
+    // catalog & data flow data
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
+    catalog: &'a dyn Catalog,
 
     // list of errors encountered during AST lowering
     errors: Vec<LowerError>,
@@ -209,8 +213,8 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
     }
 }
 
-impl AstToLogical {
-    pub fn new(registry: name_resolver::KeyRegistry) -> Self {
+impl<'a> AstToLogical<'a> {
+    pub fn new(catalog: &'a dyn Catalog, registry: name_resolver::KeyRegistry) -> Self {
         let fnsym_tab: &FnSymTab = &FN_SYM_TAB;
         AstToLogical {
             id_stack: Default::default(),
@@ -239,6 +243,7 @@ impl AstToLogical {
 
             key_registry: registry,
             fnsym_tab,
+            catalog,
 
             errors: vec![],
         }
@@ -504,7 +509,7 @@ impl AstToLogical {
 // so there is nothing done between the `enter_<x>` and `exit_<x>` calls.
 // By convention, processing for them is done in the `enter_<x>` calls here.
 //
-impl<'ast> Visitor<'ast> for AstToLogical {
+impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_stack.push(id);
         Traverse::Continue
@@ -915,11 +920,20 @@ impl<'ast> Visitor<'ast> for AstToLogical {
         let args = self.exit_call();
         let name = call.func_name.value.to_lowercase();
 
+        let call_def_to_vexpr =
+            |call_def: &CallDef| call_def.lookup(&args, &name).map_err(Into::into);
+
         let call_expr = self
             .fnsym_tab
-            .lookup(name.as_ref())
-            .ok_or_else(|| LowerError::UnsupportedFunction(name.clone()))
-            .and_then(|c| c.lookup(&args, name));
+            .lookup(&name)
+            .map(|cd| call_def_to_vexpr(cd))
+            .or_else(|| {
+                self.catalog
+                    .get_function(&name)
+                    .map(|e| call_def_to_vexpr(e.call_def()))
+            })
+            .unwrap_or_else(|| Err(LowerError::UnsupportedFunction(name.clone())));
+
         let expr = match call_expr {
             Ok(expr) => expr,
             Err(err) => {
@@ -1726,15 +1740,18 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower;
+    use crate::LogicalPlanner;
+    use partiql_catalog::PartiqlCatalog;
 
     #[test]
     fn test_plan_non_existent_fns() {
+        let catalog = PartiqlCatalog::default();
         let statement = "foo(1, 2) + bar(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
             .expect("Expect successful parse");
-        let logical = lower(&parsed);
+        let planner = LogicalPlanner::new(&catalog);
+        let logical = planner.lower(&parsed);
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
@@ -1750,11 +1767,13 @@ mod tests {
 
     #[test]
     fn test_plan_bad_num_arguments() {
+        let catalog = PartiqlCatalog::default();
         let statement = "abs(1, 2) + mod(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
             .expect("Expect successful parse");
-        let logical = lower(&parsed);
+        let planner = LogicalPlanner::new(&catalog);
+        let logical = planner.lower(&parsed);
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);

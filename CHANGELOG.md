@@ -12,9 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-ast: `visit` fn returns a `partiql-ast::Recurse` type to indicate if visitation of children nodes should continue
 - *BREAKING:* partiql-logical-planner: modifies `lower(parsed: &Parsed)` to return a Result type of `Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError>` rather than a `logical::LogicalPlan<logical::BindingsOp>`
   - This is part of an effort to replace `panic`s with `Result`s
+- *BREAKING:* partiql-logical-planner: Adds a `LogicalPlanner` to encapsulate the `lower` method
+- *BREAKING:* partiql-eval: Adds a `EvaluatorPlanner` now requires a `Catalog` to be supplied at initialization
+- *BREAKING:* partiql-logical-planner: `CallDef` and related types moved to partiql-catalog
 ### Added
 - Implements built-in function `EXTRACT`
 - Add `partiql-extension-ion` extension for encoding/decoding `Value` to/from Ion data
+- Add `partiql-extension-ion-functions` extension which contains an extension function for reading from an Ion file
+- Add `partiql-catalog` including an experimental `Catalog` interface and implementation
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`

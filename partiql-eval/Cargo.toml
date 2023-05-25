@@ -23,10 +23,11 @@ bench = false
 [dependencies]
 partiql-logical = { path = "../partiql-logical", version = "0.3.*" }
 partiql-value = { path = "../partiql-value", version = "0.3.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.3.*" }
 petgraph = "0.6.*"
 ordered-float = "3.*"
 itertools = "0.10.*"
-unicase = "2.*"
+unicase = "2.6"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.26"
 thiserror = "1.0"
