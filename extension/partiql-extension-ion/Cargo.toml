@@ -5,7 +5,7 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
-readme = "../README.md"
+readme = "../../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
@@ -21,7 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-value = { path = "../../partiql-value", version = "0.3.*" }
+partiql-value = { path = "../../partiql-value", version = "0.4.*" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.6"

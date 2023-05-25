@@ -5,7 +5,7 @@ authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
-readme = "../README.md"
+readme = "../../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
@@ -21,10 +21,10 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-extension-ion = {path = "../partiql-extension-ion"}
-partiql-value = { path = "../../partiql-value", version = "0.3.*" }
-partiql-catalog = { path = "../../partiql-catalog", version = "0.3.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.3.*" }
+partiql-extension-ion = {path = "../partiql-extension-ion", version = "0.4.*"}
+partiql-value = { path = "../../partiql-value", version = "0.4.*" }
+partiql-catalog = { path = "../../partiql-catalog", version = "0.4.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.4.*" }
 
 ordered-float = "3.*"
 itertools = "0.10.*"
@@ -42,10 +42,10 @@ flate2 = "1.0"
 
 [dev-dependencies]
 criterion = "0.4"
-partiql-parser = { path = "../../partiql-parser", version = "0.3.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.3.*" }
-partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.3.*" }
-partiql-eval = { path = "../../partiql-eval", version = "0.3.*" }
+partiql-parser = { path = "../../partiql-parser", version = "0.4.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.4.*" }
+partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.4.*" }
+partiql-eval = { path = "../../partiql-eval", version = "0.4.*" }
 
 [features]
 default = []
