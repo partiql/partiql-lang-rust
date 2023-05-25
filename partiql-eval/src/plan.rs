@@ -6,8 +6,8 @@ use partiql_logical as logical;
 
 use partiql_logical::{
     AggFunc, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan,
-    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SortSpecNullOrder, SortSpecOrder,
-    Type, UnaryOp, ValueExpr,
+    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier, SortSpecNullOrder,
+    SortSpecOrder, Type, UnaryOp, ValueExpr,
 };
 
 use crate::error::{ErrorNode, PlanErr, PlanningError};
@@ -19,7 +19,8 @@ use crate::eval::evaluable::{
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
-    EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength, EvalFnExists,
+    EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength,
+    EvalFnCollAvg, EvalFnCollCount, EvalFnCollMax, EvalFnCollMin, EvalFnCollSum, EvalFnExists,
     EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
     EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
     EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
@@ -28,6 +29,7 @@ use crate::eval::expr::{
     EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
+use partiql_catalog::Catalog;
 use partiql_value::Value::Null;
 
 #[macro_export]
@@ -51,14 +53,24 @@ macro_rules! correct_num_args_or_err {
     };
 }
 
-#[derive(Default)]
-pub struct EvaluatorPlanner {
+pub struct EvaluatorPlanner<'c> {
+    catalog: &'c dyn Catalog,
     errors: Vec<PlanningError>,
 }
 
-impl EvaluatorPlanner {
-    pub fn new() -> EvaluatorPlanner {
-        EvaluatorPlanner { errors: vec![] }
+fn plan_set_quantifier(setq: &logical::SetQuantifier) -> eval::evaluable::SetQuantifier {
+    match setq {
+        SetQuantifier::All => eval::evaluable::SetQuantifier::All,
+        SetQuantifier::Distinct => eval::evaluable::SetQuantifier::Distinct,
+    }
+}
+
+impl<'c> EvaluatorPlanner<'c> {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
+        EvaluatorPlanner {
+            catalog,
+            errors: vec![],
+        }
     }
 
     #[inline]
@@ -678,6 +690,50 @@ impl EvaluatorPlanner {
                             value: args.pop().unwrap(),
                         })
                     }
+                    CallName::CollAvg(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollAvg {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollCount(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollCount {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollMax(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollMax {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollMin(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollMin {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::CollSum(setq) => {
+                        assert_eq!(args.len(), 1);
+                        Box::new(EvalFnCollSum {
+                            setq: plan_set_quantifier(setq),
+                            elems: args.pop().unwrap(),
+                        })
+                    }
+                    CallName::ByName(name) => {
+                        let function = self
+                            .catalog
+                            .get_function(name)
+                            .expect("function to exist in catalog");
+
+                        let eval = function.plan_eval();
+                        Box::new(EvalFnBaseTableExpr { args, expr: eval })
+                    }
                 }
             }
         }
@@ -687,6 +743,7 @@ impl EvaluatorPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use partiql_catalog::PartiqlCatalog;
     use partiql_logical::CallExpr;
     use partiql_logical::ExprQuery;
     use partiql_value::Value;
@@ -719,7 +776,8 @@ mod tests {
         let sink = logical.add_operator(BindingsOp::Sink);
         logical.add_flow(expq, sink);
 
-        let mut planner = EvaluatorPlanner::new();
+        let catalog = PartiqlCatalog::default();
+        let mut planner = EvaluatorPlanner::new(&catalog);
         let plan = planner.compile(&logical);
 
         assert!(plan.is_err());

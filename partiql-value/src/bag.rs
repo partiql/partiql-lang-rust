@@ -104,6 +104,15 @@ macro_rules! partiql_bag {
     );
 }
 
+impl<'a> IntoIterator for &'a Bag {
+    type Item = &'a Value;
+    type IntoIter = BagIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BagIter(self.0.iter())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BagIter<'a>(slice::Iter<'a, Value>);
 

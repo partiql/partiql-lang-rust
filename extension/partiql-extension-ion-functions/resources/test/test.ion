@@ -1,0 +1,39 @@
+// Copy 1
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "put"}
+{Program: "p2", Operation: "get"}
+{Program: "p3", Operation: "update"}
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "get"}
+{Program: "p2", Operation: "put"}
+{Program: "p1", Operation: "get"}
+
+// Copy 2 - Same data as Copy 1
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "put"}
+{Program: "p2", Operation: "get"}
+{Program: "p3", Operation: "update"}
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "get"}
+{Program: "p2", Operation: "put"}
+{Program: "p1", Operation: "get"}
+
+// Copy 3 - Same data as Copy 1
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "put"}
+{Program: "p2", Operation: "get"}
+{Program: "p3", Operation: "update"}
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "get"}
+{Program: "p2", Operation: "put"}
+{Program: "p1", Operation: "get"}
+
+// Copy 4 - Same data as Copy 1
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "put"}
+{Program: "p2", Operation: "get"}
+{Program: "p3", Operation: "update"}
+{Program: "p1", Operation: "get"}
+{Program: "p1", Operation: "get"}
+{Program: "p2", Operation: "put"}
+{Program: "p1", Operation: "get"}

@@ -1,3 +1,4 @@
+use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::PlanErr;
@@ -26,17 +27,20 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(
+    catalog: &dyn Catalog,
     parsed: &Parsed,
 ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
-    partiql_logical_planner::lower(parsed)
+    let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
+    planner.lower(parsed)
 }
 
 #[track_caller]
 #[inline]
 pub(crate) fn compile(
+    catalog: &dyn Catalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
 ) -> Result<EvalPlan, PlanErr> {
-    let mut planner = eval::plan::EvaluatorPlanner::new();
+    let mut planner = eval::plan::EvaluatorPlanner::new(catalog);
     planner.compile(&logical)
 }
 
@@ -80,9 +84,10 @@ pub(crate) fn fail_semantics(_statement: &str) {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn pass_semantics(statement: &str) {
+    let catalog = PartiqlCatalog::default();
     let parsed = pass_syntax(statement);
     // TODO add Result to lower call
-    let lowered: Result<_, ()> = Ok(lower(&parsed));
+    let lowered: Result<_, ()> = Ok(lower(&catalog, &parsed));
     assert!(
         lowered.is_ok(),
         "For `{statement}`, expected `Ok(_)`, but was `{lowered:#?}`"
@@ -93,19 +98,20 @@ pub(crate) fn pass_semantics(statement: &str) {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
+    let catalog = PartiqlCatalog::default();
     if let EvaluationMode::Error = mode {
         eprintln!("EvaluationMode::Error currently unsupported");
         return;
     }
 
     let parsed = parse(statement);
-    let lowered_result = lower(&parsed.expect("parse"));
+    let lowered_result = lower(&catalog, &parsed.expect("parse"));
     let lowered = lowered_result.expect("lower");
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let plan = compile(lowered).expect("compile");
+    let plan = compile(&catalog, lowered).expect("compile");
     let out = evaluate(plan, bindings);
 
     assert!(out.is_err());
@@ -120,19 +126,20 @@ pub(crate) fn pass_eval(
     env: &Option<TestValue>,
     expected: &TestValue,
 ) {
+    let catalog = PartiqlCatalog::default();
     if let EvaluationMode::Error = mode {
         eprintln!("EvaluationMode::Error currently unsupported");
         return;
     }
 
     let parsed = parse(statement);
-    let lowered_result = lower(&parsed.expect("parse"));
+    let lowered_result = lower(&catalog, &parsed.expect("parse"));
     let lowered = lowered_result.expect("lower");
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let plan = compile(lowered).expect("compile");
+    let plan = compile(&catalog, lowered).expect("compile");
     let out = evaluate(plan, bindings);
 
     match out {

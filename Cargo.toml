@@ -11,6 +11,7 @@ members = [
   "partiql",
   "partiql-ast",
   "partiql-ast/partiql-ast-macros",
+  "partiql-catalog",
   "partiql-conformance-tests",
   "partiql-conformance-test-generator",
   "partiql-source-map",
@@ -23,7 +24,10 @@ members = [
   "partiql-rewriter",
   "partiql-types",
   "partiql-value",
+
+
   "extension/partiql-extension-ion",
+  "extension/partiql-extension-ion-functions",
 ]
 
 [profile.dev.build-override]

@@ -659,6 +659,12 @@ pub enum CallName {
     ExtractSecond,
     ExtractTimezoneHour,
     ExtractTimezoneMinute,
+    CollAvg(SetQuantifier),
+    CollCount(SetQuantifier),
+    CollMax(SetQuantifier),
+    CollMin(SetQuantifier),
+    CollSum(SetQuantifier),
+    ByName(String),
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.

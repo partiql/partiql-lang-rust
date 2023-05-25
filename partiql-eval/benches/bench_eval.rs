@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use partiql_catalog::PartiqlCatalog;
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::EvalPlan;
@@ -120,7 +121,8 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 }
 
 fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    let mut planner = plan::EvaluatorPlanner::new();
+    let catalog = PartiqlCatalog::default();
+    let mut planner = plan::EvaluatorPlanner::new(&catalog);
     planner.compile(logical).expect("Expect no plan error")
 }
 

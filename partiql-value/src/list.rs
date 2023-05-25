@@ -104,6 +104,15 @@ macro_rules! partiql_list {
     );
 }
 
+impl<'a> IntoIterator for &'a List {
+    type Item = &'a Value;
+    type IntoIter = ListIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ListIter(self.0.iter())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ListIter<'a>(slice::Iter<'a, Value>);
 

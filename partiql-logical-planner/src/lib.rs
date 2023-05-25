@@ -5,36 +5,53 @@ use partiql_ast::ast;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
-mod call_defs;
+use partiql_catalog::Catalog;
+
+mod builtins;
 pub mod error;
 mod lower;
 mod name_resolver;
 
-// TODO better encapsulate.
-pub fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
-    if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-        let mut resolver = NameResolver::default();
-        let registry = resolver.resolve(q)?;
-        let planner = AstToLogical::new(registry);
-        planner.lower_query(q)
-    } else {
-        Err(LoweringError {
-            errors: vec![LowerError::NotYetImplemented(
-                "Expr type not supported yet".to_string(),
-            )],
-        })
+pub struct LogicalPlanner<'c> {
+    catalog: &'c dyn Catalog,
+}
+
+impl<'c> LogicalPlanner<'c> {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
+        LogicalPlanner { catalog }
+    }
+
+    #[inline]
+    pub fn lower(
+        &self,
+        parsed: &Parsed,
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
+            let mut resolver = NameResolver::default();
+            let registry = resolver.resolve(q)?;
+            let planner = AstToLogical::new(self.catalog, registry);
+            planner.lower_query(q)
+        } else {
+            Err(LoweringError {
+                errors: vec![LowerError::NotYetImplemented(
+                    "Expr type not supported yet".to_string(),
+                )],
+            })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
 
     use partiql_eval::plan;
 
     use crate::error::LoweringError;
+    use crate::LogicalPlanner;
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
@@ -47,12 +64,15 @@ mod tests {
 
     #[track_caller]
     fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
-        super::lower(parsed)
+        let catalog = PartiqlCatalog::default();
+        let planner = LogicalPlanner::new(&catalog);
+        planner.lower(parsed)
     }
 
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let mut planner = plan::EvaluatorPlanner::new();
+        let catalog = PartiqlCatalog::default();
+        let mut planner = plan::EvaluatorPlanner::new(&catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
 
