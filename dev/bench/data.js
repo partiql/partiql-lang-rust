@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1684443094849,
+  "lastUpdate": 1684981018033,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -9005,6 +9005,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 33774,
             "range": "± 84",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "josh@pschorr.dev",
+            "name": "Josh Pschorr",
+            "username": "jpschorr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "425d3cccbb14dc5879b78d070f2441087e9bf891",
+          "message": "Preliminary work to create a Catalog, plumb it through lowering and evaluation with a `read_ion` extension function. (#375)\n\nMVP for a Catalog for eventually holding Functions, Types, Schemas, etc. For now, it is able to hold a BaseTableFunction that is used to allow scanning of arbitrary data sources via an 'extension' plug-in interface.\r\n\r\nThe new partiql-extension-ion-functions crate provides an example an extension in IonExtension, which registers a ReadIonFunction.",
+          "timestamp": "2023-05-24T19:05:40-07:00",
+          "tree_id": "9ff322cf39568b9c892e86b79c55aa4da6a1f0fb",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/425d3cccbb14dc5879b78d070f2441087e9bf891"
+        },
+        "date": 1684981017107,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6556,
+            "range": "± 87",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 61896,
+            "range": "± 2639",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 120027,
+            "range": "± 3622",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 5479,
+            "range": "± 175",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 39933,
+            "range": "± 1516",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 78845,
+            "range": "± 2600",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 23247,
+            "range": "± 956",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 422144,
+            "range": "± 13026",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 833501,
+            "range": "± 29380",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 23491583,
+            "range": "± 961139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 136653164,
+            "range": "± 4191411",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 255348535,
+            "range": "± 7394218",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 16559,
+            "range": "± 594",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 7640,
+            "range": "± 301",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 686,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 163,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 767,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2772,
+            "range": "± 140",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 9316,
+            "range": "± 398",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 24205,
+            "range": "± 856",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 38564,
+            "range": "± 1503",
             "unit": "ns/iter"
           }
         ]
