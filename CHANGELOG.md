@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+### Added
+### Fixes
+
+## [0.4.0] - 2023-05-24
+### Changed
 - *BREAKING:* partiql-eval: modifies visibility of types implementing `EvalExpr` and `Evaluable`
 - *BREAKING:* removed `from_ion` method on `Value`
 - *BREAKING:* partiql-ast: `visit` fn returns a `partiql-ast::Recurse` type to indicate if visitation of children nodes should continue
@@ -132,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.0
 [0.3.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.3.0
 [0.2.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.2.0
 [0.1.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.1.0
