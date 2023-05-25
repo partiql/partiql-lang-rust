@@ -45,7 +45,7 @@ impl From<std::io::Error> for IonExtensionError {
 }
 
 #[derive(Debug)]
-pub(crate) struct IonExtension {}
+pub struct IonExtension {}
 
 impl partiql_catalog::Extension for IonExtension {
     fn name(&self) -> String {
