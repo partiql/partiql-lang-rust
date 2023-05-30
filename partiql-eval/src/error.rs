@@ -56,7 +56,7 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 

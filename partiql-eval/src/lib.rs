@@ -2266,7 +2266,7 @@ mod tests {
                 partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]), ("y", 0)],
                 partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]), ("y", 1)],
             ];
-            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), res);
         }
 
         // Spec 5.1.1
@@ -2298,7 +2298,7 @@ mod tests {
                     ("y", value::Value::Missing)
                 ],
             ];
-            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), res);
         }
 
         // Spec 5.1.1
@@ -2323,7 +2323,7 @@ mod tests {
             let scan_res = scan.evaluate(&ctx);
 
             let expected = partiql_bag![partiql_tuple![("x", 0)]];
-            assert_eq!(Value::Bag(Box::new(expected)), scan_res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), scan_res);
         }
 
         // Spec 5.1.1
@@ -2348,7 +2348,7 @@ mod tests {
             let res = scan.evaluate(&ctx);
 
             let expected = partiql_bag![partiql_tuple![("x", value::Value::Missing)]];
-            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), res);
         }
     }
 
@@ -2386,7 +2386,7 @@ mod tests {
                 partiql_tuple![("symbol", "tdc"), ("price", 31.06)],
                 partiql_tuple![("symbol", "amzn"), ("price", 840.05)],
             ];
-            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), res);
         }
 
         // Spec 5.2.1
@@ -2407,7 +2407,7 @@ mod tests {
             let res = unpivot.evaluate(&ctx);
 
             let expected = partiql_bag![partiql_tuple![("x", 1), ("y", "_1")]];
-            assert_eq!(Value::Bag(Box::new(expected)), res.unwrap());
+            assert_eq!(Value::Bag(Box::new(expected)), res);
         }
     }
 }

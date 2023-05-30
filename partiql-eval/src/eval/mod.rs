@@ -64,8 +64,9 @@ impl EvalPlan {
                             )],
                         });
                     }
-                    result = src.unwrap().evaluate(&*ctx);
+                    result = Some(src.unwrap().evaluate(&*ctx));
 
+                    // return on first evaluation error
                     if ctx.has_errors() {
                         return Err(EvalErr {
                             errors: ctx.errors(),
@@ -116,7 +117,6 @@ impl EvalPlan {
                     }
                     Some(val) => val,
                 };
-                // TODO: decide on `evaluate`'s type. Currently returns an `Option`. For error handling, perhaps a `Result` type is better here.
                 Ok(Evaluated { result })
             }
             Err(e) => Err(EvalErr {

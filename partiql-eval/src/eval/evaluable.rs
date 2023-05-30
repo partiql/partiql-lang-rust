@@ -20,7 +20,7 @@ macro_rules! take_input {
                 $ctx.add_error(EvaluationError::IllegalState(
                     "Error in retrieving input value".to_string(),
                 ));
-                return None;
+                return Missing;
             }
             Some(val) => val,
         }
@@ -29,7 +29,7 @@ macro_rules! take_input {
 
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value>;
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value;
     fn update_input(&mut self, input: Value, branch_num: u8);
     fn get_vars(&self) -> Option<&[String]> {
         None
@@ -74,7 +74,7 @@ impl EvalScan {
 }
 
 impl Evaluable for EvalScan {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = self.input.take().unwrap_or(Missing);
 
         let bindings = match input_value {
@@ -109,7 +109,7 @@ impl Evaluable for EvalScan {
             }
         });
 
-        Some(Value::Bag(Box::new(value)))
+        Value::Bag(Box::new(value))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -159,7 +159,7 @@ impl EvalJoin {
 }
 
 impl Evaluable for EvalJoin {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         /// Creates a `Tuple` with attributes `attrs`, each with value `Null`
         #[inline]
         fn tuple_with_null_vals<I, S>(attrs: I) -> Tuple
@@ -178,12 +178,12 @@ impl Evaluable for EvalJoin {
         self.left.update_input(input_env.clone(), 0);
         let lhs_values = self.left.evaluate(ctx);
         let left_bindings = match lhs_values {
-            Some(Value::Bag(t)) => *t,
+            Value::Bag(t) => *t,
             _ => {
                 ctx.add_error(EvaluationError::IllegalState(
                     "Left side of FROM source should result in a bag of bindings".to_string(),
                 ));
-                return None;
+                return Missing;
             }
         };
 
@@ -201,7 +201,7 @@ impl Evaluable for EvalJoin {
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
-                        Some(Value::Bag(t)) => *t,
+                        Value::Bag(t) => *t,
                         _ => partiql_bag![partiql_tuple![]],
                     };
 
@@ -245,7 +245,7 @@ impl Evaluable for EvalJoin {
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
-                        Some(Value::Bag(t)) => *t,
+                        Value::Bag(t) => *t,
                         _ => partiql_bag![partiql_tuple![]],
                     };
 
@@ -296,10 +296,10 @@ impl Evaluable for EvalJoin {
                 ctx.add_error(EvaluationError::NotYetImplemented(
                     "FULL and RIGHT JOIN".to_string(),
                 ));
-                return None;
+                return Missing;
             }
         };
-        Some(Value::Bag(Box::new(output_bag)))
+        Value::Bag(Box::new(output_bag))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -702,7 +702,7 @@ impl EvalGroupBy {
 }
 
 impl Evaluable for EvalGroupBy {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let group_as_alias = &self.group_as_alias;
         let input_value = take_input!(self.input.take(), ctx);
 
@@ -711,7 +711,7 @@ impl Evaluable for EvalGroupBy {
                 ctx.add_error(EvaluationError::NotYetImplemented(
                     "GROUP PARTIAL".to_string(),
                 ));
-                None
+                Missing
             }
             EvalGroupingStrategy::GroupFull => {
                 let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
@@ -743,7 +743,7 @@ impl Evaluable for EvalGroupBy {
                                 }
                                 Err(err) => {
                                     ctx.add_error(err);
-                                    return Null;
+                                    return Missing;
                                 }
                             }
                         }
@@ -761,7 +761,7 @@ impl Evaluable for EvalGroupBy {
                         }
                     })
                     .collect::<Bag>();
-                Some(Value::from(bag))
+                Value::from(bag)
             }
         }
     }
@@ -792,7 +792,7 @@ impl EvalPivot {
 }
 
 impl Evaluable for EvalPivot {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let tuple: Tuple = input_value
@@ -808,7 +808,7 @@ impl Evaluable for EvalPivot {
                 }
             })
             .collect();
-        Some(Value::from(tuple))
+        Value::from(tuple)
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -849,7 +849,7 @@ impl EvalUnpivot {
 }
 
 impl Evaluable for EvalUnpivot {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let tuple = match self.expr.evaluate(&Tuple::new(), ctx).into_owned() {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_to_tuple(),
@@ -866,7 +866,7 @@ impl Evaluable for EvalUnpivot {
                 .map(|(_, v)| Tuple::from([(as_key, v)]))
                 .collect::<Bag>()
         };
-        Some(Value::from(unpivoted))
+        Value::from(unpivoted)
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -906,14 +906,14 @@ impl EvalFilter {
 }
 
 impl Evaluable for EvalFilter {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let filtered = input_value
             .into_iter()
             .map(Value::coerce_to_tuple)
             .filter_map(|v| self.eval_filter(&v, ctx).then_some(v));
-        Some(Value::from(filtered.collect::<Bag>()))
+        Value::from(filtered.collect::<Bag>())
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -951,14 +951,14 @@ impl EvalHaving {
 }
 
 impl Evaluable for EvalHaving {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let filtered = input_value
             .into_iter()
             .map(Value::coerce_to_tuple)
             .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
-        Some(Value::from(filtered.collect::<Bag>()))
+        Value::from(filtered.collect::<Bag>())
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -1031,12 +1031,12 @@ impl EvalOrderBy {
 }
 
 impl Evaluable for EvalOrderBy {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let mut values = input_value.into_iter().collect_vec();
         values.sort_by(|l, r| self.compare(l, r, ctx));
-        Some(Value::from(List::from(values)))
+        Value::from(List::from(values))
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -1053,7 +1053,7 @@ pub(crate) struct EvalLimitOffset {
 }
 
 impl Evaluable for EvalLimitOffset {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let empty_bindings = Tuple::new();
@@ -1096,8 +1096,8 @@ impl Evaluable for EvalLimitOffset {
 
         let offsetted = input_value.into_iter().skip(offset);
         match limit {
-            Some(n) => Some(collect(offsetted.take(n), ordered)),
-            None => Some(collect(offsetted, ordered)),
+            Some(n) => collect(offsetted.take(n), ordered),
+            None => collect(offsetted, ordered),
         }
     }
 
@@ -1122,7 +1122,7 @@ impl EvalSelectValue {
 }
 
 impl Evaluable for EvalSelectValue {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1133,8 +1133,8 @@ impl Evaluable for EvalSelectValue {
         });
 
         match ordered {
-            true => Some(Value::from(values.collect::<List>())),
-            false => Some(Value::from(values.collect::<Bag>())),
+            true => Value::from(values.collect::<List>()),
+            false => Value::from(values.collect::<Bag>()),
         }
     }
 
@@ -1160,7 +1160,7 @@ impl EvalSelect {
 }
 
 impl Evaluable for EvalSelect {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1180,8 +1180,8 @@ impl Evaluable for EvalSelect {
         });
 
         match ordered {
-            true => Some(Value::from(values.collect::<List>())),
-            false => Some(Value::from(values.collect::<Bag>())),
+            true => Value::from(values.collect::<List>()),
+            false => Value::from(values.collect::<Bag>()),
         }
     }
 
@@ -1204,7 +1204,7 @@ impl EvalSelectAll {
 }
 
 impl Evaluable for EvalSelectAll {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1217,8 +1217,8 @@ impl Evaluable for EvalSelectAll {
         });
 
         match ordered {
-            true => Some(Value::from(values.collect::<List>())),
-            false => Some(Value::from(values.collect::<Bag>())),
+            true => Value::from(values.collect::<List>()),
+            false => Value::from(values.collect::<Bag>()),
         }
     }
 
@@ -1243,10 +1243,10 @@ impl EvalExprQuery {
 }
 
 impl Evaluable for EvalExprQuery {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = self.input.take().unwrap_or(Value::Null).coerce_to_tuple();
 
-        Some(self.expr.evaluate(&input_value, ctx).into_owned())
+        self.expr.evaluate(&input_value, ctx).into_owned()
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
@@ -1267,14 +1267,14 @@ impl EvalDistinct {
 }
 
 impl Evaluable for EvalDistinct {
-    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Option<Value> {
+    fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().unique();
         match ordered {
-            true => Some(Value::from(values.collect::<List>())),
-            false => Some(Value::from(values.collect::<Bag>())),
+            true => Value::from(values.collect::<List>()),
+            false => Value::from(values.collect::<Bag>()),
         }
     }
 
@@ -1290,8 +1290,8 @@ pub(crate) struct EvalSink {
 }
 
 impl Evaluable for EvalSink {
-    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Option<Value> {
-        self.input.take()
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
+        self.input.take().unwrap_or_else(|| Missing)
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
