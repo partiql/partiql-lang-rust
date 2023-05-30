@@ -33,9 +33,15 @@ pub struct EvalErr {
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum EvaluationError {
+    /// Internal error that was not due to user input or API violation.
+    #[error("Illegal State: {0}")]
+    IllegalState(String),
     /// Malformed evaluation plan with graph containing cycle.
     #[error("Evaluation Error: invalid evaluation plan detected `{0}`")]
     InvalidEvaluationPlan(String),
+    /// Feature has not yet been implemented.
+    #[error("Not yet implemented: {0}")]
+    NotYetImplemented(String),
 }
 
 /// Used when an error occurs during the the logical to eval plan conversion. Allows the conversion

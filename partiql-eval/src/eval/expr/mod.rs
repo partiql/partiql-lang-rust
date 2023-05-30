@@ -1,4 +1,5 @@
 use crate::env::Bindings;
+use crate::error::EvaluationError;
 use crate::eval::evaluable::SetQuantifier;
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::EvalContext;
@@ -12,6 +13,7 @@ use partiql_value::{
 };
 use regex::{Regex, RegexBuilder};
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
@@ -246,7 +248,12 @@ impl EvalExpr for EvalIsTypeExpr {
         let result = match self.is_type {
             Type::NullType => matches!(expr, Missing | Null),
             Type::MissingType => matches!(expr, Missing),
-            _ => todo!("Implement `IS` for other types"),
+            _ => {
+                ctx.add_error(EvaluationError::NotYetImplemented(
+                    "`IS` for other types".to_string(),
+                ));
+                false
+            }
         };
 
         Cow::Owned(result.into())
@@ -377,7 +384,12 @@ impl EvalExpr for EvalBinOpExpr {
                 }
                 _ => Null,
             },
-            EvalBinOp::Exp => todo!("Exponentiation"),
+            EvalBinOp::Exp => {
+                ctx.add_error(EvaluationError::NotYetImplemented(
+                    "Exponentiation".to_string(),
+                ));
+                Missing
+            }
         };
         Cow::Owned(result)
     }
@@ -411,14 +423,10 @@ pub(crate) struct EvalLikeMatch {
 
 // TODO make configurable?
 // Limit chosen somewhat arbitrarily, but to be smaller than the default of `10 * (1 << 20)`
-const RE_SIZE_LIMIT: usize = 1 << 16;
+pub(crate) const RE_SIZE_LIMIT: usize = 1 << 16;
 
 impl EvalLikeMatch {
-    pub(crate) fn new(value: Box<dyn EvalExpr>, pattern: &str) -> Self {
-        let pattern = RegexBuilder::new(pattern)
-            .size_limit(RE_SIZE_LIMIT)
-            .build()
-            .expect("Like Pattern");
+    pub(crate) fn new(value: Box<dyn EvalExpr>, pattern: Regex) -> Self {
         EvalLikeMatch { value, pattern }
     }
 }
@@ -473,13 +481,22 @@ impl EvalExpr for EvalLikeNonStringNonLiteralMatch {
             (_, Null, _) => Null,
             (_, _, Null) => Null,
             (Value::String(v), Value::String(p), Value::String(e)) => {
-                assert!(e.chars().count() <= 1);
+                if e.chars().count() > 1 {
+                    ctx.add_error(EvaluationError::IllegalState(
+                        "escape longer than 1 character".to_string(),
+                    ));
+                }
                 let escape = e.chars().next();
                 let regex_pattern = RegexBuilder::new(&like_to_re_pattern(p, escape))
                     .size_limit(RE_SIZE_LIMIT)
-                    .build()
-                    .expect("Like Pattern");
-                Boolean(regex_pattern.is_match(v.as_ref()))
+                    .build();
+                match regex_pattern {
+                    Ok(pattern) => Boolean(pattern.is_match(v.as_ref())),
+                    Err(err) => {
+                        ctx.add_error(EvaluationError::IllegalState(err.to_string()));
+                        Missing
+                    }
+                }
             }
             _ => Missing,
         };
@@ -1071,10 +1088,8 @@ pub(crate) struct EvalFnExtractSecond {
     pub(crate) value: Box<dyn EvalExpr>,
 }
 
-fn total_seconds(second: u8, nanosecond: u32) -> Value {
-    let result = rust_decimal::Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9)
-        .expect("time as decimal");
-    Value::from(result)
+fn total_seconds(second: u8, nanosecond: u32) -> Option<Value> {
+    Decimal::from_f64(((second as f64 * 1e9) + nanosecond as f64) / 1e9).map(Value::from)
 }
 
 impl EvalExpr for EvalFnExtractSecond {
@@ -1084,11 +1099,35 @@ impl EvalExpr for EvalFnExtractSecond {
         let result = match value.borrow() {
             Null => Null,
             Value::DateTime(dt) => match dt.as_ref() {
-                DateTime::Time(t) => total_seconds(t.second(), t.nanosecond()),
-                DateTime::TimeWithTz(t, _) => total_seconds(t.second(), t.nanosecond()),
-                DateTime::Timestamp(tstamp) => total_seconds(tstamp.second(), tstamp.nanosecond()),
+                DateTime::Time(t) => {
+                    total_seconds(t.second(), t.nanosecond()).unwrap_or_else(|| {
+                        ctx.add_error(EvaluationError::IllegalState(format!(
+                            "Invalid number seconds: {t}"
+                        )));
+                        Missing
+                    })
+                }
+                DateTime::TimeWithTz(t, _) => total_seconds(t.second(), t.nanosecond())
+                    .unwrap_or_else(|| {
+                        ctx.add_error(EvaluationError::IllegalState(format!(
+                            "Invalid number seconds: {t}"
+                        )));
+                        Missing
+                    }),
+                DateTime::Timestamp(tstamp) => total_seconds(tstamp.second(), tstamp.nanosecond())
+                    .unwrap_or_else(|| {
+                        ctx.add_error(EvaluationError::IllegalState(format!(
+                            "Invalid number seconds: {tstamp}"
+                        )));
+                        Missing
+                    }),
                 DateTime::TimestampWithTz(tstamp) => {
-                    total_seconds(tstamp.second(), tstamp.nanosecond())
+                    total_seconds(tstamp.second(), tstamp.nanosecond()).unwrap_or_else(|| {
+                        ctx.add_error(EvaluationError::IllegalState(format!(
+                            "Invalid number seconds: {tstamp}"
+                        )));
+                        Missing
+                    })
                 }
                 DateTime::Date(_) => Missing,
             },

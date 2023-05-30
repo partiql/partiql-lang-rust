@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use petgraph::prelude::StableGraph;
+use regex::RegexBuilder;
 use std::collections::HashMap;
 
 use partiql_logical as logical;
@@ -26,7 +27,7 @@ use crate::eval::expr::{
     EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
     EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
     EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr,
-    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef,
+    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, RE_SIZE_LIMIT,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
@@ -388,10 +389,21 @@ impl<'c> EvaluatorPlanner<'c> {
                             self.errors.push(PlanningError::IllegalState(format!(
                                 "Invalid LIKE expression pattern: {escape}"
                             )));
+                            return Box::new(ErrorNode::new());
                         }
                         let escape = escape.chars().next();
                         let regex = like_to_re_pattern(pattern, escape);
-                        Box::new(EvalLikeMatch::new(value, &regex))
+                        let regex_pattern =
+                            RegexBuilder::new(&regex).size_limit(RE_SIZE_LIMIT).build();
+                        match regex_pattern {
+                            Ok(pattern) => Box::new(EvalLikeMatch::new(value, pattern)),
+                            Err(err) => {
+                                self.errors.push(PlanningError::IllegalState(format!(
+                                    "Invalid LIKE expression pattern: {regex}. Regex error: {err}"
+                                )));
+                                Box::new(ErrorNode::new())
+                            }
+                        }
                     }
                     Pattern::LikeNonStringNonLiteral(logical::LikeNonStringNonLiteralMatch {
                         pattern,

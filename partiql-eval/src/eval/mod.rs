@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use std::cell::RefCell;
 
 use std::fmt::Debug;
 
@@ -42,7 +43,7 @@ impl EvalPlan {
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
     /// operators.
     pub fn execute_mut(&mut self, bindings: MapBindings<Value>) -> Result<Evaluated, EvalErr> {
-        let ctx: Box<dyn EvalContext> = Box::new(BasicContext { bindings });
+        let ctx: Box<dyn EvalContext> = Box::new(BasicContext::new(bindings));
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
         // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
@@ -55,10 +56,21 @@ impl EvalPlan {
                 let plan_graph = &mut self.0;
                 let mut result = None;
                 for idx in ops.into_iter() {
-                    let src = plan_graph
-                        .node_weight_mut(idx)
-                        .expect("Error in retrieving node");
-                    result = src.evaluate(&*ctx);
+                    let src = plan_graph.node_weight_mut(idx);
+                    if src.is_none() {
+                        return Err(EvalErr {
+                            errors: vec![EvaluationError::IllegalState(
+                                "Error in retrieving node".to_string(),
+                            )],
+                        });
+                    }
+                    result = src.unwrap().evaluate(&*ctx);
+
+                    if ctx.has_errors() {
+                        return Err(EvalErr {
+                            errors: ctx.errors(),
+                        });
+                    }
 
                     let destinations: Vec<(usize, (u8, NodeIndex))> = plan_graph
                         .edges_directed(idx, Outgoing)
@@ -71,17 +83,40 @@ impl EvalPlan {
                             result.take()
                         } else {
                             result.clone()
+                        };
+                        match res {
+                            None => {
+                                return Err(EvalErr {
+                                    errors: vec![EvaluationError::IllegalState(
+                                        "Error in retrieving source value".to_string(),
+                                    )],
+                                })
+                            }
+                            Some(res) => {
+                                let dst = plan_graph.node_weight_mut(dst_id);
+                                if dst.is_none() {
+                                    return Err(EvalErr {
+                                        errors: vec![EvaluationError::IllegalState(
+                                            "Error in retrieving node".to_string(),
+                                        )],
+                                    });
+                                }
+                                dst.unwrap().update_input(res, branch_num);
+                            }
                         }
-                        .expect("Error in retrieving source value");
-
-                        let dst = plan_graph
-                            .node_weight_mut(dst_id)
-                            .expect("Error in retrieving node");
-                        dst.update_input(res, branch_num);
                     }
                 }
-
-                let result = result.expect("Error in retrieving eval output");
+                let result = match result {
+                    None => {
+                        return Err(EvalErr {
+                            errors: vec![EvaluationError::IllegalState(
+                                "Error in retrieving eval output".to_string(),
+                            )],
+                        })
+                    }
+                    Some(val) => val,
+                };
+                // TODO: decide on `evaluate`'s type. Currently returns an `Option`. For error handling, perhaps a `Result` type is better here.
                 Ok(Evaluated { result })
             }
             Err(e) => Err(EvalErr {
@@ -108,21 +143,40 @@ pub struct Evaluated {
 /// Represents an evaluation context that is used during evaluation of a plan.
 pub trait EvalContext {
     fn bindings(&self) -> &dyn Bindings<Value>;
+    fn add_error(&self, error: EvaluationError);
+    fn has_errors(&self) -> bool;
+    fn errors(&self) -> Vec<EvaluationError>;
 }
 
 #[derive(Default, Debug)]
 pub struct BasicContext {
     bindings: MapBindings<Value>,
+    errors: RefCell<Vec<EvaluationError>>,
 }
 
 impl BasicContext {
     pub fn new(bindings: MapBindings<Value>) -> Self {
-        BasicContext { bindings }
+        BasicContext {
+            bindings,
+            errors: RefCell::new(vec![]),
+        }
     }
 }
 
 impl EvalContext for BasicContext {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
+    }
+
+    fn add_error(&self, error: EvaluationError) {
+        self.errors.borrow_mut().push(error)
+    }
+
+    fn has_errors(&self) -> bool {
+        !self.errors.borrow().is_empty()
+    }
+
+    fn errors(&self) -> Vec<EvaluationError> {
+        self.errors.take()
     }
 }
