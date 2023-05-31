@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING:* partiql-eval: `evaluate` on `Evaluable` returns a `Value` rather than an `Option<Value>`
+- *BREAKING:* partiql-ast: changes the modeling of Bag/List/Tuple literals
 ### Added
 - Ability to add and view errors during evaluation with partiql-eval's `EvalContext`
+- AST sub-trees representing literal values are lowered to `Value`s during planning
 ### Fixes
 
 ## [0.4.1] - 2023-05-25

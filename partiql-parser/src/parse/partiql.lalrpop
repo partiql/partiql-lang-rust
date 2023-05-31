@@ -9,7 +9,7 @@ use partiql_ast::ast;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_query, CallSite};
+use crate::parse::parse_util::{strip_query, CallSite, Attrs, Synth};
 use crate::parse::parser_state::{ParserState, IdGenerator};
 
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
@@ -149,7 +149,7 @@ Values: ast::AstNode<ast::QuerySet> = {
 #[inline]
 ValueRow: Box<ast::Expr> = {
     "(" <e:ExprQuery> ")" => Box::new(*e),
-    <array:ExprTermCollection> => Box::new(array)
+    <array:ExprTermCollection> => Box::new(array.data)
 }
 
 #[inline]
@@ -551,284 +551,291 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 
 
 ExprQuery: Box<ast::Expr> = {
-    <e:ExprPrecedence15> => Box::new(e)
+    <e:ExprQuerySynth> => e.data,
 }
 
-ExprPrecedence15: ast::Expr = {
+ExprQuerySynth: Synth<Box<ast::Expr>> = {
+    <e:ExprPrecedence15> => {
+        let Synth{data, attrs} = e;
+        Synth::new(Box::new(data), attrs)
+    }
+}
+
+ExprPrecedence15: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence15> "OR" <r:ExprPrecedence14> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Or,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence14>,
 }
 
-ExprPrecedence14: ast::Expr = {
+ExprPrecedence14: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence14> "AND" <r:ExprPrecedence13> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::And,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence13>,
 }
 
-ExprPrecedence13: ast::Expr = {
+ExprPrecedence13: Synth<ast::Expr> = {
     <lo:@L> "NOT" <r:ExprPrecedence13> <hi:@R> =>
-       ast::Expr::UniOp(
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
-               expr: Box::new(r),
+               expr: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence12>,
 }
 
-ExprPrecedence12: ast::Expr = {
+ExprPrecedence12: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence12> "IS" <r:ExprPrecedence11> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Is,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence12> "IS" "NOT" <r:ExprPrecedence11> <hi:@R> => {
        let is =  ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Is,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
        );
-       ast::Expr::UniOp(
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(is),
            }, lo..hi)
-       )
+       ))
     },
     <ExprPrecedence11>
 }
 
-ExprPrecedence11: ast::Expr = {
+ExprPrecedence11: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence11> "=" <r:ExprPrecedence10> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Eq,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence11> "!=" <r:ExprPrecedence10> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Ne,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence11> "<>" <r:ExprPrecedence10> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Ne,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence10>,
 }
 
-ExprPrecedence10: ast::Expr = {
+ExprPrecedence10: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence09> "<" <r:ExprPrecedence09> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Lt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence09> ">" <r:ExprPrecedence09> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Gt,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence09> "<=" <r:ExprPrecedence09> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Lte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence09> ">=" <r:ExprPrecedence09> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Gte,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence09>,
 }
 
-ExprPrecedence09: ast::Expr = {
+ExprPrecedence09: Synth<ast::Expr> = {
     <lo:@L> <value:ExprPrecedence09> "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> =>
-       ast::Expr::Between( state.node(ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }, lo..hi) ),
+       Synth::empty(ast::Expr::Between( state.node(ast::Between{ value: Box::new(value.data), from: Box::new(from.data), to: Box::new(to.data) }, lo..hi) )),
     <lo:@L> <value:ExprPrecedence09> "NOT" "BETWEEN" <from:ExprPrecedence08> "AND" <to:ExprPrecedence08> <hi:@R> => {
-       let between = ast::Expr::Between( state.node(ast::Between{ value: Box::new(value), from: Box::new(from), to: Box::new(to) }, lo..hi) );
-       ast::Expr::UniOp(
+       let between = ast::Expr::Between( state.node(ast::Between{ value: Box::new(value.data), from: Box::new(from.data), to: Box::new(to.data) }, lo..hi) );
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(between),
            }, lo..hi)
-       )
+       ))
     },
     <lo:@L> <value:ExprPrecedence09> "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R> =>
-       ast::Expr::Like( state.node(ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }, lo..hi) ),
+       Synth::empty(ast::Expr::Like( state.node(ast::Like{ value: Box::new(value.data), pattern: Box::new(pattern.data), escape }, lo..hi) )),
     <lo:@L> <value:ExprPrecedence09> "NOT" "LIKE" <pattern:ExprPrecedence08> <escape:LikeEscape?> <hi:@R>  => {
-       let like = ast::Expr::Like( state.node(ast::Like{ value: Box::new(value), pattern: Box::new(pattern), escape }, lo..hi) );
-       ast::Expr::UniOp(
+       let like = ast::Expr::Like( state.node(ast::Like{ value: Box::new(value.data), pattern: Box::new(pattern.data), escape }, lo..hi) );
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(like),
            }, lo..hi)
-       )
+       ))
     },
     <lo:@L> <l:ExprPrecedence09> "IN" <r:ExprPrecedence08> <hi:@R> =>
-       ast::Expr::In( state.node(ast::In{ lhs: Box::new(l), rhs: Box::new(r) }, lo..hi) ),
+       Synth::empty(ast::Expr::In( state.node(ast::In{ lhs: Box::new(l.data), rhs: Box::new(r.data) }, lo..hi) )),
     <lo:@L> <l:ExprPrecedence09> "NOT" "IN" <r:ExprPrecedence08> <hi:@R> => {
-       let in_expr = ast::Expr::In( state.node(ast::In{ lhs: Box::new(l), rhs: Box::new(r) }, lo..hi) );
-       ast::Expr::UniOp(
+       let in_expr = ast::Expr::In( state.node(ast::In{ lhs: Box::new(l.data), rhs: Box::new(r.data) }, lo..hi) );
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Not,
                expr: Box::new(in_expr),
            }, lo..hi)
-       )
+       ))
     },
     <ExprPrecedence08>,
 }
 
 #[inline]
 LikeEscape: Box<ast::Expr> = {
-    "ESCAPE" <e:ExprPrecedence07> => Box::new(e)
+    "ESCAPE" <e:ExprPrecedence07> => Box::new(e.data)
 }
 
-ExprPrecedence08: ast::Expr = {
+ExprPrecedence08: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence08> "||" <r:ExprPrecedence07> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Concat,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence07>,
 }
 
-ExprPrecedence07: ast::Expr = {
+ExprPrecedence07: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence07> "+" <r:ExprPrecedence06> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Add,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence07> "-" <r:ExprPrecedence06> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Sub,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence06>,
 }
 
-ExprPrecedence06: ast::Expr = {
+ExprPrecedence06: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence06> "*" <r:ExprPrecedence05> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Mul,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence06> "/" <r:ExprPrecedence05> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Div,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> <l:ExprPrecedence06> "%" <r:ExprPrecedence05> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Mod,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence05>,
 }
 
-ExprPrecedence05: ast::Expr = {
+ExprPrecedence05: Synth<ast::Expr> = {
     <lo:@L> <l:ExprPrecedence05> "^" <r:ExprPrecedence04> <hi:@R> =>
-       ast::Expr::BinOp(
+       Synth::empty(ast::Expr::BinOp(
            state.node(ast::BinOp {
                kind: ast::BinOpKind::Exp,
-               lhs: Box::new(l),
-               rhs: Box::new(r),
+               lhs: Box::new(l.data),
+               rhs: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence04>,
 }
 
-ExprPrecedence04: ast::Expr = {
+ExprPrecedence04: Synth<ast::Expr> = {
     <lo:@L> "+" <r:ExprPrecedence04> <hi:@R> =>
-       ast::Expr::UniOp(
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Pos,
-               expr: Box::new(r),
+               expr: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <lo:@L> "-" <r:ExprPrecedence04> <hi:@R> =>
-       ast::Expr::UniOp(
+       Synth::empty(ast::Expr::UniOp(
            state.node(ast::UniOp {
                kind: ast::UniOpKind::Neg,
-               expr: Box::new(r),
+               expr: Box::new(r.data),
            }, lo..hi)
-       ),
+       )),
     <ExprPrecedence03>,
 }
 
 #[inline]
-ExprPrecedence03: ast::Expr = {
-    <casexpr:CaseExpr> => ast::Expr::Case(casexpr),
+ExprPrecedence03: Synth<ast::Expr> = {
+    <casexpr:CaseExpr> => Synth::empty(ast::Expr::Case(casexpr)),
     <ExprPrecedence02>,
 }
 
-ExprPrecedence02: ast::Expr = {
-    <lo:@L> <expr:PathExpr> <hi:@R> => ast::Expr::Path( state.node(expr, lo..hi) ),
+ExprPrecedence02: Synth<ast::Expr> = {
+    <lo:@L> <expr:PathExpr> <hi:@R> => Synth::empty(ast::Expr::Path( state.node(expr, lo..hi) )),
     <ExprPrecedence01>,
 }
 
 PathExpr: ast::Path = {
-    <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l), steps },
+    <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l.data), steps },
     <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
         let step = ast::PathStep::PathWildCard;
         ast::Path {
-            root: Box::new(l),
+            root: Box::new(l.data),
             steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
@@ -840,12 +847,12 @@ PathExpr: ast::Path = {
         );
 
         ast::Path {
-            root: Box::new(l),
+            root: Box::new(l.data),
             steps: std::iter::once(step).chain(s.into_iter()).collect()
         }
     },
     <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
-        root:Box::new(l), steps:vec![ast::PathStep::PathWildCard]
+        root:Box::new(l.data), steps:vec![ast::PathStep::PathWildCard]
     },
     <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" => {
          let step = ast::PathStep::PathExpr(
@@ -854,33 +861,53 @@ PathExpr: ast::Path = {
              });
 
         ast::Path {
-            root:Box::new(l), steps:vec![step]
+            root:Box::new(l.data), steps:vec![step]
         }
     },
 }
 
 #[inline]
-ExprPrecedence01: ast::Expr = {
+ExprPrecedence01: Synth<ast::Expr> = {
     <lo:@L> <call:FunctionCall> <hi:@R> => {
-        match call {
+        let call = match call {
             CallSite::Call(call) => ast::Expr::Call( state.node(call, lo..hi) ),
             CallSite::CallAgg(call_agg)  => ast::Expr::CallAgg( state.node(call_agg, lo..hi) ),
-        }
+        };
+        Synth::empty(call)
     },
     <ExprTerm>,
 }
 
-ExprTerm: ast::Expr = {
-    <SubQuery>,
-    <lo:@L> <lit:Literal> <hi:@R> => ast::Expr::Lit( state.node(lit, lo..hi) ),
-    <VarRefExpr>,
-    <ExprTermCollection>,
-    <ExprTermTuple>,
-    ! => { state.errors.push(<>); ast::Expr::Error},
+ExprTerm: Synth<ast::Expr> = {
+    <s:SubQuery> => Synth::empty(s),
+    <lo:@L> <lit:Literal> <hi:@R> => Synth::new(ast::Expr::Lit( state.node(lit, lo..hi) ), Attrs::LIT),
+    <v:VarRefExpr> => Synth::empty(v),
+    <lo:@L> <c:ExprTermCollection> <hi:@R> => {
+        if c.attrs.contains(Attrs::LIT) {
+            match c.data {
+                ast::Expr::List(l) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::ListLit(l), lo..hi) ), Attrs::LIT),
+                ast::Expr::Bag(b) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::BagLit(b), lo..hi) ), Attrs::LIT),
+                _ => unreachable!(),
+            }
+        } else {
+            c
+        }
+    },
+    <lo:@L> <t:ExprTermTuple> <hi:@R> => {
+        if t.attrs.contains(Attrs::LIT) {
+            match t.data {
+                ast::Expr::Struct(s) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::StructLit(s), lo..hi) ), Attrs::LIT),
+                _ => unreachable!(),
+            }
+        } else {
+            t
+        }
+    },
+    ! => { state.errors.push(<>); Synth::empty(ast::Expr::Error)},
 }
 
 SubQuery: ast::Expr = {
-    "(" <q:Query> ")" =>  *strip_query(q),
+    "(" <q:Query> ")" => *strip_query(q),
 }
 
 SubQueryAst: ast::AstNode<ast::Expr> = {
@@ -929,39 +956,76 @@ ExprPairWhenThen: ast::ExprPair = {
 }
 
 #[inline]
-ExprTermCollection: ast::Expr = {
+ExprTermCollection: Synth<ast::Expr> = {
       <ExprTermArray>,
       <ExprTermBag>,
 }
 
 #[inline]
-ExprTermArray: ast::Expr = {
+ExprTermArray: Synth<ast::Expr> = {
     <ExprTermArrayBrackets>,
     <ExprTermArrayParens>
 }
 
 #[inline]
-ExprTermArrayBrackets: ast::Expr = {
-    <lo:@L> "[" <values:CommaTermStar<ExprQuery>> "]" <hi:@R> => ast::Expr::List( state.node(ast::List{values}, lo..hi) )
+ExprTermArrayBrackets: Synth<ast::Expr> = {
+    <lo:@L> "[" <values:(<ExprQuerySynth> ",")*> <value:ExprQuerySynth?> "]" <hi:@R> => {
+        let values = match value {
+            None => values.into_iter().collect(),
+            Some(v) => values.into_iter().chain( std::iter::once(v) ).collect(),
+        };
+        let Synth{data, attrs} = values;
+        let data = ast::Expr::List( state.node(ast::List{values:data}, lo..hi) );
+        Synth{data, attrs}
+    }
 }
 
 #[inline]
-ExprTermArrayParens: ast::Expr = {
-    <lo:@L> "(" <values:CommaTermPlus<ExprQuery>> ")" <hi:@R> => ast::Expr::List( state.node(ast::List{values}, lo..hi) )
+ExprTermArrayParens: Synth<ast::Expr> = {
+    <lo:@L> "(" <values:(<ExprQuerySynth> ",")+> <value:ExprQuerySynth?> ")" <hi:@R> => {
+        let values = match value {
+            None => values.into_iter().collect(),
+            Some(v) => values.into_iter().chain( std::iter::once(v) ).collect(),
+        };
+        let Synth{data, attrs} = values;
+        let data = ast::Expr::List( state.node(ast::List{values:data}, lo..hi) );
+        Synth{data, attrs}
+    }
 }
 
 #[inline]
-ExprTermBag: ast::Expr = {
-    <lo:@L> "<<" <values:CommaTermStar<ExprQuery>> ">>" <hi:@R> => ast::Expr::Bag( state.node(ast::Bag{values}, lo..hi) )
+ExprTermBag: Synth<ast::Expr> = {
+    <lo:@L> "<<" <values:(<ExprQuerySynth> ",")*> <value:ExprQuerySynth?> ">>" <hi:@R> => {
+        let values = match value {
+            None => values.into_iter().collect(),
+            Some(v) => values.into_iter().chain( std::iter::once(v) ).collect(),
+        };
+        let Synth{data, attrs} = values;
+        let data = ast::Expr::Bag( state.node(ast::Bag{values:data}, lo..hi) );
+        Synth{data, attrs}
+    }
 }
 
 #[inline]
-ExprTermTuple: ast::Expr = {
-    <lo:@L> "{" <fields:CommaTermStar<ExprPair>> "}" <hi:@R> => ast::Expr::Struct( state.node(ast::Struct{fields}, lo..hi) )
+ExprTermTuple: Synth<ast::Expr> = {
+    <lo:@L> "{" <fields:(<ExprPair> ",")*> <field:ExprPair?> "}" <hi:@R> => {
+        let fields = match field {
+            None => fields.into_iter().collect(),
+            Some(f) => fields.into_iter().chain( std::iter::once(f) ).collect(),
+        };
+        let Synth{data, attrs} = fields;
+        let data = ast::Expr::Struct( state.node(ast::Struct{fields:data}, lo..hi) );
+        Synth{data, attrs}
+    }
 }
 
-ExprPair: ast::ExprPair = {
-    <lo:@L> <first:ExprQuery> ":" <second:ExprQuery> <hi:@R> => ast::ExprPair{ first, second },
+ExprPair: Synth<ast::ExprPair> = {
+    <lo:@L> <first:ExprQuerySynth> ":" <second:ExprQuerySynth> <hi:@R> => {
+        let Synth{data:first, attrs: fattrs} = first;
+        let Synth{data:second, attrs: sattrs} = second;
+
+        Synth{ data: ast::ExprPair{ first, second }, attrs: fattrs.synthesize(sattrs) }
+    }
 }
 
 #[inline]

@@ -444,17 +444,14 @@ pub enum Lit {
     #[visit(skip)]
     HexStringLit(String),
     #[visit(skip)]
-    CollectionLit(CollectionLit),
+    StructLit(AstNode<Struct>),
+    #[visit(skip)]
+    BagLit(AstNode<Bag>),
+    #[visit(skip)]
+    ListLit(AstNode<List>),
     /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
     #[visit(skip)]
     TypedLit(String, Type),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CollectionLit {
-    ArrayLit(String),
-    BagLit(String),
 }
 
 #[derive(Visit, Clone, Debug, PartialEq, Eq)]
