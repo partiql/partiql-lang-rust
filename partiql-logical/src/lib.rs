@@ -638,7 +638,6 @@ pub struct CallExpr {
 pub enum CallName {
     Lower,
     Upper,
-    CharLength,
     OctetLength,
     BitLength,
     LTrim,

@@ -20,17 +20,17 @@ use crate::eval::evaluable::{
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
-    EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength,
-    EvalFnCollAvg, EvalFnCollCount, EvalFnCollMax, EvalFnCollMin, EvalFnCollSum, EvalFnExists,
-    EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
-    EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
-    EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
-    EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
+    EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCollAvg,
+    EvalFnCollCount, EvalFnCollMax, EvalFnCollMin, EvalFnCollSum, EvalFnExists, EvalFnExtractDay,
+    EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth, EvalFnExtractSecond,
+    EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear, EvalFnLower,
+    EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition, EvalFnRtrim,
+    EvalFnScalarExpr, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
     EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr,
     EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, RE_SIZE_LIMIT,
 };
 use crate::eval::EvalPlan;
-use partiql_catalog::Catalog;
+use partiql_catalog::{Catalog, FunctionEntryFunction};
 use partiql_value::Value::Null;
 
 #[macro_export]
@@ -554,12 +554,6 @@ impl<'c> EvaluatorPlanner<'c> {
                             value: args.pop().unwrap(),
                         })
                     }
-                    CallName::CharLength => {
-                        correct_num_args_or_err!(self, args, 1, "char_length");
-                        Box::new(EvalFnCharLength {
-                            value: args.pop().unwrap(),
-                        })
-                    }
                     CallName::OctetLength => {
                         correct_num_args_or_err!(self, args, 1, "octet_length");
                         Box::new(EvalFnOctetLength {
@@ -744,10 +738,17 @@ impl<'c> EvaluatorPlanner<'c> {
                             )));
                             Box::new(ErrorNode::new())
                         }
-                        Some(function) => {
-                            let eval = function.plan_eval();
-                            Box::new(EvalFnBaseTableExpr { args, expr: eval })
-                        }
+                        Some(entry) => match entry.function {
+                            FunctionEntryFunction::Table(tf) => {
+                                let eval = tf.info.plan_eval();
+                                Box::new(EvalFnBaseTableExpr { args, expr: eval })
+                            }
+                            FunctionEntryFunction::Scalar(sf) => {
+                                let eval = sf.info.plan_eval();
+                                Box::new(EvalFnScalarExpr { args, expr: eval })
+                            }
+                            FunctionEntryFunction::Aggregate() => todo!(),
+                        },
                     },
                 }
             }

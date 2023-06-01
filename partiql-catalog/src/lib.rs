@@ -2,6 +2,7 @@ use crate::call_defs::CallDef;
 use partiql_value::Value;
 use std::borrow::Cow;
 
+use crate::builtins::CharLenFunction;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 use unicase::UniCase;
 
+mod builtins;
 pub mod call_defs;
 
 pub trait Extension: Debug {
@@ -46,6 +48,9 @@ pub type BaseTableExprResultValueIter<'a> =
 pub type BaseTableExprResult<'a> =
     Result<BaseTableExprResultValueIter<'a>, BaseTableExprResultError>;
 
+pub type ScalarExprResultError = Box<dyn Error>;
+pub type ScalarExprResult<'a> = Result<Cow<'a, Value>, ScalarExprResultError>;
+
 pub trait BaseTableExpr: Debug {
     fn evaluate(&self, args: &[Cow<Value>]) -> BaseTableExprResult;
 }
@@ -55,14 +60,34 @@ pub trait BaseTableFunctionInfo: Debug {
     fn plan_eval(&self) -> Box<dyn BaseTableExpr>;
 }
 
+pub trait ScalarExpr: Debug {
+    fn evaluate(&self, args: &[Cow<Value>]) -> ScalarExprResult;
+}
+
+pub trait ScalarFunctionInfo: Debug {
+    fn call_def(&self) -> &CallDef;
+    fn plan_eval(&self) -> Box<dyn ScalarExpr>;
+}
+
 #[derive(Debug)]
 pub struct TableFunction {
-    info: Box<dyn BaseTableFunctionInfo>,
+    pub info: Box<dyn BaseTableFunctionInfo>,
 }
 
 impl TableFunction {
     pub fn new(info: Box<dyn BaseTableFunctionInfo>) -> Self {
         TableFunction { info }
+    }
+}
+
+#[derive(Debug)]
+pub struct ScalarFunction {
+    pub info: Box<dyn ScalarFunctionInfo>,
+}
+
+impl ScalarFunction {
+    pub fn new(info: Box<dyn ScalarFunctionInfo>) -> Self {
+        ScalarFunction { info }
     }
 }
 
@@ -87,7 +112,7 @@ pub enum CatalogError {
 }
 
 pub trait Catalog: Debug {
-    fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError>;
+    fn add_function(&mut self, entry: FunctionEntryFunction) -> Result<ObjectId, CatalogError>;
 
     fn get_function(&self, name: &str) -> Option<FunctionEntry>;
 }
@@ -96,13 +121,13 @@ pub trait Catalog: Debug {
 #[allow(dead_code)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,
-    function: &'a FunctionEntryFunction,
+    pub function: &'a FunctionEntryFunction,
 }
 
 #[derive(Debug)]
 pub enum FunctionEntryFunction {
     Table(TableFunction),
-    Scalar(),
+    Scalar(ScalarFunction),
     Aggregate(),
 }
 
@@ -110,15 +135,7 @@ impl<'a> FunctionEntry<'a> {
     pub fn call_def(&'a self) -> &'a CallDef {
         match &self.function {
             FunctionEntryFunction::Table(tf) => tf.info.call_def(),
-            FunctionEntryFunction::Scalar() => todo!(),
-            FunctionEntryFunction::Aggregate() => todo!(),
-        }
-    }
-
-    pub fn plan_eval(&'a self) -> Box<dyn BaseTableExpr> {
-        match &self.function {
-            FunctionEntryFunction::Table(tf) => tf.info.plan_eval(),
-            FunctionEntryFunction::Scalar() => todo!(),
+            FunctionEntryFunction::Scalar(sf) => sf.info.call_def(),
             FunctionEntryFunction::Aggregate() => todo!(),
         }
     }
@@ -133,24 +150,31 @@ pub struct PartiqlCatalog {
 
 impl Default for PartiqlCatalog {
     fn default() -> Self {
-        PartiqlCatalog {
+        let mut default = PartiqlCatalog {
             functions: Default::default(),
-
             id: CatalogId(1),
-        }
+        };
+        default
+            .add_function(FunctionEntryFunction::Scalar(ScalarFunction::new(
+                Box::new(CharLenFunction::new()),
+            )))
+            .expect("TODO: panic message");
+        default
     }
 }
 
 impl PartiqlCatalog {}
 
 impl Catalog for PartiqlCatalog {
-    fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError> {
-        let call_def = info.info.call_def();
+    fn add_function(&mut self, entry: FunctionEntryFunction) -> Result<ObjectId, CatalogError> {
+        let call_def = match &entry {
+            FunctionEntryFunction::Table(tf) => tf.info.call_def(),
+            FunctionEntryFunction::Scalar(sf) => sf.info.call_def(),
+            FunctionEntryFunction::Aggregate() => todo!(),
+        };
         let names = call_def.names.clone();
         if let Some((name, aliases)) = names.split_first() {
-            let id = self
-                .functions
-                .add(name, aliases, FunctionEntryFunction::Table(info))?;
+            let id = self.functions.add(name, aliases, entry)?;
             Ok(ObjectId {
                 catalog_id: self.id,
                 entry_id: id,
@@ -194,7 +218,7 @@ impl<T> Default for CatalogEntrySet<T> {
 }
 
 impl<T> CatalogEntrySet<T> {
-    fn add(&mut self, name: &str, _aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
+    fn add(&mut self, name: &str, aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
         let name = UniCase::from(name);
         if self.by_name.contains_key(&name) {
             return Err(CatalogError::EntryExists(name.to_string()));
@@ -203,6 +227,10 @@ impl<T> CatalogEntrySet<T> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).into();
         if let Some(_old_val) = self.entries.insert(id, info) {
             return Err(CatalogError::Unknown);
+        }
+
+        for &alias in aliases {
+            self.by_name.insert(alias.into(), id);
         }
 
         self.by_name.insert(name, id);

@@ -4,7 +4,7 @@ use crate::eval::evaluable::SetQuantifier;
 use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::EvalContext;
 use itertools::Itertools;
-use partiql_catalog::BaseTableExpr;
+use partiql_catalog::{BaseTableExpr, ScalarExpr};
 use partiql_logical::Type;
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{
@@ -563,22 +563,6 @@ impl EvalExpr for EvalFnUpper {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
             s.to_uppercase().into()
-        });
-        Cow::Owned(transformed)
-    }
-}
-
-/// Represents a built-in character length string function, e.g. `char_length('123456789')`.
-#[derive(Debug)]
-pub(crate) struct EvalFnCharLength {
-    pub(crate) value: Box<dyn EvalExpr>,
-}
-
-impl EvalExpr for EvalFnCharLength {
-    #[inline]
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let transformed = string_transform(self.value.evaluate(bindings, ctx).as_ref(), |s| {
-            s.chars().count().into()
         });
         Cow::Owned(transformed)
     }
@@ -1471,5 +1455,28 @@ impl EvalExpr for EvalFnBaseTableExpr {
             }
         };
         Cow::Owned(result)
+    }
+}
+
+/// Represents a Scalar function expr
+#[derive(Debug)]
+pub(crate) struct EvalFnScalarExpr {
+    pub(crate) args: Vec<Box<dyn EvalExpr>>,
+    pub(crate) expr: Box<dyn ScalarExpr>,
+}
+
+impl EvalExpr for EvalFnScalarExpr {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.evaluate(bindings, ctx))
+            .collect_vec();
+        let results = self.expr.evaluate(&args);
+        match results {
+            Ok(val) => val,
+            Err(_) => todo!("Plumb through errors"),
+        }
     }
 }

@@ -9,21 +9,6 @@ use std::fmt::Debug;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use unicase::UniCase;
 
-fn function_call_def_char_len() -> CallDef {
-    CallDef {
-        names: vec!["char_length", "character_length"],
-        overloads: vec![CallSpec {
-            input: vec![CallSpecArg::Positional],
-            output: Box::new(|args| {
-                logical::ValueExpr::Call(logical::CallExpr {
-                    name: logical::CallName::CharLength,
-                    arguments: args,
-                })
-            }),
-        }],
-    }
-}
-
 fn function_call_def_octet_len() -> CallDef {
     CallDef {
         names: vec!["octet_length"],
@@ -677,7 +662,6 @@ pub fn function_call_def() -> FnSymTab {
     let mut synonyms: HashMap<UniCase<String>, UniCase<String>> = HashMap::new();
 
     for def in [
-        function_call_def_char_len(),
         function_call_def_octet_len(),
         function_call_def_bit_len(),
         function_call_def_lower(),

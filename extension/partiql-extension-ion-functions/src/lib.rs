@@ -1,10 +1,10 @@
 use ion_rs::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
-use partiql_catalog::TableFunction;
 use partiql_catalog::{
     BaseTableExpr, BaseTableExprResult, BaseTableExprResultError, BaseTableExprResultValueIter,
     BaseTableFunctionInfo, Catalog,
 };
+use partiql_catalog::{FunctionEntryFunction, TableFunction};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical as logical;
@@ -53,7 +53,9 @@ impl partiql_catalog::Extension for IonExtension {
     }
 
     fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>> {
-        match catalog.add_table_function(TableFunction::new(Box::new(ReadIonFunction::new()))) {
+        match catalog.add_function(FunctionEntryFunction::Table(TableFunction::new(Box::new(
+            ReadIonFunction::new(),
+        )))) {
             Ok(_) => Ok(()),
             Err(e) => Err(Box::new(e) as Box<dyn Error>),
         }
