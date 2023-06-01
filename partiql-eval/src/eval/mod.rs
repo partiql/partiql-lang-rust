@@ -34,10 +34,29 @@ impl Default for EvalPlan {
     }
 }
 
+#[inline]
+fn err_illegal_state(msg: impl AsRef<str>) -> EvalErr {
+    EvalErr {
+        errors: vec![EvaluationError::IllegalState(msg.as_ref().to_string())],
+    }
+}
+
 impl EvalPlan {
     /// Creates a new evaluation plan.
     fn new() -> Self {
         EvalPlan(StableGraph::<Box<dyn Evaluable>, u8, Directed>::new())
+    }
+
+    #[inline]
+    fn plan_graph(&mut self) -> &mut StableGraph<Box<dyn Evaluable>, u8> {
+        &mut self.0
+    }
+
+    #[inline]
+    fn get_node(&mut self, idx: NodeIndex) -> Result<&mut Box<dyn Evaluable>, EvalErr> {
+        self.plan_graph()
+            .node_weight_mut(idx)
+            .ok_or_else(|| err_illegal_state("Error in retrieving node"))
     }
 
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
@@ -50,81 +69,45 @@ impl EvalPlan {
         // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
         // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
         // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
-        let sorted_ops = toposort(&self.0, None);
-        match sorted_ops {
-            Ok(ops) => {
-                let plan_graph = &mut self.0;
-                let mut result = None;
-                for idx in ops.into_iter() {
-                    let src = plan_graph.node_weight_mut(idx);
-                    if src.is_none() {
-                        return Err(EvalErr {
-                            errors: vec![EvaluationError::IllegalState(
-                                "Error in retrieving node".to_string(),
-                            )],
-                        });
-                    }
-                    result = Some(src.unwrap().evaluate(&*ctx));
+        let ops = toposort(&self.0, None).map_err(|e| EvalErr {
+            errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
+                "Malformed evaluation plan detected: {e:?}"
+            ))],
+        })?;
 
-                    // return on first evaluation error
-                    if ctx.has_errors() {
-                        return Err(EvalErr {
-                            errors: ctx.errors(),
-                        });
-                    }
+        let mut result = None;
+        for idx in ops.into_iter() {
+            result = Some(self.get_node(idx)?.evaluate(&*ctx));
 
-                    let destinations: Vec<(usize, (u8, NodeIndex))> = plan_graph
-                        .edges_directed(idx, Outgoing)
-                        .map(|e| (*e.weight(), e.target()))
-                        .enumerate()
-                        .collect_vec();
-                    let branches = destinations.len();
-                    for (i, (branch_num, dst_id)) in destinations {
-                        let res = if i == branches - 1 {
-                            result.take()
-                        } else {
-                            result.clone()
-                        };
-                        match res {
-                            None => {
-                                return Err(EvalErr {
-                                    errors: vec![EvaluationError::IllegalState(
-                                        "Error in retrieving source value".to_string(),
-                                    )],
-                                })
-                            }
-                            Some(res) => {
-                                let dst = plan_graph.node_weight_mut(dst_id);
-                                if dst.is_none() {
-                                    return Err(EvalErr {
-                                        errors: vec![EvaluationError::IllegalState(
-                                            "Error in retrieving node".to_string(),
-                                        )],
-                                    });
-                                }
-                                dst.unwrap().update_input(res, branch_num);
-                            }
-                        }
-                    }
-                }
-                let result = match result {
-                    None => {
-                        return Err(EvalErr {
-                            errors: vec![EvaluationError::IllegalState(
-                                "Error in retrieving eval output".to_string(),
-                            )],
-                        })
-                    }
-                    Some(val) => val,
-                };
-                Ok(Evaluated { result })
+            // return on first evaluation error
+            if ctx.has_errors() {
+                return Err(EvalErr {
+                    errors: ctx.errors(),
+                });
             }
-            Err(e) => Err(EvalErr {
-                errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
-                    "Malformed evaluation plan detected: {e:?}"
-                ))],
-            }),
+
+            let destinations: Vec<(usize, (u8, NodeIndex))> = self
+                .plan_graph()
+                .edges_directed(idx, Outgoing)
+                .map(|e| (*e.weight(), e.target()))
+                .enumerate()
+                .collect_vec();
+            let branches = destinations.len();
+            for (i, (branch_num, dst_id)) in destinations {
+                let res = if i == branches - 1 {
+                    result.take()
+                } else {
+                    result.clone()
+                };
+
+                let res =
+                    res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
+                self.get_node(dst_id)?.update_input(res, branch_num);
+            }
         }
+
+        let result = result.ok_or_else(|| err_illegal_state("Error in retrieving eval output"))?;
+        Ok(Evaluated { result })
     }
 
     pub fn to_dot_graph(&self) -> String {
