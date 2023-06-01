@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING:* partiql-eval: `evaluate` on `Evaluable` returns a `Value` rather than an `Option<Value>`
 ### Added
+- Ability to add and view errors during evaluation with partiql-eval's `EvalContext`
 ### Fixes
 
 ## [0.4.1] - 2023-05-25
