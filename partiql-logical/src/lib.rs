@@ -142,6 +142,11 @@ where
         &self.nodes
     }
 
+    /// Returns the operators of the plan.
+    pub fn operators_by_id(&self) -> impl Iterator<Item = (OpId, &T)> {
+        self.nodes.iter().enumerate().map(|(i, n)| (OpId(i + 1), n))
+    }
+
     /// Returns the data flows of the plan.
     pub fn flows(&self) -> &Vec<(OpId, OpId, u8)> {
         &self.edges
