@@ -25,29 +25,19 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          # Coverage requires the nightly toolchain because it uses the presently unstable `-Z profile` feature
-          # See: https://github.com/rust-lang/rust/issues/42524
-          # See also: https://github.com/actions-rs/grcov#usage
-          # nightly can be very volatile--pin this to a version we know works well...
-          toolchain: nightly-2023-03-09
+          toolchain: stable
+          # We need this component to generate source coverage in stable
+          components: llvm-tools-preview
+      - name: Cargo Install
+        run: cargo install cargo-llvm-cov
       # Conformance tests are run with 'conformance_test' feature. Since step runs with 'all-features', the conformance
       # test are also run, which can cause `cargo test` to fail. Add 'continue-on-error' step to prevent GH Actions
       # failure.
-      - name: Cargo Test
+      - name: Cargo Test w/ Coverage
         continue-on-error: true
-        run: cargo test --verbose --workspace --all-features --no-fail-fast -- -Z unstable-options --ensure-time
-        env:
-          CARGO_INCREMENTAL: '0'
-          # https://github.com/marketplace/actions/rust-grcov
-          # For some reason the panic=abort modes don't work for build script...
-          #RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-          #RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off'
-          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off'
-      - id: coverage
-        name: Code Coverage
-        uses: actions-rs/grcov@v0.1
+        run: cargo llvm-cov --verbose --workspace --all-features --ignore-run-fail --codecov --output-path codecov.json
       - name: Codecov Upload
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v3
         with:
-          files: ${{ steps.coverage.outputs.report }}
+          files: codecov.json
+          fail_ci_if_error: true
