@@ -87,7 +87,6 @@ impl<'c> EvaluatorPlanner<'c> {
 
     #[inline]
     fn plan_eval(&mut self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
-        let ops = lg.operators();
         let flows = lg.flows();
 
         let mut graph: StableGraph<_, _> = Default::default();
@@ -95,7 +94,7 @@ impl<'c> EvaluatorPlanner<'c> {
 
         for (s, d, w) in flows {
             let mut add_node = |op_id: &OpId| {
-                let logical_op = &ops[op_id.index() - 1];
+                let logical_op = lg.operator(*op_id).unwrap();
                 *seen
                     .entry(*op_id)
                     .or_insert_with(|| graph.add_node(self.get_eval_node(logical_op)))
