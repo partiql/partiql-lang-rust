@@ -142,7 +142,7 @@ where
         &self.nodes
     }
 
-    /// Returns the operators of the plan.
+    /// Returns the operators of the plan with their `OpId`.
     pub fn operators_by_id(&self) -> impl Iterator<Item = (OpId, &T)> {
         self.nodes.iter().enumerate().map(|(i, n)| (OpId(i + 1), n))
     }
