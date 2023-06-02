@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixes
 
 ## [0.4.0] - 2023-05-24
-### Changed
+### Changed 
 - *BREAKING:* partiql-eval: modifies visibility of types implementing `EvalExpr` and `Evaluable`
 - *BREAKING:* removed `from_ion` method on `Value`
 - *BREAKING:* partiql-ast: `visit` fn returns a `partiql-ast::Recurse` type to indicate if visitation of children nodes should continue
