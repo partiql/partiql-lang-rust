@@ -6,8 +6,8 @@ use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CallArg, CallArgNamed,
     CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
-    DropTable, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey, GroupingStrategy, Insert,
-    InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, NullOrderingSpec,
+    DropTable, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey, GroupingStrategy,
+    Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, NullOrderingSpec,
     OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
     Query, QuerySet, Remove, SearchedCase, Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase,
     SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
@@ -979,48 +979,12 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
     // Values & Value Constructors
 
-    fn enter_lit(&mut self, _lit: &'ast Lit) -> Traverse {
-        let val = match _lit {
-            Lit::Null => Value::Null,
-            Lit::Missing => Value::Missing,
-            Lit::Int8Lit(n) => Value::Integer(*n as i64),
-            Lit::Int16Lit(n) => Value::Integer(*n as i64),
-            Lit::Int32Lit(n) => Value::Integer(*n as i64),
-            Lit::Int64Lit(n) => Value::Integer(*n),
-            Lit::DecimalLit(d) => Value::Decimal(*d),
-            Lit::NumericLit(n) => Value::Decimal(*n),
-            Lit::RealLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
-            Lit::FloatLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
-            Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
-            Lit::BoolLit(b) => Value::Boolean(*b),
-            Lit::IonStringLit(s) => match parse_embedded_ion_str(s) {
-                Ok(v) => v,
-                Err(e) => {
-                    // Report error but allow visitor to continue
-                    self.errors.push(e);
-                    Value::Missing
-                }
-            },
-            Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
-            Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
-            Lit::BitStringLit(_) => {
+    fn enter_lit(&mut self, lit: &'ast Lit) -> Traverse {
+        let val = match lit_to_value(lit) {
+            Ok(v) => v,
+            Err(e) => {
                 // Report error but allow visitor to continue
-                not_yet_implemented_err!(self, "Lit::BitStringLit".to_string());
-                Value::Missing
-            }
-            Lit::HexStringLit(_) => {
-                // Report error but allow visitor to continue
-                not_yet_implemented_err!(self, "Lit::HexStringLit".to_string());
-                Value::Missing
-            }
-            Lit::CollectionLit(_) => {
-                // Report error but allow visitor to continue
-                not_yet_implemented_err!(self, "Lit::CollectionLit".to_string());
-                Value::Missing
-            }
-            Lit::TypedLit(_, _) => {
-                // Report error but allow visitor to continue
-                not_yet_implemented_err!(self, "Lit::TypedLit".to_string());
+                self.errors.push(e);
                 Value::Missing
             }
         };
@@ -1712,6 +1676,90 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         }));
         Traverse::Continue
     }
+}
+
+fn lit_to_value(lit: &Lit) -> Result<Value, LowerError> {
+    fn expect_lit(v: &Expr) -> Result<Value, LowerError> {
+        match v {
+            Expr::Lit(l) => lit_to_value(&l.node),
+            _ => Err(LowerError::IllegalState(
+                "non literal in literal aggregate".to_string(),
+            )),
+        }
+    }
+
+    fn tuple_pair(pair: &ast::ExprPair) -> Option<Result<(String, Value), LowerError>> {
+        let key = match expect_lit(pair.first.as_ref()) {
+            Ok(Value::String(s)) => s.as_ref().clone(),
+            Ok(_) => {
+                return Some(Err(LowerError::IllegalState(
+                    "non string literal in literal struct key".to_string(),
+                )))
+            }
+            Err(e) => return Some(Err(e)),
+        };
+
+        match expect_lit(pair.second.as_ref()) {
+            Ok(Value::Missing) => None,
+            Ok(val) => Some(Ok((key, val))),
+            Err(e) => Some(Err(e)),
+        }
+    }
+
+    let val = match lit {
+        Lit::Null => Value::Null,
+        Lit::Missing => Value::Missing,
+        Lit::Int8Lit(n) => Value::Integer(*n as i64),
+        Lit::Int16Lit(n) => Value::Integer(*n as i64),
+        Lit::Int32Lit(n) => Value::Integer(*n as i64),
+        Lit::Int64Lit(n) => Value::Integer(*n),
+        Lit::DecimalLit(d) => Value::Decimal(*d),
+        Lit::NumericLit(n) => Value::Decimal(*n),
+        Lit::RealLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
+        Lit::FloatLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
+        Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
+        Lit::BoolLit(b) => Value::Boolean(*b),
+        Lit::IonStringLit(s) => parse_embedded_ion_str(s)?,
+        Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
+        Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
+        Lit::BitStringLit(_) => {
+            return Err(LowerError::NotYetImplemented(
+                "Lit::BitStringLit".to_string(),
+            ))
+        }
+        Lit::HexStringLit(_) => {
+            return Err(LowerError::NotYetImplemented(
+                "Lit::HexStringLit".to_string(),
+            ))
+        }
+        Lit::BagLit(b) => {
+            let bag: Result<partiql_value::Bag, _> = b
+                .node
+                .values
+                .iter()
+                .map(|l| expect_lit(l.as_ref()))
+                .collect();
+            Value::from(bag?)
+        }
+        Lit::ListLit(l) => {
+            let l: Result<partiql_value::List, _> = l
+                .node
+                .values
+                .iter()
+                .map(|l| expect_lit(l.as_ref()))
+                .collect();
+            Value::from(l?)
+        }
+        Lit::StructLit(s) => {
+            let tuple: Result<partiql_value::Tuple, _> =
+                s.node.fields.iter().filter_map(tuple_pair).collect();
+            Value::from(tuple?)
+        }
+        Lit::TypedLit(_, _) => {
+            return Err(LowerError::NotYetImplemented("Lit::TypedLit".to_string()))
+        }
+    };
+    Ok(val)
 }
 
 fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
