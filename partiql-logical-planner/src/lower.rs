@@ -1345,6 +1345,8 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             right,
         });
         let join = self.plan.add_operator(join);
+        self.plan.add_flow_with_branch_num(lid, join, 0);
+        self.plan.add_flow_with_branch_num(rid, join, 1);
         self.push_bexpr(join);
         Traverse::Continue
     }

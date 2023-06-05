@@ -27,12 +27,21 @@ macro_rules! take_input {
     };
 }
 
+/// Whether an [`Evaluable`] takes input from the plan graph or manages its own iteration.
+pub enum EvalType {
+    SelfManaged,
+    GraphManaged,
+}
+
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value;
     fn update_input(&mut self, input: Value, branch_num: u8);
     fn get_vars(&self) -> Option<&[String]> {
         None
+    }
+    fn eval_type(&self) -> EvalType {
+        EvalType::GraphManaged
     }
 }
 
@@ -304,6 +313,10 @@ impl Evaluable for EvalJoin {
 
     fn update_input(&mut self, input: Value, _branch_num: u8) {
         self.input = Some(input);
+    }
+
+    fn eval_type(&self) -> EvalType {
+        EvalType::SelfManaged
     }
 }
 
