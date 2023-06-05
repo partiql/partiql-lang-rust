@@ -18,7 +18,7 @@ use petgraph::graph::NodeIndex;
 use crate::error::{EvalErr, EvaluationError};
 use petgraph::visit::EdgeRef;
 
-use crate::eval::evaluable::Evaluable;
+use crate::eval::evaluable::{EvalType, Evaluable};
 
 pub mod evaluable;
 pub mod expr;
@@ -77,32 +77,44 @@ impl EvalPlan {
 
         let mut result = None;
         for idx in ops.into_iter() {
-            result = Some(self.get_node(idx)?.evaluate(&*ctx));
-
-            // return on first evaluation error
-            if ctx.has_errors() {
-                return Err(EvalErr {
-                    errors: ctx.errors(),
-                });
-            }
-
             let destinations: Vec<(usize, (u8, NodeIndex))> = self
                 .plan_graph()
                 .edges_directed(idx, Outgoing)
                 .map(|e| (*e.weight(), e.target()))
                 .enumerate()
                 .collect_vec();
-            let branches = destinations.len();
-            for (i, (branch_num, dst_id)) in destinations {
-                let res = if i == branches - 1 {
-                    result.take()
-                } else {
-                    result.clone()
-                };
 
-                let res =
-                    res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
-                self.get_node(dst_id)?.update_input(res, branch_num);
+            // Some evaluables (i.e., `JOIN`) manage their own inputs
+            let graph_managed = destinations.is_empty()
+                || destinations.iter().any(|(_, (_, dest_idx))| {
+                    matches!(
+                        self.get_node(*dest_idx).map(|d| d.eval_type()),
+                        Ok(EvalType::GraphManaged)
+                    )
+                });
+            if graph_managed {
+                let src = self.get_node(idx)?;
+                result = Some(src.evaluate(&*ctx));
+
+                // return on first evaluation error
+                if ctx.has_errors() {
+                    return Err(EvalErr {
+                        errors: ctx.errors(),
+                    });
+                }
+
+                let num_destinations = destinations.len();
+                for (i, (branch_num, dst_id)) in destinations {
+                    let res = if i == num_destinations - 1 {
+                        result.take()
+                    } else {
+                        result.clone()
+                    };
+
+                    let res =
+                        res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
+                    self.get_node(dst_id)?.update_input(res, branch_num);
+                }
             }
         }
 
