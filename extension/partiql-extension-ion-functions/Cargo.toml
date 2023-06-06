@@ -21,10 +21,10 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-extension-ion = {path = "../partiql-extension-ion", version = "0.4.*"}
-partiql-value = { path = "../../partiql-value", version = "0.4.*" }
-partiql-catalog = { path = "../../partiql-catalog", version = "0.4.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.4.*" }
+partiql-extension-ion = {path = "../partiql-extension-ion", version = "0.5.*" }
+partiql-value = { path = "../../partiql-value", version = "0.5.*" }
+partiql-catalog = { path = "../../partiql-catalog", version = "0.5.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.5.*" }
 
 ordered-float = "3.*"
 itertools = "0.10.*"
@@ -42,10 +42,10 @@ flate2 = "1.0"
 
 [dev-dependencies]
 criterion = "0.4"
-partiql-parser = { path = "../../partiql-parser", version = "0.4.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.4.*" }
-partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.4.*" }
-partiql-eval = { path = "../../partiql-eval", version = "0.4.*" }
+partiql-parser = { path = "../../partiql-parser", version = "0.5.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.5.*" }
+partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.5.*" }
+partiql-eval = { path = "../../partiql-eval", version = "0.5.*" }
 
 [features]
 default = []

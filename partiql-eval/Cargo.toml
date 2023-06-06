@@ -21,9 +21,9 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-logical = { path = "../partiql-logical", version = "0.4.*" }
-partiql-value = { path = "../partiql-value", version = "0.4.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.4.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.5.*" }
+partiql-value = { path = "../partiql-value", version = "0.5.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.5.*" }
 petgraph = "0.6.*"
 ordered-float = "3.*"
 itertools = "0.10.*"
