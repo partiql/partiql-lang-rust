@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.5.0] - 2023-06-06
 ### Changed
 - *BREAKING:* partiql-eval: `evaluate` on `Evaluable` returns a `Value` rather than an `Option<Value>`
 - *BREAKING:* partiql-ast: changes the modeling of Bag/List/Tuple literals
@@ -147,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.5.0
 [0.4.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.1
 [0.4.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.0
 [0.3.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.3.0
