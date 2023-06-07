@@ -11,6 +11,7 @@ members = [
   "partiql",
   "partiql-ast",
   "partiql-ast/partiql-ast-macros",
+  "partiql-ast-passes",
   "partiql-catalog",
   "partiql-conformance-tests",
   "partiql-conformance-test-generator",

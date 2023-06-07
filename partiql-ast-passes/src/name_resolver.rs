@@ -1,4 +1,4 @@
-use crate::error::{LowerError, LoweringError};
+use crate::error::{AstTransformError, AstTransformationError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
@@ -98,17 +98,17 @@ pub struct NameResolver {
     aliases: FnvIndexMap<ast::NodeId, Symbol>,
 
     // errors that occur during name resolution
-    errors: Vec<LowerError>,
+    errors: Vec<AstTransformError>,
 }
 
 impl NameResolver {
     pub fn resolve(
         &mut self,
         query: &ast::AstNode<ast::Query>,
-    ) -> Result<KeyRegistry, LoweringError> {
+    ) -> Result<KeyRegistry, AstTransformationError> {
         query.visit(self);
         if !self.errors.is_empty() {
-            return Err(LoweringError {
+            return Err(AstTransformationError {
                 errors: std::mem::take(&mut self.errors),
             });
         }
@@ -152,10 +152,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_lateral(&mut self) -> Result<Vec<ast::NodeId>, LowerError> {
-        self.lateral_stack
-            .pop()
-            .ok_or_else(|| LowerError::IllegalState("Expected non-empty lateral stack".to_string()))
+    fn exit_lateral(&mut self) -> Result<Vec<ast::NodeId>, AstTransformError> {
+        self.lateral_stack.pop().ok_or_else(|| {
+            AstTransformError::IllegalState("Expected non-empty lateral stack".to_string())
+        })
     }
 
     #[inline]
@@ -164,10 +164,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_child_stack(&mut self) -> Result<Vec<ast::NodeId>, LowerError> {
-        self.id_child_stack
-            .pop()
-            .ok_or_else(|| LowerError::IllegalState("Expected non-empty child stack".to_string()))
+    fn exit_child_stack(&mut self) -> Result<Vec<ast::NodeId>, AstTransformError> {
+        self.id_child_stack.pop().ok_or_else(|| {
+            AstTransformError::IllegalState("Expected non-empty child stack".to_string())
+        })
     }
 
     #[inline]
@@ -176,10 +176,10 @@ impl NameResolver {
     }
 
     #[inline]
-    fn exit_keyref(&mut self) -> Result<KeyRefs, LowerError> {
-        self.keyref_stack
-            .pop()
-            .ok_or_else(|| LowerError::IllegalState("Expected non-empty keyrefs".to_string()))
+    fn exit_keyref(&mut self) -> Result<KeyRefs, AstTransformError> {
+        self.keyref_stack.pop().ok_or_else(|| {
+            AstTransformError::IllegalState("Expected non-empty keyrefs".to_string())
+        })
     }
 
     #[inline]

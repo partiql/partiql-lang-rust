@@ -1,16 +1,16 @@
 use partiql_catalog::call_defs::CallLookupError;
 use thiserror::Error;
 
-/// Contains the errors that occur during AST to logical plan conversion
+/// Contains the errors that occur during AST transformations
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LoweringError {
-    pub errors: Vec<LowerError>,
+pub struct AstTransformationError {
+    pub errors: Vec<AstTransformError>,
 }
 
-/// An error that can happen during the AST to logical plan conversion
+/// Represents an AST transform Error
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum LowerError {
+pub enum AstTransformError {
     /// Indicates that AST lowering has not yet been implemented for this feature.
     #[error("Not yet implemented: {0}")]
     NotYetImplemented(String),
@@ -40,11 +40,13 @@ pub enum LowerError {
     Unknown(String),
 }
 
-impl From<CallLookupError> for LowerError {
+impl From<CallLookupError> for AstTransformError {
     fn from(err: CallLookupError) -> Self {
         match err {
-            CallLookupError::InvalidNumberOfArguments(e) => LowerError::InvalidNumberOfArguments(e),
-            e => LowerError::Unknown(e.to_string()),
+            CallLookupError::InvalidNumberOfArguments(e) => {
+                AstTransformError::InvalidNumberOfArguments(e)
+            }
+            e => AstTransformError::Unknown(e.to_string()),
         }
     }
 }
