@@ -1,0 +1,33 @@
+[package]
+name = "partiql-ast-passes"
+description = "A crate for PartiQL AST transformation passes"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["sql", "ast", "query", "compilers", "interpreters", "visitors", "passes"]
+categories = ["database", "compilers", "ast-implementations"]
+exclude = [
+  "**/.git/**",
+  "**/.github/**",
+]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+bench = false
+
+[dependencies]
+partiql-ast = { path = "../partiql-ast", version = "0.5.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.5.*" }
+
+fnv = "1"
+indexmap = "1.9"
+thiserror = "1.0"
+
+[dev-dependencies]
+
+[features]
+default = []

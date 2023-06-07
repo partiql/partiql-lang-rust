@@ -1,10 +1,10 @@
+use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::{EvalPlan, EvalResult};
 use partiql_logical as logical;
-use partiql_logical_planner::error::LoweringError;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::Value;
 
@@ -29,7 +29,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 pub(crate) fn lower(
     catalog: &dyn Catalog,
     parsed: &Parsed,
-) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
     planner.lower(parsed)
 }

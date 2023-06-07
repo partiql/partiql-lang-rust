@@ -1,16 +1,14 @@
-use crate::error::{LowerError, LoweringError};
 use crate::lower::AstToLogical;
-use crate::name_resolver::NameResolver;
 use partiql_ast::ast;
+use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
+use partiql_ast_passes::name_resolver::NameResolver;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
 use partiql_catalog::Catalog;
 
 mod builtins;
-pub mod error;
 mod lower;
-mod name_resolver;
 
 pub struct LogicalPlanner<'c> {
     catalog: &'c dyn Catalog,
@@ -25,15 +23,15 @@ impl<'c> LogicalPlanner<'c> {
     pub fn lower(
         &self,
         parsed: &Parsed,
-    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         if let ast::Expr::Query(q) = parsed.ast.as_ref() {
             let mut resolver = NameResolver::default();
             let registry = resolver.resolve(q)?;
             let planner = AstToLogical::new(self.catalog, registry);
             planner.lower_query(q)
         } else {
-            Err(LoweringError {
-                errors: vec![LowerError::NotYetImplemented(
+            Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
                     "Expr type not supported yet".to_string(),
                 )],
             })
@@ -44,13 +42,13 @@ impl<'c> LogicalPlanner<'c> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use partiql_ast_passes::error::AstTransformationError;
     use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
 
     use partiql_eval::plan;
 
-    use crate::error::LoweringError;
     use crate::LogicalPlanner;
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
@@ -63,7 +61,9 @@ mod tests {
     }
 
     #[track_caller]
-    fn lower(parsed: &Parsed) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+    fn lower(
+        parsed: &Parsed,
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let catalog = PartiqlCatalog::default();
         let planner = LogicalPlanner::new(&catalog);
         planner.lower(parsed)

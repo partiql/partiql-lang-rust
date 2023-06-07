@@ -25,11 +25,11 @@ use partiql_value::{BindingsName, Value};
 use std::collections::{HashMap, HashSet};
 
 use crate::builtins::{FnSymTab, FN_SYM_TAB};
-use crate::name_resolver;
 use itertools::Itertools;
+use partiql_ast_passes::name_resolver;
 use partiql_catalog::call_defs::{CallArgument, CallDef};
 
-use crate::error::{LowerError, LoweringError};
+use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use partiql_catalog::Catalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
@@ -45,7 +45,7 @@ macro_rules! eq_or_fault {
         if $lhs != $rhs {
             $self
                 .errors
-                .push(LowerError::IllegalState($msg.to_string()));
+                .push(AstTransformError::IllegalState($msg.to_string()));
             return partiql_ast::visit::Traverse::Stop;
         }
     };
@@ -57,7 +57,7 @@ macro_rules! true_or_fault {
         if !$expr {
             $self
                 .errors
-                .push(LowerError::IllegalState($msg.to_string()));
+                .push(AstTransformError::IllegalState($msg.to_string()));
             return partiql_ast::visit::Traverse::Stop;
         }
     };
@@ -76,7 +76,7 @@ macro_rules! not_yet_implemented_err {
     ($self:ident, $msg:expr) => {
         $self
             .errors
-            .push(LowerError::NotYetImplemented($msg.to_string()));
+            .push(AstTransformError::NotYetImplemented($msg.to_string()));
     };
 }
 
@@ -177,7 +177,7 @@ pub struct AstToLogical<'a> {
     catalog: &'a dyn Catalog,
 
     // list of errors encountered during AST lowering
-    errors: Vec<LowerError>,
+    errors: Vec<AstTransformError>,
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
@@ -252,10 +252,10 @@ impl<'a> AstToLogical<'a> {
     pub fn lower_query(
         mut self,
         query: &ast::AstNode<ast::Query>,
-    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, LoweringError> {
+    ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         query.visit(&mut self);
         if !self.errors.is_empty() {
-            return Err(LoweringError {
+            return Err(AstTransformationError {
                 errors: self.errors,
             });
         }
@@ -722,7 +722,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                             Value::String(s) => (*s).clone(),
                             _ => {
                                 // Report error but allow visitor to continue
-                                self.errors.push(LowerError::IllegalState(
+                                self.errors.push(AstTransformError::IllegalState(
                                     "Unexpected literal type".to_string(),
                                 ));
                                 "".to_string()
@@ -730,8 +730,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                         },
                         _ => {
                             // Report error but allow visitor to continue
-                            self.errors
-                                .push(LowerError::IllegalState("Invalid alias type".to_string()));
+                            self.errors.push(AstTransformError::IllegalState(
+                                "Invalid alias type".to_string(),
+                            ));
                             "".to_string()
                         }
                     };
@@ -932,7 +933,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     .get_function(&name)
                     .map(|e| call_def_to_vexpr(e.call_def()))
             })
-            .unwrap_or_else(|| Err(LowerError::UnsupportedFunction(name.clone())));
+            .unwrap_or_else(|| Err(AstTransformError::UnsupportedFunction(name.clone())));
 
         let expr = match call_expr {
             Ok(expr) => expr,
@@ -1075,7 +1076,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 "all" => (logical::SetQuantifier::All, ve),
                 "distinct" => (logical::SetQuantifier::Distinct, ve),
                 _ => {
-                    self.errors.push(LowerError::IllegalState(
+                    self.errors.push(AstTransformError::IllegalState(
                         "Invalid set quantifier".to_string(),
                     ));
                     return Traverse::Stop;
@@ -1116,7 +1117,8 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             },
             _ => {
                 // Include as an error but allow lowering to proceed for multiple error reporting
-                self.errors.push(LowerError::UnsupportedFunction(name));
+                self.errors
+                    .push(AstTransformError::UnsupportedFunction(name));
                 // continue lowering with `AggAvg` aggregation function
                 AggregateExpression {
                     name: new_name,
@@ -1440,7 +1442,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         // that are in the `HAVING` and `ORDER BY` clauses.
         let select_clause_op_id = self.current_clauses_mut().select_clause;
         if select_clause_op_id.is_none() {
-            self.errors.push(LowerError::IllegalState(
+            self.errors.push(AstTransformError::IllegalState(
                 "select_clause_op_id is None".to_string(),
             ));
             return Traverse::Stop;
@@ -1455,7 +1457,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             BindingsOp::ProjectAll => &mut binding,
             BindingsOp::ProjectValue(_) => &mut binding, // TODO: replacement of SELECT VALUE expressions
             _ => {
-                self.errors.push(LowerError::IllegalState(
+                self.errors.push(AstTransformError::IllegalState(
                     "Unexpected project type".to_string(),
                 ));
                 return Traverse::Stop;
@@ -1473,14 +1475,14 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     Value::String(s) => (*s).clone(),
                     _ => {
                         // Report error but allow visitor to continue
-                        self.errors.push(LowerError::IllegalState(
+                        self.errors.push(AstTransformError::IllegalState(
                             "Unexpected literal type".to_string(),
                         ));
                         "".to_string()
                     }
                 },
                 _ => {
-                    self.errors.push(LowerError::IllegalState(
+                    self.errors.push(AstTransformError::IllegalState(
                         "Unexpected alias type".to_string(),
                     ));
                     return Traverse::Stop;
@@ -1680,21 +1682,21 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 }
 
-fn lit_to_value(lit: &Lit) -> Result<Value, LowerError> {
-    fn expect_lit(v: &Expr) -> Result<Value, LowerError> {
+fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
+    fn expect_lit(v: &Expr) -> Result<Value, AstTransformError> {
         match v {
             Expr::Lit(l) => lit_to_value(&l.node),
-            _ => Err(LowerError::IllegalState(
+            _ => Err(AstTransformError::IllegalState(
                 "non literal in literal aggregate".to_string(),
             )),
         }
     }
 
-    fn tuple_pair(pair: &ast::ExprPair) -> Option<Result<(String, Value), LowerError>> {
+    fn tuple_pair(pair: &ast::ExprPair) -> Option<Result<(String, Value), AstTransformError>> {
         let key = match expect_lit(pair.first.as_ref()) {
             Ok(Value::String(s)) => s.as_ref().clone(),
             Ok(_) => {
-                return Some(Err(LowerError::IllegalState(
+                return Some(Err(AstTransformError::IllegalState(
                     "non string literal in literal struct key".to_string(),
                 )))
             }
@@ -1725,12 +1727,12 @@ fn lit_to_value(lit: &Lit) -> Result<Value, LowerError> {
         Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::BitStringLit(_) => {
-            return Err(LowerError::NotYetImplemented(
+            return Err(AstTransformError::NotYetImplemented(
                 "Lit::BitStringLit".to_string(),
             ))
         }
         Lit::HexStringLit(_) => {
-            return Err(LowerError::NotYetImplemented(
+            return Err(AstTransformError::NotYetImplemented(
                 "Lit::HexStringLit".to_string(),
             ))
         }
@@ -1758,15 +1760,17 @@ fn lit_to_value(lit: &Lit) -> Result<Value, LowerError> {
             Value::from(tuple?)
         }
         Lit::TypedLit(_, _) => {
-            return Err(LowerError::NotYetImplemented("Lit::TypedLit".to_string()))
+            return Err(AstTransformError::NotYetImplemented(
+                "Lit::TypedLit".to_string(),
+            ))
         }
     };
     Ok(val)
 }
 
-fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
-    fn lit_err(literal: &str, err: impl std::error::Error) -> LowerError {
-        LowerError::Literal {
+fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
+    fn lit_err(literal: &str, err: impl std::error::Error) -> AstTransformError {
+        AstTransformError::Literal {
             literal: literal.into(),
             error: err.to_string(),
         }
@@ -1780,7 +1784,7 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, LowerError> {
         .map_err(|e| lit_err(contents, e))?;
 
     iter.next()
-        .ok_or_else(|| LowerError::Literal {
+        .ok_or_else(|| AstTransformError::Literal {
             literal: contents.into(),
             error: "Contains no value".into(),
         })?
@@ -1807,11 +1811,11 @@ mod tests {
         assert_eq!(lowering_errs.len(), 2);
         assert_eq!(
             lowering_errs.get(0),
-            Some(&LowerError::UnsupportedFunction("foo".to_string()))
+            Some(&AstTransformError::UnsupportedFunction("foo".to_string()))
         );
         assert_eq!(
             lowering_errs.get(1),
-            Some(&LowerError::UnsupportedFunction("bar".to_string()))
+            Some(&AstTransformError::UnsupportedFunction("bar".to_string()))
         );
     }
 
@@ -1829,11 +1833,15 @@ mod tests {
         assert_eq!(lowering_errs.len(), 2);
         assert_eq!(
             lowering_errs.get(0),
-            Some(&LowerError::InvalidNumberOfArguments("abs".to_string()))
+            Some(&AstTransformError::InvalidNumberOfArguments(
+                "abs".to_string()
+            ))
         );
         assert_eq!(
             lowering_errs.get(1),
-            Some(&LowerError::InvalidNumberOfArguments("mod".to_string()))
+            Some(&AstTransformError::InvalidNumberOfArguments(
+                "mod".to_string()
+            ))
         );
     }
 }
