@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1686084238597,
+  "lastUpdate": 1686178470961,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -10805,6 +10805,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 39085,
             "range": "± 1276",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "15fe939a35bf508d8f66fa7f4edd4b087a5c4578",
+          "message": "Move `name_resolver` to a different crate (#387)\n\nThis PR is in preparation of upcomming work for adding an AST Typer.\r\nThe name resolver seems to be required by the `typer` but it being in\r\n`partiql-logical-planner` implies its use only in planner.\r\n\r\nIn addition, this PR defines a new crate call `partiql-ast-passes`\r\n(could pick a better name and open to ideas)  that\r\nintends to include passes on AST transformation. Arguably `lower` in\r\n`partiql-logical-planner` can also be part of this new crate but leaving\r\nit out for now, as logical planning is a major transform and perhaps deserves\r\nits own crate.\r\n\r\n* This PR also updates the `partiql-tests` sub-module.",
+          "timestamp": "2023-06-07T15:43:47-07:00",
+          "tree_id": "6599b6cb0ba34b9b0ca42a9cb7bcdcc3ed46cbf3",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/15fe939a35bf508d8f66fa7f4edd4b087a5c4578"
+        },
+        "date": 1686178470068,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6080,
+            "range": "± 58",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 55784,
+            "range": "± 59",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 112905,
+            "range": "± 420",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 5314,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 36802,
+            "range": "± 40",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 74525,
+            "range": "± 61",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 20232,
+            "range": "± 82",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 364387,
+            "range": "± 1103",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 739409,
+            "range": "± 1554",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 22104702,
+            "range": "± 162526",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 121983473,
+            "range": "± 533637",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 238539502,
+            "range": "± 516303",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 14340,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 7351,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 634,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 107,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 710,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2638,
+            "range": "± 50",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 8644,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 22227,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 34834,
+            "range": "± 98",
             "unit": "ns/iter"
           }
         ]
