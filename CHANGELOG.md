@@ -10,8 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
 
 ### Added
-- Adds `partiql-types` crate that includes data models for PartiQL Types.
-- Adds `partiql_ast_passes::static_typer` for type annotating the AST.
+- Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
+- Add `partiql-types` crate that includes data models for PartiQL Types.
+- Add `partiql_ast_passes::static_typer` for type annotating the AST.
+
+### Fixes
 
 ## [0.5.0] - 2023-06-06
 ### Changed
