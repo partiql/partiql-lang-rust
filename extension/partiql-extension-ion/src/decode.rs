@@ -1,5 +1,5 @@
 use delegate::delegate;
-use ion_rs::{Decimal, Int, IonError, IonReader, IonType, Reader, StreamItem};
+use ion_rs::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
 use once_cell::sync::Lazy;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use regex::RegexSet;
@@ -89,7 +89,10 @@ impl IonDecoderBuilder {
     }
 
     /// Create a decoder given the previously specified config and an ion [`Reader`].
-    pub fn build(self, reader: Reader) -> Result<IonValueIter, IonDecodeError> {
+    pub fn build<'a>(
+        self,
+        reader: impl 'a + IonReader<Item = StreamItem, Symbol = Symbol>,
+    ) -> Result<IonValueIter<'a>, IonDecodeError> {
         let decoder = SimpleIonValueDecoder {};
         let inner: Box<dyn Iterator<Item = IonDecodeResult>> = match self.config.mode {
             crate::Encoding::Ion => Box::new(IonValueIterInner { reader, decoder }),
@@ -123,17 +126,19 @@ impl<'a> Iterator for IonValueIter<'a> {
     }
 }
 
-struct IonValueIterInner<'a, D>
+struct IonValueIterInner<D, R>
 where
-    D: IonValueDecoder,
+    D: IonValueDecoder<R>,
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
 {
-    reader: Reader<'a>,
+    reader: R,
     decoder: D,
 }
 
-impl<'a, P> Iterator for IonValueIterInner<'a, P>
+impl<D, R> Iterator for IonValueIterInner<D, R>
 where
-    P: IonValueDecoder,
+    D: IonValueDecoder<R>,
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
 {
     type Item = IonDecodeResult;
 
@@ -147,9 +152,12 @@ where
     }
 }
 
-trait IonValueDecoder {
+trait IonValueDecoder<R>
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+{
     #[inline]
-    fn decode_value(&self, reader: &mut Reader, typ: IonType) -> IonDecodeResult {
+    fn decode_value(&self, reader: &mut R, typ: IonType) -> IonDecodeResult {
         match typ {
             IonType::Null => self.decode_null(reader),
             IonType::Bool => self.decode_bool(reader),
@@ -167,19 +175,19 @@ trait IonValueDecoder {
         }
     }
 
-    fn decode_null(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_bool(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_int(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_float(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_decimal(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_timestamp(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_symbol(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_string(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_clob(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_blob(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_list(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_sexp(&self, reader: &mut Reader) -> IonDecodeResult;
-    fn decode_struct(&self, reader: &mut Reader) -> IonDecodeResult;
+    fn decode_null(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_bool(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_int(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_float(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_decimal(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_timestamp(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_symbol(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_string(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_clob(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_blob(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_list(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_sexp(&self, reader: &mut R) -> IonDecodeResult;
+    fn decode_struct(&self, reader: &mut R) -> IonDecodeResult;
 }
 
 fn ion_decimal_to_decimal(ion_dec: Decimal) -> Result<rust_decimal::Decimal, rust_decimal::Error> {
@@ -192,19 +200,22 @@ fn ion_decimal_to_decimal(ion_dec: Decimal) -> Result<rust_decimal::Decimal, rus
 
 struct SimpleIonValueDecoder {}
 
-impl IonValueDecoder for SimpleIonValueDecoder {
+impl<R> IonValueDecoder<R> for SimpleIonValueDecoder
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+{
     #[inline]
-    fn decode_null(&self, _: &mut Reader) -> IonDecodeResult {
+    fn decode_null(&self, _: &mut R) -> IonDecodeResult {
         Ok(Value::Null)
     }
 
     #[inline]
-    fn decode_bool(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_bool(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::Boolean(reader.read_bool()?))
     }
 
     #[inline]
-    fn decode_int(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_int(&self, reader: &mut R) -> IonDecodeResult {
         match reader.read_int()? {
             Int::I64(i) => Ok(Value::Integer(i)),
             Int::BigInt(_) => Err(IonDecodeError::UnsupportedType("bigint")),
@@ -212,18 +223,18 @@ impl IonValueDecoder for SimpleIonValueDecoder {
     }
 
     #[inline]
-    fn decode_float(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_float(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::Real(reader.read_f64()?.into()))
     }
 
     #[inline]
-    fn decode_decimal(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_decimal(&self, reader: &mut R) -> IonDecodeResult {
         let dec = ion_decimal_to_decimal(reader.read_decimal()?);
         Ok(Value::Decimal(dec?))
     }
 
     #[inline]
-    fn decode_timestamp(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_timestamp(&self, reader: &mut R) -> IonDecodeResult {
         let ts = reader.read_timestamp()?;
         let offset = ts.offset();
         let datetime = DateTime::from_ymdhms_nano_offset_minutes(
@@ -242,47 +253,50 @@ impl IonValueDecoder for SimpleIonValueDecoder {
     }
 
     #[inline]
-    fn decode_symbol(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_symbol(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::String(Box::new(
             reader.read_symbol()?.text_or_error()?.to_string(),
         )))
     }
 
     #[inline]
-    fn decode_string(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_string(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::String(Box::new(
             reader.read_string()?.text().to_string(),
         )))
     }
 
     #[inline]
-    fn decode_clob(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_clob(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::Blob(Box::new(reader.read_clob()?.as_slice().into())))
     }
 
     #[inline]
-    fn decode_blob(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_blob(&self, reader: &mut R) -> IonDecodeResult {
         Ok(Value::Blob(Box::new(reader.read_blob()?.as_slice().into())))
     }
 
     #[inline]
-    fn decode_list(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_list(&self, reader: &mut R) -> IonDecodeResult {
         decode_list(self, reader)
     }
 
     #[inline]
-    fn decode_sexp(&self, _: &mut Reader) -> IonDecodeResult {
+    fn decode_sexp(&self, _: &mut R) -> IonDecodeResult {
         Err(IonDecodeError::UnsupportedType("sexp"))
     }
 
     #[inline]
-    fn decode_struct(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_struct(&self, reader: &mut R) -> IonDecodeResult {
         decode_struct(self, reader)
     }
 }
 
 #[inline]
-fn decode_list(decoder: &impl IonValueDecoder, reader: &mut Reader) -> IonDecodeResult {
+fn decode_list<R>(decoder: &impl IonValueDecoder<R>, reader: &mut R) -> IonDecodeResult
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+{
     reader.step_in()?;
     let mut values = vec![];
     'values: loop {
@@ -299,10 +313,13 @@ fn decode_list(decoder: &impl IonValueDecoder, reader: &mut Reader) -> IonDecode
 }
 
 #[inline]
-fn decode_struct(decoder: &impl IonValueDecoder, reader: &mut Reader) -> IonDecodeResult {
+fn decode_struct<R>(decoder: &impl IonValueDecoder<R>, reader: &mut R) -> IonDecodeResult
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+{
     let mut tuple = Tuple::new();
     reader.step_in()?;
-    loop {
+    'kv: loop {
         let item = reader.next()?;
         let (key, value) = match item {
             StreamItem::Value(typ) => {
@@ -310,7 +327,7 @@ fn decode_struct(decoder: &impl IonValueDecoder, reader: &mut Reader) -> IonDeco
                 (field_name, decoder.decode_value(reader, typ)?)
             }
             StreamItem::Null(_) => (reader.field_name()?, decoder.decode_null(reader)?),
-            StreamItem::Nothing => break,
+            StreamItem::Nothing => break 'kv,
         };
         tuple.insert(key.text_or_error()?, value);
     }
@@ -323,7 +340,10 @@ struct PartiqlEncodedIonValueDecoder {
 }
 
 #[inline]
-fn has_annotation(reader: &Reader, annot: &str) -> bool {
+fn has_annotation(
+    reader: &impl IonReader<Item = StreamItem, Symbol = Symbol>,
+    annot: &str,
+) -> bool {
     reader
         .annotations()
         .any(|a| a.map_or(false, |a| a == annot))
@@ -333,7 +353,10 @@ static TIME_PARTS_PATTERN_SET: Lazy<RegexSet> =
     Lazy::new(|| RegexSet::new(RE_SET_TIME_PARTS).unwrap());
 
 impl PartiqlEncodedIonValueDecoder {
-    fn decode_date(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_date<R>(&self, reader: &mut R) -> IonDecodeResult
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
         let ts = reader.read_timestamp()?;
         let datetime = DateTime::from_ymd(
             ts.year(),
@@ -345,12 +368,18 @@ impl PartiqlEncodedIonValueDecoder {
         Ok(datetime.into())
     }
 
-    fn decode_time(&self, reader: &mut Reader) -> IonDecodeResult {
-        fn expect_u8(
-            reader: &mut Reader,
+    fn decode_time<R>(&self, reader: &mut R) -> IonDecodeResult
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        fn expect_u8<R>(
+            reader: &mut R,
             typ: Option<IonType>,
             unit: &'static str,
-        ) -> Result<u8, IonDecodeError> {
+        ) -> Result<u8, IonDecodeError>
+        where
+            R: IonReader<Item = StreamItem, Symbol = Symbol>,
+        {
             match typ {
                 Some(IonType::Int) => match reader.read_int()? {
                     Int::I64(i) => Ok(i as u8), // TODO check range
@@ -363,11 +392,14 @@ impl PartiqlEncodedIonValueDecoder {
                 ))),
             }
         }
-        fn maybe_i8(
-            reader: &mut Reader,
+        fn maybe_i8<R>(
+            reader: &mut R,
             typ: Option<IonType>,
             unit: &'static str,
-        ) -> Result<Option<i8>, IonDecodeError> {
+        ) -> Result<Option<i8>, IonDecodeError>
+        where
+            R: IonReader<Item = StreamItem, Symbol = Symbol>,
+        {
             match typ {
                 Some(IonType::Int) => match reader.read_int()? {
                     Int::I64(i) => Ok(Some(i as i8)), // TODO check range
@@ -382,11 +414,14 @@ impl PartiqlEncodedIonValueDecoder {
                 ))),
             }
         }
-        fn expect_f64(
-            reader: &mut Reader,
+        fn expect_f64<R>(
+            reader: &mut R,
             typ: Option<IonType>,
             unit: &'static str,
-        ) -> Result<f64, IonDecodeError> {
+        ) -> Result<f64, IonDecodeError>
+        where
+            R: IonReader<Item = StreamItem, Symbol = Symbol>,
+        {
             match typ {
                 Some(IonType::Decimal) => {
                     let dec = ion_decimal_to_decimal(reader.read_decimal()?);
@@ -457,9 +492,12 @@ impl PartiqlEncodedIonValueDecoder {
     }
 }
 
-impl IonValueDecoder for PartiqlEncodedIonValueDecoder {
+impl<R> IonValueDecoder<R> for PartiqlEncodedIonValueDecoder
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+{
     #[inline]
-    fn decode_null(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_null(&self, reader: &mut R) -> IonDecodeResult {
         if has_annotation(reader, MISSING_ANNOT) {
             Ok(Value::Missing)
         } else {
@@ -468,7 +506,7 @@ impl IonValueDecoder for PartiqlEncodedIonValueDecoder {
     }
 
     #[inline]
-    fn decode_timestamp(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_timestamp(&self, reader: &mut R) -> IonDecodeResult {
         if has_annotation(reader, DATE_ANNOT) {
             self.decode_date(reader)
         } else {
@@ -477,7 +515,7 @@ impl IonValueDecoder for PartiqlEncodedIonValueDecoder {
     }
 
     #[inline]
-    fn decode_list(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_list(&self, reader: &mut R) -> IonDecodeResult {
         let is_bag = has_annotation(reader, BAG_ANNOT);
         let list = decode_list(self, reader);
         if is_bag {
@@ -488,7 +526,7 @@ impl IonValueDecoder for PartiqlEncodedIonValueDecoder {
     }
 
     #[inline]
-    fn decode_struct(&self, reader: &mut Reader) -> IonDecodeResult {
+    fn decode_struct(&self, reader: &mut R) -> IonDecodeResult {
         if has_annotation(reader, TIME_ANNOT) {
             self.decode_time(reader)
         } else {
@@ -498,15 +536,15 @@ impl IonValueDecoder for PartiqlEncodedIonValueDecoder {
 
     delegate! {
         to self.inner {
-            fn decode_bool(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_int(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_float(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_decimal(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_symbol(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_string(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_clob(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_blob(&self, reader: &mut Reader) -> IonDecodeResult;
-            fn decode_sexp(&self, reader: &mut Reader) -> IonDecodeResult;
+            fn decode_bool(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_int(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_float(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_decimal(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_symbol(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_string(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_clob(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_blob(&self, reader: &mut R) -> IonDecodeResult;
+            fn decode_sexp(&self, reader: &mut R) -> IonDecodeResult;
         }
     }
 }
