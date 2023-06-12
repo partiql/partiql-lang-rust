@@ -11,6 +11,7 @@ mod tests {
     use crate::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
     use itertools::Itertools;
 
+    use ion_rs::element::writer::TextKind;
     use partiql_value::{partiql_bag, partiql_list, partiql_tuple, DateTime, Value};
     use rust_decimal_macros::dec;
     use std::num::NonZeroU8;
@@ -27,7 +28,7 @@ mod tests {
 
     fn encode_ion(value: &Value, encoding: Encoding) -> Result<String, IonEncodeError> {
         let mut buff = vec![];
-        let mut writer = ion_rs::TextWriterBuilder::new()
+        let mut writer = ion_rs::TextWriterBuilder::new(TextKind::Compact)
             .build(&mut buff)
             .expect("writer");
         let mut encoder = IonEncoderBuilder::new(IonEncoderConfig::default().with_mode(encoding))
