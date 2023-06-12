@@ -77,7 +77,7 @@ impl IonEncoderBuilder {
         writer: &'a mut I,
     ) -> Result<Box<dyn ValueEncoder<W, I> + 'a>, IonEncodeError>
     where
-        W: Write + 'a,
+        W: 'a,
         I: IonWriter<Output = W> + 'a,
     {
         let encoder = SimpleIonValueEncoder { writer };
@@ -101,7 +101,6 @@ impl Default for IonEncoderBuilder {
 /// An encoder which will write [`Value`]s as Ion stream values.
 pub trait ValueEncoder<W, I>
 where
-    W: Write,
     I: IonWriter<Output = W>,
 {
     /// A reference to the writer used by this encoder.
@@ -113,7 +112,6 @@ where
 
 trait IonValueEncoder<W, I>: ValueEncoder<W, I>
 where
-    W: Write,
     I: IonWriter<Output = W>,
 {
     fn get_writer(&mut self) -> &mut I;
@@ -152,7 +150,7 @@ where
 
 impl<'a, W, I> ValueEncoder<W, I> for SimpleIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     fn writer(&mut self) -> &mut I {
@@ -167,7 +165,7 @@ where
 
 impl<'a, W, I> ValueEncoder<W, I> for PartiqlEncodedIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     fn writer(&mut self) -> &mut I {
@@ -182,7 +180,7 @@ where
 
 struct SimpleIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     pub(crate) writer: &'a mut I,
@@ -190,7 +188,7 @@ where
 
 impl<'a, W, I> IonValueEncoder<W, I> for SimpleIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     fn get_writer(&mut self) -> &mut I {
@@ -280,7 +278,7 @@ where
 #[inline]
 fn encode_list<'a, W, I, V>(encoder: &'a mut impl IonValueEncoder<W, I>, vals: V) -> IonEncodeResult
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W> + 'a,
     V: Iterator<Item = &'a Value> + 'a,
 {
@@ -299,7 +297,7 @@ fn encode_tuple<'a, W, I>(
     val: &'a Tuple,
 ) -> IonEncodeResult
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W> + 'a,
 {
     encoder.writer().step_in(IonType::Struct)?;
@@ -314,7 +312,7 @@ where
 
 struct PartiqlEncodedIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     inner: SimpleIonValueEncoder<'a, W, I>,
@@ -322,7 +320,7 @@ where
 
 impl<'a, W, I> PartiqlEncodedIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     fn write_date(&mut self, date: &Date) -> IonEncodeResult {
@@ -364,7 +362,7 @@ where
 
 impl<'a, W, I> IonValueEncoder<W, I> for PartiqlEncodedIonValueEncoder<'a, W, I>
 where
-    W: Write,
+    W: 'a,
     I: IonWriter<Output = W>,
 {
     fn get_writer(&mut self) -> &mut I {
