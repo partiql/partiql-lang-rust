@@ -22,7 +22,7 @@ bench = false
 
 [dependencies]
 walkdir = "2.3"
-ion-rs = "0.17"
+ion-rs = "0.18"
 codegen = "0.2.*"
 Inflector = "0.11.*"
 miette = "5.*"
