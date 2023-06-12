@@ -4,7 +4,6 @@ use ion_rs::{IonError, IonType, IonWriter};
 use ordered_float::OrderedFloat;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use rust_decimal::Decimal;
-use std::io::Write;
 
 use crate::common::{
     BAG_ANNOT, DATE_ANNOT, MISSING_ANNOT, TIME_ANNOT, TIME_PART_HOUR_KEY, TIME_PART_MINUTE_KEY,

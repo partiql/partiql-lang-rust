@@ -238,14 +238,11 @@ mod tests {
 
     #[test]
     fn partiql_value_from_partiql_encoded_ion() {
-        /*
         assert_partiql_encoded_ion(
             "null",
             ion_rs::element::Value::Null(IonType::Null),
             Value::Null,
         );
-
-         */
         assert_partiql_encoded_ion(
             "$missing::null",
             ion_rs::element::Value::Null(IonType::Null).with_annotations(["$missing"]),
