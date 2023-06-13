@@ -92,11 +92,15 @@ pub enum CatalogError {
 pub trait Catalog: Debug {
     fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError>;
 
+    fn add_type_entry(&mut self, entry: TypeEntry) -> Result<ObjectId, CatalogError>;
+
     fn get_function(&self, name: &str) -> Option<FunctionEntry>;
+
+    fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
 }
 
 pub struct TypeEntry {
-    name: String,
+    name: UniCase<String>,
     ty: StaticType,
 }
 
@@ -171,6 +175,10 @@ impl Catalog for PartiqlCatalog {
         }
     }
 
+    fn add_type_entry(&mut self, entry: TypeEntry) -> Result<ObjectId, CatalogError> {
+        todo!()
+    }
+
     fn get_function(&self, name: &str) -> Option<FunctionEntry> {
         self.functions
             .find_by_name(name)
@@ -181,6 +189,10 @@ impl Catalog for PartiqlCatalog {
                 },
                 function: entry,
             })
+    }
+
+    fn resolve_type(&self, name: &str) -> Option<TypeEntry> {
+        todo!()
     }
 }
 
