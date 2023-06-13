@@ -1,10 +1,13 @@
 use crate::call_defs::CallDef;
+
+use partiql_types::StaticType;
 use partiql_value::Value;
 use std::borrow::Cow;
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 use unicase::UniCase;
@@ -92,8 +95,12 @@ pub trait Catalog: Debug {
     fn get_function(&self, name: &str) -> Option<FunctionEntry>;
 }
 
+pub struct TypeEntry {
+    name: String,
+    ty: StaticType,
+}
+
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,
     function: &'a FunctionEntryFunction,
@@ -127,7 +134,7 @@ impl<'a> FunctionEntry<'a> {
 #[derive(Debug)]
 pub struct PartiqlCatalog {
     functions: CatalogEntrySet<FunctionEntryFunction>,
-
+    type_env: CatalogEntrySet<StaticType>,
     id: CatalogId,
 }
 
@@ -135,7 +142,9 @@ impl Default for PartiqlCatalog {
     fn default() -> Self {
         PartiqlCatalog {
             functions: Default::default(),
-
+            // TODO for now don't expose the `type_env` to `Catalog` as a loadable env until we have
+            // a better story around pluggable types.
+            type_env: Default::default(),
             id: CatalogId(1),
         }
     }
