@@ -57,7 +57,7 @@ pub(crate) fn fail_syntax(statement: &str) {
     let res = parse(statement);
     assert!(
         res.is_err(),
-        "For `{statement}`, expected `Err(_)`, but was `{res:#?}`"
+        "When parsing `{statement}`, expected `Err(_)`, but was `{res:#?}`"
     );
 }
 
@@ -68,7 +68,7 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
     let res = parse(statement);
     assert!(
         res.is_ok(),
-        "For `{statement}`, expected `Ok(_)`, but was `{res:#?}`"
+        "When parsing `{statement}`, expected `Ok(_)`, but was `{res:#?}`"
     );
     res.unwrap()
 }
@@ -76,8 +76,14 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
 #[track_caller]
 #[inline]
 #[allow(dead_code)]
-pub(crate) fn fail_semantics(_statement: &str) {
-    todo!("fail_semantics")
+pub(crate) fn fail_semantics(statement: &str) {
+    let catalog = PartiqlCatalog::default();
+    let parsed = parse(statement);
+    let lowered = parsed.map(|parsed| lower(&catalog, &parsed));
+    assert!(
+        lowered.is_err(),
+        "When semantically verifying `{statement}`, expected `Err(_)`, but was `{lowered:#?}`"
+    );
 }
 
 #[track_caller]
@@ -86,11 +92,10 @@ pub(crate) fn fail_semantics(_statement: &str) {
 pub(crate) fn pass_semantics(statement: &str) {
     let catalog = PartiqlCatalog::default();
     let parsed = pass_syntax(statement);
-    // TODO add Result to lower call
-    let lowered: Result<_, ()> = Ok(lower(&catalog, &parsed));
+    let lowered = lower(&catalog, &parsed);
     assert!(
         lowered.is_ok(),
-        "For `{statement}`, expected `Ok(_)`, but was `{lowered:#?}`"
+        "When semantically verifying `{statement}`, expected `Ok(_)`, but was `{lowered:#?}`"
     );
 }
 
@@ -99,10 +104,6 @@ pub(crate) fn pass_semantics(statement: &str) {
 #[allow(dead_code)]
 pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
     let catalog = PartiqlCatalog::default();
-    if let EvaluationMode::Error = mode {
-        eprintln!("EvaluationMode::Error currently unsupported");
-        return;
-    }
 
     let parsed = parse(statement);
     let lowered_result = lower(&catalog, &parsed.expect("parse"));
@@ -114,7 +115,10 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
     let plan = compile(&catalog, lowered).expect("compile");
     let out = evaluate(plan, bindings);
 
-    assert!(out.is_err());
+    assert!(
+        out.is_err(),
+        "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
+    );
 }
 
 #[track_caller]
@@ -127,10 +131,6 @@ pub(crate) fn pass_eval(
     expected: &TestValue,
 ) {
     let catalog = PartiqlCatalog::default();
-    if let EvaluationMode::Error = mode {
-        eprintln!("EvaluationMode::Error currently unsupported");
-        return;
-    }
 
     let parsed = parse(statement);
     let lowered_result = lower(&catalog, &parsed.expect("parse"));
@@ -144,7 +144,11 @@ pub(crate) fn pass_eval(
 
     match out {
         Ok(v) => assert_eq!(v.result, expected.value),
-        Err(err) => panic!("Encountered error: {err:?}"),
+        Err(err) => {
+            panic!(
+                "When evaluating (mode = {mode:#?}) `{statement}`, expected `Ok(_)`, but was `Err({err:#?})`"
+            )
+        }
     }
 }
 
