@@ -26,6 +26,7 @@ partiql-parser = { path = "../partiql-parser", version = "0.5.*" }
 partiql-logical = { path = "../partiql-logical", version = "0.5.*" }
 partiql-types = { path = "../partiql-types", version = "0.5.*" }
 
+
 thiserror = "1.0"
 ordered-float = "3.*"
 itertools = "0.10.*"

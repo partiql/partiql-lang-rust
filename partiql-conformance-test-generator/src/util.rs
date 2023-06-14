@@ -1,4 +1,5 @@
 use inflector::Inflector;
+use quote::__private::TokenStream;
 
 pub trait Escaper {
     /// Escapes a string intended to be used in a file path
@@ -49,6 +50,11 @@ impl Escaper for String {
     fn escape_module_name(&self) -> String {
         self.as_str().escape_module_name()
     }
+}
+
+#[inline]
+pub fn escape_fn_code(ts: TokenStream) -> String {
+    ts.to_string().replace("\\n", "\n")
 }
 
 #[cfg(test)]

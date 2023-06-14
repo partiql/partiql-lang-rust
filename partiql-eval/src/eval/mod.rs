@@ -131,6 +131,9 @@ impl EvalPlan {
 pub type EvalResult = Result<Evaluated, EvalErr>;
 
 /// Represents result of evaluation as an evaluated entity.
+#[non_exhaustive]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Evaluated {
     pub result: Value,
 }

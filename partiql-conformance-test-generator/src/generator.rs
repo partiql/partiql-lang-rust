@@ -1,12 +1,13 @@
 use crate::schema::spec::*;
 use crate::schema::structure::*;
 
-use crate::util::Escaper;
+use crate::util::{escape_fn_code, Escaper};
 use codegen::{Function, Module, Scope};
 use ion_rs::TextWriterBuilder;
 
 use ion_rs::element::writer::ElementWriter;
 use ion_rs::element::{Element, Struct};
+use quote::__private::TokenStream;
 use quote::quote;
 use std::collections::{HashMap, HashSet};
 
@@ -167,6 +168,9 @@ impl Generator {
                 let mut module = Module::new(&mod_name);
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name.clone()));
@@ -193,6 +197,9 @@ impl Generator {
         let mut module = Module::new(&mod_name.escape_module_name());
         module.attr("allow(unused_imports)");
         module.attr("allow(clippy::module_inception)");
+        if self.curr_path.iter().any(|s| s.contains("experimental")) {
+            module.attr(r#"cfg(feature = "experimental")"#);
+        }
         module.import("super", "*");
 
         self.push_scope(Some(mod_name.clone()));
@@ -215,6 +222,10 @@ impl Generator {
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -231,6 +242,10 @@ impl Generator {
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -327,6 +342,9 @@ impl Generator {
         let module = scope.new_module(&mod_name.escape_module_name());
         module.attr("allow(unused_imports)");
         module.import("super", "*");
+        if self.curr_path.iter().any(|s| s.contains("experimental")) {
+            module.attr(r#"cfg(feature = "experimental")"#);
+        }
 
         self.push_scope(Some(mod_name.clone()));
         self.gen_variants(module.scope(), &namespace.contents);
@@ -344,20 +362,8 @@ impl Generator {
         name
     }
 
-    fn gen_test(&mut self, scope: &mut Scope, test_case: &TestCase) {
-        let escaped_name = test_case.name.escape_test_name();
-        let name = self.intern_test_name(escaped_name);
-
-        let test_fn: &mut Function = scope.new_fn(&name);
-        test_fn.attr("test");
-        test_fn.attr("allow(text_direction_codepoint_in_literal)");
-
-        let doc = format!("Generated test for test named `{}`", &test_case.name);
-        test_fn.doc(&doc);
-
-        let mut ignore_test = false;
-        let mut has_env = false;
-        let test_case_expr = |gen: &dyn Fn(&str) -> _| match &test_case.statement {
+    fn test_case_stmts(&self, test_case: &TestCase) -> Vec<String> {
+        match &test_case.statement {
             TestStatement::EquivalenceClass(equiv_id) => {
                 let stmts = self
                     .curr_equivs
@@ -367,158 +373,193 @@ impl Generator {
                     .next();
 
                 let stmts = stmts.expect("equivalence class named");
-                stmts.iter().map(|s| gen(s)).collect::<Vec<_>>()
+                stmts.to_vec()
             }
-            TestStatement::Statement(s) => vec![gen(s)],
-        };
+            TestStatement::Statement(s) => vec![s.clone()],
+        }
+    }
 
-        if let Some(env) = &test_case.env {
+    fn create_test<F>(
+        &mut self,
+        scope: &mut Scope,
+        test_case: &TestCase,
+        name_prefix: Option<&str>,
+        needs_env: bool,
+        mut body: F,
+    ) where
+        F: FnMut(&mut Function),
+    {
+        let bare_name = &test_case.name;
+        let prefixed_name = if let Some(prefix) = name_prefix {
+            format!("{prefix}_{bare_name}")
+        } else {
+            bare_name.clone()
+        };
+        let escaped_name = prefixed_name.escape_test_name();
+        let name = self.intern_test_name(escaped_name);
+
+        let test_fn: &mut Function = scope.new_fn(&name);
+        test_fn.attr("test");
+        test_fn.attr("allow(text_direction_codepoint_in_literal)");
+
+        let doc = format!("Generated test for test named `{}`", &test_case.name);
+        test_fn.doc(&doc);
+
+        let env = if let Some(env) = &test_case.env {
             let env = struct_to_string(env);
-            let env = quote! {
+            quote! {
                 let env_ion_text = #env;
                 let env = Some(env_ion_text.into());
             }
-            .to_string()
-            .replace("\\n", "\n");
-            test_fn.line(env);
-            has_env = true;
+        } else if needs_env {
+            quote! {
+                let env = environment();
+            }
+        } else {
+            quote! {}
+        };
+        test_fn.line(escape_fn_code(env));
+
+        body(test_fn)
+    }
+
+    fn write_aside_expected(&mut self, test_case: &TestCase, expected: String) -> (String, bool) {
+        if expected.lines().count() > EXPECTED_INLINE_LOWER_BOUND_LINE_COUNT {
+            let expected_file = self
+                .curr_mod_path
+                .iter()
+                .map(|s| s.escape_path())
+                .chain(std::iter::once(test_case.name.escape_path()))
+                .collect::<Vec<_>>()
+                .join("___")
+                + ".expected.ion";
+
+            let td_dir = TEST_DATA_DIR.to_string();
+            let expected_path: Vec<_> = self
+                .curr_path
+                .iter()
+                .chain(std::iter::once(&td_dir))
+                .chain(std::iter::once(&expected_file))
+                .collect();
+
+            self.result.insert(
+                expected_path.as_slice(),
+                Node::Value(TestValueNode { value: expected }),
+            );
+
+            (format!("{TEST_DATA_DIR}/{expected_file}"), true)
+        } else {
+            (expected, false)
+        }
+    }
+
+    fn gen_test(&mut self, scope: &mut Scope, test_case: &TestCase) {
+        let stmts = self.test_case_stmts(test_case);
+        let test_case_expr =
+            |gen: &dyn Fn(&str) -> _| stmts.iter().map(|s| gen(s)).collect::<Vec<_>>();
+
+        fn mode_data(eval_mode: &EvaluationMode) -> (&'static str, &'static str, TokenStream) {
+            match eval_mode {
+                EvaluationMode::EvalModeError => {
+                    ("strict", "strict", quote! { EvaluationMode::Error })
+                }
+                EvaluationMode::EvalModeCoerce => (
+                    "permissive",
+                    "permissive",
+                    quote! { EvaluationMode::Coerce },
+                ),
+            }
         }
 
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
-                    let stmts = test_case_expr(&|stmt: &str| quote! {pass_syntax(#stmt);});
-                    let tokens = quote! {
-                        #(#stmts)*
-                    };
-                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "syntax")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {pass_syntax(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::SyntaxFail(_) => {
-                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_syntax(#stmt);});
-                    let tokens = quote! {
-                        #(#stmts)*
-                    };
-                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "syntax")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {fail_syntax(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::StaticAnalysisFail(_) => {
-                    // TODO semantics tests are not yet implemented
-                    ignore_test = true;
-
-                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_semantics(#stmt);});
-                    let tokens = quote! {
-                        #(#stmts)*
-                    };
-                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "semantics")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {fail_semantics(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::EvaluationSuccess(EvaluationSuccessAssertion {
                     output,
                     eval_mode,
                     ..
                 }) => {
-                    if !std::mem::replace(&mut has_env, true) {
-                        test_fn.line("let env = environment();\n\n");
-                    }
-                    test_fn.line("\n//**** evaluation success test case(s) ****//");
+                    for mode in eval_mode {
+                        let (prefix, feature, mode) = mode_data(mode);
+                        let (expected, is_file) =
+                            self.write_aside_expected(test_case, elt_to_string(output));
 
-                    let expected = elt_to_string(output);
-                    let expected =
-                        if expected.lines().count() > EXPECTED_INLINE_LOWER_BOUND_LINE_COUNT {
-                            let expected_file = self
-                                .curr_mod_path
-                                .iter()
-                                .map(|s| s.escape_path())
-                                .chain(std::iter::once(test_case.name.escape_path()))
-                                .collect::<Vec<_>>()
-                                .join("___")
-                                + ".expected.ion";
+                        self.create_test(scope, test_case, Some(prefix), true, |test_fn| {
+                            test_fn.attr(&format!(r#"cfg(feature = "{feature}")"#));
+                            test_fn.line("\n//**** evaluation success test case(s) ****//");
 
-                            let td_dir = TEST_DATA_DIR.to_string();
-                            let expected_path: Vec<_> = self
-                                .curr_path
-                                .iter()
-                                .chain(std::iter::once(&td_dir))
-                                .chain(std::iter::once(&expected_file))
-                                .collect();
+                            let expected = if is_file {
+                                quote! {include_str!(#expected)}
+                            } else {
+                                quote! {#expected}
+                            };
 
-                            self.result.insert(
-                                expected_path.as_slice(),
-                                Node::Value(TestValueNode { value: expected }),
-                            );
+                            // emit asserts for all statements
+                            let stmts = test_case_expr(&|stmt: &str| {
+                                // emit PartiQL statement and evaluation mode assert
+                                quote! {
+                                    let stmt = #stmt;
+                                    pass_eval(stmt, #mode, &env, &expected);
+                                }
+                            });
 
-                            let data_file = format!("{TEST_DATA_DIR}/{expected_file}");
-                            quote! {include_str!(#data_file)}
-                        } else {
-                            quote! {#expected}
-                        };
-
-                    let modes: Vec<_> = eval_mode
-                        .into_iter()
-                        .map(|mode| match mode {
-                            EvaluationMode::EvalModeError => quote! { EvaluationMode::Error },
-                            EvaluationMode::EvalModeCoerce => quote! { EvaluationMode::Coerce },
-                        })
-                        .collect();
-
-                    // emit asserts for all statements X all modes
-                    let stmts = test_case_expr(&|stmt: &str| {
-                        // emit one assert statement per evaluation mode
-                        let asserts = modes.iter().map(|mode| {
-                            quote! {
-                                pass_eval(stmt, #mode, &env, &expected);
-                            }
+                            test_fn.line(escape_fn_code(quote! {
+                                let expected = #expected.into();
+                                #(#stmts)*
+                            }));
                         });
-                        // emit PartiQL statement and evaluation mode asserts
-                        quote! {
-                            let stmt = #stmt;
-                            #(#asserts)*
-                        }
-                    });
-
-                    let tokens = quote! {
-                        let expected = #expected.into();
-                        #(#stmts)*
-                    };
-                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
+                    }
                 }
                 Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
-                    if !std::mem::replace(&mut has_env, true) {
-                        test_fn.line("let env = environment();\n\n");
-                    }
-                    test_fn.line("\n//**** evaluation failure test case(s) ****//");
+                    for mode in eval_mode {
+                        let (prefix, feature, mode) = mode_data(mode);
 
-                    let modes: Vec<_> = eval_mode
-                        .into_iter()
-                        .map(|mode| match mode {
-                            EvaluationMode::EvalModeError => quote! { EvaluationMode::Error },
-                            EvaluationMode::EvalModeCoerce => quote! { EvaluationMode::Coerce },
-                        })
-                        .collect();
+                        self.create_test(scope, test_case, Some(prefix), true, |test_fn| {
+                            test_fn.attr(&format!(r#"cfg(feature = "{feature}")"#));
+                            test_fn.line("\n//**** evaluation failure test case(s) ****//");
 
-                    // emit asserts for all statements X all modes
-                    let stmts = test_case_expr(&|stmt: &str| {
-                        // emit one assert statement per evaluation mode
-                        let asserts = modes.iter().map(|mode| {
-                            quote! {
-                                fail_eval(stmt, #mode, &env);
-                            }
+                            // emit asserts for all statements
+                            let stmts = test_case_expr(&|stmt: &str| {
+                                // emit PartiQL statement and evaluation mode assert
+                                quote! {
+                                    let stmt = #stmt;
+                                    fail_eval(stmt, #mode, &env);
+                                }
+                            });
+
+                            test_fn.line(escape_fn_code(quote! {
+                                #(#stmts)*
+                            }));
                         });
-                        // emit PartiQL statement and evaluation mode asserts
-                        quote! {
-                            let stmt = #stmt;
-                            #(#asserts)*
-                        }
-                    });
-
-                    let tokens = quote! {
-                        #(#stmts)*
-                    };
-                    test_fn.line(tokens.to_string().replace("\\n", "\n"));
+                    }
                 }
             }
-        }
-
-        if ignore_test {
-            test_fn.attr("ignore = \"not yet implemented\"");
         }
     }
 }
