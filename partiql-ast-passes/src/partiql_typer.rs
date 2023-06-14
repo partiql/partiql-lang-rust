@@ -4,15 +4,15 @@ use partiql_ast::ast::{
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::Catalog;
-use partiql_types::{ArrayType, BagType, StaticType, StaticTypeKind, StructType};
+use partiql_types::{ArrayType, BagType, PartiqlType, StructType, TypeKind};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AstStaticTyper<'c> {
     id_stack: Vec<NodeId>,
-    container_stack: Vec<Vec<StaticType>>,
+    container_stack: Vec<Vec<PartiqlType>>,
     errors: Vec<AstTransformError>,
-    type_map: AstTypeMap<StaticType>,
+    type_map: AstTypeMap<PartiqlType>,
     catalog: &'c dyn Catalog,
 }
 
@@ -30,7 +30,7 @@ impl<'c> AstStaticTyper<'c> {
     pub fn type_nodes(
         mut self,
         query: &AstNode<Query>,
-    ) -> Result<AstTypeMap<StaticType>, AstTransformationError> {
+    ) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
         query.visit(&mut self);
         if self.errors.is_empty() {
             Ok(self.type_map)
@@ -99,30 +99,30 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
         // Currently we're assuming no-schema, hence typing to arbitrary sized scalars.
         // TODO type to the corresponding scalar with the introduction of schema
         let kind = match _lit {
-            Lit::Null => StaticTypeKind::Null,
-            Lit::Missing => StaticTypeKind::Missing,
-            Lit::Int8Lit(_) => StaticTypeKind::Int,
-            Lit::Int16Lit(_) => StaticTypeKind::Int,
-            Lit::Int32Lit(_) => StaticTypeKind::Int,
-            Lit::Int64Lit(_) => StaticTypeKind::Int,
-            Lit::DecimalLit(_) => StaticTypeKind::Decimal,
-            Lit::NumericLit(_) => StaticTypeKind::Decimal,
-            Lit::RealLit(_) => StaticTypeKind::Float64,
-            Lit::FloatLit(_) => StaticTypeKind::Float64,
-            Lit::DoubleLit(_) => StaticTypeKind::Float64,
-            Lit::BoolLit(_) => StaticTypeKind::Bool,
+            Lit::Null => TypeKind::Null,
+            Lit::Missing => TypeKind::Missing,
+            Lit::Int8Lit(_) => TypeKind::Int,
+            Lit::Int16Lit(_) => TypeKind::Int,
+            Lit::Int32Lit(_) => TypeKind::Int,
+            Lit::Int64Lit(_) => TypeKind::Int,
+            Lit::DecimalLit(_) => TypeKind::Decimal,
+            Lit::NumericLit(_) => TypeKind::Decimal,
+            Lit::RealLit(_) => TypeKind::Float64,
+            Lit::FloatLit(_) => TypeKind::Float64,
+            Lit::DoubleLit(_) => TypeKind::Float64,
+            Lit::BoolLit(_) => TypeKind::Bool,
             Lit::IonStringLit(_) => todo!(),
-            Lit::CharStringLit(_) => StaticTypeKind::String,
-            Lit::NationalCharStringLit(_) => StaticTypeKind::String,
+            Lit::CharStringLit(_) => TypeKind::String,
+            Lit::NationalCharStringLit(_) => TypeKind::String,
             Lit::BitStringLit(_) => todo!(),
             Lit::HexStringLit(_) => todo!(),
-            Lit::StructLit(_) => StaticTypeKind::Struct(StructType::unconstrained()),
-            Lit::ListLit(_) => StaticTypeKind::Array(ArrayType::array()),
-            Lit::BagLit(_) => StaticTypeKind::Bag(BagType::bag()),
+            Lit::StructLit(_) => TypeKind::Struct(StructType::unconstrained()),
+            Lit::ListLit(_) => TypeKind::Array(ArrayType::array()),
+            Lit::BagLit(_) => TypeKind::Bag(BagType::bag()),
             Lit::TypedLit(_, _) => todo!(),
         };
 
-        let ty = StaticType::new(kind);
+        let ty = PartiqlType::new(kind);
         let id = *self.current_node();
         if let Some(c) = self.container_stack.last_mut() {
             c.push(ty.clone())
@@ -161,7 +161,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
             }
         }
 
-        let ty = StaticType::new_struct(StructType::unconstrained());
+        let ty = PartiqlType::new_struct(StructType::unconstrained());
         self.type_map.insert(id, ty.clone());
 
         if let Some(c) = self.container_stack.last_mut() {
@@ -184,7 +184,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
         self.container_stack.pop();
 
         let id = *self.current_node();
-        let ty = StaticType::new_bag(BagType::bag());
+        let ty = PartiqlType::new_bag(BagType::bag());
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
@@ -206,7 +206,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
         self.container_stack.pop();
 
         let id = *self.current_node();
-        let ty = StaticType::new_array(ArrayType::array());
+        let ty = PartiqlType::new_array(ArrayType::array());
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
@@ -222,29 +222,23 @@ mod tests {
     use assert_matches::assert_matches;
     use partiql_ast::ast;
     use partiql_catalog::PartiqlCatalog;
-    use partiql_types::{StaticType, StaticTypeKind};
+    use partiql_types::{PartiqlType, TypeKind};
 
     #[test]
     fn simple_test() {
-        assert_matches!(run_literal_test("NULL"), StaticTypeKind::Null);
-        assert_matches!(run_literal_test("MISSING"), StaticTypeKind::Missing);
-        assert_matches!(run_literal_test("Missing"), StaticTypeKind::Missing);
-        assert_matches!(run_literal_test("true"), StaticTypeKind::Bool);
-        assert_matches!(run_literal_test("false"), StaticTypeKind::Bool);
-        assert_matches!(run_literal_test("1"), StaticTypeKind::Int);
-        assert_matches!(run_literal_test("1.5"), StaticTypeKind::Decimal);
-        assert_matches!(run_literal_test("'hello world!'"), StaticTypeKind::String);
-        assert_matches!(
-            run_literal_test("[1, 2 , {'a': 2}]"),
-            StaticTypeKind::Array(_)
-        );
-        assert_matches!(
-            run_literal_test("<<'1', {'a': 11}>>"),
-            StaticTypeKind::Bag(_)
-        );
+        assert_matches!(run_literal_test("NULL"), TypeKind::Null);
+        assert_matches!(run_literal_test("MISSING"), TypeKind::Missing);
+        assert_matches!(run_literal_test("Missing"), TypeKind::Missing);
+        assert_matches!(run_literal_test("true"), TypeKind::Bool);
+        assert_matches!(run_literal_test("false"), TypeKind::Bool);
+        assert_matches!(run_literal_test("1"), TypeKind::Int);
+        assert_matches!(run_literal_test("1.5"), TypeKind::Decimal);
+        assert_matches!(run_literal_test("'hello world!'"), TypeKind::String);
+        assert_matches!(run_literal_test("[1, 2 , {'a': 2}]"), TypeKind::Array(_));
+        assert_matches!(run_literal_test("<<'1', {'a': 11}>>"), TypeKind::Bag(_));
         assert_matches!(
             run_literal_test("{'a': 1, 'b': 3, 'c': [1, 2]}"),
-            StaticTypeKind::Struct(_)
+            TypeKind::Struct(_)
         );
     }
 
@@ -253,13 +247,13 @@ mod tests {
         assert!(type_statement("{'a': 1, a.b: 3}").is_err());
     }
 
-    fn run_literal_test(q: &str) -> StaticTypeKind {
+    fn run_literal_test(q: &str) -> TypeKind {
         let out = type_statement(q).expect("type map");
-        let values: Vec<&StaticType> = out.values().collect();
+        let values: Vec<&PartiqlType> = out.values().collect();
         values.last().unwrap().kind().clone()
     }
 
-    fn type_statement(q: &str) -> Result<AstTypeMap<StaticType>, AstTransformationError> {
+    fn type_statement(q: &str) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
         let parsed = partiql_parser::Parser::default()
             .parse(q)
             .expect("Expect successful parse");

@@ -1,6 +1,6 @@
 use crate::call_defs::CallDef;
 
-use partiql_types::StaticType;
+use partiql_types::PartiqlType;
 use partiql_value::Value;
 use std::borrow::Cow;
 
@@ -115,13 +115,13 @@ pub trait Catalog: Debug {
 pub struct TypeEnvEntry<'a> {
     name: UniCase<String>,
     aliases: Vec<&'a str>,
-    ty: StaticType,
+    ty: PartiqlType,
 }
 
 #[derive(Debug)]
 pub struct TypeEntry {
     id: ObjectId,
-    ty: StaticType,
+    ty: PartiqlType,
 }
 
 #[derive(Debug)]
@@ -158,7 +158,7 @@ impl<'a> FunctionEntry<'a> {
 #[derive(Debug)]
 pub struct PartiqlCatalog {
     functions: CatalogEntrySet<FunctionEntryFunction>,
-    types: CatalogEntrySet<StaticType>,
+    types: CatalogEntrySet<PartiqlType>,
     id: CatalogId,
 }
 
@@ -194,11 +194,16 @@ impl Catalog for PartiqlCatalog {
     }
 
     fn add_type_entry(&mut self, entry: TypeEnvEntry) -> Result<ObjectId, CatalogError> {
-        let id = self.types.add(entry.name.as_ref(), entry.aliases.as_slice(), entry.ty);
+        let id = self
+            .types
+            .add(entry.name.as_ref(), entry.aliases.as_slice(), entry.ty);
 
         match id {
-            Ok(id) => Ok(ObjectId { catalog_id: self.id, entry_id: id }),
-            Err(e) => Err(e)
+            Ok(id) => Ok(ObjectId {
+                catalog_id: self.id,
+                entry_id: id,
+            }),
+            Err(e) => Err(e),
         }
     }
 
@@ -215,14 +220,12 @@ impl Catalog for PartiqlCatalog {
     }
 
     fn resolve_type(&self, name: &str) -> Option<TypeEntry> {
-        self.types
-        .find_by_name(name)
-        .map(|(eid, entry)| TypeEntry {
+        self.types.find_by_name(name).map(|(eid, entry)| TypeEntry {
             id: ObjectId {
                 catalog_id: self.id,
-                entry_id: eid
+                entry_id: eid,
             },
-            ty: entry.clone()
+            ty: entry.clone(),
         })
     }
 }

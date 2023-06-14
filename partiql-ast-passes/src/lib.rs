@@ -6,4 +6,4 @@
 
 pub mod error;
 pub mod name_resolver;
-pub mod static_typer;
+pub mod partiql_typer;

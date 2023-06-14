@@ -3,15 +3,15 @@ use std::fmt::Debug;
 
 pub trait Type {}
 
-impl Type for StaticType {}
+impl Type for PartiqlType {}
 
 #[derive(Debug, Clone)]
-pub struct StaticType {
-    kind: StaticTypeKind,
+pub struct PartiqlType {
+    kind: TypeKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum StaticTypeKind {
+pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
 
@@ -35,45 +35,45 @@ pub enum StaticTypeKind {
 }
 
 #[allow(dead_code)]
-impl StaticType {
-    pub fn new(kind: StaticTypeKind) -> StaticType {
-        StaticType { kind }
+impl PartiqlType {
+    pub fn new(kind: TypeKind) -> PartiqlType {
+        PartiqlType { kind }
     }
 
-    pub fn new_struct(s: StructType) -> StaticType {
-        StaticType {
-            kind: StaticTypeKind::Struct(s),
+    pub fn new_struct(s: StructType) -> PartiqlType {
+        PartiqlType {
+            kind: TypeKind::Struct(s),
         }
     }
 
-    pub fn new_bag(b: BagType) -> StaticType {
-        StaticType {
-            kind: StaticTypeKind::Bag(b),
+    pub fn new_bag(b: BagType) -> PartiqlType {
+        PartiqlType {
+            kind: TypeKind::Bag(b),
         }
     }
 
-    pub fn new_array(a: ArrayType) -> StaticType {
-        StaticType {
-            kind: StaticTypeKind::Array(a),
+    pub fn new_array(a: ArrayType) -> PartiqlType {
+        PartiqlType {
+            kind: TypeKind::Array(a),
         }
     }
 
-    pub fn union_of(types: HashSet<StaticType>) -> StaticType {
-        StaticType {
-            kind: StaticTypeKind::AnyOf(AnyOf::new(types)),
+    pub fn union_of(types: HashSet<PartiqlType>) -> PartiqlType {
+        PartiqlType {
+            kind: TypeKind::AnyOf(AnyOf::new(types)),
         }
     }
 
     pub fn is_string(&self) -> bool {
         matches!(
             &self,
-            StaticType {
-                kind: StaticTypeKind::String
+            PartiqlType {
+                kind: TypeKind::String
             }
         )
     }
 
-    pub fn kind(&self) -> &StaticTypeKind {
+    pub fn kind(&self) -> &TypeKind {
         &self.kind
     }
 }
@@ -81,11 +81,11 @@ impl StaticType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AnyOf {
-    types: HashSet<StaticType>,
+    types: HashSet<PartiqlType>,
 }
 
 impl AnyOf {
-    pub fn new(types: HashSet<StaticType>) -> Self {
+    pub fn new(types: HashSet<PartiqlType>) -> Self {
         AnyOf { types }
     }
 }
@@ -100,12 +100,12 @@ pub struct StructType {
 #[allow(dead_code)]
 pub struct StructField {
     name: String,
-    value: StaticType,
+    value: PartiqlType,
 }
 
 impl<T> From<(String, T)> for StructField
 where
-    T: Into<StaticType>,
+    T: Into<PartiqlType>,
 {
     fn from(pair: (String, T)) -> Self {
         StructField {
@@ -138,18 +138,18 @@ pub enum StructConstraint {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct BagType {
-    element_type: Box<StaticType>,
+    element_type: Box<PartiqlType>,
     constraints: Vec<CollectionConstraint>,
 }
 
 impl BagType {
     pub fn bag() -> Self {
-        BagType::bag_of(Box::new(StaticType {
-            kind: StaticTypeKind::Any,
+        BagType::bag_of(Box::new(PartiqlType {
+            kind: TypeKind::Any,
         }))
     }
 
-    pub fn bag_of(typ: Box<StaticType>) -> Self {
+    pub fn bag_of(typ: Box<PartiqlType>) -> Self {
         BagType {
             element_type: typ,
             constraints: vec![CollectionConstraint::Ordered(false)],
@@ -160,18 +160,18 @@ impl BagType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ArrayType {
-    element_type: Box<StaticType>,
+    element_type: Box<PartiqlType>,
     constraints: Vec<CollectionConstraint>,
 }
 
 impl ArrayType {
     pub fn array() -> Self {
-        ArrayType::array_of(Box::new(StaticType {
-            kind: StaticTypeKind::Any,
+        ArrayType::array_of(Box::new(PartiqlType {
+            kind: TypeKind::Any,
         }))
     }
 
-    pub fn array_of(typ: Box<StaticType>) -> Self {
+    pub fn array_of(typ: Box<PartiqlType>) -> Self {
         ArrayType {
             element_type: typ,
             constraints: vec![CollectionConstraint::Ordered(true)],
