@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1686756807589,
+  "lastUpdate": 1686775491713,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -11705,6 +11705,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 45491,
             "range": "± 3352",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "004d2c04a09f897b652c5bf20b20c6023db3dcdb",
+          "message": "Use `partiql_ast::ast::AstTypeMap` for `LocationMap` (#394)\n\nAddressing the comment in PR #389, this PR re-uses the `AstTypeMap`\r\nfor `LocationMap` which removes a dependency to `HashMap` as `AstTypeMap`\r\nuses `IndexMap`.",
+          "timestamp": "2023-06-14T13:32:49-07:00",
+          "tree_id": "bae213675e834573973c112d66493278e10a7ebf",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/004d2c04a09f897b652c5bf20b20c6023db3dcdb"
+        },
+        "date": 1686775490488,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6627,
+            "range": "± 161",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 65440,
+            "range": "± 867",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 129684,
+            "range": "± 1883",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 5852,
+            "range": "± 101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 41875,
+            "range": "± 588",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 85142,
+            "range": "± 1376",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 23148,
+            "range": "± 404",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 427549,
+            "range": "± 5974",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 873706,
+            "range": "± 11191",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 28031260,
+            "range": "± 535227",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 143519947,
+            "range": "± 1527247",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 269445526,
+            "range": "± 2782126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 17721,
+            "range": "± 204",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 8129,
+            "range": "± 68",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 765,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 171,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 883,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 3202,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 10143,
+            "range": "± 71",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 26513,
+            "range": "± 79",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 41816,
+            "range": "± 150",
             "unit": "ns/iter"
           }
         ]
