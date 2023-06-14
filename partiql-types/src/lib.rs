@@ -64,25 +64,17 @@ pub enum StaticTypeKind {
 
     // Scalar Types
     Int,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
     Bool,
     Decimal,
-    DecimalP(usize, usize),
-    Float32,
-    Float64,
 
+    Float64,
     String,
-    StringFixed(usize),
-    StringVarying(usize),
 
     // Container Type
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-    // TODO Add Sexp
+    // TODO Add Sexp, TIMESTAMP
 }
 
 #[derive(Debug, Clone)]
