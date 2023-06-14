@@ -12,7 +12,6 @@ use crate::parse::parser_state::{IdGenerator, ParserState};
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
 use partiql_ast::ast;
-use partiql_ast::ast::NodeId;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use partiql_source_map::metadata::LocationMap;
@@ -41,7 +40,7 @@ type LalrpopErrorRecovery<'input> =
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
     pub ast: Box<ast::Expr>,
-    pub locations: LocationMap<NodeId>,
+    pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
 
@@ -535,6 +534,7 @@ mod tests {
 
     mod set_ops {
         use super::*;
+        use partiql_ast::ast::NodeId;
 
         #[derive(Default)]
         pub(crate) struct NullIdGenerator {}

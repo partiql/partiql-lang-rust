@@ -30,8 +30,6 @@ use parse::{parse_partiql, AstData, ErrorData};
 use partiql_ast::ast;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::BytePosition;
-
-use partiql_ast::ast::NodeId;
 use partiql_source_map::metadata::LocationMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -82,7 +80,7 @@ pub struct Parsed<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,
     pub ast: Box<ast::Expr>,
-    pub locations: LocationMap<NodeId>,
+    pub locations: LocationMap,
 }
 
 /// The output of errors when parsing PartiQL statement strings: an errors and auxiliary data.
