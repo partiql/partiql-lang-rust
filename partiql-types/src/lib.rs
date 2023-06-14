@@ -31,7 +31,6 @@ pub enum StaticTypeKind {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-
     // TODO Add Sexp, TIMESTAMP
 }
 
