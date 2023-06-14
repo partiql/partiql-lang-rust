@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Debug;
 
 pub trait Type {}
 
@@ -7,6 +8,30 @@ impl Type for StaticType {}
 #[derive(Debug, Clone)]
 pub struct StaticType {
     kind: StaticTypeKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum StaticTypeKind {
+    Any,
+    AnyOf(AnyOf),
+
+    // Absent Types
+    Null,
+    Missing,
+
+    // Scalar Types
+    Int,
+    Bool,
+    Decimal,
+
+    Float64,
+    String,
+
+    // Container Type
+    Struct(StructType),
+    Bag(BagType),
+    Array(ArrayType),
+    // TODO Add Sexp, TIMESTAMP
 }
 
 #[allow(dead_code)]
@@ -51,30 +76,6 @@ impl StaticType {
     pub fn kind(&self) -> &StaticTypeKind {
         &self.kind
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum StaticTypeKind {
-    Any,
-    AnyOf(AnyOf),
-
-    // Absent Types
-    Null,
-    Missing,
-
-    // Scalar Types
-    Int,
-    Bool,
-    Decimal,
-
-    Float64,
-    String,
-
-    // Container Type
-    Struct(StructType),
-    Bag(BagType),
-    Array(ArrayType),
-    // TODO Add Sexp, TIMESTAMP
 }
 
 #[derive(Debug, Clone)]
