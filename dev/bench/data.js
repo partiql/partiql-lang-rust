@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1686781272532,
+  "lastUpdate": 1686785220294,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -12005,6 +12005,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 35239,
             "range": "± 3138",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a3f64f53504ce4478f81fbf5352351ebd2932201",
+          "message": "Rename `StaticType` and add `TypeEnv` to the Catalog (#396)\n\n- Adds TypeEnv to the Catalog\r\n- Renames StaticType to refrain from conveying an inaccurate message that this type is only used for Static typing. with PartiQL b/c seemingly, we need to do a combination of Static And Dynamic Typing.",
+          "timestamp": "2023-06-14T16:14:48-07:00",
+          "tree_id": "c42090b2370829734c36d042cfde22d59fb0989c",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/a3f64f53504ce4478f81fbf5352351ebd2932201"
+        },
+        "date": 1686785218983,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6798,
+            "range": "± 111",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 66347,
+            "range": "± 1046",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 129394,
+            "range": "± 1955",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 5914,
+            "range": "± 92",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 42800,
+            "range": "± 656",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 86598,
+            "range": "± 1181",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 23847,
+            "range": "± 341",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 437411,
+            "range": "± 10127",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 878109,
+            "range": "± 9840",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 26414000,
+            "range": "± 657182",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 144335716,
+            "range": "± 1177810",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 271022392,
+            "range": "± 2417086",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 17922,
+            "range": "± 417",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 8049,
+            "range": "± 112",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 787,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 171,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 891,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 3104,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 10132,
+            "range": "± 113",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 26420,
+            "range": "± 370",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 41890,
+            "range": "± 787",
             "unit": "ns/iter"
           }
         ]
