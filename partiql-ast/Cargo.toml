@@ -20,7 +20,7 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-indexmap = "1.9"
+indexmap = { version = "1.9", default-features = false }
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 serde = { version = "1.*", features = ["derive"], optional = true }
 
@@ -31,7 +31,8 @@ default = []
 serde = [
   "dep:serde",
   "rust_decimal/serde-with-str",
-  "rust_decimal/serde"
+  "rust_decimal/serde",
+  "indexmap/serde",
 ]
 
 [dependencies.partiql-ast-macros]
