@@ -1,5 +1,6 @@
 use crate::call_defs::CallDef;
 
+use partiql_types::StaticType;
 use partiql_value::Value;
 use std::borrow::Cow;
 
@@ -103,7 +104,24 @@ pub enum CatalogErrorKind {
 pub trait Catalog: Debug {
     fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError>;
 
+    fn add_type_entry(&mut self, entry: TypeEnvEntry) -> Result<ObjectId, CatalogError>;
+
     fn get_function(&self, name: &str) -> Option<FunctionEntry>;
+
+    fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
+}
+
+#[derive(Debug)]
+pub struct TypeEnvEntry<'a> {
+    name: UniCase<String>,
+    aliases: Vec<&'a str>,
+    ty: StaticType,
+}
+
+#[derive(Debug)]
+pub struct TypeEntry {
+    id: ObjectId,
+    ty: StaticType,
 }
 
 #[derive(Debug)]
@@ -140,6 +158,7 @@ impl<'a> FunctionEntry<'a> {
 #[derive(Debug)]
 pub struct PartiqlCatalog {
     functions: CatalogEntrySet<FunctionEntryFunction>,
+    types: CatalogEntrySet<StaticType>,
     id: CatalogId,
 }
 
@@ -147,6 +166,7 @@ impl Default for PartiqlCatalog {
     fn default() -> Self {
         PartiqlCatalog {
             functions: Default::default(),
+            types: Default::default(),
             id: CatalogId(1),
         }
     }
@@ -173,6 +193,15 @@ impl Catalog for PartiqlCatalog {
         }
     }
 
+    fn add_type_entry(&mut self, entry: TypeEnvEntry) -> Result<ObjectId, CatalogError> {
+        let id = self.types.add(entry.name.as_ref(), entry.aliases.as_slice(), entry.ty);
+
+        match id {
+            Ok(id) => Ok(ObjectId { catalog_id: self.id, entry_id: id }),
+            Err(e) => Err(e)
+        }
+    }
+
     fn get_function(&self, name: &str) -> Option<FunctionEntry> {
         self.functions
             .find_by_name(name)
@@ -183,6 +212,18 @@ impl Catalog for PartiqlCatalog {
                 },
                 function: entry,
             })
+    }
+
+    fn resolve_type(&self, name: &str) -> Option<TypeEntry> {
+        self.types
+        .find_by_name(name)
+        .map(|(eid, entry)| TypeEntry {
+            id: ObjectId {
+                catalog_id: self.id,
+                entry_id: eid
+            },
+            ty: entry.clone()
+        })
     }
 }
 
