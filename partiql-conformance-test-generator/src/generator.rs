@@ -168,6 +168,9 @@ impl Generator {
                 let mut module = Module::new(&mod_name);
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name.clone()));
@@ -194,6 +197,9 @@ impl Generator {
         let mut module = Module::new(&mod_name.escape_module_name());
         module.attr("allow(unused_imports)");
         module.attr("allow(clippy::module_inception)");
+        if self.curr_path.iter().any(|s| s.contains("experimental")) {
+            module.attr(r#"cfg(feature = "experimental")"#);
+        }
         module.import("super", "*");
 
         self.push_scope(Some(mod_name.clone()));
@@ -216,6 +222,10 @@ impl Generator {
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -232,6 +242,10 @@ impl Generator {
                 let module = scope.new_module(&mod_name.escape_module_name());
                 module.attr("allow(unused_imports)");
                 module.attr("allow(clippy::module_inception)");
+
+                if self.curr_path.iter().any(|s| s.contains("experimental")) {
+                    module.attr(r#"cfg(feature = "experimental")"#);
+                }
                 module.import("super", "*");
 
                 self.push_scope(Some(mod_name));
@@ -328,6 +342,9 @@ impl Generator {
         let module = scope.new_module(&mod_name.escape_module_name());
         module.attr("allow(unused_imports)");
         module.import("super", "*");
+        if self.curr_path.iter().any(|s| s.contains("experimental")) {
+            module.attr(r#"cfg(feature = "experimental")"#);
+        }
 
         self.push_scope(Some(mod_name.clone()));
         self.gen_variants(module.scope(), &namespace.contents);
@@ -362,13 +379,16 @@ impl Generator {
         }
     }
 
-    fn create_test<'a>(
+    fn create_test<F>(
         &mut self,
-        scope: &'a mut Scope,
+        scope: &mut Scope,
         test_case: &TestCase,
         name_prefix: Option<&str>,
         needs_env: bool,
-    ) -> &'a mut Function {
+        mut body: F,
+    ) where
+        F: FnMut(&mut Function),
+    {
         let bare_name = &test_case.name;
         let prefixed_name = if let Some(prefix) = name_prefix {
             format!("{prefix}_{bare_name}")
@@ -398,10 +418,9 @@ impl Generator {
         } else {
             quote! {}
         };
-
         test_fn.line(escape_fn_code(env));
 
-        test_fn
+        body(test_fn)
     }
 
     fn write_aside_expected(&mut self, test_case: &TestCase, expected: String) -> (String, bool) {
@@ -439,36 +458,47 @@ impl Generator {
         let test_case_expr =
             |gen: &dyn Fn(&str) -> _| stmts.iter().map(|s| gen(s)).collect::<Vec<_>>();
 
-        fn mode_data(eval_mode: &EvaluationMode) -> (&'static str, TokenStream) {
+        fn mode_data(eval_mode: &EvaluationMode) -> (&'static str, &'static str, TokenStream) {
             match eval_mode {
-                EvaluationMode::EvalModeError => ("strict", quote! { EvaluationMode::Error }),
-                EvaluationMode::EvalModeCoerce => ("permissive", quote! { EvaluationMode::Coerce }),
+                EvaluationMode::EvalModeError => {
+                    ("strict", "strict", quote! { EvaluationMode::Error })
+                }
+                EvaluationMode::EvalModeCoerce => (
+                    "permissive",
+                    "permissive",
+                    quote! { EvaluationMode::Coerce },
+                ),
             }
         }
 
         for assertion in &test_case.assert {
             match assertion {
                 Assertion::SyntaxSuccess(_) => {
-                    let test_fn = self.create_test(scope, test_case, None, false);
-                    let stmts = test_case_expr(&|stmt: &str| quote! {pass_syntax(#stmt);});
-                    test_fn.line(escape_fn_code(quote! {
-                        #(#stmts)*
-                    }));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "syntax")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {pass_syntax(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::SyntaxFail(_) => {
-                    let test_fn = self.create_test(scope, test_case, None, false);
-                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_syntax(#stmt);});
-                    test_fn.line(escape_fn_code(quote! {
-                        #(#stmts)*
-                    }));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "syntax")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {fail_syntax(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::StaticAnalysisFail(_) => {
-                    let test_fn = self.create_test(scope, test_case, None, false);
-
-                    let stmts = test_case_expr(&|stmt: &str| quote! {fail_semantics(#stmt);});
-                    test_fn.line(escape_fn_code(quote! {
-                        #(#stmts)*
-                    }));
+                    self.create_test(scope, test_case, None, false, |test_fn| {
+                        test_fn.attr(r#"cfg(feature = "semantics")"#);
+                        let stmts = test_case_expr(&|stmt: &str| quote! {fail_semantics(#stmt);});
+                        test_fn.line(escape_fn_code(quote! {
+                            #(#stmts)*
+                        }));
+                    })
                 }
                 Assertion::EvaluationSuccess(EvaluationSuccessAssertion {
                     output,
@@ -476,53 +506,57 @@ impl Generator {
                     ..
                 }) => {
                     for mode in eval_mode {
-                        let (prefix, mode) = mode_data(mode);
-
-                        let test_fn = self.create_test(scope, test_case, Some(prefix), true);
-                        test_fn.line("\n//**** evaluation success test case(s) ****//");
-
+                        let (prefix, feature, mode) = mode_data(mode);
                         let (expected, is_file) =
                             self.write_aside_expected(test_case, elt_to_string(output));
-                        let expected = if is_file {
-                            quote! {include_str!(#expected)}
-                        } else {
-                            quote! {#expected}
-                        };
 
-                        // emit asserts for all statements
-                        let stmts = test_case_expr(&|stmt: &str| {
-                            // emit PartiQL statement and evaluation mode assert
-                            quote! {
-                                let stmt = #stmt;
-                                pass_eval(stmt, #mode, &env, &expected);
-                            }
+                        self.create_test(scope, test_case, Some(prefix), true, |test_fn| {
+                            test_fn.attr(&format!(r#"cfg(feature = "{feature}")"#));
+                            test_fn.line("\n//**** evaluation success test case(s) ****//");
+
+                            let expected = if is_file {
+                                quote! {include_str!(#expected)}
+                            } else {
+                                quote! {#expected}
+                            };
+
+                            // emit asserts for all statements
+                            let stmts = test_case_expr(&|stmt: &str| {
+                                // emit PartiQL statement and evaluation mode assert
+                                quote! {
+                                    let stmt = #stmt;
+                                    pass_eval(stmt, #mode, &env, &expected);
+                                }
+                            });
+
+                            test_fn.line(escape_fn_code(quote! {
+                                let expected = #expected.into();
+                                #(#stmts)*
+                            }));
                         });
-
-                        test_fn.line(escape_fn_code(quote! {
-                            let expected = #expected.into();
-                            #(#stmts)*
-                        }));
                     }
                 }
                 Assertion::EvaluationFail(EvaluationFailAssertion { eval_mode, .. }) => {
                     for mode in eval_mode {
-                        let (prefix, mode) = mode_data(mode);
+                        let (prefix, feature, mode) = mode_data(mode);
 
-                        let test_fn = self.create_test(scope, test_case, Some(prefix), true);
-                        test_fn.line("\n//**** evaluation failure test case(s) ****//");
+                        self.create_test(scope, test_case, Some(prefix), true, |test_fn| {
+                            test_fn.attr(&format!(r#"cfg(feature = "{feature}")"#));
+                            test_fn.line("\n//**** evaluation failure test case(s) ****//");
 
-                        // emit asserts for all statements
-                        let stmts = test_case_expr(&|stmt: &str| {
-                            // emit PartiQL statement and evaluation mode assert
-                            quote! {
-                                let stmt = #stmt;
-                                fail_eval(stmt, #mode, &env);
-                            }
+                            // emit asserts for all statements
+                            let stmts = test_case_expr(&|stmt: &str| {
+                                // emit PartiQL statement and evaluation mode assert
+                                quote! {
+                                    let stmt = #stmt;
+                                    fail_eval(stmt, #mode, &env);
+                                }
+                            });
+
+                            test_fn.line(escape_fn_code(quote! {
+                                #(#stmts)*
+                            }));
                         });
-
-                        test_fn.line(escape_fn_code(quote! {
-                            #(#stmts)*
-                        }));
                     }
                 }
             }
