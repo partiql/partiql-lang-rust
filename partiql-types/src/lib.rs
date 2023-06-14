@@ -1,8 +1,5 @@
 use std::collections::HashSet;
-<<<<<<< HEAD
 use std::fmt::Debug;
-=======
->>>>>>> main
 
 pub trait Type {}
 
@@ -34,11 +31,8 @@ pub enum StaticTypeKind {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-
     // TODO Add Sexp, TIMESTAMP
 }
-
-pub struct SchemaType
 
 #[allow(dead_code)]
 impl StaticType {
