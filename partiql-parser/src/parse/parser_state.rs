@@ -53,7 +53,7 @@ pub(crate) struct ParserState<'input, Id: IdGenerator> {
     /// Generator for 'fresh' [`NodeId`]s
     pub id_gen: Id,
     /// Maps AST [`NodeId`]s to the location in the source from which each was derived.
-    pub locations: LocationMap<NodeId>,
+    pub locations: LocationMap,
     /// Any errors accumulated during parse.
     pub errors: ParseErrors<'input>,
 
