@@ -1,8 +1,5 @@
 use std::collections::HashSet;
-<<<<<<< HEAD
 use std::fmt::Debug;
-=======
->>>>>>> main
 
 pub trait Type {}
 
@@ -37,8 +34,6 @@ pub enum StaticTypeKind {
 
     // TODO Add Sexp, TIMESTAMP
 }
-
-pub struct SchemaType
 
 #[allow(dead_code)]
 impl StaticType {

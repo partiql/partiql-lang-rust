@@ -69,13 +69,27 @@ impl TableFunction {
     }
 }
 
-/// Catalog Errors.
+/// Contains the errors that occur during Catalog related operations
+#[derive(Debug, Clone)]
+pub struct CatalogError {
+    errors: Vec<CatalogErrorKind>,
+}
+
+impl CatalogError {
+    pub fn new(errors: Vec<CatalogErrorKind>) -> Self {
+        CatalogError {
+            errors
+        }
+    }
+}
+
+/// Catalog Error kind
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
 #[derive(Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub enum CatalogError {
+pub enum CatalogErrorKind {
     /// Entry exists error.
     #[error("Catalog error: entry already exists for `{}`", .0)]
     EntryExists(String),
@@ -169,9 +183,7 @@ impl Catalog for PartiqlCatalog {
                 entry_id: id,
             })
         } else {
-            Err(CatalogError::EntryError(
-                "Function definition has no name".into(),
-            ))
+            Err(CatalogError::new(vec![CatalogErrorKind::EntryError("Function definition has no name".into())]))
         }
     }
 
@@ -200,6 +212,7 @@ impl Catalog for PartiqlCatalog {
 struct CatalogEntrySet<T> {
     entries: HashMap<EntryId, T>,
     by_name: HashMap<UniCase<String>, EntryId>,
+    by_alias: HashMap<UniCase<String>, EntryId>,
 
     next_id: AtomicU64,
 }
@@ -209,26 +222,41 @@ impl<T> Default for CatalogEntrySet<T> {
         CatalogEntrySet {
             entries: Default::default(),
             by_name: Default::default(),
+            by_alias: Default::default(),
             next_id: 1.into(),
         }
     }
 }
 
 impl<T> CatalogEntrySet<T> {
-    fn add(&mut self, name: &str, _aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
+    fn add(&mut self, name: &str, aliases: &[&str], info: T) -> Result<EntryId, CatalogError> {
+        let mut errors = vec![];
         let name = UniCase::from(name);
+        let aliases: Vec<UniCase<String>> = aliases.into_iter().map(|a| UniCase::from(a.to_string())).collect();
+
+        aliases.into_iter().for_each(|a| {
+            if self.by_alias.contains_key(&a) {
+                errors.push(CatalogErrorKind::EntryExists(a.as_ref().to_string()))
+            }
+        });
+
         if self.by_name.contains_key(&name) {
-            return Err(CatalogError::EntryExists(name.to_string()));
+            errors.push(CatalogErrorKind::EntryExists(name.to_string()));
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).into();
+
         if let Some(_old_val) = self.entries.insert(id, info) {
-            return Err(CatalogError::Unknown);
+            errors.push(CatalogErrorKind::Unknown);
         }
 
-        self.by_name.insert(name, id);
-
-        Ok(id)
+        match errors.is_empty() {
+            true => {
+                self.by_name.insert(name, id);
+                Ok(id)
+            },
+            _ => Err(CatalogError::new(errors))
+        }
     }
 
     fn find_by_name(&self, name: &str) -> Option<(EntryId, &T)> {
