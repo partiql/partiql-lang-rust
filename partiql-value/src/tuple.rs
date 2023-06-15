@@ -227,7 +227,7 @@ impl Ord for Tuple {
 }
 
 #[macro_export]
-macro_rules! partiql_tuple {
+macro_rules! tuple {
     () => (
         $crate::Tuple::new()
     );

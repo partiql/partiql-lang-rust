@@ -92,7 +92,7 @@ where
 }
 
 #[macro_export]
-macro_rules! partiql_list {
+macro_rules! list {
     () => (
         $crate::List::from(vec![])
     );

@@ -111,17 +111,17 @@ pub mod basic {
 mod tests {
     use super::*;
     use crate::env::basic::MapBindings;
-    use partiql_value::partiql_tuple;
+    use partiql_value::tuple;
 
     #[test]
     fn test_bindings_from_tuple() {
-        let t = partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)];
+        let t = tuple![("a", tuple![("p", 1)]), ("b", 2)];
 
         // by ref
         let bindings = MapBindings::from(&t);
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
-            Some(&Value::from(partiql_tuple![("p", 1)]))
+            Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
@@ -132,7 +132,7 @@ mod tests {
         let bindings = MapBindings::from(t);
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
-            Some(&Value::from(partiql_tuple![("p", 1)]))
+            Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
@@ -163,13 +163,13 @@ mod tests {
             None
         );
 
-        let t = Value::from(partiql_tuple![("a", partiql_tuple![("p", 1)]), ("b", 2)]);
+        let t = Value::from(tuple![("a", tuple![("p", 1)]), ("b", 2)]);
 
         // by ref
         let bindings = MapBindings::from(&t);
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
-            Some(&Value::from(partiql_tuple![("p", 1)]))
+            Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
@@ -180,7 +180,7 @@ mod tests {
         let bindings = MapBindings::from(t);
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
-            Some(&Value::from(partiql_tuple![("p", 1)]))
+            Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
             bindings.get(&BindingsName::CaseInsensitive("b".to_string())),

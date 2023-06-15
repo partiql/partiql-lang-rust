@@ -158,7 +158,7 @@ mod tests {
     use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
     use partiql_parser::{Parsed, ParserResult};
-    use partiql_value::{partiql_bag, partiql_tuple, Value};
+    use partiql_value::{bag, tuple, Value};
 
     #[track_caller]
     #[inline]
@@ -217,12 +217,12 @@ mod tests {
 
     #[test]
     fn custom_ion_scan() {
-        let value = partiql_bag![
-            partiql_tuple![("Program", "p1"), ("Operation", "get")],
-            partiql_tuple![("Program", "p1"), ("Operation", "put")],
-            partiql_tuple![("Program", "p2"), ("Operation", "get")],
-            partiql_tuple![("Program", "p2"), ("Operation", "put")],
-            partiql_tuple![("Program", "p3"), ("Operation", "update")],
+        let value = bag![
+            tuple![("Program", "p1"), ("Operation", "get")],
+            tuple![("Program", "p1"), ("Operation", "put")],
+            tuple![("Program", "p2"), ("Operation", "get")],
+            tuple![("Program", "p2"), ("Operation", "put")],
+            tuple![("Program", "p3"), ("Operation", "update")],
         ]
         .into();
 

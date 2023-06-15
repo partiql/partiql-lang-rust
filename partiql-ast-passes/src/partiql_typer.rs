@@ -246,15 +246,11 @@ mod tests {
     fn varef_test() {
         let ty = null!();
         dbg!(ty);
-        let customers_schema = PartiqlType::new(
-            TypeKind::Bag(BagType::new(
-                Box::new(PartiqlType::new_struct(StructType::new(
-                    vec![StructConstraint::Fields(
-                        StructField::from(("a".to_string(), PartiqlType::new(TypeKind::Int)))
-                    )]
-                )))
-            ))
-        );
+        let customers_schema = PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(
+            PartiqlType::new_struct(StructType::new(vec![StructConstraint::Fields(
+                StructField::from(("a".to_string(), PartiqlType::new(TypeKind::Int))),
+            )])),
+        ))));
 
         // let customer_schema = bag_of![struct![{'a': int![]}]
 
@@ -282,12 +278,15 @@ mod tests {
     }
 
     fn run_literal_test(q: &str) -> TypeKind {
-        let out = type_statement(q,&PartiqlCatalog::default()).expect("type map");
+        let out = type_statement(q, &PartiqlCatalog::default()).expect("type map");
         let values: Vec<&PartiqlType> = out.values().collect();
         values.last().unwrap().kind().clone()
     }
 
-    fn type_statement(q: &str, catalog: &dyn Catalog) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
+    fn type_statement(
+        q: &str,
+        catalog: &dyn Catalog,
+    ) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
         let parsed = partiql_parser::Parser::default()
             .parse(q)
             .expect("Expect successful parse");

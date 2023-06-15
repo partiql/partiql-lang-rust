@@ -10,36 +10,36 @@ use partiql_eval::plan;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
-use partiql_value::{partiql_bag, partiql_list, partiql_tuple, BindingsName, Value};
+use partiql_value::{bag, list, tuple, BindingsName, Value};
 
 fn data() -> MapBindings<Value> {
-    let hr = partiql_tuple![(
+    let hr = tuple![(
         "employeesNestScalars",
-        partiql_bag![
-            partiql_tuple![
+        bag![
+            tuple![
                 ("id", 3),
                 ("name", "Bob Smith"),
                 ("title", Value::Null),
                 (
                     "projects",
-                    partiql_list![
+                    list![
                         "AWS Redshift Spectrum querying",
                         "AWS Redshift security",
                         "AWS Aurora security",
                     ]
                 ),
             ],
-            partiql_tuple![
+            tuple![
                 ("id", 4),
                 ("name", "Susan Smith"),
                 ("title", "Dev Mgr"),
-                ("projects", partiql_list![]),
+                ("projects", list![]),
             ],
-            partiql_tuple![
+            tuple![
                 ("id", 6),
                 ("name", "Jane Smith"),
                 ("title", "Software Eng 2"),
-                ("projects", partiql_list!["AWS Redshift security"]),
+                ("projects", list!["AWS Redshift security"]),
             ],
         ]
     )];
@@ -50,14 +50,14 @@ fn data() -> MapBindings<Value> {
 }
 
 fn join_data() -> MapBindings<Value> {
-    let customers = partiql_list![
-        partiql_tuple![("id", 5), ("name", "Joe")],
-        partiql_tuple![("id", 7), ("name", "Mary")],
+    let customers = list![
+        tuple![("id", 5), ("name", "Joe")],
+        tuple![("id", 7), ("name", "Mary")],
     ];
 
-    let orders = partiql_list![
-        partiql_tuple![("custId", 7), ("productId", 101)],
-        partiql_tuple![("custId", 7), ("productId", 523)],
+    let orders = list![
+        tuple![("custId", 7), ("productId", 101)],
+        tuple![("custId", 7), ("productId", 523)],
     ];
 
     let mut bindings = MapBindings::default();

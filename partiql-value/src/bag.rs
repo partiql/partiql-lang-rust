@@ -92,7 +92,7 @@ where
 }
 
 #[macro_export]
-macro_rules! partiql_bag {
+macro_rules! bag {
     () => (
         $crate::Bag::from(vec![])
     );

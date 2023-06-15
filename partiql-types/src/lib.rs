@@ -5,119 +5,120 @@ pub trait Type {}
 
 impl Type for PartiqlType {}
 
-
 #[macro_export]
 macro_rules! any {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Any)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! null {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Null)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! missing {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Missing)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! int {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Int)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! int8 {
-    () => (
-        $crate::PartiqlType::new($crate::TypeKind::Int)
-    );
+    () => {
+        $crate::PartiqlType::new($crate::TypeKind::Int8)
+    };
 }
 
 #[macro_export]
 macro_rules! int16 {
-    () => (
-        $crate::PartiqlType::new($crate::TypeKind::Int)
-    );
+    () => {
+        $crate::PartiqlType::new($crate::TypeKind::Int16)
+    };
 }
 
 #[macro_export]
 macro_rules! int32 {
-    () => (
-        $crate::PartiqlType::new($crate::TypeKind::Int)
-    );
+    () => {
+        $crate::PartiqlType::new($crate::TypeKind::Int32)
+    };
 }
 
 #[macro_export]
 macro_rules! int64 {
-    () => (
-        $crate::PartiqlType::new($crate::TypeKind::Int)
-    );
+    () => {
+        $crate::PartiqlType::new($crate::TypeKind::Int64)
+    };
 }
 
 #[macro_export]
 macro_rules! dec {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Decimal)
-    );
+    };
 }
+
+// TODO add `DecimalP`
 
 #[macro_export]
 macro_rules! f32 {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Float32)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! f64 {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::Float64)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! str {
-    () => (
+    () => {
         $crate::PartiqlType::new($crate::TypeKind::String)
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! r#struct {
-    () => (
+    () => {
         $crate::PartiqlType::new_struct(StructType::new_any())
-    );
-    ($elem:expr) => (
+    };
+    ($elem:expr) => {
         $crate::PartiqlType::new_struct(StructType::new($elem))
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! r#bag {
-    () => (
+    () => {
         $crate::PartiqlType::new_bag(BagType::new_any());
-    );
-    ($elem:expr) => (
+    };
+    ($elem:expr) => {
         $crate::PartiqlType::new_bag(BagType::new($elem))
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! r#array {
-    () => (
+    () => {
         $crate::PartiqlType::new_array(ArrayType::new_any());
-    );
-    ($elem:expr) => (
+    };
+    ($elem:expr) => {
         $crate::PartiqlType::new_bag(ArrayType::new($elem))
-    );
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +156,6 @@ pub enum TypeKind {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-
     // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
 }
 
