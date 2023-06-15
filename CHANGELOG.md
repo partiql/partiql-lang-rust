@@ -8,11 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
+- *BREAKING:* partiql-values: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
 
 ### Added
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
+
 
 ### Fixes
 

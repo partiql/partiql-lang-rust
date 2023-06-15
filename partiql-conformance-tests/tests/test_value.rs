@@ -37,7 +37,7 @@ fn parse_test_value_str(contents: &str) -> Value {
 mod tests {
     use super::parse_test_value_str;
 
-    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, Value};
+    use partiql_value::{bag, list, tuple, Value};
 
     #[track_caller]
     fn parse(test: &str, expected: Value) {
@@ -64,7 +64,7 @@ mod tests {
                 s: 1
             }
         ]";
-        let expected = Value::from(partiql_bag![partiql_tuple![
+        let expected = Value::from(bag![partiql_tuple![
             ("f", 1),
             ("d", Value::Real(2.0.into())),
             ("s", 1)
@@ -79,7 +79,7 @@ mod tests {
                     sensor: 1,
                     reading: 42
                   }",
-            Value::Tuple(Box::new(partiql_tuple![("sensor", 1), ("reading", 42)])),
+            Value::Tuple(Box::new(tuple![("sensor", 1), ("reading", 42)])),
         );
     }
 
@@ -110,7 +110,7 @@ mod tests {
                         }
                     ]
                 }",
-            Value::Tuple(Box::new(partiql_tuple![
+            Value::Tuple(Box::new(tuple![
                 (
                     "sensors",
                     partiql_list![partiql_tuple![("sensor", 1)], partiql_tuple![("sensor", 2)]]
@@ -136,7 +136,7 @@ mod tests {
                 s: 1
             }
         ]";
-        let expected = Value::from(partiql_list![partiql_tuple![
+        let expected = Value::from(list![partiql_tuple![
             ("f", 1),
             ("d", Value::Real(2.0.into())),
             ("s", 1)

@@ -53,7 +53,7 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
-    use partiql_value::{partiql_bag, partiql_tuple, Value};
+    use partiql_value::{bag, tuple, Value};
 
     #[track_caller]
     fn parse(text: &str) -> Parsed {
@@ -92,10 +92,10 @@ mod tests {
 
     fn data_customer() -> MapBindings<Value> {
         fn customer_tuple(id: i64, first_name: &str, balance: i64) -> Value {
-            partiql_tuple![("id", id), ("firstName", first_name), ("balance", balance),].into()
+            tuple![("id", id), ("firstName", first_name), ("balance", balance),].into()
         }
 
-        let customer_val = partiql_bag![
+        let customer_val = bag![
             customer_tuple(5, "jason", 100),
             customer_tuple(4, "sisko", 0),
             customer_tuple(3, "jason", -30),
@@ -121,9 +121,9 @@ mod tests {
 
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
-                partiql_tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
+            let expected = bag![
+                tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
+                tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -141,7 +141,7 @@ mod tests {
         let out = evaluate_query("SELECT * FROM 5");
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_tuple![("_1", 5)]];
+            let expected = bag![tuple![("_1", 5)]];
             assert_eq!(*bag, expected);
         });
     }

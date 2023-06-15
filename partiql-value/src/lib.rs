@@ -536,10 +536,10 @@ impl Value {
     pub fn coerce_to_tuple(self) -> Tuple {
         match self {
             Value::Tuple(t) => *t,
-            Value::Missing => partiql_tuple![],
+            Value::Missing => tuple![],
             _ => {
                 let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
-                partiql_tuple![(fresh_key, self)]
+                tuple![(fresh_key, self)]
             }
         }
     }
@@ -943,14 +943,14 @@ mod tests {
 
     #[test]
     fn macro_rules_tests() {
-        println!("partiql_list:{:?}", partiql_list!());
-        println!("partiql_list:{:?}", partiql_list![10, 10]);
-        println!("partiql_list:{:?}", partiql_list!(5; 3));
-        println!("partiql_bag:{:?}", partiql_bag!());
-        println!("partiql_bag:{:?}", partiql_bag![10, 10]);
-        println!("partiql_bag:{:?}", partiql_bag!(5; 3));
-        println!("partiql_tuple:{:?}", partiql_tuple![]);
-        println!("partiql_tuple:{:?}", partiql_tuple![("a", 1), ("b", 2)]);
+        println!("partiql_list:{:?}", list!());
+        println!("partiql_list:{:?}", list![10, 10]);
+        println!("partiql_list:{:?}", list!(5; 3));
+        println!("partiql_bag:{:?}", bag!());
+        println!("partiql_bag:{:?}", bag![10, 10]);
+        println!("partiql_bag:{:?}", bag!(5; 3));
+        println!("partiql_tuple:{:?}", tuple![]);
+        println!("partiql_tuple:{:?}", tuple![("a", 1), ("b", 2)]);
     }
 
     #[test]
@@ -1026,16 +1026,16 @@ mod tests {
             Value::from("abc"),
             Value::Blob(Box::default()),
             Value::Blob(Box::new(vec![1, 2, 3])),
-            Value::from(partiql_list!()),
-            Value::from(partiql_list!(1, 2, 3)),
-            Value::from(partiql_list!(1, 2, 3, 4, 5)),
-            Value::from(partiql_tuple!()),
-            Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-            Value::from(partiql_tuple![("a", 1), ("b", 3)]),
-            Value::from(partiql_tuple![("a", 1), ("c", 2)]),
-            Value::from(partiql_bag!()),
-            Value::from(partiql_bag!(1, 2, 3)),
-            Value::from(partiql_bag!(3, 3, 3)),
+            Value::from(list!()),
+            Value::from(list!(1, 2, 3)),
+            Value::from(list!(1, 2, 3, 4, 5)),
+            Value::from(tuple!()),
+            Value::from(tuple![("a", 1), ("b", 2)]),
+            Value::from(tuple![("a", 1), ("b", 3)]),
+            Value::from(tuple![("a", 1), ("c", 2)]),
+            Value::from(bag!()),
+            Value::from(bag!(1, 2, 3)),
+            Value::from(bag!(3, 3, 3)),
         ];
         let expected_vals = vals.clone();
         vals.reverse();
@@ -1315,58 +1315,58 @@ mod tests {
         assert_eq!(
             Value::from(true),
             NullableEq::eq(
-                &Value::from(partiql_bag![3, 2, 4, 2]),
-                &Value::from(partiql_bag![2, 2, 3, 4])
+                &Value::from(bag![3, 2, 4, 2]),
+                &Value::from(bag![2, 2, 3, 4])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)])
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::eq(
-                &Value::from(partiql_bag![3, 4, 2]),
-                &Value::from(partiql_bag![2, 2, 3, 4])
+                &Value::from(bag![3, 4, 2]),
+                &Value::from(bag![2, 2, 3, 4])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1)])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1, 2]), ("b", 2)])
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1), ("b", Value::Null)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1), ("b", Value::Null)])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::eq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![
-                    ("a", partiql_list![Value::Null, 1]),
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![
+                    ("a", list![Value::Null, 1]),
                     ("b", 2)
                 ])
             )
@@ -1470,58 +1470,58 @@ mod tests {
         assert_eq!(
             Value::from(false),
             NullableEq::neq(
-                &Value::from(partiql_bag![3, 2, 4, 2]),
-                &Value::from(partiql_bag![2, 2, 3, 4])
+                &Value::from(bag![3, 2, 4, 2]),
+                &Value::from(bag![2, 2, 3, 4])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(false),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)])
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::neq(
-                &Value::from(partiql_bag![3, 4, 2]),
-                &Value::from(partiql_bag![2, 2, 3, 4])
+                &Value::from(bag![3, 4, 2]),
+                &Value::from(bag![2, 2, 3, 4])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1)])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1, 2]), ("b", 2)])
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", 1), ("b", 2)]),
-                &Value::from(partiql_tuple![("a", 1), ("b", Value::Null)])
+                &Value::from(tuple![("a", 1), ("b", 2)]),
+                &Value::from(tuple![("a", 1), ("b", Value::Null)])
             )
         );
         assert_eq!(
             Value::from(true),
             NullableEq::neq(
-                &Value::from(partiql_tuple![("a", partiql_list![0, 1]), ("b", 2)]),
-                &Value::from(partiql_tuple![
-                    ("a", partiql_list![Value::Null, 1]),
+                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                &Value::from(tuple![
+                    ("a", list![Value::Null, 1]),
                     ("b", 2)
                 ])
             )
@@ -1960,22 +1960,22 @@ mod tests {
         //   }>>
         //   'outer_elem_1': 1,
         // }>>
-        let bag1 = partiql_bag!(partiql_tuple![
+        let bag1 = bag!(tuple![
             ("outer_elem_1", 1),
             (
                 "outer_elem_2",
-                partiql_bag![partiql_tuple![
-                    ("inner_elem_1", partiql_tuple![("bar", 3)]),
-                    ("inner_elem_2", partiql_tuple![("foo", 4)])
+                bag![tuple![
+                    ("inner_elem_1", tuple![("bar", 3)]),
+                    ("inner_elem_2", tuple![("foo", 4)])
                 ]]
             )
         ]);
-        let bag2 = partiql_bag!(partiql_tuple![
+        let bag2 = bag!(tuple![
             (
                 "outer_elem_2",
-                partiql_bag![partiql_tuple![
-                    ("inner_elem_2", partiql_tuple![("foo", 4)]),
-                    ("inner_elem_1", partiql_tuple![("bar", 3)])
+                bag![tuple![
+                    ("inner_elem_2", tuple![("foo", 4)]),
+                    ("inner_elem_1", tuple![("bar", 3)])
                 ]]
             ),
             ("outer_elem_1", 1)
@@ -1985,17 +1985,17 @@ mod tests {
 
     #[test]
     fn duplicate_tuple_elems() {
-        let tuple1 = partiql_tuple![("a", 1), ("a", 1), ("b", 2)];
-        let tuple2 = partiql_tuple![("a", 1), ("b", 2)];
+        let tuple1 = tuple![("a", 1), ("a", 1), ("b", 2)];
+        let tuple2 = tuple![("a", 1), ("b", 2)];
         assert_ne!(tuple1, tuple2);
     }
 
     #[test]
     fn tuple_hashing() {
-        let tuple1 = partiql_tuple![("a", 1), ("b", 2)];
+        let tuple1 = tuple![("a", 1), ("b", 2)];
         let mut s: HashSet<Tuple> = HashSet::from([tuple1]);
         assert_eq!(1, s.len());
-        let tuple2 = partiql_tuple![("b", 2), ("a", 1)];
+        let tuple2 = tuple![("b", 2), ("a", 1)];
         s.insert(tuple2);
         assert_eq!(1, s.len());
     }

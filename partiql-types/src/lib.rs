@@ -5,6 +5,121 @@ pub trait Type {}
 
 impl Type for PartiqlType {}
 
+
+#[macro_export]
+macro_rules! any {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Any)
+    );
+}
+
+#[macro_export]
+macro_rules! null {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Null)
+    );
+}
+
+#[macro_export]
+macro_rules! missing {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Missing)
+    );
+}
+
+#[macro_export]
+macro_rules! int {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Int)
+    );
+}
+
+#[macro_export]
+macro_rules! int8 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Int)
+    );
+}
+
+#[macro_export]
+macro_rules! int16 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Int)
+    );
+}
+
+#[macro_export]
+macro_rules! int32 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Int)
+    );
+}
+
+#[macro_export]
+macro_rules! int64 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Int)
+    );
+}
+
+#[macro_export]
+macro_rules! dec {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Decimal)
+    );
+}
+
+#[macro_export]
+macro_rules! f32 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Float32)
+    );
+}
+
+#[macro_export]
+macro_rules! f64 {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::Float64)
+    );
+}
+
+#[macro_export]
+macro_rules! str {
+    () => (
+        $crate::PartiqlType::new($crate::TypeKind::String)
+    );
+}
+
+#[macro_export]
+macro_rules! r#struct {
+    () => (
+        $crate::PartiqlType::new_struct(StructType::new_any())
+    );
+    ($elem:expr) => (
+        $crate::PartiqlType::new_struct(StructType::new($elem))
+    );
+}
+
+#[macro_export]
+macro_rules! r#bag {
+    () => (
+        $crate::PartiqlType::new_bag(BagType::new_any());
+    );
+    ($elem:expr) => (
+        $crate::PartiqlType::new_bag(BagType::new($elem))
+    );
+}
+
+#[macro_export]
+macro_rules! r#array {
+    () => (
+        $crate::PartiqlType::new_array(ArrayType::new_any());
+    );
+    ($elem:expr) => (
+        $crate::PartiqlType::new_bag(ArrayType::new($elem))
+    );
+}
+
 #[derive(Debug, Clone)]
 pub struct PartiqlType {
     kind: TypeKind,
@@ -126,13 +241,13 @@ where
 }
 
 impl StructType {
-    pub fn unconstrained() -> Self {
+    pub fn new_any() -> Self {
         StructType {
             constraints: vec![],
         }
     }
 
-    pub fn constrained(constraints: Vec<StructConstraint>) -> Self {
+    pub fn new(constraints: Vec<StructConstraint>) -> Self {
         StructType { constraints }
     }
 }
@@ -153,13 +268,13 @@ pub struct BagType {
 }
 
 impl BagType {
-    pub fn bag() -> Self {
-        BagType::bag_of(Box::new(PartiqlType {
+    pub fn new_any() -> Self {
+        BagType::new(Box::new(PartiqlType {
             kind: TypeKind::Any,
         }))
     }
 
-    pub fn bag_of(typ: Box<PartiqlType>) -> Self {
+    pub fn new(typ: Box<PartiqlType>) -> Self {
         BagType {
             element_type: typ,
             constraints: vec![CollectionConstraint::Ordered(false)],
@@ -175,13 +290,13 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
-    pub fn array() -> Self {
-        ArrayType::array_of(Box::new(PartiqlType {
+    pub fn new_any() -> Self {
+        ArrayType::new(Box::new(PartiqlType {
             kind: TypeKind::Any,
         }))
     }
 
-    pub fn array_of(typ: Box<PartiqlType>) -> Self {
+    pub fn new(typ: Box<PartiqlType>) -> Self {
         ArrayType {
             element_type: typ,
             constraints: vec![CollectionConstraint::Ordered(true)],

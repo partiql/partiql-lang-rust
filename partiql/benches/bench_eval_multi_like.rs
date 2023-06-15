@@ -12,7 +12,7 @@ use partiql_logical::{BindingsOp, LogicalPlan};
 use partiql_logical_planner::LogicalPlanner;
 
 use partiql_parser::{Parser, ParserResult};
-use partiql_value::{partiql_tuple, Bag, Value};
+use partiql_value::{tuple, Bag, Value};
 
 // Benchmarks:
 //  - parsing,
@@ -256,7 +256,7 @@ fn employee_data() -> Vec<Value> {
                 .map(|_| rng.sample(chars) as char)
                 .collect();
             let full_name = format!("{prefix} {person} {suffix}");
-            partiql_tuple![("id", id), ("name", full_name)].into()
+            tuple![("id", id), ("name", full_name)].into()
         })
         .collect_vec();
 
@@ -264,9 +264,9 @@ fn employee_data() -> Vec<Value> {
 }
 
 fn data() -> MapBindings<Value> {
-    let data = partiql_tuple![(
+    let data = tuple![(
         "hr",
-        partiql_tuple![("employees", Bag::from(employee_data()))]
+        tuple![("employees", Bag::from(employee_data()))]
     )];
 
     data.into()
