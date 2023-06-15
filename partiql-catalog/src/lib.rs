@@ -291,7 +291,10 @@ impl<T> CatalogEntrySet<T> {
 
     fn find_by_name(&self, name: &str) -> Option<(EntryId, &T)> {
         let name = UniCase::from(name);
-        if let Some(eid) = self.by_name.get(&name) {
+
+        let eid = self.by_name.get(&name).or(self.by_alias.get(&name));
+
+        if let Some(eid) = eid {
             self.entries.get(eid).map(|e| (*eid, e))
         } else {
             None
