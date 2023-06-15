@@ -16,7 +16,7 @@ mod tests {
     use ion_rs::types::{Bytes, Sequence, Struct};
     use ion_rs::{Decimal, Int, IonType, Str, Timestamp};
 
-    use partiql_value::{partiql_bag, partiql_list, partiql_tuple, DateTime, Value};
+    use partiql_value::{bag, list, tuple, DateTime, Value};
     use rust_decimal_macros::dec;
     use std::num::NonZeroU8;
 
@@ -221,7 +221,7 @@ mod tests {
                 ion_rs::element::Value::Int(Int::I64(2)),
                 ion_rs::element::Value::String(Str::from("3")),
             ])),
-            partiql_list![1, 2, "3"],
+            list![1, 2, "3"],
         );
 
         // struct
@@ -232,7 +232,7 @@ mod tests {
                     .with_field("k", ion_rs::element::List(Sequence::new([1, 2, 3])))
                     .build(),
             ),
-            partiql_tuple![("k", partiql_list![1, 2, 3])],
+            tuple![("k", list![1, 2, 3])],
         );
     }
 
@@ -377,7 +377,7 @@ mod tests {
                 ion_rs::element::Value::Int(Int::I64(2)),
                 ion_rs::element::Value::String(Str::from("3")),
             ])),
-            partiql_list![1, 2, "3"],
+            list![1, 2, "3"],
         );
 
         // bag
@@ -391,7 +391,7 @@ mod tests {
                 ion_rs::element::Value::Null(IonType::Null).with_annotations(["$missing"]),
             ]))
             .with_annotations(["$bag"]),
-            partiql_bag![1, 2, "3", Value::Null, Value::Missing],
+            bag![1, 2, "3", Value::Null, Value::Missing],
         );
 
         // struct
@@ -402,7 +402,7 @@ mod tests {
                     .with_field("k", ion_rs::element::List(Sequence::new::<Element, _>([])))
                     .build(),
             ),
-            partiql_tuple![("k", partiql_list![])],
+            tuple![("k", list![])],
         );
         assert_partiql_encoded_ion(
             "{\"k\": [1,2,3]}",
@@ -411,7 +411,7 @@ mod tests {
                     .with_field("k", ion_rs::element::List(Sequence::new([1, 2, 3])))
                     .build(),
             ),
-            partiql_tuple![("k", partiql_list![1, 2, 3])],
+            tuple![("k", list![1, 2, 3])],
         );
     }
 }

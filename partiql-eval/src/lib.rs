@@ -22,9 +22,7 @@ mod tests {
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
-    use partiql_value::{
-        partiql_bag, partiql_list, partiql_tuple, Bag, BindingsName, List, Tuple, Value,
-    };
+    use partiql_value::{bag, list, tuple, Bag, BindingsName, List, Tuple, Value};
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
@@ -40,10 +38,10 @@ mod tests {
 
     fn data_customer() -> MapBindings<Value> {
         fn customer_tuple(id: i64, first_name: &str, balance: i64) -> Value {
-            partiql_tuple![("id", id), ("firstName", first_name), ("balance", balance),].into()
+            tuple![("id", id), ("firstName", first_name), ("balance", balance),].into()
         }
 
-        let customer_val = partiql_bag![
+        let customer_val = bag![
             customer_tuple(5, "jason", 100),
             customer_tuple(4, "sisko", 0),
             customer_tuple(3, "jason", -30),
@@ -58,10 +56,10 @@ mod tests {
 
     fn data_3_tuple() -> MapBindings<Value> {
         fn a_tuple(n: i64) -> Value {
-            partiql_tuple![("a", n)].into()
+            tuple![("a", n)].into()
         }
 
-        let data = partiql_list![a_tuple(1), a_tuple(2), a_tuple(3)];
+        let data = list![a_tuple(1), a_tuple(2), a_tuple(3)];
 
         let mut bindings = MapBindings::default();
         bindings.insert("data", data.into());
@@ -88,14 +86,14 @@ mod tests {
     }
 
     fn join_data() -> MapBindings<Value> {
-        let customers = partiql_list![
-            partiql_tuple![("id", 5), ("name", "Joe")],
-            partiql_tuple![("id", 7), ("name", "Mary")],
+        let customers = list![
+            tuple![("id", 5), ("name", "Joe")],
+            tuple![("id", 7), ("name", "Mary")],
         ];
 
-        let orders = partiql_list![
-            partiql_tuple![("custId", 7), ("productId", 101)],
-            partiql_tuple![("custId", 7), ("productId", 523)],
+        let orders = list![
+            tuple![("custId", 7), ("productId", 101)],
+            tuple![("custId", 7), ("productId", 523)],
         ];
 
         let mut bindings = MapBindings::default();
@@ -105,18 +103,11 @@ mod tests {
     }
 
     fn join_data_sensors() -> MapBindings<Value> {
-        let sensors = partiql_list![
-            partiql_tuple![(
+        let sensors = list![
+            tuple![("readings", list![tuple![("v", 1.3)], tuple![("v", 2)],])],
+            tuple![(
                 "readings",
-                partiql_list![partiql_tuple![("v", 1.3)], partiql_tuple![("v", 2)],]
-            )],
-            partiql_tuple![(
-                "readings",
-                partiql_list![
-                    partiql_tuple![("v", 0.7)],
-                    partiql_tuple![("v", 0.8)],
-                    partiql_tuple![("v", 0.9)],
-                ]
+                list![tuple![("v", 0.7)], tuple![("v", 0.8)], tuple![("v", 0.9)],]
             )],
         ];
         let mut bindings = MapBindings::default();
@@ -125,20 +116,13 @@ mod tests {
     }
 
     fn join_data_sensors_with_empty_table() -> MapBindings<Value> {
-        let sensors = partiql_list![
-            partiql_tuple![(
+        let sensors = list![
+            tuple![("readings", list![tuple![("v", 1.3)], tuple![("v", 2)],])],
+            tuple![(
                 "readings",
-                partiql_list![partiql_tuple![("v", 1.3)], partiql_tuple![("v", 2)],]
+                list![tuple![("v", 0.7)], tuple![("v", 0.8)], tuple![("v", 0.9)],]
             )],
-            partiql_tuple![(
-                "readings",
-                partiql_list![
-                    partiql_tuple![("v", 0.7)],
-                    partiql_tuple![("v", 0.8)],
-                    partiql_tuple![("v", 0.9)],
-                ]
-            )],
-            partiql_tuple![("readings", partiql_list![])],
+            tuple![("readings", list![])],
         ];
         let mut bindings = MapBindings::default();
         bindings.insert("sensors", sensors.into());
@@ -146,13 +130,13 @@ mod tests {
     }
 
     fn case_when_data() -> MapBindings<Value> {
-        let nums = partiql_list![
-            partiql_tuple![("a", 1)],
-            partiql_tuple![("a", 2)],
-            partiql_tuple![("a", 3)],
-            partiql_tuple![("a", Null)],
-            partiql_tuple![("a", Missing)],
-            partiql_tuple![("a", "foo")],
+        let nums = list![
+            tuple![("a", 1)],
+            tuple![("a", 2)],
+            tuple![("a", 3)],
+            tuple![("a", Null)],
+            tuple![("a", Missing)],
+            tuple![("a", "foo")],
         ];
 
         let mut bindings = MapBindings::default();
@@ -195,15 +179,15 @@ mod tests {
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
-        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
+        bindings.insert("data", list![Tuple::from([("lhs", lhs)])].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
         let expected_result = if expected_first_elem != Missing {
-            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+            bag!(Tuple::from([("result", expected_first_elem)]))
         } else {
             // Filter tuples with `MISSING` vals
-            partiql_bag!(Tuple::new())
+            bag!(Tuple::new())
         };
         assert_eq!(expected_result, result);
     }
@@ -511,7 +495,7 @@ mod tests {
         eval_bin_op(
             BinaryOp::In,
             Value::from(1),
-            Value::from(partiql_list![1, 2, 3]),
+            Value::from(list![1, 2, 3]),
             Value::from(true),
         );
         // We still need to define the rules of coercion for `IN` RHS.
@@ -521,49 +505,45 @@ mod tests {
         // - https://github.com/partiql/partiql-lang-kotlin/pull/621#issuecomment-1147754213
         eval_bin_op(
             BinaryOp::In,
-            Value::from(partiql_tuple![("a", 2)]),
-            Value::from(partiql_list![
-                partiql_tuple![("a", 6)],
-                partiql_tuple![("b", 12)],
-                partiql_tuple![("a", 2)]
-            ]),
+            Value::from(tuple![("a", 2)]),
+            Value::from(list![tuple![("a", 6)], tuple![("b", 12)], tuple![("a", 2)]]),
             Value::from(true),
         );
         eval_bin_op(
             BinaryOp::In,
             Value::from(10),
-            Value::from(partiql_bag!["a", "b", 11]),
+            Value::from(bag!["a", "b", 11]),
             Value::from(false),
         );
         eval_bin_op(BinaryOp::In, Value::from(1), Value::from(1), Null);
         eval_bin_op(
             BinaryOp::In,
             Value::from(1),
-            Value::from(partiql_list![10, Missing, "b"]),
+            Value::from(list![10, Missing, "b"]),
             Null,
         );
         eval_bin_op(
             BinaryOp::In,
             Missing,
-            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(list![1, Missing, "b"]),
             Null,
         );
         eval_bin_op(
             BinaryOp::In,
             Null,
-            Value::from(partiql_list![1, Missing, "b"]),
+            Value::from(list![1, Missing, "b"]),
             Null,
         );
         eval_bin_op(
             BinaryOp::In,
             Value::from(1),
-            Value::from(partiql_list![1, Null, "b"]),
+            Value::from(list![1, Null, "b"]),
             Value::from(true),
         );
         eval_bin_op(
             BinaryOp::In,
             Value::from(1),
-            Value::from(partiql_list![3, Null]),
+            Value::from(list![3, Null]),
             Null,
         );
     }
@@ -704,14 +684,11 @@ mod tests {
             plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
             let mut bindings = MapBindings::default();
-            bindings.insert(
-                "data",
-                partiql_list![Tuple::from([("value", value)])].into(),
-            );
+            bindings.insert("data", list![Tuple::from([("value", value)])].into());
 
             let result = evaluate(plan, bindings).coerce_to_bag();
             assert!(!&result.is_empty());
-            let expected_result = partiql_bag!(Tuple::from([("result", expected_first_elem)]));
+            let expected_result = bag!(Tuple::from([("result", expected_first_elem)]));
             assert_eq!(expected_result, result);
         }
         eval_between_op(
@@ -779,9 +756,9 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
-                partiql_tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
+            let expected = bag![
+                tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 101)],
+                tuple![("custId", 7), ("name", "Mary"), ("id", 7), ("productId", 523)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -821,12 +798,12 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("v", 1.3)],
-                partiql_tuple![("v", 2)],
-                partiql_tuple![("v", 0.7)],
-                partiql_tuple![("v", 0.8)],
-                partiql_tuple![("v", 0.9)],
+            let expected = bag![
+                tuple![("v", 1.3)],
+                tuple![("v", 2)],
+                tuple![("v", 0.7)],
+                tuple![("v", 0.8)],
+                tuple![("v", 0.9)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -866,12 +843,12 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("v", 1.3)],
-                partiql_tuple![("v", 2)],
-                partiql_tuple![("v", 0.7)],
-                partiql_tuple![("v", 0.8)],
-                partiql_tuple![("v", 0.9)],
+            let expected = bag![
+                tuple![("v", 1.3)],
+                tuple![("v", 2)],
+                tuple![("v", 0.7)],
+                tuple![("v", 0.8)],
+                tuple![("v", 0.9)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -916,13 +893,13 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("r", partiql_tuple![("v", 1.3)])],
-                partiql_tuple![("r", partiql_tuple![("v", 2)])],
-                partiql_tuple![("r", partiql_tuple![("v", 0.7)])],
-                partiql_tuple![("r", partiql_tuple![("v", 0.8)])],
-                partiql_tuple![("r", partiql_tuple![("v", 0.9)])],
-                partiql_tuple![("r", Null)],
+            let expected = bag![
+                tuple![("r", tuple![("v", 1.3)])],
+                tuple![("r", tuple![("v", 2)])],
+                tuple![("r", tuple![("v", 0.7)])],
+                tuple![("r", tuple![("v", 0.8)])],
+                tuple![("r", tuple![("v", 0.9)])],
+                tuple![("r", Null)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1002,13 +979,13 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1), ("b", "one")],
-                partiql_tuple![("a", 2), ("b", "two")],
-                partiql_tuple![("a", 3), ("b", "other")],
-                partiql_tuple![("a", Null), ("b", "other")],
-                partiql_tuple![("b", "other")],
-                partiql_tuple![("a", "foo"), ("b", "other")],
+            let expected = bag![
+                tuple![("a", 1), ("b", "one")],
+                tuple![("a", 2), ("b", "two")],
+                tuple![("a", 3), ("b", "other")],
+                tuple![("a", Null), ("b", "other")],
+                tuple![("b", "other")],
+                tuple![("a", "foo"), ("b", "other")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1044,13 +1021,13 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1), ("b", "one")],
-                partiql_tuple![("a", 2), ("b", "two")],
-                partiql_tuple![("a", 3), ("b", Null)],
-                partiql_tuple![("a", Null), ("b", Null)],
-                partiql_tuple![("b", Null)],
-                partiql_tuple![("a", "foo"), ("b", Null)],
+            let expected = bag![
+                tuple![("a", 1), ("b", "one")],
+                tuple![("a", 2), ("b", "two")],
+                tuple![("a", 3), ("b", Null)],
+                tuple![("a", Null), ("b", Null)],
+                tuple![("b", Null)],
+                tuple![("a", "foo"), ("b", Null)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1085,13 +1062,13 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1), ("b", "one")],
-                partiql_tuple![("a", 2), ("b", "two")],
-                partiql_tuple![("a", 3), ("b", "other")],
-                partiql_tuple![("a", Null), ("b", "other")],
-                partiql_tuple![("b", "other")],
-                partiql_tuple![("a", "foo"), ("b", "other")],
+            let expected = bag![
+                tuple![("a", 1), ("b", "one")],
+                tuple![("a", 2), ("b", "two")],
+                tuple![("a", 3), ("b", "other")],
+                tuple![("a", Null), ("b", "other")],
+                tuple![("b", "other")],
+                tuple![("a", "foo"), ("b", "other")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1127,13 +1104,13 @@ mod tests {
         println!("{:?}", &out);
 
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1), ("b", "one")],
-                partiql_tuple![("a", 2), ("b", "two")],
-                partiql_tuple![("a", 3), ("b", Null)],
-                partiql_tuple![("a", Null), ("b", Null)],
-                partiql_tuple![("b", Null)],
-                partiql_tuple![("a", "foo"), ("b", Null)],
+            let expected = bag![
+                tuple![("a", 1), ("b", "one")],
+                tuple![("a", 2), ("b", "two")],
+                tuple![("a", 3), ("b", Null)],
+                tuple![("a", Null), ("b", Null)],
+                tuple![("b", Null)],
+                tuple![("a", "foo"), ("b", Null)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1172,14 +1149,11 @@ mod tests {
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
-        bindings.insert("data", partiql_list![Tuple::from([("expr", expr)])].into());
+        bindings.insert("data", list![Tuple::from([("expr", expr)])].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        assert_eq!(
-            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
-            result
-        );
+        assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
 
     #[test]
@@ -1237,15 +1211,15 @@ mod tests {
         plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
         let mut bindings = MapBindings::default();
-        bindings.insert("data", partiql_list![Tuple::from([("lhs", lhs)])].into());
+        bindings.insert("data", list![Tuple::from([("lhs", lhs)])].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
         let expected_result = if expected_first_elem != Missing {
-            partiql_bag!(Tuple::from([("result", expected_first_elem)]))
+            bag!(Tuple::from([("result", expected_first_elem)]))
         } else {
             // Filter tuples with `MISSING` vals
-            partiql_bag!(Tuple::new())
+            bag!(Tuple::new())
         };
         assert_eq!(expected_result, result);
     }
@@ -1301,14 +1275,11 @@ mod tests {
             .into_iter()
             .enumerate()
             .for_each(|(i, e)| data.insert(&format!("arg{i}"), e));
-        bindings.insert("data", partiql_list![data].into());
+        bindings.insert("data", list![data].into());
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        assert_eq!(
-            partiql_bag!(Tuple::from([("result", expected_first_elem)])),
-            result
-        );
+        assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
 
     #[test]
@@ -1378,7 +1349,7 @@ mod tests {
             println!("{:?}", &out);
             assert_eq!(out, expected);
         }
-        let list = ValueExpr::Lit(Box::new(Value::List(Box::new(partiql_list![1, 2, 3]))));
+        let list = ValueExpr::Lit(Box::new(Value::List(Box::new(list![1, 2, 3]))));
 
         // `[1,2,3][0]` -> `1`
         let index = ValueExpr::Path(Box::new(list.clone()), vec![PathComponent::Index(0)]);
@@ -1397,7 +1368,7 @@ mod tests {
         test(index, Value::Integer(3));
 
         // `{'a':10}[''||'a']` -> `10`
-        let tuple = ValueExpr::Lit(Box::new(Value::Tuple(Box::new(partiql_tuple![("a", 10)]))));
+        let tuple = ValueExpr::Lit(Box::new(Value::Tuple(Box::new(tuple![("a", 10)]))));
         let index_expr = ValueExpr::BinaryExpr(
             BinaryOp::Concat,
             Box::new(ValueExpr::Lit(Box::new("".into()))),
@@ -1438,10 +1409,10 @@ mod tests {
         let out = evaluate(lg, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("b", 1)],
-                partiql_tuple![("b", 2)],
-                partiql_tuple![("b", 3)],
+            let expected = bag![
+                tuple![("b", 1)],
+                tuple![("b", 2)],
+                tuple![("b", 3)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1464,10 +1435,10 @@ mod tests {
         let out = evaluate(lg, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1)],
-                partiql_tuple![("a", 2)],
-                partiql_tuple![("a", 3)],
+            let expected = bag![
+                tuple![("a", 1)],
+                tuple![("a", 2)],
+                tuple![("a", 3)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1501,7 +1472,7 @@ mod tests {
         let out = evaluate(lg, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![2, 4, 6];
+            let expected = bag![2, 4, 6];
             assert_eq!(*bag, expected);
         });
     }
@@ -1534,10 +1505,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_bag![
-            partiql_tuple![("a", 1), ("b", 1)],
-            partiql_tuple![("a", 2), ("b", 2)],
-        ];
+        let data = bag![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1545,9 +1513,9 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("a", 1), ("b", 1)],
-                partiql_tuple![("a", 2), ("b", 2)],
+            let expected = bag![
+                tuple![("a", 1), ("b", 1)],
+                tuple![("a", 2), ("b", 2)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1586,10 +1554,10 @@ mod tests {
         let out = evaluate(lg, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("test", 2)],
-                partiql_tuple![("test", 4)],
-                partiql_tuple![("test", 6)],
+            let expected = bag![
+                tuple![("test", 2)],
+                tuple![("test", 4)],
+                tuple![("test", 6)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -1621,9 +1589,9 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![
-            partiql_tuple![("a", "legit"), ("b", 1)],
-            partiql_tuple![("a", 400), ("b", 2)],
+        let data = list![
+            tuple![("a", "legit"), ("b", 1)],
+            tuple![("a", 400), ("b", 2)],
         ];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
@@ -1632,7 +1600,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_tuple![("legit", 1)], partiql_tuple![]];
+            let expected = bag![tuple![("legit", 1)], tuple![]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1666,12 +1634,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![partiql_tuple![
-            ("a", "same"),
-            ("b", 1),
-            ("c", "same"),
-            ("d", 2)
-        ]];
+        let data = list![tuple![("a", "same"), ("b", 1), ("c", "same"), ("d", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1679,7 +1642,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_tuple![("same", 1), ("same", 2)]];
+            let expected = bag![tuple![("same", 1), ("same", 2)]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1710,10 +1673,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![
-            partiql_tuple![("a", 1), ("b", 1)],
-            partiql_tuple![("a", 2), ("b", 2)],
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1721,7 +1681,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, 2]];
+            let expected = bag![list![1, 1], list![2, 2]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1756,7 +1716,7 @@ mod tests {
         let out = evaluate(lg, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_list![2], partiql_list![4], partiql_list![6]];
+            let expected = bag![list![2], list![4], list![6]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1787,10 +1747,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![
-            partiql_tuple![("a", 1), ("b", 1)],
-            partiql_tuple![("a", 2), ("b", 2)],
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1798,7 +1755,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, 2]];
+            let expected = bag![bag![1, 1], bag![2, 2]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1830,7 +1787,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1839,7 +1796,7 @@ mod tests {
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
             let expected =
-                partiql_bag![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)],];
+                bag![tuple![("a", 1), ("b", 1)], tuple![("a", 2)],];
             assert_eq!(*bag, expected);
         });
     }
@@ -1869,7 +1826,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1877,7 +1834,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_list![1, 1], partiql_list![2, Value::Missing]];
+            let expected = bag![list![1, 1], list![2, Value::Missing]];
             assert_eq!(*bag, expected);
         });
     }
@@ -1900,7 +1857,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1908,7 +1865,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![1, Value::Missing];
+            let expected = bag![1, Value::Missing];
             assert_eq!(*bag, expected);
         });
     }
@@ -1938,7 +1895,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = partiql_list![partiql_tuple![("a", 1), ("b", 1)], partiql_tuple![("a", 2)]];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1946,7 +1903,7 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![partiql_bag![1, 1], partiql_bag![2, Value::Missing]];
+            let expected = bag![bag![1, 1], bag![2, Value::Missing]];
             assert_eq!(*bag, expected);
         });
     }
@@ -2024,9 +1981,9 @@ mod tests {
         let out = evaluate(logical, data_customer());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
-                partiql_tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
+            let expected = bag![
+                tuple![("firstName", "jason"), ("doubleName", "jasonjason")],
+                tuple![("firstName", "miriam"), ("doubleName", "miriammiriam")],
             ];
             assert_eq!(*bag, expected);
         });
@@ -2050,7 +2007,7 @@ mod tests {
                         "a".to_string(),
                     ))],
                 )),
-                Box::new(ValueExpr::Lit(Box::new(partiql_list![1].into()))),
+                Box::new(ValueExpr::Lit(Box::new(list![1].into()))),
             ),
         }));
 
@@ -2075,8 +2032,8 @@ mod tests {
         let out = evaluate(logical, data_3_tuple());
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![("b", 1)],
+            let expected = bag![
+                tuple![("b", 1)],
             ];
             assert_eq!(*bag, expected);
         });
@@ -2130,11 +2087,7 @@ mod tests {
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
-        let data = partiql_list![
-            partiql_tuple![("a", 1)],
-            partiql_tuple![("a", 2)],
-            partiql_tuple![("a", 3)],
-        ];
+        let data = list![tuple![("a", 1)], tuple![("a", 2)], tuple![("a", 3)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -2142,16 +2095,16 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![
+            let expected = bag![
+                tuple![
                     ("ta", 1),
                     ("su", 2),
                 ],
-                partiql_tuple![
+                tuple![
                     ("ta", 2),
                     ("su", 4),
                 ],
-                partiql_tuple![
+                tuple![
                     ("ta", 3),
                     ("su", 6),
                 ],
@@ -2199,10 +2152,7 @@ mod tests {
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
 
-        let data = partiql_list![
-            partiql_tuple![("a", 1), ("b", 1)],
-            partiql_tuple![("a", 2), ("b", 2)]
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -2210,14 +2160,14 @@ mod tests {
         let out = evaluate(lg, bindings);
         println!("{:?}", &out);
         assert_matches!(out, Value::Bag(bag) => {
-            let expected = partiql_bag![
-                partiql_tuple![
+            let expected = bag![
+                tuple![
                     ("ta", 1),
-                    ("s", partiql_bag![partiql_tuple![("u", 2)]]),
+                    ("s", bag![tuple![("u", 2)]]),
                 ],
-                partiql_tuple![
+                tuple![
                     ("ta", 2),
-                    ("s", partiql_bag![partiql_tuple![("u", 4)]]),
+                    ("s", bag![tuple![("u", 4)]]),
                 ],
             ];
             assert_eq!(*bag, expected);
@@ -2228,15 +2178,12 @@ mod tests {
         use crate::eval::evaluable::{EvalScan, Evaluable};
         use crate::eval::expr::{EvalPath, EvalPathComponent, EvalVarRef};
         use crate::eval::BasicContext;
-        use partiql_value::{partiql_bag, partiql_list, BindingsName};
+        use partiql_value::{bag, list, BindingsName};
 
         use super::*;
 
         fn some_ordered_table() -> List {
-            partiql_list![
-                partiql_tuple![("a", 0), ("b", 0)],
-                partiql_tuple![("a", 1), ("b", 1)],
-            ]
+            list![tuple![("a", 0), ("b", 0)], tuple![("a", 1), ("b", 1)],]
         }
 
         fn some_unordered_table() -> Bag {
@@ -2262,9 +2209,9 @@ mod tests {
             let res = scan.evaluate(&ctx);
 
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
-            let expected = partiql_bag![
-                partiql_tuple![("x", partiql_tuple![("a", 0), ("b", 0)]), ("y", 0)],
-                partiql_tuple![("x", partiql_tuple![("a", 1), ("b", 1)]), ("y", 1)],
+            let expected = bag![
+                tuple![("x", tuple![("a", 0), ("b", 0)]), ("y", 0)],
+                tuple![("x", tuple![("a", 1), ("b", 1)]), ("y", 1)],
             ];
             assert_eq!(Value::Bag(Box::new(expected)), res);
         }
@@ -2288,13 +2235,13 @@ mod tests {
             let res = scan.evaluate(&ctx);
 
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
-            let expected = partiql_bag![
-                partiql_tuple![
-                    ("x", partiql_tuple![("a", 0), ("b", 0)]),
+            let expected = bag![
+                tuple![
+                    ("x", tuple![("a", 0), ("b", 0)]),
                     ("y", value::Value::Missing)
                 ],
-                partiql_tuple![
-                    ("x", partiql_tuple![("a", 1), ("b", 1)]),
+                tuple![
+                    ("x", tuple![("a", 1), ("b", 1)]),
                     ("y", value::Value::Missing)
                 ],
             ];
@@ -2322,7 +2269,7 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let scan_res = scan.evaluate(&ctx);
 
-            let expected = partiql_bag![partiql_tuple![("x", 0)]];
+            let expected = bag![tuple![("x", 0)]];
             assert_eq!(Value::Bag(Box::new(expected)), scan_res);
         }
 
@@ -2347,13 +2294,13 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = scan.evaluate(&ctx);
 
-            let expected = partiql_bag![partiql_tuple![("x", value::Value::Missing)]];
+            let expected = bag![tuple![("x", value::Value::Missing)]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
         }
     }
 
     mod clause_unpivot {
-        use partiql_value::{partiql_bag, BindingsName, Tuple};
+        use partiql_value::{bag, BindingsName, Tuple};
 
         use crate::eval::evaluable::{EvalUnpivot, Evaluable};
         use crate::eval::expr::EvalVarRef;
@@ -2362,7 +2309,7 @@ mod tests {
         use super::*;
 
         fn just_a_tuple() -> Tuple {
-            partiql_tuple![("amzn", 840.05), ("tdc", 31.06)]
+            tuple![("amzn", 840.05), ("tdc", 31.06)]
         }
 
         // Spec 5.2
@@ -2382,9 +2329,9 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = unpivot.evaluate(&ctx);
 
-            let expected = partiql_bag![
-                partiql_tuple![("symbol", "tdc"), ("price", 31.06)],
-                partiql_tuple![("symbol", "amzn"), ("price", 840.05)],
+            let expected = bag![
+                tuple![("symbol", "tdc"), ("price", 31.06)],
+                tuple![("symbol", "amzn"), ("price", 840.05)],
             ];
             assert_eq!(Value::Bag(Box::new(expected)), res);
         }
@@ -2406,7 +2353,7 @@ mod tests {
             let ctx = BasicContext::new(p0);
             let res = unpivot.evaluate(&ctx);
 
-            let expected = partiql_bag![partiql_tuple![("x", 1), ("y", "_1")]];
+            let expected = bag![tuple![("x", 1), ("y", "_1")]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
         }
     }

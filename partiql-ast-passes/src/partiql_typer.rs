@@ -8,7 +8,7 @@ use partiql_types::{ArrayType, BagType, PartiqlType, StructType, TypeKind};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct AstStaticTyper<'c> {
+pub struct AstPartiqlTyper<'c> {
     id_stack: Vec<NodeId>,
     container_stack: Vec<Vec<PartiqlType>>,
     errors: Vec<AstTransformError>,
@@ -16,9 +16,9 @@ pub struct AstStaticTyper<'c> {
     catalog: &'c dyn Catalog,
 }
 
-impl<'c> AstStaticTyper<'c> {
+impl<'c> AstPartiqlTyper<'c> {
     pub fn new(catalog: &'c dyn Catalog) -> Self {
-        AstStaticTyper {
+        AstPartiqlTyper {
             id_stack: Default::default(),
             container_stack: Default::default(),
             errors: Default::default(),
@@ -47,7 +47,7 @@ impl<'c> AstStaticTyper<'c> {
     }
 }
 
-impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
+impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
     fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_stack.push(id);
         Traverse::Continue
@@ -116,9 +116,9 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
             Lit::NationalCharStringLit(_) => TypeKind::String,
             Lit::BitStringLit(_) => todo!(),
             Lit::HexStringLit(_) => todo!(),
-            Lit::StructLit(_) => TypeKind::Struct(StructType::unconstrained()),
-            Lit::ListLit(_) => TypeKind::Array(ArrayType::array()),
-            Lit::BagLit(_) => TypeKind::Bag(BagType::bag()),
+            Lit::StructLit(_) => TypeKind::Struct(StructType::new_any()),
+            Lit::ListLit(_) => TypeKind::Array(ArrayType::new_any()),
+            Lit::BagLit(_) => TypeKind::Bag(BagType::new_any()),
             Lit::TypedLit(_, _) => todo!(),
         };
 
@@ -161,7 +161,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
             }
         }
 
-        let ty = PartiqlType::new_struct(StructType::unconstrained());
+        let ty = PartiqlType::new_struct(StructType::new_any());
         self.type_map.insert(id, ty.clone());
 
         if let Some(c) = self.container_stack.last_mut() {
@@ -184,7 +184,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
         self.container_stack.pop();
 
         let id = *self.current_node();
-        let ty = PartiqlType::new_bag(BagType::bag());
+        let ty = PartiqlType::new_bag(BagType::new_any());
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
@@ -206,7 +206,7 @@ impl<'c, 'ast> Visitor<'ast> for AstStaticTyper<'c> {
         self.container_stack.pop();
 
         let id = *self.current_node();
-        let ty = PartiqlType::new_array(ArrayType::array());
+        let ty = PartiqlType::new_array(ArrayType::new_any());
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
@@ -221,8 +221,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use partiql_ast::ast;
-    use partiql_catalog::PartiqlCatalog;
-    use partiql_types::{PartiqlType, TypeKind};
+    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_types::{PartiqlType, StructConstraint, StructField, TypeKind};
 
     #[test]
     fn simple_test() {
@@ -244,22 +244,24 @@ mod tests {
 
     #[test]
     fn simple_err_test() {
-        assert!(type_statement("{'a': 1, a.b: 3}").is_err());
+        assert!(type_statement("{'a': 1, a.b: 3}", &PartiqlCatalog::default()).is_err());
     }
 
     fn run_literal_test(q: &str) -> TypeKind {
-        let out = type_statement(q).expect("type map");
+        let out = type_statement(q, &PartiqlCatalog::default()).expect("type map");
         let values: Vec<&PartiqlType> = out.values().collect();
         values.last().unwrap().kind().clone()
     }
 
-    fn type_statement(q: &str) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
+    fn type_statement(
+        q: &str,
+        catalog: &dyn Catalog,
+    ) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
         let parsed = partiql_parser::Parser::default()
             .parse(q)
             .expect("Expect successful parse");
 
-        let catalog = PartiqlCatalog::default();
-        let typer = AstStaticTyper::new(&catalog);
+        let typer = AstPartiqlTyper::new(catalog);
         if let ast::Expr::Query(q) = parsed.ast.as_ref() {
             typer.type_nodes(&q)
         } else {

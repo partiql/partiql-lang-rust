@@ -118,6 +118,16 @@ pub struct TypeEnvEntry<'a> {
     ty: PartiqlType,
 }
 
+impl<'a> TypeEnvEntry<'a> {
+    pub fn new(name: &str, aliases: &[&'a str], ty: PartiqlType) -> Self {
+        TypeEnvEntry {
+            name: UniCase::from(name.to_string()),
+            aliases: aliases.to_vec(),
+            ty,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TypeEntry {
     id: ObjectId,

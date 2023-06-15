@@ -4,7 +4,7 @@ use crate::eval::expr::EvalExpr;
 use crate::eval::{EvalContext, EvalPlan};
 use itertools::Itertools;
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{partiql_bag, partiql_tuple, Bag, List, Tuple, Value};
+use partiql_value::{bag, tuple, Bag, List, Tuple, Value};
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
@@ -88,11 +88,11 @@ impl Evaluable for EvalScan {
 
         let bindings = match input_value {
             Value::Bag(t) => *t,
-            Value::Tuple(t) => partiql_bag![*t],
-            _ => partiql_bag![partiql_tuple![]],
+            Value::Tuple(t) => bag![*t],
+            _ => bag![tuple![]],
         };
 
-        let mut value = partiql_bag![];
+        let mut value = bag![];
         bindings.iter().for_each(|binding| {
             let binding_tuple = binding.as_tuple_ref();
             let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
@@ -179,11 +179,8 @@ impl Evaluable for EvalJoin {
             attrs.into_iter().map(|k| (k.into(), Null)).collect()
         }
 
-        let mut output_bag = partiql_bag![];
-        let input_env = self
-            .input
-            .take()
-            .unwrap_or_else(|| Value::from(partiql_tuple![]));
+        let mut output_bag = bag![];
+        let input_env = self.input.take().unwrap_or_else(|| Value::from(tuple![]));
         self.left.update_input(input_env.clone(), 0);
         let lhs_values = self.left.evaluate(ctx);
         let left_bindings = match lhs_values {
@@ -211,7 +208,7 @@ impl Evaluable for EvalJoin {
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,
-                        _ => partiql_bag![partiql_tuple![]],
+                        _ => bag![tuple![]],
                     };
 
                     // for each binding b_r in eval (p0, (p || b_l), r)
@@ -245,7 +242,7 @@ impl Evaluable for EvalJoin {
                 // for each binding b_l in eval(p0, p, l)
                 left_bindings.iter().for_each(|b_l| {
                     // define empty bag q_r
-                    let mut output_bag_left = partiql_bag![];
+                    let mut output_bag_left = bag![];
                     let env_b_l = input_env
                         .as_tuple_ref()
                         .as_ref()
@@ -255,7 +252,7 @@ impl Evaluable for EvalJoin {
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,
-                        _ => partiql_bag![partiql_tuple![]],
+                        _ => bag![tuple![]],
                     };
 
                     // for each binding b_r in eval (p0, (p || b_l), r)
