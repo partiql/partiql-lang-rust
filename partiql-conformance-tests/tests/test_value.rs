@@ -64,7 +64,7 @@ mod tests {
                 s: 1
             }
         ]";
-        let expected = Value::from(bag![partiql_tuple![
+        let expected = Value::from(bag![tuple![
             ("f", 1),
             ("d", Value::Real(2.0.into())),
             ("s", 1)
@@ -113,14 +113,14 @@ mod tests {
             Value::Tuple(Box::new(tuple![
                 (
                     "sensors",
-                    partiql_list![partiql_tuple![("sensor", 1)], partiql_tuple![("sensor", 2)]]
+                    list![tuple![("sensor", 1)], tuple![("sensor", 2)]]
                 ),
                 (
                     "logs",
-                    partiql_list![
-                        partiql_tuple![("sensor", 1), ("co", rust_decimal::Decimal::new(4, 1))],
-                        partiql_tuple![("sensor", 1), ("co", rust_decimal::Decimal::new(2, 1))],
-                        partiql_tuple![("sensor", 2), ("co", rust_decimal::Decimal::new(3, 1))]
+                    list![
+                        tuple![("sensor", 1), ("co", rust_decimal::Decimal::new(4, 1))],
+                        tuple![("sensor", 1), ("co", rust_decimal::Decimal::new(2, 1))],
+                        tuple![("sensor", 2), ("co", rust_decimal::Decimal::new(3, 1))]
                     ]
                 )
             ])),
@@ -136,7 +136,7 @@ mod tests {
                 s: 1
             }
         ]";
-        let expected = Value::from(list![partiql_tuple![
+        let expected = Value::from(list![tuple![
             ("f", 1),
             ("d", Value::Real(2.0.into())),
             ("s", 1)

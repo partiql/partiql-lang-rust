@@ -180,10 +180,7 @@ impl Evaluable for EvalJoin {
         }
 
         let mut output_bag = bag![];
-        let input_env = self
-            .input
-            .take()
-            .unwrap_or_else(|| Value::from(tuple![]));
+        let input_env = self.input.take().unwrap_or_else(|| Value::from(tuple![]));
         self.left.update_input(input_env.clone(), 0);
         let lhs_values = self.left.evaluate(ctx);
         let left_bindings = match lhs_values {
