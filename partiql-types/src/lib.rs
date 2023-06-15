@@ -21,17 +21,27 @@ pub enum TypeKind {
 
     // Scalar Types
     Int,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
     Bool,
     Decimal,
+    DecimalP(usize, usize),
 
+    Float32,
     Float64,
-    String,
 
-    // Container Type
+    String,
+    StringFixed(usize),
+    StringVarying(usize),
+
+    // Container Types
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-    // TODO Add Sexp, TIMESTAMP
+
+    // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
 }
 
 #[allow(dead_code)]
