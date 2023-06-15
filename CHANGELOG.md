@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
 
-
 ### Fixes
 
 ## [0.5.0] - 2023-06-06

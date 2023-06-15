@@ -1335,10 +1335,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(
-                &Value::from(bag![3, 4, 2]),
-                &Value::from(bag![2, 2, 3, 4])
-            )
+            NullableEq::eq(&Value::from(bag![3, 4, 2]), &Value::from(bag![2, 2, 3, 4]))
         );
         assert_eq!(
             Value::from(false),
@@ -1365,10 +1362,7 @@ mod tests {
             Value::from(false),
             NullableEq::eq(
                 &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![
-                    ("a", list![Value::Null, 1]),
-                    ("b", 2)
-                ])
+                &Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
             )
         );
         assert_eq!(
@@ -1490,10 +1484,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(
-                &Value::from(bag![3, 4, 2]),
-                &Value::from(bag![2, 2, 3, 4])
-            )
+            NullableEq::neq(&Value::from(bag![3, 4, 2]), &Value::from(bag![2, 2, 3, 4]))
         );
         assert_eq!(
             Value::from(true),
@@ -1520,10 +1511,7 @@ mod tests {
             Value::from(true),
             NullableEq::neq(
                 &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![
-                    ("a", list![Value::Null, 1]),
-                    ("b", 2)
-                ])
+                &Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
             )
         );
         assert_eq!(Value::Null, Value::from(true).neq(&Value::Null));

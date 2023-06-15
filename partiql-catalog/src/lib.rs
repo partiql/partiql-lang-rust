@@ -123,7 +123,7 @@ impl<'a> TypeEnvEntry<'a> {
         TypeEnvEntry {
             name: UniCase::from(name.to_string()),
             aliases: aliases.to_vec(),
-            ty
+            ty,
         }
     }
 }

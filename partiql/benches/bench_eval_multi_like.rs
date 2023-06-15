@@ -264,10 +264,7 @@ fn employee_data() -> Vec<Value> {
 }
 
 fn data() -> MapBindings<Value> {
-    let data = tuple![(
-        "hr",
-        tuple![("employees", Bag::from(employee_data()))]
-    )];
+    let data = tuple![("hr", tuple![("employees", Bag::from(employee_data()))])];
 
     data.into()
 }

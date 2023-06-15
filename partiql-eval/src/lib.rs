@@ -22,9 +22,7 @@ mod tests {
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
-    use partiql_value::{
-        bag, list, tuple, Bag, BindingsName, List, Tuple, Value,
-    };
+    use partiql_value::{bag, list, tuple, Bag, BindingsName, List, Tuple, Value};
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
@@ -106,17 +104,10 @@ mod tests {
 
     fn join_data_sensors() -> MapBindings<Value> {
         let sensors = list![
+            tuple![("readings", list![tuple![("v", 1.3)], tuple![("v", 2)],])],
             tuple![(
                 "readings",
-                list![tuple![("v", 1.3)], tuple![("v", 2)],]
-            )],
-            tuple![(
-                "readings",
-                list![
-                    tuple![("v", 0.7)],
-                    tuple![("v", 0.8)],
-                    tuple![("v", 0.9)],
-                ]
+                list![tuple![("v", 0.7)], tuple![("v", 0.8)], tuple![("v", 0.9)],]
             )],
         ];
         let mut bindings = MapBindings::default();
@@ -126,17 +117,10 @@ mod tests {
 
     fn join_data_sensors_with_empty_table() -> MapBindings<Value> {
         let sensors = list![
+            tuple![("readings", list![tuple![("v", 1.3)], tuple![("v", 2)],])],
             tuple![(
                 "readings",
-                list![tuple![("v", 1.3)], tuple![("v", 2)],]
-            )],
-            tuple![(
-                "readings",
-                list![
-                    tuple![("v", 0.7)],
-                    tuple![("v", 0.8)],
-                    tuple![("v", 0.9)],
-                ]
+                list![tuple![("v", 0.7)], tuple![("v", 0.8)], tuple![("v", 0.9)],]
             )],
             tuple![("readings", list![])],
         ];
@@ -522,11 +506,7 @@ mod tests {
         eval_bin_op(
             BinaryOp::In,
             Value::from(tuple![("a", 2)]),
-            Value::from(list![
-                tuple![("a", 6)],
-                tuple![("b", 12)],
-                tuple![("a", 2)]
-            ]),
+            Value::from(list![tuple![("a", 6)], tuple![("b", 12)], tuple![("a", 2)]]),
             Value::from(true),
         );
         eval_bin_op(
@@ -704,10 +684,7 @@ mod tests {
             plan.extend_with_flows(&[(scan, project), (project, sink)]);
 
             let mut bindings = MapBindings::default();
-            bindings.insert(
-                "data",
-                list![Tuple::from([("value", value)])].into(),
-            );
+            bindings.insert("data", list![Tuple::from([("value", value)])].into());
 
             let result = evaluate(plan, bindings).coerce_to_bag();
             assert!(!&result.is_empty());
@@ -1176,10 +1153,7 @@ mod tests {
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        assert_eq!(
-            bag!(Tuple::from([("result", expected_first_elem)])),
-            result
-        );
+        assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
 
     #[test]
@@ -1305,10 +1279,7 @@ mod tests {
 
         let result = evaluate(plan, bindings).coerce_to_bag();
         assert!(!&result.is_empty());
-        assert_eq!(
-            bag!(Tuple::from([("result", expected_first_elem)])),
-            result
-        );
+        assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
 
     #[test]
@@ -1534,10 +1505,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = bag![
-            tuple![("a", 1), ("b", 1)],
-            tuple![("a", 2), ("b", 2)],
-        ];
+        let data = bag![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1666,12 +1634,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = list![tuple![
-            ("a", "same"),
-            ("b", 1),
-            ("c", "same"),
-            ("d", 2)
-        ]];
+        let data = list![tuple![("a", "same"), ("b", 1), ("c", "same"), ("d", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1710,10 +1673,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = list![
-            tuple![("a", 1), ("b", 1)],
-            tuple![("a", 2), ("b", 2)],
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -1787,10 +1747,7 @@ mod tests {
         lg.add_flow(from, select_value);
         lg.add_flow(select_value, sink);
 
-        let data = list![
-            tuple![("a", 1), ("b", 1)],
-            tuple![("a", 2), ("b", 2)],
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -2130,11 +2087,7 @@ mod tests {
         lg.add_flow_with_branch_num(join, project, 0);
         lg.add_flow_with_branch_num(project, sink, 0);
 
-        let data = list![
-            tuple![("a", 1)],
-            tuple![("a", 2)],
-            tuple![("a", 3)],
-        ];
+        let data = list![tuple![("a", 1)], tuple![("a", 2)], tuple![("a", 3)],];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -2199,10 +2152,7 @@ mod tests {
         lg.add_flow(from, project);
         lg.add_flow(project, sink);
 
-        let data = list![
-            tuple![("a", 1), ("b", 1)],
-            tuple![("a", 2), ("b", 2)]
-        ];
+        let data = list![tuple![("a", 1), ("b", 1)], tuple![("a", 2), ("b", 2)]];
 
         let mut bindings: MapBindings<Value> = MapBindings::default();
         bindings.insert("data", data.into());
@@ -2233,10 +2183,7 @@ mod tests {
         use super::*;
 
         fn some_ordered_table() -> List {
-            list![
-                tuple![("a", 0), ("b", 0)],
-                tuple![("a", 1), ("b", 1)],
-            ]
+            list![tuple![("a", 0), ("b", 0)], tuple![("a", 1), ("b", 1)],]
         }
 
         fn some_unordered_table() -> Bag {
