@@ -107,7 +107,7 @@ macro_rules! r#bag {
         $crate::PartiqlType::new_bag(BagType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlType::new_bag(BagType::new($elem))
+        $crate::PartiqlType::new_bag(BagType::new(Box::new($elem)))
     };
 }
 
@@ -117,7 +117,7 @@ macro_rules! r#array {
         $crate::PartiqlType::new_array(ArrayType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlType::new_bag(ArrayType::new($elem))
+        $crate::PartiqlType::new_array(ArrayType::new(Box::new($elem)))
     };
 }
 
@@ -203,6 +203,25 @@ impl PartiqlType {
     }
 }
 
+pub trait Schema {
+    fn relation(&self) -> Vec<Attr>;
+}
+
+#[derive(Debug, Clone)]
+pub struct Attr {
+    name: String,
+    ty: PartiqlType,
+}
+
+impl Attr {
+    fn new(name: &str, ty: PartiqlType) -> Self {
+        Attr {
+            name: name.to_string(),
+            ty,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AnyOf {
@@ -221,11 +240,18 @@ pub struct StructType {
     constraints: Vec<StructConstraint>,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct StructField {
-    name: String,
-    value: PartiqlType,
+impl StructType {
+    pub fn fields(&self) -> Vec<StructField> {
+        self.constraints.iter().map(|c|
+        {
+            if let StructConstraint::Fields(fields) = c.clone() {
+                fields
+            } else {
+                vec![]
+            }
+        }
+        ).flatten().collect()
+    }
 }
 
 impl<T> From<(String, T)> for StructField
@@ -235,7 +261,7 @@ where
     fn from(pair: (String, T)) -> Self {
         StructField {
             name: pair.0,
-            value: pair.1.into(),
+            ty: pair.1.into(),
         }
     }
 }
@@ -257,8 +283,29 @@ pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
     DuplicateAttrs(bool),
-    Fields(StructField),
+    Fields(Vec<StructField>),
 }
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct StructField {
+    name: String,
+    ty: PartiqlType,
+}
+
+impl StructField {
+    pub fn new(name: &str, ty: PartiqlType) -> Self {
+        StructField {
+            name: name.to_string(),
+            ty,
+        }
+    }
+}
+
+trait Collection {}
+
+impl Collection for BagType {}
+impl Collection for ArrayType {}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -278,6 +325,25 @@ impl BagType {
         BagType {
             element_type: typ,
             constraints: vec![CollectionConstraint::Ordered(false)],
+        }
+    }
+}
+
+impl Schema for BagType {
+    fn relation(&self) -> Vec<Attr> {
+        let kind = self.element_type.kind();
+        match kind {
+            TypeKind::Any |
+            TypeKind::AnyOf(_) |
+            TypeKind::Missing => vec![],
+            TypeKind::Struct(s) => {
+                s.fields().into_iter().map(|f| Attr::new(f.name.as_str(), f.ty)).collect()
+            },
+            _ => {
+                let key = "_1";
+                let ty = PartiqlType::new(kind.clone());
+                vec![Attr::new(key, ty)]
+            }
         }
     }
 }
@@ -311,6 +377,12 @@ enum CollectionConstraint {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
-    fn todo() {}
+    fn todo() {
+        let bag1 = bag!(PartiqlType::new_struct(StructType::new(vec![StructConstraint::Fields(vec![StructField::new("a", PartiqlType::new(TypeKind::Int))])])));
+        let bag2 = BagType::new(Box::new(PartiqlType::new(TypeKind::Int)));
+        // dbg!(bag1.kind().relation());
+        // dbg!(bag2.relation());
+    }
 }

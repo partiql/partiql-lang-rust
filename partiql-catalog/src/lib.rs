@@ -134,6 +134,16 @@ pub struct TypeEntry {
     ty: PartiqlType,
 }
 
+impl TypeEntry {
+    pub fn id(&self) -> ObjectId {
+        self.id.clone()
+    }
+
+    pub fn ty(&self) -> PartiqlType {
+        self.ty.clone()
+    }
+}
+
 #[derive(Debug)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,

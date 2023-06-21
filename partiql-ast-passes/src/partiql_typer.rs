@@ -1,29 +1,76 @@
+use partiql_ast::ast;
 use crate::error::{AstTransformError, AstTransformationError};
-use partiql_ast::ast::{
-    AstNode, AstTypeMap, Bag, Expr, List, Lit, NodeId, Query, QuerySet, Struct,
-};
+use partiql_ast::ast::{AstNode, AstTypeMap, Bag, Expr, FromClause, FromLet, List, Lit, NodeId, Query, QuerySet, Struct, VarRef};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::Catalog;
+use partiql_parser::Parsed;
 use partiql_types::{ArrayType, BagType, PartiqlType, StructType, TypeKind};
+use crate::name_resolver;
+use crate::name_resolver::{KeyRegistry, NameResolver};
+
+#[derive(Copy, Clone, Debug)]
+enum QueryContext {
+    FromLet,
+    Path,
+    Order,
+    Query,
+}
+
+pub struct AstTyper<'c> {
+    catalog: &'c dyn Catalog,
+}
+
+impl<'c> AstTyper<'c> {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
+        AstTyper { catalog }
+    }
+
+    #[inline]
+    pub fn type_nodes(&self, query: &str) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
+        let parsed = partiql_parser::Parser::default()
+            .parse(query)
+            .expect("Expect successful parse");
+
+        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
+            let mut resolver = NameResolver::default();
+            let registry = resolver.resolve(&q).expect("KeyRegistry");
+            let typer = AstToTypeMap::new(self.catalog, registry);
+            let out = typer.type_nodes(&q);
+            dbg!(&out);
+            out
+        } else {
+            Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "Expr type not supported yet".to_string(),
+                )],
+            })
+        }
+
+    }
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct AstPartiqlTyper<'c> {
+pub struct AstToTypeMap<'c> {
     id_stack: Vec<NodeId>,
+    ctx_stack: Vec<QueryContext>,
     container_stack: Vec<Vec<PartiqlType>>,
     errors: Vec<AstTransformError>,
     type_map: AstTypeMap<PartiqlType>,
     catalog: &'c dyn Catalog,
+    registry: KeyRegistry
 }
 
-impl<'c> AstPartiqlTyper<'c> {
-    pub fn new(catalog: &'c dyn Catalog) -> Self {
-        AstPartiqlTyper {
+impl<'c> AstToTypeMap<'c> {
+    pub fn new(catalog: &'c dyn Catalog, registry: KeyRegistry) -> Self {
+        AstToTypeMap {
             id_stack: Default::default(),
+            ctx_stack: Default::default(),
             container_stack: Default::default(),
             errors: Default::default(),
             type_map: Default::default(),
             catalog,
+            registry,
         }
     }
 
@@ -47,7 +94,7 @@ impl<'c> AstPartiqlTyper<'c> {
     }
 }
 
-impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
+impl<'c, 'ast> Visitor<'ast> for AstToTypeMap<'c> {
     fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_stack.push(id);
         Traverse::Continue
@@ -59,6 +106,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
     }
 
     fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
+        self.ctx_stack.push(QueryContext::Query);
         Traverse::Continue
     }
 
@@ -214,6 +262,52 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
         }
         Traverse::Continue
     }
+
+    fn enter_from_let(&mut self, _from_let: &'ast FromLet) -> Traverse {
+        self.ctx_stack.push(QueryContext::FromLet);
+        Traverse::Continue
+    }
+
+    fn enter_var_ref(&mut self, var_ref: &'ast VarRef) -> Traverse {
+        dbg!(&var_ref);
+        let current_ctx = self.ctx_stack.last();
+        if matches!(current_ctx, Some(QueryContext::FromLet)) {
+            for id in self.id_stack.iter().rev() {
+                if let Some(key_schema) = self.registry.schema.get(id) {
+                    let key_schema: &name_resolver::KeySchema = key_schema;
+                    let name_ref: &name_resolver::NameRef = key_schema
+                        .consume
+                        .iter()
+                        .find(|name_ref| name_ref.sym == var_ref.name)
+                        .expect("NameRef");
+
+                    dbg!(&name_ref);
+
+                    for lookup in &name_ref.lookup {
+                        dbg!(&lookup);
+                        match lookup {
+                            name_resolver::NameLookup::Global => {
+                                let ty_entry = self.catalog.resolve_type(name_ref.sym.value.as_str()).expect("TypeEntry");
+                                let typ = ty_entry.ty();
+                                dbg!(&typ);
+                                self.type_map.insert(self.current_node().clone(), typ);
+                            }
+                            name_resolver::NameLookup::Local => {
+                                // if let Some(scope_ids) = self.registry.in_scope.get(id) {} {
+                                //     Traverse::Continue
+                                // }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Traverse::Continue
+    }
+
+    fn exit_var_ref(&mut self, var_ref: &'ast VarRef) -> Traverse {
+        Traverse::Continue
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +317,7 @@ mod tests {
     use partiql_ast::ast;
     use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_types::{int, null, PartiqlType, StructConstraint, StructField, TypeKind};
+    use crate::name_resolver::NameResolver;
 
     #[test]
     fn simple_test() {
@@ -248,7 +343,7 @@ mod tests {
         dbg!(ty);
         let customers_schema = PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(
             PartiqlType::new_struct(StructType::new(vec![StructConstraint::Fields(
-                StructField::from(("a".to_string(), PartiqlType::new(TypeKind::Int))),
+                vec![StructField::from(("a".to_string(), PartiqlType::new(TypeKind::Int)))],
             )])),
         ))));
 
@@ -256,20 +351,12 @@ mod tests {
 
         let mut catalog = PartiqlCatalog::default();
         let _oid = catalog.add_type_entry(TypeEnvEntry::new("customers", &[], customers_schema));
-        let query = "SELECT customers.a FROM customers";
-        let parsed = partiql_parser::Parser::default()
-            .parse(query)
-            .expect("Expect successful parse");
-
-        let typer = AstPartiqlTyper::new(&catalog);
-        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-            let out = typer.type_nodes(&q);
-            dbg!(out);
-            // let values: Vec<&PartiqlType> = out.values().collect();
-            // dbg!(values.last().unwrap().kind().clone());
-        } else {
-            panic!("Typing statement other than `Query` are unsupported")
-        }
+        let q = "SELECT customers.a FROM customers";
+        let typer = AstTyper::new(&catalog);//AstToTypeMap::new(&catalog, registry);
+        let out = typer.type_nodes(&q);
+        dbg!(out);
+        // let values: Vec<&PartiqlType> = out.values().collect();
+        // dbg!(values.last().unwrap().kind().clone());
     }
 
     #[test]
@@ -287,15 +374,7 @@ mod tests {
         q: &str,
         catalog: &dyn Catalog,
     ) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
-        let parsed = partiql_parser::Parser::default()
-            .parse(q)
-            .expect("Expect successful parse");
-
-        let typer = AstPartiqlTyper::new(catalog);
-        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-            typer.type_nodes(&q)
-        } else {
-            panic!("Typing statement other than `Query` are unsupported")
-        }
+        let typer = AstTyper::new(catalog);
+        typer.type_nodes(q)
     }
 }
