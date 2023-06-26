@@ -9,6 +9,7 @@ use partiql_catalog::Catalog;
 
 mod builtins;
 mod lower;
+mod typer;
 
 pub struct LogicalPlanner<'c> {
     catalog: &'c dyn Catalog,

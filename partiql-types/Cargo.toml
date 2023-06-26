@@ -25,6 +25,7 @@ bench = false
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.6"
+indexmap = "1.9.*"
 
 [dev-dependencies]
 criterion = "0.4"

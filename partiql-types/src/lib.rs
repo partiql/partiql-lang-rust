@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::hash::Hash;
 
 pub trait Type {}
 
@@ -68,7 +69,7 @@ macro_rules! dec {
     };
 }
 
-// TODO add macro_rule for Decimal with precision and scale
+// TODO add `DecimalP`
 
 #[macro_export]
 macro_rules! f32 {
@@ -102,12 +103,19 @@ macro_rules! r#struct {
 }
 
 #[macro_export]
+macro_rules! struct_fields {
+    ($(($x:expr, $y:expr)),+ $(,)?) => (
+        $crate::StructConstraint::Fields(vec![$(($x, $y).into()),+])
+    );
+}
+
+#[macro_export]
 macro_rules! r#bag {
     () => {
         $crate::PartiqlType::new_bag(BagType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlType::new_bag(BagType::new($elem))
+        $crate::PartiqlType::new_bag(BagType::new(Box::new($elem)))
     };
 }
 
@@ -117,16 +125,16 @@ macro_rules! r#array {
         $crate::PartiqlType::new_array(ArrayType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlType::new_bag(ArrayType::new($elem))
+        $crate::PartiqlType::new_array(ArrayType::new(Box::new($elem)))
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct PartiqlType {
     kind: TypeKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
@@ -165,6 +173,12 @@ impl PartiqlType {
         PartiqlType { kind }
     }
 
+    pub fn new_any() -> PartiqlType {
+        PartiqlType {
+            kind: TypeKind::Any,
+        }
+    }
+
     pub fn new_struct(s: StructType) -> PartiqlType {
         PartiqlType {
             kind: TypeKind::Struct(s),
@@ -183,7 +197,7 @@ impl PartiqlType {
         }
     }
 
-    pub fn union_of(types: HashSet<PartiqlType>) -> PartiqlType {
+    pub fn union_of(types: BTreeSet<PartiqlType>) -> PartiqlType {
         PartiqlType {
             kind: TypeKind::AnyOf(AnyOf::new(types)),
         }
@@ -201,31 +215,100 @@ impl PartiqlType {
     pub fn kind(&self) -> &TypeKind {
         &self.kind
     }
-}
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct AnyOf {
-    types: HashSet<PartiqlType>,
-}
+    pub fn is_struct(&self) -> bool {
+        matches!(
+            *self,
+            PartiqlType {
+                kind: TypeKind::Struct(_)
+            }
+        )
+    }
 
-impl AnyOf {
-    pub fn new(types: HashSet<PartiqlType>) -> Self {
-        AnyOf { types }
+    pub fn is_collection(&self) -> bool {
+        matches!(
+            *self,
+            PartiqlType {
+                kind: TypeKind::Bag(_)
+            }
+        ) || matches!(
+            *self,
+            PartiqlType {
+                kind: TypeKind::Array(_)
+            }
+        )
     }
 }
 
-#[derive(Debug, Clone)]
+pub trait Schema {
+    fn as_relation(&self) -> Vec<Attr>;
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct Attr {
+    name: String,
+    ty: PartiqlType,
+}
+
+impl Attr {
+    pub fn new(name: &str, ty: &PartiqlType) -> Self {
+        Attr {
+            name: name.to_string(),
+            ty: ty.clone(),
+        }
+    }
+}
+
+#[derive(Hash, Eq, PartialEq, Debug, Clone)]
+#[allow(dead_code)]
+pub struct AnyOf {
+    types: BTreeSet<PartiqlType>,
+}
+
+impl AnyOf {
+    pub fn new(types: BTreeSet<PartiqlType>) -> Self {
+        AnyOf { types }
+    }
+
+    pub fn types(&self) -> &BTreeSet<PartiqlType> {
+        &self.types
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct StructType {
     constraints: Vec<StructConstraint>,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct StructField {
-    name: String,
-    value: PartiqlType,
+impl StructType {
+    pub fn new(constraints: Vec<StructConstraint>) -> Self {
+        StructType { constraints }
+    }
+
+    pub fn new_any() -> Self {
+        StructType {
+            constraints: vec![],
+        }
+    }
+
+    pub fn fields(&self) -> Vec<StructField> {
+        self.constraints
+            .iter()
+            .flat_map(|c| {
+                if let StructConstraint::Fields(fields) = c.clone() {
+                    fields
+                } else {
+                    vec![]
+                }
+            })
+            .collect()
+    }
+
+    pub fn is_partial(&self) -> bool {
+        self.constraints.is_empty() || self.constraints.contains(&StructConstraint::Open(false))
+    }
 }
 
 impl<T> From<(String, T)> for StructField
@@ -235,32 +318,58 @@ where
     fn from(pair: (String, T)) -> Self {
         StructField {
             name: pair.0,
-            value: pair.1.into(),
+            ty: pair.1.into(),
         }
     }
 }
 
-impl StructType {
-    pub fn new_any() -> Self {
-        StructType {
-            constraints: vec![],
-        }
-    }
-
-    pub fn new(constraints: Vec<StructConstraint>) -> Self {
-        StructType { constraints }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
     DuplicateAttrs(bool),
-    Fields(StructField),
+    Fields(Vec<StructField>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[allow(dead_code)]
+pub struct StructField {
+    name: String,
+    ty: PartiqlType,
+}
+
+impl StructField {
+    pub fn new(name: &str, ty: PartiqlType) -> Self {
+        StructField {
+            name: name.to_string(),
+            ty,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn ty(&self) -> &PartiqlType {
+        &self.ty
+    }
+}
+
+impl From<(&str, PartiqlType)> for StructField {
+    fn from(value: (&str, PartiqlType)) -> Self {
+        StructField {
+            name: value.0.to_string(),
+            ty: value.1,
+        }
+    }
+}
+
+trait Collection {}
+
+impl Collection for BagType {}
+impl Collection for ArrayType {}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlType>,
@@ -280,9 +389,17 @@ impl BagType {
             constraints: vec![CollectionConstraint::Ordered(false)],
         }
     }
+
+    pub fn element_type(&self) -> &PartiqlType {
+        &self.element_type
+    }
+
+    pub fn constraints(&self) -> &Vec<CollectionConstraint> {
+        &self.constraints
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
@@ -302,10 +419,18 @@ impl ArrayType {
             constraints: vec![CollectionConstraint::Ordered(true)],
         }
     }
+
+    pub fn element_type(&self) -> &PartiqlType {
+        &self.element_type
+    }
+
+    pub fn constraints(&self) -> &Vec<CollectionConstraint> {
+        &self.constraints
+    }
 }
 
-#[derive(Debug, Clone)]
-enum CollectionConstraint {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum CollectionConstraint {
     Ordered(bool),
 }
 

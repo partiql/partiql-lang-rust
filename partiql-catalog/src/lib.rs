@@ -134,7 +134,18 @@ pub struct TypeEntry {
     ty: PartiqlType,
 }
 
+impl TypeEntry {
+    pub fn id(&self) -> &ObjectId {
+        &self.id
+    }
+
+    pub fn ty(&self) -> &PartiqlType {
+        &self.ty
+    }
+}
+
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,
     function: &'a FunctionEntryFunction,

@@ -9,6 +9,7 @@
 //! Plan graph nodes are called _operators_ and edges are called _flows_ re-instating the fact that
 //! the plan captures data flows for a given PartiQL statement.
 //!
+use indexmap::IndexMap;
 /// # Examples
 /// ```
 /// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr};
@@ -54,6 +55,8 @@ use std::fmt::{Debug, Display, Formatter};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+pub type PlanMap<T> = IndexMap<OpId, T>;
 
 /// Represents a PartiQL logical plan.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
