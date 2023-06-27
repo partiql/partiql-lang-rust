@@ -307,7 +307,11 @@ impl StructType {
     }
 
     pub fn is_partial(&self) -> bool {
-        self.constraints.is_empty() || self.constraints.contains(&StructConstraint::Open(false))
+        !self.is_closed()
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.constraints.contains(&StructConstraint::Open(false))
     }
 }
 
