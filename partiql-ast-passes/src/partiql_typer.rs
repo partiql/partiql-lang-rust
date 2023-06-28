@@ -221,8 +221,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use partiql_ast::ast;
-    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
-    use partiql_types::{PartiqlType, StructConstraint, StructField, TypeKind};
+    use partiql_catalog::PartiqlCatalog;
+    use partiql_types::{PartiqlType, TypeKind};
 
     #[test]
     fn simple_test() {
@@ -263,7 +263,7 @@ mod tests {
 
         let typer = AstPartiqlTyper::new(catalog);
         if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-            typer.type_nodes(&q)
+            typer.type_nodes(q)
         } else {
             panic!("Typing statement other than `Query` are unsupported")
         }

@@ -89,7 +89,6 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
         }
         (Ok(ast), true) => {
             let ast = Box::new(ast::Expr::Query(ast.node.query));
-
             Ok(AstData {
                 ast,
                 locations,
@@ -613,12 +612,34 @@ mod tests {
 
         #[test]
         fn complex_set() {
-            let query = r#"
-                (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
-            OUTER UNION ALL
-                (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
-            ORDER BY c3 LIMIT d3 OFFSET e3"#;
-            parse_null_id!(query);
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER UNION ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER INTERSECT ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER EXCEPT ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(
+                       (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                       UNION DISTINCT
+                       (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   )
+                   OUTER UNION ALL
+                   (SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3)
+                   ORDER BY c4 LIMIT d4 OFFSET e4"#
+            );
         }
     }
 

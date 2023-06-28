@@ -9,7 +9,7 @@ use partiql_ast::ast;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_expr, strip_query, strip_queryset, CallSite, Attrs, Synth};
+use crate::parse::parse_util::{strip_expr, strip_query, strip_query_set, CallSite, Attrs, Synth};
 use crate::parse::parser_state::{ParserState, IdGenerator};
 
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
@@ -104,7 +104,7 @@ WithCycleClause : () = {
 QuerySet: ast::AstNode<ast::QuerySet> = {
     <lo:@L> <lhs:Query> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
         let lhs = strip_query(lhs);
-        let rhs = strip_queryset(rhs, state);
+        let rhs = strip_query_set(rhs, state, lo, hi);
         let set_expr = state.node(ast::SetExpr {
              setop,
              setq,
