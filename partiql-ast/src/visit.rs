@@ -207,6 +207,12 @@ pub trait Visitor<'ast> {
     fn exit_on_conflict(&mut self, _on_conflict: &'ast ast::OnConflict) -> Traverse {
         Traverse::Continue
     }
+    fn enter_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        Traverse::Continue
+    }
     fn enter_query(&mut self, _query: &'ast ast::Query) -> Traverse {
         Traverse::Continue
     }

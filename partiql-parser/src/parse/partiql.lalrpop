@@ -9,20 +9,28 @@ use partiql_ast::ast;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_query, CallSite, Attrs, Synth};
+use crate::parse::parse_util::{strip_expr, strip_query, strip_query_set, CallSite, Attrs, Synth};
 use crate::parse::parser_state::{ParserState, IdGenerator};
 
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
 
 
-pub(crate) Query: Box<ast::Expr> = {
+pub(crate) TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
     <lo:@L>
     <with:WithClause?>
+    <query:Query>
+    <hi:@R> => {
+        state.node(ast::TopLevelQuery { with, query }, lo..hi)
+    }
+}
+
+Query: ast::AstNode<ast::Query> = {
+    <lo:@L>
     <set:QuerySet>
     <order_by:OrderByClause?>
     <limit_offset:LimitOffsetClause>
     <hi:@R> => {
-        Box::new(ast::Expr::Query( state.node(ast::Query { with, set, order_by, limit_offset }, lo..hi) ) )
+        state.node(ast::Query { set, order_by, limit_offset }, lo..hi)
     }
 }
 
@@ -94,7 +102,9 @@ WithCycleClause : () = {
 //    - all set operations are left-associative and are thus expressed as left-self-recursive rules
 
 QuerySet: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:QuerySet> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+    <lo:@L> <lhs:Query> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+        let lhs = strip_query(lhs);
+        let rhs = strip_query_set(rhs, state, lo, hi);
         let set_expr = state.node(ast::SetExpr {
              setop,
              setq,
@@ -133,7 +143,7 @@ SetQuantifier: ast::SetQuantifier = {
 SingleQuery: ast::AstNode<ast::QuerySet> = {
     <lo:@L> <expr:ExprQuery> <hi:@R> => {
         match *expr {
-           ast::Expr::Query(ast::AstNode{ node: ast::Query{with: None, set, order_by:None, limit_offset:None} , .. }) => set,
+           ast::Expr::Query(ast::AstNode{ node: ast::Query{set, order_by:None, limit_offset:None} , .. }) => set,
            _ => state.node(ast::QuerySet::Expr( expr ), lo..hi),
         }
     },
@@ -907,7 +917,7 @@ ExprTerm: Synth<ast::Expr> = {
 }
 
 SubQuery: ast::Expr = {
-    "(" <q:Query> ")" => *strip_query(q),
+    "(" <q:Query> ")" => *strip_expr(q),
 }
 
 SubQueryAst: ast::AstNode<ast::Expr> = {
@@ -1050,7 +1060,7 @@ FunctionCallArgs: Vec<ast::AstNode<ast::CallArg>> = {
     // Special case subquery when it is the only sub-expression of a function call (e.g., `SELECT AVG(SELECT VALUE price FROM g AS v))... `)
     <lo:@L> <subq:SfwQuery> <hi:@R> => {
         let qset = state.node(ast::QuerySet::Select(Box::new(subq)), lo..hi);
-        let query = state.node(ast::Query{ with: None, set: qset, order_by: None, limit_offset:None }, lo..hi);
+        let query = state.node(ast::Query{ set: qset, order_by: None, limit_offset:None }, lo..hi);
         vec![state.node(ast::CallArg::Positional(Box::new(ast::Expr::Query(query))), lo..hi)]
     },
 }
