@@ -236,8 +236,14 @@ pub enum ConflictAction {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Query {
+pub struct TopLevelQuery {
     pub with: Option<AstNode<WithClause>>,
+    pub query: AstNode<Query>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Query {
     pub set: AstNode<QuerySet>,
     pub order_by: Option<Box<AstNode<OrderByExpr>>>,
     pub limit_offset: Option<Box<AstNode<LimitOffsetClause>>>,
@@ -278,8 +284,8 @@ pub struct SetExpr {
     pub setop: SetOperator,
     #[visit(skip)]
     pub setq: SetQuantifier,
-    pub lhs: Box<AstNode<QuerySet>>,
-    pub rhs: Box<AstNode<QuerySet>>,
+    pub lhs: Box<AstNode<Query>>,
+    pub rhs: Box<AstNode<Query>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

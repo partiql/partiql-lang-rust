@@ -33,7 +33,7 @@ mod grammar {
 
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
-type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
+type LalrpopResult<'input> = Result<ast::AstNode<ast::TopLevelQuery>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
@@ -65,7 +65,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
     let lexer = CommentSkippingLexer::new(lexer);
 
-    let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
+    let result: LalrpopResult = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
 
     let ParserState {
         locations, errors, ..
@@ -87,11 +87,15 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
             errors.push(ParseError::from(e));
             Err(ErrorData { errors, offsets })
         }
-        (Ok(ast), true) => Ok(AstData {
-            ast,
-            locations,
-            offsets,
-        }),
+        (Ok(ast), true) => {
+            let ast = Box::new(ast::Expr::Query(ast.node.query));
+
+            Ok(AstData {
+                ast,
+                locations,
+                offsets,
+            })
+        }
     }
 }
 
@@ -605,6 +609,16 @@ mod tests {
             );
             assert_ne!(l, r2);
             assert_ne!(r, r2);
+        }
+
+        #[test]
+        fn complex_set() {
+            let query = r#"
+                (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+            OUTER UNION ALL
+                (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+            ORDER BY c3 LIMIT d3 OFFSET e3"#;
+            parse_null_id!(query);
         }
     }
 

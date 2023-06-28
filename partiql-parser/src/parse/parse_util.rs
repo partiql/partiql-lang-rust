@@ -1,6 +1,8 @@
 use partiql_ast::ast;
 
+use crate::parse::parser_state::{IdGenerator, ParserState};
 use bitflags::bitflags;
+use partiql_ast::ast::AstNode;
 
 bitflags! {
     /// Set of AST node attributes to use as synthesized attributes.
@@ -61,11 +63,10 @@ pub(crate) enum CallSite {
 #[inline]
 // if this is just a parenthesized expr, lift it out of the query AST, otherwise return input
 //      e.g. `(1+2)` should be a ExprKind::Expr, not wrapped deep in a ExprKind::Query
-pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
+pub(crate) fn strip_expr_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
     if let ast::Expr::Query(ast::AstNode {
         node:
             ast::Query {
-                with: None,
                 set:
                     ast::AstNode {
                         node: ast::QuerySet::Expr(e),
@@ -80,5 +81,115 @@ pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
         e
     } else {
         q
+    }
+}
+
+#[inline]
+// todo docs
+pub(crate) fn strip_queryset<Id>(
+    qs: ast::AstNode<ast::QuerySet>,
+    state: &mut ParserState<Id>,
+) -> ast::AstNode<ast::Query>
+where
+    Id: IdGenerator,
+{
+    if let ast::AstNode {
+        node: ast::QuerySet::Expr(q),
+        id: id,
+    } = qs
+    {
+        if let ast::Expr::Query(
+            qnode @ ast::AstNode {
+                node: ast::Query { .. },
+                ..
+            },
+        ) = *q
+        {
+            // preserve query including limit/offset & order by if present
+            qnode
+        } else {
+            // todo handle unwrap
+            let range = state.locations.get(&qs.id).unwrap();
+            let (lo, hi) = (range.start.0, range.end.0);
+            let query = ast::Query {
+                set: ast::AstNode {
+                    id: id,
+                    node: ast::QuerySet::Expr(q),
+                },
+                order_by: None,
+                limit_offset: None,
+            };
+            state.node(query, lo..hi)
+        }
+    } else {
+        // todo handle unwrap
+        let range = state.locations.get(&qs.id).unwrap();
+        let (lo, hi) = (range.start.0, range.end.0);
+        let query = ast::Query {
+            set: qs,
+            order_by: None,
+            limit_offset: None,
+        };
+        state.node(query, lo..hi)
+    }
+}
+
+#[inline]
+// todo docs
+pub(crate) fn strip_query(q: AstNode<ast::Query>) -> AstNode<ast::Query> {
+    let outer_id = q.id;
+    if let ast::AstNode {
+        node: ast::QuerySet::Expr(e),
+        id,
+    } = q.node.set
+    {
+        if let ast::Expr::Query(
+            qnode @ ast::AstNode {
+                node: ast::Query { .. },
+                ..
+            },
+        ) = *e
+        {
+            qnode
+        } else {
+            let set = AstNode {
+                id: id,
+                node: ast::QuerySet::Expr(e),
+            };
+            ast::AstNode {
+                id: outer_id,
+                node: ast::Query {
+                    set,
+                    order_by: None,
+                    limit_offset: None,
+                },
+            }
+        }
+    } else {
+        q
+    }
+}
+
+#[inline]
+// if this is just a parenthesized expr, lift it out of the query AST, otherwise return input
+//      e.g. `(1+2)` should be a ExprKind::Expr, not wrapped deep in a ExprKind::Query
+pub(crate) fn strip_expr(q: AstNode<ast::Query>) -> Box<ast::Expr> {
+    if let ast::AstNode {
+        node:
+            ast::Query {
+                set:
+                    ast::AstNode {
+                        node: ast::QuerySet::Expr(e),
+                        ..
+                    },
+                order_by: None,
+                limit_offset: None,
+            },
+        ..
+    } = q
+    {
+        e
+    } else {
+        Box::new(ast::Expr::Query(q))
     }
 }
