@@ -1,6 +1,6 @@
 use crate::error::{AstTransformError, AstTransformationError};
 use partiql_ast::ast::{
-    AstNode, AstTypeMap, Bag, Expr, List, Lit, NodeId, Query, QuerySet, Struct,
+    AstNode, AstTypeMap, Bag, Expr, List, Lit, NodeId, Query, QuerySet, Struct, TopLevelQuery,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::Catalog;
@@ -29,7 +29,7 @@ impl<'c> AstPartiqlTyper<'c> {
 
     pub fn type_nodes(
         mut self,
-        query: &AstNode<Query>,
+        query: &AstNode<TopLevelQuery>,
     ) -> Result<AstTypeMap<PartiqlType>, AstTransformationError> {
         query.visit(&mut self);
         if self.errors.is_empty() {
@@ -220,7 +220,6 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use partiql_ast::ast;
     use partiql_catalog::PartiqlCatalog;
     use partiql_types::{PartiqlType, TypeKind};
 
@@ -262,10 +261,7 @@ mod tests {
             .expect("Expect successful parse");
 
         let typer = AstPartiqlTyper::new(catalog);
-        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-            typer.type_nodes(q)
-        } else {
-            panic!("Typing statement other than `Query` are unsupported")
-        }
+        let q = &parsed.ast;
+        typer.type_nodes(q)
     }
 }

@@ -95,8 +95,6 @@ struct QueryClauses {
     where_clause: Option<logical::OpId>,
     group_by_clause: Option<logical::OpId>,
     having_clause: Option<logical::OpId>,
-    order_by_clause: Option<logical::OpId>,
-    limit_offset_clause: Option<logical::OpId>,
     select_clause: Option<logical::OpId>,
     distinct: Option<logical::OpId>,
 }
@@ -109,8 +107,6 @@ impl QueryClauses {
             self.where_clause,
             self.group_by_clause,
             self.having_clause,
-            self.order_by_clause,
-            self.limit_offset_clause,
             self.select_clause,
             self.distinct,
         ]
@@ -247,7 +243,7 @@ impl<'a> AstToLogical<'a> {
 
     pub fn lower_query(
         mut self,
-        query: &ast::AstNode<ast::Query>,
+        query: &ast::AstNode<ast::TopLevelQuery>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         query.visit(&mut self);
         if !self.errors.is_empty() {
@@ -580,19 +576,34 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         not_yet_implemented_fault!(self, "OnConflict".to_string());
     }
 
+    fn enter_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        self.enter_benv();
+        Traverse::Continue
+    }
+    fn exit_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        let mut benv = self.exit_benv();
+        eq_or_fault!(self, benv.len(), 1, "Expect benv.len() == 1");
+        let out = benv.pop().unwrap();
+        let sink_id = self.plan.add_operator(BindingsOp::Sink);
+        self.plan.add_flow(out, sink_id);
+        Traverse::Continue
+    }
+
     fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
         self.enter_benv();
         Traverse::Continue
     }
 
     fn exit_query(&mut self, _query: &'ast Query) -> Traverse {
-        let mut benv = self.exit_benv();
-        eq_or_fault!(self, benv.len(), 1, "Expect benv.len() == 1");
+        let benv = self.exit_benv();
+        // todo: assert benv is at least one element
+        let mut out = *benv.first().unwrap(); // todo handle unwrap()
+        benv.into_iter().skip(1).for_each(|op| {
+            self.plan.add_flow(out, op);
+            out = op;
+        });
 
-        let out = benv.pop().unwrap();
-
-        let sink_id = self.plan.add_operator(BindingsOp::Sink);
-        self.plan.add_flow(out, sink_id);
+        self.push_bexpr(out);
         Traverse::Continue
     }
 
@@ -1569,7 +1580,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let specs = self.exit_sort();
         let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
         let id = self.plan.add_operator(order_by);
-        self.current_clauses_mut().order_by_clause.replace(id);
+        self.push_bexpr(id);
         Traverse::Continue
     }
 
@@ -1638,7 +1649,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
         let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
         let id = self.plan.add_operator(limit_offset);
-        self.current_clauses_mut().limit_offset_clause.replace(id);
+        self.push_bexpr(id);
         Traverse::Continue
     }
 

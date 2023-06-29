@@ -39,7 +39,7 @@ type LalrpopErrorRecovery<'input> =
 
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
-    pub ast: Box<ast::Expr>,
+    pub ast: ast::AstNode<ast::TopLevelQuery>,
     pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
@@ -87,14 +87,11 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
             errors.push(ParseError::from(e));
             Err(ErrorData { errors, offsets })
         }
-        (Ok(ast), true) => {
-            let ast = Box::new(ast::Expr::Query(ast.node.query));
-            Ok(AstData {
-                ast,
-                locations,
-                offsets,
-            })
-        }
+        (Ok(ast), true) => Ok(AstData {
+            ast,
+            locations,
+            offsets,
+        }),
     }
 }
 
@@ -362,18 +359,26 @@ mod tests {
         fn test_pathexpr_struct() {
             let res = parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
 
-            if let ast::Expr::Query(ast::AstNode {
+            if let ast::AstNode {
                 node:
-                    ast::Query {
-                        set:
+                    ast::TopLevelQuery {
+                        query:
                             ast::AstNode {
-                                node: ast::QuerySet::Expr(ref e),
+                                node:
+                                    ast::Query {
+                                        set:
+                                            ast::AstNode {
+                                                node: ast::QuerySet::Expr(ref e),
+                                                ..
+                                            },
+                                        ..
+                                    },
                                 ..
                             },
                         ..
                     },
                 ..
-            }) = *res
+            } = res
             {
                 if let ast::Expr::Path(p) = &**e {
                     assert_eq!(9, p.node.steps.len())

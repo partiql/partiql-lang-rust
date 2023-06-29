@@ -79,7 +79,7 @@ impl Parser {
 pub struct Parsed<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,
-    pub ast: Box<ast::Expr>,
+    pub ast: ast::AstNode<ast::TopLevelQuery>,
     pub locations: LocationMap,
 }
 
