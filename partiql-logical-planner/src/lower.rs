@@ -95,6 +95,8 @@ struct QueryClauses {
     where_clause: Option<logical::OpId>,
     group_by_clause: Option<logical::OpId>,
     having_clause: Option<logical::OpId>,
+    order_by_clause: Option<logical::OpId>,
+    limit_offset_clause: Option<logical::OpId>,
     select_clause: Option<logical::OpId>,
     distinct: Option<logical::OpId>,
 }
@@ -107,6 +109,8 @@ impl QueryClauses {
             self.where_clause,
             self.group_by_clause,
             self.having_clause,
+            self.order_by_clause,
+            self.limit_offset_clause,
             self.select_clause,
             self.distinct,
         ]
@@ -591,19 +595,36 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
     fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
         self.enter_benv();
+        if let QuerySet::Select(_) = _query.set.node {
+            self.enter_q();
+        }
         Traverse::Continue
     }
 
     fn exit_query(&mut self, _query: &'ast Query) -> Traverse {
         let benv = self.exit_benv();
         // todo: assert benv is at least one element
-        let mut out = *benv.first().unwrap(); // todo handle unwrap()
-        benv.into_iter().skip(1).for_each(|op| {
-            self.plan.add_flow(out, op);
-            out = op;
-        });
-
-        self.push_bexpr(out);
+        match _query.set.node {
+            QuerySet::Select(_) => {
+                let clauses = self.exit_q();
+                let mut clauses = clauses.evaluation_order().into_iter();
+                if let Some(mut src_id) = clauses.next() {
+                    for dst_id in clauses {
+                        self.plan.add_flow(src_id, dst_id);
+                        src_id = dst_id;
+                    }
+                    self.push_bexpr(src_id);
+                }
+            }
+            _ => {
+                let mut out = *benv.first().unwrap(); // todo handle unwrap()
+                benv.into_iter().skip(1).for_each(|op| {
+                    self.plan.add_flow(out, op);
+                    out = op;
+                });
+                self.push_bexpr(out);
+            }
+        }
         Traverse::Continue
     }
 
@@ -613,9 +634,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
         match _query_set {
             QuerySet::BagOp(_) => {}
-            QuerySet::Select(_) => {
-                self.enter_q();
-            }
+            QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {}
             QuerySet::Values(_) => {
                 not_yet_implemented_fault!(self, "QuerySet::Values".to_string());
@@ -658,17 +677,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 self.plan.add_flow_with_branch_num(rid, id, 1);
                 self.push_bexpr(id);
             }
-            QuerySet::Select(_) => {
-                let clauses = self.exit_q();
-                let mut clauses = clauses.evaluation_order().into_iter();
-                if let Some(mut src_id) = clauses.next() {
-                    for dst_id in clauses {
-                        self.plan.add_flow(src_id, dst_id);
-                        src_id = dst_id;
-                    }
-                    self.push_bexpr(src_id);
-                }
-            }
+            QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
                 let expr = env.into_iter().next().unwrap();
@@ -1580,7 +1589,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let specs = self.exit_sort();
         let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
         let id = self.plan.add_operator(order_by);
-        self.push_bexpr(id);
+        if matches!(self.current_ctx(), Some(QueryContext::Query)) {
+            self.current_clauses_mut().order_by_clause.replace(id);
+        } else {
+            self.push_bexpr(id);
+        }
         Traverse::Continue
     }
 
@@ -1649,7 +1662,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
         let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
         let id = self.plan.add_operator(limit_offset);
-        self.push_bexpr(id);
+        if matches!(self.current_ctx(), Some(QueryContext::Query)) {
+            self.current_clauses_mut().limit_offset_clause.replace(id);
+        } else {
+            self.push_bexpr(id);
+        }
         Traverse::Continue
     }
 
