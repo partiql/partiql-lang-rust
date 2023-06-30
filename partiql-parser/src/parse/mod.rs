@@ -600,7 +600,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore]
         fn limit() {
             let l = parse_null_id!(
                 r#"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"#

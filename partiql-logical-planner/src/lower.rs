@@ -593,18 +593,17 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
+    fn enter_query(&mut self, query: &'ast Query) -> Traverse {
         self.enter_benv();
-        if let QuerySet::Select(_) = _query.set.node {
+        if let QuerySet::Select(_) = query.set.node {
             self.enter_q();
         }
         Traverse::Continue
     }
 
-    fn exit_query(&mut self, _query: &'ast Query) -> Traverse {
+    fn exit_query(&mut self, query: &'ast Query) -> Traverse {
         let benv = self.exit_benv();
-        // todo: assert benv is at least one element
-        match _query.set.node {
+        match query.set.node {
             QuerySet::Select(_) => {
                 let clauses = self.exit_q();
                 let mut clauses = clauses.evaluation_order().into_iter();
@@ -617,7 +616,12 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 }
             }
             _ => {
-                let mut out = *benv.first().unwrap(); // todo handle unwrap()
+                true_or_fault!(
+                    self,
+                    (1..=3).contains(&benv.len()),
+                    "benv.len() is not between 1 and 3"
+                );
+                let mut out = *benv.first().unwrap();
                 benv.into_iter().skip(1).for_each(|op| {
                     self.plan.add_flow(out, op);
                     out = op;
