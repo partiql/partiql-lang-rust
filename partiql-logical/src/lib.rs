@@ -457,6 +457,10 @@ pub enum PathComponent {
     Index(i64),
     KeyExpr(Box<ValueExpr>),
     IndexExpr(Box<ValueExpr>),
+    /// E.g. `[*]` in `foo[*].a[*].b`
+    PathWildcard,
+    /// E.g. `.*` in `bar.*.c.*.d`
+    PathUnpivot,
 }
 
 /// Represents a PartiQL tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.

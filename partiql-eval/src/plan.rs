@@ -340,6 +340,8 @@ impl<'c> EvaluatorPlanner<'c> {
                         PathComponent::IndexExpr(i) => {
                             eval::expr::EvalPathComponent::IndexExpr(self.plan_values(i))
                         }
+                        PathComponent::PathWildcard => eval::expr::EvalPathComponent::PathWildcard,
+                        PathComponent::PathUnpivot => eval::expr::EvalPathComponent::PathUnpivot,
                     })
                     .collect(),
             }),

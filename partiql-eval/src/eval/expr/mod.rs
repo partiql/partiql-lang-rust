@@ -16,6 +16,7 @@ use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
+use std::iter::Peekable;
 
 pub(crate) mod pattern_match;
 
@@ -107,54 +108,126 @@ pub(crate) enum EvalPathComponent {
     KeyExpr(Box<dyn EvalExpr>),
     Index(i64),
     IndexExpr(Box<dyn EvalExpr>),
+    PathWildcard,
+    PathUnpivot,
 }
 
 impl EvalExpr for EvalPath {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         #[inline]
-        fn path_into<'a>(
-            value: &'a Value,
-            path: &EvalPathComponent,
+        fn path<'a, I>(
+            v: Value,
+            mut paths: Peekable<I>,
             bindings: &'a Tuple,
             ctx: &dyn EvalContext,
-        ) -> Option<&'a Value> {
-            match path {
-                EvalPathComponent::Key(k) => match value {
-                    Value::Tuple(tuple) => tuple.get(k),
-                    _ => None,
-                },
-                EvalPathComponent::Index(idx) => match value {
-                    Value::List(list) if (*idx as usize) < list.len() => list.get(*idx),
-                    _ => None,
-                },
-                EvalPathComponent::KeyExpr(ke) => {
-                    let key = ke.evaluate(bindings, ctx);
-                    match (value, key.as_ref()) {
-                        (Value::Tuple(tuple), Value::String(key)) => {
-                            tuple.get(&BindingsName::CaseInsensitive(key.as_ref().clone()))
+        ) -> Value
+        where
+            I: Iterator<Item = &'a EvalPathComponent>,
+            I: Clone,
+        {
+            let mut value = v;
+            while let Some(p) = paths.next() {
+                match p {
+                    EvalPathComponent::Key(k) => {
+                        value = match value {
+                            Value::Tuple(tuple) => tuple.get(k).unwrap_or_else(|| &Missing).clone(),
+                            _ => Missing,
                         }
-                        _ => None,
                     }
-                }
-                EvalPathComponent::IndexExpr(ie) => {
-                    if let Value::Integer(idx) = ie.evaluate(bindings, ctx).as_ref() {
-                        match value {
-                            Value::List(list) if (*idx as usize) < list.len() => list.get(*idx),
-                            _ => None,
+                    EvalPathComponent::Index(idx) => {
+                        value = match &value {
+                            Value::List(list) if (*idx as usize) < list.len() => {
+                                list.get(*idx).unwrap_or_else(|| &Missing).clone()
+                            }
+                            _ => Missing,
                         }
-                    } else {
-                        None
+                    }
+                    EvalPathComponent::KeyExpr(ke) => {
+                        let key = ke.evaluate(bindings, ctx);
+                        value = match (value, key.as_ref()) {
+                            (Value::Tuple(tuple), Value::String(key)) => tuple
+                                .get(&BindingsName::CaseInsensitive(key.as_ref().clone()))
+                                .unwrap_or_else(|| &Missing)
+                                .clone(),
+                            _ => Missing,
+                        }
+                    }
+                    EvalPathComponent::IndexExpr(ie) => {
+                        value = if let Value::Integer(idx) = ie.evaluate(bindings, ctx).as_ref() {
+                            match &value {
+                                Value::List(list) if (*idx as usize) < list.len() => {
+                                    list.get(*idx).unwrap_or_else(|| &Missing).clone()
+                                }
+                                _ => Missing,
+                            }
+                        } else {
+                            Missing
+                        }
+                    }
+                    EvalPathComponent::PathWildcard => {
+                        return match paths.peek().is_some() {
+                            true => {
+                                // iterator is not empty
+                                let other_wildcards_present = paths
+                                    .clone()
+                                    .any(|_p| matches!(EvalPathComponent::PathWildcard, _p));
+                                if other_wildcards_present {
+                                    // other path wildcards so flatten
+                                    let values = value
+                                        .into_iter()
+                                        .flat_map(|v| path(v, paths.clone(), bindings, ctx))
+                                        .collect::<Vec<Value>>();
+                                    Value::from(Bag::from(values))
+                                } else {
+                                    // no other path wildcards
+                                    let values = value
+                                        .into_iter()
+                                        .map(|v| path(v, paths.clone(), bindings, ctx))
+                                        .collect::<Vec<Value>>();
+                                    Value::from(Bag::from(values))
+                                }
+                            }
+                            false => {
+                                // iterator is empty; path wildcard is last component
+                                Value::from(Bag::from_iter(value.into_iter()))
+                            }
+                        };
+                    }
+                    EvalPathComponent::PathUnpivot => {
+                        return match paths.peek().is_some() {
+                            true => {
+                                // iterator is not empty
+                                let values = value
+                                    .coerce_to_tuple()
+                                    .into_values()
+                                    .flat_map(|v| path(v, paths.clone(), bindings, ctx))
+                                    .collect::<Vec<Value>>();
+                                Value::from(Bag::from(values))
+                            }
+                            false =>
+                            // iterator is empty; path unpivot is last component
+                            {
+                                match value {
+                                    Value::Tuple(tuple) => {
+                                        let values = tuple.into_values().collect::<Vec<Value>>();
+                                        Value::from(Bag::from(values))
+                                    }
+                                    non_tuple => Value::from(Value::coerce_to_bag(non_tuple)),
+                                }
+                            }
+                        };
                     }
                 }
             }
+            value
         }
-        let value = self.expr.evaluate(bindings, ctx);
-        self.components
-            .iter()
-            .fold(Some(value.as_ref()), |v, path| {
-                v.and_then(|v| path_into(v, path, bindings, ctx))
-            })
-            .map_or_else(|| Cow::Owned(Value::Missing), |v| Cow::Owned(v.clone()))
+        let value = self.expr.evaluate(bindings, ctx).into_owned();
+        Cow::Owned(path(
+            value,
+            self.components.iter().peekable(),
+            bindings,
+            ctx,
+        ))
     }
 }
 

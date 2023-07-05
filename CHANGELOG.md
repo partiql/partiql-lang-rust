@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
+- Adds evaluation of path wildcard (e.g. `foo[*].a[*].b`) and path unpivot expressions (e.g. `bar.*.c.*.d`)
+- Adds AST to logical plan lowering for `IN` expressions
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
