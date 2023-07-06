@@ -841,37 +841,11 @@ ExprPrecedence02: Synth<ast::Expr> = {
 }
 
 PathExpr: ast::Path = {
-    <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l.data), steps },
-    <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
+    <l:ExprPrecedence01> <s:PathSteps> => {
         let step = ast::PathStep::PathWildCard;
         ast::Path {
             root: Box::new(l.data),
-            steps: std::iter::once(step).chain(s.into_iter()).collect()
-        }
-    },
-    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" "." <s:PathSteps> => {
-       let step = ast::PathStep::PathExpr(
-        ast::PathExpr{
-                index: Box::new(*expr),
-            }
-        );
-
-        ast::Path {
-            root: Box::new(l.data),
-            steps: std::iter::once(step).chain(s.into_iter()).collect()
-        }
-    },
-    <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
-        root:Box::new(l.data), steps:vec![ast::PathStep::PathWildCard]
-    },
-    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" => {
-         let step = ast::PathStep::PathExpr(
-             ast::PathExpr{
-                 index: Box::new(*expr),
-             });
-
-        ast::Path {
-            root:Box::new(l.data), steps:vec![step]
+            steps: s
         }
     },
 }
@@ -1111,9 +1085,10 @@ FunctionArgName: ast::SymbolPrimitive = {
 // Examples:
 // a.b
 // a.*
-// a.[*]
 // a[*]
+// a[*][*]
 // a.b.c
+// a[*].b[*].c
 // "a".b
 // "a"."b"
 // { 'a': 1, 'b': 2 }.a
@@ -1137,7 +1112,6 @@ PathSteps: Vec<ast::PathStep> = {
          let mut steps = path;
          steps.push(ast::PathStep::PathUnpivot);
          steps
-         // ast::Path{ root:path.root, steps }
     },
     <lo:@L> <path:PathSteps> "[" <expr:ExprQuery> "]" <hi:@R> => {
         let step = ast::PathStep::PathExpr(
@@ -1149,17 +1123,17 @@ PathSteps: Vec<ast::PathStep> = {
         steps.push(step);
         steps
     },
+    "." <v:PathExprVarRef> => {
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
+    },
     "[" "*" "]" => {
         vec![ast::PathStep::PathWildCard]
     },
-    "[" <expr:ExprQuery> "]" => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
-    },
-    "*" => {
+    "." "*" => {
         vec![ast::PathStep::PathUnpivot]
     },
-    <v:PathExprVarRef> => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
+    "[" <expr:ExprQuery> "]" => {
+        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
     },
 }
 

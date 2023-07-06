@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
 
 ### Fixes
+- Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
 
 ## [0.5.0] - 2023-06-06
 ### Changed
