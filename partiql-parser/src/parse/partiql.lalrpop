@@ -1098,42 +1098,27 @@ FunctionArgName: ast::SymbolPrimitive = {
 //
 // See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathSteps: Vec<ast::PathStep> = {
-    <path:PathSteps> "." <v:PathExprVarRef> => {
-        let mut steps = path;
-        steps.push(ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) }));
-        steps
-    },
-    <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
-        let mut steps = path;
-        steps.push(ast::PathStep::PathWildCard);
-        steps
-    },
-    <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
-         let mut steps = path;
-         steps.push(ast::PathStep::PathUnpivot);
-         steps
-    },
-    <lo:@L> <path:PathSteps> "[" <expr:ExprQuery> "]" <hi:@R> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(*expr),
-            });
-
+    <path:PathSteps> <step:PathStep> => {
         let mut steps = path;
         steps.push(step);
         steps
     },
+    <step:PathStep> => {
+        vec![step]
+    },
+}
+PathStep: ast::PathStep = {
     "." <v:PathExprVarRef> => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
+        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })
     },
     "[" "*" "]" => {
-        vec![ast::PathStep::PathWildCard]
+        ast::PathStep::PathWildCard
     },
     "." "*" => {
-        vec![ast::PathStep::PathUnpivot]
+        ast::PathStep::PathUnpivot
     },
     "[" <expr:ExprQuery> "]" => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
+        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })
     },
 }
 
