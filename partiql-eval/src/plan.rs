@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use partiql_logical as logical;
 
 use partiql_logical::{
-    AggFunc, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind, LogicalPlan,
-    OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier, SortSpecNullOrder,
-    SortSpecOrder, Type, UnaryOp, ValueExpr,
+    AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
+    LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
+    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr,
 };
 
 use crate::error::{ErrorNode, PlanErr, PlanningError};
@@ -283,12 +283,38 @@ impl<'c> EvaluatorPlanner<'c> {
                     input: None,
                 })
             }
-            BindingsOp::SetOp => {
-                self.errors.push(PlanningError::NotYetImplemented(
-                    "BindingsOp::SetOp not yet implemented in evaluator".to_string(),
-                ));
-                Box::new(ErrorNode::new())
-            }
+            BindingsOp::BagOp(logical::BagOp {
+                bag_op: setop,
+                setq,
+            }) => match setop {
+                BagOperator::Union => {
+                    self.errors.push(PlanningError::NotYetImplemented(
+                        "BagOperator::Union not yet implemented in evaluator".to_string(),
+                    ));
+                    Box::new(ErrorNode::new())
+                }
+                BagOperator::Intersect => {
+                    self.errors.push(PlanningError::NotYetImplemented(
+                        "BagOperator::Intersect not yet implemented in evaluator".to_string(),
+                    ));
+                    Box::new(ErrorNode::new())
+                }
+                BagOperator::Except => {
+                    self.errors.push(PlanningError::NotYetImplemented(
+                        "BagOperator::Except not yet implemented in evaluator".to_string(),
+                    ));
+                    Box::new(ErrorNode::new())
+                }
+                BagOperator::OuterUnion => Box::new(eval::evaluable::EvalOuterUnion::new(
+                    plan_set_quantifier(setq),
+                )),
+                BagOperator::OuterIntersect => Box::new(eval::evaluable::EvalOuterIntersect::new(
+                    plan_set_quantifier(setq),
+                )),
+                BagOperator::OuterExcept => Box::new(eval::evaluable::EvalOuterExcept::new(
+                    plan_set_quantifier(setq),
+                )),
+            },
         }
     }
 

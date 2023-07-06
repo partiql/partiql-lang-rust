@@ -204,7 +204,7 @@ pub enum BindingsOp {
     OrderBy(OrderBy),
     LimitOffset(LimitOffset),
     Join(Join),
-    SetOp,
+    BagOp(BagOp),
     Project(Project),
     ProjectAll,
     ProjectValue(ProjectValue),
@@ -295,6 +295,26 @@ pub struct SortSpec {
 pub struct LimitOffset {
     pub limit: Option<ValueExpr>,
     pub offset: Option<ValueExpr>,
+}
+
+/// [`BagOp`] represents a bag operator, e.g. `UNION ALL` in `SELECT a, b FROM foo UNION ALL SELECT c, d FROM bar`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BagOp {
+    pub bag_op: BagOperator,
+    pub setq: SetQuantifier,
+}
+
+/// Represents the supported bag operator types.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BagOperator {
+    Union,
+    Except,
+    Intersect,
+    OuterUnion,
+    OuterExcept,
+    OuterIntersect,
 }
 
 /// ['Join`] represents a join operator, e.g. implicit `CROSS JOIN` specified by comma in `FROM`

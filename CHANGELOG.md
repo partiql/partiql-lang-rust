@@ -11,15 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-values: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
 - *BREAKING:* partiql-ast: changed modeling of `Query` and `SetExpr` nodes to support `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
   - Also affects the `Visitor` trait
+- *BREAKING:* partiql-ast: rename of `SetExpr` to `BagOpExpr` and `SetOp` to `BagOp`
+  - Affects the AST and visitor
 
 ### Added
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
+- Add `OUTER` bag operator (`OUTER UNION`, `OUTER INTERSECT`, `OUTER EXCEPT`) implementation
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
+- partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 
 ## [0.5.0] - 2023-06-06
 ### Changed

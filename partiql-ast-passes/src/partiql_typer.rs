@@ -68,7 +68,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
 
     fn enter_query_set(&mut self, _query_set: &'ast QuerySet) -> Traverse {
         match _query_set {
-            QuerySet::SetOp(_) => {
+            QuerySet::BagOp(_) => {
                 todo!()
             }
             QuerySet::Select(_) => {}

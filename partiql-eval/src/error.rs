@@ -60,7 +60,7 @@ impl Evaluable for ErrorNode {
         panic!("ErrorNode will not be evaluated")
     }
 
-    fn update_input(&mut self, _input: Value, _branch_num: u8) {
+    fn update_input(&mut self, _input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         panic!("ErrorNode will not be evaluated")
     }
 }

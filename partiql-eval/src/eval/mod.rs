@@ -113,7 +113,7 @@ impl EvalPlan {
 
                     let res =
                         res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
-                    self.get_node(dst_id)?.update_input(res, branch_num);
+                    self.get_node(dst_id)?.update_input(res, branch_num, &*ctx);
                 }
             }
         }

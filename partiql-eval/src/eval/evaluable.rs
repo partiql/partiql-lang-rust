@@ -36,7 +36,7 @@ pub enum EvalType {
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value;
-    fn update_input(&mut self, input: Value, branch_num: u8);
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext);
     fn get_vars(&self) -> Option<&[String]> {
         None
     }
@@ -121,7 +121,7 @@ impl Evaluable for EvalScan {
         Value::Bag(Box::new(value))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 
@@ -181,7 +181,7 @@ impl Evaluable for EvalJoin {
 
         let mut output_bag = bag![];
         let input_env = self.input.take().unwrap_or_else(|| Value::from(tuple![]));
-        self.left.update_input(input_env.clone(), 0);
+        self.left.update_input(input_env.clone(), 0, ctx);
         let lhs_values = self.left.evaluate(ctx);
         let left_bindings = match lhs_values {
             Value::Bag(t) => *t,
@@ -203,7 +203,7 @@ impl Evaluable for EvalJoin {
                         .as_tuple_ref()
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
-                    self.right.update_input(Value::from(env_b_l), 0);
+                    self.right.update_input(Value::from(env_b_l), 0, ctx);
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
@@ -247,7 +247,7 @@ impl Evaluable for EvalJoin {
                         .as_tuple_ref()
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
-                    self.right.update_input(Value::from(env_b_l), 0);
+                    self.right.update_input(Value::from(env_b_l), 0, ctx);
                     let rhs_values = self.right.evaluate(ctx);
 
                     let right_bindings = match rhs_values {
@@ -308,7 +308,7 @@ impl Evaluable for EvalJoin {
         Value::Bag(Box::new(output_bag))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 
@@ -776,7 +776,7 @@ impl Evaluable for EvalGroupBy {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -821,7 +821,7 @@ impl Evaluable for EvalPivot {
         Value::from(tuple)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -879,7 +879,7 @@ impl Evaluable for EvalUnpivot {
         Value::from(unpivoted)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 
@@ -926,7 +926,7 @@ impl Evaluable for EvalFilter {
         Value::from(filtered.collect::<Bag>())
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -971,7 +971,7 @@ impl Evaluable for EvalHaving {
         Value::from(filtered.collect::<Bag>())
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1049,7 +1049,7 @@ impl Evaluable for EvalOrderBy {
         Value::from(List::from(values))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1111,7 +1111,7 @@ impl Evaluable for EvalLimitOffset {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1148,7 +1148,7 @@ impl Evaluable for EvalSelectValue {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1195,7 +1195,7 @@ impl Evaluable for EvalSelect {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1232,7 +1232,7 @@ impl Evaluable for EvalSelectAll {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1259,7 +1259,7 @@ impl Evaluable for EvalExprQuery {
         self.expr.evaluate(&input_value, ctx).into_owned()
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1288,7 +1288,7 @@ impl Evaluable for EvalDistinct {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1304,7 +1304,7 @@ impl Evaluable for EvalSink {
         self.input.take().unwrap_or_else(|| Missing)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
     }
 }
@@ -1339,8 +1339,203 @@ impl EvalExpr for EvalSubQueryExpr {
     }
 }
 
+///
+/// Coercion function F for bag operators described in RFC-0007
+/// - F(absent_value) -> << >>
+/// - F(scalar_value) -> << scalar_value >> # singleton bag
+/// - F(tuple_value)  -> << tuple_value >>  # singleton bag, see future extensions
+/// - F(array_value)  -> bag_value          # discard ordering
+/// - F(bag_value)    -> bag_value          # identity
+///
+fn coerce_to_bag(v: Value) -> Bag {
+    match v {
+        Null | Missing => bag![],
+        Value::Bag(b) => *b,
+        Value::List(l) => Bag::from(*l),
+        scalar_or_tuple => Bag::from(vec![scalar_or_tuple]),
+    }
+}
+
+/// Represents the `OUTER UNION` bag operator.
+#[derive(Debug, PartialEq)]
+pub(crate) struct EvalOuterUnion {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) l_input: Option<Value>,
+    pub(crate) r_input: Option<Value>,
+}
+
+impl EvalOuterUnion {
+    pub(crate) fn new(setq: SetQuantifier) -> Self {
+        EvalOuterUnion {
+            setq,
+            l_input: None,
+            r_input: None,
+        }
+    }
+}
+
+impl Evaluable for EvalOuterUnion {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
+        let lhs = self.l_input.take().unwrap_or(Missing);
+        let rhs = self.r_input.take().unwrap_or(Missing);
+        match self.setq {
+            SetQuantifier::All => {
+                let mut result = coerce_to_bag(lhs);
+                coerce_to_bag(rhs).into_iter().for_each(|elem| {
+                    result.push(elem);
+                });
+                Value::from(result)
+            }
+            SetQuantifier::Distinct => {
+                let mut result: HashSet<Value> = HashSet::from_iter(coerce_to_bag(lhs).into_iter());
+                coerce_to_bag(rhs).into_iter().for_each(|elem| {
+                    result.insert(elem);
+                });
+                Value::from(Bag::from(result))
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+        match branch_num {
+            0 => self.l_input = Some(input),
+            1 => self.r_input = Some(input),
+            _ => ctx.add_error(EvaluationError::IllegalState(
+                "Invalid branch number".to_string(),
+            )),
+        }
+    }
+}
+
+/// Represents the `OUTER INTERSECT` bag operator.
+#[derive(Debug, PartialEq)]
+pub(crate) struct EvalOuterIntersect {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) l_input: Option<Value>,
+    pub(crate) r_input: Option<Value>,
+}
+
+impl EvalOuterIntersect {
+    pub(crate) fn new(setq: SetQuantifier) -> Self {
+        EvalOuterIntersect {
+            setq,
+            l_input: None,
+            r_input: None,
+        }
+    }
+}
+
+impl Evaluable for EvalOuterIntersect {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
+        let lhs = self.l_input.take().unwrap_or(Missing);
+        let rhs = self.r_input.take().unwrap_or(Missing);
+
+        match self.setq {
+            SetQuantifier::All => {
+                let mut result: Vec<Value> = Vec::new();
+                let mut lhs_multiplicities: HashMap<Value, usize> = HashMap::new();
+                coerce_to_bag(lhs).into_iter().for_each(|elem| {
+                    lhs_multiplicities
+                        .entry(elem)
+                        .and_modify(|m| *m += 1)
+                        .or_insert(1);
+                });
+                coerce_to_bag(rhs).into_iter().for_each(|elem| {
+                    if lhs_multiplicities.contains_key(&elem) {
+                        *lhs_multiplicities.get_mut(&elem).unwrap() += 1;
+                        result.push(elem);
+                    }
+                });
+                Value::from(Bag::from(result))
+            }
+            SetQuantifier::Distinct => {
+                let mut result: HashSet<Value> = HashSet::new();
+                let lhs_set: HashSet<Value> = HashSet::from_iter(coerce_to_bag(lhs).into_iter());
+                coerce_to_bag(rhs).into_iter().for_each(|elem| {
+                    if lhs_set.contains(&elem) {
+                        result.insert(elem);
+                    }
+                });
+                Value::from(Bag::from(result))
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+        match branch_num {
+            0 => self.l_input = Some(input),
+            1 => self.r_input = Some(input),
+            _ => ctx.add_error(EvaluationError::IllegalState(
+                "Invalid branch number".to_string(),
+            )),
+        }
+    }
+}
+
+/// Represents the `OUTER EXCEPT` bag operator.
+#[derive(Debug, PartialEq)]
+pub(crate) struct EvalOuterExcept {
+    pub(crate) setq: SetQuantifier,
+    pub(crate) l_input: Option<Value>,
+    pub(crate) r_input: Option<Value>,
+}
+
+impl EvalOuterExcept {
+    pub(crate) fn new(setq: SetQuantifier) -> Self {
+        EvalOuterExcept {
+            setq,
+            l_input: None,
+            r_input: None,
+        }
+    }
+}
+
+impl Evaluable for EvalOuterExcept {
+    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
+        let lhs = self.l_input.take().unwrap_or(Missing);
+        let rhs = self.r_input.take().unwrap_or(Missing);
+        let mut result: Vec<Value> = Vec::new();
+        let mut rhs_multiplicities: HashMap<Value, usize> = HashMap::new();
+        coerce_to_bag(rhs).into_iter().for_each(|elem| {
+            rhs_multiplicities
+                .entry(elem)
+                .and_modify(|m| *m += 1)
+                .or_insert(1);
+        });
+        coerce_to_bag(lhs).into_iter().for_each(|elem| {
+            if rhs_multiplicities.contains_key(&elem) {
+                let m = rhs_multiplicities.get_mut(&elem).unwrap();
+                if *m > 0 {
+                    *m -= 1
+                } else {
+                    result.push(elem)
+                }
+            } else {
+                result.push(elem)
+            }
+        });
+        match self.setq {
+            SetQuantifier::All => Value::from(Bag::from(result)),
+            SetQuantifier::Distinct => {
+                let result = HashSet::from_iter(result.into_iter());
+                Value::from(Bag::from(result))
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+        match branch_num {
+            0 => self.l_input = Some(input),
+            1 => self.r_input = Some(input),
+            _ => ctx.add_error(EvaluationError::IllegalState(
+                "Invalid branch number".to_string(),
+            )),
+        }
+    }
+}
+
 /// Indicates if a set should be reduced to its distinct elements or not.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum SetQuantifier {
     All,
     Distinct,

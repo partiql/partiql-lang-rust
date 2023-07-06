@@ -4,18 +4,18 @@ use num::Integer;
 use ordered_float::OrderedFloat;
 use partiql_ast::ast;
 use partiql_ast::ast::{
-    Assignment, Bag, Between, BinOp, BinOpKind, Call, CallAgg, CallArg, CallArgNamed,
-    CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp, DropIndex,
-    DropTable, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey, GroupingStrategy,
-    Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId, NullOrderingSpec,
-    OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr, Projection, ProjectionKind,
-    Query, QuerySet, Remove, SearchedCase, Select, Set, SetExpr, SetQuantifier, Sexp, SimpleCase,
-    SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
+    CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
+    DropIndex, DropTable, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
+    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId,
+    NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
+    Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
+    Sexp, SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    AggregateExpression, BagExpr, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
+    AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
     LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
     PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr,
 };
@@ -160,8 +160,6 @@ pub struct AstToLogical<'a> {
 
     from_lets: HashSet<ast::NodeId>,
 
-    siblings: Vec<Vec<NodeId>>,
-
     aliases: FnvIndexMap<NodeId, SymbolPrimitive>,
 
     // generator of 'fresh' ids
@@ -229,8 +227,6 @@ impl<'a> AstToLogical<'a> {
             aggregate_exprs: Default::default(),
 
             from_lets: Default::default(),
-
-            siblings: Default::default(),
 
             aliases: Default::default(),
 
@@ -586,26 +582,10 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
     fn enter_query(&mut self, _query: &'ast Query) -> Traverse {
         self.enter_benv();
-        self.siblings.push(vec![]);
-        self.enter_q();
         Traverse::Continue
     }
 
     fn exit_query(&mut self, _query: &'ast Query) -> Traverse {
-        let clauses = self.exit_q();
-
-        let mut clauses = clauses.evaluation_order().into_iter();
-        if let Some(mut src_id) = clauses.next() {
-            for dst_id in clauses {
-                self.plan.add_flow(src_id, dst_id);
-                src_id = dst_id;
-            }
-
-            self.push_bexpr(src_id);
-        }
-
-        self.siblings.pop();
-
         let mut benv = self.exit_benv();
         eq_or_fault!(self, benv.len(), 1, "Expect benv.len() == 1");
 
@@ -618,12 +598,13 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
     fn enter_query_set(&mut self, _query_set: &'ast QuerySet) -> Traverse {
         self.enter_env();
+        self.enter_benv();
 
         match _query_set {
-            QuerySet::SetOp(_) => {
-                not_yet_implemented_fault!(self, "QuerySet::SetOp".to_string());
+            QuerySet::BagOp(_) => {}
+            QuerySet::Select(_) => {
+                self.enter_q();
             }
-            QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {}
             QuerySet::Values(_) => {
                 not_yet_implemented_fault!(self, "QuerySet::Values".to_string());
@@ -635,14 +616,48 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn exit_query_set(&mut self, _query_set: &'ast QuerySet) -> Traverse {
+    fn exit_query_set(&mut self, query_set: &'ast QuerySet) -> Traverse {
         let env = self.exit_env();
+        let mut benv = self.exit_benv();
 
-        match _query_set {
-            QuerySet::SetOp(_) => {
-                not_yet_implemented_fault!(self, "QuerySet::SetOp".to_string());
+        match query_set {
+            QuerySet::BagOp(bag_op) => {
+                eq_or_fault!(self, benv.len(), 2, "benv.len() != 2");
+                let rid = benv.pop().unwrap();
+                let lid = benv.pop().unwrap();
+
+                let bag_operator = match bag_op.node.bag_op {
+                    BagOperator::Union => logical::BagOperator::Union,
+                    BagOperator::Except => logical::BagOperator::Except,
+                    BagOperator::Intersect => logical::BagOperator::Intersect,
+                    BagOperator::OuterUnion => logical::BagOperator::OuterUnion,
+                    BagOperator::OuterExcept => logical::BagOperator::OuterExcept,
+                    BagOperator::OuterIntersect => logical::BagOperator::OuterIntersect,
+                };
+                let setq = match bag_op.node.setq {
+                    SetQuantifier::All => logical::SetQuantifier::All,
+                    SetQuantifier::Distinct => logical::SetQuantifier::Distinct,
+                };
+
+                let id = self.plan.add_operator(BindingsOp::BagOp(BagOp {
+                    bag_op: bag_operator,
+                    setq,
+                }));
+                self.plan.add_flow_with_branch_num(lid, id, 0);
+                self.plan.add_flow_with_branch_num(rid, id, 1);
+                self.push_bexpr(id);
             }
-            QuerySet::Select(_) => {}
+            QuerySet::Select(_) => {
+                let clauses = self.exit_q();
+                let mut clauses = clauses.evaluation_order().into_iter();
+                if let Some(mut src_id) = clauses.next() {
+                    for dst_id in clauses {
+                        self.plan.add_flow(src_id, dst_id);
+                        src_id = dst_id;
+                    }
+                    self.push_bexpr(src_id);
+                }
+            }
             QuerySet::Expr(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
                 let expr = env.into_iter().next().unwrap();
@@ -660,11 +675,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Traverse {
+    fn enter_bag_op_expr(&mut self, _set_expr: &'ast BagOpExpr) -> Traverse {
         Traverse::Continue
     }
 
-    fn exit_set_expr(&mut self, _set_expr: &'ast SetExpr) -> Traverse {
+    fn exit_bag_op_expr(&mut self, _set_expr: &'ast BagOpExpr) -> Traverse {
         Traverse::Continue
     }
 
@@ -1278,8 +1293,6 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         self.enter_env();
 
         let id = *self.current_node();
-        true_or_fault!(self, !self.siblings.is_empty(), "self.siblings is empty");
-        self.siblings.last_mut().unwrap().push(id);
 
         for sym in [&from_let.as_alias, &from_let.at_alias, &from_let.by_alias]
             .into_iter()
