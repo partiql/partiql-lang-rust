@@ -393,6 +393,9 @@ mod tests {
 
         let query = "SELECT customers.id, customers.name FROM customers";
         // let query = "SELECT customers.id FROM {'id': 1, 'name': 'Bob'} AS customers";
+
+        // let query = "SELECT customers.id FROM customers";
+
         let parsed = parse(query);
         let lg = lower(&parsed).expect("Logical plan");
 
@@ -400,6 +403,7 @@ mod tests {
         let actual = typer.type_plan().expect("typer");
 
         let expected_fields = struct_fields![("id", int!()),("name", str!())];
+        // let expected_fields = struct_fields![("id", int!())];
         let expected = bag![r#struct![vec![expected_fields]]];
         assert_eq!(actual, expected);
     }
