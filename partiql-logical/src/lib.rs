@@ -92,11 +92,6 @@ where
     }
 
     /// Adds a data flow with a branch number.
-    /// TODO: decide if `branch_num` is necessary within the current implementation. JOINs were
-    ///  previously modeled as having separate data flows and the branch number was used to
-    ///  distinguish between the LHS and RHS of a JOIN. JOINs have since been refactored to support
-    ///  LATERAL JOINs which don't have separate data flows within the logical plan.
-    ///  Tracking issue for possible removal: https://github.com/partiql/partiql-lang-rust/issues/237
     #[inline]
     pub fn add_flow_with_branch_num(&mut self, src: OpId, dst: OpId, branch_num: u8) {
         assert!(src.index() <= self.operator_count());
