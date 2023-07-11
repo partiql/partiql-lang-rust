@@ -1442,8 +1442,11 @@ impl Evaluable for EvalOuterIntersect {
                 });
                 coerce_to_bag(rhs).into_iter().for_each(|elem| {
                     if lhs_multiplicities.contains_key(&elem) {
-                        *lhs_multiplicities.get_mut(&elem).unwrap() += 1;
-                        result.push(elem);
+                        let m = lhs_multiplicities.get_mut(&elem).unwrap();
+                        if *m > 0 {
+                            *m -= 1;
+                            result.push(elem);
+                        }
                     }
                 });
                 Value::from(Bag::from(result))
