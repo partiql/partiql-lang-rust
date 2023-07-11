@@ -867,6 +867,24 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
+    fn enter_in(&mut self, _in: &'ast ast::In) -> Traverse {
+        self.enter_env();
+        Traverse::Continue
+    }
+    fn exit_in(&mut self, _in: &'ast ast::In) -> Traverse {
+        let mut env = self.exit_env();
+        eq_or_fault!(self, env.len(), 2, "env.len() != 2");
+
+        let rhs = env.pop().unwrap();
+        let lhs = env.pop().unwrap();
+        self.push_vexpr(logical::ValueExpr::BinaryExpr(
+            logical::BinaryOp::In,
+            Box::new(lhs),
+            Box::new(rhs),
+        ));
+        Traverse::Continue
+    }
+
     fn enter_like(&mut self, _like: &'ast Like) -> Traverse {
         self.enter_env();
         Traverse::Continue
