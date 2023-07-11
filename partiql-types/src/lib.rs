@@ -129,12 +129,10 @@ macro_rules! r#array {
     };
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct PartiqlType {
-    kind: TypeKind,
-}
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct PartiqlType(TypeKind);
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
@@ -170,73 +168,52 @@ pub enum TypeKind {
 #[allow(dead_code)]
 impl PartiqlType {
     pub fn new(kind: TypeKind) -> PartiqlType {
-        PartiqlType { kind }
+        PartiqlType(kind)
     }
 
     pub fn new_any() -> PartiqlType {
-        PartiqlType {
-            kind: TypeKind::Any,
-        }
+        PartiqlType(TypeKind::Any)
     }
 
     pub fn new_struct(s: StructType) -> PartiqlType {
-        PartiqlType {
-            kind: TypeKind::Struct(s),
-        }
+        PartiqlType(TypeKind::Struct(s))
     }
 
     pub fn new_bag(b: BagType) -> PartiqlType {
-        PartiqlType {
-            kind: TypeKind::Bag(b),
-        }
+        PartiqlType(TypeKind::Bag(b))
     }
 
     pub fn new_array(a: ArrayType) -> PartiqlType {
-        PartiqlType {
-            kind: TypeKind::Array(a),
-        }
+        PartiqlType(TypeKind::Array(a))
     }
 
     pub fn union_of(types: BTreeSet<PartiqlType>) -> PartiqlType {
-        PartiqlType {
-            kind: TypeKind::AnyOf(AnyOf::new(types)),
-        }
+        PartiqlType(TypeKind::AnyOf(AnyOf::new(types)))
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(
-            &self,
-            PartiqlType {
-                kind: TypeKind::String
-            }
-        )
+        matches!(&self, PartiqlType(TypeKind::String))
     }
 
     pub fn kind(&self) -> &TypeKind {
-        &self.kind
+        &self.0
     }
 
     pub fn is_struct(&self) -> bool {
-        matches!(
-            *self,
-            PartiqlType {
-                kind: TypeKind::Struct(_)
-            }
-        )
+        matches!(*self, PartiqlType(TypeKind::Struct(_)))
     }
 
     pub fn is_collection(&self) -> bool {
-        matches!(
-            *self,
-            PartiqlType {
-                kind: TypeKind::Bag(_)
-            }
-        ) || matches!(
-            *self,
-            PartiqlType {
-                kind: TypeKind::Array(_)
-            }
-        )
+        matches!(*self, PartiqlType(TypeKind::Bag(_)))
+            || matches!(*self, PartiqlType(TypeKind::Array(_)))
+    }
+
+    pub fn is_bag(&self) -> bool {
+        matches!(*self, PartiqlType(TypeKind::Bag(_)))
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(*self, PartiqlType(TypeKind::Array(_)))
     }
 }
 
@@ -260,7 +237,7 @@ impl Attr {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug, Clone)]
+#[derive(Hash, Eq, PartialEq, Debug, Clone, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct AnyOf {
     types: BTreeSet<PartiqlType>,
@@ -276,42 +253,34 @@ impl AnyOf {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructType {
-    constraints: Vec<StructConstraint>,
+    constraints: BTreeSet<StructConstraint>,
 }
 
 impl StructType {
-    pub fn new(constraints: Vec<StructConstraint>) -> Self {
+    pub fn new(constraints: BTreeSet<StructConstraint>) -> Self {
         StructType { constraints }
     }
 
     pub fn new_any() -> Self {
         StructType {
-            constraints: vec![],
+            constraints: Default::default(),
         }
     }
 
     pub fn fields(&self) -> Vec<StructField> {
-        let mut fields: Vec<StructField> = vec![];
-        for c in self.constraints.iter() {
-            if let StructConstraint::Fields(f) = c.clone() {
-                fields.extend(f)
-            }
-        }
-
-        fields
-        // self.constraints
-        //     .iter()
-        //     .map(|c| {
-        //         if let StructConstraint::Fields(fields) = c.clone() {
-        //             fields
-        //         } else {
-        //             vec![]
-        //         }
-        //     })
-        //     .flatten().collect()
+        self.constraints
+            .iter()
+            .flat_map(|c| {
+                if let StructConstraint::Fields(fields) = c.clone() {
+                    fields
+                } else {
+                    vec![]
+                }
+            })
+            .collect()
     }
 
     pub fn is_partial(&self) -> bool {
@@ -321,7 +290,50 @@ impl StructType {
     pub fn is_closed(&self) -> bool {
         self.constraints.contains(&StructConstraint::Open(false))
     }
+
+    pub fn is_unordered(&self) -> bool {
+        !self.is_ordered()
+    }
+
+    pub fn is_ordered(&self) -> bool {
+        self.constraints.contains(&StructConstraint::Ordered(true))
+    }
 }
+
+// impl PartialEq for StructType {
+//     fn eq(&self, other: &Self) -> bool {
+//         let self_constraints = &self.constraints;
+//         let other_constraints = &other.constraints;
+//
+//         if self_constraints == other_constraints {
+//             true
+//         } else {
+//             // What other_constraints don't have from self_constraints
+//             // let diff = other_constraints.into_iter().filter(|c| !self_constraints.contains(c)).collect();
+//             let diff: Vec<_> = other_constraints.difference(self_constraints).collec();
+//             if diff.len() == 1 && matches!(diff[0], StructConstraint::Fields(_)) {
+//                 let self_fields = &self.fields();
+//
+//                 if self.is_unordered() {
+//                     let other_fields = &other.fields();
+//                     return if self_fields.len() == other_fields.len() {
+//                         let fields_diff: Vec<_> = self_fields.into_iter().filter(|f| !other_fields.contains(f)).collect();
+//                         fields_diff.len() == 0
+//                     } else {
+//                         false
+//                     }
+//                 }
+//             }
+//             false
+//         }
+//     }
+// }
+//
+// impl Hash for StructType {
+//     fn hash<H: Hasher>(&self, state: &mut H) {
+//         self.constraints.hash(state);
+//     }
+// }
 
 impl<T> From<(String, T)> for StructField
 where
@@ -335,7 +347,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
@@ -343,7 +355,7 @@ pub enum StructConstraint {
     Fields(Vec<StructField>),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructField {
     name: String,
@@ -376,12 +388,7 @@ impl From<(&str, PartiqlType)> for StructField {
     }
 }
 
-trait Collection {}
-
-impl Collection for BagType {}
-impl Collection for ArrayType {}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlType>,
@@ -390,9 +397,7 @@ pub struct BagType {
 
 impl BagType {
     pub fn new_any() -> Self {
-        BagType::new(Box::new(PartiqlType {
-            kind: TypeKind::Any,
-        }))
+        BagType::new(Box::new(PartiqlType(TypeKind::Any)))
     }
 
     pub fn new(typ: Box<PartiqlType>) -> Self {
@@ -411,7 +416,7 @@ impl BagType {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
@@ -420,9 +425,7 @@ pub struct ArrayType {
 
 impl ArrayType {
     pub fn new_any() -> Self {
-        ArrayType::new(Box::new(PartiqlType {
-            kind: TypeKind::Any,
-        }))
+        ArrayType::new(Box::new(PartiqlType(TypeKind::Any)))
     }
 
     pub fn new(typ: Box<PartiqlType>) -> Self {
@@ -441,7 +444,7 @@ impl ArrayType {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum CollectionConstraint {
     Ordered(bool),
 }
