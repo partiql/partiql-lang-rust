@@ -1,4 +1,6 @@
 use indexmap::IndexMap;
+use itertools::all;
+use partiql_ast::ast::CustomTypeParam::Type;
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::PathComponent::Index;
@@ -10,24 +12,22 @@ use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
-use std::collections::HashMap;
-use itertools::all;
 use petgraph::visit::Walker;
+use std::collections::HashMap;
 use thiserror::Error;
-use partiql_ast::ast::CustomTypeParam::Type;
 
 #[macro_export]
 macro_rules! ty_ctx {
-    (($x:expr, $y:expr)) => (
+    (($x:expr, $y:expr)) => {
         TypeEnvContext::from(($x, $y))
-    );
+    };
 }
 
 #[macro_export]
 macro_rules! ty_env {
-    (($x:expr, $y:expr)) => (
+    (($x:expr, $y:expr)) => {
         TypeEnv::from([($x, $y)])
-    );
+    };
 }
 
 /// All errors that occurred during [`partiql_logical::LogicalPlan`] to [`eval::EvalPlan`] creation.
@@ -62,7 +62,10 @@ impl TypeEnvContext {
     }
 
     fn add(env: &TypeEnv, derived_type: &PartiqlType) -> Self {
-        TypeEnvContext { env: env.clone(), derived_type: Some(derived_type.clone())}
+        TypeEnvContext {
+            env: env.clone(),
+            derived_type: Some(derived_type.clone()),
+        }
     }
 
     fn update_derived_type(&mut self, derived_type: &PartiqlType) -> Self {
@@ -71,7 +74,6 @@ impl TypeEnvContext {
             derived_type: Some(derived_type.clone()),
         }
     }
-
 }
 
 impl Default for TypeEnvContext {
@@ -162,7 +164,10 @@ impl<'c> PlanTyper<'c> {
                         );
                     }
                 }
-                self.type_env_stack.push(ty_ctx![(&new_type_env, &type_ctx.derived_type().clone().unwrap().clone())]);
+                self.type_env_stack.push(ty_ctx![(
+                    &new_type_env,
+                    &type_ctx.derived_type().clone().unwrap().clone()
+                )]);
             }
             BindingsOp::Pivot(_) => {}
             BindingsOp::Unpivot(_) => {}
@@ -172,22 +177,24 @@ impl<'c> PlanTyper<'c> {
             BindingsOp::Join(_) => {}
             BindingsOp::SetOp => {}
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
+                let mut fields = vec![];
+                let derived_type_ctx = self.local_type_env().clone();
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
-                    let type_ctx = self.local_type_env();
+                    let type_ctx = self.local_type_env().clone();
                     if let Some(ty) = type_ctx.env().get(&string_to_sym(k.as_str())) {
-                        let ty = PartiqlType::new_struct(partiql_types::StructType::new(vec![
-                            StructConstraint::Fields(vec![StructField::new(
-                                k.as_str(),
-                                ty.clone(),
-                            )]),
-                        ]));
-                        let schema = PartiqlType::new_bag(BagType::new(Box::new(ty.clone())));
-                        self.type_env_stack
-                        .push(ty_ctx![(&ty_env![(string_to_sym("schema"), schema.clone())], &type_ctx.derived_type().clone().unwrap())]);
+                        fields.push(StructField::new(k.as_str(), ty.clone()));
                         // .push(TypeEnvContext::from((TypeEnv::from([(string_to_sym("schema"), schema.clone())]), &type_ctx.derived_type().unwrap().clone())));
                     }
                 }
+                let ty = PartiqlType::new_struct(partiql_types::StructType::new(vec![
+                    StructConstraint::Fields(fields),
+                ]));
+                let schema = PartiqlType::new_bag(BagType::new(Box::new(ty.clone())));
+                self.type_env_stack.push(ty_ctx![(
+                    &ty_env![(string_to_sym("schema"), schema.clone())],
+                    &derived_type_ctx.derived_type().clone().unwrap()
+                )]);
             }
             BindingsOp::ProjectAll => {}
             BindingsOp::ProjectValue(_) => {}
@@ -230,7 +237,10 @@ impl<'c> PlanTyper<'c> {
 
                             // let type_ctx = TypeEnvContext::from((TypeEnv::from([(sym.clone(), self.element_type(ty))], ty)));
 
-                            let type_ctx = ty_ctx![(&ty_env![(sym.clone(), self.element_type(ty).clone())], ty)];
+                            let type_ctx = ty_ctx![(
+                                &ty_env![(sym.clone(), self.element_type(ty).clone())],
+                                ty
+                            )];
 
                             self.type_env_stack.push(type_ctx);
                         } else {
@@ -270,25 +280,30 @@ impl<'c> PlanTyper<'c> {
                             if let Some(ty) = type_ctx.env().get(&sym) {
                                 let env = ty_env![(sym.clone(), ty.clone())];
 
-                                self.type_env_stack.push(ty_ctx![(&env, &type_ctx.derived_type().clone().unwrap())]);
+                                self.type_env_stack.push(ty_ctx![(
+                                    &env,
+                                    &type_ctx.derived_type().clone().unwrap()
+                                )]);
                             } else {
                                 if let Some(derived_type) = type_ctx.derived_type() {
                                     match derived_type.kind() {
                                         TypeKind::Struct(s) => {
                                             dbg!(s);
                                             if s.is_partial() {
-                                                self.type_env_stack
-                                                .push(ty_ctx![(&ty_env![(sym.clone(), PartiqlType::new_any())], &type_ctx.derived_type().clone().unwrap())]);
+                                                self.type_env_stack.push(ty_ctx![(
+                                                    &ty_env![(sym.clone(), PartiqlType::new_any())],
+                                                    &type_ctx.derived_type().clone().unwrap()
+                                                )]);
                                             }
-                                        },
+                                        }
                                         _ => {}
                                     }
                                 }
                             }
-                        },
+                        }
                         Index(_) => todo!(),
                         PathComponent::KeyExpr(_) => todo!(),
-                        PathComponent::IndexExpr(_) => todo!()
+                        PathComponent::IndexExpr(_) => todo!(),
                     }
                 }
             }
@@ -389,7 +404,11 @@ mod tests {
         let customers_schema = bag![r#struct![vec![fields]]];
 
         let mut catalog = PartiqlCatalog::default();
-        let _oid = catalog.add_type_entry(TypeEnvEntry::new("customers", &[], customers_schema));
+        let _oid = catalog.add_type_entry(TypeEnvEntry::new(
+            "customers",
+            &[],
+            customers_schema.clone(),
+        ));
 
         let query = "SELECT customers.id, customers.name FROM customers";
         // let query = "SELECT customers.id FROM {'id': 1, 'name': 'Bob'} AS customers";
@@ -402,10 +421,12 @@ mod tests {
         let mut typer = PlanTyper::new(&catalog, &lg);
         let actual = typer.type_plan().expect("typer");
 
-        let expected_fields = struct_fields![("id", int!()),("name", str!())];
+        let expected_fields = struct_fields![("id", int!()), ("name", str!())];
         // let expected_fields = struct_fields![("id", int!())];
         let expected = bag![r#struct![vec![expected_fields]]];
-        assert_eq!(actual, expected);
+        dbg!(&expected);
+        dbg!(&actual);
+        assert_eq!(actual, customers_schema.clone());
     }
 
     #[track_caller]

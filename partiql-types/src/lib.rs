@@ -294,16 +294,24 @@ impl StructType {
     }
 
     pub fn fields(&self) -> Vec<StructField> {
-        self.constraints
-            .iter()
-            .flat_map(|c| {
-                if let StructConstraint::Fields(fields) = c.clone() {
-                    fields
-                } else {
-                    vec![]
-                }
-            })
-            .collect()
+        let mut fields: Vec<StructField> = vec![];
+        for c in self.constraints.iter() {
+            if let StructConstraint::Fields(f) = c.clone() {
+                fields.extend(f)
+            }
+        }
+
+        fields
+        // self.constraints
+        //     .iter()
+        //     .map(|c| {
+        //         if let StructConstraint::Fields(fields) = c.clone() {
+        //             fields
+        //         } else {
+        //             vec![]
+        //         }
+        //     })
+        //     .flatten().collect()
     }
 
     pub fn is_partial(&self) -> bool {
