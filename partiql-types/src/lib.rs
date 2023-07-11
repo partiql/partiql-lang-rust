@@ -133,6 +133,7 @@ macro_rules! r#array {
 pub struct PartiqlType(TypeKind);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[non_exhaustive]
 pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
@@ -217,10 +218,6 @@ impl PartiqlType {
     }
 }
 
-pub trait Schema {
-    fn as_relation(&self) -> Vec<Attr>;
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[allow(dead_code)]
 pub struct Attr {
@@ -300,41 +297,6 @@ impl StructType {
     }
 }
 
-// impl PartialEq for StructType {
-//     fn eq(&self, other: &Self) -> bool {
-//         let self_constraints = &self.constraints;
-//         let other_constraints = &other.constraints;
-//
-//         if self_constraints == other_constraints {
-//             true
-//         } else {
-//             // What other_constraints don't have from self_constraints
-//             // let diff = other_constraints.into_iter().filter(|c| !self_constraints.contains(c)).collect();
-//             let diff: Vec<_> = other_constraints.difference(self_constraints).collec();
-//             if diff.len() == 1 && matches!(diff[0], StructConstraint::Fields(_)) {
-//                 let self_fields = &self.fields();
-//
-//                 if self.is_unordered() {
-//                     let other_fields = &other.fields();
-//                     return if self_fields.len() == other_fields.len() {
-//                         let fields_diff: Vec<_> = self_fields.into_iter().filter(|f| !other_fields.contains(f)).collect();
-//                         fields_diff.len() == 0
-//                     } else {
-//                         false
-//                     }
-//                 }
-//             }
-//             false
-//         }
-//     }
-// }
-//
-// impl Hash for StructType {
-//     fn hash<H: Hasher>(&self, state: &mut H) {
-//         self.constraints.hash(state);
-//     }
-// }
-
 impl<T> From<(String, T)> for StructField
 where
     T: Into<PartiqlType>,
@@ -348,6 +310,7 @@ where
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[non_exhaustive]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
@@ -445,6 +408,7 @@ impl ArrayType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[non_exhaustive]
 pub enum CollectionConstraint {
     Ordered(bool),
 }

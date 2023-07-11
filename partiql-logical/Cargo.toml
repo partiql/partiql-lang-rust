@@ -23,7 +23,6 @@ bench = false
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.5.*" }
 ordered-float = "3.*"
-indexmap = "1.9.*"
 itertools = "0.10.*"
 unicase = "2.6"
 

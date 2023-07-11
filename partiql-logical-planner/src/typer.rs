@@ -47,7 +47,6 @@ struct TypeEnvContext {
 }
 
 #[allow(dead_code)]
-#[allow(dead_code)]
 impl TypeEnvContext {
     fn new() -> Self {
         TypeEnvContext::default()
@@ -139,8 +138,6 @@ impl<'c> PlanTyper<'c> {
         }
 
         if self.errors.is_empty() {
-            // dbg!(&self.type_env_stack);
-            // dbg!(&self.output);
             Ok(self.output.clone().expect("PartiQL Type"))
         } else {
             Err(PlanErr {
@@ -234,9 +231,6 @@ impl<'c> PlanTyper<'c> {
                     LookupOrder::GlobalLocal => {
                         if let Some(type_entry) = self.catalog.resolve_type(name.as_str()) {
                             let ty = type_entry.ty();
-
-                            // let type_ctx = TypeEnvContext::from((TypeEnv::from([(sym.clone(), self.element_type(ty))], ty)));
-
                             let type_ctx =
                                 ty_ctx![(&ty_env![(sym, self.element_type(ty).clone())], ty)];
 
@@ -326,12 +320,6 @@ impl<'c> PlanTyper<'c> {
 
     fn sort(&self) -> Result<Vec<NodeIndex>, PlanErr> {
         let graph = self.to_stable_graph().expect("Graph");
-        // We are only interested in DAGs that can be used as execution plans, which leads to the
-        // following definition.
-        // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
-        // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
-        // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
-        // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
         toposort(&graph, None).map_err(|e| PlanErr {
             errors: vec![TypingError::IllegalState(format!(
                 "Malformed plan detected: {e:?}"
@@ -388,11 +376,10 @@ fn string_to_sym(name: &str) -> SymbolPrimitive {
 mod tests {
     use super::*;
     use crate::{logical, LogicalPlanner};
-    use assert_matches::assert_matches;
     use partiql_ast_passes::error::AstTransformationError;
     use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_parser::{Parsed, Parser};
-    use partiql_types::{bag, int, r#struct, str, struct_fields, BagType, StructType};
+    use partiql_types::{any, bag, int, r#struct, str, struct_fields, BagType, StructType};
 
     #[test]
     fn simple_sfw() {
@@ -406,7 +393,7 @@ mod tests {
             customers_schema.clone(),
         ));
 
-        let query = "SELECT customers.id, customers.name FROM customers";
+        let query = "SELECT customers.id, customers.name, customers.age FROM customers";
         let parsed = parse(query);
         let lg = lower(&parsed).expect("Logical plan");
 
@@ -416,8 +403,10 @@ mod tests {
         let expected_fields = vec![
             StructField::new("id", int!()),
             StructField::new("name", str!()),
+            StructField::new("age", any!()),
         ];
 
+        println!("{:?}", &actual);
         match &actual.kind() {
             TypeKind::Bag(b) => {
                 if let TypeKind::Struct(s) = b.element_type().kind() {
@@ -431,8 +420,6 @@ mod tests {
             }
             _ => panic!("expected bag type"),
         }
-
-        // assert_eq!(actual, customers_schema.clone());
     }
 
     #[track_caller]
