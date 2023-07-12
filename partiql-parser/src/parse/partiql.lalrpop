@@ -9,20 +9,28 @@ use partiql_ast::ast;
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_query, CallSite, Attrs, Synth};
+use crate::parse::parse_util::{strip_expr, strip_query, strip_query_set, CallSite, Attrs, Synth};
 use crate::parse::parser_state::{ParserState, IdGenerator};
 
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
 
 
-pub(crate) Query: Box<ast::Expr> = {
+pub(crate) TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
     <lo:@L>
     <with:WithClause?>
+    <query:Query>
+    <hi:@R> => {
+        state.node(ast::TopLevelQuery { with, query }, lo..hi)
+    }
+}
+
+Query: ast::AstNode<ast::Query> = {
+    <lo:@L>
     <set:QuerySet>
     <order_by:OrderByClause?>
     <limit_offset:LimitOffsetClause>
     <hi:@R> => {
-        Box::new(ast::Expr::Query( state.node(ast::Query { with, set, order_by, limit_offset }, lo..hi) ) )
+        state.node(ast::Query { set, order_by, limit_offset }, lo..hi)
     }
 }
 
@@ -94,33 +102,35 @@ WithCycleClause : () = {
 //    - all set operations are left-associative and are thus expressed as left-self-recursive rules
 
 QuerySet: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:QuerySet> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
-        let set_expr = state.node(ast::SetExpr {
-             setop,
+    <lo:@L> <lhs:Query> <bag_op:BagOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+        let lhs = strip_query(lhs);
+        let rhs = strip_query_set(rhs, state, lo, hi);
+        let bag_expr = state.node(ast::BagOpExpr {
+             bag_op,
              setq,
              lhs: Box::new(lhs),
              rhs: Box::new(rhs)
         }, lo..hi);
-        state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
+        state.node(ast::QuerySet::BagOp(Box::new( bag_expr )), lo..hi)
 	},
     <SingleQuery>,
 }
 
 #[inline]
-SetOp: ast::SetOperator = {
-    "UNION" => ast::SetOperator::Union,
-    "OUTER" "UNION" => ast::SetOperator::OuterUnion,
-    "EXCEPT" => ast::SetOperator::Except,
-    "OUTER" "EXCEPT" => ast::SetOperator::OuterExcept,
-    "INTERSECT" => ast::SetOperator::Intersect,
-    "OUTER" "INTERSECT" => ast::SetOperator::OuterIntersect,
+BagOp: ast::BagOperator = {
+    "UNION" => ast::BagOperator::Union,
+    "OUTER" "UNION" => ast::BagOperator::OuterUnion,
+    "EXCEPT" => ast::BagOperator::Except,
+    "OUTER" "EXCEPT" => ast::BagOperator::OuterExcept,
+    "INTERSECT" => ast::BagOperator::Intersect,
+    "OUTER" "INTERSECT" => ast::BagOperator::OuterIntersect,
 
 }
 
 #[inline]
 SetQuantifier: ast::SetQuantifier = {
-    "DISTINCT" => ast::SetQuantifier::Distinct,
-    "ALL"? => ast::SetQuantifier::All,
+    "DISTINCT"? => ast::SetQuantifier::Distinct,
+    "ALL" => ast::SetQuantifier::All,
 }
 
 
@@ -133,7 +143,7 @@ SetQuantifier: ast::SetQuantifier = {
 SingleQuery: ast::AstNode<ast::QuerySet> = {
     <lo:@L> <expr:ExprQuery> <hi:@R> => {
         match *expr {
-           ast::Expr::Query(ast::AstNode{ node: ast::Query{with: None, set, order_by:None, limit_offset:None} , .. }) => set,
+           ast::Expr::Query(ast::AstNode{ node: ast::Query{set, order_by:None, limit_offset:None} , .. }) => set,
            _ => state.node(ast::QuerySet::Expr( expr ), lo..hi),
         }
     },
@@ -831,37 +841,11 @@ ExprPrecedence02: Synth<ast::Expr> = {
 }
 
 PathExpr: ast::Path = {
-    <l:ExprPrecedence01> "." <steps:PathSteps> => ast::Path { root:Box::new(l.data), steps },
-    <l:ExprPrecedence01> "[" "*" "]" "." <s:PathSteps> => {
+    <l:ExprPrecedence01> <s:PathSteps> => {
         let step = ast::PathStep::PathWildCard;
         ast::Path {
             root: Box::new(l.data),
-            steps: std::iter::once(step).chain(s.into_iter()).collect()
-        }
-    },
-    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" "." <s:PathSteps> => {
-       let step = ast::PathStep::PathExpr(
-        ast::PathExpr{
-                index: Box::new(*expr),
-            }
-        );
-
-        ast::Path {
-            root: Box::new(l.data),
-            steps: std::iter::once(step).chain(s.into_iter()).collect()
-        }
-    },
-    <l:ExprPrecedence01> "[" "*" "]" => ast::Path {
-        root:Box::new(l.data), steps:vec![ast::PathStep::PathWildCard]
-    },
-    <l:ExprPrecedence01> "[" <expr:ExprQuery> "]" => {
-         let step = ast::PathStep::PathExpr(
-             ast::PathExpr{
-                 index: Box::new(*expr),
-             });
-
-        ast::Path {
-            root:Box::new(l.data), steps:vec![step]
+            steps: s
         }
     },
 }
@@ -907,7 +891,7 @@ ExprTerm: Synth<ast::Expr> = {
 }
 
 SubQuery: ast::Expr = {
-    "(" <q:Query> ")" => *strip_query(q),
+    "(" <q:Query> ")" => *strip_expr(q),
 }
 
 SubQueryAst: ast::AstNode<ast::Expr> = {
@@ -1050,7 +1034,7 @@ FunctionCallArgs: Vec<ast::AstNode<ast::CallArg>> = {
     // Special case subquery when it is the only sub-expression of a function call (e.g., `SELECT AVG(SELECT VALUE price FROM g AS v))... `)
     <lo:@L> <subq:SfwQuery> <hi:@R> => {
         let qset = state.node(ast::QuerySet::Select(Box::new(subq)), lo..hi);
-        let query = state.node(ast::Query{ with: None, set: qset, order_by: None, limit_offset:None }, lo..hi);
+        let query = state.node(ast::Query{ set: qset, order_by: None, limit_offset:None }, lo..hi);
         vec![state.node(ast::CallArg::Positional(Box::new(ast::Expr::Query(query))), lo..hi)]
     },
 }
@@ -1101,9 +1085,10 @@ FunctionArgName: ast::SymbolPrimitive = {
 // Examples:
 // a.b
 // a.*
-// a.[*]
 // a[*]
+// a[*][*]
 // a.b.c
+// a[*].b[*].c
 // "a".b
 // "a"."b"
 // { 'a': 1, 'b': 2 }.a
@@ -1113,43 +1098,27 @@ FunctionArgName: ast::SymbolPrimitive = {
 //
 // See the path expression conformance tests under `partiql-tests` or parser unit-tests for more examples.
 PathSteps: Vec<ast::PathStep> = {
-    <path:PathSteps> "." <v:PathExprVarRef> => {
-        let mut steps = path;
-        steps.push(ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) }));
-        steps
-    },
-    <lo:@L> <path:PathSteps> "[" "*" "]" <hi:@R> => {
-        let mut steps = path;
-        steps.push(ast::PathStep::PathWildCard);
-        steps
-    },
-    <lo:@L> <path:PathSteps>  "." "*" <hi:@R> => {
-         let mut steps = path;
-         steps.push(ast::PathStep::PathUnpivot);
-         steps
-         // ast::Path{ root:path.root, steps }
-    },
-    <lo:@L> <path:PathSteps> "[" <expr:ExprQuery> "]" <hi:@R> => {
-        let step = ast::PathStep::PathExpr(
-            ast::PathExpr{
-                index: Box::new(*expr),
-            });
-
+    <path:PathSteps> <step:PathStep> => {
         let mut steps = path;
         steps.push(step);
         steps
     },
+    <step:PathStep> => {
+        vec![step]
+    },
+}
+PathStep: ast::PathStep = {
+    "." <v:PathExprVarRef> => {
+        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })
+    },
     "[" "*" "]" => {
-        vec![ast::PathStep::PathWildCard]
+        ast::PathStep::PathWildCard
+    },
+    "." "*" => {
+        ast::PathStep::PathUnpivot
     },
     "[" <expr:ExprQuery> "]" => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })]
-    },
-    "*" => {
-        vec![ast::PathStep::PathUnpivot]
-    },
-    <v:PathExprVarRef> => {
-        vec![ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })]
+        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })
     },
 }
 

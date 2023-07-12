@@ -1,6 +1,6 @@
 use crate::lower::AstToLogical;
-use partiql_ast::ast;
-use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
+
+use partiql_ast_passes::error::AstTransformationError;
 use partiql_ast_passes::name_resolver::NameResolver;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
@@ -25,18 +25,11 @@ impl<'c> LogicalPlanner<'c> {
         &self,
         parsed: &Parsed,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
-        if let ast::Expr::Query(q) = parsed.ast.as_ref() {
-            let mut resolver = NameResolver::default();
-            let registry = resolver.resolve(q)?;
-            let planner = AstToLogical::new(self.catalog, registry);
-            planner.lower_query(q)
-        } else {
-            Err(AstTransformationError {
-                errors: vec![AstTransformError::NotYetImplemented(
-                    "Expr type not supported yet".to_string(),
-                )],
-            })
-        }
+        let q = &parsed.ast;
+        let mut resolver = NameResolver::default();
+        let registry = resolver.resolve(q)?;
+        let planner = AstToLogical::new(self.catalog, registry);
+        planner.lower_query(q)
     }
 }
 

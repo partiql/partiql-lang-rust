@@ -9,13 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
 - *BREAKING:* partiql-values: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
+- *BREAKING:* partiql-ast: changed modeling of `Query` and `SetExpr` nodes to support `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
+  - Affects the AST and visitor
+- *BREAKING:* partiql-ast: rename of `SetExpr` to `BagOpExpr` and `SetOp` to `BagOp`
+  - Affects the AST and visitor
+- *BREAKING:* partiql-parser: `Parsed` struct's `ast` field is now an `ast::AstNode<ast::TopLevelQuery>`
+- *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
 
 ### Added
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
+- Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
+- Add `OUTER` bag operator (`OUTER UNION`, `OUTER INTERSECT`, `OUTER EXCEPT`) implementation
 
 ### Fixes
+- Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
+- partiql-parser set quantifier for bag operators fixed to `DISTINCT`
+- partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
 
 ## [0.5.0] - 2023-06-06
 ### Changed
@@ -49,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-extension-ion-functions` extension which contains an extension function for reading from an Ion file
 - Add `partiql-catalog` including an experimental `Catalog` interface and implementation
 - Implements the `COLL_*` functions -- `COLL_AVG`, `COLL_COUNT`, `COLL_MAX`, `COLL_MIN`, `COLL_SUM`
+- Adds AST to logical plan lowering for `IN` expressions
 ### Fixes
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`

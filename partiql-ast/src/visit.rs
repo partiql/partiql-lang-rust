@@ -207,6 +207,12 @@ pub trait Visitor<'ast> {
     fn exit_on_conflict(&mut self, _on_conflict: &'ast ast::OnConflict) -> Traverse {
         Traverse::Continue
     }
+    fn enter_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_top_level_query(&mut self, _query: &'ast ast::TopLevelQuery) -> Traverse {
+        Traverse::Continue
+    }
     fn enter_query(&mut self, _query: &'ast ast::Query) -> Traverse {
         Traverse::Continue
     }
@@ -231,10 +237,10 @@ pub trait Visitor<'ast> {
     fn exit_query_set(&mut self, _query_set: &'ast ast::QuerySet) -> Traverse {
         Traverse::Continue
     }
-    fn enter_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) -> Traverse {
+    fn enter_bag_op_expr(&mut self, _set_expr: &'ast ast::BagOpExpr) -> Traverse {
         Traverse::Continue
     }
-    fn exit_set_expr(&mut self, _set_expr: &'ast ast::SetExpr) -> Traverse {
+    fn exit_bag_op_expr(&mut self, _set_expr: &'ast ast::BagOpExpr) -> Traverse {
         Traverse::Continue
     }
     fn enter_select(&mut self, _select: &'ast ast::Select) -> Traverse {

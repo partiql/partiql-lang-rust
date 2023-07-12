@@ -1,6 +1,8 @@
 use partiql_ast::ast;
 
+use crate::parse::parser_state::{IdGenerator, ParserState};
 use bitflags::bitflags;
+use partiql_source_map::location::ByteOffset;
 
 bitflags! {
     /// Set of AST node attributes to use as synthesized attributes.
@@ -59,13 +61,98 @@ pub(crate) enum CallSite {
 }
 
 #[inline]
-// if this is just a parenthesized expr, lift it out of the query AST, otherwise return input
-//      e.g. `(1+2)` should be a ExprKind::Expr, not wrapped deep in a ExprKind::Query
-pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
-    if let ast::Expr::Query(ast::AstNode {
+// Removes extra `Query` nesting if it exists, otherwise return the input.
+// e.g. `(SELECT a FROM b ORDER BY c LIMIT d OFFSET e)` should be a Query with no additional nesting.
+// Put another way: if `q` is a Query(QuerySet::Expr(Query(inner_q), ...), return Query(inner_q).
+// Otherwise, return `q`.
+pub(crate) fn strip_query(q: ast::AstNode<ast::Query>) -> ast::AstNode<ast::Query> {
+    let outer_id = q.id;
+    if let ast::AstNode {
+        node: ast::QuerySet::Expr(e),
+        id: inner_id,
+    } = q.node.set
+    {
+        if let ast::Expr::Query(
+            inner_q @ ast::AstNode {
+                node: ast::Query { .. },
+                ..
+            },
+        ) = *e
+        {
+            inner_q
+        } else {
+            let set = ast::AstNode {
+                id: inner_id,
+                node: ast::QuerySet::Expr(e),
+            };
+            ast::AstNode {
+                id: outer_id,
+                node: ast::Query {
+                    set,
+                    order_by: None,
+                    limit_offset: None,
+                },
+            }
+        }
+    } else {
+        q
+    }
+}
+
+#[inline]
+// If `qs` is a `QuerySet::Expr(Expr::Query(inner_q))`, return Query(inner_q). Otherwise, return `qs` wrapped
+// in a `Query` with `None` as the `OrderBy` and `LimitOffset`
+pub(crate) fn strip_query_set<Id>(
+    qs: ast::AstNode<ast::QuerySet>,
+    state: &mut ParserState<Id>,
+    lo: ByteOffset,
+    hi: ByteOffset,
+) -> ast::AstNode<ast::Query>
+where
+    Id: IdGenerator,
+{
+    if let ast::AstNode {
+        node: ast::QuerySet::Expr(q),
+        id: inner_id,
+    } = qs
+    {
+        if let ast::Expr::Query(
+            inner_q @ ast::AstNode {
+                node: ast::Query { .. },
+                ..
+            },
+        ) = *q
+        {
+            // preserve query including limit/offset & order by if present
+            inner_q
+        } else {
+            let query = ast::Query {
+                set: ast::AstNode {
+                    id: inner_id,
+                    node: ast::QuerySet::Expr(q),
+                },
+                order_by: None,
+                limit_offset: None,
+            };
+            state.node(query, lo..hi)
+        }
+    } else {
+        let query = ast::Query {
+            set: qs,
+            order_by: None,
+            limit_offset: None,
+        };
+        state.node(query, lo..hi)
+    }
+}
+
+#[inline]
+// If this is just a parenthesized expr, lift it out of the query AST, otherwise return input
+//      e.g. `(1+2)` should be an `Expr`, not wrapped deep in a `Query`
+pub(crate) fn strip_expr(q: ast::AstNode<ast::Query>) -> Box<ast::Expr> {
+    if let ast::AstNode {
         node:
             ast::Query {
-                with: None,
                 set:
                     ast::AstNode {
                         node: ast::QuerySet::Expr(e),
@@ -75,10 +162,10 @@ pub(crate) fn strip_query(q: Box<ast::Expr>) -> Box<ast::Expr> {
                 limit_offset: None,
             },
         ..
-    }) = *q
+    } = q
     {
         e
     } else {
-        q
+        Box::new(ast::Expr::Query(q))
     }
 }

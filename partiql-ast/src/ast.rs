@@ -236,8 +236,14 @@ pub enum ConflictAction {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Query {
+pub struct TopLevelQuery {
     pub with: Option<AstNode<WithClause>>,
+    pub query: AstNode<Query>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Query {
     pub set: AstNode<QuerySet>,
     pub order_by: Option<Box<AstNode<OrderByExpr>>>,
     pub limit_offset: Option<Box<AstNode<LimitOffsetClause>>>,
@@ -264,7 +270,7 @@ pub struct WithElement {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum QuerySet {
-    SetOp(Box<AstNode<SetExpr>>),
+    BagOp(Box<AstNode<BagOpExpr>>),
     Select(Box<AstNode<Select>>),
     Expr(Box<Expr>),
     Values(Vec<Box<Expr>>),
@@ -273,18 +279,18 @@ pub enum QuerySet {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SetExpr {
+pub struct BagOpExpr {
     #[visit(skip)]
-    pub setop: SetOperator,
+    pub bag_op: BagOperator,
     #[visit(skip)]
     pub setq: SetQuantifier,
-    pub lhs: Box<AstNode<QuerySet>>,
-    pub rhs: Box<AstNode<QuerySet>>,
+    pub lhs: Box<AstNode<Query>>,
+    pub rhs: Box<AstNode<Query>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum SetOperator {
+pub enum BagOperator {
     Union,
     Except,
     Intersect,

@@ -33,13 +33,13 @@ mod grammar {
 
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
-type LalrpopResult<'input> = Result<Box<ast::Expr>, LalrpopError<'input>>;
+type LalrpopResult<'input> = Result<ast::AstNode<ast::TopLevelQuery>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
-    pub ast: Box<ast::Expr>,
+    pub ast: ast::AstNode<ast::TopLevelQuery>,
     pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
@@ -65,7 +65,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
     let lexer = CommentSkippingLexer::new(lexer);
 
-    let result: LalrpopResult = grammar::QueryParser::new().parse(s, &mut state, lexer);
+    let result: LalrpopResult = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
 
     let ParserState {
         locations, errors, ..
@@ -359,18 +359,26 @@ mod tests {
         fn test_pathexpr_struct() {
             let res = parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
 
-            if let ast::Expr::Query(ast::AstNode {
+            if let ast::AstNode {
                 node:
-                    ast::Query {
-                        set:
+                    ast::TopLevelQuery {
+                        query:
                             ast::AstNode {
-                                node: ast::QuerySet::Expr(ref e),
+                                node:
+                                    ast::Query {
+                                        set:
+                                            ast::AstNode {
+                                                node: ast::QuerySet::Expr(ref e),
+                                                ..
+                                            },
+                                        ..
+                                    },
                                 ..
                             },
                         ..
                     },
                 ..
-            }) = *res
+            } = res
             {
                 if let ast::Expr::Path(p) = &**e {
                     assert_eq!(9, p.node.steps.len())
@@ -605,6 +613,38 @@ mod tests {
             );
             assert_ne!(l, r2);
             assert_ne!(r, r2);
+        }
+
+        #[test]
+        fn complex_set() {
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER UNION ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER INTERSECT ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                   OUTER EXCEPT ALL
+                   (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+            );
+            parse_null_id!(
+                r#"(
+                       (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                       UNION DISTINCT
+                       (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                   )
+                   OUTER UNION ALL
+                   (SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3)
+                   ORDER BY c4 LIMIT d4 OFFSET e4"#
+            );
         }
     }
 
