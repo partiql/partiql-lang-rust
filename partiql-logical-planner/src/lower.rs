@@ -1241,12 +1241,8 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     }
                 }
             }
-            PathStep::PathWildCard => {
-                not_yet_implemented_fault!(self, "PathStep::PathWildCard".to_string());
-            }
-            PathStep::PathUnpivot => {
-                not_yet_implemented_fault!(self, "PathStep::PathUnpivot".to_string());
-            }
+            PathStep::PathWildCard => logical::PathComponent::PathWildcard,
+            PathStep::PathUnpivot => logical::PathComponent::PathUnpivot,
         };
 
         self.push_path_step(step);
