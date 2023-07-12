@@ -129,6 +129,13 @@ macro_rules! r#array {
     };
 }
 
+#[macro_export]
+macro_rules! unknown {
+    () => {
+        $crate::PartiqlType::new($crate::TypeKind::Unknown)
+    };
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct PartiqlType(TypeKind);
 
@@ -163,6 +170,8 @@ pub enum TypeKind {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
+    // Serves as Bottom Type
+    Unknown,
     // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
 }
 
