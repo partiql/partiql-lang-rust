@@ -196,13 +196,6 @@ impl<'c> PlanTyper<'c> {
                 self.type_env_stack
                     .push(ty_ctx![(&new_type_env, derived_type)]);
             }
-            BindingsOp::Pivot(_) => {}
-            BindingsOp::Unpivot(_) => {}
-            BindingsOp::Filter(_) => {}
-            BindingsOp::OrderBy(_) => {}
-            BindingsOp::LimitOffset(_) => {}
-            BindingsOp::Join(_) => {}
-            BindingsOp::SetOp => {}
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
                 let derived_type_ctx = self.local_type_env().clone();
@@ -222,17 +215,15 @@ impl<'c> PlanTyper<'c> {
                     derived_type
                 )]);
             }
-            BindingsOp::ProjectAll => {}
-            BindingsOp::ProjectValue(_) => {}
-            BindingsOp::ExprQuery(_) => {}
-            BindingsOp::Distinct => {}
-            BindingsOp::GroupBy(_) => {}
-            BindingsOp::Having(_) => {}
             BindingsOp::Sink => {
                 if let Some(ty) = self.retrieve_type_from_local_ctx(OUTPUT_SCHEMA_KEY) {
                     self.output = Some(ty);
                 }
             }
+            _ => self.errors.push(TypingError::NotYetImplemented(format!(
+                "Unsupported BindingOperator: {:?}",
+                &op
+            ))),
         }
     }
 
@@ -363,7 +354,7 @@ impl<'c> PlanTyper<'c> {
                     Value::Bag(_) => TypeKind::Bag(BagType::new_any()),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
-                            "Unsupported Literal for typing".to_string(),
+                            "Unsupported Literal".to_string(),
                         ));
                         todo!()
                     }
@@ -373,9 +364,10 @@ impl<'c> PlanTyper<'c> {
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
-            _ => self.errors.push(TypingError::NotYetImplemented(
-                "Unsupported [ValueExpr] for typing".to_string(),
-            )),
+            _ => self.errors.push(TypingError::NotYetImplemented(format!(
+                "Unsupported Value Expression: {:?}",
+                &v
+            ))),
         }
     }
 
