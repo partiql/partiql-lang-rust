@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
-use partiql_logical::PathComponent::Index;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr};
 use partiql_types::{
     any, missing, unknown, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
@@ -24,13 +23,12 @@ macro_rules! ty_ctx {
 #[macro_export]
 macro_rules! ty_env {
     (($x:expr, $y:expr)) => {
-        TypeEnv::from([($x, $y)])
+        LocalTypeEnv::from([($x, $y)])
     };
 }
 
 const OUTPUT_SCHEMA_KEY: &str = "_output_schema";
 
-/// All errors that occurred during [`partiql_logical::LogicalPlan`] to [`eval::EvalPlan`] creation.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypeErr {
     pub errors: Vec<TypingError>,
@@ -68,7 +66,8 @@ enum LookupOrder {
 /// Represents a type environment context
 #[derive(Debug, Clone)]
 struct TypeEnvContext {
-    env: TypeEnv,
+    env: LocalTypeEnv,
+    /// Represents the type that is used for creating the `env` in the [TypeEnvContext]
     derived_type: PartiqlType,
 }
 
@@ -78,40 +77,26 @@ impl TypeEnvContext {
         TypeEnvContext::default()
     }
 
-    fn env(&self) -> &TypeEnv {
+    fn env(&self) -> &LocalTypeEnv {
         &self.env
     }
 
     fn derived_type(&self) -> &PartiqlType {
         &self.derived_type
     }
-
-    fn add(env: &TypeEnv, derived_type: &PartiqlType) -> Self {
-        TypeEnvContext {
-            env: env.clone(),
-            derived_type: derived_type.clone(),
-        }
-    }
-
-    fn update_derived_type(&mut self, derived_type: &PartiqlType) -> Self {
-        TypeEnvContext {
-            env: self.env.clone(),
-            derived_type: derived_type.clone(),
-        }
-    }
 }
 
 impl Default for TypeEnvContext {
     fn default() -> Self {
         TypeEnvContext {
-            env: TypeEnv::new(),
+            env: LocalTypeEnv::new(),
             derived_type: any!(),
         }
     }
 }
 
-impl From<(&TypeEnv, &PartiqlType)> for TypeEnvContext {
-    fn from(value: (&TypeEnv, &PartiqlType)) -> Self {
+impl From<(&LocalTypeEnv, &PartiqlType)> for TypeEnvContext {
+    fn from(value: (&LocalTypeEnv, &PartiqlType)) -> Self {
         TypeEnvContext {
             env: value.0.clone(),
             derived_type: value.1.clone(),
@@ -119,8 +104,8 @@ impl From<(&TypeEnv, &PartiqlType)> for TypeEnvContext {
     }
 }
 
-/// Represents a type environment
-type TypeEnv = IndexMap<SymbolPrimitive, PartiqlType>;
+/// Represents a Local Type Environment as opposed to the Global Type Environment in the Catalog.
+type LocalTypeEnv = IndexMap<SymbolPrimitive, PartiqlType>;
 
 #[derive(Debug, Clone)]
 pub struct PlanTyper<'c> {
@@ -134,17 +119,19 @@ pub struct PlanTyper<'c> {
 
 #[allow(dead_code)]
 impl<'c> PlanTyper<'c> {
-    pub fn new(catalog: &'c dyn Catalog, lg: &LogicalPlan<BindingsOp>) -> Self {
+    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Strict` Typing Mode as the default Typing Mode.
+    pub fn new(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Strict,
             catalog,
-            logical_plan: lg.clone(),
+            logical_plan: ir.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
             output: None,
         }
     }
 
+    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Permissive` Typing Mode.
     pub fn new_permissive(catalog: &'c dyn Catalog, lg: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Permissive,
@@ -156,19 +143,19 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
+    /// Returns the typing result for the Typer
     pub fn type_plan(&mut self) -> Result<PartiqlType, TypeErr> {
-        let bop = self.sort().expect("Ops");
+        let ops = self.sort()?;
 
-        for idx in bop {
-            if let Some(binop) = self.to_stable_graph().expect("Graph").node_weight(idx) {
+        for idx in ops {
+            let graph = self.to_stable_graph()?;
+            if let Some(binop) = graph.node_weight(idx) {
                 self.type_binop(binop)
             }
         }
 
-        // dbg!(&self.type_env_stack);
-
         if self.errors.is_empty() {
-            Ok(self.output.clone().expect("PartiQL Type"))
+            Ok(self.output.clone().unwrap_or(unknown!()))
         } else {
             Err(TypeErr {
                 errors: self.errors.clone(),
@@ -180,8 +167,8 @@ impl<'c> PlanTyper<'c> {
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
                 self.type_vexpr(expr, LookupOrder::GlobalLocal);
-                let type_ctx = &self.local_type_env().clone();
-                let mut new_type_env = TypeEnv::new();
+                let type_ctx = &self.local_type_env();
+                let mut new_type_env = LocalTypeEnv::new();
                 for (name, ty) in type_ctx.env().iter() {
                     if as_key.is_empty() {
                         new_type_env.insert(name.clone(), self.element_type(ty).clone());
@@ -198,7 +185,7 @@ impl<'c> PlanTyper<'c> {
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
-                let derived_type_ctx = self.local_type_env().clone();
+                let derived_type_ctx = self.local_type_env();
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
                     if let Some(ty) = self.retrieve_type_from_local_ctx(k) {
@@ -208,8 +195,19 @@ impl<'c> PlanTyper<'c> {
                 let ty = PartiqlType::new_struct(partiql_types::StructType::new(BTreeSet::from([
                     StructConstraint::Fields(fields),
                 ])));
-                let schema = PartiqlType::new_bag(BagType::new(Box::new(ty)));
                 let derived_type = &self.derived_type(&derived_type_ctx);
+                let schema = if derived_type.is_ordered_collection() {
+                    PartiqlType::new_array(ArrayType::new(Box::new(ty)))
+                } else if derived_type.is_unordered_collection() {
+                    PartiqlType::new_bag(BagType::new(Box::new(ty)))
+                } else {
+                    self.errors.push(TypingError::IllegalState(format!(
+                        "Expecting Collection for the output Schema but found {:?}",
+                        &ty
+                    )));
+                    ty
+                };
+
                 self.type_env_stack.push(ty_ctx![(
                     &ty_env![(string_to_sym(OUTPUT_SCHEMA_KEY), schema)],
                     derived_type
@@ -262,7 +260,7 @@ impl<'c> PlanTyper<'c> {
                     LookupOrder::LocalGlobal => {
                         for type_env in self.type_env_stack.clone().into_iter().rev() {
                             if let Some(ty) = type_env.env().get(&sym) {
-                                let mut new_type_env = TypeEnv::new();
+                                let mut new_type_env = LocalTypeEnv::new();
                                 if let TypeKind::Struct(s) = ty.kind() {
                                     for field in s.fields() {
                                         let sym = SymbolPrimitive {
@@ -283,7 +281,7 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Path(v, components) => {
                 self.type_vexpr(v, LookupOrder::LocalGlobal);
-                let type_ctx = self.local_type_env().clone();
+                let type_ctx = self.local_type_env();
 
                 for component in components {
                     match component {
@@ -301,8 +299,6 @@ impl<'c> PlanTyper<'c> {
                                         derived_type
                                     )]);
                                 } else {
-                                    // If the schema is closed we know that we the type for this name does not exist.
-                                    // Because the type is non-existent mark this as error. We can propagate missing
                                     match &self.typing_mode {
                                         TypingMode::Permissive => {
                                             self.type_env_stack.push(ty_ctx![(
@@ -325,9 +321,11 @@ impl<'c> PlanTyper<'c> {
                                 ));
                             }
                         }
-                        Index(_) => self.errors.push(TypingError::NotYetImplemented(
-                            "Typing [Index] [PathComponent]s".to_string(),
-                        )),
+                        PathComponent::Index(_) => {
+                            self.errors.push(TypingError::NotYetImplemented(
+                                "Typing [Index] [PathComponent]s".to_string(),
+                            ))
+                        }
                         PathComponent::KeyExpr(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
                                 "Typing [KeyExpr] [PathComponent]s".to_string(),
@@ -372,7 +370,8 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn sort(&self) -> Result<Vec<NodeIndex>, TypeErr> {
-        let graph = self.to_stable_graph().expect("Graph");
+        let graph = self.to_stable_graph()?;
+
         toposort(&graph, None).map_err(|e| TypeErr {
             errors: vec![TypingError::IllegalState(format!(
                 "Malformed plan detected: {e:?}"
@@ -389,13 +388,18 @@ impl<'c> PlanTyper<'c> {
 
         for (s, d, w) in flows {
             let mut add_node = |op_id: &OpId| {
-                let logical_op = lg.operator(*op_id).unwrap();
-                *seen
-                    .entry(*op_id)
-                    .or_insert_with(|| graph.add_node(logical_op.clone()))
+                if let Some(logical_op) = lg.operator(*op_id) {
+                    Ok(*seen
+                        .entry(*op_id)
+                        .or_insert_with(|| graph.add_node(logical_op.clone())))
+                } else {
+                    Err(TypeErr {
+                        errors: vec![TypingError::IllegalState("Malformed IR".to_string())],
+                    })
+                }
             };
 
-            let (s, d) = (add_node(s), add_node(d));
+            let (s, d) = (add_node(s)?, add_node(d)?);
             graph.add_edge(s, d, *w);
         }
 
@@ -450,8 +454,19 @@ impl<'c> PlanTyper<'c> {
     }
 
     #[inline]
-    fn local_type_env(&self) -> &TypeEnvContext {
-        self.type_env_stack.last().expect("TypeEnv")
+    fn local_type_env(&mut self) -> TypeEnvContext {
+        let out = self
+            .type_env_stack
+            .last()
+            .ok_or_else(|| TypingError::IllegalState("Malformed TypeEnv stack".to_string()));
+
+        match out {
+            Ok(out) => out.clone(),
+            Err(err) => {
+                self.errors.push(err);
+                TypeEnvContext::new()
+            }
+        }
     }
 }
 
@@ -473,6 +488,7 @@ mod tests {
 
     #[test]
     fn simple_sfw() {
+        // Closed schema with `Strict` typing mode.
         assert_query_typing(
             TypingMode::Strict,
             "SELECT customers.id, customers.name FROM customers",
@@ -483,17 +499,7 @@ mod tests {
             ],
         )
         .expect("Type");
-        assert_query_typing(
-            TypingMode::Permissive,
-            "SELECT customers.id, customers.name, customers.age FROM customers",
-            create_customer_schema(false),
-            vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", missing!()),
-            ],
-        )
-        .expect("Type");
+        // Open schema with `Strict` typing mode and `age` non-existent projection.
         assert_query_typing(
             TypingMode::Strict,
             "SELECT customers.id, customers.name, customers.age FROM customers",
@@ -505,12 +511,9 @@ mod tests {
             ],
         )
         .expect("Type");
-    }
-
-    #[test]
-    fn simple_sfw_err() {
-        let result = assert_query_typing(
-            TypingMode::Strict,
+        // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
+        assert_query_typing(
+            TypingMode::Permissive,
             "SELECT customers.id, customers.name, customers.age FROM customers",
             create_customer_schema(false),
             vec![
@@ -518,6 +521,18 @@ mod tests {
                 StructField::new("name", str!()),
                 StructField::new("age", missing!()),
             ],
+        )
+        .expect("Type");
+    }
+
+    #[test]
+    fn simple_sfw_err() {
+        // Closed Schema with `Strict` typing mode and `age` non-existent projection.
+        let result = assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.age FROM customers",
+            create_customer_schema(false),
+            vec![],
         );
 
         match result {

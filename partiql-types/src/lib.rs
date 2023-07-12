@@ -218,28 +218,21 @@ impl PartiqlType {
             || matches!(*self, PartiqlType(TypeKind::Array(_)))
     }
 
+    pub fn is_unordered_collection(&self) -> bool {
+        !self.is_ordered_collection()
+    }
+
+    pub fn is_ordered_collection(&self) -> bool {
+        // TODO Add Sexp when added
+        matches!(*self, PartiqlType(TypeKind::Array(_)))
+    }
+
     pub fn is_bag(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Bag(_)))
     }
 
     pub fn is_array(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Array(_)))
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-#[allow(dead_code)]
-pub struct Attr {
-    name: String,
-    ty: PartiqlType,
-}
-
-impl Attr {
-    pub fn new(name: &str, ty: &PartiqlType) -> Self {
-        Attr {
-            name: name.to_string(),
-            ty: ty.clone(),
-        }
     }
 }
 
@@ -295,14 +288,6 @@ impl StructType {
 
     pub fn is_closed(&self) -> bool {
         self.constraints.contains(&StructConstraint::Open(false))
-    }
-
-    pub fn is_unordered(&self) -> bool {
-        !self.is_ordered()
-    }
-
-    pub fn is_ordered(&self) -> bool {
-        self.constraints.contains(&StructConstraint::Ordered(true))
     }
 }
 
