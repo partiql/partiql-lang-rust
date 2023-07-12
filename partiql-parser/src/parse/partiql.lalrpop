@@ -102,35 +102,35 @@ WithCycleClause : () = {
 //    - all set operations are left-associative and are thus expressed as left-self-recursive rules
 
 QuerySet: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:Query> <setop:SetOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+    <lo:@L> <lhs:Query> <bag_op:BagOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
         let lhs = strip_query(lhs);
         let rhs = strip_query_set(rhs, state, lo, hi);
-        let set_expr = state.node(ast::SetExpr {
-             setop,
+        let bag_expr = state.node(ast::BagOpExpr {
+             bag_op,
              setq,
              lhs: Box::new(lhs),
              rhs: Box::new(rhs)
         }, lo..hi);
-        state.node(ast::QuerySet::SetOp(Box::new( set_expr )), lo..hi)
+        state.node(ast::QuerySet::BagOp(Box::new( bag_expr )), lo..hi)
 	},
     <SingleQuery>,
 }
 
 #[inline]
-SetOp: ast::SetOperator = {
-    "UNION" => ast::SetOperator::Union,
-    "OUTER" "UNION" => ast::SetOperator::OuterUnion,
-    "EXCEPT" => ast::SetOperator::Except,
-    "OUTER" "EXCEPT" => ast::SetOperator::OuterExcept,
-    "INTERSECT" => ast::SetOperator::Intersect,
-    "OUTER" "INTERSECT" => ast::SetOperator::OuterIntersect,
+BagOp: ast::BagOperator = {
+    "UNION" => ast::BagOperator::Union,
+    "OUTER" "UNION" => ast::BagOperator::OuterUnion,
+    "EXCEPT" => ast::BagOperator::Except,
+    "OUTER" "EXCEPT" => ast::BagOperator::OuterExcept,
+    "INTERSECT" => ast::BagOperator::Intersect,
+    "OUTER" "INTERSECT" => ast::BagOperator::OuterIntersect,
 
 }
 
 #[inline]
 SetQuantifier: ast::SetQuantifier = {
-    "DISTINCT" => ast::SetQuantifier::Distinct,
-    "ALL"? => ast::SetQuantifier::All,
+    "DISTINCT"? => ast::SetQuantifier::Distinct,
+    "ALL" => ast::SetQuantifier::All,
 }
 
 

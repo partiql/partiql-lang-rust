@@ -104,7 +104,7 @@ pub struct NameResolver {
 impl NameResolver {
     pub fn resolve(
         &mut self,
-        query: &ast::AstNode<ast::Query>,
+        query: &ast::AstNode<ast::TopLevelQuery>,
     ) -> Result<KeyRegistry, AstTransformationError> {
         query.visit(self);
         if !self.errors.is_empty() {
