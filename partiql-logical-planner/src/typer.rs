@@ -570,6 +570,24 @@ mod tests {
             ],
         )
         .expect("Type");
+
+        let schema = bag![r#struct![BTreeSet::from([
+            fields,
+            StructConstraint::Open(true)
+        ])]];
+
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.details.age, customers.details.bday FROM customers",
+            schema,
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", int!()),
+                StructField::new("bday", any!()),
+            ],
+        )
+        .expect("Type");
     }
 
     #[test]
@@ -625,7 +643,7 @@ mod tests {
                             .iter()
                             .filter(|f| !fields.contains(f))
                             .collect();
-                        Ok(assert![f.is_empty()])
+                        Ok(assert![f.is_empty() && expected_fields.len() == fields.len()])
                     } else {
                         Err(TypeErr {
                             errors: vec![TypingError::TypeCheck(
