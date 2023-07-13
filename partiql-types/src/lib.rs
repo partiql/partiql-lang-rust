@@ -69,7 +69,7 @@ macro_rules! dec {
     };
 }
 
-// TODO add `DecimalP`
+// TODO add macro_rule for Decimal with precision and scale
 
 #[macro_export]
 macro_rules! f32 {
@@ -233,6 +233,10 @@ impl PartiqlType {
 
     pub fn is_array(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Array(_)))
+    }
+
+    pub fn is_any(&self) -> bool {
+        matches!(*self, PartiqlType(TypeKind::Any))
     }
 }
 
