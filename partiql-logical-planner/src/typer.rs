@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use itertools::any;
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr};
@@ -187,11 +188,47 @@ impl<'c> PlanTyper<'c> {
                 let mut fields = vec![];
                 let derived_type_ctx = self.local_type_env();
                 for (k, v) in exprs.iter() {
+                    println!("k: {:?}", k);
+                    println!("v: {:?}", v);
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
                     if let Some(ty) = self.retrieve_type_from_local_ctx(k) {
+                        println!("ty in project: {:?}", &ty);
                         fields.push(StructField::new(k.as_str(), ty.clone()));
                     }
                 }
+
+                // if let Some(ty) = type_ctx.env().get(&sym) {
+                //     let env = ty_env![(sym.clone(), ty.clone())];
+                //     self.type_env_stack.push(ty_ctx![(&env, derived_type)]);
+                // } else if let TypeKind::Struct(s) = derived_type.kind() {
+                //     if s.is_partial() {
+                //         self.type_env_stack.push(ty_ctx![(
+                //                         &ty_env![(sym.clone(), any!())],
+                //                         derived_type
+                //         )]);
+                //     } else {
+                //         match &self.typing_mode {
+                //             TypingMode::Permissive => {
+                //                 self.type_env_stack.push(ty_ctx![(
+                //                                 &ty_env![(sym.clone(), missing!())],
+                //                                 derived_type
+                //                             )]);
+                //             }
+                //             TypingMode::Strict => {
+                //                 self.errors.push(TypingError::TypeCheck(format!(
+                //                     "No Typing Information for {:?}",
+                //                     &key
+                //                 )))
+                //             }
+                //         }
+                //     }
+                // } else {
+                //     self.errors.push(TypingError::TypeCheck(
+                //         "Typing [Key] [PathComponent]s from types other than Struct"
+                //         .to_string(),
+                //     ));
+                // }
+
                 let ty = PartiqlType::new_struct(partiql_types::StructType::new(BTreeSet::from([
                     StructConstraint::Fields(fields),
                 ])));
@@ -259,7 +296,10 @@ impl<'c> PlanTyper<'c> {
                     }
                     LookupOrder::LocalGlobal => {
                         for type_env in self.type_env_stack.clone().into_iter().rev() {
+                            dbg!(&sym);
+                            dbg!(&type_env);
                             if let Some(ty) = type_env.env().get(&sym) {
+                                dbg!(&ty);
                                 let mut new_type_env = LocalTypeEnv::new();
                                 if let TypeKind::Struct(s) = ty.kind() {
                                     for field in s.fields() {
@@ -269,6 +309,8 @@ impl<'c> PlanTyper<'c> {
                                         };
                                         new_type_env.insert(sym, field.ty().clone());
                                     }
+                                } else {
+                                    new_type_env.insert(sym, ty.clone());
                                 }
 
                                 let type_ctx = ty_ctx![(&new_type_env, ty)];
@@ -281,45 +323,12 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Path(v, components) => {
                 self.type_vexpr(v, LookupOrder::LocalGlobal);
-                let type_ctx = self.local_type_env();
-
+                // let type_ctx = self.local_type_env();
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
-                            let sym = binding_to_sym(key);
-                            let derived_type = &self.derived_type(&type_ctx);
-                            if let Some(ty) = type_ctx.env().get(&sym) {
-                                let env = ty_env![(sym.clone(), ty.clone())];
-
-                                self.type_env_stack.push(ty_ctx![(&env, derived_type)]);
-                            } else if let TypeKind::Struct(s) = derived_type.kind() {
-                                if s.is_partial() {
-                                    self.type_env_stack.push(ty_ctx![(
-                                        &ty_env![(sym.clone(), any!())],
-                                        derived_type
-                                    )]);
-                                } else {
-                                    match &self.typing_mode {
-                                        TypingMode::Permissive => {
-                                            self.type_env_stack.push(ty_ctx![(
-                                                &ty_env![(sym.clone(), missing!())],
-                                                derived_type
-                                            )]);
-                                        }
-                                        TypingMode::Strict => {
-                                            self.errors.push(TypingError::TypeCheck(format!(
-                                                "No Typing Information for {:?}",
-                                                &key
-                                            )))
-                                        }
-                                    }
-                                }
-                            } else {
-                                self.errors.push(TypingError::TypeCheck(
-                                    "Typing [Key] [PathComponent]s from types other than Struct"
-                                        .to_string(),
-                                ));
-                            }
+                            let var = ValueExpr::VarRef(key.clone());
+                            self.type_vexpr(&var, LookupOrder::LocalGlobal);
                         }
                         PathComponent::Index(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
@@ -427,17 +436,35 @@ impl<'c> PlanTyper<'c> {
 
     #[inline]
     fn retrieve_type_from_local_ctx(&mut self, key: &str) -> Option<PartiqlType> {
-        let env = self.local_type_env().env().clone();
-        let ty = env.get(&string_to_sym(key)).ok_or_else(|| {
-            TypingError::IllegalState("Absent value found for derived_type".to_string())
-        });
+        let type_ctx = self.local_type_env();
+        dbg!(&type_ctx);
+        let env = type_ctx.env().clone();
+        let derived_type = self.derived_type(&type_ctx.clone());
+        dbg!(&key);
+        dbg!(&env);
+        // let ty = env.get(&string_to_sym(key)).ok_or_else(|| {
+        //     TypingError::IllegalState("Absent value found for derived_type".to_string())
+        // });
 
-        match ty.clone() {
-            Ok(t) => Some(t.clone()),
-            Err(e) => {
-                self.errors.push(e);
-                None
+        if let Some(ty) = env.get(&string_to_sym(key)) {
+            Some(ty.clone())
+        } else if let TypeKind::Struct(s) = derived_type.kind() {
+            if s.is_partial() {
+                Some(any!())
+            } else {
+                match &self.typing_mode {
+                    TypingMode::Permissive => Some(missing!()),
+                    TypingMode::Strict => {
+                        self.errors.push(TypingError::TypeCheck(format!(
+                            "No Typing Information for {:?}",
+                            &key
+                        )));
+                        None
+                    }
+                }
             }
+        } else {
+            None
         }
     }
 
@@ -499,7 +526,7 @@ mod tests {
             ],
         )
         .expect("Type");
-        // Open schema with `Strict` typing mode and `age` non-existent projection.
+        // // Open schema with `Strict` typing mode and `age` non-existent projection.
         assert_query_typing(
             TypingMode::Strict,
             "SELECT customers.id, customers.name, customers.age FROM customers",
@@ -523,6 +550,26 @@ mod tests {
             ],
         )
         .expect("Type");
+
+        let details_fields = struct_fields![("age", int!())];
+        let details = r#struct![BTreeSet::from([details_fields])];
+        let fields = struct_fields![("id", int!()), ("name", str!()), ("details", details)];
+        let schema = bag![r#struct![BTreeSet::from([
+            fields,
+            StructConstraint::Open(false)
+        ])]];
+
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.details.age FROM customers",
+            schema,
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", int!()),
+            ],
+        )
+        .expect("Type");
     }
 
     #[test]
@@ -543,14 +590,9 @@ mod tests {
                 assert_eq!(
                     e,
                     TypeErr {
-                        errors: vec![
-                            TypingError::TypeCheck(format!(
-                                "No Typing Information for CaseInsensitive(\"age\")"
-                            )),
-                            TypingError::IllegalState(
-                                "Absent value found for derived_type".to_string()
-                            )
-                        ],
+                        errors: vec![TypingError::TypeCheck(format!(
+                            "No Typing Information for \"age\""
+                        )),],
                     }
                 )
             }
