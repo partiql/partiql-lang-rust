@@ -119,7 +119,7 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
 
     let parsed = parse(statement);
     let lowered_result = lower(&catalog, &parsed.expect("parse"));
-    let lowered = lowered_result.expect("lower");
+    let lowered = lowered_result.expect("blah blah blah lower");
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
