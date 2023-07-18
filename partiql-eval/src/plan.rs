@@ -830,7 +830,7 @@ mod tests {
         logical.add_flow(expq, sink);
 
         let catalog = PartiqlCatalog::default();
-        let mut planner = EvaluatorPlanner::new(&catalog);
+        let mut planner = EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let plan = planner.compile(&logical);
 
         assert!(plan.is_err());

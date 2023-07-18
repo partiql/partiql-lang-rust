@@ -41,6 +41,7 @@ mod tests {
     use partiql_eval::env::basic::MapBindings;
 
     use partiql_eval::plan;
+    use partiql_eval::plan::EvaluationMode;
 
     use crate::LogicalPlanner;
     use partiql_logical as logical;
@@ -65,7 +66,7 @@ mod tests {
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
-        let mut planner = plan::EvaluatorPlanner::new(&catalog);
+        let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
 
