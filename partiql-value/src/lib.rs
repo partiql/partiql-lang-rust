@@ -44,7 +44,7 @@ pub enum Value {
     Boolean(bool),
     Integer(i64),
     Real(OrderedFloat<f64>),
-    Decimal(RustDecimal),
+    Decimal(Box<RustDecimal>),
     String(Box<String>),
     Blob(Box<Vec<u8>>),
     DateTime(Box<DateTime>),
@@ -66,7 +66,9 @@ impl ops::Add for &Value {
             (_, Value::Null) => Value::Null,
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l + r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l + *r),
-            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l + r),
+            (Value::Decimal(l), Value::Decimal(r)) => {
+                Value::Decimal(Box::new(l.as_ref() + r.as_ref()))
+            }
             (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) + rhs,
             (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
             (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) + rhs,
@@ -90,7 +92,9 @@ impl ops::Sub for &Value {
             (_, Value::Null) => Value::Null,
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l - r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l - *r),
-            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l - r),
+            (Value::Decimal(l), Value::Decimal(r)) => {
+                Value::Decimal(Box::new(l.as_ref() - r.as_ref()))
+            }
             (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) - rhs,
             (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
             (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) - rhs,
@@ -114,7 +118,9 @@ impl ops::Mul for &Value {
             (_, Value::Null) => Value::Null,
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l * r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l * *r),
-            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l * r),
+            (Value::Decimal(l), Value::Decimal(r)) => {
+                Value::Decimal(Box::new(l.as_ref() * r.as_ref()))
+            }
             (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) * rhs,
             (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
             (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) * rhs,
@@ -138,7 +144,9 @@ impl ops::Div for &Value {
             (_, Value::Null) => Value::Null,
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l / r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l / *r),
-            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l / r),
+            (Value::Decimal(l), Value::Decimal(r)) => {
+                Value::Decimal(Box::new(l.as_ref() / r.as_ref()))
+            }
             (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) / rhs,
             (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
             (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) / rhs,
@@ -162,7 +170,9 @@ impl ops::Rem for &Value {
             (_, Value::Null) => Value::Null,
             (Value::Integer(l), Value::Integer(r)) => Value::Integer(l % r),
             (Value::Real(l), Value::Real(r)) => Value::Real(*l % *r),
-            (Value::Decimal(l), Value::Decimal(r)) => Value::Decimal(l % r),
+            (Value::Decimal(l), Value::Decimal(r)) => {
+                Value::Decimal(Box::new(l.as_ref() % r.as_ref()))
+            }
             (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) % rhs,
             (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
             (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) % rhs,
@@ -202,7 +212,7 @@ impl ops::Neg for &Value {
             Value::Missing => Value::Missing,
             Value::Integer(i) => Value::from(-i),
             Value::Real(f) => Value::Real(-f),
-            Value::Decimal(d) => Value::from(-d),
+            Value::Decimal(d) => Value::from(-d.as_ref()),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -218,7 +228,7 @@ impl ops::Neg for Value {
             Value::Missing => self,
             Value::Integer(i) => Value::from(-i),
             Value::Real(f) => Value::Real(-f),
-            Value::Decimal(d) => Value::from(-d),
+            Value::Decimal(d) => Value::from(-d.as_ref()),
             _ => Value::Missing, // data type mismatch => Missing
         }
     }
@@ -477,13 +487,13 @@ impl NullableOrd for Value {
 
 fn coerce_int_or_real_to_decimal(value: &Value) -> Value {
     match value {
-        Value::Integer(int_value) => Value::Decimal(rust_decimal::Decimal::from(*int_value)),
+        Value::Integer(int_value) => Value::from(rust_decimal::Decimal::from(*int_value)),
         Value::Real(real_value) => {
             if !real_value.is_finite() {
                 Value::Missing
             } else {
                 match Decimal::from_f64(real_value.0) {
-                    Some(d_from_r) => Value::Decimal(d_from_r),
+                    Some(d_from_r) => Value::from(d_from_r),
                     None => Value::Missing, // TODO: decide on behavior when float cannot be coerced to Decimal
                 }
             }
@@ -727,7 +737,7 @@ impl Ord for Value {
                 self.cmp(&Value::Real(ordered_float::OrderedFloat(*r as f64)))
             }
             (Value::Integer(l), Value::Decimal(r)) => RustDecimal::from(*l).cmp(r),
-            (Value::Decimal(l), Value::Integer(r)) => l.cmp(&RustDecimal::from(*r)),
+            (Value::Decimal(l), Value::Integer(r)) => l.as_ref().cmp(&RustDecimal::from(*r)),
             (Value::Real(l), Value::Decimal(r)) => {
                 if l.is_nan() || l.0 == f64::NEG_INFINITY {
                     Ordering::Less
@@ -749,7 +759,7 @@ impl Ord for Value {
                     Ordering::Less
                 } else {
                     match RustDecimal::from_f64(r.0) {
-                        Some(r_d) => l.cmp(&r_d),
+                        Some(r_d) => l.as_ref().cmp(&r_d),
                         None => todo!(
                             "Decide default behavior when f64 can't be converted to RustDecimal"
                         ),
@@ -873,7 +883,7 @@ impl From<f64> for Value {
 impl From<RustDecimal> for Value {
     #[inline]
     fn from(d: RustDecimal) -> Self {
-        Value::Decimal(d)
+        Value::Decimal(Box::new(d))
     }
 }
 
@@ -937,8 +947,15 @@ mod tests {
         println!("Cow<&Tuple> size: {}", mem::size_of::<Cow<&Tuple>>());
         println!("Value size: {}", mem::size_of::<Value>());
         println!("Option<Value> size: {}", mem::size_of::<Option<Value>>());
+        println!(
+            "Option<Option<Value>> size: {}",
+            mem::size_of::<Option<Option<Value>>>()
+        );
         println!("Cow<Value> size: {}", mem::size_of::<Cow<Value>>());
         println!("Cow<&Value> size: {}", mem::size_of::<Cow<&Value>>());
+
+        assert_eq!(mem::size_of::<Value>(), 16);
+        assert_eq!(mem::size_of::<Option<Option<Value>>>(), 16);
     }
 
     #[test]
@@ -1019,7 +1036,7 @@ mod tests {
             Value::from(f64::NAN),
             Value::from(f64::NEG_INFINITY),
             Value::from(-123.456),
-            Value::Decimal(dec!(1.23456)),
+            Value::Decimal(Box::new(dec!(1.23456))),
             Value::from(123456),
             Value::from(f64::INFINITY),
             Value::from(""),
@@ -1050,8 +1067,8 @@ mod tests {
         assert_eq!(&Value::Null, &Value::Null.positive());
         assert_eq!(&Value::Integer(123), &Value::Integer(123).positive());
         assert_eq!(
-            &Value::Decimal(dec!(3)),
-            &Value::Decimal(dec!(3)).positive()
+            &Value::Decimal(Box::new(dec!(3))),
+            &Value::Decimal(Box::new(dec!(3))).positive()
         );
         assert_eq!(&Value::from(4.0), &Value::from(4.0).positive());
         assert_eq!(&Value::Missing, &Value::from("foo").positive());
@@ -1060,7 +1077,10 @@ mod tests {
         assert_eq!(Value::Missing, -&Value::Missing);
         assert_eq!(Value::Null, -&Value::Null);
         assert_eq!(Value::Integer(-123), -&Value::Integer(123));
-        assert_eq!(Value::Decimal(dec!(-3)), -&Value::Decimal(dec!(3)));
+        assert_eq!(
+            Value::Decimal(Box::new(dec!(-3))),
+            -&Value::Decimal(Box::new(dec!(3)))
+        );
         assert_eq!(Value::from(-4.0), -&Value::from(4.0));
         assert_eq!(Value::Missing, -&Value::from("foo"));
 
@@ -1073,26 +1093,26 @@ mod tests {
         assert_eq!(Value::Integer(3), &Value::Integer(1) + &Value::Integer(2));
         assert_eq!(Value::from(4.0), &Value::from(1.5) + &Value::from(2.5));
         assert_eq!(
-            Value::Decimal(dec!(3)),
-            &Value::Decimal(dec!(1)) + &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(3))),
+            &Value::Decimal(Box::new(dec!(1))) + &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(Value::from(3.5), &Value::Integer(1) + &Value::from(2.5));
         assert_eq!(Value::from(3.), &Value::from(1.) + &Value::from(2.));
         assert_eq!(
-            Value::Decimal(dec!(3)),
-            &Value::Integer(1) + &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(3))),
+            &Value::Integer(1) + &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(3)),
-            &Value::Decimal(dec!(1)) + &Value::Integer(2)
+            Value::Decimal(Box::new(dec!(3))),
+            &Value::Decimal(Box::new(dec!(1))) + &Value::Integer(2)
         );
         assert_eq!(
-            Value::Decimal(dec!(3)),
-            &Value::from(1.) + &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(3))),
+            &Value::from(1.) + &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(3)),
-            &Value::Decimal(dec!(1)) + &Value::from(2.)
+            Value::Decimal(Box::new(dec!(3))),
+            &Value::Decimal(Box::new(dec!(1))) + &Value::from(2.)
         );
 
         // Sub
@@ -1104,26 +1124,26 @@ mod tests {
         assert_eq!(Value::Integer(-1), &Value::Integer(1) - &Value::Integer(2));
         assert_eq!(Value::from(-1.0), &Value::from(1.5) - &Value::from(2.5));
         assert_eq!(
-            Value::Decimal(dec!(-1)),
-            &Value::Decimal(dec!(1)) - &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(-1))),
+            &Value::Decimal(Box::new(dec!(1))) - &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(Value::from(-1.5), &Value::Integer(1) - &Value::from(2.5));
         assert_eq!(Value::from(-1.), &Value::from(1.) - &Value::from(2.));
         assert_eq!(
-            Value::Decimal(dec!(-1)),
-            &Value::Integer(1) - &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(-1))),
+            &Value::Integer(1) - &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(-1)),
-            &Value::Decimal(dec!(1)) - &Value::Integer(2)
+            Value::Decimal(Box::new(dec!(-1))),
+            &Value::Decimal(Box::new(dec!(1))) - &Value::Integer(2)
         );
         assert_eq!(
-            Value::Decimal(dec!(-1)),
-            &Value::from(1.) - &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(-1))),
+            &Value::from(1.) - &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(-1)),
-            &Value::Decimal(dec!(1)) - &Value::from(2.)
+            Value::Decimal(Box::new(dec!(-1))),
+            &Value::Decimal(Box::new(dec!(1))) - &Value::from(2.)
         );
 
         // Mul
@@ -1135,26 +1155,26 @@ mod tests {
         assert_eq!(Value::Integer(2), &Value::Integer(1) * &Value::Integer(2));
         assert_eq!(Value::from(3.75), &Value::from(1.5) * &Value::from(2.5));
         assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            &Value::Decimal(dec!(1)) * &Value::Decimal(dec!(2))
+            Value::from(Decimal::new(2, 0)),
+            &Value::Decimal(Box::new(dec!(1))) * &Value::from(dec!(2))
         );
         assert_eq!(Value::from(2.5), &Value::Integer(1) * &Value::from(2.5));
         assert_eq!(Value::from(2.), &Value::from(1.) * &Value::from(2.));
         assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            &Value::Integer(1) * &Value::Decimal(dec!(2))
+            Value::from(Decimal::new(2, 0)),
+            &Value::Integer(1) * &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            &Value::Decimal(dec!(1)) * &Value::Integer(2)
+            Value::from(Decimal::new(2, 0)),
+            &Value::Decimal(Box::new(dec!(1))) * &Value::Integer(2)
         );
         assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            &Value::from(1.) * &Value::Decimal(dec!(2))
+            Value::from(Decimal::new(2, 0)),
+            &Value::from(1.) * &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(Decimal::new(2, 0)),
-            &Value::Decimal(dec!(1)) * &Value::from(2.)
+            Value::from(Decimal::new(2, 0)),
+            &Value::Decimal(Box::new(dec!(1))) * &Value::from(2.)
         );
 
         // Div
@@ -1166,26 +1186,26 @@ mod tests {
         assert_eq!(Value::Integer(0), &Value::Integer(1) / &Value::Integer(2));
         assert_eq!(Value::from(0.6), &Value::from(1.5) / &Value::from(2.5));
         assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            &Value::Decimal(dec!(1)) / &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(0.5))),
+            &Value::Decimal(Box::new(dec!(1))) / &Value::from(dec!(2))
         );
         assert_eq!(Value::from(0.4), &Value::Integer(1) / &Value::from(2.5));
         assert_eq!(Value::from(0.5), &Value::from(1.) / &Value::from(2.));
         assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            &Value::Integer(1) / &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(0.5))),
+            &Value::Integer(1) / &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            &Value::Decimal(dec!(1)) / &Value::Integer(2)
+            Value::Decimal(Box::new(dec!(0.5))),
+            &Value::Decimal(Box::new(dec!(1))) / &Value::Integer(2)
         );
         assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            &Value::from(1.) / &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(0.5))),
+            &Value::from(1.) / &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(0.5)),
-            &Value::Decimal(dec!(1)) / &Value::from(2.)
+            Value::Decimal(Box::new(dec!(0.5))),
+            &Value::Decimal(Box::new(dec!(1))) / &Value::from(2.)
         );
 
         // Mod
@@ -1197,26 +1217,26 @@ mod tests {
         assert_eq!(Value::Integer(1), &Value::Integer(1) % &Value::Integer(2));
         assert_eq!(Value::from(1.5), &Value::from(1.5) % &Value::from(2.5));
         assert_eq!(
-            Value::Decimal(dec!(1)),
-            &Value::Decimal(dec!(1)) % &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(1))),
+            &Value::Decimal(Box::new(dec!(1))) % &Value::from(dec!(2))
         );
         assert_eq!(Value::from(1.), &Value::Integer(1) % &Value::from(2.5));
         assert_eq!(Value::from(1.), &Value::from(1.) % &Value::from(2.));
         assert_eq!(
-            Value::Decimal(dec!(1)),
-            &Value::Integer(1) % &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(1))),
+            &Value::Integer(1) % &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(1)),
-            &Value::Decimal(dec!(1)) % &Value::Integer(2)
+            Value::Decimal(Box::new(dec!(1))),
+            &Value::Decimal(Box::new(dec!(1))) % &Value::Integer(2)
         );
         assert_eq!(
-            Value::Decimal(dec!(1)),
-            &Value::from(1.) % &Value::Decimal(dec!(2))
+            Value::Decimal(Box::new(dec!(1))),
+            &Value::from(1.) % &Value::Decimal(Box::new(dec!(2)))
         );
         assert_eq!(
-            Value::Decimal(dec!(1)),
-            &Value::Decimal(dec!(1)) % &Value::from(2.)
+            Value::Decimal(Box::new(dec!(1))),
+            &Value::Decimal(Box::new(dec!(1))) % &Value::from(2.)
         );
     }
 
@@ -1776,7 +1796,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lt(&Value::from(1), &Value::Decimal(dec!(2.0)))
+            NullableOrd::lt(&Value::from(1), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(true),
@@ -1784,15 +1804,15 @@ mod tests {
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lt(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+            NullableOrd::lt(&Value::from(1.0), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lt(&Value::Decimal(dec!(1.0)), &Value::from(2))
+            NullableOrd::lt(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2))
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lt(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+            NullableOrd::lt(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2.))
         );
 
         // GT
@@ -1802,7 +1822,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gt(&Value::from(1), &Value::Decimal(dec!(2.0)))
+            NullableOrd::gt(&Value::from(1), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(false),
@@ -1810,15 +1830,15 @@ mod tests {
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gt(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+            NullableOrd::gt(&Value::from(1.0), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gt(&Value::Decimal(dec!(1.0)), &Value::from(2))
+            NullableOrd::gt(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2))
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gt(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+            NullableOrd::gt(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2.))
         );
 
         // LTEQ
@@ -1828,7 +1848,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lteq(&Value::from(1), &Value::Decimal(dec!(2.0)))
+            NullableOrd::lteq(&Value::from(1), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(true),
@@ -1836,15 +1856,15 @@ mod tests {
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lteq(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+            NullableOrd::lteq(&Value::from(1.0), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lteq(&Value::Decimal(dec!(1.0)), &Value::from(2))
+            NullableOrd::lteq(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2))
         );
         assert_eq!(
             Value::from(true),
-            NullableOrd::lteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+            NullableOrd::lteq(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2.))
         );
 
         // GTEQ
@@ -1854,7 +1874,7 @@ mod tests {
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gteq(&Value::from(1), &Value::Decimal(dec!(2.0)))
+            NullableOrd::gteq(&Value::from(1), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(false),
@@ -1862,15 +1882,15 @@ mod tests {
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gteq(&Value::from(1.0), &Value::Decimal(dec!(2.0)))
+            NullableOrd::gteq(&Value::from(1.0), &Value::Decimal(Box::new(dec!(2.0))))
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2))
+            NullableOrd::gteq(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2))
         );
         assert_eq!(
             Value::from(false),
-            NullableOrd::gteq(&Value::Decimal(dec!(1.0)), &Value::from(2.))
+            NullableOrd::gteq(&Value::Decimal(Box::new(dec!(1.0))), &Value::from(2.))
         );
     }
 

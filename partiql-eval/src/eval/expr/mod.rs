@@ -1211,7 +1211,7 @@ fn coll_avg(elems: Vec<&Value>) -> Value {
                 return Missing;
             }
         }
-        &sum / &Value::Decimal(rust_decimal::Decimal::from(count))
+        &sum / &Value::from(rust_decimal::Decimal::from(count))
     }
 }
 

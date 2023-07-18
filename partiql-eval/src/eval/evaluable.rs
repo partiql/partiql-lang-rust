@@ -475,7 +475,7 @@ impl AggregateFunction for Avg {
                 "Expect group to exist in avgs".to_string(),
             )),
             Some((0, _)) => Ok(Null),
-            Some((c, s)) => Ok(s / &Value::Decimal(rust_decimal::Decimal::from(*c))),
+            Some((c, s)) => Ok(s / &Value::from(rust_decimal::Decimal::from(*c))),
         }
     }
 }
