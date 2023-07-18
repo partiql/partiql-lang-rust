@@ -1503,7 +1503,7 @@ impl Evaluable for EvalOuterExcept {
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum SetQuantifier {
     All,
     Distinct,
