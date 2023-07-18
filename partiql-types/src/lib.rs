@@ -1,5 +1,6 @@
-use std::collections::HashSet;
-use std::fmt::Debug;
+use itertools::Itertools;
+use std::collections::BTreeSet;
+use std::fmt::{Debug, Display, Formatter};
 
 pub trait Type {}
 
@@ -121,12 +122,12 @@ macro_rules! r#array {
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct PartiqlType {
     kind: TypeKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
@@ -152,6 +153,8 @@ pub enum TypeKind {
     StringFixed(usize),
     StringVarying(usize),
 
+    DateTime,
+
     // Container Types
     Struct(StructType),
     Bag(BagType),
@@ -159,9 +162,79 @@ pub enum TypeKind {
     // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
 }
 
+impl Display for TypeKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let x = match self {
+            TypeKind::Any => "Any".to_string(),
+            TypeKind::AnyOf(anyof) => {
+                format!(
+                    "AnyOf({})",
+                    anyof.types.iter().map(|pt| pt.kind()).join(",")
+                )
+            }
+            TypeKind::Null => "Null".to_string(),
+            TypeKind::Missing => "Missing".to_string(),
+            TypeKind::Int => "Int".to_string(),
+            TypeKind::Int8 => "Int8".to_string(),
+            TypeKind::Int16 => "Int16".to_string(),
+            TypeKind::Int32 => "Int32".to_string(),
+            TypeKind::Int64 => "Int64".to_string(),
+            TypeKind::Bool => "Bool".to_string(),
+            TypeKind::Decimal => "Decimal".to_string(),
+            TypeKind::DecimalP(_, _) => {
+                todo!()
+            }
+            TypeKind::Float32 => "Float32".to_string(),
+            TypeKind::Float64 => "Float64".to_string(),
+            TypeKind::String => "String".to_string(),
+            TypeKind::StringFixed(_) => {
+                todo!()
+            }
+            TypeKind::StringVarying(_) => {
+                todo!()
+            }
+            TypeKind::DateTime => "DateTime".to_string(),
+            TypeKind::Struct(_) => "Struct".to_string(),
+            TypeKind::Bag(_) => "Bag".to_string(),
+            TypeKind::Array(_) => "Array".to_string(),
+        };
+        write!(f, "{}", x)
+    }
+}
+
+pub const TYPE_ANY: PartiqlType = PartiqlType::new(TypeKind::Any);
+pub const TYPE_NULL: PartiqlType = PartiqlType::new(TypeKind::Null);
+pub const TYPE_MISSING: PartiqlType = PartiqlType::new(TypeKind::Missing);
+pub const TYPE_BOOL: PartiqlType = PartiqlType::new(TypeKind::Bool);
+pub const TYPE_INT: PartiqlType = PartiqlType::new(TypeKind::Int);
+pub const TYPE_INT8: PartiqlType = PartiqlType::new(TypeKind::Int8);
+pub const TYPE_INT16: PartiqlType = PartiqlType::new(TypeKind::Int16);
+pub const TYPE_INT32: PartiqlType = PartiqlType::new(TypeKind::Int32);
+pub const TYPE_INT64: PartiqlType = PartiqlType::new(TypeKind::Int64);
+pub const TYPE_REAL: PartiqlType = PartiqlType::new(TypeKind::Float32);
+pub const TYPE_DOUBLE: PartiqlType = PartiqlType::new(TypeKind::Float64);
+pub const TYPE_DECIMAL: PartiqlType = PartiqlType::new(TypeKind::Decimal);
+pub const TYPE_STRING: PartiqlType = PartiqlType::new(TypeKind::String);
+pub const TYPE_DATETIME: PartiqlType = PartiqlType::new(TypeKind::DateTime);
+
+/*
+pub const TYPE_BOOL: LogicalType = LogicalType {
+    kind: LogicalTypeKind::Bool,
+};
+
+pub const TYPE_INT: LogicalType = LogicalType {
+    kind: LogicalTypeKind::Int,
+};
+
+pub const TYPE_REAL: LogicalType = LogicalType {
+    kind: LogicalTypeKind::Real,
+};
+
+ */
+
 #[allow(dead_code)]
 impl PartiqlType {
-    pub fn new(kind: TypeKind) -> PartiqlType {
+    pub const fn new(kind: TypeKind) -> PartiqlType {
         PartiqlType { kind }
     }
 
@@ -183,9 +256,27 @@ impl PartiqlType {
         }
     }
 
-    pub fn union_of(types: HashSet<PartiqlType>) -> PartiqlType {
+    pub fn union_of(types: BTreeSet<PartiqlType>) -> PartiqlType {
         PartiqlType {
             kind: TypeKind::AnyOf(AnyOf::new(types)),
+        }
+    }
+
+    pub fn union_with(self, other: PartiqlType) -> PartiqlType {
+        match (self.kind, other.kind) {
+            (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
+            (TypeKind::AnyOf(lhs), TypeKind::AnyOf(rhs)) => {
+                PartiqlType::union_of(lhs.types.into_iter().chain(rhs.types.into_iter()).collect())
+            }
+            (TypeKind::AnyOf(anyof), other) | (other, TypeKind::AnyOf(anyof)) => {
+                let mut types = anyof.types;
+                types.insert(PartiqlType::new(other));
+                PartiqlType::union_of(types)
+            }
+            (l, r) => {
+                let types = [PartiqlType::new(l), PartiqlType::new(r)];
+                PartiqlType::union_of(types.into_iter().collect())
+            }
         }
     }
 
@@ -203,25 +294,29 @@ impl PartiqlType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct AnyOf {
-    types: HashSet<PartiqlType>,
+    types: BTreeSet<PartiqlType>,
 }
 
 impl AnyOf {
-    pub fn new(types: HashSet<PartiqlType>) -> Self {
+    pub fn new(types: BTreeSet<PartiqlType>) -> Self {
         AnyOf { types }
+    }
+
+    pub fn types(&self) -> impl Iterator<Item = &PartiqlType> {
+        self.types.iter()
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructType {
     constraints: Vec<StructConstraint>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructField {
     name: String,
@@ -252,7 +347,7 @@ impl StructType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
@@ -260,7 +355,7 @@ pub enum StructConstraint {
     Fields(StructField),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlType>,
@@ -282,7 +377,7 @@ impl BagType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
@@ -304,7 +399,7 @@ impl ArrayType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 enum CollectionConstraint {
     Ordered(bool),
 }

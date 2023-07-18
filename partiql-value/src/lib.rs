@@ -526,6 +526,11 @@ impl Value {
     }
 
     #[inline]
+    pub fn is_sequence(&self) -> bool {
+        self.is_bag() || self.is_list()
+    }
+
+    #[inline]
     /// Returns true if and only if Value is an integer, real, or decimal
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
@@ -535,6 +540,18 @@ impl Value {
     /// Returns true if and only if Value is null or missing
     pub fn is_null_or_missing(&self) -> bool {
         matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
+    /// Returns true if and only if Value is null or missing
+    pub fn is_absent(&self) -> bool {
+        self.is_null_or_missing()
+    }
+
+    #[inline]
+    /// Returns true if and only if Value is null or missing
+    pub fn is_present(&self) -> bool {
+        !self.is_absent()
     }
 
     #[inline]
@@ -602,9 +619,19 @@ impl Value {
     #[inline]
     pub fn iter(&self) -> ValueIter {
         match self {
+            Value::Null | Value::Missing => ValueIter::Single(None),
             Value::List(list) => ValueIter::List(list.iter()),
             Value::Bag(bag) => ValueIter::Bag(bag.iter()),
             other => ValueIter::Single(Some(other)),
+        }
+    }
+
+    #[inline]
+    pub fn sequence_iter(&self) -> Option<ValueIter> {
+        if self.is_sequence() {
+            Some(self.iter())
+        } else {
+            None
         }
     }
 }
