@@ -78,12 +78,14 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
 #[allow(dead_code)]
 pub(crate) fn fail_semantics(statement: &str) {
     let catalog = PartiqlCatalog::default();
-    let parsed = parse(statement);
-    let lowered = parsed.map(|parsed| lower(&catalog, &parsed));
-    assert!(
-        lowered.is_err(),
-        "When semantically verifying `{statement}`, expected `Err(_)`, but was `{lowered:#?}`"
-    );
+    if let Ok(parsed) = parse(statement) {
+        let lowered = lower(&catalog, &parsed);
+
+        assert!(
+            lowered.is_err(),
+            "When semantically verifying `{statement}`, expected `Err(_)`, but was `{lowered:#?}`"
+        );
+    }
 }
 
 #[track_caller]
