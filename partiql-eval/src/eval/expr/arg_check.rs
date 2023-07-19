@@ -133,13 +133,7 @@ impl<const STRICT: bool, OnMissing: MissingArgShortCircuit> ArgChecker
         };
 
         match arg.borrow() {
-            Missing => {
-                if STRICT {
-                    ArgCheckControlFlow::ShortCircuit(OnMissing::propagate())
-                } else {
-                    ArgCheckControlFlow::Propagate(OnMissing::propagate())
-                }
-            }
+            Missing => ArgCheckControlFlow::Propagate(OnMissing::propagate()),
             Null => ArgCheckControlFlow::Propagate(Null),
             val => {
                 if subsumes(typ, val) {

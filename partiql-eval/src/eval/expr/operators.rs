@@ -64,12 +64,7 @@ impl BindEvalExpr for EvalOpUnary {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let bools = [TYPE_BOOL];
-        let nums = [PartiqlType::union_of(
-            [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]
-                .into_iter()
-                .collect(),
-        )];
+        let any_num = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
 
         let unop = |types, f: fn(&Value) -> Value| {
             GenericFn::create_with_checker::<
@@ -80,9 +75,9 @@ impl BindEvalExpr for EvalOpUnary {
         };
 
         match self {
-            EvalOpUnary::Pos => unop(nums, |operand| operand.clone()),
-            EvalOpUnary::Neg => unop(nums, |operand| -operand),
-            EvalOpUnary::Not => unop(bools, |operand| !operand),
+            EvalOpUnary::Pos => unop([any_num], |operand| operand.clone()),
+            EvalOpUnary::Neg => unop([any_num], |operand| -operand),
+            EvalOpUnary::Not => unop([TYPE_BOOL], |operand| !operand),
         }
     }
 }
@@ -105,9 +100,11 @@ where
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum EvalOpBinary {
+    // Logical ops
     And,
     Or,
-    Concat,
+
+    // Equality ops
     Eq,
     Neq,
     Gt,
@@ -123,7 +120,9 @@ pub(crate) enum EvalOpBinary {
     Mod,
     Exp,
 
+    // other ops
     In,
+    Concat,
 }
 
 #[derive(Debug)]
@@ -147,19 +146,6 @@ impl<const B: bool, OnMissing: MissingArgShortCircuit> ArgChecker
     }
 }
 
-#[derive(Debug)]
-struct MissingToFalse<const IS_ERR: bool> {}
-impl<const IS_ERR: bool> MissingArgShortCircuit for MissingToFalse<IS_ERR> {
-    fn is_strict_error() -> bool {
-        IS_ERR
-    }
-
-    #[inline]
-    fn propagate() -> Value {
-        false.into()
-    }
-}
-
 impl BindEvalExpr for EvalOpBinary {
     #[inline]
     fn bind<const STRICT: bool>(
@@ -173,129 +159,56 @@ impl BindEvalExpr for EvalOpBinary {
         type EqCheck<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToMissing<false>>;
         type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToMissing<true>>;
 
-        let anys = [TYPE_ANY, TYPE_ANY];
-        let bools = [TYPE_BOOL, TYPE_BOOL];
-        let list = PartiqlType::new(TypeKind::Array(ArrayType::new_any()));
-        let bag = PartiqlType::new(TypeKind::Bag(BagType::new_any()));
-        let seqs = list.union_with(bag);
-        let num = PartiqlType::union_of(
-            [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]
-                .into_iter()
-                .collect(),
-        );
-        let nums = [num.clone(), num];
-
-        #[inline]
-        fn control_flow<const STRICT: bool, ArgC, F, R>(
-            ident: &EvalOpBinary,
-            types: [PartiqlType; 2],
-            args: Vec<Box<dyn EvalExpr>>,
-            f: F,
-        ) -> Result<Box<dyn EvalExpr>, BindError>
-        where
-            F: Fn(&Value, &Value) -> R + 'static,
-            R: Into<Value> + 'static,
-            ArgC: ArgChecker + 'static,
-        {
-            GenericFn::create_with_checker::<{ STRICT }, 2, ArgC>(*ident, types, args, f)
+        macro_rules! create {
+            ($check: ty, $types: expr, $f:expr) => {
+                GenericFn::create_with_checker::<{ STRICT }, 2, $check>(*self, $types, args, $f)
+            };
         }
 
-        #[inline]
-        fn eqbinop<const STRICT: bool, F, R>(
-            ident: &EvalOpBinary,
-            types: [PartiqlType; 2],
-            args: Vec<Box<dyn EvalExpr>>,
-            f: F,
-        ) -> Result<Box<dyn EvalExpr>, BindError>
-        where
-            F: Fn(&Value, &Value) -> R + 'static,
-            R: Into<Value> + 'static,
-        {
-            GenericFn::create_with_checker::<{ STRICT }, 2, EqCheck<STRICT>>(*ident, types, args, f)
+        macro_rules! logical {
+            ($check: ty, $f:expr) => {
+                create!($check, [TYPE_BOOL, TYPE_BOOL], $f)
+            };
         }
 
-        #[inline]
-        fn binop<const STRICT: bool, F, R>(
-            ident: &EvalOpBinary,
-            types: [PartiqlType; 2],
-            args: Vec<Box<dyn EvalExpr>>,
-            f: F,
-        ) -> Result<Box<dyn EvalExpr>, BindError>
-        where
-            F: Fn(&Value, &Value) -> R + 'static,
-            R: Into<Value> + 'static,
-        {
-            GenericFn::create_with_checker::<{ STRICT }, 2, Check<STRICT>>(*ident, types, args, f)
+        macro_rules! equality {
+            ($f:expr) => {
+                create!(EqCheck<STRICT>, [TYPE_ANY, TYPE_ANY], $f)
+            };
         }
 
-        #[inline]
-        fn mbinop<const STRICT: bool, F, R>(
-            ident: &EvalOpBinary,
-            types: [PartiqlType; 2],
-            args: Vec<Box<dyn EvalExpr>>,
-            f: F,
-        ) -> Result<Box<dyn EvalExpr>, BindError>
-        where
-            F: Fn(&Value, &Value) -> R + 'static,
-            R: Into<Value> + 'static,
-        {
-            GenericFn::create_with_checker::<{ STRICT }, 2, MathCheck<STRICT>>(
-                *ident, types, args, f,
-            )
+        macro_rules! math {
+            ($f:expr) => {{
+                let nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
+                create!(MathCheck<STRICT>, [nums.clone(), nums], $f)
+            }};
         }
 
         match self {
+            EvalOpBinary::And => logical!(AndCheck, |lhs, rhs| lhs.and(rhs)),
+            EvalOpBinary::Or => logical!(OrCheck, |lhs, rhs| lhs.or(rhs)),
+            EvalOpBinary::Eq => equality!(|lhs, rhs| NullableEq::eq(lhs, rhs)),
+            EvalOpBinary::Neq => equality!(|lhs, rhs| NullableEq::neq(lhs, rhs)),
+            EvalOpBinary::Gt => equality!(|lhs, rhs| NullableOrd::gt(lhs, rhs)),
+            EvalOpBinary::Gteq => equality!(|lhs, rhs| NullableOrd::gteq(lhs, rhs)),
+            EvalOpBinary::Lt => equality!(|lhs, rhs| NullableOrd::lt(lhs, rhs)),
+            EvalOpBinary::Lteq => equality!(|lhs, rhs| NullableOrd::lteq(lhs, rhs)),
+            EvalOpBinary::Add => math!(|lhs, rhs| lhs + rhs),
+            EvalOpBinary::Sub => math!(|lhs, rhs| lhs - rhs),
+            EvalOpBinary::Mul => math!(|lhs, rhs| lhs * rhs),
+            EvalOpBinary::Div => math!(|lhs, rhs| lhs / rhs),
+            EvalOpBinary::Mod => math!(|lhs, rhs| lhs % rhs),
             EvalOpBinary::Exp => Err(BindError::NotYetImplemented("exp".to_string())),
-            EvalOpBinary::And => {
-                control_flow::<{ STRICT }, AndCheck, _, _>(self, bools, args, |lhs, rhs| {
-                    lhs.and(rhs)
-                })
-            }
-            EvalOpBinary::Or => {
-                control_flow::<{ STRICT }, OrCheck, _, _>(self, bools, args, |lhs, rhs| lhs.or(rhs))
-            }
-            EvalOpBinary::Concat => binop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| {
-                // TODO non-naive concat (i.e., don't just use debug print for non-strings).
-                let lhs = if let Value::String(s) = lhs {
-                    s.as_ref().clone()
-                } else {
-                    format!("{lhs:?}")
-                };
-                let rhs = if let Value::String(s) = rhs {
-                    s.as_ref().clone()
-                } else {
-                    format!("{rhs:?}")
-                };
-                Value::String(Box::new(format!("{lhs}{rhs}")))
-            }),
-            EvalOpBinary::Eq => {
-                eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| NullableEq::eq(lhs, rhs))
-            }
-            EvalOpBinary::Neq => {
-                eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| NullableEq::neq(lhs, rhs))
-            }
-            EvalOpBinary::Gt => {
-                eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| NullableOrd::gt(lhs, rhs))
-            }
-            EvalOpBinary::Gteq => eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| {
-                NullableOrd::gteq(lhs, rhs)
-            }),
-            EvalOpBinary::Lt => {
-                eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| NullableOrd::lt(lhs, rhs))
-            }
-            EvalOpBinary::Lteq => eqbinop::<{ STRICT }, _, _>(self, anys, args, |lhs, rhs| {
-                NullableOrd::lteq(lhs, rhs)
-            }),
-            EvalOpBinary::Add => mbinop::<{ STRICT }, _, _>(self, nums, args, |lhs, rhs| lhs + rhs),
-            EvalOpBinary::Sub => mbinop::<{ STRICT }, _, _>(self, nums, args, |lhs, rhs| lhs - rhs),
-            EvalOpBinary::Mul => mbinop::<{ STRICT }, _, _>(self, nums, args, |lhs, rhs| lhs * rhs),
-            EvalOpBinary::Div => mbinop::<{ STRICT }, _, _>(self, nums, args, |lhs, rhs| lhs / rhs),
-            EvalOpBinary::Mod => mbinop::<{ STRICT }, _, _>(self, nums, args, |lhs, rhs| lhs % rhs),
             EvalOpBinary::In => {
-                control_flow::<{ STRICT }, InCheck<STRICT>, _, _>(
-                    self,
-                    [TYPE_ANY, seqs],
-                    args,
+                create!(
+                    InCheck<STRICT>,
+                    [
+                        TYPE_ANY,
+                        PartiqlType::any_of([
+                            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
+                            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
+                        ])
+                    ],
                     |lhs, rhs| {
                         match rhs.sequence_iter() {
                             // TODO apply the changes once we clarify the rules of coercion for `IN` RHS.
@@ -327,8 +240,24 @@ impl BindEvalExpr for EvalOpBinary {
                             }
                             None => Null,
                         }
-                    },
+                    }
                 )
+            }
+            EvalOpBinary::Concat => {
+                create!(Check<STRICT>, [TYPE_ANY, TYPE_ANY], |lhs, rhs| {
+                    // TODO non-naive concat (i.e., don't just use debug print for non-strings).
+                    let lhs = if let Value::String(s) = lhs {
+                        s.as_ref().clone()
+                    } else {
+                        format!("{lhs:?}")
+                    };
+                    let rhs = if let Value::String(s) = rhs {
+                        s.as_ref().clone()
+                    } else {
+                        format!("{rhs:?}")
+                    };
+                    Value::String(Box::new(format!("{lhs}{rhs}")))
+                })
             }
         }
     }
@@ -410,7 +339,8 @@ impl BindEvalExpr for EvalFnAbs {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        GenericFn::create_generic::<STRICT, 1>(args, |[value]| {
+        let nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
+        GenericFn::create_typed_generic::<STRICT, 1>([nums], args, |[value]| {
             let zero: Value = 0.into();
             Cow::Owned(match NullableOrd::lt(value.borrow(), &zero) {
                 Null => Null,
@@ -431,11 +361,11 @@ impl BindEvalExpr for EvalFnCardinality {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let list = PartiqlType::new(TypeKind::Array(ArrayType::new_any()));
-        let bag = PartiqlType::new(TypeKind::Bag(BagType::new_any()));
-        let seqs = list.union_with(bag);
-        let collections =
-            seqs.union_with(PartiqlType::new(TypeKind::Struct(StructType::new_any())));
+        let collections = PartiqlType::any_of([
+            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
+            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
+            PartiqlType::new(TypeKind::Struct(StructType::new_any())),
+        ]);
         GenericFn::create_typed_generic::<STRICT, 1>([collections], args, |[value]| {
             let result = match value.borrow() {
                 Value::List(l) => Value::from(l.len()),

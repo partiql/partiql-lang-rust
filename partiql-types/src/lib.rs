@@ -256,9 +256,12 @@ impl PartiqlType {
         }
     }
 
-    pub fn union_of(types: BTreeSet<PartiqlType>) -> PartiqlType {
+    pub fn any_of<I>(types: I) -> PartiqlType
+    where
+        I: IntoIterator<Item = PartiqlType>,
+    {
         PartiqlType {
-            kind: TypeKind::AnyOf(AnyOf::new(types)),
+            kind: TypeKind::AnyOf(AnyOf::from_iter(types)),
         }
     }
 
@@ -266,16 +269,16 @@ impl PartiqlType {
         match (self.kind, other.kind) {
             (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
             (TypeKind::AnyOf(lhs), TypeKind::AnyOf(rhs)) => {
-                PartiqlType::union_of(lhs.types.into_iter().chain(rhs.types.into_iter()).collect())
+                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types.into_iter()))
             }
             (TypeKind::AnyOf(anyof), other) | (other, TypeKind::AnyOf(anyof)) => {
                 let mut types = anyof.types;
                 types.insert(PartiqlType::new(other));
-                PartiqlType::union_of(types)
+                PartiqlType::any_of(types)
             }
             (l, r) => {
                 let types = [PartiqlType::new(l), PartiqlType::new(r)];
-                PartiqlType::union_of(types.into_iter().collect())
+                PartiqlType::any_of(types)
             }
         }
     }
@@ -307,6 +310,14 @@ impl AnyOf {
 
     pub fn types(&self) -> impl Iterator<Item = &PartiqlType> {
         self.types.iter()
+    }
+}
+
+impl FromIterator<PartiqlType> for AnyOf {
+    fn from_iter<T: IntoIterator<Item = PartiqlType>>(iter: T) -> Self {
+        AnyOf {
+            types: iter.into_iter().collect(),
+        }
     }
 }
 
