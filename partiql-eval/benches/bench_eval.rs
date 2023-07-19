@@ -7,6 +7,7 @@ use partiql_catalog::PartiqlCatalog;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan;
+use partiql_eval::plan::EvaluationMode;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
@@ -122,7 +123,7 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 
 fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     let catalog = PartiqlCatalog::default();
-    let mut planner = plan::EvaluatorPlanner::new(&catalog);
+    let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
     planner.compile(logical).expect("Expect no plan error")
 }
 

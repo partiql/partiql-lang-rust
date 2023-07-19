@@ -7,7 +7,7 @@ use rand::{Rng, SeedableRng};
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::EvalPlan;
-use partiql_eval::plan::EvaluatorPlanner;
+use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
 use partiql_logical::{BindingsOp, LogicalPlan};
 use partiql_logical_planner::LogicalPlanner;
 
@@ -341,7 +341,7 @@ fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPla
 }
 #[inline]
 fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    EvaluatorPlanner::new(catalog)
+    EvaluatorPlanner::new(EvaluationMode::Permissive, catalog)
         .compile(logical)
         .expect("Expect no plan error")
 }

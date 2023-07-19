@@ -157,6 +157,7 @@ mod tests {
 
     use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
+    use partiql_eval::plan::EvaluationMode;
     use partiql_parser::{Parsed, ParserResult};
     use partiql_value::{bag, tuple, Value};
 
@@ -183,7 +184,8 @@ mod tests {
         logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
     ) -> Value {
-        let mut planner = partiql_eval::plan::EvaluatorPlanner::new(catalog);
+        let mut planner =
+            partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);
 
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
 

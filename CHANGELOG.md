@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter. 
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
 - *BREAKING:* partiql-value: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
 
 ### Added
+- Add interface for `STRICT` mode evalution to `EvaluatorPlanner`.
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
