@@ -18,6 +18,15 @@ pub(crate) enum EvaluationMode {
     Error,
 }
 
+impl From<EvaluationMode> for eval::plan::EvaluationMode {
+    fn from(value: EvaluationMode) -> Self {
+        match value {
+            EvaluationMode::Coerce => eval::plan::EvaluationMode::Permissive,
+            EvaluationMode::Error => eval::plan::EvaluationMode::Strict,
+        }
+    }
+}
+
 #[track_caller]
 #[inline]
 pub(crate) fn parse(statement: &str) -> ParserResult {
@@ -37,10 +46,11 @@ pub(crate) fn lower(
 #[track_caller]
 #[inline]
 pub(crate) fn compile(
+    mode: EvaluationMode,
     catalog: &dyn Catalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
 ) -> Result<EvalPlan, PlanErr> {
-    let mut planner = eval::plan::EvaluatorPlanner::new(catalog);
+    let mut planner = eval::plan::EvaluatorPlanner::new(mode.into(), catalog);
     planner.compile(&logical)
 }
 
@@ -78,12 +88,14 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
 #[allow(dead_code)]
 pub(crate) fn fail_semantics(statement: &str) {
     let catalog = PartiqlCatalog::default();
-    let parsed = parse(statement);
-    let lowered = parsed.map(|parsed| lower(&catalog, &parsed));
-    assert!(
-        lowered.is_err(),
-        "When semantically verifying `{statement}`, expected `Err(_)`, but was `{lowered:#?}`"
-    );
+    if let Ok(parsed) = parse(statement) {
+        let lowered = lower(&catalog, &parsed);
+
+        assert!(
+            lowered.is_err(),
+            "When semantically verifying `{statement}`, expected `Err(_)`, but was `{lowered:#?}`"
+        );
+    }
 }
 
 #[track_caller]
@@ -112,13 +124,19 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let plan = compile(&catalog, lowered).expect("compile");
-    let out = evaluate(plan, bindings);
 
-    assert!(
-        out.is_err(),
-        "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
-    );
+    let plan = compile(mode, &catalog, lowered);
+    match plan {
+        Ok(plan) => {
+            let out = evaluate(plan, bindings);
+
+            assert!(
+                out.is_err(),
+                "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
+            );
+        }
+        Err(_) => {}
+    }
 }
 
 #[track_caller]
@@ -139,7 +157,7 @@ pub(crate) fn pass_eval(
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
-    let plan = compile(&catalog, lowered).expect("compile");
+    let plan = compile(mode, &catalog, lowered).expect("compile");
     let out = evaluate(plan, bindings);
 
     match out {

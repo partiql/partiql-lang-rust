@@ -16,6 +16,7 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsOp::{Distinct, Project, ProjectAll, ProjectValue};
 
+    use crate::plan::EvaluationMode;
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
         ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
@@ -26,7 +27,7 @@ mod tests {
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
-        let mut planner = plan::EvaluatorPlanner::new(&catalog);
+        let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
         if let Ok(out) = plan.execute_mut(bindings) {

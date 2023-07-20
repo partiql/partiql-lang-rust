@@ -475,7 +475,7 @@ impl AggregateFunction for Avg {
                 "Expect group to exist in avgs".to_string(),
             )),
             Some((0, _)) => Ok(Null),
-            Some((c, s)) => Ok(s / &Value::Decimal(rust_decimal::Decimal::from(*c))),
+            Some((c, s)) => Ok(s / &Value::from(rust_decimal::Decimal::from(*c))),
         }
     }
 }
@@ -1422,7 +1422,7 @@ impl Evaluable for EvalOuterIntersect {
         let bag: Bag = match self.setq {
             SetQuantifier::All => {
                 let mut lhs = lhs.counts();
-                Bag::from_iter(rhs.filter(|elem| match lhs.get_mut(&elem) {
+                Bag::from_iter(rhs.filter(|elem| match lhs.get_mut(elem) {
                     Some(count) if *count > 0 => {
                         *count -= 1;
                         true
@@ -1477,7 +1477,7 @@ impl Evaluable for EvalOuterExcept {
         let rhs = bagop_iter(self.r_input.take().unwrap_or(Missing));
 
         let mut exclude = rhs.counts();
-        let excepted = lhs.filter(|elem| match exclude.get_mut(&elem) {
+        let excepted = lhs.filter(|elem| match exclude.get_mut(elem) {
             Some(count) if *count > 0 => {
                 *count -= 1;
                 false
@@ -1503,7 +1503,7 @@ impl Evaluable for EvalOuterExcept {
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum SetQuantifier {
     All,
     Distinct,

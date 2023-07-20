@@ -230,7 +230,7 @@ where
     #[inline]
     fn decode_decimal(&self, reader: &mut R) -> IonDecodeResult {
         let dec = ion_decimal_to_decimal(reader.read_decimal()?);
-        Ok(Value::Decimal(dec?))
+        Ok(Value::Decimal(Box::new(dec?)))
     }
 
     #[inline]
