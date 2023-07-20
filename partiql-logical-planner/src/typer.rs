@@ -234,6 +234,20 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_vexpr(&mut self, v: &ValueExpr, lookup_order: LookupOrder) {
+        fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlType)> {
+            s.fields()
+                .into_iter()
+                .map(|field| {
+                    let sym = SymbolPrimitive {
+                        value: field.name().to_string(),
+                        case: CaseSensitivity::CaseInsensitive,
+                    };
+
+                    (sym, field.ty().clone())
+                })
+                .collect()
+        }
+
         fn binding_to_sym(binding: &BindingsName) -> SymbolPrimitive {
             match binding {
                 BindingsName::CaseSensitive(s) => SymbolPrimitive {
@@ -270,13 +284,16 @@ impl<'c> PlanTyper<'c> {
                             if let Some(ty) = type_ctx.env().get(&sym) {
                                 let mut new_type_env = LocalTypeEnv::new();
                                 if let TypeKind::Struct(s) = ty.kind() {
-                                    for field in s.fields() {
-                                        let sym = SymbolPrimitive {
-                                            value: field.name().to_string(),
-                                            case: CaseSensitivity::CaseInsensitive,
-                                        };
-                                        new_type_env.insert(sym, field.ty().clone());
-                                    }
+                                    // for field in s.fields() {
+                                    //     let sym = SymbolPrimitive {
+                                    //         value: field.name().to_string(),
+                                    //         case: CaseSensitivity::CaseInsensitive,
+                                    //     };
+                                    //     new_type_env.insert(sym, field.ty().clone());
+                                    // }
+                                    to_bindings(&s).into_iter().for_each(|b| {
+                                        new_type_env.insert(b.0, b.1);
+                                    });
                                 } else {
                                     new_type_env.insert(sym, ty.clone());
                                 }
