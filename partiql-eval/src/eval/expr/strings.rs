@@ -1,4 +1,7 @@
-use crate::eval::expr::arg_check::{ExecuteEvalExpr, GenericFn};
+use crate::eval::expr::eval_wrapper::{
+    BinaryValueExpr, EvalExprWrapper, ExecuteEvalExpr, QuaternaryValueExpr, TernaryValueExpr,
+    UnaryValueExpr,
+};
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
@@ -33,7 +36,6 @@ impl BindEvalExpr for EvalStringFn {
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         #[inline]
         fn create<const STRICT: bool, F, R>(
-            ident: &EvalStringFn,
             args: Vec<Box<dyn EvalExpr>>,
             f: F,
         ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -41,21 +43,24 @@ impl BindEvalExpr for EvalStringFn {
             F: Fn(&Box<String>) -> R + 'static,
             R: Into<Value> + 'static,
         {
-            GenericFn::create::<{ STRICT }, 1>(*ident, [TYPE_STRING], args, f)
+            UnaryValueExpr::create_typed::<{ STRICT }, _>([TYPE_STRING], args, move |value| {
+                match value {
+                    Value::String(value) => (f(value)).into(),
+                    _ => Missing,
+                }
+            })
         }
         match self {
-            EvalStringFn::Lower => create::<{ STRICT }, _, _>(self, args, |s| s.to_lowercase()),
-            EvalStringFn::Upper => create::<{ STRICT }, _, _>(self, args, |s| s.to_uppercase()),
-            EvalStringFn::CharLength => {
-                create::<{ STRICT }, _, _>(self, args, |s| s.chars().count())
-            }
-            EvalStringFn::OctetLength => create::<{ STRICT }, _, _>(self, args, |s| s.len()),
-            EvalStringFn::BitLength => create::<{ STRICT }, _, _>(self, args, |s| (s.len() * 8)),
+            EvalStringFn::Lower => create::<{ STRICT }, _, _>(args, |s| s.to_lowercase()),
+            EvalStringFn::Upper => create::<{ STRICT }, _, _>(args, |s| s.to_uppercase()),
+            EvalStringFn::CharLength => create::<{ STRICT }, _, _>(args, |s| s.chars().count()),
+            EvalStringFn::OctetLength => create::<{ STRICT }, _, _>(args, |s| s.len()),
+            EvalStringFn::BitLength => create::<{ STRICT }, _, _>(args, |s| (s.len() * 8)),
         }
     }
 }
 
-impl<F, R> ExecuteEvalExpr<1> for GenericFn<EvalStringFn, F>
+impl<F, R> ExecuteEvalExpr<1> for EvalExprWrapper<EvalStringFn, F>
 where
     F: Fn(&Box<String>) -> R,
     R: Into<Value>,
@@ -90,7 +95,16 @@ impl BindEvalExpr for EvalTrimFn {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let create = |f: for<'a> fn(&'a str, &'a str) -> &'a str| {
-            GenericFn::create::<{ STRICT }, 2>(*self, [TYPE_STRING, TYPE_STRING], args, f)
+            BinaryValueExpr::create_typed::<{ STRICT }, _>(
+                [TYPE_STRING, TYPE_STRING],
+                args,
+                move |to_trim, value| match (to_trim, value) {
+                    (Value::String(to_trim), Value::String(value)) => {
+                        Value::from(f(to_trim, value))
+                    }
+                    _ => Missing,
+                },
+            )
         };
         match self {
             EvalTrimFn::TrimBoth => create(|trim, value| {
@@ -109,24 +123,6 @@ impl BindEvalExpr for EvalTrimFn {
     }
 }
 
-impl<F> ExecuteEvalExpr<2> for GenericFn<EvalTrimFn, F>
-where
-    for<'a> F: Fn(&'a str, &'a str) -> &'a str,
-{
-    #[inline]
-    fn evaluate<'a>(
-        &'a self,
-        args: [Cow<'a, Value>; 2],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
-        let [to_trim, value] = args;
-        Cow::Owned(match (to_trim.borrow(), value.borrow()) {
-            (Value::String(to_trim), Value::String(value)) => ((self.f)(to_trim, value)).into(),
-            _ => Missing,
-        })
-    }
-}
-
 /// Represents a built-in position string function, e.g. `position('3' IN '123456789')`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EvalFnPosition {}
@@ -136,18 +132,16 @@ impl BindEvalExpr for EvalFnPosition {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        GenericFn::create_typed_generic::<STRICT, 2>(
+        BinaryValueExpr::create_typed::<STRICT, _>(
             [TYPE_STRING, TYPE_STRING],
             args,
-            |[needle, haystack]| {
-                Cow::Owned(match (needle.borrow(), haystack.borrow()) {
-                    (Value::String(needle), Value::String(haystack)) => haystack
-                        .find(needle.as_ref())
-                        .map(|l| l + 1)
-                        .unwrap_or(0)
-                        .into(),
-                    _ => Missing,
-                })
+            |needle, haystack| match (needle, haystack) {
+                (Value::String(needle), Value::String(haystack)) => haystack
+                    .find(needle.as_ref())
+                    .map(|l| l + 1)
+                    .unwrap_or(0)
+                    .into(),
+                _ => Missing,
             },
         )
     }
@@ -163,45 +157,36 @@ impl BindEvalExpr for EvalFnSubstring {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         match args.len() {
-            2 => GenericFn::create_typed_generic::<STRICT, 2>(
+            2 => BinaryValueExpr::create_typed::<STRICT, _>(
                 [TYPE_STRING, TYPE_INT],
                 args,
-                |[value, offset]| {
-                    let result = match (value.borrow(), offset.borrow()) {
-                        (Value::String(value), Value::Integer(offset)) => {
-                            let offset = (std::cmp::max(offset, &1) - 1) as usize;
-                            let substring = value.chars().skip(offset).collect::<String>();
-                            Value::from(substring)
-                        }
-                        _ => Missing,
-                    };
-
-                    Cow::Owned(result)
+                |value, offset| match (value, offset) {
+                    (Value::String(value), Value::Integer(offset)) => {
+                        let offset = (std::cmp::max(offset, &1) - 1) as usize;
+                        let substring = value.chars().skip(offset).collect::<String>();
+                        Value::from(substring)
+                    }
+                    _ => Missing,
                 },
             ),
-            3 => GenericFn::create_typed_generic::<STRICT, 3>(
+            3 => TernaryValueExpr::create_typed::<STRICT, _>(
                 [TYPE_STRING, TYPE_INT, TYPE_INT],
                 args,
-                |[value, offset, length]| {
-                    let result = match (value.borrow(), offset.borrow(), length.borrow()) {
-                        (Value::String(value), Value::Integer(offset), Value::Integer(length)) => {
-                            let (offset, length) = if *length < 1 {
-                                (0, 0)
-                            } else if *offset < 1 {
-                                let length = std::cmp::max(offset + (length - 1), 0) as usize;
-                                let offset = std::cmp::max(*offset, 0) as usize;
-                                (offset, length)
-                            } else {
-                                ((offset - 1) as usize, *length as usize)
-                            };
-                            let substring =
-                                value.chars().skip(offset).take(length).collect::<String>();
-                            Value::from(substring)
-                        }
-                        _ => Missing,
-                    };
-
-                    Cow::Owned(result)
+                |value, offset, length| match (value, offset, length) {
+                    (Value::String(value), Value::Integer(offset), Value::Integer(length)) => {
+                        let (offset, length) = if *length < 1 {
+                            (0, 0)
+                        } else if *offset < 1 {
+                            let length = std::cmp::max(offset + (length - 1), 0) as usize;
+                            let offset = std::cmp::max(*offset, 0) as usize;
+                            (offset, length)
+                        } else {
+                            ((offset - 1) as usize, *length as usize)
+                        };
+                        let substring = value.chars().skip(offset).take(length).collect::<String>();
+                        Value::from(substring)
+                    }
+                    _ => Missing,
                 },
             ),
             n => Err(BindError::ArgNumMismatch {
@@ -235,48 +220,31 @@ impl BindEvalExpr for EvalFnOverlay {
         }
 
         match args.len() {
-            3 => GenericFn::create_typed_generic::<STRICT, 3>(
+            3 => TernaryValueExpr::create_typed::<STRICT, _>(
                 [TYPE_STRING, TYPE_STRING, TYPE_INT],
                 args,
-                |[value, replacement, offset]| {
-                    let result = match (value.borrow(), replacement.borrow(), offset.borrow()) {
-                        (
-                            Value::String(value),
-                            Value::String(replacement),
-                            Value::Integer(offset),
-                        ) => {
-                            let length = replacement.len();
-                            overlay(value.as_ref(), replacement.as_ref(), *offset, length)
-                        }
-                        _ => Missing,
-                    };
-
-                    Cow::Owned(result)
+                |value, replacement, offset| match (value, replacement, offset) {
+                    (Value::String(value), Value::String(replacement), Value::Integer(offset)) => {
+                        let length = replacement.len();
+                        overlay(value.as_ref(), replacement.as_ref(), *offset, length)
+                    }
+                    _ => Missing,
                 },
             ),
-            4 => GenericFn::create_typed_generic::<STRICT, 4>(
+            4 => QuaternaryValueExpr::create_typed::<STRICT, _>(
                 [TYPE_STRING, TYPE_STRING, TYPE_INT, TYPE_INT],
                 args,
-                |[value, replacement, offset, length]| {
-                    let result = match (
-                        value.borrow(),
-                        replacement.borrow(),
-                        offset.borrow(),
-                        length.borrow(),
-                    ) {
-                        (
-                            Value::String(value),
-                            Value::String(replacement),
-                            Value::Integer(offset),
-                            Value::Integer(length),
-                        ) => {
-                            let length = std::cmp::max(*length, 0) as usize;
-                            overlay(value.as_ref(), replacement.as_ref(), *offset, length)
-                        }
-                        _ => Missing,
-                    };
-
-                    Cow::Owned(result)
+                |value, replacement, offset, length| match (value, replacement, offset, length) {
+                    (
+                        Value::String(value),
+                        Value::String(replacement),
+                        Value::Integer(offset),
+                        Value::Integer(length),
+                    ) => {
+                        let length = std::cmp::max(*length, 0) as usize;
+                        overlay(value.as_ref(), replacement.as_ref(), *offset, length)
+                    }
+                    _ => Missing,
                 },
             ),
             n => Err(BindError::ArgNumMismatch {

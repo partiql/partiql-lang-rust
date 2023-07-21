@@ -1,5 +1,5 @@
 use crate::eval::evaluable::SetQuantifier;
-use crate::eval::expr::arg_check::GenericFn;
+use crate::eval::expr::eval_wrapper::{EvalExprWrapper, UnaryValueExpr};
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
@@ -13,6 +13,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use partiql_types::TypeKind::{Any, AnyOf};
 use std::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -43,9 +44,9 @@ impl BindEvalExpr for EvalCollFn {
         {
             let list = PartiqlType::new(TypeKind::Array(ArrayType::new_any()));
             let bag = PartiqlType::new(TypeKind::Bag(BagType::new_any()));
-            let types = [list.union_with(bag).union_with(TYPE_MISSING)];
-            GenericFn::create_typed_generic::<STRICT, 1>(types, args, move |[value]| {
-                Cow::Owned(value.sequence_iter().map(|it| f(it)).unwrap_or(Missing))
+            let types = [PartiqlType::any_of([list, bag, TYPE_MISSING])];
+            UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, move |value| {
+                value.sequence_iter().map(|it| f(it)).unwrap_or(Missing)
             })
         }
 
@@ -59,7 +60,8 @@ impl BindEvalExpr for EvalCollFn {
     }
 }
 
-pub enum SetQuantified<V, I>
+/// An [`Iterator`] over either `ALL` or `DISTINCT` items
+enum SetQuantified<V, I>
 where
     V: Clone + Eq + Hash,
     I: Iterator<Item = V>,
@@ -67,22 +69,6 @@ where
     All(I),
     Distinct(Unique<I>),
 }
-
-trait SetIterator: Iterator {
-    #[inline]
-    fn set_quantified(self, setq: SetQuantifier) -> SetQuantified<Self::Item, Self>
-    where
-        Self: Sized,
-        Self::Item: Clone + Eq + Hash,
-    {
-        match setq {
-            SetQuantifier::All => SetQuantified::All(self),
-            SetQuantifier::Distinct => SetQuantified::Distinct(self.unique()),
-        }
-    }
-}
-
-impl<T: ?Sized> SetIterator for T where T: Iterator {}
 
 impl<V, I> Iterator for SetQuantified<V, I>
 where
@@ -99,6 +85,24 @@ where
     }
 }
 
+/// An [`Iterator`] over a 'set' of values
+trait SetIterator: Iterator {
+    #[inline]
+    fn set_quantified(self, setq: SetQuantifier) -> SetQuantified<Self::Item, Self>
+    where
+        Self: Sized,
+        Self::Item: Clone + Eq + Hash,
+    {
+        match setq {
+            SetQuantifier::All => SetQuantified::All(self),
+            SetQuantifier::Distinct => SetQuantified::Distinct(self.unique()),
+        }
+    }
+}
+
+impl<T: ?Sized> SetIterator for T where T: Iterator {}
+
+/// [`Iterator`] methods for performing `COLL_*` operations
 trait CollIterator<'a>: Iterator<Item = &'a Value> {
     #[inline]
     fn coll_sum(self, setq: SetQuantifier) -> Value
@@ -181,6 +185,8 @@ trait CollIterator<'a>: Iterator<Item = &'a Value> {
     }
 }
 
+/// [`Iterator`] helper methods for `COLL_*` operators for reducing values to a single value while
+/// allowing the reducing closure to signal an early return with [`ControlFlow::Break`]
 trait ShortCircuitReduceIterator<'a, R: 'a>: Iterator<Item = &'a R>
 where
     R: Clone,

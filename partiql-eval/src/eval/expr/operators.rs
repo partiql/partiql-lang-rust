@@ -1,7 +1,7 @@
-use crate::eval::expr::arg_check::{
-    unwrap_args, ArgCheckControlFlow, ArgCheckEvalExpr, ArgChecker, DefaultArgChecker,
-    ExecuteEvalExpr, GenericFn, MissingArgShortCircuit, MissingToMissing, MissingToNull,
-    NullArgChecker,
+use crate::eval::expr::eval_wrapper::{
+    unwrap_args, ArgCheckControlFlow, ArgCheckEvalExpr, ArgChecker, ArgShortCircuit,
+    BinaryValueExpr, DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing,
+    PropagateNull, TernaryValueExpr, UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -36,7 +36,7 @@ impl BindEvalExpr for EvalLitExpr {
             STRICT,
             0,
             _,
-            DefaultArgChecker<{ STRICT }, MissingToMissing<false>>,
+            DefaultArgChecker<{ STRICT }, PropagateMissing<false>>,
         > = ArgCheckEvalExpr::new([], unwrap_args(args)?, self.lit.as_ref().clone());
         Ok(Box::new(expr))
     }
@@ -67,11 +67,7 @@ impl BindEvalExpr for EvalOpUnary {
         let any_num = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
 
         let unop = |types, f: fn(&Value) -> Value| {
-            GenericFn::create_with_checker::<
-                { STRICT },
-                1,
-                DefaultArgChecker<{ STRICT }, MissingToMissing<true>>,
-            >(*self, types, args, f)
+            UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
         };
 
         match self {
@@ -79,22 +75,6 @@ impl BindEvalExpr for EvalOpUnary {
             EvalOpUnary::Neg => unop([any_num], |operand| -operand),
             EvalOpUnary::Not => unop([TYPE_BOOL], |operand| !operand),
         }
-    }
-}
-
-impl<F, R> ExecuteEvalExpr<1> for GenericFn<EvalOpUnary, F>
-where
-    F: Fn(&Value) -> R,
-    R: Into<Value>,
-{
-    #[inline]
-    fn evaluate<'a>(
-        &'a self,
-        args: [Cow<'a, Value>; 1],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
-        let [val] = args;
-        Cow::Owned(((self.f)(val.borrow())).into())
     }
 }
 
@@ -126,11 +106,11 @@ pub(crate) enum EvalOpBinary {
 }
 
 #[derive(Debug)]
-struct BoolShortCircuitArgChecker<const B: bool, OnMissing: MissingArgShortCircuit> {
+struct BoolShortCircuitArgChecker<const B: bool, OnMissing: ArgShortCircuit> {
     marker: PhantomData<OnMissing>,
 }
 
-impl<const B: bool, OnMissing: MissingArgShortCircuit> ArgChecker
+impl<const B: bool, OnMissing: ArgShortCircuit> ArgChecker
     for BoolShortCircuitArgChecker<B, OnMissing>
 {
     fn arg_check<'a>(
@@ -152,16 +132,16 @@ impl BindEvalExpr for EvalOpBinary {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        type AndCheck = BoolShortCircuitArgChecker<false, MissingToNull<false>>;
-        type OrCheck = BoolShortCircuitArgChecker<true, MissingToNull<false>>;
-        type InCheck<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToNull<false>>;
-        type Check<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToMissing<true>>;
-        type EqCheck<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToMissing<false>>;
-        type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, MissingToMissing<true>>;
+        type AndCheck = BoolShortCircuitArgChecker<false, PropagateNull<false>>;
+        type OrCheck = BoolShortCircuitArgChecker<true, PropagateNull<false>>;
+        type InCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateNull<false>>;
+        type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
+        type EqCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<false>>;
+        type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
 
         macro_rules! create {
             ($check: ty, $types: expr, $f:expr) => {
-                GenericFn::create_with_checker::<{ STRICT }, 2, $check>(*self, $types, args, $f)
+                BinaryValueExpr::create_checked::<{ STRICT }, $check, _>($types, args, $f)
             };
         }
 
@@ -263,22 +243,6 @@ impl BindEvalExpr for EvalOpBinary {
     }
 }
 
-impl<F, R> ExecuteEvalExpr<2> for GenericFn<EvalOpBinary, F>
-where
-    F: Fn(&Value, &Value) -> R,
-    R: Into<Value>,
-{
-    #[inline]
-    fn evaluate<'a>(
-        &'a self,
-        args: [Cow<'a, Value>; 2],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
-        let [lhs, rhs] = args;
-        Cow::Owned(((self.f)(lhs.borrow(), rhs.borrow())).into())
-    }
-}
-
 /// Represents an evaluation PartiQL `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EvalBetweenExpr {}
@@ -289,23 +253,11 @@ impl BindEvalExpr for EvalBetweenExpr {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [TYPE_ANY, TYPE_ANY, TYPE_ANY];
-
-        let args = unwrap_args(args)?;
-        Ok(Box::new(
-            ArgCheckEvalExpr::<STRICT, 3, _, NullArgChecker>::new(types, args, self.clone()),
-        ))
-    }
-}
-
-impl ExecuteEvalExpr<3> for EvalBetweenExpr {
-    fn evaluate<'a>(
-        &'a self,
-        args: [Cow<'a, Value>; 3],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
-        let [value, from, to] = args;
-
-        Cow::Owned(value.gteq(&from).and(&value.lteq(&to)))
+        TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
+            types,
+            args,
+            |value, from, to| value.gteq(&from).and(&value.lteq(&to)),
+        )
     }
 }
 
@@ -318,14 +270,13 @@ impl BindEvalExpr for EvalFnExists {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        GenericFn::create_generic::<STRICT, 1>(args, |[value]| {
-            let exists = match value.borrow() {
+        UnaryValueExpr::create_with_any::<{ STRICT }, _>(args, |v| {
+            Value::from(match v {
                 Value::Bag(b) => !b.is_empty(),
                 Value::List(l) => !l.is_empty(),
                 Value::Tuple(t) => !t.is_empty(),
                 _ => false,
-            };
-            Cow::Owned(Value::Boolean(exists))
+            })
         })
     }
 }
@@ -340,14 +291,13 @@ impl BindEvalExpr for EvalFnAbs {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
-        GenericFn::create_typed_generic::<STRICT, 1>([nums], args, |[value]| {
-            let zero: Value = 0.into();
-            Cow::Owned(match NullableOrd::lt(value.borrow(), &zero) {
+        UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
+            match NullableOrd::lt(v, &Value::from(0)) {
                 Null => Null,
                 Missing => Missing,
-                Value::Boolean(true) => -value.into_owned(),
-                _ => value.into_owned(),
-            })
+                Value::Boolean(true) => -v,
+                _ => v.clone(),
+            }
         })
     }
 }
@@ -366,14 +316,12 @@ impl BindEvalExpr for EvalFnCardinality {
             PartiqlType::new(TypeKind::Bag(BagType::new_any())),
             PartiqlType::new(TypeKind::Struct(StructType::new_any())),
         ]);
-        GenericFn::create_typed_generic::<STRICT, 1>([collections], args, |[value]| {
-            let result = match value.borrow() {
-                Value::List(l) => Value::from(l.len()),
-                Value::Bag(b) => Value::from(b.len()),
-                Value::Tuple(t) => Value::from(t.len()),
-                _ => Missing,
-            };
-            Cow::Owned(result)
+
+        UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
+            Value::List(l) => Value::from(l.len()),
+            Value::Bag(b) => Value::from(b.len()),
+            Value::Tuple(t) => Value::from(t.len()),
+            _ => Missing,
         })
     }
 }

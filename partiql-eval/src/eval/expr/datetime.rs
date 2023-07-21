@@ -1,4 +1,4 @@
-use crate::eval::expr::arg_check::{ExecuteEvalExpr, GenericFn};
+use crate::eval::expr::eval_wrapper::{EvalExprWrapper, ExecuteEvalExpr, UnaryValueExpr};
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
@@ -46,8 +46,14 @@ impl BindEvalExpr for EvalExtractFn {
         }
 
         let create = |f: fn(&DateTime) -> Value| {
-            GenericFn::create::<{ STRICT }, 1>(*self, [TYPE_DATETIME], args, f)
+            UnaryValueExpr::create_typed::<{ STRICT }, _>([TYPE_DATETIME], args, move |value| {
+                match value {
+                    Value::DateTime(dt) => (f(dt.as_ref())),
+                    _ => Missing,
+                }
+            })
         };
+
         match self {
             EvalExtractFn::Year => create(|dt: &DateTime| match dt {
                 DateTime::Date(d) => Value::from(d.year()),
@@ -100,24 +106,5 @@ impl BindEvalExpr for EvalExtractFn {
                 _ => Missing,
             }),
         }
-    }
-}
-
-impl<F, R> ExecuteEvalExpr<1> for GenericFn<EvalExtractFn, F>
-where
-    F: Fn(&DateTime) -> R + 'static,
-    R: Into<Value> + 'static,
-{
-    #[inline]
-    fn evaluate<'a>(
-        &'a self,
-        args: [Cow<'a, Value>; 1],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
-        let [datetime] = args;
-        Cow::Owned(match datetime.borrow() {
-            Value::DateTime(dt) => ((self.f)(dt.as_ref())).into(),
-            _ => Missing,
-        })
     }
 }
