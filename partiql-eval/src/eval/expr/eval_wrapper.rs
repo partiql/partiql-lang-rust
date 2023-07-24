@@ -65,6 +65,7 @@ pub(crate) trait ExecuteEvalExpr<const N: usize>: Debug {
         ctx: &'a dyn EvalContext,
     ) -> Cow<'a, Value>;
 }
+
 /// Used to tell argument checking whether it should exit early or go on as usual.
 ///
 /// Analagous to [`ControlFlow`], but with additional states to handle strict error reporting and
