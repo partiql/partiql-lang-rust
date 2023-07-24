@@ -1,5 +1,5 @@
 use crate::eval::evaluable::SetQuantifier;
-use crate::eval::expr::eval_wrapper::{EvalExprWrapper, UnaryValueExpr};
+use crate::eval::expr::eval_wrapper::UnaryValueExpr;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
@@ -9,11 +9,9 @@ use partiql_types::{ArrayType, BagType, PartiqlType, TypeKind, TYPE_MISSING};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Value, ValueIter};
 
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use partiql_types::TypeKind::{Any, AnyOf};
 use std::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -46,7 +44,7 @@ impl BindEvalExpr for EvalCollFn {
             let bag = PartiqlType::new(TypeKind::Bag(BagType::new_any()));
             let types = [PartiqlType::any_of([list, bag, TYPE_MISSING])];
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, move |value| {
-                value.sequence_iter().map(|it| f(it)).unwrap_or(Missing)
+                value.sequence_iter().map(&f).unwrap_or(Missing)
             })
         }
 

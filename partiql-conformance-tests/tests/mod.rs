@@ -2,7 +2,7 @@ use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::error::{EvalErr, EvaluationError, PlanErr};
+use partiql_eval::error::{EvalErr, PlanErr};
 use partiql_eval::eval::{EvalPlan, EvalResult, Evaluated};
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};

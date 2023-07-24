@@ -1,14 +1,12 @@
-use crate::eval::expr::eval_wrapper::{EvalExprWrapper, ExecuteEvalExpr, UnaryValueExpr};
+use crate::eval::expr::eval_wrapper::UnaryValueExpr;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
-use crate::eval::EvalContext;
 
 use partiql_types::TYPE_DATETIME;
 use partiql_value::Value::Missing;
 use partiql_value::{DateTime, Value};
 
 use rust_decimal::Decimal;
-use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
 use std::time::Duration;
@@ -48,7 +46,7 @@ impl BindEvalExpr for EvalExtractFn {
         let create = |f: fn(&DateTime) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>([TYPE_DATETIME], args, move |value| {
                 match value {
-                    Value::DateTime(dt) => (f(dt.as_ref())),
+                    Value::DateTime(dt) => f(dt.as_ref()),
                     _ => Missing,
                 }
             })

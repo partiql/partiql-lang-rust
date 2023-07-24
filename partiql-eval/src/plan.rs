@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use petgraph::prelude::StableGraph;
-use regex::RegexBuilder;
 use std::collections::HashMap;
 
 use partiql_logical as logical;
@@ -18,14 +17,12 @@ use crate::eval::evaluable::{
     EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, EvalSubQueryExpr,
     Evaluable, Max, Min, Sum,
 };
-use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
     EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
     EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
     EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
     EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
-    RE_SIZE_LIMIT,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
@@ -382,20 +379,28 @@ impl<'c> EvaluatorPlanner<'c> {
     }
 
     fn plan_values<const STRICT: bool>(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
+        let mut plan_args = |args: &[&ValueExpr]| {
+            args.iter()
+                .map(|arg| self.plan_values::<{ STRICT }>(arg))
+                .collect_vec()
+        };
+        /*
         let mut plan_args = |args: &[&Box<ValueExpr>]| {
             args.iter()
                 .map(|arg| self.plan_values::<{ STRICT }>(arg))
                 .collect_vec()
         };
 
+         */
+
         let (name, bind) = match ve {
             ValueExpr::UnExpr(op, operand) => (
                 "unary operator",
-                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand])),
+                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand.as_ref()])),
             ),
             ValueExpr::BinaryExpr(op, lhs, rhs) => (
                 "binary operator",
-                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs, rhs])),
+                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs.as_ref(), rhs.as_ref()])),
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
@@ -464,40 +469,18 @@ impl<'c> EvaluatorPlanner<'c> {
                     Ok(Box::new(EvalBagExpr { elements }) as Box<dyn EvalExpr>),
                 )
             }
-            ValueExpr::BetweenExpr(logical::BetweenExpr { value, from, to }) => (
-                "between",
-                EvalBetweenExpr {}.bind::<{ STRICT }>(plan_args(&[value, from, to])),
-            ),
+            ValueExpr::BetweenExpr(logical::BetweenExpr { value, from, to }) => {
+                let args = plan_args(&[value.as_ref(), from.as_ref(), to.as_ref()]);
+                ("between", EvalBetweenExpr {}.bind::<{ STRICT }>(args))
+            }
             ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
-                let value = self.plan_values::<{ STRICT }>(value);
-                match pattern {
+                let expr = match pattern {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
-                        // TODO statically assert escape length
-                        if escape.chars().count() > 1 {
-                            self.errors.push(PlanningError::IllegalState(format!(
-                                "Invalid LIKE expression pattern: {escape}"
-                            )));
-                            return Box::new(ErrorNode::new());
-                        }
-                        let escape = escape.chars().next();
-                        let regex = like_to_re_pattern(pattern, escape);
-                        let regex_pattern =
-                            RegexBuilder::new(&regex).size_limit(RE_SIZE_LIMIT).build();
-                        match regex_pattern {
-                            Ok(pattern) => (
-                                "pattern expr",
-                                Ok(Box::new(EvalLikeMatch::new(value, pattern))
-                                    as Box<dyn EvalExpr>),
-                            ),
+                        match EvalLikeMatch::create(pattern, escape) {
+                            Ok(like) => like.bind::<{ STRICT }>(plan_args(&[value.as_ref()])),
                             Err(err) => {
-                                self.errors.push(PlanningError::IllegalState(format!(
-                                    "Invalid LIKE expression pattern: {regex}. Regex error: {err}"
-                                )));
-                                // TODO
-                                (
-                                    "pattern expr",
-                                    Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>),
-                                )
+                                self.errors.push(err);
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
                             }
                         }
                     }
@@ -505,16 +488,12 @@ impl<'c> EvaluatorPlanner<'c> {
                         pattern,
                         escape,
                     }) => {
-                        let pattern = self.plan_values::<{ STRICT }>(pattern);
-                        let escape = self.plan_values::<{ STRICT }>(escape);
-                        (
-                            "pattern expr",
-                            Ok(Box::new(EvalLikeNonStringNonLiteralMatch::new(
-                                value, pattern, escape,
-                            )) as Box<dyn EvalExpr>),
-                        )
+                        let args = plan_args(&[value.as_ref(), pattern.as_ref(), escape.as_ref()]);
+                        EvalLikeNonStringNonLiteralMatch {}.bind::<{ STRICT }>(args)
                     }
-                }
+                };
+
+                ("pattern expr", expr)
             }
             ValueExpr::SubQueryExpr(expr) => (
                 "subquery",
@@ -676,9 +655,9 @@ impl<'c> EvaluatorPlanner<'c> {
                         "bit_length",
                         EvalStringFn::BitLength.bind::<{ STRICT }>(args),
                     ),
-                    CallName::LTrim => ("ltrim", EvalTrimFn::TrimStart.bind::<{ STRICT }>(args)),
-                    CallName::BTrim => ("btrim", EvalTrimFn::TrimBoth.bind::<{ STRICT }>(args)),
-                    CallName::RTrim => ("rtrim", EvalTrimFn::TrimEnd.bind::<{ STRICT }>(args)),
+                    CallName::LTrim => ("ltrim", EvalTrimFn::Start.bind::<{ STRICT }>(args)),
+                    CallName::BTrim => ("btrim", EvalTrimFn::Both.bind::<{ STRICT }>(args)),
+                    CallName::RTrim => ("rtrim", EvalTrimFn::End.bind::<{ STRICT }>(args)),
                     CallName::Substring => {
                         ("substring", EvalFnSubstring {}.bind::<{ STRICT }>(args))
                     }

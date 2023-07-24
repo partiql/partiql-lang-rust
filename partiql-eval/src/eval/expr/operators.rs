@@ -256,7 +256,7 @@ impl BindEvalExpr for EvalBetweenExpr {
         TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
             types,
             args,
-            |value, from, to| value.gteq(&from).and(&value.lteq(&to)),
+            |value, from, to| value.gteq(from).and(&value.lteq(to)),
         )
     }
 }

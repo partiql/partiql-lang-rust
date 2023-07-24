@@ -82,11 +82,11 @@ where
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum EvalTrimFn {
     /// Represents a built-in trim string function, e.g. `trim(both from ' foobar ')`.
-    TrimBoth,
+    Both,
     /// Represents a built-in start trim string function.
-    TrimStart,
+    Start,
     /// Represents a built-in end trim string function.
-    TrimEnd,
+    End,
 }
 
 impl BindEvalExpr for EvalTrimFn {
@@ -107,15 +107,15 @@ impl BindEvalExpr for EvalTrimFn {
             )
         };
         match self {
-            EvalTrimFn::TrimBoth => create(|trim, value| {
+            EvalTrimFn::Both => create(|trim, value| {
                 let to_trim = trim.chars().collect_vec();
                 value.trim_matches(&to_trim[..])
             }),
-            EvalTrimFn::TrimStart => create(|trim, value| {
+            EvalTrimFn::Start => create(|trim, value| {
                 let to_trim = trim.chars().collect_vec();
                 value.trim_start_matches(&to_trim[..])
             }),
-            EvalTrimFn::TrimEnd => create(|trim, value| {
+            EvalTrimFn::End => create(|trim, value| {
                 let to_trim = trim.chars().collect_vec();
                 value.trim_end_matches(&to_trim[..])
             }),

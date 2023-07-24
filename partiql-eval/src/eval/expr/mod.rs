@@ -1,14 +1,21 @@
 pub(crate) mod eval_wrapper;
-pub(crate) mod pattern_match;
 
+mod base_table;
+pub(crate) use base_table::*;
 mod coll;
 pub(crate) use coll::*;
-mod expr;
-pub(crate) use expr::*;
+mod control_flow;
+pub(crate) use control_flow::*;
+mod data_types;
+pub(crate) use data_types::*;
 mod datetime;
 pub(crate) use datetime::*;
 mod strings;
 pub(crate) use strings::*;
+mod path;
+pub(crate) use path::*;
+mod pattern_match;
+pub(crate) use pattern_match::*;
 mod operators;
 pub(crate) use operators::*;
 
