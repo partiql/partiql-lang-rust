@@ -1,0 +1,23 @@
+[package]
+name = "partiql-py"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "partiql_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.19.0"
+partiql-catalog = { path = "../partiql-catalog" }
+
+partiql-parser = { path = "../partiql-parser", features=["serde"] }
+partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.5.*"}
+partiql-eval = { path = "../partiql-eval" }
+partiql-value = {  path = "../partiql-value", features=["serde"] }
+partiql-logical = { path = "../partiql-logical", features=["serde"] }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+
+ion-rs = "0.18"
+serde_json = "1.*"

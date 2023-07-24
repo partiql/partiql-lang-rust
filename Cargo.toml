@@ -31,6 +31,10 @@ members = [
   "extension/partiql-extension-ion-functions",
 ]
 
+exclude = [
+  "partiql-py"
+]
+
 [profile.dev.build-override]
 opt-level = 3
 
