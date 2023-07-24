@@ -369,6 +369,7 @@ where
 }
 
 impl UnaryValueExpr {
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
         args: Vec<Box<dyn EvalExpr>>,
@@ -380,6 +381,7 @@ impl UnaryValueExpr {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 1], args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
         types: [PartiqlType; 1],
@@ -393,6 +395,7 @@ impl UnaryValueExpr {
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
         types: [PartiqlType; 1],
@@ -427,6 +430,7 @@ where
 }
 
 impl BinaryValueExpr {
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
         args: Vec<Box<dyn EvalExpr>>,
@@ -438,6 +442,7 @@ impl BinaryValueExpr {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 2], args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
         types: [PartiqlType; 2],
@@ -451,6 +456,7 @@ impl BinaryValueExpr {
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
         types: [PartiqlType; 2],
@@ -485,6 +491,7 @@ where
 }
 
 impl TernaryValueExpr {
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
         args: Vec<Box<dyn EvalExpr>>,
@@ -496,6 +503,7 @@ impl TernaryValueExpr {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 3], args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
         types: [PartiqlType; 3],
@@ -509,6 +517,7 @@ impl TernaryValueExpr {
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
         types: [PartiqlType; 3],
@@ -548,6 +557,7 @@ where
 }
 
 impl QuaternaryValueExpr {
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
         args: Vec<Box<dyn EvalExpr>>,
@@ -559,6 +569,7 @@ impl QuaternaryValueExpr {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 4], args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
         types: [PartiqlType; 4],
@@ -572,6 +583,7 @@ impl QuaternaryValueExpr {
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
         types: [PartiqlType; 4],
