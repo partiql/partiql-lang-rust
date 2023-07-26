@@ -483,11 +483,12 @@ impl<'ast> Visitor<'ast> for NameResolver {
 
         // TODO: delete in_scope for FROM sources in subsequent clauses
 
-        let produce: Names = produce_required;
+        let mut produce: Names = produce_required;
         // add the `GROUP AS` alias
         if let Some(sym) = &group_by_expr.group_as_alias {
             let as_alias = Symbol::Known(sym.clone());
-            self.aliases.insert(id, as_alias);
+            self.aliases.insert(id, as_alias.clone());
+            produce.insert(as_alias);
         }
         self.schema.insert(id, KeySchema { consume, produce });
         Traverse::Continue
