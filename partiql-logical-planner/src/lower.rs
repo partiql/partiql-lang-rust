@@ -342,7 +342,12 @@ impl<'a> AstToLogical<'a> {
                                 for scope in scopes {
                                     for produce in &scope.produce {
                                         if let name_resolver::Symbol::Known(sym) = produce {
-                                            if sym == &varref.name {
+                                            if (sym == &varref.name)
+                                                || (sym.value.to_lowercase()
+                                                    == varref.name.value.to_lowercase()
+                                                    && varref.name.case
+                                                        == ast::CaseSensitivity::CaseInsensitive)
+                                            {
                                                 let expr = ValueExpr::VarRef(
                                                     sym_to_binding(produce).unwrap_or_else(|| {
                                                         symprim_to_binding(&self.gen_id())
