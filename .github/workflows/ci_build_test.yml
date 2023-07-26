@@ -6,8 +6,6 @@ env:
   CARGO_TEST_RESULT_NAME: cargo_test_results.json
   CONFORMANCE_REPORT_NAME: cts_report.json
   COMPARISON_REPORT_NAME: cts-comparison-report.md
-  RUST_TEST_TIME_UNIT: 150,5000
-  RUST_TEST_TIME_INTEGRATION: 150,5000
 
 jobs:
   build:
@@ -105,7 +103,7 @@ jobs:
       # to format and use the output.
       - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
-        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
       # Create a conformance report from the `cargo test` json file
       - run: cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
       # Upload conformance report for comparison with future runs
@@ -162,7 +160,7 @@ jobs:
         continue-on-error: true
         run: |
           cd ${{ github.event.pull_request.base.sha }}
-          cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --ensure-time --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
+          cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
       - name: (If download of target branch conformance report fails) Generate conformance test report for target branch
         if: ${{ steps.download-report.outcome == 'failure' }}
         continue-on-error: true
