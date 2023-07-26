@@ -233,6 +233,8 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let schema = KeySchema { consume, produce };
 
         self.schema.insert(id, schema);
+        println!("final schema: {:?}", self.schema);
+        println!("in scope: {:?}", self.in_scope);
         Traverse::Continue
     }
 
@@ -383,7 +385,42 @@ impl<'ast> Visitor<'ast> for NameResolver {
         Traverse::Continue
     }
 
+    fn enter_group_key(&mut self, _group_key: &'ast GroupKey) -> Traverse {
+        self.enter_keyref();
+        let id = *self.current_node();
+
+        self.enclosing_clause
+            .get(&EnclosingClause::FromLet)
+            .unwrap()
+            .iter()
+            .for_each(|enclosing_clause| {
+                self.in_scope
+                    .entry(id)
+                    .or_insert_with(Vec::new)
+                    .push(*enclosing_clause);
+            });
+
+        self.enclosing_clause
+            .entry(EnclosingClause::Query)
+            .or_insert_with(Vec::new)
+            .push(id);
+        Traverse::Continue
+    }
+
     fn exit_group_key(&mut self, group_key: &'ast GroupKey) -> Traverse {
+        let KeyRefs {
+            consume,
+            produce_required,
+            ..
+        } = match self.exit_keyref() {
+            Ok(kr) => kr,
+            Err(e) => {
+                self.errors.push(e);
+                return Traverse::Stop;
+            }
+        };
+        let mut produce = produce_required;
+
         let id = *self.current_node();
         // get the "as" alias for each `GROUP BY` expr
         // 1. if explicitly given
@@ -397,21 +434,62 @@ impl<'ast> Visitor<'ast> for NameResolver {
             Symbol::Unknown(self.id_gen.next_id())
         };
         self.aliases.insert(id, as_alias.clone());
+        produce.insert(as_alias.clone());
         self.keyref_stack
             .last_mut()
             .unwrap()
             .produce_required
             .insert(as_alias);
+        self.schema.insert(id, KeySchema { consume, produce });
+        Traverse::Continue
+    }
+
+    fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
+        self.enter_child_stack();
+        self.enter_keyref();
+        let id = *self.current_node();
+        // Scopes above this `GROUP BY` in the AST are in-scope to use variables defined by this GROUP BY
+        for in_scope in self.id_path_to_root.iter().rev().skip(1) {
+            self.in_scope
+                .entry(*in_scope)
+                .or_insert_with(Vec::new)
+                .push(id);
+        }
         Traverse::Continue
     }
 
     fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Traverse {
+        let id = *self.current_node();
+        let child_stack = self.exit_child_stack();
+        if let Err(e) = child_stack {
+            self.errors.push(e);
+            return Traverse::Stop;
+        } else {
+            println!("group_by_expr child stack: {:?}", child_stack);
+        }
+        println!("group_by_expr nodeid: {:?}", self.current_node());
+
+        let KeyRefs {
+            consume,
+            produce_required,
+            ..
+        } = match self.exit_keyref() {
+            Ok(kr) => kr,
+            Err(e) => {
+                self.errors.push(e);
+                return Traverse::Stop;
+            }
+        };
+
+        // TODO: delete in_scope for FROM sources in subsequent clauses
+
+        let produce: Names = produce_required;
         // add the `GROUP AS` alias
         if let Some(sym) = &group_by_expr.group_as_alias {
-            let id = *self.current_node();
             let as_alias = Symbol::Known(sym.clone());
             self.aliases.insert(id, as_alias);
         }
+        self.schema.insert(id, KeySchema { consume, produce });
         Traverse::Continue
     }
 }

@@ -334,7 +334,7 @@ impl<'a> AstToLogical<'a> {
                                 });
                                 if let Some(_matching) = exact.next() {
                                     let var_ref_expr =
-                                        ValueExpr::VarRef(var_binding.clone(), VarRefType::Local);
+                                        ValueExpr::VarRef(var_binding, VarRefType::Local);
                                     lookups.push(var_ref_expr);
                                     break;
                                 }
