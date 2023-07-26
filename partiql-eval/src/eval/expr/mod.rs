@@ -180,13 +180,17 @@ impl EvalExpr for EvalDynamicLookup {
 
 /// Represents a variable reference in a (sub)query, e.g. `a` in `SELECT b as a FROM`.
 #[derive(Debug)]
-pub(crate) struct EvalVarRef {
-    pub(crate) name: BindingsName,
+pub(crate) enum EvalVarRef {
+    Local(BindingsName),
+    Global(BindingsName),
 }
 
 impl EvalExpr for EvalVarRef {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let value = Bindings::get(bindings, &self.name).or_else(|| ctx.bindings().get(&self.name));
+        let value = match self {
+            EvalVarRef::Global(name) => ctx.bindings().get(name),
+            EvalVarRef::Local(name) => Bindings::get(bindings, name),
+        };
 
         match value {
             None => Cow::Owned(Missing),

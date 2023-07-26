@@ -411,7 +411,7 @@ pub enum ValueExpr {
     Lit(Box<Value>),
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
-    VarRef(BindingsName),
+    VarRef(BindingsName, VarRefType),
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),
@@ -693,6 +693,19 @@ pub enum CallName {
 pub enum SetQuantifier {
     All,
     Distinct,
+}
+
+/// Indicates scope search order when resolving variables.
+/// Has no effect except within `FROM` sources.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum VarRefType {
+    /// The variable was *NOT* prefixed with `@`.
+    /// Resolve the variable by looking first in the database environment, then in the 'lexical' scope.
+    Global,
+    /// The variable *WAS* prefixed with `@`.
+    /// Resolve the variable by looking first in the 'lexical' scope, then in the database environment.
+    Local,
 }
 
 #[cfg(test)]
