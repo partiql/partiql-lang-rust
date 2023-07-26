@@ -459,7 +459,7 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_path(&mut self) {
         self.path_stack.push(vec![]);
-        self.ctx_stack.push(QueryContext::Path);
+        self.ctx_stack.push(QueryContext::Query);
     }
 
     #[inline]
@@ -1250,8 +1250,20 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
-        if let PathStep::PathExpr(_) = _path_step {
+        if let PathStep::PathExpr(expr) = _path_step {
             self.enter_env();
+            match *(expr.index) {
+                Expr::VarRef(_) => {
+                    // covers case of var refs along path: a.b.c <-- the "b" and "c" in "a.b.c" are local lookups only
+                    let qc = self.ctx_stack.last_mut().unwrap();
+                    *qc = QueryContext::Path;
+                }
+                _ => {
+                    // covers case of a.b[c + 1] <-- the "c" in "c + 1" could be a dynamic lookup
+                    let qc = self.ctx_stack.last_mut().unwrap();
+                    *qc = QueryContext::Query;
+                }
+            }
         }
         Traverse::Continue
     }
