@@ -282,6 +282,7 @@ impl<'a> AstToLogical<'a> {
     }
 
     fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
+        println!("varref: {:?}", varref);
         // Convert a `SymbolPrimitive` into a `BindingsName`
         fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName {
             match sym.case {
@@ -359,6 +360,19 @@ impl<'a> AstToLogical<'a> {
                                                 }
                                                 continue;
                                             }
+                                        } else if let name_resolver::Symbol::Unknown(num) = produce
+                                        {
+                                            let formatted_num = format!("_{}", num);
+                                            if formatted_num == varref.name.value {
+                                                let expr = ValueExpr::VarRef(
+                                                    BindingsName::CaseInsensitive(formatted_num),
+                                                    VarRefType::Local,
+                                                );
+                                                if !lookups.contains(&expr) {
+                                                    lookups.push(expr);
+                                                }
+                                                continue;
+                                            }
                                         }
                                         // else
                                         let path = logical::ValueExpr::Path(
@@ -380,6 +394,7 @@ impl<'a> AstToLogical<'a> {
                         }
                     }
                 }
+                println!("lookups: {:?}", lookups);
                 return ValueExpr::DynamicLookup(Box::new(lookups));
             }
         }
