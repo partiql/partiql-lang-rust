@@ -282,7 +282,7 @@ impl<'a> AstToLogical<'a> {
     }
 
     fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
-        println!("varref: {:?}", varref);
+        // println!("varref: {:?}", varref);
         // Convert a `SymbolPrimitive` into a `BindingsName`
         fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName {
             match sym.case {
@@ -335,9 +335,9 @@ impl<'a> AstToLogical<'a> {
                                 });
                                 if let Some(_matching) = exact.next() {
                                     let var_ref_expr =
-                                        ValueExpr::VarRef(var_binding, VarRefType::Local);
+                                        ValueExpr::VarRef(var_binding.clone(), VarRefType::Local);
                                     lookups.push(var_ref_expr);
-                                    break;
+                                    continue;
                                 }
 
                                 for scope in scopes {
@@ -394,7 +394,7 @@ impl<'a> AstToLogical<'a> {
                         }
                     }
                 }
-                println!("lookups: {:?}", lookups);
+                // println!("lookups: {:?}", lookups);
                 return ValueExpr::DynamicLookup(Box::new(lookups));
             }
         }
