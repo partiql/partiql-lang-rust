@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-parser: `Parsed` struct's `ast` field is now an `ast::AstNode<ast::TopLevelQuery>`
 - *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
 - *BREAKING:* partiql-logical: changed modeling of `Project` `exprs` to be a `Vec<(String, ValueExpr)>` rather than a `HashMap<String, ValueExpr>` to support multiple project items with the same alias
+- *BREAKING:* partiql-logical: changed modeling of `VarRef` to include a `VarRefType` to indicate whether to do a local vs global binding lookup
 
 ### Added
 - Add interface for `STRICT` mode evalution to `EvaluatorPlanner`.
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
 - partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 - partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
+- Fixes variable resolution lookup order and excessive lookups
 
 ## [0.5.0] - 2023-06-06
 ### Changed

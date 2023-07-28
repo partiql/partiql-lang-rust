@@ -282,7 +282,6 @@ impl<'a> AstToLogical<'a> {
     }
 
     fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
-        // println!("varref: {:?}", varref);
         // Convert a `SymbolPrimitive` into a `BindingsName`
         fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName {
             match sym.case {
@@ -394,7 +393,6 @@ impl<'a> AstToLogical<'a> {
                         }
                     }
                 }
-                // println!("lookups: {:?}", lookups);
                 return ValueExpr::DynamicLookup(Box::new(lookups));
             }
         }
@@ -1238,7 +1236,6 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
         if should_resolve {
             let options = self.resolve_varref(_var_ref);
-            // println!("var ref options: {:?}", options);
             self.push_vexpr(options);
         } else {
             // TODO scope qualifier
@@ -1250,7 +1247,6 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 CaseSensitivity::CaseSensitive => BindingsName::CaseSensitive(value.clone()),
                 CaseSensitivity::CaseInsensitive => BindingsName::CaseInsensitive(value.clone()),
             };
-            // println!("var ref name: {:?}", name);
             self.push_vexpr(ValueExpr::VarRef(name, VarRefType::Local));
         }
         Traverse::Continue

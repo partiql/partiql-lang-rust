@@ -233,8 +233,6 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let schema = KeySchema { consume, produce };
 
         self.schema.insert(id, schema);
-        println!("final schema: {:?}", self.schema);
-        println!("in scope: {:?}", self.in_scope);
         Traverse::Continue
     }
 
@@ -445,7 +443,6 @@ impl<'ast> Visitor<'ast> for NameResolver {
     }
 
     fn enter_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
-        self.enter_child_stack();
         self.enter_keyref();
         let id = *self.current_node();
         // Scopes above this `GROUP BY` in the AST are in-scope to use variables defined by this GROUP BY
@@ -460,15 +457,6 @@ impl<'ast> Visitor<'ast> for NameResolver {
 
     fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Traverse {
         let id = *self.current_node();
-        let child_stack = self.exit_child_stack();
-        if let Err(e) = child_stack {
-            self.errors.push(e);
-            return Traverse::Stop;
-        } else {
-            println!("group_by_expr child stack: {:?}", child_stack);
-        }
-        println!("group_by_expr nodeid: {:?}", self.current_node());
-
         let KeyRefs {
             consume,
             produce_required,

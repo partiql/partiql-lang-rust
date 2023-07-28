@@ -18,7 +18,7 @@ mod tests {
     use crate::plan::EvaluationMode;
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
-        ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr,
+        ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr, VarRefType,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -68,7 +68,10 @@ mod tests {
 
     fn scan(name: &str, as_key: &str) -> BindingsOp {
         BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive(name.into())),
+            expr: ValueExpr::VarRef(
+                BindingsName::CaseInsensitive(name.into()),
+                VarRefType::Global,
+            ),
             as_key: as_key.to_string(),
             at_key: None,
         })
@@ -76,9 +79,10 @@ mod tests {
 
     fn path_var(name: &str, component: &str) -> ValueExpr {
         ValueExpr::Path(
-            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                name.into(),
-            ))),
+            Box::new(ValueExpr::VarRef(
+                BindingsName::CaseInsensitive(name.into()),
+                VarRefType::Local,
+            )),
             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                 component.to_string(),
             ))],
@@ -152,7 +156,10 @@ mod tests {
     fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            expr: ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("data".into()),
+                VarRefType::Global,
+            ),
             as_key: "data".to_string(),
             at_key: None,
         }));
@@ -163,9 +170,10 @@ mod tests {
                 ValueExpr::BinaryExpr(
                     op,
                     Box::new(ValueExpr::Path(
-                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                            "data".into(),
-                        ))),
+                        Box::new(ValueExpr::VarRef(
+                            BindingsName::CaseInsensitive("data".into()),
+                            VarRefType::Local,
+                        )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
                             "lhs".to_string(),
                         ))],
@@ -657,7 +665,10 @@ mod tests {
         fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
             let mut plan = LogicalPlan::new();
             let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
-                expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+                expr: ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive("data".into()),
+                    VarRefType::Global,
+                ),
                 as_key: "data".to_string(),
                 at_key: None,
             }));
@@ -667,9 +678,10 @@ mod tests {
                     "result".to_string(),
                     ValueExpr::BetweenExpr(BetweenExpr {
                         value: Box::new(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                "data".into(),
-                            ))),
+                            Box::new(ValueExpr::VarRef(
+                                BindingsName::CaseInsensitive("data".into()),
+                                VarRefType::Local,
+                            )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                                 "value".to_string(),
                             ))],
@@ -874,7 +886,7 @@ mod tests {
         let project = lg.add_operator(Project(logical::Project {
             exprs: Vec::from([(
                 "r".to_string(),
-                ValueExpr::VarRef(BindingsName::CaseInsensitive("r".into())),
+                ValueExpr::VarRef(BindingsName::CaseInsensitive("r".into()), VarRefType::Local),
             )]),
         }));
 
@@ -1122,7 +1134,10 @@ mod tests {
     fn eval_is_op(not: bool, expr: Value, is_type: Type, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            expr: ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("data".into()),
+                VarRefType::Global,
+            ),
             as_key: "data".to_string(),
             at_key: None,
         }));
@@ -1133,9 +1148,10 @@ mod tests {
                 ValueExpr::IsTypeExpr(IsTypeExpr {
                     not,
                     expr: Box::new(ValueExpr::Path(
-                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                            "data".into(),
-                        ))),
+                        Box::new(ValueExpr::VarRef(
+                            BindingsName::CaseInsensitive("data".into()),
+                            VarRefType::Local,
+                        )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
                             "expr".to_string(),
                         ))],
@@ -1185,7 +1201,10 @@ mod tests {
     fn eval_null_if_op(lhs: Value, rhs: Value, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            expr: ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("data".into()),
+                VarRefType::Global,
+            ),
             as_key: "data".to_string(),
             at_key: None,
         }));
@@ -1195,9 +1214,10 @@ mod tests {
                 "result".to_string(),
                 ValueExpr::NullIfExpr(NullIfExpr {
                     lhs: Box::new(ValueExpr::Path(
-                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                            "data".into(),
-                        ))),
+                        Box::new(ValueExpr::VarRef(
+                            BindingsName::CaseInsensitive("data".into()),
+                            VarRefType::Local,
+                        )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
                             "lhs".to_string(),
                         ))],
@@ -1240,16 +1260,20 @@ mod tests {
     fn eval_coalesce_op(elements: Vec<Value>, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+            expr: ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("data".into()),
+                VarRefType::Global,
+            ),
             as_key: "data".to_string(),
             at_key: None,
         }));
 
         fn index_to_valueexpr(i: usize) -> ValueExpr {
             ValueExpr::Path(
-                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                    "data".into(),
-                ))),
+                Box::new(ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive("data".into()),
+                    VarRefType::Local,
+                )),
                 vec![PathComponent::Key(BindingsName::CaseInsensitive(format!(
                     "arg{i}"
                 )))],
@@ -1391,9 +1415,10 @@ mod tests {
             exprs: Vec::from([(
                 "b".to_string(),
                 ValueExpr::Path(
-                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                        "data".into(),
-                    ))),
+                    Box::new(ValueExpr::VarRef(
+                        BindingsName::CaseInsensitive("data".into()),
+                        VarRefType::Local,
+                    )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
                         "a".to_string(),
                     ))],
@@ -1919,9 +1944,10 @@ mod tests {
             expr: ValueExpr::BinaryExpr(
                 BinaryOp::Gt,
                 Box::new(ValueExpr::Path(
-                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                        "customer".into(),
-                    ))),
+                    Box::new(ValueExpr::VarRef(
+                        BindingsName::CaseInsensitive("customer".into()),
+                        VarRefType::Local,
+                    )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
                         "balance".to_string(),
                     ))],
@@ -1935,9 +1961,10 @@ mod tests {
                 (
                     "firstName".to_string(),
                     ValueExpr::Path(
-                        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                            "customer".into(),
-                        ))),
+                        Box::new(ValueExpr::VarRef(
+                            BindingsName::CaseInsensitive("customer".into()),
+                            VarRefType::Local,
+                        )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
                             "firstName".to_string(),
                         ))],
@@ -1948,17 +1975,19 @@ mod tests {
                     ValueExpr::BinaryExpr(
                         BinaryOp::Concat,
                         Box::new(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                "customer".into(),
-                            ))),
+                            Box::new(ValueExpr::VarRef(
+                                BindingsName::CaseInsensitive("customer".into()),
+                                VarRefType::Local,
+                            )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                                 "firstName".to_string(),
                             ))],
                         )),
                         Box::new(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                                "customer".into(),
-                            ))),
+                            Box::new(ValueExpr::VarRef(
+                                BindingsName::CaseInsensitive("customer".into()),
+                                VarRefType::Local,
+                            )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                                 "firstName".to_string(),
                             ))],
@@ -2000,9 +2029,10 @@ mod tests {
             expr: ValueExpr::BinaryExpr(
                 BinaryOp::In,
                 Box::new(ValueExpr::Path(
-                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                        "data".into(),
-                    ))),
+                    Box::new(ValueExpr::VarRef(
+                        BindingsName::CaseInsensitive("data".into()),
+                        VarRefType::Local,
+                    )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
                         "a".to_string(),
                     ))],
@@ -2015,9 +2045,10 @@ mod tests {
             exprs: Vec::from([(
                 "b".to_string(),
                 ValueExpr::Path(
-                    Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                        "data".into(),
-                    ))),
+                    Box::new(ValueExpr::VarRef(
+                        BindingsName::CaseInsensitive("data".into()),
+                        VarRefType::Local,
+                    )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
                         "a".to_string(),
                     ))],
@@ -2199,9 +2230,9 @@ mod tests {
             let ctx = BasicContext::new(p0);
 
             let mut scan = EvalScan::new_with_at_key(
-                Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
-                }),
+                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
+                    "someOrderedTable".to_string(),
+                ))),
                 "x",
                 "y",
             );
@@ -2225,9 +2256,9 @@ mod tests {
             let ctx = BasicContext::new(p0);
 
             let mut scan = EvalScan::new_with_at_key(
-                Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("someUnorderedTable".to_string()),
-                }),
+                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
+                    "someUnorderedTable".to_string(),
+                ))),
                 "x",
                 "y",
             );
@@ -2254,9 +2285,9 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let table_ref = EvalVarRef {
-                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
-            };
+            let table_ref = EvalVarRef::Global(BindingsName::CaseInsensitive(
+                "someOrderedTable".to_string(),
+            ));
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
                 components: vec![
@@ -2279,9 +2310,9 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let table_ref = EvalVarRef {
-                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
-            };
+            let table_ref = EvalVarRef::Global(BindingsName::CaseInsensitive(
+                "someOrderedTable".to_string(),
+            ));
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
                 components: vec![
@@ -2319,9 +2350,9 @@ mod tests {
             p0.insert("justATuple", just_a_tuple().into());
 
             let mut unpivot = EvalUnpivot::new(
-                Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("justATuple".to_string()),
-                }),
+                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
+                    "justATuple".to_string(),
+                ))),
                 "price",
                 Some("symbol".into()),
             );
@@ -2343,9 +2374,9 @@ mod tests {
             p0.insert("nonTuple", Value::from(1));
 
             let mut unpivot = EvalUnpivot::new(
-                Box::new(EvalVarRef {
-                    name: BindingsName::CaseInsensitive("nonTuple".to_string()),
-                }),
+                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
+                    "nonTuple".to_string(),
+                ))),
                 "x",
                 Some("y".into()),
             );

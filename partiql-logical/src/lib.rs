@@ -11,7 +11,7 @@
 //!
 /// # Examples
 /// ```
-/// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr};
+/// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr, VarRefType};
 /// use partiql_value::{BindingsName, Value};
 ///
 /// // Plan for `SELECT VALUE 2*v.a FROM [{'a': 1}, {'a': 2}, {'a': 3}] AS v`
@@ -19,7 +19,7 @@
 /// let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
 ///
 /// let from = p.add_operator(BindingsOp::Scan(Scan {
-///     expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+///     expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into()), VarRefType::Global),
 ///     as_key: "v".to_string(),
 ///     at_key: None,
 /// }));
@@ -27,7 +27,7 @@
 /// let va = ValueExpr::Path(
 ///     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
 ///         "v".into(),
-///     ))),
+///     ), VarRefType::Local)),
 ///     vec![PathComponent::Key(BindingsName::CaseInsensitive("a".to_string()))],
 /// );
 ///
@@ -695,16 +695,13 @@ pub enum SetQuantifier {
     Distinct,
 }
 
-/// Indicates scope search order when resolving variables.
-/// Has no effect except within `FROM` sources.
+/// Indicates whether to look in the local/lexical or global environment when resolving a variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum VarRefType {
-    /// The variable was *NOT* prefixed with `@`.
-    /// Resolve the variable by looking first in the database environment, then in the 'lexical' scope.
+    /// Resolve the variable by looking in the global environment.
     Global,
-    /// The variable *WAS* prefixed with `@`.
-    /// Resolve the variable by looking first in the 'lexical' scope, then in the database environment.
+    /// Resolve the variable by looking in the local/lexical scope environment.
     Local,
 }
 

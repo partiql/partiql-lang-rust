@@ -126,16 +126,12 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
         .unwrap_or_else(MapBindings::default);
 
     let plan = compile(mode, &catalog, lowered);
-    match plan {
-        Ok(plan) => {
-            let out = evaluate(plan, bindings);
-
-            assert!(
-                out.is_err(),
-                "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
-            );
-        }
-        Err(_) => {}
+    if let Ok(plan) = plan {
+        let out = evaluate(plan, bindings);
+        assert!(
+            out.is_err(),
+            "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
+        );
     }
 }
 
