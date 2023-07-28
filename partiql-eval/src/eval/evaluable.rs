@@ -1159,12 +1159,12 @@ impl Evaluable for EvalSelectValue {
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
 pub(crate) struct EvalSelect {
-    pub(crate) exprs: HashMap<String, Box<dyn EvalExpr>>,
+    pub(crate) exprs: Vec<(String, Box<dyn EvalExpr>)>,
     pub(crate) input: Option<Value>,
 }
 
 impl EvalSelect {
-    pub(crate) fn new(exprs: HashMap<String, Box<dyn EvalExpr>>) -> Self {
+    pub(crate) fn new(exprs: Vec<(String, Box<dyn EvalExpr>)>) -> Self {
         EvalSelect { exprs, input: None }
     }
 }

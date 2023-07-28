@@ -752,7 +752,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll,
             ProjectionKind::ProjectList(_) => {
                 true_or_fault!(self, env.len().is_even(), "env.len() is not even");
-                let mut exprs = HashMap::with_capacity(env.len() / 2);
+                let mut exprs = Vec::with_capacity(env.len() / 2);
                 let mut iter = env.into_iter();
                 while let Some(value) = iter.next() {
                     let alias = iter.next().unwrap();
@@ -775,7 +775,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                             "".to_string()
                         }
                     };
-                    exprs.insert(alias, value);
+                    exprs.push((alias, value));
                 }
 
                 logical::BindingsOp::Project(logical::Project { exprs })
@@ -1506,7 +1506,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             .plan
             .operator_as_mut(select_clause_op_id.expect("select_clause_op_id not None"))
             .unwrap();
-        let mut binding = HashMap::new();
+        let mut binding = Vec::new();
         let select_clause_exprs = match select_clause {
             BindingsOp::Project(ref mut project) => &mut project.exprs,
             BindingsOp::ProjectAll => &mut binding,
@@ -1518,8 +1518,6 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 return Traverse::Stop;
             }
         };
-        let mut exprs_to_replace: Vec<(String, ValueExpr)> = Vec::new();
-
         let mut exprs = HashMap::with_capacity(env.len() / 2);
         let mut iter = env.into_iter();
 
@@ -1543,18 +1541,14 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     return Traverse::Stop;
                 }
             };
-            for (alias, expr) in select_clause_exprs.iter() {
+            for (alias, expr) in select_clause_exprs.iter_mut() {
                 if *expr == value {
                     let new_binding_name = BindingsName::CaseSensitive(alias.clone());
                     let new_expr = ValueExpr::VarRef(new_binding_name);
-                    exprs_to_replace.push((alias.to_owned(), new_expr));
+                    *expr = new_expr
                 }
             }
             exprs.insert(alias, value);
-        }
-
-        for (k, v) in exprs_to_replace {
-            select_clause_exprs.insert(k, v);
         }
 
         let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {

@@ -141,7 +141,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 }
             }
             BindingsOp::Project(logical::Project { exprs }) => {
-                let exprs: HashMap<_, _> = exprs
+                let exprs: Vec<(_, _)> = exprs
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_values::<{ STRICT }>(v)))
                     .collect();

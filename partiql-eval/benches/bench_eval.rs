@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -95,7 +94,7 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
     let from_rhs = scan("orders", "o");
 
     let project = lg.add_operator(Project(logical::Project {
-        exprs: HashMap::from([
+        exprs: Vec::from([
             ("id".to_string(), path_var("c", "id")),
             ("name".to_string(), path_var("c", "name")),
             ("custId".to_string(), path_var("o", "custId")),

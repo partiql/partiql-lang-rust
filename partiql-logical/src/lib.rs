@@ -383,7 +383,7 @@ pub enum GroupingStrategy {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Project {
-    pub exprs: HashMap<String, ValueExpr>,
+    pub exprs: Vec<(String, ValueExpr)>,
 }
 
 /// Represents a value projection (SELECT VALUE) e.g. `SELECT VALUE t.a * 2` in

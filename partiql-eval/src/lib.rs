@@ -6,7 +6,6 @@ pub mod plan;
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use std::collections::HashMap;
 
     use crate::env::basic::MapBindings;
     use crate::plan;
@@ -159,7 +158,7 @@ mod tests {
         }));
 
         let project = plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "result".to_string(),
                 ValueExpr::BinaryExpr(
                     op,
@@ -664,7 +663,7 @@ mod tests {
             }));
 
             let project = plan.add_operator(Project(logical::Project {
-                exprs: HashMap::from([(
+                exprs: Vec::from([(
                     "result".to_string(),
                     ValueExpr::BetweenExpr(BetweenExpr {
                         value: Box::new(ValueExpr::Path(
@@ -730,7 +729,7 @@ mod tests {
 
         let mut lg = LogicalPlan::new();
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("id".to_string(), path_var("c", "id")),
                 ("name".to_string(), path_var("c", "name")),
                 ("custId".to_string(), path_var("o", "custId")),
@@ -781,7 +780,7 @@ mod tests {
         });
 
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
+            exprs: Vec::from([("v".to_string(), path_var("r", "v"))]),
         }));
 
         let join = lg.add_operator(BindingsOp::Join(logical::Join {
@@ -826,7 +825,7 @@ mod tests {
         });
 
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([("v".to_string(), path_var("r", "v"))]),
+            exprs: Vec::from([("v".to_string(), path_var("r", "v"))]),
         }));
 
         let join = lg.add_operator(BindingsOp::Join(logical::Join {
@@ -873,7 +872,7 @@ mod tests {
         });
 
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "r".to_string(),
                 ValueExpr::VarRef(BindingsName::CaseInsensitive("r".into())),
             )]),
@@ -963,7 +962,7 @@ mod tests {
         let scan = lg.add_operator(scan("nums", "n"));
 
         let project_logical = Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("a".to_string(), path_var("n", "a")),
                 (
                     "b".to_string(),
@@ -1002,7 +1001,7 @@ mod tests {
         // FROM nums AS n
         let scan = lg.add_operator(scan("nums", "n"));
         let project_logical_no_default = Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("a".to_string(), path_var("n", "a")),
                 (
                     "b".to_string(),
@@ -1046,7 +1045,7 @@ mod tests {
         let scan = lg.add_operator(scan("nums", "n"));
 
         let project_logical = Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("a".to_string(), path_var("n", "a")),
                 (
                     "b".to_string(),
@@ -1085,7 +1084,7 @@ mod tests {
         // FROM nums AS n
         let scan = lg.add_operator(scan("nums", "n"));
         let project_logical_no_default = Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("a".to_string(), path_var("n", "a")),
                 (
                     "b".to_string(),
@@ -1129,7 +1128,7 @@ mod tests {
         }));
 
         let project = plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "result".to_string(),
                 ValueExpr::IsTypeExpr(IsTypeExpr {
                     not,
@@ -1192,7 +1191,7 @@ mod tests {
         }));
 
         let project = plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "result".to_string(),
                 ValueExpr::NullIfExpr(NullIfExpr {
                     lhs: Box::new(ValueExpr::Path(
@@ -1258,7 +1257,7 @@ mod tests {
         }
 
         let project = plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "result".to_string(),
                 ValueExpr::CoalesceExpr(CoalesceExpr {
                     elements: (0..elements.len()).map(index_to_valueexpr).collect(),
@@ -1389,7 +1388,7 @@ mod tests {
         let from = lg.add_operator(scan("data", "data"));
 
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "b".to_string(),
                 ValueExpr::Path(
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
@@ -1932,7 +1931,7 @@ mod tests {
         }));
 
         let project = logical.add_operator(Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 (
                     "firstName".to_string(),
                     ValueExpr::Path(
@@ -2013,7 +2012,7 @@ mod tests {
         }));
 
         let project = logical.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "b".to_string(),
                 ValueExpr::Path(
                     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
@@ -2047,7 +2046,7 @@ mod tests {
         let subq_scan = subq_plan.add_operator(scan("t", "v"));
         let va = path_var("v", "a");
         let subq_project = subq_plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "u".to_string(),
                 ValueExpr::BinaryExpr(
                     BinaryOp::Mul,
@@ -2080,7 +2079,7 @@ mod tests {
         let ta = path_var("t", "a");
         let su = path_var("s", "u");
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([("ta".to_string(), ta), ("su".to_string(), su)]),
+            exprs: Vec::from([("ta".to_string(), ta), ("su".to_string(), su)]),
         }));
 
         let sink = lg.add_operator(BindingsOp::Sink);
@@ -2121,7 +2120,7 @@ mod tests {
         let subq_scan = subq_plan.add_operator(scan("t", "v"));
         let va = path_var("v", "a");
         let subq_project = subq_plan.add_operator(Project(logical::Project {
-            exprs: HashMap::from([(
+            exprs: Vec::from([(
                 "u".to_string(),
                 ValueExpr::BinaryExpr(
                     BinaryOp::Mul,
@@ -2139,7 +2138,7 @@ mod tests {
         let from = lg.add_operator(scan("data", "t"));
         let ta = path_var("t", "a");
         let project = lg.add_operator(Project(logical::Project {
-            exprs: HashMap::from([
+            exprs: Vec::from([
                 ("ta".to_string(), ta),
                 (
                     "s".to_string(),
