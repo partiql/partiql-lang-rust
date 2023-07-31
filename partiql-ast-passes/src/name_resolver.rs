@@ -387,9 +387,19 @@ impl<'ast> Visitor<'ast> for NameResolver {
         self.enter_keyref();
         let id = *self.current_node();
 
+        if self
+            .enclosing_clause
+            .get(&EnclosingClause::FromLet)
+            .is_none()
+        {
+            self.errors.push(AstTransformError::IllegalState(
+                "group_key expects a FromLet enclosing clause".to_string(),
+            ))
+        }
+
         self.enclosing_clause
             .get(&EnclosingClause::FromLet)
-            .unwrap()
+            .expect("EnclosingClause::FromLet")
             .iter()
             .for_each(|enclosing_clause| {
                 self.in_scope
