@@ -29,8 +29,7 @@ pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
             Value::Integer(_),
         ) => true,
         (TypeKind::Bool, Value::Boolean(_)) => true,
-        (TypeKind::Decimal, Value::Decimal(_)) => true,
-        (TypeKind::DecimalP(_, _), Value::Decimal(_)) => true,
+        (TypeKind::Decimal | TypeKind::DecimalP(_, _), Value::Decimal(_)) => true,
         (TypeKind::Float32 | TypeKind::Float64, Value::Real(_)) => true,
         (
             TypeKind::String | TypeKind::StringFixed(_) | TypeKind::StringVarying(_),
@@ -51,7 +50,7 @@ pub(crate) fn unwrap_args<const N: usize>(
 ) -> Result<[Box<dyn EvalExpr>; N], BindError> {
     args.try_into()
         .map_err(|args: Vec<_>| BindError::ArgNumMismatch {
-            expected: 1,
+            expected: N,
             found: args.len(),
         })
 }
@@ -68,7 +67,7 @@ pub(crate) trait ExecuteEvalExpr<const N: usize>: Debug {
 
 /// Used to tell argument checking whether it should exit early or go on as usual.
 ///
-/// Analagous to [`ControlFlow`], but with additional states to handle strict error reporting and
+/// Analogous to [`ControlFlow`], but with additional states to handle strict error reporting and
 /// `NULL`/`MISSING` propagation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ArgCheckControlFlow<B, C, R = B> {
@@ -225,7 +224,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
     /// and convert them into an array of `N` `Cow<Value>`s.
     ///
     /// If type-checking fails, the appropriate failure case of [`ArgCheckControlFlow`] is returned,
-    /// else [`ArgCheckControlFlow::Continue`] is returned containg the `N` values.
+    /// else [`ArgCheckControlFlow::Continue`] is returned containing the `N` values.
     pub fn evaluate_args<'a>(
         &'a self,
         bindings: &'a Tuple,
