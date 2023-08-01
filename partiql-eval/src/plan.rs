@@ -428,7 +428,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 }) as Box<dyn EvalExpr>),
             ),
             ValueExpr::VarRef(name) => (
-                "path",
+                "var ref",
                 Ok(Box::new(EvalVarRef { name: name.clone() }) as Box<dyn EvalExpr>),
             ),
             ValueExpr::TupleExpr(expr) => {
@@ -556,7 +556,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     Some(def) => self.plan_values::<{ STRICT }>(def.as_ref()),
                 };
                 (
-                    "searchd case",
+                    "searched case",
                     Ok(Box::new(EvalSearchedCaseExpr { cases, default }) as Box<dyn EvalExpr>),
                 )
             }
