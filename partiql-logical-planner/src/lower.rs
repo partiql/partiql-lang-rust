@@ -1230,15 +1230,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) -> Traverse {
-        // let is_from_path = matches!(self.current_ctx(), Some(QueryContext::FromLet));
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
-        let should_resolve = /* !is_from_path && */ !is_path;
-
-        if should_resolve {
+        if !is_path {
             let options = self.resolve_varref(_var_ref);
             self.push_vexpr(options);
         } else {
-            // TODO scope qualifier
             let VarRef {
                 name: SymbolPrimitive { value, case },
                 qualifier: _,
