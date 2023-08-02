@@ -9,7 +9,7 @@ use std::vec;
 
 use unicase::UniCase;
 
-use crate::{BindingsName, Value};
+use crate::{BindingsName, NullSortedValue, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -122,31 +122,6 @@ impl Tuple {
     pub fn into_values(self) -> impl Iterator<Item = Value> {
         self.vals.into_iter()
     }
-
-    #[inline]
-    pub(crate) fn order_by_cmp<const NULLS_FIRST: bool>(&self, other: &Self) -> Ordering {
-        let self_pairs = self.pairs();
-        let other_pairs = other.pairs();
-        let mut p1 = self_pairs.sorted();
-        let mut p2 = other_pairs.sorted();
-
-        loop {
-            return match (p1.next(), p2.next()) {
-                (None, None) => Ordering::Equal,
-                (Some(_), None) => Ordering::Greater,
-                (None, Some(_)) => Ordering::Less,
-                (Some((ls, lv)), Some((rs, rv))) => {
-                    match (ls.cmp(&rs), Value::order_by_cmp::<NULLS_FIRST>(lv, rv)) {
-                        (Ordering::Less, _) => Ordering::Less,
-                        (Ordering::Greater, _) => Ordering::Greater,
-                        (_, Ordering::Less) => Ordering::Less,
-                        (_, Ordering::Greater) => Ordering::Greater,
-                        (_, Ordering::Equal) => continue,
-                    }
-                }
-            };
-        }
-    }
 }
 
 impl<const N: usize, T> From<[(&str, T); N]> for Tuple
@@ -226,6 +201,32 @@ impl Debug for Tuple {
             }
         }
         write!(f, "}}")
+    }
+}
+
+impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Tuple> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let wrap = NullSortedValue::<{ NULLS_FIRST }, Value>;
+
+        let self_pairs = self.0.pairs();
+        let other_pairs = other.0.pairs();
+        let mut p1 = self_pairs.sorted();
+        let mut p2 = other_pairs.sorted();
+
+        loop {
+            return match (p1.next(), p2.next()) {
+                (None, None) => Ordering::Equal,
+                (Some(_), None) => Ordering::Greater,
+                (None, Some(_)) => Ordering::Less,
+                (Some((ls, lv)), Some((rs, rv))) => match (ls.cmp(rs), wrap(lv).cmp(&wrap(rv))) {
+                    (Ordering::Less, _) => Ordering::Less,
+                    (Ordering::Greater, _) => Ordering::Greater,
+                    (_, Ordering::Less) => Ordering::Less,
+                    (_, Ordering::Greater) => Ordering::Greater,
+                    (_, Ordering::Equal) => continue,
+                },
+            };
+        }
     }
 }
 
