@@ -149,6 +149,7 @@ mod tests {
     // (i.e. <<{'result': <expected_first_elem>}>>)
     // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
     //  in evaluator output), change or delete tests using this function
+    #[track_caller]
     fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
@@ -625,6 +626,7 @@ mod tests {
 
     #[test]
     fn and_or_null() {
+        #[track_caller]
         fn eval_to_null(op: BinaryOp, lhs: Value, rhs: Value) {
             let mut plan = LogicalPlan::new();
             let expq = plan.add_operator(BindingsOp::ExprQuery(ExprQuery {
@@ -654,6 +656,7 @@ mod tests {
 
     #[test]
     fn between_op() {
+        #[track_caller]
         fn eval_between_op(value: Value, from: Value, to: Value, expected_first_elem: Value) {
             let mut plan = LogicalPlan::new();
             let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {

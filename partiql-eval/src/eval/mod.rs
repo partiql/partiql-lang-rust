@@ -20,6 +20,7 @@ use petgraph::visit::EdgeRef;
 
 use crate::eval::evaluable::{EvalType, Evaluable};
 
+pub(crate) mod eval_expr_wrapper;
 pub mod evaluable;
 pub mod expr;
 

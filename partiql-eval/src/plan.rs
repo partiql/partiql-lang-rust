@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use petgraph::prelude::StableGraph;
-use regex::RegexBuilder;
 use std::collections::HashMap;
 
 use partiql_logical as logical;
@@ -18,17 +17,12 @@ use crate::eval::evaluable::{
     EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, EvalSubQueryExpr,
     Evaluable, Max, Min, Sum,
 };
-use crate::eval::expr::pattern_match::like_to_re_pattern;
 use crate::eval::expr::{
-    EvalBagExpr, EvalBetweenExpr, EvalBinOp, EvalBinOpExpr, EvalDynamicLookup, EvalExpr, EvalFnAbs,
-    EvalFnBaseTableExpr, EvalFnBitLength, EvalFnBtrim, EvalFnCardinality, EvalFnCharLength,
-    EvalFnCollAvg, EvalFnCollCount, EvalFnCollMax, EvalFnCollMin, EvalFnCollSum, EvalFnExists,
-    EvalFnExtractDay, EvalFnExtractHour, EvalFnExtractMinute, EvalFnExtractMonth,
-    EvalFnExtractSecond, EvalFnExtractTimezoneHour, EvalFnExtractTimezoneMinute, EvalFnExtractYear,
-    EvalFnLower, EvalFnLtrim, EvalFnModulus, EvalFnOctetLength, EvalFnOverlay, EvalFnPosition,
-    EvalFnRtrim, EvalFnSubstring, EvalFnUpper, EvalIsTypeExpr, EvalLikeMatch,
-    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalPath, EvalSearchedCaseExpr,
-    EvalTupleExpr, EvalUnaryOp, EvalUnaryOpExpr, EvalVarRef, RE_SIZE_LIMIT,
+    BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
+    EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
+    EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
+    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
+    EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
@@ -71,6 +65,39 @@ impl From<&logical::SetQuantifier> for eval::evaluable::SetQuantifier {
         match setq {
             SetQuantifier::All => eval::evaluable::SetQuantifier::All,
             SetQuantifier::Distinct => eval::evaluable::SetQuantifier::Distinct,
+        }
+    }
+}
+
+impl From<&UnaryOp> for EvalOpUnary {
+    fn from(op: &UnaryOp) -> Self {
+        match op {
+            UnaryOp::Pos => EvalOpUnary::Pos,
+            UnaryOp::Neg => EvalOpUnary::Neg,
+            UnaryOp::Not => EvalOpUnary::Not,
+        }
+    }
+}
+
+impl From<&BinaryOp> for EvalOpBinary {
+    fn from(op: &BinaryOp) -> Self {
+        match op {
+            BinaryOp::And => EvalOpBinary::And,
+            BinaryOp::Or => EvalOpBinary::Or,
+            BinaryOp::Concat => EvalOpBinary::Concat,
+            BinaryOp::Eq => EvalOpBinary::Eq,
+            BinaryOp::Neq => EvalOpBinary::Neq,
+            BinaryOp::Gt => EvalOpBinary::Gt,
+            BinaryOp::Gteq => EvalOpBinary::Gteq,
+            BinaryOp::Lt => EvalOpBinary::Lt,
+            BinaryOp::Lteq => EvalOpBinary::Lteq,
+            BinaryOp::Add => EvalOpBinary::Add,
+            BinaryOp::Sub => EvalOpBinary::Sub,
+            BinaryOp::Mul => EvalOpBinary::Mul,
+            BinaryOp::Div => EvalOpBinary::Div,
+            BinaryOp::Mod => EvalOpBinary::Mod,
+            BinaryOp::Exp => EvalOpBinary::Exp,
+            BinaryOp::In => EvalOpBinary::In,
         }
     }
 }
@@ -129,13 +156,13 @@ impl<'c> EvaluatorPlanner<'c> {
             }) => {
                 if let Some(at_key) = at_key {
                     Box::new(eval::evaluable::EvalScan::new_with_at_key(
-                        self.plan_values::<{ STRICT }>(expr),
+                        self.plan_value::<{ STRICT }>(expr),
                         as_key,
                         at_key,
                     ))
                 } else {
                     Box::new(eval::evaluable::EvalScan::new(
-                        self.plan_values::<{ STRICT }>(expr),
+                        self.plan_value::<{ STRICT }>(expr),
                         as_key,
                     ))
                 }
@@ -143,27 +170,27 @@ impl<'c> EvaluatorPlanner<'c> {
             BindingsOp::Project(logical::Project { exprs }) => {
                 let exprs: Vec<(_, _)> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values::<{ STRICT }>(v)))
+                    .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
                     .collect();
                 Box::new(eval::evaluable::EvalSelect::new(exprs))
             }
             BindingsOp::ProjectAll => Box::new(eval::evaluable::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
-                let expr = self.plan_values::<{ STRICT }>(expr);
+                let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalSelectValue::new(expr))
             }
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(
-                eval::evaluable::EvalFilter::new(self.plan_values::<{ STRICT }>(expr)),
+                eval::evaluable::EvalFilter::new(self.plan_value::<{ STRICT }>(expr)),
             ),
             BindingsOp::Having(logical::Having { expr }) => Box::new(
-                eval::evaluable::EvalHaving::new(self.plan_values::<{ STRICT }>(expr)),
+                eval::evaluable::EvalHaving::new(self.plan_value::<{ STRICT }>(expr)),
             ),
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
             BindingsOp::Pivot(logical::Pivot { key, value }) => {
                 Box::new(eval::evaluable::EvalPivot::new(
-                    self.plan_values::<{ STRICT }>(key),
-                    self.plan_values::<{ STRICT }>(value),
+                    self.plan_value::<{ STRICT }>(key),
+                    self.plan_value::<{ STRICT }>(value),
                 ))
             }
             BindingsOp::Unpivot(logical::Unpivot {
@@ -171,7 +198,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 as_key,
                 at_key,
             }) => Box::new(eval::evaluable::EvalUnpivot::new(
-                self.plan_values::<{ STRICT }>(expr),
+                self.plan_value::<{ STRICT }>(expr),
                 as_key,
                 at_key.clone(),
             )),
@@ -191,7 +218,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 };
                 let on = on
                     .as_ref()
-                    .map(|on_condition| self.plan_values::<{ STRICT }>(on_condition));
+                    .map(|on_condition| self.plan_value::<{ STRICT }>(on_condition));
                 Box::new(eval::evaluable::EvalJoin::new(
                     kind,
                     self.get_eval_node::<{ STRICT }>(left),
@@ -211,7 +238,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 };
                 let exprs: HashMap<_, _> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values::<{ STRICT }>(v)))
+                    .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
                     .collect();
                 let aggregate_exprs = aggregate_exprs
                     .iter()
@@ -250,7 +277,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         };
                         eval::evaluable::AggregateExpression {
                             name: a_e.name.to_string(),
-                            expr: self.plan_values::<{ STRICT }>(&a_e.expr),
+                            expr: self.plan_value::<{ STRICT }>(&a_e.expr),
                             func,
                         }
                     })
@@ -265,14 +292,14 @@ impl<'c> EvaluatorPlanner<'c> {
                 })
             }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
-                let expr = self.plan_values::<{ STRICT }>(expr);
+                let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy(logical::OrderBy { specs }) => {
                 let cmp = specs
                     .iter()
                     .map(|spec| {
-                        let expr = self.plan_values::<{ STRICT }>(&spec.expr);
+                        let expr = self.plan_value::<{ STRICT }>(&spec.expr);
                         let spec = match (&spec.order, &spec.null_order) {
                             (SortSpecOrder::Asc, SortSpecNullOrder::First) => {
                                 EvalOrderBySortSpec::AscNullsFirst
@@ -294,8 +321,8 @@ impl<'c> EvaluatorPlanner<'c> {
             }
             BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
                 Box::new(eval::evaluable::EvalLimitOffset {
-                    limit: limit.as_ref().map(|e| self.plan_values::<{ STRICT }>(e)),
-                    offset: offset.as_ref().map(|e| self.plan_values::<{ STRICT }>(e)),
+                    limit: limit.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
+                    offset: offset.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
                     input: None,
                 })
             }
@@ -328,115 +355,131 @@ impl<'c> EvaluatorPlanner<'c> {
         Box::new(ErrorNode::new())
     }
 
-    fn plan_values<const STRICT: bool>(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
-        match ve {
-            ValueExpr::UnExpr(unary_op, operand) => {
-                let operand = self.plan_values::<{ STRICT }>(operand);
-                let op = match unary_op {
-                    UnaryOp::Pos => EvalUnaryOp::Pos,
-                    UnaryOp::Neg => EvalUnaryOp::Neg,
-                    UnaryOp::Not => EvalUnaryOp::Not,
+    fn unwrap_bind(
+        &mut self,
+        name: &str,
+        op: Result<Box<dyn EvalExpr>, BindError>,
+    ) -> Box<dyn EvalExpr> {
+        match op {
+            Ok(op) => op,
+            Err(err) => {
+                let err = match err {
+                    BindError::ArgNumMismatch { .. } => {
+                        PlanningError::IllegalState(format!("Wrong number of arguments for {name}"))
+                    }
+                    BindError::Unknown => {
+                        PlanningError::IllegalState(format!("Unknown error binding {name}"))
+                    }
+                    BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
+                    BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
                 };
-                Box::new(EvalUnaryOpExpr { op, operand })
+
+                self.err(err)
             }
-            ValueExpr::BinaryExpr(binop, lhs, rhs) => {
-                let lhs = self.plan_values::<{ STRICT }>(lhs);
-                let rhs = self.plan_values::<{ STRICT }>(rhs);
-                let op = match binop {
-                    BinaryOp::And => EvalBinOp::And,
-                    BinaryOp::Or => EvalBinOp::Or,
-                    BinaryOp::Concat => EvalBinOp::Concat,
-                    BinaryOp::Eq => EvalBinOp::Eq,
-                    BinaryOp::Neq => EvalBinOp::Neq,
-                    BinaryOp::Gt => EvalBinOp::Gt,
-                    BinaryOp::Gteq => EvalBinOp::Gteq,
-                    BinaryOp::Lt => EvalBinOp::Lt,
-                    BinaryOp::Lteq => EvalBinOp::Lteq,
-                    BinaryOp::Add => EvalBinOp::Add,
-                    BinaryOp::Sub => EvalBinOp::Sub,
-                    BinaryOp::Mul => EvalBinOp::Mul,
-                    BinaryOp::Div => EvalBinOp::Div,
-                    BinaryOp::Mod => EvalBinOp::Mod,
-                    BinaryOp::Exp => EvalBinOp::Exp,
-                    BinaryOp::In => EvalBinOp::In,
-                };
-                Box::new(EvalBinOpExpr { op, lhs, rhs })
-            }
-            ValueExpr::Lit(lit) => Box::new(EvalLitExpr { lit: lit.clone() }),
-            ValueExpr::Path(expr, components) => Box::new(EvalPath {
-                expr: self.plan_values::<{ STRICT }>(expr),
-                components: components
-                    .iter()
-                    .map(|c| match c {
-                        PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
-                        PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
-                        PathComponent::KeyExpr(k) => eval::expr::EvalPathComponent::KeyExpr(
-                            self.plan_values::<{ STRICT }>(k),
-                        ),
-                        PathComponent::IndexExpr(i) => eval::expr::EvalPathComponent::IndexExpr(
-                            self.plan_values::<{ STRICT }>(i),
-                        ),
-                    })
-                    .collect(),
-            }),
-            ValueExpr::VarRef(name) => Box::new(EvalVarRef { name: name.clone() }),
+        }
+    }
+
+    fn plan_values<'v, const STRICT: bool, I>(&mut self, vals: I) -> Vec<Box<dyn EvalExpr>>
+    where
+        I: Iterator<Item = &'v ValueExpr>,
+    {
+        vals.map(|arg| self.plan_value::<{ STRICT }>(arg))
+            .collect_vec()
+    }
+
+    fn plan_value<const STRICT: bool>(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
+        let mut plan_args = |arguments: &[&ValueExpr]| {
+            self.plan_values::<{ STRICT }, _>(arguments.iter().map(std::ops::Deref::deref))
+        };
+
+        let (name, bind) = match ve {
+            ValueExpr::UnExpr(op, operand) => (
+                "unary operator",
+                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand])),
+            ),
+            ValueExpr::BinaryExpr(op, lhs, rhs) => (
+                "binary operator",
+                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs, rhs])),
+            ),
+            ValueExpr::Lit(lit) => (
+                "literal",
+                EvalLitExpr { lit: lit.clone() }.bind::<{ STRICT }>(vec![]),
+            ),
+            ValueExpr::Path(expr, components) => (
+                "path",
+                Ok(Box::new(EvalPath {
+                    expr: self.plan_value::<{ STRICT }>(expr),
+                    components: components
+                        .iter()
+                        .map(|c| match c {
+                            PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
+                            PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
+                            PathComponent::KeyExpr(k) => eval::expr::EvalPathComponent::KeyExpr(
+                                self.plan_value::<{ STRICT }>(k),
+                            ),
+                            PathComponent::IndexExpr(i) => {
+                                eval::expr::EvalPathComponent::IndexExpr(
+                                    self.plan_value::<{ STRICT }>(i),
+                                )
+                            }
+                        })
+                        .collect(),
+                }) as Box<dyn EvalExpr>),
+            ),
+            ValueExpr::VarRef(name) => (
+                "var ref",
+                Ok(Box::new(EvalVarRef { name: name.clone() }) as Box<dyn EvalExpr>),
+            ),
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr
                     .attrs
                     .iter()
-                    .map(|attr| self.plan_values::<{ STRICT }>(attr))
+                    .map(|attr| self.plan_value::<{ STRICT }>(attr))
                     .collect();
                 let vals: Vec<Box<dyn EvalExpr>> = expr
                     .values
                     .iter()
-                    .map(|attr| self.plan_values::<{ STRICT }>(attr))
+                    .map(|attr| self.plan_value::<{ STRICT }>(attr))
                     .collect();
-                Box::new(EvalTupleExpr { attrs, vals })
+                (
+                    "tuple expr",
+                    Ok(Box::new(EvalTupleExpr { attrs, vals }) as Box<dyn EvalExpr>),
+                )
             }
             ValueExpr::ListExpr(expr) => {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
                     .iter()
-                    .map(|elem| self.plan_values::<{ STRICT }>(elem))
+                    .map(|elem| self.plan_value::<{ STRICT }>(elem))
                     .collect();
-                Box::new(EvalListExpr { elements })
+                (
+                    "list expr",
+                    Ok(Box::new(EvalListExpr { elements }) as Box<dyn EvalExpr>),
+                )
             }
             ValueExpr::BagExpr(expr) => {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
                     .iter()
-                    .map(|elem| self.plan_values::<{ STRICT }>(elem))
+                    .map(|elem| self.plan_value::<{ STRICT }>(elem))
                     .collect();
-                Box::new(EvalBagExpr { elements })
+                (
+                    "bag expr",
+                    Ok(Box::new(EvalBagExpr { elements }) as Box<dyn EvalExpr>),
+                )
             }
-            ValueExpr::BetweenExpr(expr) => {
-                let value = self.plan_values::<{ STRICT }>(expr.value.as_ref());
-                let from = self.plan_values::<{ STRICT }>(expr.from.as_ref());
-                let to = self.plan_values::<{ STRICT }>(expr.to.as_ref());
-                Box::new(EvalBetweenExpr { value, from, to })
+            ValueExpr::BetweenExpr(logical::BetweenExpr { value, from, to }) => {
+                let args = plan_args(&[value, from, to]);
+                ("between", EvalBetweenExpr {}.bind::<{ STRICT }>(args))
             }
             ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
-                let value = self.plan_values::<{ STRICT }>(value);
-                match pattern {
+                let expr = match pattern {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
-                        // TODO statically assert escape length
-                        if escape.chars().count() > 1 {
-                            self.errors.push(PlanningError::IllegalState(format!(
-                                "Invalid LIKE expression pattern: {escape}"
-                            )));
-                            return Box::new(ErrorNode::new());
-                        }
-                        let escape = escape.chars().next();
-                        let regex = like_to_re_pattern(pattern, escape);
-                        let regex_pattern =
-                            RegexBuilder::new(&regex).size_limit(RE_SIZE_LIMIT).build();
-                        match regex_pattern {
-                            Ok(pattern) => Box::new(EvalLikeMatch::new(value, pattern)),
+                        match EvalLikeMatch::create(pattern, escape) {
+                            Ok(like) => like.bind::<{ STRICT }>(plan_args(&[value])),
                             Err(err) => {
-                                self.errors.push(PlanningError::IllegalState(format!(
-                                    "Invalid LIKE expression pattern: {regex}. Regex error: {err}"
-                                )));
-                                Box::new(ErrorNode::new())
+                                self.errors.push(err);
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
                             }
                         }
                     }
@@ -444,41 +487,50 @@ impl<'c> EvaluatorPlanner<'c> {
                         pattern,
                         escape,
                     }) => {
-                        let pattern = self.plan_values::<{ STRICT }>(pattern);
-                        let escape = self.plan_values::<{ STRICT }>(escape);
-                        Box::new(EvalLikeNonStringNonLiteralMatch::new(
-                            value, pattern, escape,
-                        ))
+                        let args = plan_args(&[value, pattern, escape]);
+                        EvalLikeNonStringNonLiteralMatch {}.bind::<{ STRICT }>(args)
                     }
-                }
+                };
+
+                ("pattern expr", expr)
             }
-            ValueExpr::SubQueryExpr(expr) => Box::new(EvalSubQueryExpr::new(
-                self.plan_eval::<{ STRICT }>(&expr.plan),
-            )),
+            ValueExpr::SubQueryExpr(expr) => (
+                "subquery",
+                Ok(Box::new(EvalSubQueryExpr::new(
+                    self.plan_eval::<{ STRICT }>(&expr.plan),
+                )) as Box<dyn EvalExpr>),
+            ),
             ValueExpr::SimpleCase(e) => {
                 let cases = e
                     .cases
                     .iter()
                     .map(|case| {
                         (
-                            self.plan_values::<{ STRICT }>(&ValueExpr::BinaryExpr(
+                            self.plan_value::<{ STRICT }>(&ValueExpr::BinaryExpr(
                                 BinaryOp::Eq,
                                 e.expr.clone(),
                                 case.0.clone(),
                             )),
-                            self.plan_values::<{ STRICT }>(case.1.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.1.as_ref()),
                         )
                     })
                     .collect();
                 let default = match &e.default {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
-                    None => Box::new(EvalLitExpr {
-                        lit: Box::new(Null),
-                    }),
-                    Some(def) => self.plan_values::<{ STRICT }>(def),
+                    None => self.unwrap_bind(
+                        "simple case default",
+                        EvalLitExpr {
+                            lit: Box::new(Null),
+                        }
+                        .bind::<{ STRICT }>(vec![]),
+                    ),
+                    Some(def) => self.plan_value::<{ STRICT }>(def),
                 };
                 // Here, rewrite `SimpleCaseExpr`s as `SearchedCaseExpr`s
-                Box::new(EvalSearchedCaseExpr { cases, default })
+                (
+                    "simple case",
+                    Ok(Box::new(EvalSearchedCaseExpr { cases, default }) as Box<dyn EvalExpr>),
+                )
             }
             ValueExpr::SearchedCase(e) => {
                 let cases = e
@@ -486,36 +538,35 @@ impl<'c> EvaluatorPlanner<'c> {
                     .iter()
                     .map(|case| {
                         (
-                            self.plan_values::<{ STRICT }>(case.0.as_ref()),
-                            self.plan_values::<{ STRICT }>(case.1.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.0.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.1.as_ref()),
                         )
                     })
                     .collect();
                 let default = match &e.default {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
-                    None => Box::new(EvalLitExpr {
-                        lit: Box::new(Null),
-                    }),
-                    Some(def) => self.plan_values::<{ STRICT }>(def.as_ref()),
+                    None => self.unwrap_bind(
+                        "searched case default",
+                        EvalLitExpr {
+                            lit: Box::new(Null),
+                        }
+                        .bind::<{ STRICT }>(vec![]),
+                    ),
+                    Some(def) => self.plan_value::<{ STRICT }>(def.as_ref()),
                 };
-                Box::new(EvalSearchedCaseExpr { cases, default })
+                (
+                    "searched case",
+                    Ok(Box::new(EvalSearchedCaseExpr { cases, default }) as Box<dyn EvalExpr>),
+                )
             }
-            ValueExpr::IsTypeExpr(i) => {
-                let expr = self.plan_values::<{ STRICT }>(i.expr.as_ref());
-                match i.not {
-                    true => Box::new(EvalUnaryOpExpr {
-                        op: EvalUnaryOp::Not,
-                        operand: Box::new(EvalIsTypeExpr {
-                            expr,
-                            is_type: i.is_type.clone(),
-                        }),
-                    }),
-                    false => Box::new(EvalIsTypeExpr {
-                        expr,
-                        is_type: i.is_type.clone(),
-                    }),
-                }
-            }
+            ValueExpr::IsTypeExpr(i) => (
+                "is type",
+                Ok(Box::new(EvalIsTypeExpr {
+                    expr: self.plan_value::<{ STRICT }>(i.expr.as_ref()),
+                    is_type: i.is_type.clone(),
+                    invert: i.not,
+                }) as Box<dyn EvalExpr>),
+            ),
             ValueExpr::NullIfExpr(n) => {
                 // NULLIF can be rewritten using CASE WHEN expressions as per section 6.9 pg 142 of SQL-92 spec:
                 //     1) NULLIF (V1, V2) is equivalent to the following <case specification>:
@@ -531,7 +582,10 @@ impl<'c> EvaluatorPlanner<'c> {
                     )],
                     default: Some(n.lhs.clone()),
                 });
-                self.plan_values::<{ STRICT }>(&rewritten_as_case)
+                (
+                    "null if",
+                    Ok(self.plan_value::<{ STRICT }>(&rewritten_as_case)),
+                )
             }
             ValueExpr::CoalesceExpr(c) => {
                 // COALESCE can be rewritten using CASE WHEN expressions as per section 6.9 pg 142 of SQL-92 spec:
@@ -561,235 +615,132 @@ impl<'c> EvaluatorPlanner<'c> {
                     };
                     ValueExpr::SearchedCase(sc)
                 }
-                self.plan_values::<{ STRICT }>(&as_case(
-                    c.elements.first().unwrap(),
-                    &c.elements[1..],
-                ))
+                (
+                    "coalesce",
+                    Ok(self.plan_value::<{ STRICT }>(&as_case(
+                        c.elements.first().unwrap(),
+                        &c.elements[1..],
+                    ))),
+                )
             }
             ValueExpr::DynamicLookup(lookups) => {
                 let lookups = lookups
                     .iter()
-                    .map(|lookup| self.plan_values::<{ STRICT }>(lookup))
+                    .map(|lookup| self.plan_value::<{ STRICT }>(lookup))
                     .collect_vec();
 
-                Box::new(EvalDynamicLookup { lookups })
+                (
+                    "dynamic lookup",
+                    Ok(Box::new(EvalDynamicLookup { lookups }) as Box<dyn EvalExpr>),
+                )
             }
             ValueExpr::Call(logical::CallExpr { name, arguments }) => {
-                let mut args = arguments
-                    .iter()
-                    .map(|arg| self.plan_values::<{ STRICT }>(arg))
-                    .collect_vec();
+                let args = self.plan_values::<{ STRICT }, _>(arguments.iter());
                 match name {
-                    CallName::Lower => {
-                        correct_num_args_or_err!(self, args, 1, "lower");
-                        Box::new(EvalFnLower {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::Upper => {
-                        correct_num_args_or_err!(self, args, 1, "upper");
-                        Box::new(EvalFnUpper {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CharLength => {
-                        correct_num_args_or_err!(self, args, 1, "char_length");
-                        Box::new(EvalFnCharLength {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::OctetLength => {
-                        correct_num_args_or_err!(self, args, 1, "octet_length");
-                        Box::new(EvalFnOctetLength {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::BitLength => {
-                        correct_num_args_or_err!(self, args, 1, "bit_length");
-                        Box::new(EvalFnBitLength {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::LTrim => {
-                        correct_num_args_or_err!(self, args, 2, "ltrim");
-                        let value = args.pop().unwrap();
-                        let to_trim = args.pop().unwrap();
-                        Box::new(EvalFnLtrim { value, to_trim })
-                    }
-                    CallName::BTrim => {
-                        correct_num_args_or_err!(self, args, 2, "btrim");
-                        let value = args.pop().unwrap();
-                        let to_trim = args.pop().unwrap();
-                        Box::new(EvalFnBtrim { value, to_trim })
-                    }
-                    CallName::RTrim => {
-                        correct_num_args_or_err!(self, args, 2, "rtrim");
-                        let value = args.pop().unwrap();
-                        let to_trim = args.pop().unwrap();
-                        Box::new(EvalFnRtrim { value, to_trim })
-                    }
+                    CallName::Lower => ("lower", EvalStringFn::Lower.bind::<{ STRICT }>(args)),
+                    CallName::Upper => ("upper", EvalStringFn::Upper.bind::<{ STRICT }>(args)),
+                    CallName::CharLength => (
+                        "char_length",
+                        EvalStringFn::CharLength.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::OctetLength => (
+                        "octet_length",
+                        EvalStringFn::OctetLength.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::BitLength => (
+                        "bit_length",
+                        EvalStringFn::BitLength.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::LTrim => ("ltrim", EvalTrimFn::Start.bind::<{ STRICT }>(args)),
+                    CallName::BTrim => ("btrim", EvalTrimFn::Both.bind::<{ STRICT }>(args)),
+                    CallName::RTrim => ("rtrim", EvalTrimFn::End.bind::<{ STRICT }>(args)),
                     CallName::Substring => {
-                        correct_num_args_or_err!(self, args, 2, 3, "substring");
-                        let length = if args.len() == 3 {
-                            Some(args.pop().unwrap())
-                        } else {
-                            None
-                        };
-                        let offset = args.pop().unwrap();
-                        let value = args.pop().unwrap();
-
-                        Box::new(EvalFnSubstring {
-                            value,
-                            offset,
-                            length,
-                        })
+                        ("substring", EvalFnSubstring {}.bind::<{ STRICT }>(args))
                     }
-                    CallName::Position => {
-                        correct_num_args_or_err!(self, args, 2, "position");
-                        let haystack = args.pop().unwrap();
-                        let needle = args.pop().unwrap();
-                        Box::new(EvalFnPosition { needle, haystack })
-                    }
-                    CallName::Overlay => {
-                        correct_num_args_or_err!(self, args, 3, 4, "overlay");
-                        let length = if args.len() == 4 {
-                            Some(args.pop().unwrap())
-                        } else {
-                            None
-                        };
-                        let offset = args.pop().unwrap();
-                        let replacement = args.pop().unwrap();
-                        let value = args.pop().unwrap();
-
-                        Box::new(EvalFnOverlay {
-                            value,
-                            replacement,
-                            offset,
-                            length,
-                        })
-                    }
-                    CallName::Exists => {
-                        correct_num_args_or_err!(self, args, 1, "exists");
-                        Box::new(EvalFnExists {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::Abs => {
-                        correct_num_args_or_err!(self, args, 1, "abs");
-                        Box::new(EvalFnAbs {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::Mod => {
-                        correct_num_args_or_err!(self, args, 2, "mod");
-                        let rhs = args.pop().unwrap();
-                        let lhs = args.pop().unwrap();
-                        Box::new(EvalFnModulus { lhs, rhs })
-                    }
+                    CallName::Position => ("position", EvalFnPosition {}.bind::<{ STRICT }>(args)),
+                    CallName::Overlay => ("overlay", EvalFnOverlay {}.bind::<{ STRICT }>(args)),
+                    CallName::Exists => ("exists", EvalFnExists {}.bind::<{ STRICT }>(args)),
+                    CallName::Abs => ("abs", EvalFnAbs {}.bind::<{ STRICT }>(args)),
+                    CallName::Mod => ("mod", EvalOpBinary::Mod.bind::<{ STRICT }>(args)),
                     CallName::Cardinality => {
-                        correct_num_args_or_err!(self, args, 1, "cardinality");
-                        Box::new(EvalFnCardinality {
-                            value: args.pop().unwrap(),
-                        })
+                        ("cardinality", EvalFnCardinality {}.bind::<{ STRICT }>(args))
                     }
                     CallName::ExtractYear => {
-                        correct_num_args_or_err!(self, args, 1, "extract year");
-                        Box::new(EvalFnExtractYear {
-                            value: args.pop().unwrap(),
-                        })
+                        ("extract year", EvalExtractFn::Year.bind::<{ STRICT }>(args))
                     }
-                    CallName::ExtractMonth => {
-                        correct_num_args_or_err!(self, args, 1, "extract month");
-                        Box::new(EvalFnExtractMonth {
-                            value: args.pop().unwrap(),
-                        })
-                    }
+                    CallName::ExtractMonth => (
+                        "extract month",
+                        EvalExtractFn::Month.bind::<{ STRICT }>(args),
+                    ),
                     CallName::ExtractDay => {
-                        correct_num_args_or_err!(self, args, 1, "extract day");
-                        Box::new(EvalFnExtractDay {
-                            value: args.pop().unwrap(),
-                        })
+                        ("extract day", EvalExtractFn::Day.bind::<{ STRICT }>(args))
                     }
                     CallName::ExtractHour => {
-                        correct_num_args_or_err!(self, args, 1, "extract hour");
-                        Box::new(EvalFnExtractHour {
-                            value: args.pop().unwrap(),
-                        })
+                        ("extract hour", EvalExtractFn::Hour.bind::<{ STRICT }>(args))
                     }
-                    CallName::ExtractMinute => {
-                        correct_num_args_or_err!(self, args, 1, "extract minute");
-                        Box::new(EvalFnExtractMinute {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::ExtractSecond => {
-                        correct_num_args_or_err!(self, args, 1, "extract second");
-                        Box::new(EvalFnExtractSecond {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::ExtractTimezoneHour => {
-                        correct_num_args_or_err!(self, args, 1, "extract timezone_hour");
-                        Box::new(EvalFnExtractTimezoneHour {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::ExtractTimezoneMinute => {
-                        correct_num_args_or_err!(self, args, 1, "extract timezone_minute");
-                        Box::new(EvalFnExtractTimezoneMinute {
-                            value: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CollAvg(setq) => {
-                        correct_num_args_or_err!(self, args, 1, "coll_avg");
-                        Box::new(EvalFnCollAvg {
-                            setq: setq.into(),
-                            elems: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CollCount(setq) => {
-                        correct_num_args_or_err!(self, args, 1, "coll_count");
-                        Box::new(EvalFnCollCount {
-                            setq: setq.into(),
-                            elems: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CollMax(setq) => {
-                        correct_num_args_or_err!(self, args, 1, "coll_max");
-                        Box::new(EvalFnCollMax {
-                            setq: setq.into(),
-                            elems: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CollMin(setq) => {
-                        correct_num_args_or_err!(self, args, 1, "coll_min");
-                        Box::new(EvalFnCollMin {
-                            setq: setq.into(),
-                            elems: args.pop().unwrap(),
-                        })
-                    }
-                    CallName::CollSum(setq) => {
-                        correct_num_args_or_err!(self, args, 1, "coll_sum");
-                        Box::new(EvalFnCollSum {
-                            setq: setq.into(),
-                            elems: args.pop().unwrap(),
-                        })
-                    }
+                    CallName::ExtractMinute => (
+                        "extract minute",
+                        EvalExtractFn::Minute.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::ExtractSecond => (
+                        "extract second",
+                        EvalExtractFn::Second.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::ExtractTimezoneHour => (
+                        "extract timezone_hour",
+                        EvalExtractFn::TzHour.bind::<{ STRICT }>(args),
+                    ),
+                    CallName::ExtractTimezoneMinute => (
+                        "extract timezone_minute",
+                        EvalExtractFn::TzMinute.bind::<{ STRICT }>(args),
+                    ),
+
+                    CallName::CollAvg(setq) => (
+                        "coll_avg",
+                        EvalCollFn::Avg(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollCount(setq) => (
+                        "coll_count",
+                        EvalCollFn::Count(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollMax(setq) => (
+                        "coll_max",
+                        EvalCollFn::Max(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollMin(setq) => (
+                        "coll_min",
+                        EvalCollFn::Min(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollSum(setq) => (
+                        "coll_sum",
+                        EvalCollFn::Sum(setq.into()).bind::<{ STRICT }>(args),
+                    ),
                     CallName::ByName(name) => match self.catalog.get_function(name) {
                         None => {
                             self.errors.push(PlanningError::IllegalState(format!(
                                 "Function to exist in catalog {name}",
                             )));
-                            Box::new(ErrorNode::new())
+
+                            (
+                                name.as_str(),
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>),
+                            )
                         }
                         Some(function) => {
                             let eval = function.plan_eval();
-                            Box::new(EvalFnBaseTableExpr { args, expr: eval })
+
+                            (
+                                name.as_str(),
+                                Ok(Box::new(EvalFnBaseTableExpr { args, expr: eval })
+                                    as Box<dyn EvalExpr>),
+                            )
                         }
                     },
                 }
             }
-        }
+        };
+
+        self.unwrap_bind(name, bind)
     }
 }
 
