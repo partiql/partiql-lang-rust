@@ -1,5 +1,4 @@
 use crate::eval::evaluable::SetQuantifier;
-use crate::eval::expr::eval_wrapper::UnaryValueExpr;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
@@ -12,6 +11,7 @@ use partiql_value::{Value, ValueIter};
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use crate::eval::eval_expr_wrapper::UnaryValueExpr;
 use std::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

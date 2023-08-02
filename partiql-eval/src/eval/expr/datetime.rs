@@ -1,5 +1,3 @@
-use crate::eval::expr::eval_wrapper::UnaryValueExpr;
-
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
 use partiql_types::TYPE_DATETIME;
@@ -9,6 +7,7 @@ use partiql_value::{DateTime, Value};
 use rust_decimal::Decimal;
 use std::fmt::Debug;
 
+use crate::eval::eval_expr_wrapper::UnaryValueExpr;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

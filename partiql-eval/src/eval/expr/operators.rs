@@ -1,4 +1,4 @@
-use crate::eval::expr::eval_wrapper::{
+use crate::eval::eval_expr_wrapper::{
     unwrap_args, ArgCheckControlFlow, ArgCheckEvalExpr, ArgChecker, ArgShortCircuit,
     BinaryValueExpr, DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing,
     PropagateNull, TernaryValueExpr, UnaryValueExpr,
@@ -9,7 +9,7 @@ use crate::eval::EvalContext;
 
 use partiql_types::{
     ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_DECIMAL,
-    TYPE_DOUBLE, TYPE_INT, TYPE_REAL,
+    TYPE_DOUBLE, TYPE_INT, TYPE_NUMERIC_TYPES, TYPE_REAL,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, NullableEq, NullableOrd, Value};
@@ -64,7 +64,7 @@ impl BindEvalExpr for EvalOpUnary {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let any_num = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
+        let any_num = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
 
         let unop = |types, f: fn(&Value) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
@@ -163,7 +163,7 @@ impl BindEvalExpr for EvalOpBinary {
 
         macro_rules! math {
             ($f:expr) => {{
-                let nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
+                let nums = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
                 create!(MathCheck<STRICT>, [nums.clone(), nums], $f)
             }};
         }
@@ -294,7 +294,7 @@ impl BindEvalExpr for EvalFnAbs {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL]);
+        let nums = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
         UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
             match NullableOrd::lt(v, &Value::from(0)) {
                 Null => Null,

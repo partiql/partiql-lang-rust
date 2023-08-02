@@ -216,6 +216,7 @@ pub const TYPE_DOUBLE: PartiqlType = PartiqlType::new(TypeKind::Float64);
 pub const TYPE_DECIMAL: PartiqlType = PartiqlType::new(TypeKind::Decimal);
 pub const TYPE_STRING: PartiqlType = PartiqlType::new(TypeKind::String);
 pub const TYPE_DATETIME: PartiqlType = PartiqlType::new(TypeKind::DateTime);
+pub const TYPE_NUMERIC_TYPES: [PartiqlType; 4] = [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL];
 
 #[allow(dead_code)]
 impl PartiqlType {
@@ -297,7 +298,7 @@ pub struct AnyOf {
 }
 
 impl AnyOf {
-    pub fn new(types: BTreeSet<PartiqlType>) -> Self {
+    pub const fn new(types: BTreeSet<PartiqlType>) -> Self {
         AnyOf { types }
     }
 
