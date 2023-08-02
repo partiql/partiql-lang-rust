@@ -738,7 +738,8 @@ impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Value
     }
 }
 
-/// Implementation of spec's `order-by less-than` assuming nulls first
+/// Implementation of spec's `order-by less-than` assuming nulls first.
+/// TODO: more tests for Ord on Value
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -2058,5 +2059,111 @@ mod tests {
         let tuple2 = tuple![("b", 2), ("a", 1)];
         s.insert(tuple2);
         assert_eq!(1, s.len());
+    }
+
+    #[test]
+    fn null_sorted_value_ord_simple_nulls_first() {
+        let v1 = Value::Missing;
+        let v2 = Value::Boolean(true);
+        let null_sorted_v1 = NullSortedValue::<true, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<true, Value>(&v2);
+        assert_eq!(Ordering::Less, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = Value::Null;
+        let null_sorted_v3 = NullSortedValue::<true, Value>(&v3);
+        assert_eq!(Ordering::Less, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+    }
+
+    #[test]
+    fn null_sorted_value_ord_simple_nulls_last() {
+        let v1 = Value::Missing;
+        let v2 = Value::Boolean(true);
+        let null_sorted_v1 = NullSortedValue::<false, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<false, Value>(&v2);
+        assert_eq!(Ordering::Greater, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = Value::Null;
+        let null_sorted_v3 = NullSortedValue::<false, Value>(&v3);
+        assert_eq!(Ordering::Greater, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+    }
+
+    #[test]
+    fn null_sorted_value_ord_collection_nulls_first() {
+        // list
+        let v1 = list![Value::Missing].into();
+        let v2 = list![Value::Boolean(true)].into();
+        let null_sorted_v1 = NullSortedValue::<true, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<true, Value>(&v2);
+        assert_eq!(Ordering::Less, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = list![Value::Null].into();
+        let null_sorted_v3 = NullSortedValue::<true, Value>(&v3);
+        assert_eq!(Ordering::Less, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+
+        // bag
+        let v1 = bag![Value::Missing].into();
+        let v2 = bag![Value::Boolean(true)].into();
+        let null_sorted_v1 = NullSortedValue::<true, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<true, Value>(&v2);
+        assert_eq!(Ordering::Less, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = bag![Value::Null].into();
+        let null_sorted_v3 = NullSortedValue::<true, Value>(&v3);
+        assert_eq!(Ordering::Less, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+
+        // tuple
+        let v1 = tuple![("a", Value::Missing)].into();
+        let v2 = tuple![("a", Value::Boolean(true))].into();
+        let null_sorted_v1 = NullSortedValue::<true, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<true, Value>(&v2);
+        assert_eq!(Ordering::Less, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = tuple![("a", Value::Null)].into();
+        let null_sorted_v3 = NullSortedValue::<true, Value>(&v3);
+        assert_eq!(Ordering::Less, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+    }
+
+    #[test]
+    fn null_sorted_value_ord_collection_nulls_last() {
+        // list
+        let v1 = list![Value::Missing].into();
+        let v2 = list![Value::Boolean(true)].into();
+        let null_sorted_v1 = NullSortedValue::<false, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<false, Value>(&v2);
+        assert_eq!(Ordering::Greater, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = list![Value::Null].into();
+        let null_sorted_v3 = NullSortedValue::<false, Value>(&v3);
+        assert_eq!(Ordering::Greater, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+
+        // bag
+        let v1 = bag![Value::Missing].into();
+        let v2 = bag![Value::Boolean(true)].into();
+        let null_sorted_v1 = NullSortedValue::<false, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<false, Value>(&v2);
+        assert_eq!(Ordering::Greater, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = bag![Value::Null].into();
+        let null_sorted_v3 = NullSortedValue::<false, Value>(&v3);
+        assert_eq!(Ordering::Greater, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
+
+        // tuple
+        let v1 = tuple![("a", Value::Missing)].into();
+        let v2 = tuple![("a", Value::Boolean(true))].into();
+        let null_sorted_v1 = NullSortedValue::<false, Value>(&v1);
+        let null_sorted_v2 = NullSortedValue::<false, Value>(&v2);
+        assert_eq!(Ordering::Greater, null_sorted_v1.cmp(&null_sorted_v2));
+
+        let v3 = tuple![("a", Value::Null)].into();
+        let null_sorted_v3 = NullSortedValue::<false, Value>(&v3);
+        assert_eq!(Ordering::Greater, null_sorted_v3.cmp(&null_sorted_v2));
+        assert_eq!(Ordering::Equal, null_sorted_v1.cmp(&null_sorted_v3));
     }
 }
