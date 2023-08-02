@@ -54,6 +54,25 @@ impl List {
     pub(crate) fn values(self) -> Vec<Value> {
         self.0
     }
+
+    #[inline]
+    pub(crate) fn order_by_cmp<const NULLS_FIRST: bool>(&self, other: &Self) -> Ordering {
+        let mut l = self.0.iter();
+        let mut r = other.0.iter();
+
+        loop {
+            match (l.next(), r.next()) {
+                (None, None) => return Ordering::Equal,
+                (Some(_), None) => return Ordering::Greater,
+                (None, Some(_)) => return Ordering::Less,
+                (Some(lv), Some(rv)) => match Value::order_by_cmp::<NULLS_FIRST>(lv, rv) {
+                    Ordering::Less => return Ordering::Less,
+                    Ordering::Greater => return Ordering::Greater,
+                    Ordering::Equal => continue,
+                },
+            }
+        }
+    }
 }
 
 impl Extend<Value> for List {

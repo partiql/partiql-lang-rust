@@ -1008,7 +1008,7 @@ impl EvalOrderBy {
                 let l = spec.expr.evaluate(&l, ctx);
                 let r = spec.expr.evaluate(&r, ctx);
 
-                match spec.spec {
+                let ordering = match spec.spec {
                     EvalOrderBySortSpec::AscNullsFirst => l.as_ref().cmp(r.as_ref()),
                     EvalOrderBySortSpec::AscNullsLast => match (l.as_ref(), r.as_ref()) {
                         (Null, Null) => Ordering::Equal,
@@ -1019,7 +1019,7 @@ impl EvalOrderBy {
                         (Missing, _) => Ordering::Greater,
                         (_, Null) => Ordering::Less,
                         (_, Missing) => Ordering::Less,
-                        (l, r) => l.cmp(r),
+                        (l, r) => Value::order_by_cmp::<false>(l, r),
                     },
                     EvalOrderBySortSpec::DescNullsFirst => match (l.as_ref(), r.as_ref()) {
                         (Null, Null) => Ordering::Equal,
@@ -1030,10 +1030,12 @@ impl EvalOrderBy {
                         (Missing, _) => Ordering::Less,
                         (_, Null) => Ordering::Greater,
                         (_, Missing) => Ordering::Greater,
-                        (l, r) => r.cmp(l),
+                        (l, r) => Value::order_by_cmp::<false>(r, l),
                     },
                     EvalOrderBySortSpec::DescNullsLast => r.as_ref().cmp(l.as_ref()),
-                }
+                };
+                println!("ordering: {:?}, l: {:?}, r: {:?}", ordering, l, r);
+                ordering
             })
             .find_or_last(|o| o != &Ordering::Equal)
             .unwrap_or(Ordering::Equal)
@@ -1043,6 +1045,7 @@ impl EvalOrderBy {
 impl Evaluable for EvalOrderBy {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
+        println!("order by self: {:?}", self);
 
         let mut values = input_value.into_iter().collect_vec();
         values.sort_by(|l, r| self.compare(l, r, ctx));

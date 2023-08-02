@@ -607,6 +607,139 @@ impl Value {
             other => ValueIter::Single(Some(other)),
         }
     }
+
+    #[inline]
+    pub fn order_by_cmp<const NULLS_FIRST: bool>(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Value::Null, Value::Null) => Ordering::Equal,
+            (Value::Missing, Value::Null) => Ordering::Equal,
+
+            (Value::Null, Value::Missing) => Ordering::Equal,
+            (Value::Null, _) => {
+                if NULLS_FIRST {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+            (_, Value::Null) => {
+                if NULLS_FIRST {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (Value::Missing, Value::Missing) => Ordering::Equal,
+            (Value::Missing, _) => {
+                if NULLS_FIRST {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+            (_, Value::Missing) => {
+                if NULLS_FIRST {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+
+            (Value::Boolean(l), Value::Boolean(r)) => match (l, r) {
+                (false, true) => Ordering::Less,
+                (true, false) => Ordering::Greater,
+                (_, _) => Ordering::Equal,
+            },
+            (Value::Boolean(_), _) => Ordering::Less,
+            (_, Value::Boolean(_)) => Ordering::Greater,
+
+            // TODO: `OrderedFloat`'s implementation of `Ord` slightly differs from what we want in
+            //  the PartiQL spec. See https://partiql.org/assets/PartiQL-Specification.pdf#subsection.12.2
+            //  point 3. In PartiQL, `nan`, comes before `-inf` which comes before all numeric
+            //  values, which are followed by `+inf`. `OrderedFloat` places `NaN` as greater than
+            //  all other `OrderedFloat` values. We could consider creating our own float type
+            //  to get around this annoyance.
+            (Value::Real(l), Value::Real(r)) => {
+                if l.is_nan() {
+                    if r.is_nan() {
+                        Ordering::Equal
+                    } else {
+                        Ordering::Less
+                    }
+                } else if r.is_nan() {
+                    Ordering::Greater
+                } else {
+                    l.cmp(r)
+                }
+            }
+            (Value::Integer(l), Value::Integer(r)) => l.cmp(r),
+            (Value::Decimal(l), Value::Decimal(r)) => l.cmp(r),
+            (Value::Integer(l), Value::Real(_)) => {
+                Value::Real(ordered_float::OrderedFloat(*l as f64)).cmp(other)
+            }
+            (Value::Real(_), Value::Integer(r)) => {
+                self.cmp(&Value::Real(ordered_float::OrderedFloat(*r as f64)))
+            }
+            (Value::Integer(l), Value::Decimal(r)) => RustDecimal::from(*l).cmp(r),
+            (Value::Decimal(l), Value::Integer(r)) => l.as_ref().cmp(&RustDecimal::from(*r)),
+            (Value::Real(l), Value::Decimal(r)) => {
+                if l.is_nan() || l.0 == f64::NEG_INFINITY {
+                    Ordering::Less
+                } else if l.0 == f64::INFINITY {
+                    Ordering::Greater
+                } else {
+                    match RustDecimal::from_f64(l.0) {
+                        Some(l_d) => l_d.cmp(r),
+                        None => todo!(
+                            "Decide default behavior when f64 can't be converted to RustDecimal"
+                        ),
+                    }
+                }
+            }
+            (Value::Decimal(l), Value::Real(r)) => {
+                if r.is_nan() || r.0 == f64::NEG_INFINITY {
+                    Ordering::Greater
+                } else if r.0 == f64::INFINITY {
+                    Ordering::Less
+                } else {
+                    match RustDecimal::from_f64(r.0) {
+                        Some(r_d) => l.as_ref().cmp(&r_d),
+                        None => todo!(
+                            "Decide default behavior when f64 can't be converted to RustDecimal"
+                        ),
+                    }
+                }
+            }
+            (Value::Integer(_), _) => Ordering::Less,
+            (Value::Real(_), _) => Ordering::Less,
+            (Value::Decimal(_), _) => Ordering::Less,
+            (_, Value::Integer(_)) => Ordering::Greater,
+            (_, Value::Real(_)) => Ordering::Greater,
+            (_, Value::Decimal(_)) => Ordering::Greater,
+
+            (Value::DateTime(l), Value::DateTime(r)) => l.cmp(r),
+            (Value::DateTime(_), _) => Ordering::Less,
+            (_, Value::DateTime(_)) => Ordering::Greater,
+
+            (Value::String(l), Value::String(r)) => l.cmp(r),
+            (Value::String(_), _) => Ordering::Less,
+            (_, Value::String(_)) => Ordering::Greater,
+
+            (Value::Blob(l), Value::Blob(r)) => l.cmp(r),
+            (Value::Blob(_), _) => Ordering::Less,
+            (_, Value::Blob(_)) => Ordering::Greater,
+
+            (Value::List(l), Value::List(r)) => List::order_by_cmp::<NULLS_FIRST>(l, r),
+            (Value::List(_), _) => Ordering::Less,
+            (_, Value::List(_)) => Ordering::Greater,
+
+            (Value::Tuple(l), Value::Tuple(r)) => Tuple::order_by_cmp::<NULLS_FIRST>(l, r),
+            (Value::Tuple(_), _) => Ordering::Less,
+            (_, Value::Tuple(_)) => Ordering::Greater,
+
+            (Value::Bag(l), Value::Bag(r)) => Bag::order_by_cmp::<NULLS_FIRST>(l, r),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -686,7 +819,7 @@ impl PartialOrd for Value {
     }
 }
 
-/// Implementation of Spec's `order-by less-than`
+/// Implementation of Spec's `order-by less-than` assuming nulls first
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {

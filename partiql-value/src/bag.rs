@@ -47,6 +47,15 @@ impl Bag {
     pub(crate) fn values(self) -> Vec<Value> {
         self.0
     }
+
+    #[inline]
+    pub(crate) fn order_by_cmp<const NULLS_FIRST: bool>(&self, other: &Self) -> Ordering {
+        let mut l = self.0.clone();
+        l.sort();
+        let mut r = other.0.clone();
+        r.sort();
+        List::order_by_cmp::<NULLS_FIRST>(&List::from(l), (&List::from(r)))
+    }
 }
 
 impl Extend<Value> for Bag {
