@@ -44,7 +44,7 @@ pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
     }
 }
 
-/// Convert a `Vec<Box<dyn EvalExpr>>` into a `Box<dyn EvalExpr>; N]` or error on length mismatch
+/// Convert a `Vec<Box<dyn EvalExpr>>` into a `[Box<dyn EvalExpr>; N]` or error on length mismatch
 pub(crate) fn unwrap_args<const N: usize>(
     args: Vec<Box<dyn EvalExpr>>,
 ) -> Result<[Box<dyn EvalExpr>; N], BindError> {

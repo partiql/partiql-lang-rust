@@ -542,7 +542,7 @@ impl Value {
     }
 
     #[inline]
-    /// Returns true if and only if Value is null or missing
+    /// Returns true if Value is neither null nor missing
     pub fn is_present(&self) -> bool {
         !self.is_absent()
     }
