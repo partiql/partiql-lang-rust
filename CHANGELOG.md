@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
 - *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter. 
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`

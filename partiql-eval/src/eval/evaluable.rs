@@ -454,9 +454,7 @@ impl Avg {
 
 impl AggregateFunction for Avg {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_null_or_missing()
-            && self.aggregator.filter_value(input_value.clone(), group)
-        {
+        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.avgs.get_mut(group) {
                 None => {
                     self.avgs.insert(group.clone(), (1, input_value.clone()));
@@ -505,9 +503,7 @@ impl Count {
 
 impl AggregateFunction for Count {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_null_or_missing()
-            && self.aggregator.filter_value(input_value.clone(), group)
-        {
+        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.counts.get_mut(group) {
                 None => {
                     self.counts.insert(group.clone(), 1);
@@ -554,9 +550,7 @@ impl Max {
 
 impl AggregateFunction for Max {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_null_or_missing()
-            && self.aggregator.filter_value(input_value.clone(), group)
-        {
+        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.maxes.get_mut(group) {
                 None => {
                     self.maxes.insert(group.clone(), input_value.clone());
@@ -603,9 +597,7 @@ impl Min {
 
 impl AggregateFunction for Min {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_null_or_missing()
-            && self.aggregator.filter_value(input_value.clone(), group)
-        {
+        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.mins.get_mut(group) {
                 None => {
                     self.mins.insert(group.clone(), input_value.clone());
@@ -652,9 +644,7 @@ impl Sum {
 
 impl AggregateFunction for Sum {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_null_or_missing()
-            && self.aggregator.filter_value(input_value.clone(), group)
-        {
+        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.sums.get_mut(group) {
                 None => {
                     self.sums.insert(group.clone(), input_value.clone());
