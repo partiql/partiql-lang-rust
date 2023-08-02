@@ -8,8 +8,8 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_DECIMAL,
-    TYPE_DOUBLE, TYPE_INT, TYPE_NUMERIC_TYPES, TYPE_REAL,
+    ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL,
+    TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, NullableEq, NullableOrd, Value};
