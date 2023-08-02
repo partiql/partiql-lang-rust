@@ -159,7 +159,7 @@ pub enum TypeKind {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-    // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
+    // TODO Add Sexp, BitString, ByteString, Blob, Clob, and Graph types
 }
 
 impl Display for TypeKind {
@@ -217,21 +217,6 @@ pub const TYPE_DECIMAL: PartiqlType = PartiqlType::new(TypeKind::Decimal);
 pub const TYPE_STRING: PartiqlType = PartiqlType::new(TypeKind::String);
 pub const TYPE_DATETIME: PartiqlType = PartiqlType::new(TypeKind::DateTime);
 
-/*
-pub const TYPE_BOOL: LogicalType = LogicalType {
-    kind: LogicalTypeKind::Bool,
-};
-
-pub const TYPE_INT: LogicalType = LogicalType {
-    kind: LogicalTypeKind::Int,
-};
-
-pub const TYPE_REAL: LogicalType = LogicalType {
-    kind: LogicalTypeKind::Real,
-};
-
- */
-
 #[allow(dead_code)]
 impl PartiqlType {
     pub const fn new(kind: TypeKind) -> PartiqlType {
@@ -260,8 +245,16 @@ impl PartiqlType {
     where
         I: IntoIterator<Item = PartiqlType>,
     {
-        PartiqlType {
-            kind: TypeKind::AnyOf(AnyOf::from_iter(types)),
+        let any_of = AnyOf::from_iter(types);
+        match any_of.types.len() {
+            0 => TYPE_ANY,
+            1 => {
+                let AnyOf { types } = any_of;
+                types.into_iter().next().unwrap()
+            }
+            _ => PartiqlType {
+                kind: TypeKind::AnyOf(any_of),
+            },
         }
     }
 
@@ -417,6 +410,32 @@ enum CollectionConstraint {
 
 #[cfg(test)]
 mod tests {
+    use crate::{PartiqlType, TYPE_INT, TYPE_REAL};
+
     #[test]
-    fn todo() {}
+    fn union() {
+        let expect_int = TYPE_INT;
+        assert_eq!(expect_int, TYPE_INT.union_with(TYPE_INT));
+
+        let expect_nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL]);
+        assert_eq!(expect_nums, TYPE_INT.union_with(TYPE_REAL));
+        assert_eq!(
+            expect_nums,
+            PartiqlType::any_of([
+                TYPE_INT.union_with(TYPE_REAL),
+                TYPE_INT.union_with(TYPE_REAL)
+            ])
+        );
+        assert_eq!(
+            expect_nums,
+            PartiqlType::any_of([
+                TYPE_INT.union_with(TYPE_REAL),
+                TYPE_INT.union_with(TYPE_REAL),
+                PartiqlType::any_of([
+                    TYPE_INT.union_with(TYPE_REAL),
+                    TYPE_INT.union_with(TYPE_REAL)
+                ])
+            ])
+        );
+    }
 }

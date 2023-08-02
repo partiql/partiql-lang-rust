@@ -105,20 +105,24 @@ pub(crate) enum EvalOpBinary {
     Concat,
 }
 
+/// An [`ArgChecker`] for short-circuiting boolean logical operators.
+///
+/// `Target` is the value upon which, if found, to short-circuit
+/// `OnMissing` contains the logic for how to handle `Missing` values.
 #[derive(Debug)]
-struct BoolShortCircuitArgChecker<const B: bool, OnMissing: ArgShortCircuit> {
+struct BoolShortCircuitArgChecker<const TARGET: bool, OnMissing: ArgShortCircuit> {
     marker: PhantomData<OnMissing>,
 }
 
-impl<const B: bool, OnMissing: ArgShortCircuit> ArgChecker
-    for BoolShortCircuitArgChecker<B, OnMissing>
+impl<const TARGET: bool, OnMissing: ArgShortCircuit> ArgChecker
+    for BoolShortCircuitArgChecker<TARGET, OnMissing>
 {
     fn arg_check<'a>(
         _typ: &PartiqlType,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
         match arg.borrow() {
-            Boolean(b) if b == &B => ArgCheckControlFlow::ShortCircuit(Value::Boolean(*b)),
+            Boolean(b) if b == &TARGET => ArgCheckControlFlow::ShortCircuit(Value::Boolean(*b)),
             Missing => ArgCheckControlFlow::ShortCircuit(OnMissing::propagate()),
             Null => ArgCheckControlFlow::Propagate(Null),
             _ => ArgCheckControlFlow::Continue(arg),

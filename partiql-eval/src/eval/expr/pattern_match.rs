@@ -72,7 +72,7 @@ impl BindEvalExpr for EvalLikeNonStringNonLiteralMatch {
             |value, pattern, escape| match (value, pattern, escape) {
                 (Value::String(v), Value::String(p), Value::String(e)) => {
                     if e.chars().count() > 1 {
-                        // TODO re-instate once ctx is plumbed through
+                        // TODO re-instate once eval closures can generate errors for STRICT mode
                         /*
                         ctx.add_error(EvaluationError::IllegalState(
                             "escape longer than 1 character".to_string(),
@@ -86,7 +86,7 @@ impl BindEvalExpr for EvalLikeNonStringNonLiteralMatch {
                     match regex_pattern {
                         Ok(pattern) => Value::Boolean(pattern.is_match(v.as_ref())),
                         Err(_err) => {
-                            // TODO re-instate once ctx is plumbed through
+                            // TODO re-instate once eval closures can generate errors for STRICT mode
                             //ctx.add_error(EvaluationError::IllegalState(err.to_string()));
                             Missing
                         }

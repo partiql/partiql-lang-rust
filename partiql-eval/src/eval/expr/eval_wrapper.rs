@@ -50,7 +50,7 @@ pub(crate) fn unwrap_args<const N: usize>(
 ) -> Result<[Box<dyn EvalExpr>; N], BindError> {
     args.try_into()
         .map_err(|args: Vec<_>| BindError::ArgNumMismatch {
-            expected: N,
+            expected: vec![N],
             found: args.len(),
         })
 }

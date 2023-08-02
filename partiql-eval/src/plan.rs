@@ -156,13 +156,13 @@ impl<'c> EvaluatorPlanner<'c> {
             }) => {
                 if let Some(at_key) = at_key {
                     Box::new(eval::evaluable::EvalScan::new_with_at_key(
-                        self.plan_values::<{ STRICT }>(expr),
+                        self.plan_value::<{ STRICT }>(expr),
                         as_key,
                         at_key,
                     ))
                 } else {
                     Box::new(eval::evaluable::EvalScan::new(
-                        self.plan_values::<{ STRICT }>(expr),
+                        self.plan_value::<{ STRICT }>(expr),
                         as_key,
                     ))
                 }
@@ -170,27 +170,27 @@ impl<'c> EvaluatorPlanner<'c> {
             BindingsOp::Project(logical::Project { exprs }) => {
                 let exprs: HashMap<_, _> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values::<{ STRICT }>(v)))
+                    .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
                     .collect();
                 Box::new(eval::evaluable::EvalSelect::new(exprs))
             }
             BindingsOp::ProjectAll => Box::new(eval::evaluable::EvalSelectAll::new()),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
-                let expr = self.plan_values::<{ STRICT }>(expr);
+                let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalSelectValue::new(expr))
             }
             BindingsOp::Filter(logical::Filter { expr }) => Box::new(
-                eval::evaluable::EvalFilter::new(self.plan_values::<{ STRICT }>(expr)),
+                eval::evaluable::EvalFilter::new(self.plan_value::<{ STRICT }>(expr)),
             ),
             BindingsOp::Having(logical::Having { expr }) => Box::new(
-                eval::evaluable::EvalHaving::new(self.plan_values::<{ STRICT }>(expr)),
+                eval::evaluable::EvalHaving::new(self.plan_value::<{ STRICT }>(expr)),
             ),
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
             BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
             BindingsOp::Pivot(logical::Pivot { key, value }) => {
                 Box::new(eval::evaluable::EvalPivot::new(
-                    self.plan_values::<{ STRICT }>(key),
-                    self.plan_values::<{ STRICT }>(value),
+                    self.plan_value::<{ STRICT }>(key),
+                    self.plan_value::<{ STRICT }>(value),
                 ))
             }
             BindingsOp::Unpivot(logical::Unpivot {
@@ -198,7 +198,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 as_key,
                 at_key,
             }) => Box::new(eval::evaluable::EvalUnpivot::new(
-                self.plan_values::<{ STRICT }>(expr),
+                self.plan_value::<{ STRICT }>(expr),
                 as_key,
                 at_key.clone(),
             )),
@@ -218,7 +218,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 };
                 let on = on
                     .as_ref()
-                    .map(|on_condition| self.plan_values::<{ STRICT }>(on_condition));
+                    .map(|on_condition| self.plan_value::<{ STRICT }>(on_condition));
                 Box::new(eval::evaluable::EvalJoin::new(
                     kind,
                     self.get_eval_node::<{ STRICT }>(left),
@@ -238,7 +238,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 };
                 let exprs: HashMap<_, _> = exprs
                     .iter()
-                    .map(|(k, v)| (k.clone(), self.plan_values::<{ STRICT }>(v)))
+                    .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
                     .collect();
                 let aggregate_exprs = aggregate_exprs
                     .iter()
@@ -277,7 +277,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         };
                         eval::evaluable::AggregateExpression {
                             name: a_e.name.to_string(),
-                            expr: self.plan_values::<{ STRICT }>(&a_e.expr),
+                            expr: self.plan_value::<{ STRICT }>(&a_e.expr),
                             func,
                         }
                     })
@@ -292,14 +292,14 @@ impl<'c> EvaluatorPlanner<'c> {
                 })
             }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
-                let expr = self.plan_values::<{ STRICT }>(expr);
+                let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy(logical::OrderBy { specs }) => {
                 let cmp = specs
                     .iter()
                     .map(|spec| {
-                        let expr = self.plan_values::<{ STRICT }>(&spec.expr);
+                        let expr = self.plan_value::<{ STRICT }>(&spec.expr);
                         let spec = match (&spec.order, &spec.null_order) {
                             (SortSpecOrder::Asc, SortSpecNullOrder::First) => {
                                 EvalOrderBySortSpec::AscNullsFirst
@@ -321,8 +321,8 @@ impl<'c> EvaluatorPlanner<'c> {
             }
             BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
                 Box::new(eval::evaluable::EvalLimitOffset {
-                    limit: limit.as_ref().map(|e| self.plan_values::<{ STRICT }>(e)),
-                    offset: offset.as_ref().map(|e| self.plan_values::<{ STRICT }>(e)),
+                    limit: limit.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
+                    offset: offset.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
                     input: None,
                 })
             }
@@ -371,6 +371,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         PlanningError::IllegalState(format!("Unknown error binding {name}"))
                     }
                     BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
+                    BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
                 };
 
                 self.err(err)
@@ -378,29 +379,27 @@ impl<'c> EvaluatorPlanner<'c> {
         }
     }
 
-    fn plan_values<const STRICT: bool>(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
-        let mut plan_args = |args: &[&ValueExpr]| {
-            args.iter()
-                .map(|arg| self.plan_values::<{ STRICT }>(arg))
-                .collect_vec()
-        };
-        /*
-        let mut plan_args = |args: &[&Box<ValueExpr>]| {
-            args.iter()
-                .map(|arg| self.plan_values::<{ STRICT }>(arg))
-                .collect_vec()
-        };
+    fn plan_values<'v, const STRICT: bool, I>(&mut self, vals: I) -> Vec<Box<dyn EvalExpr>>
+    where
+        I: Iterator<Item = &'v ValueExpr>,
+    {
+        vals.map(|arg| self.plan_value::<{ STRICT }>(arg))
+            .collect_vec()
+    }
 
-         */
+    fn plan_value<const STRICT: bool>(&mut self, ve: &ValueExpr) -> Box<dyn EvalExpr> {
+        let mut plan_args = |arguments: &[&ValueExpr]| {
+            self.plan_values::<{ STRICT }, _>(arguments.iter().map(std::ops::Deref::deref))
+        };
 
         let (name, bind) = match ve {
             ValueExpr::UnExpr(op, operand) => (
                 "unary operator",
-                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand.as_ref()])),
+                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand])),
             ),
             ValueExpr::BinaryExpr(op, lhs, rhs) => (
                 "binary operator",
-                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs.as_ref(), rhs.as_ref()])),
+                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs, rhs])),
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
@@ -409,18 +408,18 @@ impl<'c> EvaluatorPlanner<'c> {
             ValueExpr::Path(expr, components) => (
                 "path",
                 Ok(Box::new(EvalPath {
-                    expr: self.plan_values::<{ STRICT }>(expr),
+                    expr: self.plan_value::<{ STRICT }>(expr),
                     components: components
                         .iter()
                         .map(|c| match c {
                             PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
                             PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
                             PathComponent::KeyExpr(k) => eval::expr::EvalPathComponent::KeyExpr(
-                                self.plan_values::<{ STRICT }>(k),
+                                self.plan_value::<{ STRICT }>(k),
                             ),
                             PathComponent::IndexExpr(i) => {
                                 eval::expr::EvalPathComponent::IndexExpr(
-                                    self.plan_values::<{ STRICT }>(i),
+                                    self.plan_value::<{ STRICT }>(i),
                                 )
                             }
                         })
@@ -435,12 +434,12 @@ impl<'c> EvaluatorPlanner<'c> {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr
                     .attrs
                     .iter()
-                    .map(|attr| self.plan_values::<{ STRICT }>(attr))
+                    .map(|attr| self.plan_value::<{ STRICT }>(attr))
                     .collect();
                 let vals: Vec<Box<dyn EvalExpr>> = expr
                     .values
                     .iter()
-                    .map(|attr| self.plan_values::<{ STRICT }>(attr))
+                    .map(|attr| self.plan_value::<{ STRICT }>(attr))
                     .collect();
                 (
                     "tuple expr",
@@ -451,7 +450,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
                     .iter()
-                    .map(|elem| self.plan_values::<{ STRICT }>(elem))
+                    .map(|elem| self.plan_value::<{ STRICT }>(elem))
                     .collect();
                 (
                     "list expr",
@@ -462,7 +461,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 let elements: Vec<Box<dyn EvalExpr>> = expr
                     .elements
                     .iter()
-                    .map(|elem| self.plan_values::<{ STRICT }>(elem))
+                    .map(|elem| self.plan_value::<{ STRICT }>(elem))
                     .collect();
                 (
                     "bag expr",
@@ -470,14 +469,14 @@ impl<'c> EvaluatorPlanner<'c> {
                 )
             }
             ValueExpr::BetweenExpr(logical::BetweenExpr { value, from, to }) => {
-                let args = plan_args(&[value.as_ref(), from.as_ref(), to.as_ref()]);
+                let args = plan_args(&[value, from, to]);
                 ("between", EvalBetweenExpr {}.bind::<{ STRICT }>(args))
             }
             ValueExpr::PatternMatchExpr(PatternMatchExpr { value, pattern }) => {
                 let expr = match pattern {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         match EvalLikeMatch::create(pattern, escape) {
-                            Ok(like) => like.bind::<{ STRICT }>(plan_args(&[value.as_ref()])),
+                            Ok(like) => like.bind::<{ STRICT }>(plan_args(&[value])),
                             Err(err) => {
                                 self.errors.push(err);
                                 Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
@@ -488,7 +487,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         pattern,
                         escape,
                     }) => {
-                        let args = plan_args(&[value.as_ref(), pattern.as_ref(), escape.as_ref()]);
+                        let args = plan_args(&[value, pattern, escape]);
                         EvalLikeNonStringNonLiteralMatch {}.bind::<{ STRICT }>(args)
                     }
                 };
@@ -507,12 +506,12 @@ impl<'c> EvaluatorPlanner<'c> {
                     .iter()
                     .map(|case| {
                         (
-                            self.plan_values::<{ STRICT }>(&ValueExpr::BinaryExpr(
+                            self.plan_value::<{ STRICT }>(&ValueExpr::BinaryExpr(
                                 BinaryOp::Eq,
                                 e.expr.clone(),
                                 case.0.clone(),
                             )),
-                            self.plan_values::<{ STRICT }>(case.1.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.1.as_ref()),
                         )
                     })
                     .collect();
@@ -525,7 +524,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         }
                         .bind::<{ STRICT }>(vec![]),
                     ),
-                    Some(def) => self.plan_values::<{ STRICT }>(def),
+                    Some(def) => self.plan_value::<{ STRICT }>(def),
                 };
                 // Here, rewrite `SimpleCaseExpr`s as `SearchedCaseExpr`s
                 (
@@ -539,8 +538,8 @@ impl<'c> EvaluatorPlanner<'c> {
                     .iter()
                     .map(|case| {
                         (
-                            self.plan_values::<{ STRICT }>(case.0.as_ref()),
-                            self.plan_values::<{ STRICT }>(case.1.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.0.as_ref()),
+                            self.plan_value::<{ STRICT }>(case.1.as_ref()),
                         )
                     })
                     .collect();
@@ -553,7 +552,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         }
                         .bind::<{ STRICT }>(vec![]),
                     ),
-                    Some(def) => self.plan_values::<{ STRICT }>(def.as_ref()),
+                    Some(def) => self.plan_value::<{ STRICT }>(def.as_ref()),
                 };
                 (
                     "searched case",
@@ -563,7 +562,7 @@ impl<'c> EvaluatorPlanner<'c> {
             ValueExpr::IsTypeExpr(i) => (
                 "is type",
                 Ok(Box::new(EvalIsTypeExpr {
-                    expr: self.plan_values::<{ STRICT }>(i.expr.as_ref()),
+                    expr: self.plan_value::<{ STRICT }>(i.expr.as_ref()),
                     is_type: i.is_type.clone(),
                     invert: i.not,
                 }) as Box<dyn EvalExpr>),
@@ -585,7 +584,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 });
                 (
                     "null if",
-                    Ok(self.plan_values::<{ STRICT }>(&rewritten_as_case)),
+                    Ok(self.plan_value::<{ STRICT }>(&rewritten_as_case)),
                 )
             }
             ValueExpr::CoalesceExpr(c) => {
@@ -618,7 +617,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 }
                 (
                     "coalesce",
-                    Ok(self.plan_values::<{ STRICT }>(&as_case(
+                    Ok(self.plan_value::<{ STRICT }>(&as_case(
                         c.elements.first().unwrap(),
                         &c.elements[1..],
                     ))),
@@ -627,7 +626,7 @@ impl<'c> EvaluatorPlanner<'c> {
             ValueExpr::DynamicLookup(lookups) => {
                 let lookups = lookups
                     .iter()
-                    .map(|lookup| self.plan_values::<{ STRICT }>(lookup))
+                    .map(|lookup| self.plan_value::<{ STRICT }>(lookup))
                     .collect_vec();
 
                 (
@@ -636,10 +635,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 )
             }
             ValueExpr::Call(logical::CallExpr { name, arguments }) => {
-                let args = arguments
-                    .iter()
-                    .map(|arg| self.plan_values::<{ STRICT }>(arg))
-                    .collect_vec();
+                let args = self.plan_values::<{ STRICT }, _>(arguments.iter());
                 match name {
                     CallName::Lower => ("lower", EvalStringFn::Lower.bind::<{ STRICT }>(args)),
                     CallName::Upper => ("upper", EvalStringFn::Upper.bind::<{ STRICT }>(args)),

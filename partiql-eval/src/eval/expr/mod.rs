@@ -35,8 +35,12 @@ pub trait EvalExpr: Debug {
 #[non_exhaustive]
 /// An error in binding an expression for evaluation
 pub enum BindError {
-    #[error("Argument number mismatch: expected `{expected}`, found `{found}` ")]
-    ArgNumMismatch { expected: usize, found: usize },
+    #[error("Argument number mismatch: expected one of `{expected:?}`, found `{found}` ")]
+    ArgNumMismatch { expected: Vec<usize>, found: usize },
+
+    /// Feature has not yet been implemented.
+    #[error("Argument constraint not satisfied: `{0}`")]
+    ArgumentConstraint(String),
 
     /// Feature has not yet been implemented.
     #[error("Not yet implemented: {0}")]

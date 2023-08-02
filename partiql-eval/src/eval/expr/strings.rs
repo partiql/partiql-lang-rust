@@ -190,7 +190,7 @@ impl BindEvalExpr for EvalFnSubstring {
                 },
             ),
             n => Err(BindError::ArgNumMismatch {
-                expected: 3,
+                expected: vec![2, 3],
                 found: n,
             }),
         }
@@ -248,7 +248,7 @@ impl BindEvalExpr for EvalFnOverlay {
                 },
             ),
             n => Err(BindError::ArgNumMismatch {
-                expected: 4,
+                expected: vec![3, 4],
                 found: n,
             }),
         }
