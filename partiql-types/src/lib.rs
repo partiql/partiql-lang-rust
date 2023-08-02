@@ -131,9 +131,9 @@ macro_rules! r#array {
 }
 
 #[macro_export]
-macro_rules! unknown {
+macro_rules! undefined {
     () => {
-        $crate::PartiqlType::new($crate::TypeKind::Unknown)
+        $crate::PartiqlType::new($crate::TypeKind::Undefined)
     };
 }
 
@@ -174,7 +174,7 @@ pub enum TypeKind {
     Bag(BagType),
     Array(ArrayType),
     // Serves as Bottom Type
-    Unknown,
+    Undefined,
     // TODO Add Sexp, BitString, ByteString, Blob, Clob, and Graph types
 }
 
@@ -213,7 +213,7 @@ impl Display for TypeKind {
             TypeKind::Struct(_) => "Struct".to_string(),
             TypeKind::Bag(_) => "Bag".to_string(),
             TypeKind::Array(_) => "Array".to_string(),
-            TypeKind::Unknown => "ErrorType".to_string(),
+            TypeKind::Undefined => "Undefined".to_string(),
         };
         write!(f, "{}", x)
     }
@@ -439,7 +439,6 @@ impl From<(&str, PartiqlType)> for StructField {
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlType>,
-    constraints: Vec<CollectionConstraint>,
 }
 
 impl BagType {
@@ -448,18 +447,11 @@ impl BagType {
     }
 
     pub fn new(typ: Box<PartiqlType>) -> Self {
-        BagType {
-            element_type: typ,
-            constraints: vec![CollectionConstraint::Ordered(false)],
-        }
+        BagType { element_type: typ }
     }
 
     pub fn element_type(&self) -> &PartiqlType {
         &self.element_type
-    }
-
-    pub fn constraints(&self) -> &Vec<CollectionConstraint> {
-        &self.constraints
     }
 }
 
@@ -467,7 +459,7 @@ impl BagType {
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
-    constraints: Vec<CollectionConstraint>,
+    constraints: Vec<OrderedCollectionConstraint>,
 }
 
 impl ArrayType {
@@ -478,7 +470,17 @@ impl ArrayType {
     pub fn new(typ: Box<PartiqlType>) -> Self {
         ArrayType {
             element_type: typ,
-            constraints: vec![CollectionConstraint::Ordered(true)],
+            constraints: vec![],
+        }
+    }
+
+    pub fn new_constrained(
+        typ: Box<PartiqlType>,
+        constraints: Vec<OrderedCollectionConstraint>,
+    ) -> Self {
+        ArrayType {
+            element_type: typ,
+            constraints,
         }
     }
 
@@ -486,15 +488,16 @@ impl ArrayType {
         &self.element_type
     }
 
-    pub fn constraints(&self) -> &Vec<CollectionConstraint> {
+    pub fn constraints(&self) -> &Vec<OrderedCollectionConstraint> {
         &self.constraints
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[non_exhaustive]
-pub enum CollectionConstraint {
-    Ordered(bool),
+pub enum OrderedCollectionConstraint {
+    // Each value in an ordered collection is expected to be valid against the type in the corresponding position of the specified types list
+    OrderedElements(Vec<PartiqlType>),
 }
 
 #[cfg(test)]

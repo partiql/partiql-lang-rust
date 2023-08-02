@@ -3,7 +3,7 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr};
 use partiql_types::{
-    any, missing, unknown, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
+    any, missing, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
     StructType, TypeKind,
 };
 use partiql_value::{BindingsName, Value};
@@ -114,19 +114,21 @@ pub struct PlanTyper<'c> {
     logical_plan: LogicalPlan<BindingsOp>,
     errors: Vec<TypingError>,
     type_env_stack: Vec<TypeEnvContext>,
+    bop_stack: Vec<BindingsOp>,
     output: Option<PartiqlType>,
 }
 
 #[allow(dead_code)]
 impl<'c> PlanTyper<'c> {
     /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Strict` Typing Mode as the default Typing Mode.
-    pub fn new(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
+    pub fn new_strict(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Strict,
             catalog,
             logical_plan: ir.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
+            bop_stack: Default::default(),
             output: None,
         }
     }
@@ -139,6 +141,7 @@ impl<'c> PlanTyper<'c> {
             logical_plan: lg.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
+            bop_stack: Default::default(),
             output: None,
         }
     }
@@ -155,7 +158,7 @@ impl<'c> PlanTyper<'c> {
         }
 
         if self.errors.is_empty() {
-            Ok(self.output.clone().unwrap_or(unknown!()))
+            Ok(self.output.clone().unwrap_or(undefined!()))
         } else {
             Err(TypeErr {
                 errors: self.errors.clone(),
@@ -164,6 +167,7 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_binop(&mut self, op: &BindingsOp) {
+        self.bop_stack.push(op.clone());
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
                 self.type_vexpr(expr, LookupOrder::GlobalLocal);
@@ -284,13 +288,6 @@ impl<'c> PlanTyper<'c> {
                             if let Some(ty) = type_ctx.env().get(&sym) {
                                 let mut new_type_env = LocalTypeEnv::new();
                                 if let TypeKind::Struct(s) = ty.kind() {
-                                    // for field in s.fields() {
-                                    //     let sym = SymbolPrimitive {
-                                    //         value: field.name().to_string(),
-                                    //         case: CaseSensitivity::CaseInsensitive,
-                                    //     };
-                                    //     new_type_env.insert(sym, field.ty().clone());
-                                    // }
                                     to_bindings(s).into_iter().for_each(|b| {
                                         new_type_env.insert(b.0, b.1);
                                     });
@@ -309,8 +306,18 @@ impl<'c> PlanTyper<'c> {
                 }
             }
             ValueExpr::Path(v, components) => {
+                if let Some(op) = self.current_bop() {
+                    match op {
+                        BindingsOp::Scan(_) => self.type_vexpr(v, LookupOrder::GlobalLocal),
+                        _ => self.type_vexpr(v, LookupOrder::LocalGlobal),
+                    }
+                } else {
+                    self.errors.push(TypingError::IllegalState(format!(
+                        "Ended up in no operator in type checking path expression: {:?}, {:?}",
+                        &v, &components,
+                    )));
+                }
                 self.type_vexpr(v, LookupOrder::LocalGlobal);
-                // let type_ctx = self.local_type_env();
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
@@ -350,7 +357,7 @@ impl<'c> PlanTyper<'c> {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
                         ));
-                        todo!()
+                        TypeKind::Undefined
                     }
                 };
 
@@ -409,12 +416,12 @@ impl<'c> PlanTyper<'c> {
             TypeKind::Any => {
                 self.errors
                     .push(TypingError::NotYetImplemented("[Any]".to_string()));
-                unknown!()
+                undefined!()
             }
             TypeKind::AnyOf(_) => {
                 self.errors
                     .push(TypingError::NotYetImplemented("[AnyOf]".to_string()));
-                unknown!()
+                undefined!()
             }
             _ => ty.clone(),
         }
@@ -454,7 +461,7 @@ impl<'c> PlanTyper<'c> {
 
     fn derived_type(&mut self, ty_ctx: &TypeEnvContext) -> PartiqlType {
         let ty = ty_ctx.derived_type();
-        if let TypeKind::Unknown = ty.kind() {
+        if let TypeKind::Undefined = ty.kind() {
             self.errors.push(TypingError::TypeCheck(format!(
                 "A call to derived type resulted in [Unknown] type for [TypeContext]; [Unknown] type cannot be used for further type checking {:?}",
                 ty_ctx
@@ -476,6 +483,10 @@ impl<'c> PlanTyper<'c> {
                 TypeEnvContext::new()
             }
         }
+    }
+
+    fn current_bop(&self) -> Option<&BindingsOp> {
+        self.bop_stack.last()
     }
 }
 
@@ -592,6 +603,21 @@ mod tests {
                 StructField::new("age", int!()),
                 StructField::new("bar", any!()),
             ],
+        )
+        .expect("Type");
+
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT d.age FROM customers.details AS d",
+            create_customer_schema(
+                true,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("details", details.clone()),
+                ],
+            ),
+            vec![StructField::new("age", int!())],
         )
         .expect("Type");
     }
@@ -735,7 +761,7 @@ mod tests {
 
         let mut typer = match mode {
             TypingMode::Permissive => PlanTyper::new_permissive(&catalog, &lg),
-            TypingMode::Strict => PlanTyper::new(&catalog, &lg),
+            TypingMode::Strict => PlanTyper::new_strict(&catalog, &lg),
         };
 
         typer.type_plan()
