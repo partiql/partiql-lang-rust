@@ -1,5 +1,6 @@
+use itertools::Itertools;
 use std::collections::BTreeSet;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 pub trait Type {}
@@ -166,18 +167,77 @@ pub enum TypeKind {
     StringFixed(usize),
     StringVarying(usize),
 
+    DateTime,
+
     // Container Types
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
     // Serves as Bottom Type
     Unknown,
-    // TODO Add Sexp, TIMESTAMP, BitString, ByteString, Blob, Clob, and Graph types
+    // TODO Add Sexp, BitString, ByteString, Blob, Clob, and Graph types
 }
+
+impl Display for TypeKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let x = match self {
+            TypeKind::Any => "Any".to_string(),
+            TypeKind::AnyOf(anyof) => {
+                format!(
+                    "AnyOf({})",
+                    anyof.types.iter().map(|pt| pt.kind()).join(",")
+                )
+            }
+            TypeKind::Null => "Null".to_string(),
+            TypeKind::Missing => "Missing".to_string(),
+            TypeKind::Int => "Int".to_string(),
+            TypeKind::Int8 => "Int8".to_string(),
+            TypeKind::Int16 => "Int16".to_string(),
+            TypeKind::Int32 => "Int32".to_string(),
+            TypeKind::Int64 => "Int64".to_string(),
+            TypeKind::Bool => "Bool".to_string(),
+            TypeKind::Decimal => "Decimal".to_string(),
+            TypeKind::DecimalP(_, _) => {
+                todo!()
+            }
+            TypeKind::Float32 => "Float32".to_string(),
+            TypeKind::Float64 => "Float64".to_string(),
+            TypeKind::String => "String".to_string(),
+            TypeKind::StringFixed(_) => {
+                todo!()
+            }
+            TypeKind::StringVarying(_) => {
+                todo!()
+            }
+            TypeKind::DateTime => "DateTime".to_string(),
+            TypeKind::Struct(_) => "Struct".to_string(),
+            TypeKind::Bag(_) => "Bag".to_string(),
+            TypeKind::Array(_) => "Array".to_string(),
+            TypeKind::Unknown => "ErrorType".to_string(),
+        };
+        write!(f, "{}", x)
+    }
+}
+
+pub const TYPE_ANY: PartiqlType = PartiqlType::new(TypeKind::Any);
+pub const TYPE_NULL: PartiqlType = PartiqlType::new(TypeKind::Null);
+pub const TYPE_MISSING: PartiqlType = PartiqlType::new(TypeKind::Missing);
+pub const TYPE_BOOL: PartiqlType = PartiqlType::new(TypeKind::Bool);
+pub const TYPE_INT: PartiqlType = PartiqlType::new(TypeKind::Int);
+pub const TYPE_INT8: PartiqlType = PartiqlType::new(TypeKind::Int8);
+pub const TYPE_INT16: PartiqlType = PartiqlType::new(TypeKind::Int16);
+pub const TYPE_INT32: PartiqlType = PartiqlType::new(TypeKind::Int32);
+pub const TYPE_INT64: PartiqlType = PartiqlType::new(TypeKind::Int64);
+pub const TYPE_REAL: PartiqlType = PartiqlType::new(TypeKind::Float32);
+pub const TYPE_DOUBLE: PartiqlType = PartiqlType::new(TypeKind::Float64);
+pub const TYPE_DECIMAL: PartiqlType = PartiqlType::new(TypeKind::Decimal);
+pub const TYPE_STRING: PartiqlType = PartiqlType::new(TypeKind::String);
+pub const TYPE_DATETIME: PartiqlType = PartiqlType::new(TypeKind::DateTime);
+pub const TYPE_NUMERIC_TYPES: [PartiqlType; 4] = [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL];
 
 #[allow(dead_code)]
 impl PartiqlType {
-    pub fn new(kind: TypeKind) -> PartiqlType {
+    pub const fn new(kind: TypeKind) -> PartiqlType {
         PartiqlType(kind)
     }
 
@@ -197,8 +257,37 @@ impl PartiqlType {
         PartiqlType(TypeKind::Array(a))
     }
 
-    pub fn union_of(types: BTreeSet<PartiqlType>) -> PartiqlType {
-        PartiqlType(TypeKind::AnyOf(AnyOf::new(types)))
+    pub fn any_of<I>(types: I) -> PartiqlType
+    where
+        I: IntoIterator<Item = PartiqlType>,
+    {
+        let any_of = AnyOf::from_iter(types);
+        match any_of.types.len() {
+            0 => TYPE_ANY,
+            1 => {
+                let AnyOf { types } = any_of;
+                types.into_iter().next().unwrap()
+            }
+            _ => PartiqlType(TypeKind::AnyOf(any_of)),
+        }
+    }
+
+    pub fn union_with(self, other: PartiqlType) -> PartiqlType {
+        match (self.0, other.0) {
+            (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
+            (TypeKind::AnyOf(lhs), TypeKind::AnyOf(rhs)) => {
+                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types.into_iter()))
+            }
+            (TypeKind::AnyOf(anyof), other) | (other, TypeKind::AnyOf(anyof)) => {
+                let mut types = anyof.types;
+                types.insert(PartiqlType::new(other));
+                PartiqlType::any_of(types)
+            }
+            (l, r) => {
+                let types = [PartiqlType::new(l), PartiqlType::new(r)];
+                PartiqlType::any_of(types)
+            }
+        }
     }
 
     pub fn is_string(&self) -> bool {
@@ -247,16 +336,24 @@ pub struct AnyOf {
 }
 
 impl AnyOf {
-    pub fn new(types: BTreeSet<PartiqlType>) -> Self {
+    pub const fn new(types: BTreeSet<PartiqlType>) -> Self {
         AnyOf { types }
     }
 
-    pub fn types(&self) -> &BTreeSet<PartiqlType> {
-        &self.types
+    pub fn types(&self) -> impl Iterator<Item = &PartiqlType> {
+        self.types.iter()
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+impl FromIterator<PartiqlType> for AnyOf {
+    fn from_iter<T: IntoIterator<Item = PartiqlType>>(iter: T) -> Self {
+        AnyOf {
+            types: iter.into_iter().collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructType {
     constraints: BTreeSet<StructConstraint>,
@@ -295,19 +392,8 @@ impl StructType {
     }
 }
 
-impl<T> From<(String, T)> for StructField
-where
-    T: Into<PartiqlType>,
-{
-    fn from(pair: (String, T)) -> Self {
-        StructField {
-            name: pair.0,
-            ty: pair.1.into(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[allow(dead_code)]
 #[non_exhaustive]
 pub enum StructConstraint {
     Open(bool),
@@ -413,6 +499,32 @@ pub enum CollectionConstraint {
 
 #[cfg(test)]
 mod tests {
+    use crate::{PartiqlType, TYPE_INT, TYPE_REAL};
+
     #[test]
-    fn todo() {}
+    fn union() {
+        let expect_int = TYPE_INT;
+        assert_eq!(expect_int, TYPE_INT.union_with(TYPE_INT));
+
+        let expect_nums = PartiqlType::any_of([TYPE_INT, TYPE_REAL]);
+        assert_eq!(expect_nums, TYPE_INT.union_with(TYPE_REAL));
+        assert_eq!(
+            expect_nums,
+            PartiqlType::any_of([
+                TYPE_INT.union_with(TYPE_REAL),
+                TYPE_INT.union_with(TYPE_REAL)
+            ])
+        );
+        assert_eq!(
+            expect_nums,
+            PartiqlType::any_of([
+                TYPE_INT.union_with(TYPE_REAL),
+                TYPE_INT.union_with(TYPE_REAL),
+                PartiqlType::any_of([
+                    TYPE_INT.union_with(TYPE_REAL),
+                    TYPE_INT.union_with(TYPE_REAL)
+                ])
+            ])
+        );
+    }
 }

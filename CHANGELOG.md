@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter. 
+- *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
+- *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
+- *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter.
+- *BREAKING:* partiql-eval: `like_to_re_pattern` is no longer public.
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
 - *BREAKING:* partiql-value: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
@@ -17,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Affects the AST and visitor
 - *BREAKING:* partiql-parser: `Parsed` struct's `ast` field is now an `ast::AstNode<ast::TopLevelQuery>`
 - *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
+- *BREAKING:* partiql-logical: changed modeling of `Project` `exprs` to be a `Vec<(String, ValueExpr)>` rather than a `HashMap<String, ValueExpr>` to support multiple project items with the same alias
 
 ### Added
+- Strict mode evaluation partial support added.
 - Add interface for `STRICT` mode evalution to `EvaluatorPlanner`.
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.

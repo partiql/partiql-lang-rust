@@ -2,11 +2,13 @@ use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::error::PlanErr;
-use partiql_eval::eval::{EvalPlan, EvalResult};
+use partiql_eval::error::{EvalErr, PlanErr};
+use partiql_eval::eval::{EvalPlan, EvalResult, Evaluated};
 use partiql_logical as logical;
-use partiql_parser::{Parsed, ParserResult};
+use partiql_parser::{Parsed, ParserError, ParserResult};
 use partiql_value::Value;
+
+use thiserror::Error;
 
 mod test_value;
 pub(crate) use test_value::TestValue;
@@ -111,31 +113,73 @@ pub(crate) fn pass_semantics(statement: &str) {
     );
 }
 
+#[derive(Error, Debug)]
+enum TestError<'a> {
+    #[error("Parse error: {0:?}")]
+    Parse(ParserError<'a>),
+    #[error("Lower error: {0:?}")]
+    Lower(AstTransformationError),
+    #[error("Plan error: {0:?}")]
+    Plan(PlanErr),
+    #[error("Evaluation error: {0:?}")]
+    Eval(EvalErr),
+}
+
+impl<'a> From<ParserError<'a>> for TestError<'a> {
+    fn from(err: ParserError<'a>) -> Self {
+        TestError::Parse(err)
+    }
+}
+
+impl From<AstTransformationError> for TestError<'_> {
+    fn from(err: AstTransformationError) -> Self {
+        TestError::Lower(err)
+    }
+}
+
+impl From<PlanErr> for TestError<'_> {
+    fn from(err: PlanErr) -> Self {
+        TestError::Plan(err)
+    }
+}
+
+impl From<EvalErr> for TestError<'_> {
+    fn from(err: EvalErr) -> Self {
+        TestError::Eval(err)
+    }
+}
+
 #[track_caller]
 #[inline]
 #[allow(dead_code)]
-pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
+pub(crate) fn eval<'a>(
+    statement: &'a str,
+    mode: EvaluationMode,
+    env: &Option<TestValue>,
+) -> Result<Evaluated, TestError<'a>> {
     let catalog = PartiqlCatalog::default();
 
-    let parsed = parse(statement);
-    let lowered_result = lower(&catalog, &parsed.expect("parse"));
-    let lowered = lowered_result.expect("lower");
+    let parsed = parse(statement)?;
+    let lowered = lower(&catalog, &parsed)?;
     let bindings = env
         .as_ref()
         .map(|e| (&e.value).into())
         .unwrap_or_else(MapBindings::default);
+    let plan = compile(mode, &catalog, lowered)?;
+    Ok(evaluate(plan, bindings)?)
+}
 
-    let plan = compile(mode, &catalog, lowered);
-    match plan {
-        Ok(plan) => {
-            let out = evaluate(plan, bindings);
+#[track_caller]
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<TestValue>) {
+    let result = eval(statement, mode, env);
 
-            assert!(
-                out.is_err(),
-                "When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{out:#?}`"
-            );
-        }
-        Err(_) => {}
+    match result {
+        Ok(result) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{result:#?}`"),
+        Err(TestError::Parse(_)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error"),
+        Err(TestError::Lower(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected lowering error `{err:?}`"),
+        Err(TestError::Plan(_)) | Err(TestError::Eval(_)) => {}
     }
 }
 
@@ -148,25 +192,16 @@ pub(crate) fn pass_eval(
     env: &Option<TestValue>,
     expected: &TestValue,
 ) {
-    let catalog = PartiqlCatalog::default();
-
-    let parsed = parse(statement);
-    let lowered_result = lower(&catalog, &parsed.expect("parse"));
-    let lowered = lowered_result.expect("lower");
-    let bindings = env
-        .as_ref()
-        .map(|e| (&e.value).into())
-        .unwrap_or_else(MapBindings::default);
-    let plan = compile(mode, &catalog, lowered).expect("compile");
-    let out = evaluate(plan, bindings);
-
-    match out {
+    match eval(statement, mode, env) {
         Ok(v) => assert_eq!(v.result, expected.value),
-        Err(err) => {
-            panic!(
-                "When evaluating (mode = {mode:#?}) `{statement}`, expected `Ok(_)`, but was `Err({err:#?})`"
-            )
+        Err(TestError::Parse(_)) => {
+            panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error")
         }
+        Err(TestError::Lower(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected lowering error `{err:?}`"),
+        Err(TestError::Plan(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected planning error `{err:?}`"),
+        Err(TestError::Eval(err)) => panic!(
+            "When evaluating (mode = {mode:#?}) `{statement}`, expected `Ok(_)`, but was `Err({err:#?})`"
+        )
     }
 }
 

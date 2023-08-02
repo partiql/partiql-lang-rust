@@ -291,7 +291,7 @@ impl<'c> PlanTyper<'c> {
                                     //     };
                                     //     new_type_env.insert(sym, field.ty().clone());
                                     // }
-                                    to_bindings(&s).into_iter().for_each(|b| {
+                                    to_bindings(s).into_iter().for_each(|b| {
                                         new_type_env.insert(b.0, b.1);
                                     });
                                 } else {
