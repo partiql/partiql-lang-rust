@@ -1010,36 +1010,24 @@ impl EvalOrderBy {
 
                 match spec.spec {
                     EvalOrderBySortSpec::AscNullsFirst => {
-                        NullSortedValue::<true, Value>(l.as_ref()).cmp(&NullSortedValue::<
-                            true,
-                            Value,
-                        >(
-                            r.as_ref()
-                        ))
+                        let wrap = NullSortedValue::<true, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        l.cmp(&r)
                     }
                     EvalOrderBySortSpec::AscNullsLast => {
-                        NullSortedValue::<false, Value>(l.as_ref()).cmp(&NullSortedValue::<
-                            false,
-                            Value,
-                        >(
-                            r.as_ref()
-                        ))
+                        let wrap = NullSortedValue::<false, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        l.cmp(&r)
                     }
                     EvalOrderBySortSpec::DescNullsFirst => {
-                        NullSortedValue::<false, Value>(r.as_ref()).cmp(&NullSortedValue::<
-                            false,
-                            Value,
-                        >(
-                            l.as_ref()
-                        ))
+                        let wrap = NullSortedValue::<false, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        r.cmp(&l)
                     }
                     EvalOrderBySortSpec::DescNullsLast => {
-                        NullSortedValue::<true, Value>(r.as_ref()).cmp(&NullSortedValue::<
-                            true,
-                            Value,
-                        >(
-                            l.as_ref()
-                        ))
+                        let wrap = NullSortedValue::<true, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        r.cmp(&l)
                     }
                 }
             })
