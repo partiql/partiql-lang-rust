@@ -1051,7 +1051,6 @@ impl EvalOrderBy {
 impl Evaluable for EvalOrderBy {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
-        println!("order by self: {:?}", self);
 
         let mut values = input_value.into_iter().collect_vec();
         values.sort_by(|l, r| self.compare(l, r, ctx));
