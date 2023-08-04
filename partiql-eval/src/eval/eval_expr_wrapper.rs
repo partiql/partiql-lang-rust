@@ -24,8 +24,6 @@ pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
         (_, Value::Missing) => true,
         (TypeKind::Any, _) => true,
         (TypeKind::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
-        (TypeKind::Null, Value::Null) => true,
-        (TypeKind::Missing, Value::Missing) => true,
         (
             TypeKind::Int | TypeKind::Int8 | TypeKind::Int16 | TypeKind::Int32 | TypeKind::Int64,
             Value::Integer(_),
@@ -41,11 +39,7 @@ pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
         (TypeKind::Bag(b_type), Value::Bag(b_values)) => {
             let bag_element_type = b_type.element_type.as_ref();
             let mut b_values = b_values.iter();
-            b_values.all(|b_value| {
-                println!("b_value: {:?}", b_value);
-                println!("bag_element_type: {:?}", bag_element_type);
-                subsumes(bag_element_type, b_value)
-            })
+            b_values.all(|b_value| subsumes(bag_element_type, b_value))
         }
         (TypeKind::DateTime, Value::DateTime(_)) => true,
 
