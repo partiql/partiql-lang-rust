@@ -363,7 +363,7 @@ pub enum StructConstraint {
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct BagType {
-    element_type: Box<PartiqlType>,
+    pub element_type: Box<PartiqlType>,
     constraints: Vec<CollectionConstraint>,
 }
 
@@ -385,7 +385,7 @@ impl BagType {
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct ArrayType {
-    element_type: Box<PartiqlType>,
+    pub element_type: Box<PartiqlType>,
     constraints: Vec<CollectionConstraint>,
 }
 

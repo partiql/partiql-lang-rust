@@ -34,7 +34,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use partiql_catalog::Catalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
+use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -1170,6 +1170,18 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 name: new_name,
                 expr: arg,
                 func: AggSum,
+                setq,
+            },
+            "any" | "some" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggAny,
+                setq,
+            },
+            "every" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggEvery,
                 setq,
             },
             _ => {
