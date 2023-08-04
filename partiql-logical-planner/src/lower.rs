@@ -707,8 +707,13 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_select(&mut self, _select: &'ast Select) -> Traverse {
-        Traverse::Continue
+    fn enter_select(&mut self, select: &'ast Select) -> Traverse {
+        if select.having.is_some() && select.group_by.is_none() {
+            self.errors.push(AstTransformError::HavingWithoutGroupBy);
+            Traverse::Stop
+        } else {
+            Traverse::Continue
+        }
     }
 
     fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
