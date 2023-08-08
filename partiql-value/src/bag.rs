@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{List, Value};
+use crate::{List, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -163,10 +163,17 @@ impl PartialEq for Bag {
         if self.len() != other.len() {
             return false;
         }
-
-        let lhs = self.0.iter().sorted();
-        let rhs = other.0.iter().sorted();
-        lhs.zip(rhs).all(|(l, r)| l == r)
+        for (v1, v2) in self.0.iter().sorted().zip(other.0.iter().sorted()) {
+            match (v1, v2) {
+                (Value::Missing, Value::Missing) | (Value::Null, Value::Null) => continue,
+                (v1, v2) => {
+                    if NullableEq::eq(v1, v2) != Value::Boolean(true) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }
 

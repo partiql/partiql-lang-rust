@@ -1378,6 +1378,18 @@ mod tests {
             NullableEq::eq(&Value::from(bag![3, 4, 2]), &Value::from(bag![2, 2, 3, 4]))
         );
         assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(list![1, 2]), &Value::from(list![1e0, 2.0]))
+        );
+        assert_eq!(
+            Value::from(false),
+            NullableEq::eq(&Value::from(list![1, 2]), &Value::from(list![2.0, 1e0]))
+        );
+        assert_eq!(
+            Value::from(true),
+            NullableEq::eq(&Value::from(bag![1, 2]), &Value::from(bag![2.0, 1e0]))
+        );
+        assert_eq!(
             Value::from(false),
             NullableEq::eq(
                 &Value::from(tuple![("a", 1), ("b", 2)]),
