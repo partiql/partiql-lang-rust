@@ -716,7 +716,7 @@ impl Evaluable for EvalGroupBy {
             EvalGroupingStrategy::GroupFull => {
                 let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
                 for v in input_value.into_iter() {
-                    let v_as_tuple = v.coerce_to_tuple();
+                    let v_as_tuple = v.coerce_into_tuple();
                     let group = self.eval_group(&v_as_tuple, ctx);
                     // Compute next aggregation result for each of the aggregation expressions
                     for aggregate_expr in self.aggregate_exprs.iter_mut() {
@@ -798,7 +798,7 @@ impl Evaluable for EvalPivot {
         let tuple: Tuple = input_value
             .into_iter()
             .filter_map(|binding| {
-                let binding = binding.coerce_to_tuple();
+                let binding = binding.coerce_into_tuple();
                 let key = self.key.evaluate(&binding, ctx);
                 if let Value::String(s) = key.as_ref() {
                     let value = self.value.evaluate(&binding, ctx);
@@ -852,7 +852,7 @@ impl Evaluable for EvalUnpivot {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
         let tuple = match self.expr.evaluate(&Tuple::new(), ctx).into_owned() {
             Value::Tuple(tuple) => *tuple,
-            other => other.coerce_to_tuple(),
+            other => other.coerce_into_tuple(),
         };
 
         let as_key = self.as_key.as_str();
@@ -911,7 +911,7 @@ impl Evaluable for EvalFilter {
 
         let filtered = input_value
             .into_iter()
-            .map(Value::coerce_to_tuple)
+            .map(Value::coerce_into_tuple)
             .filter_map(|v| self.eval_filter(&v, ctx).then_some(v));
         Value::from(filtered.collect::<Bag>())
     }
@@ -956,7 +956,7 @@ impl Evaluable for EvalHaving {
 
         let filtered = input_value
             .into_iter()
-            .map(Value::coerce_to_tuple)
+            .map(Value::coerce_into_tuple)
             .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
         Value::from(filtered.collect::<Bag>())
     }
@@ -1128,7 +1128,7 @@ impl Evaluable for EvalSelectValue {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|v| {
-            let v_as_tuple = v.coerce_to_tuple();
+            let v_as_tuple = v.coerce_into_tuple();
             self.expr.evaluate(&v_as_tuple, ctx).into_owned()
         });
 
@@ -1166,7 +1166,7 @@ impl Evaluable for EvalSelect {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|v| {
-            let v_as_tuple = v.coerce_to_tuple();
+            let v_as_tuple = v.coerce_into_tuple();
 
             let tuple_pairs = self.exprs.iter().filter_map(|(alias, expr)| {
                 let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
@@ -1210,9 +1210,9 @@ impl Evaluable for EvalSelectAll {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|val| {
-            val.coerce_to_tuple()
+            val.coerce_into_tuple()
                 .into_values()
-                .flat_map(|v| v.coerce_to_tuple().into_pairs())
+                .flat_map(|v| v.coerce_into_tuple().into_pairs())
                 .collect::<Tuple>()
         });
 
@@ -1244,7 +1244,7 @@ impl EvalExprQuery {
 
 impl Evaluable for EvalExprQuery {
     fn evaluate(&mut self, ctx: &dyn EvalContext) -> Value {
-        let input_value = self.input.take().unwrap_or(Value::Null).coerce_to_tuple();
+        let input_value = self.input.take().unwrap_or(Value::Null).coerce_into_tuple();
 
         self.expr.evaluate(&input_value, ctx).into_owned()
     }

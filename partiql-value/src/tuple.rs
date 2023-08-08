@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::iter::zip;
+use std::iter::{zip, Zip};
 use std::vec;
 
 use unicase::UniCase;
@@ -104,13 +104,14 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn pairs(&self) -> impl Iterator<Item = (&str, &Value)> + Clone {
-        zip(&self.attrs, &self.vals).map(|(k, v)| (k.as_str(), v))
+    pub fn pairs(&self) -> PairsIter {
+        let attrs = self.attrs.iter();
+        PairsIter(zip(attrs, self.vals.iter()))
     }
 
     #[inline]
-    pub fn into_pairs(self) -> impl Iterator<Item = (String, Value)> {
-        zip(self.attrs, self.vals)
+    pub fn into_pairs(self) -> PairsIntoIter {
+        PairsIntoIter(zip(self.attrs, self.vals))
     }
 
     #[inline]
@@ -121,6 +122,40 @@ impl Tuple {
     #[inline]
     pub fn into_values(self) -> impl Iterator<Item = Value> {
         self.vals.into_iter()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PairsIter<'a>(Zip<std::slice::Iter<'a, String>, std::slice::Iter<'a, Value>>);
+
+impl<'a> Iterator for PairsIter<'a> {
+    type Item = (&'a String, &'a Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PairsIntoIter(Zip<std::vec::IntoIter<String>, std::vec::IntoIter<Value>>);
+
+impl Iterator for PairsIntoIter {
+    type Item = (String, Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -160,11 +195,17 @@ where
 impl Iterator for Tuple {
     type Item = (String, Value);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match (self.attrs.pop(), self.vals.pop()) {
             (Some(attr), Some(val)) => Some((attr, val)),
             _ => None,
         }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.attrs.len(), Some(self.attrs.len()))
     }
 }
 

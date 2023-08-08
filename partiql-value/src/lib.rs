@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 
+use std::iter::Once;
 use std::{ops, vec};
 
 use rust_decimal::prelude::FromPrimitive;
@@ -553,13 +554,25 @@ impl Value {
     }
 
     #[inline]
-    pub fn coerce_to_tuple(self) -> Tuple {
+    pub fn coerce_into_tuple(self) -> Tuple {
         match self {
             Value::Tuple(t) => *t,
-            Value::Missing => tuple![],
+            _ => self
+                .into_bindings()
+                .map(|(k, v)| (k.unwrap_or_else(|| "_1".to_string()), v))
+                .collect(),
+        }
+    }
+
+    #[inline]
+    pub fn coerce_to_tuple(&self) -> Tuple {
+        match self {
+            Value::Tuple(t) => t.as_ref().clone(),
             _ => {
-                let fresh_key = "_1"; // TODO don't hard-code 'fresh' keys
-                tuple![(fresh_key, self)]
+                let fresh = "_1".to_string();
+                self.as_bindings()
+                    .map(|(k, v)| (k.unwrap_or(&fresh), v.clone()))
+                    .collect()
             }
         }
     }
@@ -569,12 +582,30 @@ impl Value {
         if let Value::Tuple(t) = self {
             Cow::Borrowed(t)
         } else {
-            Cow::Owned(self.clone().coerce_to_tuple())
+            Cow::Owned(self.coerce_to_tuple())
         }
     }
 
     #[inline]
-    pub fn coerce_to_bag(self) -> Bag {
+    pub fn as_bindings(&self) -> BindingIter {
+        match self {
+            Value::Tuple(t) => BindingIter::Tuple(t.pairs()),
+            Value::Missing => BindingIter::Empty,
+            _ => BindingIter::Single(std::iter::once(self)),
+        }
+    }
+
+    #[inline]
+    pub fn into_bindings(self) -> BindingIntoIter {
+        match self {
+            Value::Tuple(t) => BindingIntoIter::Tuple(t.into_pairs()),
+            Value::Missing => BindingIntoIter::Empty,
+            _ => BindingIntoIter::Single(std::iter::once(self)),
+        }
+    }
+
+    #[inline]
+    pub fn coerce_into_bag(self) -> Bag {
         if let Value::Bag(b) = self {
             *b
         } else {
@@ -587,12 +618,12 @@ impl Value {
         if let Value::Bag(b) = self {
             Cow::Borrowed(b)
         } else {
-            Cow::Owned(self.clone().coerce_to_bag())
+            Cow::Owned(self.clone().coerce_into_bag())
         }
     }
 
     #[inline]
-    pub fn coerce_to_list(self) -> List {
+    pub fn coerce_into_list(self) -> List {
         if let Value::List(b) = self {
             *b
         } else {
@@ -605,7 +636,7 @@ impl Value {
         if let Value::List(l) = self {
             Cow::Borrowed(l)
         } else {
-            Cow::Owned(self.clone().coerce_to_list())
+            Cow::Owned(self.clone().coerce_into_list())
         }
     }
 
@@ -630,6 +661,64 @@ impl Value {
 }
 
 #[derive(Debug, Clone)]
+pub enum BindingIter<'a> {
+    Tuple(PairsIter<'a>),
+    Single(Once<&'a Value>),
+    Empty,
+}
+
+impl<'a> Iterator for BindingIter<'a> {
+    type Item = (Option<&'a String>, &'a Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            BindingIter::Tuple(t) => t.next().map(|(k, v)| (Some(k), v)),
+            BindingIter::Single(single) => single.next().map(|v| (None, v)),
+            BindingIter::Empty => None,
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            BindingIter::Tuple(t) => t.size_hint(),
+            BindingIter::Single(_single) => (1, Some(1)),
+            BindingIter::Empty => (0, Some(0)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum BindingIntoIter {
+    Tuple(PairsIntoIter),
+    Single(Once<Value>),
+    Empty,
+}
+
+impl Iterator for BindingIntoIter {
+    type Item = (Option<String>, Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            BindingIntoIter::Tuple(t) => t.next().map(|(k, v)| (Some(k), v)),
+            BindingIntoIter::Single(single) => single.next().map(|v| (None, v)),
+            BindingIntoIter::Empty => None,
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            BindingIntoIter::Tuple(t) => t.size_hint(),
+            BindingIntoIter::Single(_single) => (1, Some(1)),
+            BindingIntoIter::Empty => (0, Some(0)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ValueIter<'a> {
     List(ListIter<'a>),
     Bag(BagIter<'a>),
@@ -639,11 +728,21 @@ pub enum ValueIter<'a> {
 impl<'a> Iterator for ValueIter<'a> {
     type Item = &'a Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             ValueIter::List(list) => list.next(),
             ValueIter::Bag(bag) => bag.next(),
             ValueIter::Single(v) => v.take(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            ValueIter::List(list) => list.size_hint(),
+            ValueIter::Bag(bag) => bag.size_hint(),
+            ValueIter::Single(_) => (1, Some(1)),
         }
     }
 }
@@ -652,6 +751,7 @@ impl IntoIterator for Value {
     type Item = Value;
     type IntoIter = ValueIntoIterator;
 
+    #[inline]
     fn into_iter(self) -> ValueIntoIterator {
         match self {
             Value::List(list) => ValueIntoIterator::List(list.into_iter()),
@@ -670,11 +770,21 @@ pub enum ValueIntoIterator {
 impl Iterator for ValueIntoIterator {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             ValueIntoIterator::List(list) => list.next(),
             ValueIntoIterator::Bag(bag) => bag.next(),
             ValueIntoIterator::Single(v) => v.take(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            ValueIntoIterator::List(list) => list.size_hint(),
+            ValueIntoIterator::Bag(bag) => bag.size_hint(),
+            ValueIntoIterator::Single(_) => (1, Some(1)),
         }
     }
 }
@@ -1038,9 +1148,9 @@ mod tests {
 
         let mut pairs = tuple.pairs();
         let list_val = Value::from(list);
-        assert_eq!(pairs.next(), Some(("list", &list_val)));
+        assert_eq!(pairs.next(), Some((&"list".to_string(), &list_val)));
         let bag_val = Value::from(bag);
-        assert_eq!(pairs.next(), Some(("bag", &bag_val)));
+        assert_eq!(pairs.next(), Some((&"bag".to_string(), &bag_val)));
         assert_eq!(pairs.next(), None);
     }
 

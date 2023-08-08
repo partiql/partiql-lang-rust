@@ -75,10 +75,19 @@ where
 {
     type Item = V;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             SetQuantified::All(i) => i.next(),
             SetQuantified::Distinct(i) => i.next(),
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            SetQuantified::All(i) => i.size_hint(),
+            SetQuantified::Distinct(i) => i.size_hint(),
         }
     }
 }

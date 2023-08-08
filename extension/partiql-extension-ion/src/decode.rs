@@ -124,6 +124,11 @@ impl<'a> Iterator for IonValueIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next()
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 struct IonValueIterInner<D, R>
@@ -519,7 +524,7 @@ where
         let is_bag = has_annotation(reader, BAG_ANNOT);
         let list = decode_list(self, reader);
         if is_bag {
-            Ok(Bag::from(list?.coerce_to_list()).into())
+            Ok(Bag::from(list?.coerce_into_list()).into())
         } else {
             list
         }
