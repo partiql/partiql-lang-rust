@@ -5,11 +5,11 @@ use std::hash::Hash;
 
 use std::{slice, vec};
 
-use crate::{Bag, NullSortedValue, Value};
+use crate::{Bag, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Hash, PartialEq, Eq, Clone)]
+#[derive(Default, Hash, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
@@ -146,6 +146,25 @@ impl Iterator for ListIntoIterator {
 impl Debug for List {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(&self.0).finish()
+    }
+}
+
+impl PartialEq for List {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        for (v1, v2) in self.iter().zip(other.iter()) {
+            match (v1, v2) {
+                (Value::Missing, Value::Missing) | (Value::Null, Value::Null) => continue,
+                (v1, v2) => {
+                    if NullableEq::eq(v1, v2) != Value::Boolean(true) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }
 
