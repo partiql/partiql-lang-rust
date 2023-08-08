@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
@@ -9,7 +9,7 @@ use crate::{Bag, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Hash, Eq, Clone)]
+#[derive(Default, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
@@ -227,6 +227,14 @@ impl Ord for List {
                     Ordering::Equal => continue,
                 },
             }
+        }
+    }
+}
+
+impl Hash for List {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in self.0.iter() {
+            v.hash(state);
         }
     }
 }
