@@ -655,6 +655,76 @@ fn function_call_def_coll_sum() -> CallDef {
     }
 }
 
+fn function_call_def_coll_any() -> CallDef {
+    CallDef {
+        names: vec!["coll_any", "coll_some"],
+        overloads: vec![
+            CallSpec {
+                input: vec![CallSpecArg::Positional],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollAny(SetQuantifier::All),
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![CallSpecArg::Named("all".into())],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollAny(SetQuantifier::All),
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![CallSpecArg::Named("distinct".into())],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollAny(SetQuantifier::Distinct),
+                        arguments: args,
+                    })
+                }),
+            },
+        ],
+    }
+}
+
+fn function_call_def_coll_every() -> CallDef {
+    CallDef {
+        names: vec!["coll_every"],
+        overloads: vec![
+            CallSpec {
+                input: vec![CallSpecArg::Positional],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollEvery(SetQuantifier::All),
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![CallSpecArg::Named("all".into())],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollEvery(SetQuantifier::All),
+                        arguments: args,
+                    })
+                }),
+            },
+            CallSpec {
+                input: vec![CallSpecArg::Named("distinct".into())],
+                output: Box::new(|args| {
+                    logical::ValueExpr::Call(logical::CallExpr {
+                        name: logical::CallName::CollEvery(SetQuantifier::Distinct),
+                        arguments: args,
+                    })
+                }),
+            },
+        ],
+    }
+}
+
 pub(crate) static FN_SYM_TAB: Lazy<FnSymTab> = Lazy::new(function_call_def);
 
 /// Function symbol table
@@ -698,6 +768,8 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_coll_max(),
         function_call_def_coll_min(),
         function_call_def_coll_sum(),
+        function_call_def_coll_any(),
+        function_call_def_coll_every(),
     ] {
         assert!(!def.names.is_empty());
         let primary = def.names[0];
