@@ -113,7 +113,7 @@ pub struct PlanTyper<'c> {
     catalog: &'c dyn Catalog,
     logical_plan: LogicalPlan<BindingsOp>,
     errors: Vec<TypingError>,
-    type_env_stack: Vec<TypeEnvContext>,
+    type_env_stack: Vec<LocalTypeEnv>,
     bop_stack: Vec<BindingsOp>,
     output: Option<PartiqlType>,
 }
@@ -171,28 +171,26 @@ impl<'c> PlanTyper<'c> {
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
                 self.type_vexpr(expr, LookupOrder::GlobalLocal);
-                let type_ctx = &self.local_type_env();
-                for (name, ty) in type_ctx.env().iter() {
-                    let derived_type = self.element_type(ty);
-                    self.type_env_stack.push(ty_ctx![(
-                        &ty_env![(name.clone(), derived_type.clone())],
-                        ty
-                    )]);
+                let type_env = &self.local_type_env();
+                for (name, ty) in type_env.iter() {
+                    let new_ty = self.element_type(ty);
+                    self.type_env_stack.push(
+                        ty_env![(name.clone(), new_ty.clone())],
+                    );
 
                     if !as_key.is_empty() {
-                        self.type_env_stack.push(ty_ctx![(
-                            &ty_env![(string_to_sym(as_key.as_str()), derived_type)],
-                            ty
-                        )]);
+                        self.type_env_stack.push(
+                            ty_env![(string_to_sym(as_key.as_str()), new_ty)],
+                        );
                     }
                 }
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
-                let derived_type_ctx = self.local_type_env();
+                let derived_type = self.local_type_env();
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
-                    if let Some(ty) = self.retrieve_type_from_local_ctx(k) {
+                    if let Some(ty) = self.retrieve_type_from_local_ctx(&string_to_sym(k)) {
                         fields.push(StructField::new(k.as_str(), ty.clone()));
                     }
                 }
@@ -200,17 +198,17 @@ impl<'c> PlanTyper<'c> {
                 let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
                     StructConstraint::Fields(fields),
                 ])));
-                let derived_type = &self.derived_type(&derived_type_ctx);
-                let schema = if derived_type.is_ordered_collection() {
-                    PartiqlType::new_array(ArrayType::new(Box::new(ty)))
-                } else if derived_type.is_unordered_collection() {
-                    PartiqlType::new_bag(BagType::new(Box::new(ty)))
+
+                let schema = if let Some(op) = self.current_bop() {
+                    match op {
+                        BindingsOp::OrderBy(_) => PartiqlType::new_array(ArrayType::new(Box::new(ty))),
+                        _ => PartiqlType::new_bag(BagType::new(Box::new(ty))),
+                    }
                 } else {
                     self.errors.push(TypingError::IllegalState(format!(
-                        "Expecting Collection for the output Schema but found {:?}",
-                        &ty
+                        "Ended up in no operator in type checking projection",
                     )));
-                    ty
+                    undefined!()
                 };
 
                 // Marking the output Schema in Typing Environment:
@@ -220,13 +218,12 @@ impl<'c> PlanTyper<'c> {
                 // ORDER BY, LIMIT / OFFSET
                 // and SELECT (or SELECT VALUE or PIVOT, which are both special to ion PartiQL).
                 // -- PartiQL Spec. 2019 Section 3.3:
-                self.type_env_stack.push(ty_ctx![(
-                    &ty_env![(string_to_sym(OUTPUT_SCHEMA_KEY), schema)],
-                    derived_type
-                )]);
+                self.type_env_stack.push(
+                    ty_env![(string_to_sym(OUTPUT_SCHEMA_KEY), schema)],
+                );
             }
             BindingsOp::Sink => {
-                if let Some(ty) = self.retrieve_type_from_local_ctx(OUTPUT_SCHEMA_KEY) {
+                if let Some(ty) = self.retrieve_type_from_local_ctx(&string_to_sym(OUTPUT_SCHEMA_KEY)) {
                     self.output = Some(ty);
                 }
             }
@@ -274,9 +271,9 @@ impl<'c> PlanTyper<'c> {
                     LookupOrder::GlobalLocal => {
                         if let Some(type_entry) = self.catalog.resolve_type(name.as_str()) {
                             let ty = type_entry.ty();
-                            let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(ty))], ty)];
+                            let type_env = ty_env![(sym, self.element_type(ty))];
 
-                            self.type_env_stack.push(type_ctx);
+                            self.type_env_stack.push(type_env);
                         } else {
                             self.errors.push(TypingError::NotYetImplemented(
                                 "Local Lookup after unsuccessful Global lookup".to_string(),
@@ -284,21 +281,22 @@ impl<'c> PlanTyper<'c> {
                         }
                     }
                     LookupOrder::LocalGlobal => {
-                        for type_ctx in self.type_env_stack.clone().into_iter().rev() {
-                            if let Some(ty) = type_ctx.env().get(&sym) {
+                        for type_env in self.type_env_stack.iter().rev() {
+                            if let Some(ty) = type_env.get(&sym) {
                                 let mut new_type_env = LocalTypeEnv::new();
                                 if let TypeKind::Struct(s) = ty.kind() {
-                                    to_bindings(s).into_iter().for_each(|b| {
+                                    to_bindings(&s).into_iter().for_each(|b| {
                                         new_type_env.insert(b.0, b.1);
                                     });
+
+                                    if s.is_partial() {
+                                        new_type_env.insert(sym.clone(), any!());
+                                    }
                                 } else {
                                     new_type_env.insert(sym, ty.clone());
                                 }
 
-                                let derived_type = self.derived_type(&type_ctx);
-                                let new_ty = self.element_type(&derived_type);
-                                let type_ctx = ty_ctx![(&new_type_env, &new_ty)];
-                                self.type_env_stack.push(type_ctx);
+                                self.type_env_stack.push(new_type_env);
                                 break;
                             }
                         }
@@ -363,7 +361,7 @@ impl<'c> PlanTyper<'c> {
 
                 let ty = PartiqlType::new(kind);
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
-                self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
+                self.type_env_stack.push(new_type_env);
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
@@ -427,12 +425,12 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn retrieve_type_from_local_ctx(&mut self, key: &str) -> Option<PartiqlType> {
-        let type_ctx = self.local_type_env();
-        let env = type_ctx.env().clone();
-        let derived_type = self.derived_type(&type_ctx);
+    fn retrieve_type_from_local_ctx(&mut self, key: &SymbolPrimitive) -> Option<PartiqlType> {
+        let type_env = self.local_type_env();
 
-        if let Some(ty) = env.get(&string_to_sym(key)) {
+        let derived_type = self.derived_type(&key);
+
+        if let Some(ty) = type_env.get(key) {
             Some(ty.clone())
         } else if let TypeKind::Struct(s) = derived_type.kind() {
             if s.is_partial() {
@@ -459,18 +457,35 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn derived_type(&mut self, ty_ctx: &TypeEnvContext) -> PartiqlType {
-        let ty = ty_ctx.derived_type();
+    fn derived_type(&mut self, sym: &SymbolPrimitive) -> PartiqlType {
+        for type_env in self.type_env_stack.clone().into_iter().rev().skip(1) {
+            if let Some(ty) = type_env.get(sym) {
+                return ty.clone();
+            }
+        }
+
+        let ty = self.resolve_from_global(sym);
         if let TypeKind::Undefined = ty.kind() {
             self.errors.push(TypingError::TypeCheck(format!(
-                "A call to derived type resulted in [Unknown] type for [TypeContext]; [Unknown] type cannot be used for further type checking {:?}",
-                ty_ctx
+                "A call to derived type resulted in [Unknown] type for key {:?}; [Undefined] type cannot be used for further type checking",
+                &sym
             )));
         }
         ty.clone()
     }
 
-    fn local_type_env(&mut self) -> TypeEnvContext {
+    fn resolve_from_global(&mut self, sym: &SymbolPrimitive) -> PartiqlType {
+        return if let Some(type_entry) = self.catalog.resolve_type(sym.value.as_str()) {
+            type_entry.ty().clone()
+        } else {
+            self.errors.push(TypingError::NotYetImplemented(
+                "Local Lookup after unsuccessful Global lookup".to_string(),
+            ));
+            undefined!()
+        }
+    }
+
+    fn local_type_env(&mut self) -> LocalTypeEnv {
         let out = self
             .type_env_stack
             .last()
@@ -480,7 +495,7 @@ impl<'c> PlanTyper<'c> {
             Ok(out) => out.clone(),
             Err(err) => {
                 self.errors.push(err);
-                TypeEnvContext::new()
+                IndexMap::new()
             }
         }
     }
