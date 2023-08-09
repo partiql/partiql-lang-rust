@@ -175,7 +175,7 @@ pub enum TypeKind {
     Array(ArrayType),
     // Serves as Bottom Type
     Undefined,
-    // TODO Add Sexp, BitString, ByteString, Blob, Clob, and Graph types
+    // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
 impl Display for TypeKind {
@@ -459,7 +459,7 @@ impl BagType {
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
-    constraints: Vec<OrderedCollectionConstraint>,
+    constraints: Vec<ArrayConstraint>,
 }
 
 impl ArrayType {
@@ -476,7 +476,7 @@ impl ArrayType {
 
     pub fn new_constrained(
         typ: Box<PartiqlType>,
-        constraints: Vec<OrderedCollectionConstraint>,
+        constraints: Vec<ArrayConstraint>,
     ) -> Self {
         ArrayType {
             element_type: typ,
@@ -488,16 +488,15 @@ impl ArrayType {
         &self.element_type
     }
 
-    pub fn constraints(&self) -> &Vec<OrderedCollectionConstraint> {
+    pub fn constraints(&self) -> &Vec<ArrayConstraint> {
         &self.constraints
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[non_exhaustive]
-pub enum OrderedCollectionConstraint {
-    // Each value in an ordered collection is expected to be valid against the type in the corresponding position of the specified types list
-    OrderedElements(Vec<PartiqlType>),
+pub enum ArrayConstraint {
+    // TODO Add Array constraint once we have Schema Specification.
 }
 
 #[cfg(test)]
