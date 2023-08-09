@@ -2210,7 +2210,7 @@ mod tests {
 
     mod clause_from {
         use crate::eval::evaluable::{EvalScan, Evaluable};
-        use crate::eval::expr::{EvalPath, EvalPathComponent, EvalVarRef};
+        use crate::eval::expr::{EvalGlobalVarRef, EvalPath, EvalPathComponent};
         use crate::eval::BasicContext;
         use partiql_value::{bag, list, BindingsName};
 
@@ -2233,9 +2233,9 @@ mod tests {
             let ctx = BasicContext::new(p0);
 
             let mut scan = EvalScan::new_with_at_key(
-                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
-                    "someOrderedTable".to_string(),
-                ))),
+                Box::new(EvalGlobalVarRef {
+                    name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+                }),
                 "x",
                 "y",
             );
@@ -2259,9 +2259,9 @@ mod tests {
             let ctx = BasicContext::new(p0);
 
             let mut scan = EvalScan::new_with_at_key(
-                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
-                    "someUnorderedTable".to_string(),
-                ))),
+                Box::new(EvalGlobalVarRef {
+                    name: BindingsName::CaseInsensitive("someUnorderedTable".to_string()),
+                }),
                 "x",
                 "y",
             );
@@ -2288,9 +2288,9 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let table_ref = EvalVarRef::Global(BindingsName::CaseInsensitive(
-                "someOrderedTable".to_string(),
-            ));
+            let table_ref = EvalGlobalVarRef {
+                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+            };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
                 components: vec![
@@ -2313,9 +2313,9 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let table_ref = EvalVarRef::Global(BindingsName::CaseInsensitive(
-                "someOrderedTable".to_string(),
-            ));
+            let table_ref = EvalGlobalVarRef {
+                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+            };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
                 components: vec![
@@ -2337,7 +2337,7 @@ mod tests {
         use partiql_value::{bag, BindingsName, Tuple};
 
         use crate::eval::evaluable::{EvalUnpivot, Evaluable};
-        use crate::eval::expr::EvalVarRef;
+        use crate::eval::expr::EvalGlobalVarRef;
         use crate::eval::BasicContext;
 
         use super::*;
@@ -2353,9 +2353,9 @@ mod tests {
             p0.insert("justATuple", just_a_tuple().into());
 
             let mut unpivot = EvalUnpivot::new(
-                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
-                    "justATuple".to_string(),
-                ))),
+                Box::new(EvalGlobalVarRef {
+                    name: BindingsName::CaseInsensitive("justATuple".to_string()),
+                }),
                 "price",
                 Some("symbol".into()),
             );
@@ -2377,9 +2377,9 @@ mod tests {
             p0.insert("nonTuple", Value::from(1));
 
             let mut unpivot = EvalUnpivot::new(
-                Box::new(EvalVarRef::Global(BindingsName::CaseInsensitive(
-                    "nonTuple".to_string(),
-                ))),
+                Box::new(EvalGlobalVarRef {
+                    name: BindingsName::CaseInsensitive("nonTuple".to_string()),
+                }),
                 "x",
                 Some("y".into()),
             );

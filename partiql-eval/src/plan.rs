@@ -440,10 +440,11 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::VarRef(name, var_ref_type) => (
                 "var ref",
-                Ok(Box::new(match var_ref_type {
+                match var_ref_type {
                     VarRefType::Global => EvalVarRef::Global(name.clone()),
                     VarRefType::Local => EvalVarRef::Local(name.clone()),
-                }) as Box<dyn EvalExpr>),
+                }
+                .bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr

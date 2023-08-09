@@ -1,6 +1,6 @@
 use crate::env::Bindings;
 
-use crate::eval::expr::EvalExpr;
+use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_value::Value::Missing;
@@ -94,23 +94,50 @@ impl EvalExpr for EvalDynamicLookup {
     }
 }
 
-/// Represents a variable reference in a (sub)query, e.g. `a` in `SELECT b as a FROM`.
-#[derive(Debug)]
+/// Represents a local variable reference in a (sub)query, e.g. `b` in `SELECT t.b as a FROM T as t`.
+#[derive(Debug, Clone)]
 pub(crate) enum EvalVarRef {
     Local(BindingsName),
     Global(BindingsName),
 }
 
-impl EvalExpr for EvalVarRef {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let value = match self {
-            EvalVarRef::Global(name) => ctx.bindings().get(name),
-            EvalVarRef::Local(name) => Bindings::get(bindings, name),
-        };
+impl BindEvalExpr for EvalVarRef {
+    fn bind<const STRICT: bool>(
+        &self,
+        _: Vec<Box<dyn EvalExpr>>,
+    ) -> Result<Box<dyn EvalExpr>, BindError> {
+        Ok(match self {
+            EvalVarRef::Global(name) => Box::new(EvalGlobalVarRef { name: name.clone() }),
+            EvalVarRef::Local(name) => Box::new(EvalLocalVarRef { name: name.clone() }),
+        })
+    }
+}
 
-        match value {
-            None => Cow::Owned(Missing),
-            Some(v) => Cow::Borrowed(v),
-        }
+#[inline]
+fn borrow_or_missing(value: Option<&Value>) -> Cow<Value> {
+    value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
+}
+
+/// Represents a local variable reference in a (sub)query, e.g. `b` in `SELECT t.b as a FROM T as t`.
+#[derive(Debug, Clone)]
+pub(crate) struct EvalLocalVarRef {
+    pub(crate) name: BindingsName,
+}
+
+impl EvalExpr for EvalLocalVarRef {
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, _: &'a dyn EvalContext) -> Cow<'a, Value> {
+        borrow_or_missing(Bindings::get(bindings, &self.name))
+    }
+}
+
+/// Represents a global variable reference in a (sub)query, e.g. `T` in `SELECT t.b as a FROM T as t`.
+#[derive(Debug, Clone)]
+pub(crate) struct EvalGlobalVarRef {
+    pub(crate) name: BindingsName,
+}
+
+impl EvalExpr for EvalGlobalVarRef {
+    fn evaluate<'a>(&'a self, _: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        borrow_or_missing(ctx.bindings().get(&self.name))
     }
 }
