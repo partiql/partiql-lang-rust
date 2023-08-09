@@ -407,9 +407,8 @@ where
                             match rest {
                                 Some(substitutions) => {
                                     // the identifier parsed as a nested fn_expr
-                                    let replacement: Vec<_> = std::iter::once(first)
-                                        .chain(substitutions.into_iter())
-                                        .collect();
+                                    let replacement: Vec<_> =
+                                        std::iter::once(first).chain(substitutions).collect();
                                     patterns = self.process_patterns(
                                         &buffered,
                                         is_nested,
@@ -582,7 +581,7 @@ where
         for ((t, _), r) in std::iter::zip(toks.drain(1..toks.len() - 1), substitution) {
             match (r, t) {
                 (None, t) => rewrite.push(t),
-                (Some(subs), _) => rewrite.extend(subs.into_iter()),
+                (Some(subs), _) => rewrite.extend(subs),
             }
         }
 

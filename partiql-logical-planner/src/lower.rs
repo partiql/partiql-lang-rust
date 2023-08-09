@@ -1013,7 +1013,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let call_expr = self
             .fnsym_tab
             .lookup(&name)
-            .map(|cd| call_def_to_vexpr(cd))
+            .map(call_def_to_vexpr)
             .or_else(|| {
                 self.catalog
                     .get_function(&name)

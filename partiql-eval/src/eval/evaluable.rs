@@ -805,7 +805,7 @@ impl Evaluable for EvalGroupBy {
                     }
                     groups
                         .entry(group)
-                        .or_insert(vec![])
+                        .or_default()
                         .push(Value::Tuple(Box::new(v_as_tuple.clone())));
                 }
 
@@ -1503,8 +1503,7 @@ impl Evaluable for EvalOuterIntersect {
                 let lhs: HashSet<Value> = lhs.collect();
                 Bag::from_iter(
                     rhs.filter(|elem| lhs.contains(elem))
-                        .collect::<HashSet<_>>()
-                        .into_iter(),
+                        .collect::<HashSet<_>>(),
                 )
             }
         };

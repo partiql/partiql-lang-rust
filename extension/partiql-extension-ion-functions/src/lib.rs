@@ -207,10 +207,7 @@ mod tests {
 
         let parsed = parse(statement);
         let lowered = lower(&catalog, &parsed.expect("parse"));
-        let bindings = env
-            .as_ref()
-            .map(|e| (e).into())
-            .unwrap_or_else(MapBindings::default);
+        let bindings = env.as_ref().map(|e| (e).into()).unwrap_or_default();
         let out = evaluate(&catalog, lowered, bindings);
 
         assert!(out.is_bag());

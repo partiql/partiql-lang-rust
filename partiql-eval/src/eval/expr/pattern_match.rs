@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(like_to_re_pattern("foo__bar", Some('\\')), r#"^foo..bar$"#);
         assert_eq!(
             like_to_re_pattern("foo_.*?_bar", Some('\\')),
-            r#"^foo.\.\*\?.bar$"#
+            r"^foo.\.\*\?.bar$"
         );
     }
 
