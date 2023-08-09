@@ -4,9 +4,9 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
 use itertools::{Itertools, Unique};
 
-use partiql_types::{ArrayType, BagType, PartiqlType, TypeKind, TYPE_MISSING};
+use partiql_types::{ArrayType, BagType, PartiqlType, TypeKind, TYPE_BOOL, TYPE_NUMERIC_TYPES};
 use partiql_value::Value::{Missing, Null};
-use partiql_value::{Value, ValueIter};
+use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -26,6 +26,10 @@ pub(crate) enum EvalCollFn {
     Min(SetQuantifier),
     /// Represents the `COLL_SUM` function, e.g. `COLL_SUM(DISTINCT [1, 2, 2, 3])`.
     Sum(SetQuantifier),
+    /// Represents the `COLL_ANY`/`COLL_SOME` function, e.g. `COLL_ANY(DISTINCT [true, true, false])`.
+    Any(SetQuantifier),
+    /// Represents the `COLL_EVERY` function, e.g. `COLL_EVERY(DISTINCT [true, true, false])`.
+    Every(SetQuantifier),
 }
 
 impl BindEvalExpr for EvalCollFn {
@@ -34,26 +38,56 @@ impl BindEvalExpr for EvalCollFn {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         fn create<const STRICT: bool, F>(
+            types: [PartiqlType; 1],
             args: Vec<Box<dyn EvalExpr>>,
             f: F,
         ) -> Result<Box<dyn EvalExpr>, BindError>
         where
             F: Fn(ValueIter) -> Value + 'static,
         {
-            let list = PartiqlType::new(TypeKind::Array(ArrayType::new_any()));
-            let bag = PartiqlType::new(TypeKind::Bag(BagType::new_any()));
-            let types = [PartiqlType::any_of([list, bag, TYPE_MISSING])];
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, move |value| {
                 value.sequence_iter().map(&f).unwrap_or(Missing)
             })
         }
+        let boolean_elems = [PartiqlType::any_of([
+            PartiqlType::new(TypeKind::Array(ArrayType::new(Box::new(TYPE_BOOL)))),
+            PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(TYPE_BOOL)))),
+        ])];
+        let numeric_elems = [PartiqlType::any_of([
+            PartiqlType::new(TypeKind::Array(ArrayType::new(Box::new(
+                PartiqlType::any_of(TYPE_NUMERIC_TYPES),
+            )))),
+            PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(PartiqlType::any_of(
+                TYPE_NUMERIC_TYPES,
+            ))))),
+        ])];
+        let any_elems = [PartiqlType::any_of([
+            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
+            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
+        ])];
 
         match *self {
-            EvalCollFn::Count(setq) => create::<{ STRICT }, _>(args, move |it| it.coll_count(setq)),
-            EvalCollFn::Avg(setq) => create::<{ STRICT }, _>(args, move |it| it.coll_avg(setq)),
-            EvalCollFn::Max(setq) => create::<{ STRICT }, _>(args, move |it| it.coll_max(setq)),
-            EvalCollFn::Min(setq) => create::<{ STRICT }, _>(args, move |it| it.coll_min(setq)),
-            EvalCollFn::Sum(setq) => create::<{ STRICT }, _>(args, move |it| it.coll_sum(setq)),
+            EvalCollFn::Count(setq) => {
+                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_count(setq))
+            }
+            EvalCollFn::Avg(setq) => {
+                create::<{ STRICT }, _>(numeric_elems, args, move |it| it.coll_avg(setq))
+            }
+            EvalCollFn::Max(setq) => {
+                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_max(setq))
+            }
+            EvalCollFn::Min(setq) => {
+                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_min(setq))
+            }
+            EvalCollFn::Sum(setq) => {
+                create::<{ STRICT }, _>(numeric_elems, args, move |it| it.coll_sum(setq))
+            }
+            EvalCollFn::Any(setq) => {
+                create::<{ STRICT }, _>(boolean_elems, args, move |it| it.coll_any(setq))
+            }
+            EvalCollFn::Every(setq) => {
+                create::<{ STRICT }, _>(boolean_elems, args, move |it| it.coll_every(setq))
+            }
         }
     }
 }
@@ -180,6 +214,38 @@ trait CollIterator<'a>: Iterator<Item = &'a Value> {
         } else {
             Null
         }
+    }
+
+    #[inline]
+    fn coll_any(self, setq: SetQuantifier) -> Value
+    where
+        Self: Sized,
+    {
+        self.filter(|e| e.is_present())
+            .set_quantified(setq)
+            .coll_reduce_or(Null, |prev, x| {
+                if let Value::Boolean(_) = x {
+                    ControlFlow::Continue(prev.or(x))
+                } else {
+                    ControlFlow::Break(Missing)
+                }
+            })
+    }
+
+    #[inline]
+    fn coll_every(self, setq: SetQuantifier) -> Value
+    where
+        Self: Sized,
+    {
+        self.filter(|e| e.is_present())
+            .set_quantified(setq)
+            .coll_reduce_or(Null, |prev, x| {
+                if let Value::Boolean(_) = x {
+                    ControlFlow::Continue(prev.and(x))
+                } else {
+                    ControlFlow::Break(Missing)
+                }
+            })
     }
 }
 

@@ -132,7 +132,7 @@ mod built_ins {
     pub(crate) fn built_in_aggs() -> FnExpr<'static> {
         FnExpr {
             // TODO: currently needs to be manually kept in-sync with parsers's `KNOWN_AGGREGATES`
-            fn_names: vec!["count", "avg", "min", "max", "sum"],
+            fn_names: vec!["count", "avg", "min", "max", "sum", "any", "some", "every"],
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., count(all x) => count("all": x)

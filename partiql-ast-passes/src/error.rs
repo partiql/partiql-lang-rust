@@ -38,6 +38,10 @@ pub enum AstTransformError {
     /// Any other lowering error.
     #[error("Lowering error: {0}")]
     Unknown(String),
+
+    /// Indicates that a `HAVING` clause was provided without a `GROUP BY`
+    #[error("HAVING clause provided without GROUP BY")]
+    HavingWithoutGroupBy,
 }
 
 impl From<CallLookupError> for AstTransformError {

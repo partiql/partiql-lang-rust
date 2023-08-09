@@ -351,6 +351,8 @@ pub(crate) enum AggFunc {
     Max(Max),
     Min(Min),
     Sum(Sum),
+    Any(Any),
+    Every(Every),
 }
 
 impl AggregateFunction for AggFunc {
@@ -361,6 +363,8 @@ impl AggregateFunction for AggFunc {
             AggFunc::Max(v) => v.next_value(input_value, group),
             AggFunc::Min(v) => v.next_value(input_value, group),
             AggFunc::Sum(v) => v.next_value(input_value, group),
+            AggFunc::Any(v) => v.next_value(input_value, group),
+            AggFunc::Every(v) => v.next_value(input_value, group),
         }
     }
 
@@ -371,6 +375,8 @@ impl AggregateFunction for AggFunc {
             AggFunc::Max(v) => v.compute(group),
             AggFunc::Min(v) => v.compute(group),
             AggFunc::Sum(v) => v.compute(group),
+            AggFunc::Any(v) => v.compute(group),
+            AggFunc::Every(v) => v.compute(group),
         }
     }
 }
@@ -454,7 +460,7 @@ impl Avg {
 
 impl AggregateFunction for Avg {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.avgs.get_mut(group) {
                 None => {
                     self.avgs.insert(group.clone(), (1, input_value.clone()));
@@ -468,12 +474,9 @@ impl AggregateFunction for Avg {
     }
 
     fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.avgs.get(group) {
-            None => Err(EvaluationError::IllegalState(
-                "Expect group to exist in avgs".to_string(),
-            )),
-            Some((0, _)) => Ok(Null),
-            Some((c, s)) => Ok(s / &Value::from(rust_decimal::Decimal::from(*c))),
+        match self.avgs.get(group).unwrap_or(&(0, Null)) {
+            (0, _) => Ok(Null),
+            (c, s) => Ok(s / &Value::from(rust_decimal::Decimal::from(*c))),
         }
     }
 }
@@ -503,7 +506,7 @@ impl Count {
 
 impl AggregateFunction for Count {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.counts.get_mut(group) {
                 None => {
                     self.counts.insert(group.clone(), 1);
@@ -516,12 +519,7 @@ impl AggregateFunction for Count {
     }
 
     fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.counts.get(group) {
-            None => Err(EvaluationError::IllegalState(
-                "Expect group to exist in counts".to_string(),
-            )),
-            Some(val) => Ok(Value::from(val)),
-        }
+        Ok(Value::from(self.counts.get(group).unwrap_or(&0)))
     }
 }
 
@@ -550,7 +548,7 @@ impl Max {
 
 impl AggregateFunction for Max {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.maxes.get_mut(group) {
                 None => {
                     self.maxes.insert(group.clone(), input_value.clone());
@@ -563,12 +561,7 @@ impl AggregateFunction for Max {
     }
 
     fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.maxes.get(group) {
-            None => Err(EvaluationError::IllegalState(
-                "Expect group to exist in maxes".to_string(),
-            )),
-            Some(val) => Ok(val.clone()),
-        }
+        Ok(self.maxes.get(group).unwrap_or(&Null).clone())
     }
 }
 
@@ -597,7 +590,7 @@ impl Min {
 
 impl AggregateFunction for Min {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.mins.get_mut(group) {
                 None => {
                     self.mins.insert(group.clone(), input_value.clone());
@@ -610,12 +603,7 @@ impl AggregateFunction for Min {
     }
 
     fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.mins.get(group) {
-            None => Err(EvaluationError::IllegalState(
-                "Expect group to exist in mins".to_string(),
-            )),
-            Some(val) => Ok(val.clone()),
-        }
+        Ok(self.mins.get(group).unwrap_or(&Null).clone())
     }
 }
 
@@ -644,7 +632,7 @@ impl Sum {
 
 impl AggregateFunction for Sum {
     fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if !input_value.is_absent() && self.aggregator.filter_value(input_value.clone(), group) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
             match self.sums.get_mut(group) {
                 None => {
                     self.sums.insert(group.clone(), input_value.clone());
@@ -657,12 +645,103 @@ impl AggregateFunction for Sum {
     }
 
     fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.sums.get(group) {
-            None => Err(EvaluationError::IllegalState(
-                "Expect group to exist in sums".to_string(),
-            )),
-            Some(val) => Ok(val.clone()),
+        Ok(self.sums.get(group).unwrap_or(&Null).clone())
+    }
+}
+
+/// Represents SQL's `ANY`/`SOME` aggregation function
+#[derive(Debug)]
+pub(crate) struct Any {
+    anys: HashMap<Tuple, Value>,
+    aggregator: AggFilterFn,
+}
+
+impl Any {
+    pub(crate) fn new_distinct() -> Self {
+        Any {
+            anys: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
         }
+    }
+
+    pub(crate) fn new_all() -> Self {
+        Any {
+            anys: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for Any {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
+            match self.anys.get_mut(group) {
+                None => {
+                    match input_value {
+                        Boolean(_) => self.anys.insert(group.clone(), input_value.clone()),
+                        _ => self.anys.insert(group.clone(), Missing),
+                    };
+                }
+                Some(acc) => {
+                    *acc = match (acc.clone(), input_value) {
+                        (Boolean(l), Value::Boolean(r)) => Value::Boolean(l || *r),
+                        (_, _) => Missing,
+                    };
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
+        Ok(self.anys.get(group).unwrap_or(&Null).clone())
+    }
+}
+
+/// Represents SQL's `EVERY` aggregation function
+#[derive(Debug)]
+pub(crate) struct Every {
+    everys: HashMap<Tuple, Value>,
+    aggregator: AggFilterFn,
+}
+
+impl Every {
+    pub(crate) fn new_distinct() -> Self {
+        Every {
+            everys: HashMap::new(),
+            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
+        }
+    }
+
+    pub(crate) fn new_all() -> Self {
+        Every {
+            everys: HashMap::new(),
+            aggregator: AggFilterFn::default(),
+        }
+    }
+}
+
+impl AggregateFunction for Every {
+    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
+        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
+            match self.everys.get_mut(group) {
+                None => {
+                    match input_value {
+                        Boolean(_) => self.everys.insert(group.clone(), input_value.clone()),
+                        _ => self.everys.insert(group.clone(), Missing),
+                    };
+                }
+                Some(acc) => {
+                    *acc = match (acc.clone(), input_value) {
+                        (Boolean(l), Value::Boolean(r)) => Value::Boolean(l && *r),
+                        (_, _) => Missing,
+                    };
+                }
+            }
+        }
+    }
+
+    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
+        Ok(self.everys.get(group).unwrap_or(&Null).clone())
     }
 }
 
