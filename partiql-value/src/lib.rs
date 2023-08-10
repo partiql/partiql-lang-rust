@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum BindingsName {
-    CaseSensitive(String),
-    CaseInsensitive(String),
+pub enum BindingsName<'s> {
+    CaseSensitive(Cow<'s, str>),
+    CaseInsensitive(Cow<'s, str>),
 }
 
 // TODO these are all quite simplified for PoC/demonstration
@@ -2093,20 +2093,20 @@ mod tests {
         // case sensitive
         assert_eq!(
             Some(&Value::from(1)),
-            tuple.get(&BindingsName::CaseSensitive("a".to_string()))
+            tuple.get(&BindingsName::CaseSensitive(Cow::Owned("a".to_string())))
         );
         assert_eq!(
             Some(&Value::from(2)),
-            tuple.get(&BindingsName::CaseSensitive("A".to_string()))
+            tuple.get(&BindingsName::CaseSensitive(Cow::Owned("A".to_string())))
         );
         // case insensitive
         assert_eq!(
             Some(&Value::from(1)),
-            tuple.get(&BindingsName::CaseInsensitive("a".to_string()))
+            tuple.get(&BindingsName::CaseInsensitive(Cow::Owned("a".to_string())))
         );
         assert_eq!(
             Some(&Value::from(1)),
-            tuple.get(&BindingsName::CaseInsensitive("A".to_string()))
+            tuple.get(&BindingsName::CaseInsensitive(Cow::Owned("A".to_string())))
         );
     }
 
@@ -2116,20 +2116,20 @@ mod tests {
         // case sensitive
         assert_eq!(
             Some(Value::from(2)),
-            tuple.remove(&BindingsName::CaseSensitive("A".to_string()))
+            tuple.remove(&BindingsName::CaseSensitive(Cow::Owned("A".to_string())))
         );
         assert_eq!(
             Some(Value::from(1)),
-            tuple.remove(&BindingsName::CaseSensitive("a".to_string()))
+            tuple.remove(&BindingsName::CaseSensitive(Cow::Owned("a".to_string())))
         );
         // case insensitive
         assert_eq!(
             Some(Value::from(3)),
-            tuple.remove(&BindingsName::CaseInsensitive("A".to_string()))
+            tuple.remove(&BindingsName::CaseInsensitive(Cow::Owned("A".to_string())))
         );
         assert_eq!(
             Some(Value::from(4)),
-            tuple.remove(&BindingsName::CaseInsensitive("a".to_string()))
+            tuple.remove(&BindingsName::CaseInsensitive(Cow::Owned("a".to_string())))
         );
     }
 

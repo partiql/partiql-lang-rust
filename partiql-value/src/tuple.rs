@@ -61,52 +61,42 @@ impl Tuple {
 
     #[inline]
     pub fn get(&self, attr: &BindingsName) -> Option<&Value> {
+        self.find_value(attr).map(|i| &self.vals[i])
+    }
+
+    #[inline]
+    pub fn take_val(self, attr: &BindingsName) -> Option<Value> {
+        self.find_value(attr)
+            .and_then(|i| self.vals.into_iter().nth(i))
+    }
+
+    #[inline(always)]
+    fn find_value(&self, attr: &BindingsName) -> Option<usize> {
         match attr {
-            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
-            {
-                Some(i) => Some(&self.vals[i]),
-                _ => None,
-            },
-            BindingsName::CaseInsensitive(s) => match self
-                .attrs
-                .iter()
-                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
-            {
-                Some(i) => Some(&self.vals[i]),
-                _ => None,
-            },
+            BindingsName::CaseSensitive(s) => {
+                self.attrs.iter().position(|a| a.as_str() == s.as_ref())
+            }
+            BindingsName::CaseInsensitive(s) => {
+                let target = UniCase::new(&s);
+                self.attrs.iter().position(|a| target == UniCase::new(a))
+            }
         }
     }
 
     #[inline]
     pub fn remove(&mut self, attr: &BindingsName) -> Option<Value> {
-        match attr {
-            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
-            {
-                Some(i) => {
-                    self.attrs.remove(i);
-                    Some(self.vals.remove(i))
-                }
-                _ => None,
-            },
-            BindingsName::CaseInsensitive(s) => match self
-                .attrs
-                .iter()
-                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
-            {
-                Some(i) => {
-                    self.attrs.remove(i);
-                    Some(self.vals.remove(i))
-                }
-                _ => None,
-            },
+        match self.find_value(attr) {
+            Some(i) => {
+                self.attrs.remove(i);
+                Some(self.vals.remove(i))
+            }
+            _ => None,
         }
     }
 
     #[inline]
     pub fn pairs(&self) -> PairsIter {
-        let attrs = self.attrs.iter();
-        PairsIter(zip(attrs, self.vals.iter()))
+        PairsIter(zip(self.attrs.iter(), self.vals.iter()))
     }
 
     #[inline]

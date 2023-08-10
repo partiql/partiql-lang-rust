@@ -19,6 +19,7 @@ use partiql_logical::{
     LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
     PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
 };
+use std::borrow::Cow;
 
 use partiql_value::{BindingsName, Value};
 
@@ -181,28 +182,28 @@ pub struct AstToLogical<'a> {
 /// Attempt to infer an alias for a simple variable reference expression.
 /// For example infer such that  `SELECT a, b.c.d.e ...` <=> `SELECT a as a, b.c.d.e as e`  
 fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
-    let sensitive = |value| {
+    let sensitive = |value: &str| {
         Some(SymbolPrimitive {
-            value,
+            value: value.to_string(),
             case: CaseSensitivity::CaseSensitive,
         })
     };
-    let insensitive = |value| {
+    let insensitive = |value: &str| {
         Some(SymbolPrimitive {
-            value,
+            value: value.to_string(),
             case: CaseSensitivity::CaseInsensitive,
         })
     };
 
     match expr {
-        ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.clone()),
-        ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.clone()),
+        ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.as_ref()),
+        ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.as_ref()),
         ValueExpr::Path(_root, steps) => match steps.last() {
-            Some(PathComponent::Key(BindingsName::CaseInsensitive(s))) => insensitive(s.clone()),
-            Some(PathComponent::Key(BindingsName::CaseSensitive(s))) => sensitive(s.clone()),
+            Some(PathComponent::Key(BindingsName::CaseInsensitive(s))) => insensitive(s.as_ref()),
+            Some(PathComponent::Key(BindingsName::CaseSensitive(s))) => sensitive(s.as_ref()),
             Some(PathComponent::KeyExpr(ke)) => match &**ke {
-                ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.clone()),
-                ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.clone()),
+                ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.as_ref()),
+                ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -283,16 +284,18 @@ impl<'a> AstToLogical<'a> {
 
     fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
         // Convert a `SymbolPrimitive` into a `BindingsName`
-        fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName {
+        fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
             match sym.case {
-                CaseSensitivity::CaseSensitive => BindingsName::CaseSensitive(sym.value.clone()),
+                CaseSensitivity::CaseSensitive => {
+                    BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
+                }
                 CaseSensitivity::CaseInsensitive => {
-                    BindingsName::CaseInsensitive(sym.value.clone())
+                    BindingsName::CaseInsensitive(Cow::Owned(sym.value.clone()))
                 }
             }
         }
         // Convert a `name_resolver::Symbol` into a `BindingsName`
-        fn sym_to_binding(sym: &name_resolver::Symbol) -> Option<BindingsName> {
+        fn sym_to_binding(sym: &name_resolver::Symbol) -> Option<BindingsName<'static>> {
             match sym {
                 name_resolver::Symbol::Known(sym) => Some(symprim_to_binding(sym)),
                 name_resolver::Symbol::Unknown(_) => None,
@@ -378,7 +381,9 @@ impl<'a> AstToLogical<'a> {
                                             let formatted_num = format!("_{}", num);
                                             if formatted_num == varref.name.value {
                                                 let expr = ValueExpr::VarRef(
-                                                    BindingsName::CaseInsensitive(formatted_num),
+                                                    BindingsName::CaseInsensitive(Cow::Owned(
+                                                        formatted_num,
+                                                    )),
                                                     VarRefType::Local,
                                                 );
                                                 if !lookups.contains(&expr) {
@@ -390,7 +395,7 @@ impl<'a> AstToLogical<'a> {
                                                     Box::new(ValueExpr::VarRef(
                                                         sym_to_binding(produce).unwrap_or({
                                                             BindingsName::CaseInsensitive(
-                                                                formatted_num,
+                                                                Cow::Owned(formatted_num),
                                                             )
                                                         }),
                                                         VarRefType::Local,
@@ -1166,7 +1171,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         // E.g. SELECT a, SUM(b) FROM t GROUP BY a
         //      SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a
         let new_name = "$__agg".to_owned() + &self.agg_id.id();
-        let new_binding_name = BindingsName::CaseSensitive(new_name.clone());
+        let new_binding_name = BindingsName::CaseSensitive(Cow::Owned(new_name.clone()));
         let new_expr = ValueExpr::VarRef(new_binding_name, VarRefType::Local);
         self.push_vexpr(new_expr);
 
@@ -1273,8 +1278,12 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 qualifier: _,
             } = _var_ref;
             let name = match case {
-                CaseSensitivity::CaseSensitive => BindingsName::CaseSensitive(value.clone()),
-                CaseSensitivity::CaseInsensitive => BindingsName::CaseInsensitive(value.clone()),
+                CaseSensitivity::CaseSensitive => {
+                    BindingsName::CaseSensitive(Cow::Owned(value.clone()))
+                }
+                CaseSensitivity::CaseInsensitive => {
+                    BindingsName::CaseInsensitive(Cow::Owned(value.clone()))
+                }
             };
             self.push_vexpr(ValueExpr::VarRef(name, VarRefType::Local));
         }
@@ -1331,9 +1340,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 match path {
                     ValueExpr::Lit(val) => match *val {
                         Value::Integer(idx) => logical::PathComponent::Index(idx),
-                        Value::String(k) => {
-                            logical::PathComponent::Key(BindingsName::CaseInsensitive(*k))
-                        }
+                        Value::String(k) => logical::PathComponent::Key(
+                            BindingsName::CaseInsensitive(Cow::Owned(*k)),
+                        ),
                         expr => logical::PathComponent::IndexExpr(Box::new(ValueExpr::Lit(
                             Box::new(expr),
                         ))),
@@ -1608,7 +1617,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             };
             for (alias, expr) in select_clause_exprs.iter_mut() {
                 if *expr == value {
-                    let new_binding_name = BindingsName::CaseSensitive(alias.clone());
+                    let new_binding_name = BindingsName::CaseSensitive(Cow::Owned(alias.clone()));
                     let new_expr = ValueExpr::VarRef(new_binding_name, VarRefType::Local);
                     *expr = new_expr
                 }

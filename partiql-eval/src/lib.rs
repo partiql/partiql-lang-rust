@@ -69,7 +69,7 @@ mod tests {
     fn scan(name: &str, as_key: &str) -> BindingsOp {
         BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(
-                BindingsName::CaseInsensitive(name.into()),
+                BindingsName::CaseInsensitive(name.to_string().into()),
                 VarRefType::Global,
             ),
             as_key: as_key.to_string(),
@@ -80,11 +80,11 @@ mod tests {
     fn path_var(name: &str, component: &str) -> ValueExpr {
         ValueExpr::Path(
             Box::new(ValueExpr::VarRef(
-                BindingsName::CaseInsensitive(name.into()),
+                BindingsName::CaseInsensitive(name.to_string().into()),
                 VarRefType::Local,
             )),
             vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                component.to_string(),
+                component.to_string().into(),
             ))],
         )
     }
@@ -176,7 +176,7 @@ mod tests {
                             VarRefType::Local,
                         )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                            "lhs".to_string(),
+                            "lhs".to_string().into(),
                         ))],
                     )),
                     Box::new(ValueExpr::Lit(Box::new(rhs))),
@@ -686,7 +686,7 @@ mod tests {
                                 VarRefType::Local,
                             )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                                "value".to_string(),
+                                "value".to_string().into(),
                             ))],
                         )),
                         from: Box::new(ValueExpr::Lit(Box::new(from))),
@@ -1156,7 +1156,7 @@ mod tests {
                             VarRefType::Local,
                         )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                            "expr".to_string(),
+                            "expr".to_string().into(),
                         ))],
                     )),
                     is_type,
@@ -1222,7 +1222,7 @@ mod tests {
                             VarRefType::Local,
                         )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                            "lhs".to_string(),
+                            "lhs".to_string().into(),
                         ))],
                     )),
                     rhs: Box::new(ValueExpr::Lit(Box::new(rhs))),
@@ -1277,9 +1277,9 @@ mod tests {
                     BindingsName::CaseInsensitive("data".into()),
                     VarRefType::Local,
                 )),
-                vec![PathComponent::Key(BindingsName::CaseInsensitive(format!(
-                    "arg{i}"
-                )))],
+                vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                    format!("arg{i}").into(),
+                ))],
             )
         }
 
@@ -1423,7 +1423,7 @@ mod tests {
                         VarRefType::Local,
                     )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                        "a".to_string(),
+                        "a".to_string().into(),
                     ))],
                 ),
             )]),
@@ -1952,7 +1952,7 @@ mod tests {
                         VarRefType::Local,
                     )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                        "balance".to_string(),
+                        "balance".to_string().into(),
                     ))],
                 )),
                 Box::new(ValueExpr::Lit(Box::new(Value::Integer(0)))),
@@ -1969,7 +1969,7 @@ mod tests {
                             VarRefType::Local,
                         )),
                         vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                            "firstName".to_string(),
+                            "firstName".to_string().into(),
                         ))],
                     ),
                 ),
@@ -1983,7 +1983,7 @@ mod tests {
                                 VarRefType::Local,
                             )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                                "firstName".to_string(),
+                                "firstName".to_string().into(),
                             ))],
                         )),
                         Box::new(ValueExpr::Path(
@@ -1992,7 +1992,7 @@ mod tests {
                                 VarRefType::Local,
                             )),
                             vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                                "firstName".to_string(),
+                                "firstName".to_string().into(),
                             ))],
                         )),
                     ),
@@ -2037,7 +2037,7 @@ mod tests {
                         VarRefType::Local,
                     )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                        "a".to_string(),
+                        "a".to_string().into(),
                     ))],
                 )),
                 Box::new(ValueExpr::Lit(Box::new(list![1].into()))),
@@ -2053,7 +2053,7 @@ mod tests {
                         VarRefType::Local,
                     )),
                     vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                        "a".to_string(),
+                        "a".to_string().into(),
                     ))],
                 ),
             )]),
@@ -2234,7 +2234,7 @@ mod tests {
 
             let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
-                    name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+                    name: BindingsName::CaseInsensitive("someOrderedTable".to_string().into()),
                 }),
                 "x",
                 "y",
@@ -2260,7 +2260,7 @@ mod tests {
 
             let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
-                    name: BindingsName::CaseInsensitive("someUnorderedTable".to_string()),
+                    name: BindingsName::CaseInsensitive("someUnorderedTable".to_string().into()),
                 }),
                 "x",
                 "y",
@@ -2289,7 +2289,7 @@ mod tests {
             p0.insert("someOrderedTable", some_ordered_table().into());
 
             let table_ref = EvalGlobalVarRef {
-                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+                name: BindingsName::CaseInsensitive("someOrderedTable".to_string().into()),
             };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
@@ -2314,7 +2314,7 @@ mod tests {
             p0.insert("someOrderedTable", some_ordered_table().into());
 
             let table_ref = EvalGlobalVarRef {
-                name: BindingsName::CaseInsensitive("someOrderedTable".to_string()),
+                name: BindingsName::CaseInsensitive("someOrderedTable".to_string().into()),
             };
             let path_to_scalar = EvalPath {
                 expr: Box::new(table_ref),
@@ -2354,7 +2354,7 @@ mod tests {
 
             let mut unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
-                    name: BindingsName::CaseInsensitive("justATuple".to_string()),
+                    name: BindingsName::CaseInsensitive("justATuple".to_string().into()),
                 }),
                 "price",
                 Some("symbol".into()),
@@ -2378,7 +2378,7 @@ mod tests {
 
             let mut unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
-                    name: BindingsName::CaseInsensitive("nonTuple".to_string()),
+                    name: BindingsName::CaseInsensitive("nonTuple".to_string().into()),
                 }),
                 "x",
                 Some("y".into()),

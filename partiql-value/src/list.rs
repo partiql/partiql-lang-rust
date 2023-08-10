@@ -41,6 +41,11 @@ impl List {
     }
 
     #[inline]
+    pub fn take_val(self, idx: i64) -> Option<Value> {
+        self.0.into_iter().nth(idx as usize)
+    }
+
+    #[inline]
     pub fn iter(&self) -> ListIter {
         ListIter(self.0.iter())
     }

@@ -28,7 +28,7 @@
 ///     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
 ///         "v".into(),
 ///     ), VarRefType::Local)),
-///     vec![PathComponent::Key(BindingsName::CaseInsensitive("a".to_string()))],
+///     vec![PathComponent::Key(BindingsName::CaseInsensitive("a".to_string().into()))],
 /// );
 ///
 /// let select_value = p.add_operator(BindingsOp::ProjectValue(ProjectValue {
@@ -415,7 +415,7 @@ pub enum ValueExpr {
     Lit(Box<Value>),
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
-    VarRef(BindingsName, VarRefType),
+    VarRef(BindingsName<'static>, VarRefType),
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),
@@ -471,7 +471,7 @@ pub enum BinaryOp {
 /// Represents a path component in a plan.
 pub enum PathComponent {
     /// E.g. `b` in `a.b`
-    Key(BindingsName),
+    Key(BindingsName<'static>),
     /// E.g. 4 in `a[4]`
     Index(i64),
     KeyExpr(Box<ValueExpr>),

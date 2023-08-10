@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -71,7 +72,7 @@ fn join_data() -> MapBindings<Value> {
 fn scan(name: &str, as_key: &str) -> BindingsOp {
     BindingsOp::Scan(logical::Scan {
         expr: ValueExpr::VarRef(
-            BindingsName::CaseInsensitive(name.into()),
+            BindingsName::CaseInsensitive(Cow::Owned(name.to_string())),
             VarRefType::Global,
         ),
         as_key: as_key.to_string(),
@@ -82,11 +83,11 @@ fn scan(name: &str, as_key: &str) -> BindingsOp {
 fn path_var(name: &str, component: &str) -> ValueExpr {
     ValueExpr::Path(
         Box::new(ValueExpr::VarRef(
-            BindingsName::CaseInsensitive(name.into()),
+            BindingsName::CaseInsensitive(Cow::Owned(name.to_string())),
             VarRefType::Local,
         )),
         vec![PathComponent::Key(BindingsName::CaseInsensitive(
-            component.to_string(),
+            Cow::Owned(component.to_string()),
         ))],
     )
 }
@@ -158,11 +159,11 @@ fn eval_bench(c: &mut Criterion) {
         let from = logical_plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::Path(
                 Box::new(ValueExpr::VarRef(
-                    BindingsName::CaseInsensitive("hr".to_string()),
+                    BindingsName::CaseInsensitive(Cow::Borrowed("hr")),
                     VarRefType::Local,
                 )),
                 vec![PathComponent::Key(BindingsName::CaseInsensitive(
-                    "employeesNestScalars".to_string(),
+                    Cow::Borrowed("employeesNestScalars"),
                 ))],
             ),
             as_key: "x".to_string(),
