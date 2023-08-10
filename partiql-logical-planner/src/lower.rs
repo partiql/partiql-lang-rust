@@ -358,6 +358,20 @@ impl<'a> AstToLogical<'a> {
                                                     lookups.push(expr);
                                                 }
                                                 continue;
+                                            } else {
+                                                let path = logical::ValueExpr::Path(
+                                                    Box::new(ValueExpr::VarRef(
+                                                        sym_to_binding(produce).unwrap_or_else(
+                                                            || symprim_to_binding(&self.gen_id()),
+                                                        ),
+                                                        VarRefType::Local,
+                                                    )),
+                                                    vec![PathComponent::Key(var_binding.clone())],
+                                                );
+
+                                                if !lookups.contains(&path) {
+                                                    lookups.push(path)
+                                                }
                                             }
                                         } else if let name_resolver::Symbol::Unknown(num) = produce
                                         {
@@ -369,23 +383,25 @@ impl<'a> AstToLogical<'a> {
                                                 );
                                                 if !lookups.contains(&expr) {
                                                     lookups.push(expr);
+                                                    continue;
                                                 }
-                                                continue;
-                                            }
-                                        }
-                                        // else
-                                        let path = logical::ValueExpr::Path(
-                                            Box::new(ValueExpr::VarRef(
-                                                sym_to_binding(produce).unwrap_or_else(|| {
-                                                    symprim_to_binding(&self.gen_id())
-                                                }),
-                                                VarRefType::Local,
-                                            )),
-                                            vec![PathComponent::Key(var_binding.clone())],
-                                        );
+                                            } else {
+                                                let path = logical::ValueExpr::Path(
+                                                    Box::new(ValueExpr::VarRef(
+                                                        sym_to_binding(produce).unwrap_or({
+                                                            BindingsName::CaseInsensitive(
+                                                                formatted_num,
+                                                            )
+                                                        }),
+                                                        VarRefType::Local,
+                                                    )),
+                                                    vec![PathComponent::Key(var_binding.clone())],
+                                                );
 
-                                        if !lookups.contains(&path) {
-                                            lookups.push(path)
+                                                if !lookups.contains(&path) {
+                                                    lookups.push(path)
+                                                }
+                                            }
                                         }
                                     }
                                 }

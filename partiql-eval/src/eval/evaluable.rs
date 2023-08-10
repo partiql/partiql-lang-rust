@@ -4,7 +4,7 @@ use crate::eval::expr::EvalExpr;
 use crate::eval::{EvalContext, EvalPlan};
 use itertools::Itertools;
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{bag, tuple, Bag, List, Tuple, Value, ValueIntoIterator};
+use partiql_value::{bag, tuple, Bag, List, NullSortedValue, Tuple, Value, ValueIntoIterator};
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
@@ -1078,30 +1078,26 @@ impl EvalOrderBy {
                 let r = spec.expr.evaluate(&r, ctx);
 
                 match spec.spec {
-                    EvalOrderBySortSpec::AscNullsFirst => l.as_ref().cmp(r.as_ref()),
-                    EvalOrderBySortSpec::AscNullsLast => match (l.as_ref(), r.as_ref()) {
-                        (Null, Null) => Ordering::Equal,
-                        (Null, Missing) => Ordering::Less,
-                        (Missing, Missing) => Ordering::Equal,
-                        (Missing, Null) => Ordering::Greater,
-                        (Null, _) => Ordering::Greater,
-                        (Missing, _) => Ordering::Greater,
-                        (_, Null) => Ordering::Less,
-                        (_, Missing) => Ordering::Less,
-                        (l, r) => l.cmp(r),
-                    },
-                    EvalOrderBySortSpec::DescNullsFirst => match (l.as_ref(), r.as_ref()) {
-                        (Null, Null) => Ordering::Equal,
-                        (Null, Missing) => Ordering::Less,
-                        (Missing, Missing) => Ordering::Equal,
-                        (Missing, Null) => Ordering::Greater,
-                        (Null, _) => Ordering::Less,
-                        (Missing, _) => Ordering::Less,
-                        (_, Null) => Ordering::Greater,
-                        (_, Missing) => Ordering::Greater,
-                        (l, r) => r.cmp(l),
-                    },
-                    EvalOrderBySortSpec::DescNullsLast => r.as_ref().cmp(l.as_ref()),
+                    EvalOrderBySortSpec::AscNullsFirst => {
+                        let wrap = NullSortedValue::<true, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        l.cmp(&r)
+                    }
+                    EvalOrderBySortSpec::AscNullsLast => {
+                        let wrap = NullSortedValue::<false, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        l.cmp(&r)
+                    }
+                    EvalOrderBySortSpec::DescNullsFirst => {
+                        let wrap = NullSortedValue::<false, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        r.cmp(&l)
+                    }
+                    EvalOrderBySortSpec::DescNullsLast => {
+                        let wrap = NullSortedValue::<true, Value>;
+                        let (l, r) = (wrap(l.as_ref()), wrap(r.as_ref()));
+                        r.cmp(&l)
+                    }
                 }
             })
             .find_or_last(|o| o != &Ordering::Equal)

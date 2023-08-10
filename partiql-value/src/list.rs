@@ -5,7 +5,7 @@ use std::hash::Hash;
 
 use std::{slice, vec};
 
-use crate::{Bag, Value};
+use crate::{Bag, NullSortedValue, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +164,28 @@ impl PartialOrd for List {
                     Some(Ordering::Less) => return Some(Ordering::Less),
                     Some(Ordering::Greater) => return Some(Ordering::Greater),
                     Some(Ordering::Equal) => continue,
+                },
+            }
+        }
+    }
+}
+
+impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, List> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let wrap = NullSortedValue::<{ NULLS_FIRST }, _>;
+
+        let mut l = self.0 .0.iter();
+        let mut r = other.0 .0.iter();
+
+        loop {
+            match (l.next(), r.next()) {
+                (None, None) => return Ordering::Equal,
+                (Some(_), None) => return Ordering::Greater,
+                (None, Some(_)) => return Ordering::Less,
+                (Some(lv), Some(rv)) => match wrap(lv).cmp(&wrap(rv)) {
+                    Ordering::Less => return Ordering::Less,
+                    Ordering::Greater => return Ordering::Greater,
+                    Ordering::Equal => continue,
                 },
             }
         }

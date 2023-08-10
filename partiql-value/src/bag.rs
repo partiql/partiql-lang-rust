@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{List, Value};
+use crate::{List, NullSortedValue, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -173,6 +173,18 @@ impl PartialEq for Bag {
 impl PartialOrd for Bag {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Bag> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let wrap = NullSortedValue::<{ NULLS_FIRST }, List>;
+
+        let mut l = self.0.clone();
+        l.0.sort();
+        let mut r = other.0.clone();
+        r.0.sort();
+        wrap(&List::from(l)).cmp(&wrap(&List::from(r)))
     }
 }
 
