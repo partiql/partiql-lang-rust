@@ -69,7 +69,8 @@ impl<'input> Default for ParserState<'input, NodeIdGenerator> {
 
 // TODO: currently needs to be manually kept in-sync with preprocessor's `built_in_aggs`
 // TODO: make extensible
-const KNOWN_AGGREGATES: &str = "(?i:^count$)|(?i:^avg$)|(?i:^min$)|(?i:^max$)|(?i:^sum$)";
+const KNOWN_AGGREGATES: &str =
+    "(?i:^count$)|(?i:^avg$)|(?i:^min$)|(?i:^max$)|(?i:^sum$)|(?i:^any$)|(?i:^some$)|(?i:^every$)";
 static KNOWN_AGGREGATE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(KNOWN_AGGREGATES).unwrap());
 
 impl<'input, I> ParserState<'input, I>

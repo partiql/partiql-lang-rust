@@ -291,7 +291,7 @@ impl TryFrom<&Element> for EvaluationModeList {
             IonType::Symbol | IonType::String => Ok(eval_mode(value)?.into()),
             IonType::List => {
                 let list = value.as_sequence().unwrap();
-                let eval_modes: Result<Vec<_>, _> = list.elements().map(|e| eval_mode(e)).collect();
+                let eval_modes: Result<Vec<_>, _> = list.elements().map(eval_mode).collect();
                 Ok(eval_modes?.into())
             }
             _ => Err(miette!(

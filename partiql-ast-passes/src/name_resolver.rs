@@ -205,7 +205,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let id = *self.current_node();
         self.enclosing_clause
             .entry(EnclosingClause::Query)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id);
         self.enter_keyref();
         Traverse::Continue
@@ -273,24 +273,18 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let id = *self.current_node();
         self.enclosing_clause
             .entry(EnclosingClause::FromLet)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id);
         self.enter_keyref();
 
         // Scopes above this `FROM` in the AST are in-scope to use variables defined by this from
         for in_scope in self.id_path_to_root.iter().rev().skip(1) {
-            self.in_scope
-                .entry(*in_scope)
-                .or_insert_with(Vec::new)
-                .push(id);
+            self.in_scope.entry(*in_scope).or_default().push(id);
         }
 
         // This `FROM` item is in-scope of variables defined by any preceding items in this `FROM` (e.g., lateral joins)
         for in_scope in self.lateral_stack.last().unwrap() {
-            self.in_scope
-                .entry(id)
-                .or_insert_with(Vec::new)
-                .push(*in_scope);
+            self.in_scope.entry(id).or_default().push(*in_scope);
         }
 
         self.lateral_stack.last_mut().unwrap().push(id);
@@ -402,15 +396,12 @@ impl<'ast> Visitor<'ast> for NameResolver {
             .expect("EnclosingClause::FromLet")
             .iter()
             .for_each(|enclosing_clause| {
-                self.in_scope
-                    .entry(id)
-                    .or_insert_with(Vec::new)
-                    .push(*enclosing_clause);
+                self.in_scope.entry(id).or_default().push(*enclosing_clause);
             });
 
         self.enclosing_clause
             .entry(EnclosingClause::Query)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(id);
         Traverse::Continue
     }
@@ -457,10 +448,7 @@ impl<'ast> Visitor<'ast> for NameResolver {
         let id = *self.current_node();
         // Scopes above this `GROUP BY` in the AST are in-scope to use variables defined by this GROUP BY
         for in_scope in self.id_path_to_root.iter().rev().skip(1) {
-            self.in_scope
-                .entry(*in_scope)
-                .or_insert_with(Vec::new)
-                .push(id);
+            self.in_scope.entry(*in_scope).or_default().push(id);
         }
         Traverse::Continue
     }

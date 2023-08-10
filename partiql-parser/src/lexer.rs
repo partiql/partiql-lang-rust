@@ -969,12 +969,12 @@ mod tests {
 
     #[test]
     fn nested_comments() {
-        let comments = r##"/*  
+        let comments = r#"/*  
                                     /*  / * * * /
                                     /*  ' " ''' ` 
                                     */  text
                                     */  1 2 3 4 5 6,7,8,9 10.112^5
-                                    */"##;
+                                    */"#;
 
         let mut offset_tracker = LineOffsetTracker::default();
         let nested_lex = CommentLexer::new(comments, &mut offset_tracker).with_nesting();

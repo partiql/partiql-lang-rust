@@ -132,7 +132,7 @@ mod built_ins {
     pub(crate) fn built_in_aggs() -> FnExpr<'static> {
         FnExpr {
             // TODO: currently needs to be manually kept in-sync with parsers's `KNOWN_AGGREGATES`
-            fn_names: vec!["count", "avg", "min", "max", "sum"],
+            fn_names: vec!["count", "avg", "min", "max", "sum", "any", "some", "every"],
             #[rustfmt::skip]
             patterns: vec![
                 // e.g., count(all x) => count("all": x)
@@ -407,9 +407,8 @@ where
                             match rest {
                                 Some(substitutions) => {
                                     // the identifier parsed as a nested fn_expr
-                                    let replacement: Vec<_> = std::iter::once(first)
-                                        .chain(substitutions.into_iter())
-                                        .collect();
+                                    let replacement: Vec<_> =
+                                        std::iter::once(first).chain(substitutions).collect();
                                     patterns = self.process_patterns(
                                         &buffered,
                                         is_nested,
@@ -582,7 +581,7 @@ where
         for ((t, _), r) in std::iter::zip(toks.drain(1..toks.len() - 1), substitution) {
             match (r, t) {
                 (None, t) => rewrite.push(t),
-                (Some(subs), _) => rewrite.extend(subs.into_iter()),
+                (Some(subs), _) => rewrite.extend(subs),
             }
         }
 

@@ -359,6 +359,10 @@ pub enum AggFunc {
     AggMin,
     /// Represents SQL's `SUM` aggregation function
     AggSum,
+    /// Represents SQL's `ANY`/`SOME` aggregation function
+    AggAny,
+    /// Represents SQL's `EVERY` aggregation function
+    AggEvery,
 }
 
 /// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
@@ -684,6 +688,8 @@ pub enum CallName {
     CollMax(SetQuantifier),
     CollMin(SetQuantifier),
     CollSum(SetQuantifier),
+    CollAny(SetQuantifier),
+    CollEvery(SetQuantifier),
     ByName(String),
 }
 

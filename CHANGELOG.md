@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter. 
+- *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
+- *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
+- *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter.
+- *BREAKING:* partiql-eval: `like_to_re_pattern` is no longer public.
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.
 - *BREAKING:* partiql-logical-planner: moves `NameResolver` to `partiql-ast-passes`
 - *BREAKING:* partiql-value: removes `partiql` from value macro_rules; e.g. `partiql_bag` renames to `bag`.
@@ -21,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-logical: changed modeling of `VarRef` to include a `VarRefType` to indicate whether to do a local vs global binding lookup
 
 ### Added
+- Strict mode evaluation partial support added.
 - Add interface for `STRICT` mode evalution to `EvaluatorPlanner`.
 - Add ability for partiql-extension-ion extension encoding/decoding of `Value` to/from Ion `Element`
 - Add `partiql-types` crate that includes data models for PartiQL Types.
@@ -28,11 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
 - Add `OUTER` bag operator (`OUTER UNION`, `OUTER INTERSECT`, `OUTER EXCEPT`) implementation
 - Add `NullSortedValue` to specify ordering null or missing values `partiql_value::Value`s before or after all other values
+- Implements the aggregation functions `ANY`, `SOME`, `EVERY` and their `COLL_` versions
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
 - partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 - partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
+- partiql-logical-planner add error for when a `HAVING` is included without `GROUP BY`
 - Fixes variable resolution lookup order and excessive lookups
 - Fixes variable resolution of some ORDER BY variables
 - Fixes nested list/bag/tuple type ordering for when `ASC NULLS LAST` and `DESC NULLS FIRST` are specified
