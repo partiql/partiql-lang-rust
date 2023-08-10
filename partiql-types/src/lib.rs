@@ -263,7 +263,7 @@ impl PartiqlType {
         match (self.kind, other.kind) {
             (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
             (TypeKind::AnyOf(lhs), TypeKind::AnyOf(rhs)) => {
-                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types.into_iter()))
+                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types))
             }
             (TypeKind::AnyOf(anyof), other) | (other, TypeKind::AnyOf(anyof)) => {
                 let mut types = anyof.types;

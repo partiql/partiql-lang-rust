@@ -7,7 +7,7 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
     LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
-    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr,
+    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
 
 use crate::error::{ErrorNode, PlanErr, PlanningError};
@@ -438,9 +438,13 @@ impl<'c> EvaluatorPlanner<'c> {
                         .collect(),
                 }) as Box<dyn EvalExpr>),
             ),
-            ValueExpr::VarRef(name) => (
+            ValueExpr::VarRef(name, var_ref_type) => (
                 "var ref",
-                Ok(Box::new(EvalVarRef { name: name.clone() }) as Box<dyn EvalExpr>),
+                match var_ref_type {
+                    VarRefType::Global => EvalVarRef::Global(name.clone()),
+                    VarRefType::Local => EvalVarRef::Local(name.clone()),
+                }
+                .bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr

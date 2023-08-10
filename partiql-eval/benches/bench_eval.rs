@@ -9,7 +9,9 @@ use partiql_eval::plan;
 use partiql_eval::plan::EvaluationMode;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::{Project, ProjectAll};
-use partiql_logical::{BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr};
+use partiql_logical::{
+    BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr, VarRefType,
+};
 use partiql_value::{bag, list, tuple, BindingsName, Value};
 
 fn data() -> MapBindings<Value> {
@@ -68,7 +70,10 @@ fn join_data() -> MapBindings<Value> {
 
 fn scan(name: &str, as_key: &str) -> BindingsOp {
     BindingsOp::Scan(logical::Scan {
-        expr: ValueExpr::VarRef(BindingsName::CaseInsensitive(name.into())),
+        expr: ValueExpr::VarRef(
+            BindingsName::CaseInsensitive(name.into()),
+            VarRefType::Global,
+        ),
         as_key: as_key.to_string(),
         at_key: None,
     })
@@ -76,9 +81,10 @@ fn scan(name: &str, as_key: &str) -> BindingsOp {
 
 fn path_var(name: &str, component: &str) -> ValueExpr {
     ValueExpr::Path(
-        Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-            name.into(),
-        ))),
+        Box::new(ValueExpr::VarRef(
+            BindingsName::CaseInsensitive(name.into()),
+            VarRefType::Local,
+        )),
         vec![PathComponent::Key(BindingsName::CaseInsensitive(
             component.to_string(),
         ))],
@@ -151,9 +157,10 @@ fn eval_bench(c: &mut Criterion) {
 
         let from = logical_plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::Path(
-                Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
-                    "hr".to_string(),
-                ))),
+                Box::new(ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive("hr".to_string()),
+                    VarRefType::Local,
+                )),
                 vec![PathComponent::Key(BindingsName::CaseInsensitive(
                     "employeesNestScalars".to_string(),
                 ))],
