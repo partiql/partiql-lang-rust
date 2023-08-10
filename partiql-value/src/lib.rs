@@ -33,7 +33,7 @@ pub enum BindingsName {
 
 // TODO these are all quite simplified for PoC/demonstration
 // TODO have an optional-like wrapper for null/missing instead of inlined here?
-#[derive(Hash, PartialEq, Eq, Clone)]
+#[derive(Hash, Eq, Clone)]
 #[allow(dead_code)] // TODO remove once out of PoC
 #[derive(Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -363,6 +363,44 @@ pub trait NullableOrd {
     fn gteq(&self, rhs: &Self) -> Self::Output;
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Missing, _) => false,
+            (_, Value::Missing) => false,
+            (Value::Null, _) => false,
+            (_, Value::Null) => false,
+            (Value::Boolean(lhs), Value::Boolean(rhs)) => lhs == rhs,
+            (Value::Integer(lhs), Value::Integer(rhs)) => lhs == rhs,
+            (Value::Real(lhs), Value::Real(rhs)) => lhs == rhs,
+            (Value::Decimal(lhs), Value::Decimal(rhs)) => lhs == rhs,
+            (Value::String(lhs), Value::String(rhs)) => lhs == rhs,
+            (Value::Blob(lhs), Value::Blob(rhs)) => lhs == rhs,
+            (Value::DateTime(lhs), Value::DateTime(rhs)) => lhs == rhs,
+            (Value::List(lhs), Value::List(rhs)) => lhs == rhs,
+            (Value::Bag(lhs), Value::Bag(rhs)) => lhs == rhs,
+            (Value::Tuple(lhs), Value::Tuple(rhs)) => lhs == rhs,
+            (Value::Integer(_), Value::Real(_)) => &coerce_int_to_real(self) == other,
+            (Value::Integer(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) == other,
+            (Value::Real(_), Value::Decimal(_)) => &coerce_int_or_real_to_decimal(self) == other,
+            (Value::Real(_), Value::Integer(_)) => self == &coerce_int_to_real(other),
+            (Value::Decimal(_), Value::Integer(_)) => self == &coerce_int_or_real_to_decimal(other),
+            (Value::Decimal(_), Value::Real(_)) => self == &coerce_int_or_real_to_decimal(other),
+            (_, _) => false,
+        }
+    }
+
+    fn ne(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Missing, _) => false,
+            (_, Value::Missing) => false,
+            (Value::Null, _) => false,
+            (_, Value::Null) => false,
+            (_, _) => !(self == other),
+        }
+    }
+}
+
 /// A wrapper on [`T`] that specifies if a missing and null values should be equal.
 #[derive(Eq, PartialEq)]
 pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
@@ -385,28 +423,7 @@ impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, 
                 _ => {}
             },
         };
-
-        match (self.0, rhs.0) {
-            (Value::Integer(_), Value::Real(_)) => {
-                Value::from(&coerce_int_to_real(self.0) == rhs.0)
-            }
-            (Value::Integer(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self.0) == rhs.0)
-            }
-            (Value::Real(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self.0) == rhs.0)
-            }
-            (Value::Real(_), Value::Integer(_)) => {
-                Value::from(self.0 == &coerce_int_to_real(rhs.0))
-            }
-            (Value::Decimal(_), Value::Integer(_)) => {
-                Value::from(self.0 == &coerce_int_or_real_to_decimal(rhs.0))
-            }
-            (Value::Decimal(_), Value::Real(_)) => {
-                Value::from(self.0 == &coerce_int_or_real_to_decimal(rhs.0))
-            }
-            (_, _) => Value::from(self.0 == rhs.0),
-        }
+        Value::from(self.0 == rhs.0)
     }
 
     fn neq(&self, rhs: &Self) -> Value {
