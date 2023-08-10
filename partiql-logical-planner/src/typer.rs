@@ -302,6 +302,8 @@ impl<'c> PlanTyper<'c> {
                                 break;
                             }
                         }
+
+
                     }
                 }
             }

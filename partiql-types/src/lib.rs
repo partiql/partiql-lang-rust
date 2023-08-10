@@ -496,7 +496,8 @@ impl ArrayType {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[non_exhaustive]
 pub enum ArrayConstraint {
-    // TODO Add Array constraint once we have Schema Specification.
+    // TODO Add Array constraint once we have Schema Specification:
+    // https://github.com/partiql/partiql-spec/issues/49
 }
 
 #[cfg(test)]
