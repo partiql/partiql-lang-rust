@@ -11,7 +11,7 @@ use partiql_types::{
     ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, BinaryOr, NullableEq, NullableOrd, Value};
+use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
@@ -170,8 +170,14 @@ impl BindEvalExpr for EvalOpBinary {
         match self {
             EvalOpBinary::And => logical!(AndCheck, |lhs, rhs| lhs.and(rhs)),
             EvalOpBinary::Or => logical!(OrCheck, |lhs, rhs| lhs.or(rhs)),
-            EvalOpBinary::Eq => equality!(|lhs, rhs| NullableEq::eq(lhs, rhs)),
-            EvalOpBinary::Neq => equality!(|lhs, rhs| NullableEq::neq(lhs, rhs)),
+            EvalOpBinary::Eq => equality!(|lhs, rhs| {
+                let wrap = EqualityValue::<false, Value>;
+                NullableEq::eq(&wrap(lhs), &wrap(rhs))
+            }),
+            EvalOpBinary::Neq => equality!(|lhs, rhs| {
+                let wrap = EqualityValue::<false, Value>;
+                NullableEq::neq(&wrap(lhs), &wrap(rhs))
+            }),
             EvalOpBinary::Gt => equality!(|lhs, rhs| NullableOrd::gt(lhs, rhs)),
             EvalOpBinary::Gteq => equality!(|lhs, rhs| NullableOrd::gteq(lhs, rhs)),
             EvalOpBinary::Lt => equality!(|lhs, rhs| NullableOrd::lt(lhs, rhs)),

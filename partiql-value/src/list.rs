@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{Bag, NullableEq, Value};
+use crate::{Bag, EqualityValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -154,11 +154,11 @@ impl PartialEq for List {
         if self.len() != other.len() {
             return false;
         }
-        for (v1, v2) in self.iter().zip(other.iter()) {
+        for (v1, v2) in self.0.iter().zip(other.0.iter()) {
             match (v1, v2) {
-                (Value::Missing, Value::Missing) | (Value::Null, Value::Null) => continue,
                 (v1, v2) => {
-                    if NullableEq::eq(v1, v2) != Value::Boolean(true) {
+                    let wrap = EqualityValue::<true, Value>;
+                    if NullableEq::eq(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
                         return false;
                     }
                 }

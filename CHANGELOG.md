@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 - partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
 - partiql-logical-planner add error for when a `HAVING` is included without `GROUP BY`
+- partiql-value fix deep equality of list, bags, and tuples
 
 ## [0.5.0] - 2023-06-06
 ### Changed
