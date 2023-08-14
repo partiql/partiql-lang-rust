@@ -351,7 +351,6 @@ impl Comparable for Value {
 // `Value` `eq` and `neq` with Missing and Null propagation
 pub trait NullableEq {
     type Output;
-
     fn eq(&self, rhs: &Self) -> Self::Output;
     fn neq(&self, rhs: &Self) -> Self::Output;
 }
@@ -366,54 +365,59 @@ pub trait NullableOrd {
     fn gteq(&self, rhs: &Self) -> Self::Output;
 }
 
-impl NullableEq for Value {
-    type Output = Self;
+/// A wrapper on [`T`] that specifies if missing and null values should be equal.
+#[derive(Eq, PartialEq)]
+pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
+
+impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, Value> {
+    type Output = Value;
 
     fn eq(&self, rhs: &Self) -> Self::Output {
-        match (self, rhs) {
-            (Value::Missing, _) => Value::Missing,
-            (_, Value::Missing) => Value::Missing,
-            (Value::Null, _) => Value::Null,
-            (_, Value::Null) => Value::Null,
-            (Value::Integer(_), Value::Real(_)) => Value::from(&coerce_int_to_real(self) == rhs),
+        match GROUP_NULLS {
+            true => match (self.0, rhs.0) {
+                (Value::Missing, Value::Missing)
+                | (Value::Null, Value::Null)
+                | (Value::Missing, Value::Null)
+                | (Value::Null, Value::Missing) => return Value::Boolean(true),
+                _ => {}
+            },
+            false => match (self.0, rhs.0) {
+                (Value::Missing, _) => return Value::Missing,
+                (_, Value::Missing) => return Value::Missing,
+                (Value::Null, _) => return Value::Null,
+                (_, Value::Null) => return Value::Null,
+                _ => {}
+            },
+        };
+
+        match (self.0, rhs.0) {
+            (Value::Integer(_), Value::Real(_)) => {
+                Value::from(&coerce_int_to_real(self.0) == rhs.0)
+            }
             (Value::Integer(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self) == rhs)
+                Value::from(&coerce_int_or_real_to_decimal(self.0) == rhs.0)
             }
             (Value::Real(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self) == rhs)
+                Value::from(&coerce_int_or_real_to_decimal(self.0) == rhs.0)
             }
-            (Value::Real(_), Value::Integer(_)) => Value::from(self == &coerce_int_to_real(rhs)),
+            (Value::Real(_), Value::Integer(_)) => {
+                Value::from(self.0 == &coerce_int_to_real(rhs.0))
+            }
             (Value::Decimal(_), Value::Integer(_)) => {
-                Value::from(self == &coerce_int_or_real_to_decimal(rhs))
+                Value::from(self.0 == &coerce_int_or_real_to_decimal(rhs.0))
             }
             (Value::Decimal(_), Value::Real(_)) => {
-                Value::from(self == &coerce_int_or_real_to_decimal(rhs))
+                Value::from(self.0 == &coerce_int_or_real_to_decimal(rhs.0))
             }
-            (_, _) => Value::from(self == rhs),
+            (_, _) => Value::from(self.0 == rhs.0),
         }
     }
 
     fn neq(&self, rhs: &Self) -> Self::Output {
-        match (self, rhs) {
-            (Value::Missing, _) => Value::Missing,
-            (_, Value::Missing) => Value::Missing,
-            (Value::Null, _) => Value::Null,
-            (_, Value::Null) => Value::Null,
-            (Value::Integer(_), Value::Real(_)) => Value::from(&coerce_int_to_real(self) != rhs),
-            (Value::Integer(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self) != rhs)
-            }
-            (Value::Real(_), Value::Decimal(_)) => {
-                Value::from(&coerce_int_or_real_to_decimal(self) != rhs)
-            }
-            (Value::Real(_), Value::Integer(_)) => Value::from(self != &coerce_int_to_real(rhs)),
-            (Value::Decimal(_), Value::Integer(_)) => {
-                Value::from(self != &coerce_int_or_real_to_decimal(rhs))
-            }
-            (Value::Decimal(_), Value::Real(_)) => {
-                Value::from(self != &coerce_int_or_real_to_decimal(rhs))
-            }
-            (_, _) => Value::from(self != rhs),
+        let eq_result = NullableEq::eq(self, rhs);
+        match eq_result {
+            Value::Boolean(_) | Value::Null => !eq_result,
+            _ => Value::Missing,
         }
     }
 }
@@ -1505,289 +1509,310 @@ mod tests {
     fn partiql_value_equality() {
         // TODO: many equality tests missing. Can use conformance tests to fill the gap or some other
         //  tests
+
+        fn nullable_eq(lhs: Value, rhs: Value) -> Value {
+            let wrap = EqualityValue::<false, Value>;
+            let lhs = wrap(&lhs);
+            let rhs = wrap(&rhs);
+            NullableEq::eq(&lhs, &rhs)
+        }
+
+        fn nullable_neq(lhs: Value, rhs: Value) -> Value {
+            let wrap = EqualityValue::<false, Value>;
+            let lhs = wrap(&lhs);
+            let rhs = wrap(&rhs);
+            NullableEq::neq(&lhs, &rhs)
+        }
+
         // Eq
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(true), &Value::from(true))
+            nullable_eq(Value::from(true), Value::from(true))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(true), &Value::from(false))
+            nullable_eq(Value::from(true), Value::from(false))
         );
         // Container examples from spec section 7.1.1 https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.7.1.1
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(
-                &Value::from(bag![3, 2, 4, 2]),
-                &Value::from(bag![2, 2, 3, 4])
+            nullable_eq(Value::from(bag![3, 2, 4, 2]), Value::from(bag![2, 2, 3, 4]))
+        );
+        assert_eq!(
+            Value::from(true),
+            nullable_eq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1), ("b", 2)])
+            nullable_eq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)])
             )
+        );
+        assert_eq!(
+            Value::from(false),
+            nullable_eq(Value::from(bag![3, 4, 2]), Value::from(bag![2, 2, 3, 4]))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)])
+            nullable_eq(Value::from(list![1, 2]), Value::from(list![1e0, 2.0]))
+        );
+        assert_eq!(
+            Value::from(false),
+            nullable_eq(Value::from(list![1, 2]), Value::from(list![2.0, 1e0]))
+        );
+        assert_eq!(
+            Value::from(true),
+            nullable_eq(Value::from(bag![1, 2]), Value::from(bag![2.0, 1e0]))
+        );
+        assert_eq!(
+            Value::from(false),
+            nullable_eq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1)])
             )
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(bag![3, 4, 2]), &Value::from(bag![2, 2, 3, 4]))
-        );
-        assert_eq!(
-            Value::from(false),
-            NullableEq::eq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1)])
+            nullable_eq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
+            nullable_eq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1), ("b", Value::Null)])
             )
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1), ("b", Value::Null)])
+            nullable_eq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
             )
         );
+        assert_eq!(Value::Null, nullable_eq(Value::from(true), Value::Null));
+        assert_eq!(Value::Null, nullable_eq(Value::Null, Value::from(true)));
         assert_eq!(
-            Value::from(false),
-            NullableEq::eq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
-            )
-        );
-        assert_eq!(
-            Value::Null,
-            NullableEq::eq(&Value::from(true), &Value::Null)
-        );
-        assert_eq!(
-            Value::Null,
-            NullableEq::eq(&Value::Null, &Value::from(true))
+            Value::Missing,
+            nullable_eq(Value::from(true), Value::Missing)
         );
         assert_eq!(
             Value::Missing,
-            NullableEq::eq(&Value::from(true), &Value::Missing)
-        );
-        assert_eq!(
-            Value::Missing,
-            NullableEq::eq(&Value::Missing, &Value::from(true))
+            nullable_eq(Value::Missing, Value::from(true))
         );
 
         // different, comparable types result in boolean true
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(1), &Value::from(1.0))
+            nullable_eq(Value::from(1), Value::from(1.0))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(1.0), &Value::from(1))
+            nullable_eq(Value::from(1.0), Value::from(1))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(1), &Value::from(dec!(1.0)))
+            nullable_eq(Value::from(1), Value::from(dec!(1.0)))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(1))
+            nullable_eq(Value::from(dec!(1.0)), Value::from(1))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(1.0), &Value::from(dec!(1.0)))
+            nullable_eq(Value::from(1.0), Value::from(dec!(1.0)))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(1.0))
+            nullable_eq(Value::from(dec!(1.0)), Value::from(1.0))
         );
         // different, comparable types result in boolean false
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(1), &Value::from(2.0))
+            nullable_eq(Value::from(1), Value::from(2.0))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(1.0), &Value::from(2))
+            nullable_eq(Value::from(1.0), Value::from(2))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(1), &Value::from(dec!(2.0)))
+            nullable_eq(Value::from(1), Value::from(dec!(2.0)))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(2))
+            nullable_eq(Value::from(dec!(1.0)), Value::from(2))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(1.0), &Value::from(dec!(2.0)))
+            nullable_eq(Value::from(1.0), Value::from(dec!(2.0)))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(dec!(1.0)), &Value::from(2.0))
+            nullable_eq(Value::from(dec!(1.0)), Value::from(2.0))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(1), &Value::from(f64::NEG_INFINITY))
+            nullable_eq(Value::from(1), Value::from(f64::NEG_INFINITY))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(f64::NEG_INFINITY), &Value::from(1))
+            nullable_eq(Value::from(f64::NEG_INFINITY), Value::from(1))
         );
         // different, non-comparable types result in boolean true
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from(true), &Value::from("abc"))
+            nullable_eq(Value::from(true), Value::from("abc"))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::eq(&Value::from("abc"), &Value::from(true))
+            nullable_eq(Value::from("abc"), Value::from(true))
         );
 
         // Neq
         assert_eq!(
             Value::from(false),
-            Value::from(true).neq(&Value::from(true))
+            nullable_neq(Value::from(true), Value::from(true))
         );
         assert_eq!(
             Value::from(true),
-            Value::from(true).neq(&Value::from(false))
+            nullable_neq(Value::from(true), Value::from(false))
         );
         // Container examples from spec section 7.1.1 https://partiql.org/assets/PartiQL-Specification.pdf#subsubsection.7.1.1
         // (opposite result of eq cases)
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(
-                &Value::from(bag![3, 2, 4, 2]),
-                &Value::from(bag![2, 2, 3, 4])
+            nullable_neq(Value::from(bag![3, 2, 4, 2]), Value::from(bag![2, 2, 3, 4]))
+        );
+        assert_eq!(
+            Value::from(false),
+            nullable_neq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1), ("b", 2)])
-            )
-        );
-        assert_eq!(
-            Value::from(false),
-            NullableEq::neq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)])
+            nullable_neq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(bag![3, 4, 2]), &Value::from(bag![2, 2, 3, 4]))
+            nullable_neq(Value::from(bag![3, 4, 2]), Value::from(bag![2, 2, 3, 4]))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1)])
+            nullable_neq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1)])
             )
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
+            nullable_neq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![0, 1, 2]), ("b", 2)])
             )
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(
-                &Value::from(tuple![("a", 1), ("b", 2)]),
-                &Value::from(tuple![("a", 1), ("b", Value::Null)])
+            nullable_neq(
+                Value::from(tuple![("a", 1), ("b", 2)]),
+                Value::from(tuple![("a", 1), ("b", Value::Null)])
             )
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(
-                &Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
-                &Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
+            nullable_neq(
+                Value::from(tuple![("a", list![0, 1]), ("b", 2)]),
+                Value::from(tuple![("a", list![Value::Null, 1]), ("b", 2)])
             )
         );
-        assert_eq!(Value::Null, Value::from(true).neq(&Value::Null));
-        assert_eq!(Value::Null, Value::Null.neq(&Value::from(true)));
-        assert_eq!(Value::Missing, Value::from(true).neq(&Value::Missing));
-        assert_eq!(Value::Missing, Value::Missing.neq(&Value::from(true)));
+        assert_eq!(Value::Null, nullable_neq(Value::from(true), Value::Null));
+        assert_eq!(Value::Null, nullable_neq(Value::Null, Value::from(true)));
+        assert_eq!(
+            Value::Missing,
+            nullable_neq(Value::from(true), Value::Missing)
+        );
+        assert_eq!(
+            Value::Missing,
+            nullable_neq(Value::Missing, Value::from(true))
+        );
 
         // different, comparable types result in boolean true
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(1), &Value::from(2.0))
+            nullable_neq(Value::from(1), Value::from(2.0))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(1.0), &Value::from(2))
+            nullable_neq(Value::from(1.0), Value::from(2))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(1), &Value::from(dec!(2.0)))
+            nullable_neq(Value::from(1), Value::from(dec!(2.0)))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(2))
+            nullable_neq(Value::from(dec!(1.0)), Value::from(2))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(1.0), &Value::from(dec!(2.0)))
+            nullable_neq(Value::from(1.0), Value::from(dec!(2.0)))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(2.0))
+            nullable_neq(Value::from(dec!(1.0)), Value::from(2.0))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(1), &Value::from(f64::NEG_INFINITY))
+            nullable_neq(Value::from(1), Value::from(f64::NEG_INFINITY))
         );
         assert_eq!(
             Value::from(true),
-            NullableEq::neq(&Value::from(f64::NEG_INFINITY), &Value::from(1))
+            nullable_neq(Value::from(f64::NEG_INFINITY), Value::from(1))
         );
         // different, comparable types result in boolean false
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(1), &Value::from(1.0))
+            nullable_neq(Value::from(1), Value::from(1.0))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(1.0), &Value::from(1))
+            nullable_neq(Value::from(1.0), Value::from(1))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(1), &Value::from(dec!(1.0)))
+            nullable_neq(Value::from(1), Value::from(dec!(1.0)))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(1))
+            nullable_neq(Value::from(dec!(1.0)), Value::from(1))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(1.0), &Value::from(dec!(1.0)))
+            nullable_neq(Value::from(1.0), Value::from(dec!(1.0)))
         );
         assert_eq!(
             Value::from(false),
-            NullableEq::neq(&Value::from(dec!(1.0)), &Value::from(1.0))
+            nullable_neq(Value::from(dec!(1.0)), Value::from(1.0))
         );
         // different, non-comparable types result in boolean true
         assert_eq!(
             Value::from(true),
-            Value::from(true).neq(&Value::from("abc"))
+            nullable_neq(Value::from(true), Value::from("abc"))
         );
         assert_eq!(
             Value::from(true),
-            Value::from("abc").neq(&Value::from(true))
+            nullable_neq(Value::from("abc"), Value::from(true))
         );
     }
 

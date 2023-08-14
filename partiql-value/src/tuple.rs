@@ -9,7 +9,7 @@ use std::vec;
 
 use unicase::UniCase;
 
-use crate::{BindingsName, NullSortedValue, Value};
+use crate::{BindingsName, EqualityValue, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -211,7 +211,19 @@ impl Iterator for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        self.pairs().sorted().eq(other.pairs().sorted())
+        if self.vals.len() != other.vals.len() {
+            return false;
+        }
+        for ((ls, lv), (rs, rv)) in self.pairs().sorted().zip(other.pairs().sorted()) {
+            if ls != rs {
+                return false;
+            }
+            let wrap = EqualityValue::<true, Value>;
+            if NullableEq::eq(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
+                return false;
+            }
+        }
+        true
     }
 }
 

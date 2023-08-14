@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixes variable resolution lookup order and excessive lookups
 - Fixes variable resolution of some ORDER BY variables
 - Fixes nested list/bag/tuple type ordering for when `ASC NULLS LAST` and `DESC NULLS FIRST` are specified
+- partiql-value fix deep equality of list, bags, and tuples
 
 ## [0.5.0] - 2023-06-06
 ### Changed

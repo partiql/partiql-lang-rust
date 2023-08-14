@@ -1,15 +1,15 @@
 use std::cmp::Ordering;
 
 use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{Bag, NullSortedValue, Value};
+use crate::{Bag, EqualityValue, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Hash, PartialEq, Eq, Clone)]
+#[derive(Default, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
@@ -161,6 +161,21 @@ impl Debug for List {
     }
 }
 
+impl PartialEq for List {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        for (v1, v2) in self.0.iter().zip(other.0.iter()) {
+            let wrap = EqualityValue::<true, Value>;
+            if NullableEq::eq(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl PartialOrd for List {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let mut l = self.0.iter();
@@ -220,6 +235,14 @@ impl Ord for List {
                     Ordering::Equal => continue,
                 },
             }
+        }
+    }
+}
+
+impl Hash for List {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in self.0.iter() {
+            v.hash(state);
         }
     }
 }
