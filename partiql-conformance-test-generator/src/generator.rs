@@ -3,10 +3,10 @@ use crate::schema::structure::*;
 
 use crate::util::{escape_fn_code, Escaper};
 use codegen::{Function, Module, Scope};
-use ion_rs::TextWriterBuilder;
 
-use ion_rs::element::writer::ElementWriter;
-use ion_rs::element::{Element, Struct};
+use ion_rs::ElementWriter;
+use ion_rs::TextWriterBuilder;
+use ion_rs::{Element, Struct};
 use quote::__private::TokenStream;
 use quote::quote;
 use std::collections::{HashMap, HashSet};

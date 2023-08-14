@@ -1,5 +1,5 @@
 use delegate::delegate;
-use ion_rs::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
+use ion_rs::{Decimal, IonError, IonReader, IonType, StreamItem, Symbol};
 use once_cell::sync::Lazy;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use regex::RegexSet;
@@ -216,9 +216,9 @@ where
 
     #[inline]
     fn decode_int(&self, reader: &mut R) -> IonDecodeResult {
-        match reader.read_int()? {
-            Int::I64(i) => Ok(Value::Integer(i)),
-            Int::BigInt(_) => Err(IonDecodeError::UnsupportedType("bigint")),
+        match reader.read_int()?.as_i64() {
+            Some(i) => Ok(Value::Integer(i)),
+            _ => Err(IonDecodeError::UnsupportedType("bigint")),
         }
     }
 
@@ -238,7 +238,7 @@ where
         let ts = reader.read_timestamp()?;
         let offset = ts.offset();
         let datetime = DateTime::from_ymdhms_nano_offset_minutes(
-            ts.year(),
+            ts.year() as i32,
             NonZeroU8::new(ts.month() as u8).ok_or(IonDecodeError::ConversionError(
                 "month outside of range".into(),
             ))?,
@@ -359,7 +359,7 @@ impl PartiqlEncodedIonValueDecoder {
     {
         let ts = reader.read_timestamp()?;
         let datetime = DateTime::from_ymd(
-            ts.year(),
+            ts.year() as i32,
             NonZeroU8::new(ts.month() as u8).ok_or(IonDecodeError::ConversionError(
                 "month outside of range".into(),
             ))?,
@@ -381,9 +381,9 @@ impl PartiqlEncodedIonValueDecoder {
             R: IonReader<Item = StreamItem, Symbol = Symbol>,
         {
             match typ {
-                Some(IonType::Int) => match reader.read_int()? {
-                    Int::I64(i) => Ok(i as u8), // TODO check range
-                    Int::BigInt(_) => Err(IonDecodeError::ConversionError(format!(
+                Some(IonType::Int) => match reader.read_int()?.as_i64() {
+                    Some(i) => Ok(i as u8), // TODO check range
+                    _ => Err(IonDecodeError::ConversionError(format!(
                         "value for {unit} outside of range"
                     ))),
                 },
@@ -401,9 +401,9 @@ impl PartiqlEncodedIonValueDecoder {
             R: IonReader<Item = StreamItem, Symbol = Symbol>,
         {
             match typ {
-                Some(IonType::Int) => match reader.read_int()? {
-                    Int::I64(i) => Ok(Some(i as i8)), // TODO check range
-                    Int::BigInt(_) => Err(IonDecodeError::ConversionError(format!(
+                Some(IonType::Int) => match reader.read_int()?.as_i64() {
+                    Some(i) => Ok(Some(i as i8)), // TODO check range
+                    _ => Err(IonDecodeError::ConversionError(format!(
                         "value for {unit} outside of range"
                     ))),
                 },

@@ -6,8 +6,8 @@ use std::fs::DirEntry;
 
 use crate::schema::spec::*;
 use crate::schema::structure::*;
-use ion_rs::element::reader::ElementReader;
-use ion_rs::element::{Element, Struct};
+use ion_rs::ElementReader;
+use ion_rs::{Element, Struct};
 use std::path::Path;
 
 macro_rules! expect_value {

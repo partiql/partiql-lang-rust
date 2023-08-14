@@ -42,7 +42,7 @@ partiql-value = { path = "../partiql-value", version = "0.5.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.5.*" }
 partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.5.*" }
 
-ion-rs = "0.18"
+ion-rs = { version="1.0.0-rc.1", features = ["experimental-reader", "experimental-writer"] }
 
 regex = "1.7"
 once_cell = "1"
