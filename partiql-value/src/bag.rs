@@ -108,6 +108,7 @@ impl<'a> IntoIterator for &'a Bag {
     type Item = &'a Value;
     type IntoIter = BagIter<'a>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         BagIter(self.0.iter())
     }
@@ -119,8 +120,14 @@ pub struct BagIter<'a>(slice::Iter<'a, Value>);
 impl<'a> Iterator for BagIter<'a> {
     type Item = &'a Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -138,8 +145,14 @@ pub struct BagIntoIterator(vec::IntoIter<Value>);
 impl Iterator for BagIntoIterator {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 

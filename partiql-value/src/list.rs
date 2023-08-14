@@ -119,8 +119,14 @@ pub struct ListIter<'a>(slice::Iter<'a, Value>);
 impl<'a> Iterator for ListIter<'a> {
     type Item = &'a Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -138,8 +144,14 @@ pub struct ListIntoIterator(vec::IntoIter<Value>);
 impl Iterator for ListIntoIterator {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 

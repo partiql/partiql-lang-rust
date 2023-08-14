@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
 - *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
+- *BREAKING:* partiql-value: `Value` trait's `coerce_to_tuple`, `coerece_to_bag`, and `coerce_to_list` methods renamed to `coerce_into_tuple`, `coerece_into_bag`, and `coerece_into_list`.
+- *BREAKING:* partiql-value: `Tuple`'s `pairs` and `into_pairs` changed to return concrete `Iterator` types.
 - *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter.
 - *BREAKING:* partiql-eval: `like_to_re_pattern` is no longer public.
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.

@@ -190,7 +190,7 @@ mod tests {
         let mut bindings = MapBindings::default();
         bindings.insert("data", list![Tuple::from([("lhs", lhs)])].into());
 
-        let result = evaluate(plan, bindings).coerce_to_bag();
+        let result = evaluate(plan, bindings).coerce_into_bag();
         assert!(!&result.is_empty());
         let expected_result = if expected_first_elem != Missing {
             bag!(Tuple::from([("result", expected_first_elem)]))
@@ -701,7 +701,7 @@ mod tests {
             let mut bindings = MapBindings::default();
             bindings.insert("data", list![Tuple::from([("value", value)])].into());
 
-            let result = evaluate(plan, bindings).coerce_to_bag();
+            let result = evaluate(plan, bindings).coerce_into_bag();
             assert!(!&result.is_empty());
             let expected_result = bag!(Tuple::from([("result", expected_first_elem)]));
             assert_eq!(expected_result, result);
@@ -1170,7 +1170,7 @@ mod tests {
         let mut bindings = MapBindings::default();
         bindings.insert("data", list![Tuple::from([("expr", expr)])].into());
 
-        let result = evaluate(plan, bindings).coerce_to_bag();
+        let result = evaluate(plan, bindings).coerce_into_bag();
         assert!(!&result.is_empty());
         assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
@@ -1236,7 +1236,7 @@ mod tests {
         let mut bindings = MapBindings::default();
         bindings.insert("data", list![Tuple::from([("lhs", lhs)])].into());
 
-        let result = evaluate(plan, bindings).coerce_to_bag();
+        let result = evaluate(plan, bindings).coerce_into_bag();
         assert!(!&result.is_empty());
         let expected_result = if expected_first_elem != Missing {
             bag!(Tuple::from([("result", expected_first_elem)]))
@@ -1304,7 +1304,7 @@ mod tests {
             .for_each(|(i, e)| data.insert(&format!("arg{i}"), e));
         bindings.insert("data", list![data].into());
 
-        let result = evaluate(plan, bindings).coerce_to_bag();
+        let result = evaluate(plan, bindings).coerce_into_bag();
         assert!(!&result.is_empty());
         assert_eq!(bag!(Tuple::from([("result", expected_first_elem)])), result);
     }
