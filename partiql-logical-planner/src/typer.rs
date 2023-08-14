@@ -45,7 +45,6 @@ pub enum TypingError {
     /// Internal error that was not due to user input or API violation.
     #[error("Illegal State: {0}")]
     IllegalState(String),
-
     /// Represents an error in type checking
     #[error("TypeCheck: {0}")]
     TypeCheck(String),
@@ -60,9 +59,12 @@ pub enum TypingMode {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 enum LookupOrder {
+    /// Global then Local
     GlobalLocal,
+    /// Local then Global
     LocalGlobal,
-    Dynamic,
+    /// Signals for delegating the lookup order, e.g., to [VarRefType]
+    Delegate,
 }
 
 /// Represents a type environment context
@@ -122,7 +124,7 @@ pub struct PlanTyper<'c> {
 
 #[allow(dead_code)]
 impl<'c> PlanTyper<'c> {
-    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Strict` Typing Mode as the default Typing Mode.
+    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Strict` Typing Mode.
     pub fn new_strict(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Strict,
@@ -159,8 +161,6 @@ impl<'c> PlanTyper<'c> {
             }
         }
 
-        // dbg!(&self.type_env_stack);
-
         if self.errors.is_empty() {
             Ok(self.output.clone().unwrap_or(undefined!()))
         } else {
@@ -174,8 +174,8 @@ impl<'c> PlanTyper<'c> {
         self.bop_stack.push(op.clone());
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
-                self.type_vexpr(expr, LookupOrder::Dynamic);
-                let type_ctx = &self.local_type_env();
+                self.type_vexpr(expr, LookupOrder::Delegate);
+                let type_ctx = &self.local_type_ctx();
                 for (name, ty) in type_ctx.env().iter() {
                     let derived_type = self.element_type(ty);
                     self.type_env_stack.push(ty_ctx![(
@@ -193,12 +193,10 @@ impl<'c> PlanTyper<'c> {
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
-                let derived_type_ctx = self.local_type_env();
+                let derived_type_ctx = self.local_type_ctx();
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
-                    if let Some(ty) = self.retrieve_type_from_local_ctx(k) {
-                        fields.push(StructField::new(k.as_str(), ty.clone()));
-                    }
+                    fields.push(StructField::new(k.as_str(), self.get_singleton_type_from_env()));
                 }
 
                 let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
@@ -230,7 +228,9 @@ impl<'c> PlanTyper<'c> {
                 )]);
             }
             BindingsOp::Sink => {
-                if let Some(ty) = self.retrieve_type_from_local_ctx(OUTPUT_SCHEMA_KEY) {
+                if let Some(ty) =
+                    self.retrieve_type_from_local_ctx(&string_to_sym(OUTPUT_SCHEMA_KEY))
+                {
                     self.output = Some(ty);
                 }
             }
@@ -278,15 +278,7 @@ impl<'c> PlanTyper<'c> {
                         let ty = self.resolve_global_then_local(&sym);
                         let ty = self.element_type(&ty);
                         if ty.is_undefined() {
-                            match &self.typing_mode {
-                                // TODO remove duplicate
-                                TypingMode::Permissive => {
-                                    let type_ctx = ty_ctx![(&ty_env![(sym, missing!())], &ty)];
-
-                                    self.type_env_stack.push(type_ctx);
-                                }
-                                _ => {}
-                            }
+                            self.type_with_undefined(&sym);
                         } else {
                             let mut new_type_env = LocalTypeEnv::new();
                             if let TypeKind::Struct(s) = ty.kind() {
@@ -307,14 +299,7 @@ impl<'c> PlanTyper<'c> {
                         let ty = self.resolve_local_then_global(&sym);
 
                         if ty.is_undefined() {
-                            match &self.typing_mode {
-                                TypingMode::Permissive => {
-                                    let type_ctx = ty_ctx![(&ty_env![(sym, missing!())], &ty)];
-
-                                    self.type_env_stack.push(type_ctx);
-                                }
-                                TypingMode::Strict => {}
-                            }
+                            self.type_with_undefined(&sym);
                         } else {
                             let mut new_type_env = LocalTypeEnv::new();
                             if let TypeKind::Struct(s) = ty.kind() {
@@ -331,16 +316,24 @@ impl<'c> PlanTyper<'c> {
                             }
                         }
                     }
-                    LookupOrder::Dynamic => self.type_vexpr(v, self.lookup_order(v)),
+                    LookupOrder::Delegate => self.type_vexpr(v, self.lookup_order(v)),
                 }
             }
             ValueExpr::Path(v, components) => {
-                self.type_vexpr(v, LookupOrder::Dynamic);
+                self.type_vexpr(v, LookupOrder::Delegate);
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
                             let var = ValueExpr::VarRef(key.clone(), VarRefType::Local);
                             self.type_vexpr(&var, LookupOrder::LocalGlobal);
+
+                            if let Some(ty) =
+                                self.retrieve_type_from_local_ctx(&binding_to_sym(key))
+                            {
+                                let key = binding_to_sym(key);
+                                let ctx = ty_ctx![(&ty_env![(key, ty.clone())], &ty)];
+                                self.type_env_stack.push(ctx);
+                            }
                         }
                         PathComponent::Index(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
@@ -447,12 +440,12 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn retrieve_type_from_local_ctx(&mut self, key: &str) -> Option<PartiqlType> {
-        let type_ctx = self.local_type_env();
+    fn retrieve_type_from_local_ctx(&mut self, key: &SymbolPrimitive) -> Option<PartiqlType> {
+        let type_ctx = self.local_type_ctx();
         let env = type_ctx.env().clone();
         let derived_type = self.derived_type(&type_ctx);
 
-        if let Some(ty) = env.get(&string_to_sym(key)) {
+        if let Some(ty) = env.get(key) {
             Some(ty.clone())
         } else if let TypeKind::Struct(s) = derived_type.kind() {
             if s.is_partial() {
@@ -485,7 +478,7 @@ impl<'c> PlanTyper<'c> {
         ty.clone()
     }
 
-    fn local_type_env(&mut self) -> TypeEnvContext {
+    fn local_type_ctx(&mut self) -> TypeEnvContext {
         let out = self
             .type_env_stack
             .last()
@@ -528,7 +521,7 @@ impl<'c> PlanTyper<'c> {
                         TypingMode::Strict => undefined!(),
                     }
                 } else {
-                    ty.clone()
+                    ty
                 }
             }
             false => ty,
@@ -546,7 +539,7 @@ impl<'c> PlanTyper<'c> {
                         TypingMode::Strict => undefined!(),
                     }
                 } else {
-                    ty.clone()
+                    ty
                 }
             }
             false => ty,
@@ -562,13 +555,35 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn resolve_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
-        for type_ctx in self.type_env_stack.clone().into_iter().rev() {
+        for type_ctx in self.type_env_stack.iter().rev() {
             if let Some(ty) = type_ctx.env().get(key) {
                 return ty.clone();
             }
         }
 
         undefined!()
+    }
+
+    fn type_with_undefined(&mut self, key: &SymbolPrimitive) {
+        if let TypingMode::Permissive = &self.typing_mode {
+            let type_ctx = ty_ctx![(&ty_env![(key.clone(), missing!())], &undefined!())];
+
+            self.type_env_stack.push(type_ctx);
+        }
+    }
+
+    fn get_singleton_type_from_env(&mut self) -> PartiqlType {
+        let ctx = self.local_type_ctx();
+        let env = ctx.env();
+        if env.len() != 1 {
+            self.errors.push(TypingError::IllegalState(format!(
+                "Unexpected Typing Environment {:?}",
+                &env
+            )));
+            undefined!()
+        } else {
+            env[0].clone()
+        }
     }
 }
 
@@ -708,7 +723,7 @@ mod tests {
     fn simple_sfw_with_alias() {
         assert_query_typing(
             TypingMode::Strict,
-            "SELECT c.id, customers.name FROM customers AS c",
+            "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c",
             create_customer_schema(
                 false,
                 vec![
@@ -718,8 +733,8 @@ mod tests {
                 ],
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
+                StructField::new("my_id", int!()),
+                StructField::new("my_name", str!()),
             ],
         )
         .expect("Type");
@@ -766,9 +781,14 @@ mod tests {
                 ),
                 vec![],
             ),
-            vec![TypingError::TypeCheck(format!(
-                "No Typing Information for \"bar\""
-            ))],
+            vec![
+                TypingError::TypeCheck(
+                    "No Typing Information for SymbolPrimitive { value: \"details\", case: CaseInsensitive }".to_string()
+                ),
+                TypingError::TypeCheck(
+                    "No Typing Information for SymbolPrimitive { value: \"bar\", case: CaseInsensitive }".to_string()
+                )
+            ],
         );
     }
 

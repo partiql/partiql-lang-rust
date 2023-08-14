@@ -1,15 +1,15 @@
 use std::cmp::Ordering;
 
 use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{Bag, NullSortedValue, Value};
+use crate::{Bag, EqualityValue, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Hash, PartialEq, Eq, Clone)]
+#[derive(Default, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a PartiQL List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
@@ -38,6 +38,11 @@ impl List {
     #[inline]
     pub fn get_mut(&mut self, idx: i64) -> Option<&mut Value> {
         self.0.get_mut(idx as usize)
+    }
+
+    #[inline]
+    pub fn take_val(self, idx: i64) -> Option<Value> {
+        self.0.into_iter().nth(idx as usize)
     }
 
     #[inline]
@@ -119,8 +124,14 @@ pub struct ListIter<'a>(slice::Iter<'a, Value>);
 impl<'a> Iterator for ListIter<'a> {
     type Item = &'a Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -138,14 +149,35 @@ pub struct ListIntoIterator(vec::IntoIter<Value>);
 impl Iterator for ListIntoIterator {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
 impl Debug for List {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(&self.0).finish()
+    }
+}
+
+impl PartialEq for List {
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        for (v1, v2) in self.0.iter().zip(other.0.iter()) {
+            let wrap = EqualityValue::<true, Value>;
+            if NullableEq::eq(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -208,6 +240,14 @@ impl Ord for List {
                     Ordering::Equal => continue,
                 },
             }
+        }
+    }
+}
+
+impl Hash for List {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for v in self.0.iter() {
+            v.hash(state);
         }
     }
 }

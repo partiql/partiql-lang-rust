@@ -55,7 +55,7 @@ pub mod basic {
         #[inline]
         fn get(&self, name: &BindingsName) -> Option<&T> {
             let idx = match name {
-                BindingsName::CaseSensitive(s) => self.sensitive.get(s),
+                BindingsName::CaseSensitive(s) => self.sensitive.get(s.as_ref()),
                 BindingsName::CaseInsensitive(s) => {
                     self.insensitive.get(&UniCase::new(s.to_string()))
                 }
@@ -120,22 +120,22 @@ mod tests {
         // by ref
         let bindings = MapBindings::from(&t);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string().into())),
             Some(&Value::from(2))
         );
 
         // by ownership
         let bindings = MapBindings::from(t);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string().into())),
             Some(&Value::from(2))
         );
     }
@@ -144,22 +144,22 @@ mod tests {
     fn test_bindings_from_value() {
         let bindings = MapBindings::from(Value::Null);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             None
         );
         let bindings = MapBindings::from(&Value::Null);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             None
         );
         let bindings = MapBindings::from(Value::Missing);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             None
         );
         let bindings = MapBindings::from(&Value::Missing);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             None
         );
 
@@ -168,22 +168,22 @@ mod tests {
         // by ref
         let bindings = MapBindings::from(&t);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string().into())),
             Some(&Value::from(2))
         );
 
         // by ownership
         let bindings = MapBindings::from(t);
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("a".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("a".to_string().into())),
             Some(&Value::from(tuple![("p", 1)]))
         );
         assert_eq!(
-            bindings.get(&BindingsName::CaseInsensitive("b".to_string())),
+            bindings.get(&BindingsName::CaseInsensitive("b".to_string().into())),
             Some(&Value::from(2))
         );
     }

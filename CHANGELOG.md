@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+- *BREAKING:* partiql-value: `BindingsName` changed to hold `Cow<str>` rather than  `String`
 - *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
 - *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
+- *BREAKING:* partiql-value: `Value` trait's `coerce_to_tuple`, `coerece_to_bag`, and `coerce_to_list` methods renamed to `coerce_into_tuple`, `coerece_into_bag`, and `coerece_into_list`.
+- *BREAKING:* partiql-value: `Tuple`'s `pairs` and `into_pairs` changed to return concrete `Iterator` types.
 - *BREAKING:* partiql-eval: `EvaluatorPlanner` construction now takes an `EvaluationMode` parameter.
 - *BREAKING:* partiql-eval: `like_to_re_pattern` is no longer public.
 - *BREAKING:* partiql-value: Box Decimals in `Value` to assure `Value` fits in 16 bytes.
@@ -34,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql_logical_planner::typer` for typing PartiQL queries with the initial support for simple SFW queries with `SELECT` and `FROM` clauses only with no operators, JOINs, etc.
 - Add `NullSortedValue` to specify ordering null or missing values `partiql_value::Value`s before or after all other values
 - Implements the aggregation functions `ANY`, `SOME`, `EVERY` and their `COLL_` versions
+- Add `COUNT(*)` implementation
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
@@ -43,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixes variable resolution lookup order and excessive lookups
 - Fixes variable resolution of some ORDER BY variables
 - Fixes nested list/bag/tuple type ordering for when `ASC NULLS LAST` and `DESC NULLS FIRST` are specified
+- partiql-value fix deep equality of list, bags, and tuples
+- Fixes bug when using multiple aggregations without a `GROUP BY`
 
 ## [0.5.0] - 2023-06-06
 ### Changed

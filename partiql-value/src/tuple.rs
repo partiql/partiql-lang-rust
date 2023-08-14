@@ -4,12 +4,12 @@ use std::cmp::Ordering;
 
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::iter::zip;
+use std::iter::{zip, Zip};
 use std::vec;
 
 use unicase::UniCase;
 
-use crate::{BindingsName, NullSortedValue, Value};
+use crate::{BindingsName, EqualityValue, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -61,56 +61,47 @@ impl Tuple {
 
     #[inline]
     pub fn get(&self, attr: &BindingsName) -> Option<&Value> {
+        self.find_value(attr).map(|i| &self.vals[i])
+    }
+
+    #[inline]
+    pub fn take_val(self, attr: &BindingsName) -> Option<Value> {
+        self.find_value(attr)
+            .and_then(|i| self.vals.into_iter().nth(i))
+    }
+
+    #[inline(always)]
+    fn find_value(&self, attr: &BindingsName) -> Option<usize> {
         match attr {
-            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
-            {
-                Some(i) => Some(&self.vals[i]),
-                _ => None,
-            },
-            BindingsName::CaseInsensitive(s) => match self
-                .attrs
-                .iter()
-                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
-            {
-                Some(i) => Some(&self.vals[i]),
-                _ => None,
-            },
+            BindingsName::CaseSensitive(s) => {
+                self.attrs.iter().position(|a| a.as_str() == s.as_ref())
+            }
+            BindingsName::CaseInsensitive(s) => {
+                let target = UniCase::new(&s);
+                self.attrs.iter().position(|a| target == UniCase::new(a))
+            }
         }
     }
 
     #[inline]
     pub fn remove(&mut self, attr: &BindingsName) -> Option<Value> {
-        match attr {
-            BindingsName::CaseSensitive(s) => match self.attrs.iter().position(|a| a.as_str() == s)
-            {
-                Some(i) => {
-                    self.attrs.remove(i);
-                    Some(self.vals.remove(i))
-                }
-                _ => None,
-            },
-            BindingsName::CaseInsensitive(s) => match self
-                .attrs
-                .iter()
-                .position(|a| UniCase::<&String>::from(a) == UniCase::<&String>::from(s))
-            {
-                Some(i) => {
-                    self.attrs.remove(i);
-                    Some(self.vals.remove(i))
-                }
-                _ => None,
-            },
+        match self.find_value(attr) {
+            Some(i) => {
+                self.attrs.remove(i);
+                Some(self.vals.remove(i))
+            }
+            _ => None,
         }
     }
 
     #[inline]
-    pub fn pairs(&self) -> impl Iterator<Item = (&str, &Value)> + Clone {
-        zip(&self.attrs, &self.vals).map(|(k, v)| (k.as_str(), v))
+    pub fn pairs(&self) -> PairsIter {
+        PairsIter(zip(self.attrs.iter(), self.vals.iter()))
     }
 
     #[inline]
-    pub fn into_pairs(self) -> impl Iterator<Item = (String, Value)> {
-        zip(self.attrs, self.vals)
+    pub fn into_pairs(self) -> PairsIntoIter {
+        PairsIntoIter(zip(self.attrs, self.vals))
     }
 
     #[inline]
@@ -121,6 +112,40 @@ impl Tuple {
     #[inline]
     pub fn into_values(self) -> impl Iterator<Item = Value> {
         self.vals.into_iter()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PairsIter<'a>(Zip<std::slice::Iter<'a, String>, std::slice::Iter<'a, Value>>);
+
+impl<'a> Iterator for PairsIter<'a> {
+    type Item = (&'a String, &'a Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PairsIntoIter(Zip<std::vec::IntoIter<String>, std::vec::IntoIter<Value>>);
+
+impl Iterator for PairsIntoIter {
+    type Item = (String, Value);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -160,17 +185,35 @@ where
 impl Iterator for Tuple {
     type Item = (String, Value);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match (self.attrs.pop(), self.vals.pop()) {
             (Some(attr), Some(val)) => Some((attr, val)),
             _ => None,
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.attrs.len(), Some(self.attrs.len()))
+    }
 }
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        self.pairs().sorted().eq(other.pairs().sorted())
+        if self.vals.len() != other.vals.len() {
+            return false;
+        }
+        for ((ls, lv), (rs, rv)) in self.pairs().sorted().zip(other.pairs().sorted()) {
+            if ls != rs {
+                return false;
+            }
+            let wrap = EqualityValue::<true, Value>;
+            if NullableEq::eq(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
+                return false;
+            }
+        }
+        true
     }
 }
 

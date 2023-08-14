@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{List, NullSortedValue, Value};
+use crate::{EqualityValue, List, NullSortedValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +108,7 @@ impl<'a> IntoIterator for &'a Bag {
     type Item = &'a Value;
     type IntoIter = BagIter<'a>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         BagIter(self.0.iter())
     }
@@ -119,8 +120,14 @@ pub struct BagIter<'a>(slice::Iter<'a, Value>);
 impl<'a> Iterator for BagIter<'a> {
     type Item = &'a Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -138,8 +145,14 @@ pub struct BagIntoIterator(vec::IntoIter<Value>);
 impl Iterator for BagIntoIterator {
     type Item = Value;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
@@ -163,10 +176,13 @@ impl PartialEq for Bag {
         if self.len() != other.len() {
             return false;
         }
-
-        let lhs = self.0.iter().sorted();
-        let rhs = other.0.iter().sorted();
-        lhs.zip(rhs).all(|(l, r)| l == r)
+        for (v1, v2) in self.0.iter().sorted().zip(other.0.iter().sorted()) {
+            let wrap = EqualityValue::<true, Value>;
+            if NullableEq::eq(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
+                return false;
+            }
+        }
+        true
     }
 }
 
