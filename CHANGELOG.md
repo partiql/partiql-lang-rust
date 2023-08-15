@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+- *BREAKING:* partiql-value: `BindingsName` changed to hold `Cow<str>` rather than  `String`
 - *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
 - *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
 - *BREAKING:* partiql-value: `Value` trait's `coerce_to_tuple`, `coerece_to_bag`, and `coerce_to_list` methods renamed to `coerce_into_tuple`, `coerece_into_bag`, and `coerece_into_list`.
