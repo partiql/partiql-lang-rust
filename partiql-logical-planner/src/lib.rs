@@ -5,7 +5,7 @@ use partiql_ast_passes::name_resolver::NameResolver;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
-use partiql_catalog::Catalog;
+use partiql_catalog::{Catalog, PartiqlCatalog};
 
 mod builtins;
 mod lower;
@@ -25,7 +25,8 @@ impl<'c> LogicalPlanner<'c> {
         parsed: &Parsed,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let q = &parsed.ast;
-        let mut resolver = NameResolver::default();
+        let catalog = PartiqlCatalog::default();
+        let mut resolver = NameResolver::new(&catalog);
         let registry = resolver.resolve(q)?;
         let planner = AstToLogical::new(self.catalog, registry);
         planner.lower_query(q)
