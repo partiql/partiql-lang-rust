@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-parser: `Parsed` struct's `ast` field is now an `ast::AstNode<ast::TopLevelQuery>`
 - *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
 - *BREAKING:* partiql-logical: changed modeling of `Project` `exprs` to be a `Vec<(String, ValueExpr)>` rather than a `HashMap<String, ValueExpr>` to support multiple project items with the same alias
+- *BREAKING:* partiql-logical: changed modeling of `VarRef` to include a `VarRefType` to indicate whether to do a local vs global binding lookup
 
 ### Added
 - Strict mode evaluation partial support added.
@@ -31,11 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
 - Add `OUTER` bag operator (`OUTER UNION`, `OUTER INTERSECT`, `OUTER EXCEPT`) implementation
 - Add `partiql_logical_planner::typer` for typing PartiQL queries with the initial support for simple SFW queries with `SELECT` and `FROM` clauses only with no operators, JOINs, etc.
+- Add `NullSortedValue` to specify ordering null or missing values `partiql_value::Value`s before or after all other values
+- Implements the aggregation functions `ANY`, `SOME`, `EVERY` and their `COLL_` versions
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
 - partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 - partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
+- partiql-logical-planner add error for when a `HAVING` is included without `GROUP BY`
+- Fixes variable resolution lookup order and excessive lookups
+- Fixes variable resolution of some ORDER BY variables
+- Fixes nested list/bag/tuple type ordering for when `ASC NULLS LAST` and `DESC NULLS FIRST` are specified
 
 ## [0.5.0] - 2023-06-06
 ### Changed

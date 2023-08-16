@@ -20,10 +20,10 @@ use std::ops::ControlFlow;
 #[inline]
 pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
     match (typ.kind(), value) {
+        (_, Value::Null) => true,
+        (_, Value::Missing) => true,
         (TypeKind::Any, _) => true,
         (TypeKind::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
-        (TypeKind::Null, Value::Null) => true,
-        (TypeKind::Missing, Value::Missing) => true,
         (
             TypeKind::Int | TypeKind::Int8 | TypeKind::Int16 | TypeKind::Int32 | TypeKind::Int64,
             Value::Integer(_),
@@ -36,10 +36,18 @@ pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
             Value::String(_),
         ) => true,
         (TypeKind::Struct(_), Value::Tuple(_)) => true,
-        (TypeKind::Bag(_), Value::Bag(_)) => true,
+        (TypeKind::Bag(b_type), Value::Bag(b_values)) => {
+            let bag_element_type = b_type.element_type();
+            let mut b_values = b_values.iter();
+            b_values.all(|b_value| subsumes(bag_element_type, b_value))
+        }
         (TypeKind::DateTime, Value::DateTime(_)) => true,
 
-        (TypeKind::Array(_), Value::List(_)) => true,
+        (TypeKind::Array(a_type), Value::List(l_values)) => {
+            let array_element_type = a_type.element_type();
+            let mut l_values = l_values.iter();
+            l_values.all(|l_value| subsumes(array_element_type, l_value))
+        }
         _ => false,
     }
 }

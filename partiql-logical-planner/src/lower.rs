@@ -17,7 +17,7 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
     LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
-    PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr,
+    PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
 };
 
 use partiql_value::{BindingsName, Value};
@@ -34,7 +34,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use partiql_catalog::Catalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use partiql_logical::AggFunc::{AggAvg, AggCount, AggMax, AggMin, AggSum};
+use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -195,18 +195,19 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
     };
 
     match expr {
-        ValueExpr::VarRef(BindingsName::CaseInsensitive(s)) => insensitive(s.clone()),
-        ValueExpr::VarRef(BindingsName::CaseSensitive(s)) => sensitive(s.clone()),
+        ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.clone()),
+        ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.clone()),
         ValueExpr::Path(_root, steps) => match steps.last() {
             Some(PathComponent::Key(BindingsName::CaseInsensitive(s))) => insensitive(s.clone()),
             Some(PathComponent::Key(BindingsName::CaseSensitive(s))) => sensitive(s.clone()),
             Some(PathComponent::KeyExpr(ke)) => match &**ke {
-                ValueExpr::VarRef(BindingsName::CaseInsensitive(s)) => insensitive(s.clone()),
-                ValueExpr::VarRef(BindingsName::CaseSensitive(s)) => sensitive(s.clone()),
+                ValueExpr::VarRef(BindingsName::CaseInsensitive(s), _) => insensitive(s.clone()),
+                ValueExpr::VarRef(BindingsName::CaseSensitive(s), _) => sensitive(s.clone()),
                 _ => None,
             },
             _ => None,
         },
+        ValueExpr::DynamicLookup(d) => infer_id(d.first().unwrap()),
         _ => None,
     }
 }
@@ -308,12 +309,13 @@ impl<'a> AstToLogical<'a> {
                     .expect("NameRef");
 
                 let var_binding = symprim_to_binding(&name_ref.sym);
-                let var_ref_expr = ValueExpr::VarRef(var_binding.clone());
 
                 let mut lookups = vec![];
                 for lookup in &name_ref.lookup {
                     match lookup {
                         name_resolver::NameLookup::Global => {
+                            let var_ref_expr =
+                                ValueExpr::VarRef(var_binding.clone(), VarRefType::Global);
                             if !lookups.contains(&var_ref_expr) {
                                 lookups.push(var_ref_expr.clone())
                             }
@@ -331,37 +333,75 @@ impl<'a> AstToLogical<'a> {
                                     ))
                                 });
                                 if let Some(_matching) = exact.next() {
+                                    let var_ref_expr =
+                                        ValueExpr::VarRef(var_binding.clone(), VarRefType::Local);
                                     lookups.push(var_ref_expr);
-                                    break;
+                                    continue;
                                 }
 
                                 for scope in scopes {
                                     for produce in &scope.produce {
                                         if let name_resolver::Symbol::Known(sym) = produce {
-                                            if sym == &varref.name {
+                                            if (sym == &varref.name)
+                                                || (sym.value.to_lowercase()
+                                                    == varref.name.value.to_lowercase()
+                                                    && varref.name.case
+                                                        == ast::CaseSensitivity::CaseInsensitive)
+                                            {
                                                 let expr = ValueExpr::VarRef(
                                                     sym_to_binding(produce).unwrap_or_else(|| {
                                                         symprim_to_binding(&self.gen_id())
                                                     }),
+                                                    VarRefType::Local,
                                                 );
                                                 if !lookups.contains(&expr) {
                                                     lookups.push(expr);
                                                 }
                                                 continue;
-                                            }
-                                        }
-                                        // else
-                                        let path = logical::ValueExpr::Path(
-                                            Box::new(ValueExpr::VarRef(
-                                                sym_to_binding(produce).unwrap_or_else(|| {
-                                                    symprim_to_binding(&self.gen_id())
-                                                }),
-                                            )),
-                                            vec![PathComponent::Key(var_binding.clone())],
-                                        );
+                                            } else {
+                                                let path = logical::ValueExpr::Path(
+                                                    Box::new(ValueExpr::VarRef(
+                                                        sym_to_binding(produce).unwrap_or_else(
+                                                            || symprim_to_binding(&self.gen_id()),
+                                                        ),
+                                                        VarRefType::Local,
+                                                    )),
+                                                    vec![PathComponent::Key(var_binding.clone())],
+                                                );
 
-                                        if !lookups.contains(&path) {
-                                            lookups.push(path)
+                                                if !lookups.contains(&path) {
+                                                    lookups.push(path)
+                                                }
+                                            }
+                                        } else if let name_resolver::Symbol::Unknown(num) = produce
+                                        {
+                                            let formatted_num = format!("_{}", num);
+                                            if formatted_num == varref.name.value {
+                                                let expr = ValueExpr::VarRef(
+                                                    BindingsName::CaseInsensitive(formatted_num),
+                                                    VarRefType::Local,
+                                                );
+                                                if !lookups.contains(&expr) {
+                                                    lookups.push(expr);
+                                                    continue;
+                                                }
+                                            } else {
+                                                let path = logical::ValueExpr::Path(
+                                                    Box::new(ValueExpr::VarRef(
+                                                        sym_to_binding(produce).unwrap_or({
+                                                            BindingsName::CaseInsensitive(
+                                                                formatted_num,
+                                                            )
+                                                        }),
+                                                        VarRefType::Local,
+                                                    )),
+                                                    vec![PathComponent::Key(var_binding.clone())],
+                                                );
+
+                                                if !lookups.contains(&path) {
+                                                    lookups.push(path)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -376,7 +416,7 @@ impl<'a> AstToLogical<'a> {
         // TODO in the presence of schema, error if the variable reference doesn't correspond to a data table
 
         // assume global
-        ValueExpr::VarRef(symprim_to_binding(&varref.name))
+        ValueExpr::VarRef(symprim_to_binding(&varref.name), VarRefType::Global)
     }
 
     #[inline]
@@ -459,7 +499,7 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_path(&mut self) {
         self.path_stack.push(vec![]);
-        self.ctx_stack.push(QueryContext::Path);
+        self.ctx_stack.push(QueryContext::Query);
     }
 
     #[inline]
@@ -707,8 +747,13 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_select(&mut self, _select: &'ast Select) -> Traverse {
-        Traverse::Continue
+    fn enter_select(&mut self, select: &'ast Select) -> Traverse {
+        if select.having.is_some() && select.group_by.is_none() {
+            self.errors.push(AstTransformError::HavingWithoutGroupBy);
+            Traverse::Stop
+        } else {
+            Traverse::Continue
+        }
     }
 
     fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
@@ -984,7 +1029,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let call_expr = self
             .fnsym_tab
             .lookup(&name)
-            .map(|cd| call_def_to_vexpr(cd))
+            .map(call_def_to_vexpr)
             .or_else(|| {
                 self.catalog
                     .get_function(&name)
@@ -1122,7 +1167,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         //      SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a
         let new_name = "$__agg".to_owned() + &self.agg_id.id();
         let new_binding_name = BindingsName::CaseSensitive(new_name.clone());
-        let new_expr = ValueExpr::VarRef(new_binding_name);
+        let new_expr = ValueExpr::VarRef(new_binding_name, VarRefType::Local);
         self.push_vexpr(new_expr);
 
         true_or_fault!(self, !env.is_empty(), "env is empty");
@@ -1172,6 +1217,18 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 func: AggSum,
                 setq,
             },
+            "any" | "some" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggAny,
+                setq,
+            },
+            "every" => AggregateExpression {
+                name: new_name,
+                expr: arg,
+                func: AggEvery,
+                setq,
+            },
             _ => {
                 // Include as an error but allow lowering to proceed for multiple error reporting
                 self.errors
@@ -1206,15 +1263,11 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) -> Traverse {
-        let is_from_path = matches!(self.current_ctx(), Some(QueryContext::FromLet));
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
-        let should_resolve = !is_from_path && !is_path;
-
-        if should_resolve {
+        if !is_path {
             let options = self.resolve_varref(_var_ref);
             self.push_vexpr(options);
         } else {
-            // TODO scope qualifier
             let VarRef {
                 name: SymbolPrimitive { value, case },
                 qualifier: _,
@@ -1223,7 +1276,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 CaseSensitivity::CaseSensitive => BindingsName::CaseSensitive(value.clone()),
                 CaseSensitivity::CaseInsensitive => BindingsName::CaseInsensitive(value.clone()),
             };
-            self.push_vexpr(ValueExpr::VarRef(name));
+            self.push_vexpr(ValueExpr::VarRef(name, VarRefType::Local));
         }
         Traverse::Continue
     }
@@ -1250,8 +1303,20 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
-        if let PathStep::PathExpr(_) = _path_step {
+        if let PathStep::PathExpr(expr) = _path_step {
             self.enter_env();
+            match *(expr.index) {
+                Expr::VarRef(_) => {
+                    // covers case of var refs along path: a.b.c <-- the "b" and "c" in "a.b.c" are local lookups only
+                    let qc = self.ctx_stack.last_mut().unwrap();
+                    *qc = QueryContext::Path;
+                }
+                _ => {
+                    // covers case of a.b[c + 1] <-- the "c" in "c + 1" could be a dynamic lookup
+                    let qc = self.ctx_stack.last_mut().unwrap();
+                    *qc = QueryContext::Query;
+                }
+            }
         }
         Traverse::Continue
     }
@@ -1273,7 +1338,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                             Box::new(expr),
                         ))),
                     },
-                    ValueExpr::VarRef(name) => logical::PathComponent::Key(name),
+                    ValueExpr::VarRef(name, _) => logical::PathComponent::Key(name),
                     expr => {
                         // TODO if type is statically STRING, then use KeyExpr
                         logical::PathComponent::IndexExpr(Box::new(expr))
@@ -1544,7 +1609,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             for (alias, expr) in select_clause_exprs.iter_mut() {
                 if *expr == value {
                     let new_binding_name = BindingsName::CaseSensitive(alias.clone());
-                    let new_expr = ValueExpr::VarRef(new_binding_name);
+                    let new_expr = ValueExpr::VarRef(new_binding_name, VarRefType::Local);
                     *expr = new_expr
                 }
             }

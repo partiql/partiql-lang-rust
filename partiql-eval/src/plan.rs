@@ -7,15 +7,15 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
     LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
-    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr,
+    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
 
 use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
 use crate::eval::evaluable::{
-    Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
+    Any, Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
     EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, EvalSubQueryExpr,
-    Evaluable, Max, Min, Sum,
+    Evaluable, Every, Max, Min, Sum,
 };
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
@@ -259,6 +259,12 @@ impl<'c> EvaluatorPlanner<'c> {
                             (AggFunc::AggSum, logical::SetQuantifier::All) => {
                                 eval::evaluable::AggFunc::Sum(Sum::new_all())
                             }
+                            (AggFunc::AggAny, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::Any(Any::new_all())
+                            }
+                            (AggFunc::AggEvery, logical::SetQuantifier::All) => {
+                                eval::evaluable::AggFunc::Every(Every::new_all())
+                            }
                             (AggFunc::AggAvg, logical::SetQuantifier::Distinct) => {
                                 eval::evaluable::AggFunc::Avg(Avg::new_distinct())
                             }
@@ -273,6 +279,12 @@ impl<'c> EvaluatorPlanner<'c> {
                             }
                             (AggFunc::AggSum, logical::SetQuantifier::Distinct) => {
                                 eval::evaluable::AggFunc::Sum(Sum::new_distinct())
+                            }
+                            (AggFunc::AggAny, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::Any(Any::new_distinct())
+                            }
+                            (AggFunc::AggEvery, logical::SetQuantifier::Distinct) => {
+                                eval::evaluable::AggFunc::Every(Every::new_distinct())
                             }
                         };
                         eval::evaluable::AggregateExpression {
@@ -426,9 +438,13 @@ impl<'c> EvaluatorPlanner<'c> {
                         .collect(),
                 }) as Box<dyn EvalExpr>),
             ),
-            ValueExpr::VarRef(name) => (
+            ValueExpr::VarRef(name, var_ref_type) => (
                 "var ref",
-                Ok(Box::new(EvalVarRef { name: name.clone() }) as Box<dyn EvalExpr>),
+                match var_ref_type {
+                    VarRefType::Global => EvalVarRef::Global(name.clone()),
+                    VarRefType::Local => EvalVarRef::Local(name.clone()),
+                }
+                .bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr
@@ -714,6 +730,14 @@ impl<'c> EvaluatorPlanner<'c> {
                     CallName::CollSum(setq) => (
                         "coll_sum",
                         EvalCollFn::Sum(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollAny(setq) => (
+                        "coll_any",
+                        EvalCollFn::Any(setq.into()).bind::<{ STRICT }>(args),
+                    ),
+                    CallName::CollEvery(setq) => (
+                        "coll_every",
+                        EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
                     ),
                     CallName::ByName(name) => match self.catalog.get_function(name) {
                         None => {

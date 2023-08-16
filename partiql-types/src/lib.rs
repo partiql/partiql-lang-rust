@@ -276,7 +276,7 @@ impl PartiqlType {
         match (self.0, other.0) {
             (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
             (TypeKind::AnyOf(lhs), TypeKind::AnyOf(rhs)) => {
-                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types.into_iter()))
+                PartiqlType::any_of(lhs.types.into_iter().chain(rhs.types))
             }
             (TypeKind::AnyOf(anyof), other) | (other, TypeKind::AnyOf(anyof)) => {
                 let mut types = anyof.types;
@@ -474,10 +474,7 @@ impl ArrayType {
         }
     }
 
-    pub fn new_constrained(
-        typ: Box<PartiqlType>,
-        constraints: Vec<ArrayConstraint>,
-    ) -> Self {
+    pub fn new_constrained(typ: Box<PartiqlType>, constraints: Vec<ArrayConstraint>) -> Self {
         ArrayType {
             element_type: typ,
             constraints,

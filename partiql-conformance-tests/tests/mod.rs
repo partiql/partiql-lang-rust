@@ -161,10 +161,7 @@ pub(crate) fn eval<'a>(
 
     let parsed = parse(statement)?;
     let lowered = lower(&catalog, &parsed)?;
-    let bindings = env
-        .as_ref()
-        .map(|e| (&e.value).into())
-        .unwrap_or_else(MapBindings::default);
+    let bindings = env.as_ref().map(|e| (&e.value).into()).unwrap_or_default();
     let plan = compile(mode, &catalog, lowered)?;
     Ok(evaluate(plan, bindings)?)
 }

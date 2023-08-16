@@ -11,7 +11,7 @@
 //!
 /// # Examples
 /// ```
-/// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr};
+/// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr, VarRefType};
 /// use partiql_value::{BindingsName, Value};
 ///
 /// // Plan for `SELECT VALUE 2*v.a FROM [{'a': 1}, {'a': 2}, {'a': 3}] AS v`
@@ -19,7 +19,7 @@
 /// let mut p: LogicalPlan<BindingsOp> = LogicalPlan::new();
 ///
 /// let from = p.add_operator(BindingsOp::Scan(Scan {
-///     expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into())),
+///     expr: ValueExpr::VarRef(BindingsName::CaseInsensitive("data".into()), VarRefType::Global),
 ///     as_key: "v".to_string(),
 ///     at_key: None,
 /// }));
@@ -27,7 +27,7 @@
 /// let va = ValueExpr::Path(
 ///     Box::new(ValueExpr::VarRef(BindingsName::CaseInsensitive(
 ///         "v".into(),
-///     ))),
+///     ), VarRefType::Local)),
 ///     vec![PathComponent::Key(BindingsName::CaseInsensitive("a".to_string()))],
 /// );
 ///
@@ -359,6 +359,10 @@ pub enum AggFunc {
     AggMin,
     /// Represents SQL's `SUM` aggregation function
     AggSum,
+    /// Represents SQL's `ANY`/`SOME` aggregation function
+    AggAny,
+    /// Represents SQL's `EVERY` aggregation function
+    AggEvery,
 }
 
 /// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
@@ -411,7 +415,7 @@ pub enum ValueExpr {
     Lit(Box<Value>),
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
-    VarRef(BindingsName),
+    VarRef(BindingsName, VarRefType),
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),
@@ -684,6 +688,8 @@ pub enum CallName {
     CollMax(SetQuantifier),
     CollMin(SetQuantifier),
     CollSum(SetQuantifier),
+    CollAny(SetQuantifier),
+    CollEvery(SetQuantifier),
     ByName(String),
 }
 
@@ -693,6 +699,16 @@ pub enum CallName {
 pub enum SetQuantifier {
     All,
     Distinct,
+}
+
+/// Indicates whether to look in the local/lexical or global environment when resolving a variable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum VarRefType {
+    /// Resolve the variable by looking in the global environment.
+    Global,
+    /// Resolve the variable by looking in the local/lexical scope environment.
+    Local,
 }
 
 #[cfg(test)]

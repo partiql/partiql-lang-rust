@@ -128,7 +128,7 @@ impl<'a> TypeEnvEntry<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeEntry {
     id: ObjectId,
     ty: PartiqlType,
