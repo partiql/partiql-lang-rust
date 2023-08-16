@@ -37,7 +37,9 @@ impl<'c> LogicalPlanner<'c> {
 mod tests {
     use assert_matches::assert_matches;
     use partiql_ast_passes::error::AstTransformationError;
-    use partiql_catalog::PartiqlCatalog;
+    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_types::any;
+    use partiql_catalog::Catalog;
 
     use partiql_eval::env::basic::MapBindings;
 
@@ -59,7 +61,8 @@ mod tests {
     fn lower(
         parsed: &Parsed,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
-        let catalog = PartiqlCatalog::default();
+        let mut catalog = PartiqlCatalog::default();
+        let _oid = catalog.add_type_entry(TypeEnvEntry::new("customer", &[], any!()));
         let planner = LogicalPlanner::new(&catalog);
         planner.lower(parsed)
     }
@@ -67,6 +70,7 @@ mod tests {
     #[track_caller]
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
+
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
