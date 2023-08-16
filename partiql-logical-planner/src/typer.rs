@@ -12,6 +12,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use std::collections::{BTreeSet, HashMap};
 use thiserror::Error;
+use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 
 #[macro_export]
 macro_rules! ty_ctx {
@@ -367,6 +368,13 @@ impl<'c> PlanTyper<'c> {
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
+            ValueExpr::DynamicLookup(v) => {
+                for expr in v.iter() {
+                    dbg!(&self.current_bop());
+                    dbg!(expr);
+                    self.type_vexpr(expr, self.lookup_order(expr))
+                }
+            }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
                 &v
@@ -455,7 +463,7 @@ impl<'c> PlanTyper<'c> {
             Some(any!())
         } else {
             self.errors.push(TypingError::IllegalState(
-                "Absent value found for derived_type".to_string(),
+                format!("Illegal Derive Type {:?}", &derived_type)
             ));
             None
         }
@@ -487,6 +495,21 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
+    fn lookup_order(&self, v: &ValueExpr) -> LookupOrder {
+        match v {
+            ValueExpr::VarRef(_, varef_type) => {
+                match varef_type {
+                    VarRefType::Global => GlobalLocal,
+                    VarRefType::Local => LocalGlobal,
+                }
+            },
+            _ => match self.current_bop() {
+                Some(BindingsOp::Scan(_)) => GlobalLocal,
+                _ => LocalGlobal
+            }
+        }
+    }
+
     fn current_bop(&self) -> Option<&BindingsOp> {
         self.bop_stack.last()
     }
@@ -511,24 +534,24 @@ mod tests {
     #[test]
     fn simple_sfw() {
         // Closed schema with `Strict` typing mode.
-        assert_query_typing(
-            TypingMode::Strict,
-            "SELECT customers.id, customers.name FROM customers",
-            create_customer_schema(
-                false,
-                vec![
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", any!()),
-                ],
-            ),
-            vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-            ],
-        )
-        .expect("Type");
-
+        // assert_query_typing(
+        //     TypingMode::Strict,
+        //     "SELECT customers.id, customers.name FROM customers",
+        //     create_customer_schema(
+        //         false,
+        //         vec![
+        //             StructField::new("id", int!()),
+        //             StructField::new("name", str!()),
+        //             StructField::new("age", any!()),
+        //         ],
+        //     ),
+        //     vec![
+        //         StructField::new("id", int!()),
+        //         StructField::new("name", str!()),
+        //     ],
+        // )
+        // .expect("Type");
+        //
         // // Open schema with `Strict` typing mode and `age` non-existent projection.
         // assert_query_typing(
         //     TypingMode::Strict,
@@ -548,24 +571,24 @@ mod tests {
         //     ],
         // )
         // .expect("Type");
-        // // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
-        // assert_query_typing(
-        //     TypingMode::Permissive,
-        //     "SELECT customers.id, customers.name, customers.age FROM customers",
-        //     create_customer_schema(
-        //         false,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //         ],
-        //     ),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("age", missing!()),
-        //     ],
-        // )
-        // .expect("Type");
+        // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
+        assert_query_typing(
+            TypingMode::Permissive,
+            "SELECT customers.id, customers.name, customers.age FROM customers",
+            create_customer_schema(
+                false,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                ],
+            ),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", missing!()),
+            ],
+        )
+        .expect("Type");
         //
         // // Open Schema with `Strict` typing mode and `age` in nested attribute.
         // let details_fields = struct_fields![("age", int!())];
