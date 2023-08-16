@@ -4,6 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
+use partiql_catalog::Catalog;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
@@ -82,8 +83,8 @@ enum EnclosingClause {
 /// Resolves which clauses in a query produce & consume variable references by walking the
 /// AST and collecting variable references. Also partially infers alias if no `AS` alias
 /// was provided in the query.
-#[derive(Default, Debug)]
-pub struct NameResolver {
+#[derive(Debug)]
+pub struct NameResolver<'c> {
     // environment stack tracking
     id_path_to_root: Vec<ast::NodeId>,
     id_child_stack: Vec<Vec<ast::NodeId>>,
@@ -99,9 +100,31 @@ pub struct NameResolver {
 
     // errors that occur during name resolution
     errors: Vec<AstTransformError>,
+    catalog: &'c dyn Catalog,
 }
 
-impl NameResolver {
+impl<'c> NameResolver<'c> {
+    pub fn new(catalog: &'c dyn Catalog) -> Self {
+        NameResolver {
+            // environment stack tracking
+            id_path_to_root: Default::default(),
+            id_child_stack: Default::default(),
+            keyref_stack: Default::default(),
+            lateral_stack: Default::default(),
+            id_gen: Default::default(),
+
+            // data flow tracking
+            enclosing_clause: Default::default(),
+            in_scope: Default::default(),
+            schema: Default::default(),
+            aliases: Default::default(),
+
+            // errors that occur during name resolution
+            errors: Default::default(),
+            catalog,
+        }
+    }
+
     pub fn resolve(
         &mut self,
         query: &ast::AstNode<ast::TopLevelQuery>,
@@ -188,7 +211,7 @@ impl NameResolver {
     }
 }
 
-impl<'ast> Visitor<'ast> for NameResolver {
+impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
     fn enter_ast_node(&mut self, id: ast::NodeId) -> Traverse {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {
