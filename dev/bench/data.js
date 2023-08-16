@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1692134239349,
+  "lastUpdate": 1692218784858,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -14855,6 +14855,156 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 37177,
             "range": "± 829",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "de1ac1b8ddd1f3b3fb9d0db5d1548557590a3bea",
+          "message": "Add Catalog to NameResolver (#425)\n\nDuring the work for adding a steel thread for PartiQL Typing (Recent PR #389)\r\nand after merging #410 to `feat-type-plan-poc` it is realized that we need to\r\nrefactor the code to remove `DynamicLocalup` `VarExpr` with the assumption that\r\nwe work based off of Typing and Value Environment from the Catalog. We have a\r\nTyping Environment in the Catalog at the moment and we are going to add the\r\nVariable Environment as well. In preparation for such task, we need to make\r\nthe `NameResolver` Catalog aware. In that regard this commit adds the `Catalog`\r\nto `NameResolver`\r\n\r\nExpecting subsequent PR(s) for the name resolving using the Catalog.",
+          "timestamp": "2023-08-16T13:34:17-07:00",
+          "tree_id": "8d7c2b8694104625663f3b73b044eb36b51b071d",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/de1ac1b8ddd1f3b3fb9d0db5d1548557590a3bea"
+        },
+        "date": 1692218783810,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse-1",
+            "value": 6379,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 58268,
+            "range": "± 481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 115399,
+            "range": "± 528",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 6697,
+            "range": "± 74",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 51118,
+            "range": "± 412",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 104724,
+            "range": "± 870",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 79903,
+            "range": "± 462",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1272265,
+            "range": "± 10271",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2546752,
+            "range": "± 14940",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 25896239,
+            "range": "± 537544",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 137386600,
+            "range": "± 603876",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 260612406,
+            "range": "± 1517263",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 16234,
+            "range": "± 123",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 4528,
+            "range": "± 58",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 704,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 63,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 889,
+            "range": "± 42",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2899,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 9043,
+            "range": "± 118",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 24231,
+            "range": "± 309",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 35402,
+            "range": "± 93",
             "unit": "ns/iter"
           }
         ]
