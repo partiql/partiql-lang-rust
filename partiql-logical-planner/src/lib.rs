@@ -36,9 +36,9 @@ impl<'c> LogicalPlanner<'c> {
 mod tests {
     use assert_matches::assert_matches;
     use partiql_ast_passes::error::AstTransformationError;
+    use partiql_catalog::Catalog;
     use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_types::any;
-    use partiql_catalog::Catalog;
 
     use partiql_eval::env::basic::MapBindings;
 
