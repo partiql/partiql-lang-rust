@@ -378,10 +378,10 @@ impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
                             lookup: vec![NameLookup::Global],
                         }
                     } else {
-                        self.errors.push(AstTransformError::IllegalState(format!(
-                            "No schema found for [{:?}] in the Catalog",
-                            &var_ref.name
-                        )));
+                        // self.errors.push(AstTransformError::IllegalState(format!(
+                        //     "No schema found for [{:?}] in the Catalog",
+                        //     &var_ref.name
+                        // )));
                         NameRef {
                             sym: var_ref.name.clone(),
                             lookup: vec![NameLookup::Global],
