@@ -14,15 +14,16 @@ use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
 use crate::eval::evaluable::{
     Any, Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
-    EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, EvalSubQueryExpr,
-    Evaluable, Every, Max, Min, Sum,
+    EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, Evaluable, Every,
+    Max, Min, Sum,
 };
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
     EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
     EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
-    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
-    EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
+    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpIdentity,
+    EvalOpUnary, EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr,
+    EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
@@ -405,6 +406,10 @@ impl<'c> EvaluatorPlanner<'c> {
         };
 
         let (name, bind) = match ve {
+            ValueExpr::Identity => (
+                "identity operator",
+                EvalOpIdentity {}.bind::<{ STRICT }>(vec![]),
+            ),
             ValueExpr::UnExpr(op, operand) => (
                 "unary operator",
                 EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand])),
@@ -510,12 +515,6 @@ impl<'c> EvaluatorPlanner<'c> {
 
                 ("pattern expr", expr)
             }
-            ValueExpr::SubQueryExpr(expr) => (
-                "subquery",
-                Ok(Box::new(EvalSubQueryExpr::new(
-                    self.plan_eval::<{ STRICT }>(&expr.plan),
-                )) as Box<dyn EvalExpr>),
-            ),
             ValueExpr::SimpleCase(e) => {
                 let cases = e
                     .cases
