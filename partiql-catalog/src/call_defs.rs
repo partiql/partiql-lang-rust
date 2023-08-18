@@ -19,6 +19,7 @@ pub enum CallLookupError {
 pub enum CallArgument {
     Positional(ValueExpr),
     Named(String, ValueExpr),
+    Star,
 }
 
 #[derive(Debug)]
