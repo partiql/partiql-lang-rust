@@ -762,6 +762,23 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
+        // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
+        // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
+        if !self.aggregate_exprs.is_empty() && self.current_clauses_mut().group_by_clause.is_none()
+        {
+            let exprs = HashMap::from([(
+                "$__gk".to_string(),
+                ValueExpr::Lit(Box::new(Value::from(true))),
+            )]);
+            let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
+                strategy: logical::GroupingStrategy::GroupFull,
+                exprs,
+                aggregate_exprs: self.aggregate_exprs.clone(),
+                group_as_alias: None,
+            });
+            let id = self.plan.add_operator(group_by);
+            self.current_clauses_mut().group_by_clause.replace(id);
+        }
         Traverse::Continue
     }
 
@@ -1062,7 +1079,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let mut env = self.exit_env();
         match _call_arg {
             CallArg::Star() => {
-                not_yet_implemented_fault!(self, "* as a call argument".to_string());
+                self.push_call_arg(CallArgument::Star);
             }
             CallArg::Positional(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
@@ -1189,6 +1206,10 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     return Traverse::Stop;
                 }
             },
+            CallArgument::Star => (
+                logical::SetQuantifier::All,
+                ValueExpr::Lit(Box::new(Value::Integer(1))),
+            ),
         };
 
         let agg_expr = match name.as_str() {
@@ -1247,23 +1268,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 }
             }
         };
-        self.aggregate_exprs.push(agg_expr);
-        // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
-        // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
-        if self.current_clauses_mut().group_by_clause.is_none() {
-            let exprs = HashMap::from([(
-                "$__gk".to_string(),
-                ValueExpr::Lit(Box::new(Value::from(true))),
-            )]);
-            let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
-                strategy: logical::GroupingStrategy::GroupFull,
-                exprs,
-                aggregate_exprs: self.aggregate_exprs.clone(),
-                group_as_alias: None,
-            });
-            let id = self.plan.add_operator(group_by);
-            self.current_clauses_mut().group_by_clause.replace(id);
-        }
+        self.aggregate_exprs.push(agg_expr.clone());
         Traverse::Continue
     }
 
