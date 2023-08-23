@@ -81,6 +81,50 @@ impl ops::Add for &Value {
     }
 }
 
+impl ops::AddAssign<&Value> for Value {
+    fn add_assign(&mut self, rhs: &Value) {
+        match (self, &rhs) {
+            // TODO: edge cases dealing with overflow
+            (Value::Missing, _) => {}
+            (this, Value::Missing) => *this = Value::Missing,
+            (Value::Null, _) => {}
+            (this, Value::Null) => *this = Value::Null,
+
+            (Value::Integer(l), Value::Integer(r)) => l.add_assign(r),
+
+            (Value::Real(l), Value::Real(r)) => l.add_assign(r),
+            (Value::Real(l), Value::Integer(i)) => l.add_assign(*i as f64),
+
+            (Value::Decimal(l), Value::Decimal(r)) => l.add_assign(r.as_ref()),
+            (Value::Decimal(l), Value::Integer(i)) => l.add_assign(rust_decimal::Decimal::from(*i)),
+            (Value::Decimal(l), Value::Real(r)) => match coerce_f64_to_decimal(r) {
+                Some(d) => l.add_assign(d),
+                None => todo!(),
+            },
+
+            (this, Value::Real(r)) => {
+                *this = match &this {
+                    Value::Integer(l) => Value::from((*l as f64) + r.0),
+                    _ => Value::Missing,
+                };
+            }
+            (this, Value::Decimal(r)) => {
+                *this = match &this {
+                    Value::Integer(l) => {
+                        Value::Decimal(Box::new(rust_decimal::Decimal::from(*l) + r.as_ref()))
+                    }
+                    Value::Real(l) => match coerce_f64_to_decimal(&l.0) {
+                        None => Value::Missing,
+                        Some(d) => Value::Decimal(Box::new(d + r.as_ref())),
+                    },
+                    _ => Value::Missing,
+                };
+            }
+            (this, _) => *this = Value::Missing, // data type mismatch => Missing
+        }
+    }
+}
+
 impl ops::Sub for &Value {
     type Output = Value;
 
@@ -487,6 +531,14 @@ impl NullableOrd for Value {
                 }
             }
         }
+    }
+}
+
+fn coerce_f64_to_decimal(real_value: &f64) -> Option<Decimal> {
+    if !real_value.is_finite() {
+        None
+    } else {
+        Decimal::from_f64(*real_value)
     }
 }
 
