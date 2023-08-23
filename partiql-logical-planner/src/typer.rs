@@ -1,3 +1,4 @@
+use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 use indexmap::IndexMap;
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
@@ -12,7 +13,6 @@ use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
 use std::collections::{BTreeSet, HashMap};
 use thiserror::Error;
-use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 
 #[macro_export]
 macro_rules! ty_ctx {
@@ -62,7 +62,7 @@ pub enum TypingMode {
 enum LookupOrder {
     GlobalLocal,
     LocalGlobal,
-    // Lazy,
+    Dynamic,
 }
 
 /// Represents a type environment context
@@ -159,7 +159,7 @@ impl<'c> PlanTyper<'c> {
             }
         }
 
-        dbg!(&self.type_env_stack);
+        // dbg!(&self.type_env_stack);
 
         if self.errors.is_empty() {
             Ok(self.output.clone().unwrap_or(undefined!()))
@@ -174,7 +174,7 @@ impl<'c> PlanTyper<'c> {
         self.bop_stack.push(op.clone());
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
-                self.type_vexpr(expr, LookupOrder::GlobalLocal);
+                self.type_vexpr(expr, LookupOrder::Dynamic);
                 let type_ctx = &self.local_type_env();
                 for (name, ty) in type_ctx.env().iter() {
                     let derived_type = self.element_type(ty);
@@ -270,7 +270,7 @@ impl<'c> PlanTyper<'c> {
         }
 
         match v {
-            ValueExpr::VarRef(binding_name, varef_type) => {
+            ValueExpr::VarRef(binding_name, _) => {
                 let sym = binding_to_sym(binding_name);
 
                 match lookup_order {
@@ -279,18 +279,13 @@ impl<'c> PlanTyper<'c> {
                         let ty = self.element_type(&ty);
                         if ty.is_undefined() {
                             match &self.typing_mode {
+                                // TODO remove duplicate
                                 TypingMode::Permissive => {
                                     let type_ctx = ty_ctx![(&ty_env![(sym, missing!())], &ty)];
 
                                     self.type_env_stack.push(type_ctx);
                                 }
-                                TypingMode::Strict => {
-                                    // dbg!("GlobalLocal");
-                                    // self.errors.push(TypingError::TypeCheck(format!(
-                                    //     "No Typing Information for {:?}",
-                                    //     &sym
-                                    // )));
-                                }
+                                _ => {}
                             }
                         } else {
                             let mut new_type_env = LocalTypeEnv::new();
@@ -306,11 +301,6 @@ impl<'c> PlanTyper<'c> {
                                 let type_ctx = ty_ctx![(&new_type_env, &ty)];
                                 self.type_env_stack.push(type_ctx);
                             }
-
-
-                            // let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(&ty))], &ty)];
-                            //
-                            // self.type_env_stack.push(type_ctx);
                         }
                     }
                     LookupOrder::LocalGlobal => {
@@ -323,13 +313,7 @@ impl<'c> PlanTyper<'c> {
 
                                     self.type_env_stack.push(type_ctx);
                                 }
-                                TypingMode::Strict => {
-                                    // dbg!("LocalGlobal");
-                                    // self.errors.push(TypingError::TypeCheck(format!(
-                                    //     "No Typing Information for {:?}",
-                                    //     &sym
-                                    // )));
-                                }
+                                TypingMode::Strict => {}
                             }
                         } else {
                             let mut new_type_env = LocalTypeEnv::new();
@@ -346,49 +330,12 @@ impl<'c> PlanTyper<'c> {
                                 self.type_env_stack.push(type_ctx);
                             }
                         }
-
-                        // for type_ctx in self.type_env_stack.clone().into_iter().rev() {
-                        //     if let Some(ty) = type_ctx.env().get(&sym) {
-                        //         let mut new_type_env = LocalTypeEnv::new();
-                        //         if let TypeKind::Struct(s) = ty.kind() {
-                        //             to_bindings(s).into_iter().for_each(|b| {
-                        //                 new_type_env.insert(b.0, b.1);
-                        //             });
-                        //
-                        //             let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(ty))], ty)];
-                        //         } else {
-                        //             new_type_env.insert(sym, ty.clone());
-                        //         }
-                        //
-                        //         let derived_type = self.derived_type(&type_ctx);
-                        //         let new_ty = self.element_type(&derived_type);
-                        //         let type_ctx = ty_ctx![(&new_type_env, &new_ty)];
-                        //         self.type_env_stack.push(type_ctx);
-                        //         break;
-                        //     }
-                        // }
-                        // LookupOrder::Lazy => {
-                        //     match varef_type  {
-                        //         VarRefType::Global => {}
-                        //         VarRefType::Local => {}
-                        //     }
-                        // }
                     }
+                    LookupOrder::Dynamic => self.type_vexpr(v, self.lookup_order(v)),
                 }
             }
             ValueExpr::Path(v, components) => {
-                if let Some(op) = self.current_binding_op() {
-                    match op {
-                        BindingsOp::Scan(_) => self.type_vexpr(v, LookupOrder::GlobalLocal),
-                        _ => self.type_vexpr(v, LookupOrder::LocalGlobal),
-                    }
-                } else {
-                    self.errors.push(TypingError::IllegalState(format!(
-                        "Ended up in no operator in type checking path expression: {:?}, {:?}",
-                        &v, &components,
-                    )));
-                }
-                // self.type_vexpr(v, LookupOrder::LocalGlobal);
+                self.type_vexpr(v, LookupOrder::Dynamic);
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
@@ -445,7 +392,6 @@ impl<'c> PlanTyper<'c> {
                 }
 
                 let expr = &v[0];
-
                 self.type_vexpr(expr, self.lookup_order(expr))
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
@@ -506,10 +452,6 @@ impl<'c> PlanTyper<'c> {
         let env = type_ctx.env().clone();
         let derived_type = self.derived_type(&type_ctx);
 
-        if key == "bar" {
-            dbg!(key);
-        }
-
         if let Some(ty) = env.get(&string_to_sym(key)) {
             Some(ty.clone())
         } else if let TypeKind::Struct(s) = derived_type.kind() {
@@ -530,9 +472,10 @@ impl<'c> PlanTyper<'c> {
         } else if derived_type.is_any() {
             Some(any!())
         } else {
-            self.errors.push(TypingError::IllegalState(
-                format!("Illegal Derive Type {:?}", &derived_type)
-            ));
+            self.errors.push(TypingError::IllegalState(format!(
+                "Illegal Derive Type {:?}",
+                &derived_type
+            )));
             None
         }
     }
@@ -559,16 +502,14 @@ impl<'c> PlanTyper<'c> {
 
     fn lookup_order(&self, v: &ValueExpr) -> LookupOrder {
         match v {
-            ValueExpr::VarRef(_, varef_type) => {
-                match varef_type {
-                    VarRefType::Global => GlobalLocal,
-                    VarRefType::Local => LocalGlobal,
-                }
+            ValueExpr::VarRef(_, varef_type) => match varef_type {
+                VarRefType::Global => GlobalLocal,
+                VarRefType::Local => LocalGlobal,
             },
             _ => match self.current_binding_op() {
                 Some(BindingsOp::Scan(_)) => GlobalLocal,
-                _ => LocalGlobal
-            }
+                _ => LocalGlobal,
+            },
         }
     }
 
@@ -590,9 +531,7 @@ impl<'c> PlanTyper<'c> {
                     ty.clone()
                 }
             }
-            false => {
-                ty
-            }
+            false => ty,
         }
     }
 
@@ -610,9 +549,7 @@ impl<'c> PlanTyper<'c> {
                     ty.clone()
                 }
             }
-            false => {
-                ty
-            }
+            false => ty,
         }
     }
 
@@ -811,7 +748,10 @@ mod tests {
 
         // Closed Schema with `Strict` typing mode and `bar` non-existent projection from closed nested `details`.
         let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![BTreeSet::from([details_fields, StructConstraint::Open(false)])];
+        let details = r#struct![BTreeSet::from([
+            details_fields,
+            StructConstraint::Open(false)
+        ])];
         assert_err(
             assert_query_typing(
                 TypingMode::Strict,
