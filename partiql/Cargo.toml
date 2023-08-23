@@ -38,3 +38,7 @@ rand = "0.8"
 [[bench]]
 name = "bench_eval_multi_like"
 harness = false
+
+[[bench]]
+name = "bench_agg"
+harness = false
