@@ -1,4 +1,4 @@
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
 
@@ -13,9 +13,9 @@ use partiql_logical::{
 use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
 use crate::eval::evaluable::{
-    Any, Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy, EvalOrderBySortCondition,
-    EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect, EvalOuterUnion, EvalSubQueryExpr,
-    Evaluable, Every, Max, Min, Sum,
+    AggregateFunction, Any, Avg, Count, EvalGroupingStrategy, EvalJoinKind, EvalOrderBy,
+    EvalOrderBySortCondition, EvalOrderBySortSpec, EvalOuterExcept, EvalOuterIntersect,
+    EvalOuterUnion, EvalSubQueryExpr, Evaluable, Every, Max, Min, Sum,
 };
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
@@ -236,72 +236,43 @@ impl<'c> EvaluatorPlanner<'c> {
                     GroupingStrategy::GroupFull => EvalGroupingStrategy::GroupFull,
                     GroupingStrategy::GroupPartial => EvalGroupingStrategy::GroupPartial,
                 };
-                let exprs: HashMap<_, _> = exprs
+                let (aliases, exprs): (Vec<String>, Vec<Box<dyn EvalExpr>>) = exprs
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
-                    .collect();
-                let aggregate_exprs = aggregate_exprs
-                    .iter()
-                    .map(|a_e| {
-                        let func = match (a_e.func.clone(), a_e.setq.clone()) {
-                            (AggFunc::AggAvg, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Avg(Avg::new_all())
-                            }
-                            (AggFunc::AggCount, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Count(Count::new_all())
-                            }
-                            (AggFunc::AggMax, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Max(Max::new_all())
-                            }
-                            (AggFunc::AggMin, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Min(Min::new_all())
-                            }
-                            (AggFunc::AggSum, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Sum(Sum::new_all())
-                            }
-                            (AggFunc::AggAny, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Any(Any::new_all())
-                            }
-                            (AggFunc::AggEvery, logical::SetQuantifier::All) => {
-                                eval::evaluable::AggFunc::Every(Every::new_all())
-                            }
-                            (AggFunc::AggAvg, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Avg(Avg::new_distinct())
-                            }
-                            (AggFunc::AggCount, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Count(Count::new_distinct())
-                            }
-                            (AggFunc::AggMax, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Max(Max::new_distinct())
-                            }
-                            (AggFunc::AggMin, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Min(Min::new_distinct())
-                            }
-                            (AggFunc::AggSum, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Sum(Sum::new_distinct())
-                            }
-                            (AggFunc::AggAny, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Any(Any::new_distinct())
-                            }
-                            (AggFunc::AggEvery, logical::SetQuantifier::Distinct) => {
-                                eval::evaluable::AggFunc::Every(Every::new_distinct())
-                            }
-                        };
-                        eval::evaluable::AggregateExpression {
-                            name: a_e.name.to_string(),
-                            expr: self.plan_value::<{ STRICT }>(&a_e.expr),
-                            func,
-                        }
-                    })
-                    .collect();
+                    .unzip();
+
+                let mut plan_agg = |a_e: &logical::AggregateExpression| {
+                    let func = match &a_e.func {
+                        AggFunc::AggAvg => Box::new(Avg {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggCount => Box::new(Count {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggMax => Box::new(Max {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggMin => Box::new(Min {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggSum => Box::new(Sum {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggAny => Box::new(Any {}) as Box<dyn AggregateFunction>,
+                        AggFunc::AggEvery => Box::new(Every {}) as Box<dyn AggregateFunction>,
+                    };
+                    eval::evaluable::AggregateExpression {
+                        name: a_e.name.to_string(),
+                        expr: self.plan_value::<{ STRICT }>(&a_e.expr),
+                        func,
+                    }
+                };
+
+                let (aggs, distinct_aggs) =
+                    aggregate_exprs.iter().partition_map(|ae| match ae.setq {
+                        SetQuantifier::All => Either::Left(plan_agg(ae)),
+                        SetQuantifier::Distinct => Either::Right(plan_agg(ae)),
+                    });
+
                 let group_as_alias = group_as_alias.as_ref().map(|alias| alias.to_string());
-                Box::new(eval::evaluable::EvalGroupBy {
+                Box::new(eval::evaluable::EvalGroupBy::new(
                     strategy,
                     exprs,
-                    aggregate_exprs,
+                    aliases,
+                    aggs,
+                    distinct_aggs,
                     group_as_alias,
-                    input: None,
-                })
+                ))
             }
             BindingsOp::ExprQuery(logical::ExprQuery { expr }) => {
                 let expr = self.plan_value::<{ STRICT }>(expr);

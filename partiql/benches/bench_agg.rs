@@ -14,7 +14,7 @@ use partiql_parser::{Parser, ParserResult};
 use partiql_value::{tuple, Bag, Value};
 
 fn numbers() -> impl Iterator<Item = Value> {
-    (0..1000i64).into_iter().map(|n| Value::from(n))
+    (0..1000i64).map(Value::from)
 }
 
 fn data() -> MapBindings<Value> {
@@ -26,7 +26,6 @@ fn data() -> MapBindings<Value> {
     .into_iter()
     .cycle();
     let numbers: Bag = numbers()
-        .into_iter()
         .map(|n| tuple![("shard", shards.next().unwrap()), ("n", n)])
         .collect();
     let data = tuple![("numbers", numbers)];
@@ -115,12 +114,10 @@ fn create_tests() -> Vec<(String, String)> {
         .map(|(a, d)| create_query(&vec![(a, *d)], false, false));
 
     let aggs_all = aggs
-        .clone()
         .into_iter()
         .cartesian_product([false].into_iter())
         .collect_vec();
     let aggs_distinct = aggs
-        .clone()
         .into_iter()
         .cartesian_product([true].into_iter())
         .collect_vec();
