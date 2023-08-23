@@ -62,6 +62,7 @@ pub enum TypingMode {
 enum LookupOrder {
     GlobalLocal,
     LocalGlobal,
+    // Lazy,
 }
 
 /// Represents a type environment context
@@ -154,9 +155,11 @@ impl<'c> PlanTyper<'c> {
         for idx in ops {
             let graph = self.to_stable_graph()?;
             if let Some(binop) = graph.node_weight(idx) {
-                self.type_binop(binop)
+                self.type_bindings_op(binop)
             }
         }
+
+        // dbg!(&self.type_env_stack);
 
         if self.errors.is_empty() {
             Ok(self.output.clone().unwrap_or(undefined!()))
@@ -167,7 +170,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn type_binop(&mut self, op: &BindingsOp) {
+    fn type_bindings_op(&mut self, op: &BindingsOp) {
         self.bop_stack.push(op.clone());
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
@@ -267,49 +270,98 @@ impl<'c> PlanTyper<'c> {
         }
 
         match v {
-            ValueExpr::VarRef(binding_name, _) => {
+            ValueExpr::VarRef(binding_name, varef_type) => {
                 let sym = binding_to_sym(binding_name);
-                let name = sym.clone().value;
 
                 match lookup_order {
                     LookupOrder::GlobalLocal => {
-                        if let Some(type_entry) = self.catalog.resolve_type(name.as_str()) {
-                            let ty = type_entry.ty();
-                            let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(ty))], ty)];
+                        let ty = self.resolve_global_then_local(&sym);
+                        if ty.is_undefined() {
+                            match &self.typing_mode {
+                                TypingMode::Permissive => {
+                                    let type_ctx = ty_ctx![(&ty_env![(sym, missing!())], &ty)];
+
+                                    self.type_env_stack.push(type_ctx);
+                                }
+                                TypingMode::Strict => {
+                                    dbg!("GlobalLocal");
+                                    self.errors.push(TypingError::TypeCheck(format!(
+                                        "No Typing Information for {:?}",
+                                        &sym
+                                    )));
+                                }
+                            }
+                        } else {
+                            let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(&ty))], &ty)];
 
                             self.type_env_stack.push(type_ctx);
-                        } else {
-                            self.errors.push(TypingError::NotYetImplemented(
-                                "Local Lookup after unsuccessful Global lookup".to_string(),
-                            ));
                         }
                     }
                     LookupOrder::LocalGlobal => {
-                        for type_ctx in self.type_env_stack.clone().into_iter().rev() {
-                            if let Some(ty) = type_ctx.env().get(&sym) {
-                                let mut new_type_env = LocalTypeEnv::new();
-                                if let TypeKind::Struct(s) = ty.kind() {
-                                    to_bindings(s).into_iter().for_each(|b| {
-                                        new_type_env.insert(b.0, b.1);
-                                    });
-                                } else {
-                                    new_type_env.insert(sym, ty.clone());
-                                }
+                        let ty = self.resolve_local_then_global(&sym);
 
-                                let derived_type = self.derived_type(&type_ctx);
-                                let new_ty = self.element_type(&derived_type);
-                                let type_ctx = ty_ctx![(&new_type_env, &new_ty)];
+                        if ty.is_undefined() {
+                            match &self.typing_mode {
+                                TypingMode::Permissive => {
+                                    let type_ctx = ty_ctx![(&ty_env![(sym, missing!())], &ty)];
+
+                                    self.type_env_stack.push(type_ctx);
+                                }
+                                TypingMode::Strict => {
+                                    dbg!("LocalGlobal");
+                                    self.errors.push(TypingError::TypeCheck(format!(
+                                        "No Typing Information for {:?}",
+                                        &sym
+                                    )));
+                                }
+                            }
+                        } else {
+                            let mut new_type_env = LocalTypeEnv::new();
+                            if let TypeKind::Struct(s) = ty.kind() {
+                                to_bindings(s).into_iter().for_each(|b| {
+                                    new_type_env.insert(b.0, b.1);
+                                });
+
+                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
                                 self.type_env_stack.push(type_ctx);
-                                break;
+                            } else {
+                                new_type_env.insert(sym, ty.clone());
+                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
+                                self.type_env_stack.push(type_ctx);
                             }
                         }
 
-
+                        // for type_ctx in self.type_env_stack.clone().into_iter().rev() {
+                        //     if let Some(ty) = type_ctx.env().get(&sym) {
+                        //         let mut new_type_env = LocalTypeEnv::new();
+                        //         if let TypeKind::Struct(s) = ty.kind() {
+                        //             to_bindings(s).into_iter().for_each(|b| {
+                        //                 new_type_env.insert(b.0, b.1);
+                        //             });
+                        //
+                        //             let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(ty))], ty)];
+                        //         } else {
+                        //             new_type_env.insert(sym, ty.clone());
+                        //         }
+                        //
+                        //         let derived_type = self.derived_type(&type_ctx);
+                        //         let new_ty = self.element_type(&derived_type);
+                        //         let type_ctx = ty_ctx![(&new_type_env, &new_ty)];
+                        //         self.type_env_stack.push(type_ctx);
+                        //         break;
+                        //     }
+                        // }
+                        // LookupOrder::Lazy => {
+                        //     match varef_type  {
+                        //         VarRefType::Global => {}
+                        //         VarRefType::Local => {}
+                        //     }
+                        // }
                     }
                 }
             }
             ValueExpr::Path(v, components) => {
-                if let Some(op) = self.current_bop() {
+                if let Some(op) = self.current_binding_op() {
                     match op {
                         BindingsOp::Scan(_) => self.type_vexpr(v, LookupOrder::GlobalLocal),
                         _ => self.type_vexpr(v, LookupOrder::LocalGlobal),
@@ -369,11 +421,16 @@ impl<'c> PlanTyper<'c> {
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
             ValueExpr::DynamicLookup(v) => {
-                for expr in v.iter() {
-                    dbg!(&self.current_bop());
-                    dbg!(expr);
-                    self.type_vexpr(expr, self.lookup_order(expr))
+                if v.is_empty() {
+                    self.errors.push(TypingError::IllegalState(format!(
+                        "Unexpected Empty DynamicLookup found: {:?}",
+                        &v
+                    )));
                 }
+
+                let expr = &v[0];
+
+                self.type_vexpr(expr, self.lookup_order(expr))
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
@@ -423,16 +480,7 @@ impl<'c> PlanTyper<'c> {
         match ty.kind() {
             TypeKind::Bag(b) => b.element_type().clone(),
             TypeKind::Array(a) => a.element_type().clone(),
-            TypeKind::Any => {
-                self.errors
-                    .push(TypingError::NotYetImplemented("[Any]".to_string()));
-                undefined!()
-            }
-            TypeKind::AnyOf(_) => {
-                self.errors
-                    .push(TypingError::NotYetImplemented("[AnyOf]".to_string()));
-                undefined!()
-            }
+            TypeKind::Any => any!(),
             _ => ty.clone(),
         }
     }
@@ -471,12 +519,6 @@ impl<'c> PlanTyper<'c> {
 
     fn derived_type(&mut self, ty_ctx: &TypeEnvContext) -> PartiqlType {
         let ty = ty_ctx.derived_type();
-        if let TypeKind::Undefined = ty.kind() {
-            self.errors.push(TypingError::TypeCheck(format!(
-                "A call to derived type resulted in [Unknown] type for [TypeContext]; [Unknown] type cannot be used for further type checking {:?}",
-                ty_ctx
-            )));
-        }
         ty.clone()
     }
 
@@ -503,15 +545,73 @@ impl<'c> PlanTyper<'c> {
                     VarRefType::Local => LocalGlobal,
                 }
             },
-            _ => match self.current_bop() {
+            _ => match self.current_binding_op() {
                 Some(BindingsOp::Scan(_)) => GlobalLocal,
                 _ => LocalGlobal
             }
         }
     }
 
-    fn current_bop(&self) -> Option<&BindingsOp> {
+    fn current_binding_op(&self) -> Option<&BindingsOp> {
         self.bop_stack.last()
+    }
+
+    fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+        let ty = self.resolve_global(key);
+        match ty.is_undefined() {
+            true => {
+                let ty = self.resolve_local(key);
+                if ty.is_undefined() {
+                    match &self.typing_mode {
+                        TypingMode::Permissive => missing!(),
+                        TypingMode::Strict => undefined!(),
+                    }
+                } else {
+                    ty.clone()
+                }
+            }
+            false => {
+                ty
+            }
+        }
+    }
+
+    fn resolve_local_then_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+        let ty = self.resolve_local(key);
+        match ty.is_undefined() {
+            true => {
+                let ty = self.resolve_global(key);
+                if ty.is_undefined() {
+                    match &self.typing_mode {
+                        TypingMode::Permissive => missing!(),
+                        TypingMode::Strict => undefined!(),
+                    }
+                } else {
+                    ty.clone()
+                }
+            }
+            false => {
+                ty
+            }
+        }
+    }
+
+    fn resolve_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+        if let Some(type_entry) = self.catalog.resolve_type(key.value.as_str()) {
+            type_entry.ty().clone()
+        } else {
+            undefined!()
+        }
+    }
+
+    fn resolve_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+        for type_ctx in self.type_env_stack.clone().into_iter().rev() {
+            if let Some(ty) = type_ctx.env().get(key) {
+                return ty.clone();
+            }
+        }
+
+        undefined!()
     }
 }
 
@@ -552,12 +652,12 @@ mod tests {
         // )
         // .expect("Type");
         //
-        // // Open schema with `Strict` typing mode and `age` non-existent projection.
+        // Open schema with `Strict` typing mode and `age` non-existent projection.
         // assert_query_typing(
         //     TypingMode::Strict,
         //     "SELECT customers.id, customers.name, customers.age FROM customers",
         //     create_customer_schema(
-        //         false,
+        //         true,
         //         vec![
         //             StructField::new("id", int!()),
         //             StructField::new("name", str!()),
@@ -572,28 +672,28 @@ mod tests {
         // )
         // .expect("Type");
         // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
-        assert_query_typing(
-            TypingMode::Permissive,
-            "SELECT customers.id, customers.name, customers.age FROM customers",
-            create_customer_schema(
-                false,
-                vec![
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                ],
-            ),
-            vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", missing!()),
-            ],
-        )
-        .expect("Type");
-        //
-        // // Open Schema with `Strict` typing mode and `age` in nested attribute.
-        // let details_fields = struct_fields![("age", int!())];
-        // let details = r#struct![BTreeSet::from([details_fields])];
-        //
+        // assert_query_typing(
+        //     TypingMode::Permissive,
+        //     "SELECT customers.id, customers.name, customers.age FROM customers",
+        //     create_customer_schema(
+        //         false,
+        //         vec![
+        //             StructField::new("id", int!()),
+        //             StructField::new("name", str!()),
+        //         ],
+        //     ),
+        //     vec![
+        //         StructField::new("id", int!()),
+        //         StructField::new("name", str!()),
+        //         StructField::new("age", missing!()),
+        //     ],
+        // )
+        // .expect("Type");
+
+        // Open Schema with `Strict` typing mode and `age` in nested attribute.
+        let details_fields = struct_fields![("age", int!())];
+        let details = r#struct![BTreeSet::from([details_fields])];
+
         // assert_query_typing(
         //     TypingMode::Strict,
         //     "SELECT customers.id, customers.name, customers.details.age FROM customers",
@@ -613,23 +713,23 @@ mod tests {
         // )
         // .expect("Type");
         //
-        // // Open Schema with `Strict` typing mode and `bar` in nested attribute.
-        // assert_query_typing(
-        //     TypingMode::Strict,
-        //     "SELECT customers.id, customers.name, customers.details.age, customers.details.foo.bar FROM customers",
-        //     create_customer_schema(true,vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("details", details.clone()),
-        //     ]),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("age", int!()),
-        //         StructField::new("bar", any!()),
-        //     ],
-        // )
-        // .expect("Type");
+        // Open Schema with `Strict` typing mode and `bar` in nested attribute.
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.details.age, customers.details.foo.bar FROM customers",
+            create_customer_schema(true,vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("details", details.clone()),
+            ]),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", int!()),
+                StructField::new("bar", any!()),
+            ],
+        )
+        .expect("Type");
         //
         // assert_query_typing(
         //     TypingMode::Strict,

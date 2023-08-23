@@ -327,7 +327,11 @@ impl PartiqlType {
     pub fn is_any(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Any))
     }
-}
+
+    pub fn is_undefined(&self) -> bool {
+        matches!(*self, PartiqlType(TypeKind::Undefined))
+    }
+ }
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Ord, PartialOrd)]
 #[allow(dead_code)]
