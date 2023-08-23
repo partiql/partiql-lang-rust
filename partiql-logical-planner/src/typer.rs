@@ -159,7 +159,7 @@ impl<'c> PlanTyper<'c> {
             }
         }
 
-        // dbg!(&self.type_env_stack);
+        dbg!(&self.type_env_stack);
 
         if self.errors.is_empty() {
             Ok(self.output.clone().unwrap_or(undefined!()))
@@ -276,6 +276,7 @@ impl<'c> PlanTyper<'c> {
                 match lookup_order {
                     LookupOrder::GlobalLocal => {
                         let ty = self.resolve_global_then_local(&sym);
+                        let ty = self.element_type(&ty);
                         if ty.is_undefined() {
                             match &self.typing_mode {
                                 TypingMode::Permissive => {
@@ -284,17 +285,32 @@ impl<'c> PlanTyper<'c> {
                                     self.type_env_stack.push(type_ctx);
                                 }
                                 TypingMode::Strict => {
-                                    dbg!("GlobalLocal");
-                                    self.errors.push(TypingError::TypeCheck(format!(
-                                        "No Typing Information for {:?}",
-                                        &sym
-                                    )));
+                                    // dbg!("GlobalLocal");
+                                    // self.errors.push(TypingError::TypeCheck(format!(
+                                    //     "No Typing Information for {:?}",
+                                    //     &sym
+                                    // )));
                                 }
                             }
                         } else {
-                            let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(&ty))], &ty)];
+                            let mut new_type_env = LocalTypeEnv::new();
+                            if let TypeKind::Struct(s) = ty.kind() {
+                                to_bindings(s).into_iter().for_each(|b| {
+                                    new_type_env.insert(b.0, b.1);
+                                });
 
-                            self.type_env_stack.push(type_ctx);
+                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
+                                self.type_env_stack.push(type_ctx);
+                            } else {
+                                new_type_env.insert(sym, self.element_type(&ty));
+                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
+                                self.type_env_stack.push(type_ctx);
+                            }
+
+
+                            // let type_ctx = ty_ctx![(&ty_env![(sym, self.element_type(&ty))], &ty)];
+                            //
+                            // self.type_env_stack.push(type_ctx);
                         }
                     }
                     LookupOrder::LocalGlobal => {
@@ -308,11 +324,11 @@ impl<'c> PlanTyper<'c> {
                                     self.type_env_stack.push(type_ctx);
                                 }
                                 TypingMode::Strict => {
-                                    dbg!("LocalGlobal");
-                                    self.errors.push(TypingError::TypeCheck(format!(
-                                        "No Typing Information for {:?}",
-                                        &sym
-                                    )));
+                                    // dbg!("LocalGlobal");
+                                    // self.errors.push(TypingError::TypeCheck(format!(
+                                    //     "No Typing Information for {:?}",
+                                    //     &sym
+                                    // )));
                                 }
                             }
                         } else {
@@ -372,7 +388,7 @@ impl<'c> PlanTyper<'c> {
                         &v, &components,
                     )));
                 }
-                self.type_vexpr(v, LookupOrder::LocalGlobal);
+                // self.type_vexpr(v, LookupOrder::LocalGlobal);
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
@@ -489,6 +505,10 @@ impl<'c> PlanTyper<'c> {
         let type_ctx = self.local_type_env();
         let env = type_ctx.env().clone();
         let derived_type = self.derived_type(&type_ctx);
+
+        if key == "bar" {
+            dbg!(key);
+        }
 
         if let Some(ty) = env.get(&string_to_sym(key)) {
             Some(ty.clone())
@@ -634,85 +654,85 @@ mod tests {
     #[test]
     fn simple_sfw() {
         // Closed schema with `Strict` typing mode.
-        // assert_query_typing(
-        //     TypingMode::Strict,
-        //     "SELECT customers.id, customers.name FROM customers",
-        //     create_customer_schema(
-        //         false,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //             StructField::new("age", any!()),
-        //         ],
-        //     ),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //     ],
-        // )
-        // .expect("Type");
-        //
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name FROM customers",
+            create_customer_schema(
+                false,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("age", any!()),
+                ],
+            ),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+            ],
+        )
+        .expect("Type");
+
         // Open schema with `Strict` typing mode and `age` non-existent projection.
-        // assert_query_typing(
-        //     TypingMode::Strict,
-        //     "SELECT customers.id, customers.name, customers.age FROM customers",
-        //     create_customer_schema(
-        //         true,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //             StructField::new("age", any!()),
-        //         ],
-        //     ),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("age", any!()),
-        //     ],
-        // )
-        // .expect("Type");
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.age FROM customers",
+            create_customer_schema(
+                true,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("age", any!()),
+                ],
+            ),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", any!()),
+            ],
+        )
+        .expect("Type");
         // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
-        // assert_query_typing(
-        //     TypingMode::Permissive,
-        //     "SELECT customers.id, customers.name, customers.age FROM customers",
-        //     create_customer_schema(
-        //         false,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //         ],
-        //     ),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("age", missing!()),
-        //     ],
-        // )
-        // .expect("Type");
+        assert_query_typing(
+            TypingMode::Permissive,
+            "SELECT customers.id, customers.name, customers.age FROM customers",
+            create_customer_schema(
+                false,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                ],
+            ),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", missing!()),
+            ],
+        )
+        .expect("Type");
 
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
         let details_fields = struct_fields![("age", int!())];
         let details = r#struct![BTreeSet::from([details_fields])];
 
-        // assert_query_typing(
-        //     TypingMode::Strict,
-        //     "SELECT customers.id, customers.name, customers.details.age FROM customers",
-        //     create_customer_schema(
-        //         true,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //             StructField::new("details", details.clone()),
-        //         ],
-        //     ),
-        //     vec![
-        //         StructField::new("id", int!()),
-        //         StructField::new("name", str!()),
-        //         StructField::new("age", int!()),
-        //     ],
-        // )
-        // .expect("Type");
-        //
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT customers.id, customers.name, customers.details.age FROM customers",
+            create_customer_schema(
+                true,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("details", details.clone()),
+                ],
+            ),
+            vec![
+                StructField::new("id", int!()),
+                StructField::new("name", str!()),
+                StructField::new("age", int!()),
+            ],
+        )
+        .expect("Type");
+
         // Open Schema with `Strict` typing mode and `bar` in nested attribute.
         assert_query_typing(
             TypingMode::Strict,
@@ -730,21 +750,21 @@ mod tests {
             ],
         )
         .expect("Type");
-        //
-        // assert_query_typing(
-        //     TypingMode::Strict,
-        //     "SELECT d.age FROM customers.details AS d",
-        //     create_customer_schema(
-        //         true,
-        //         vec![
-        //             StructField::new("id", int!()),
-        //             StructField::new("name", str!()),
-        //             StructField::new("details", details.clone()),
-        //         ],
-        //     ),
-        //     vec![StructField::new("age", int!())],
-        // )
-        // .expect("Type");
+
+        assert_query_typing(
+            TypingMode::Strict,
+            "SELECT d.age FROM customers.details AS d",
+            create_customer_schema(
+                true,
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("details", details.clone()),
+                ],
+            ),
+            vec![StructField::new("age", int!())],
+        )
+        .expect("Type");
     }
 
     #[test]
@@ -784,14 +804,14 @@ mod tests {
                 ),
                 vec![],
             ),
-            vec![TypingError::TypeCheck(format!(
-                "No Typing Information for \"age\""
+            vec![TypingError::IllegalState(format!(
+                "Illegal Derive Type PartiqlType(String)"
             ))],
         );
 
-        // Closed Schema with `Strict` typing mode and `bar` non-existent projection from nested.
+        // Closed Schema with `Strict` typing mode and `bar` non-existent projection from closed nested `details`.
         let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![BTreeSet::from([details_fields])];
+        let details = r#struct![BTreeSet::from([details_fields, StructConstraint::Open(false)])];
         assert_err(
             assert_query_typing(
                 TypingMode::Strict,
