@@ -196,7 +196,10 @@ impl<'c> PlanTyper<'c> {
                 let derived_type_ctx = self.local_type_ctx();
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
-                    fields.push(StructField::new(k.as_str(), self.get_singleton_type_from_env()));
+                    fields.push(StructField::new(
+                        k.as_str(),
+                        self.get_singleton_type_from_env(),
+                    ));
                 }
 
                 let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
@@ -384,6 +387,8 @@ impl<'c> PlanTyper<'c> {
                     )));
                 }
 
+                // TODO for Typing we handle multiple lookups through `[LookupOrder]` hence using
+                // the first element. Remove this workround once we remove DynamicLookup
                 let expr = &v[0];
                 self.type_vexpr(expr, self.lookup_order(expr))
             }
@@ -702,6 +707,13 @@ mod tests {
             ],
         )
         .expect("Type");
+    }
+
+    #[test]
+    fn simple_sfw_with_alias() {
+        // Open Schema with `Strict` typing mode and `age` in nested attribute.
+        let details_fields = struct_fields![("age", int!())];
+        let details = r#struct![BTreeSet::from([details_fields])];
 
         assert_query_typing(
             TypingMode::Strict,
@@ -717,10 +729,7 @@ mod tests {
             vec![StructField::new("age", int!())],
         )
         .expect("Type");
-    }
 
-    #[test]
-    fn simple_sfw_with_alias() {
         assert_query_typing(
             TypingMode::Strict,
             "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c",
