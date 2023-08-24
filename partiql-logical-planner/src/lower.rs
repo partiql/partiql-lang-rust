@@ -41,13 +41,27 @@ use std::sync::atomic::{AtomicU32, Ordering};
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 
 #[macro_export]
+macro_rules! illegal_state_fault {
+    ($self:ident, $msg:expr) => {
+        illegal_state_err!($self, $msg);
+        return partiql_ast::visit::Traverse::Stop;
+    };
+}
+
+#[macro_export]
+macro_rules! illegal_state_err {
+    ($self:ident, $msg:expr) => {
+        $self
+            .errors
+            .push(AstTransformError::IllegalState($msg.to_string()));
+    };
+}
+
+#[macro_export]
 macro_rules! eq_or_fault {
     ($self:ident, $lhs:expr, $rhs:expr, $msg:expr) => {
         if $lhs != $rhs {
-            $self
-                .errors
-                .push(AstTransformError::IllegalState($msg.to_string()));
-            return partiql_ast::visit::Traverse::Stop;
+            illegal_state_fault!($self, $msg);
         }
     };
 }
@@ -56,10 +70,7 @@ macro_rules! eq_or_fault {
 macro_rules! true_or_fault {
     ($self:ident, $expr:expr, $msg:expr) => {
         if !$expr {
-            $self
-                .errors
-                .push(AstTransformError::IllegalState($msg.to_string()));
-            return partiql_ast::visit::Traverse::Stop;
+            illegal_state_fault!($self, $msg);
         }
     };
 }
@@ -425,15 +436,13 @@ impl<'a> AstToLogical<'a> {
     }
 
     #[inline]
-    fn enter_q(&mut self) {
-        self.q_stack.push(Default::default());
-        self.ctx_stack.push(QueryContext::Query);
+    fn enter_ctx(&mut self, ctx: QueryContext) {
+        self.ctx_stack.push(ctx);
     }
 
     #[inline]
-    fn exit_q(&mut self) -> QueryClauses {
-        self.ctx_stack.pop();
-        self.q_stack.pop().expect("q level")
+    fn exit_ctx(&mut self) -> QueryContext {
+        self.ctx_stack.pop().expect("ctx level")
     }
 
     #[inline]
@@ -442,8 +451,26 @@ impl<'a> AstToLogical<'a> {
     }
 
     #[inline]
-    fn current_ctx_mut(&mut self) -> &mut QueryContext {
-        self.ctx_stack.last_mut().unwrap()
+    fn enter_q(&mut self) {
+        self.q_stack.push(Default::default());
+        self.enter_ctx(QueryContext::Query);
+    }
+
+    #[inline]
+    fn exit_q(&mut self) -> QueryClauses {
+        self.exit_ctx();
+        self.q_stack.pop().expect("q level")
+    }
+
+    #[inline]
+    fn enter_from(&mut self, id: NodeId) {
+        self.from_lets.insert(id);
+        self.enter_ctx(QueryContext::FromLet);
+    }
+
+    #[inline]
+    fn exit_from(&mut self) {
+        self.exit_ctx();
     }
 
     #[inline]
@@ -504,13 +531,21 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_path(&mut self) {
         self.path_stack.push(vec![]);
-        self.ctx_stack.push(QueryContext::Query);
     }
 
     #[inline]
     fn exit_path(&mut self) -> Vec<PathComponent> {
-        self.ctx_stack.pop();
         self.path_stack.pop().expect("path level")
+    }
+
+    #[inline]
+    fn enter_path_step(&mut self) {
+        self.enter_ctx(QueryContext::Path);
+    }
+
+    #[inline]
+    fn exit_path_step(&mut self) {
+        self.exit_ctx();
     }
 
     #[inline]
@@ -521,12 +556,12 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_sort(&mut self) {
         self.sort_stack.push(vec![]);
-        self.ctx_stack.push(QueryContext::Order);
+        self.enter_ctx(QueryContext::Order);
     }
 
     #[inline]
     fn exit_sort(&mut self) -> Vec<logical::SortSpec> {
-        self.ctx_stack.pop();
+        self.exit_ctx();
         self.sort_stack.pop().expect("sort specs")
     }
 
@@ -1272,16 +1307,16 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_var_ref(&mut self, _var_ref: &'ast VarRef) -> Traverse {
+    fn enter_var_ref(&mut self, var_ref: &'ast VarRef) -> Traverse {
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
         if !is_path {
-            let options = self.resolve_varref(_var_ref);
+            let options = self.resolve_varref(var_ref);
             self.push_vexpr(options);
         } else {
             let VarRef {
                 name: SymbolPrimitive { value, case },
                 qualifier: _,
-            } = _var_ref;
+            } = var_ref;
             let name = match case {
                 CaseSensitivity::CaseSensitive => {
                     BindingsName::CaseSensitive(Cow::Owned(value.clone()))
@@ -1316,8 +1351,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
-        if let PathStep::PathExpr(expr) = _path_step {
+    fn enter_path_step(&mut self, path_step: &'ast PathStep) -> Traverse {
+        self.enter_path_step();
+        if let PathStep::PathExpr(expr) = path_step {
             self.enter_env();
             match *(expr.index) {
                 Expr::VarRef(_) => {
@@ -1368,6 +1404,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         };
 
         self.push_path_step(step);
+        self.exit_path_step();
         Traverse::Continue
     }
 
@@ -1391,9 +1428,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
-        self.from_lets.insert(*self.current_node());
-        *self.current_ctx_mut() = QueryContext::FromLet;
+        self.enter_from(*self.current_node());
         self.enter_env();
+        self.enter_benv();
 
         let id = *self.current_node();
 
@@ -1407,37 +1444,70 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
     }
 
     fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
-        *self.current_ctx_mut() = QueryContext::Query;
+        self.exit_from();
         let mut env = self.exit_env();
-        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+        let mut benv = self.exit_benv();
 
-        let expr = env.pop().unwrap();
+        let mut lower = |expr| {
+            let FromLet {
+                kind,
+                as_alias,
+                at_alias,
+                ..
+            } = from_let;
 
-        let FromLet {
-            kind,
-            as_alias,
-            at_alias,
-            ..
-        } = from_let;
-        let as_key = self.infer_id(&expr, as_alias).value;
-        let at_key = at_alias
-            .as_ref()
-            .map(|SymbolPrimitive { value, case: _ }| value.clone());
+            let as_key = self.infer_id(&expr, as_alias).value;
+            let at_key = at_alias
+                .as_ref()
+                .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
-        let bexpr = match kind {
-            FromLetKind::Scan => logical::BindingsOp::Scan(logical::Scan {
-                expr,
-                as_key,
-                at_key,
-            }),
-            FromLetKind::Unpivot => logical::BindingsOp::Unpivot(logical::Unpivot {
-                expr,
-                as_key,
-                at_key,
-            }),
+            let bexpr = match kind {
+                FromLetKind::Scan => logical::BindingsOp::Scan(logical::Scan {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                FromLetKind::Unpivot => logical::BindingsOp::Unpivot(logical::Unpivot {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+            };
+            let id = self.plan.add_operator(bexpr);
+            self.push_bexpr(id);
+            id
         };
-        let id = self.plan.add_operator(bexpr);
-        self.push_bexpr(id);
+
+        // Each clause of a `FROM` (i.e., a 'from let') should have either an expression or a relation
+        // as input.
+        //
+        // An expression input corresponds to the object to the right of the `FROM` in clauses like:
+        //  - `FROM <<{a:1},{a:2},{a:3}>>`
+        //  - `FROM MyTable`
+        //
+        // A relation input corresponds to a subquery input like:
+        //  - `FROM (SELECT ... FROM ...)
+        match (env.len(), benv.len()) {
+            (0, 1) => {
+                // A relation input; Lower to a Scan over relation's output
+                eq_or_fault!(self, benv.len(), 1, "benv.len() != 1");
+                let src = benv.pop().unwrap();
+                let expr = ValueExpr::Identity;
+
+                let id = lower(expr);
+                self.plan.add_flow(src, id);
+            }
+            (1, 0) => {
+                // An expression input; Lower to a Scan/Unpivot over an expression evaluation
+                eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+                let expr = env.pop().unwrap();
+
+                let _ = lower(expr);
+            }
+            _ => {
+                illegal_state_fault!(self, "Input to From Let is malformed");
+            }
+        }
         Traverse::Continue
     }
 

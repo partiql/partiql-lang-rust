@@ -410,6 +410,7 @@ pub struct ExprQuery {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ValueExpr {
+    Identity,
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
     Lit(Box<Value>),
@@ -421,7 +422,6 @@ pub enum ValueExpr {
     BagExpr(BagExpr),
     BetweenExpr(BetweenExpr),
     PatternMatchExpr(PatternMatchExpr),
-    SubQueryExpr(SubQueryExpr),
     SimpleCase(SimpleCase),
     SearchedCase(SearchedCase),
     IsTypeExpr(IsTypeExpr),

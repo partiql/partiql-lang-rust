@@ -1374,36 +1374,6 @@ impl Evaluable for EvalSink {
     }
 }
 
-/// Represents an evaluation operator for sub-queries, e.g. `SELECT a FROM b` in
-/// `SELECT b.c, (SELECT a FROM b) FROM books AS b`.
-#[derive(Debug)]
-pub(crate) struct EvalSubQueryExpr {
-    pub(crate) plan: Rc<RefCell<EvalPlan>>,
-}
-
-impl EvalSubQueryExpr {
-    pub(crate) fn new(plan: EvalPlan) -> Self {
-        EvalSubQueryExpr {
-            plan: Rc::new(RefCell::new(plan)),
-        }
-    }
-}
-
-impl EvalExpr for EvalSubQueryExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, _ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
-        let value = if let Ok(evaluated) = self
-            .plan
-            .borrow_mut()
-            .execute_mut(MapBindings::from(bindings))
-        {
-            evaluated.result
-        } else {
-            Missing
-        };
-        Cow::Owned(value)
-    }
-}
-
 ///
 /// Coercion function F for bag operators described in RFC-0007
 /// - F(absent_value) -> << >>

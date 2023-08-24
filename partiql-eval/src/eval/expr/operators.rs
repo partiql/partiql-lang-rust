@@ -11,7 +11,7 @@ use partiql_types::{
     ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Value};
+use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
@@ -48,6 +48,25 @@ impl ExecuteEvalExpr<0> for Value {
         _ctx: &'a dyn EvalContext,
     ) -> Cow<'a, Value> {
         Cow::Borrowed(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct EvalOpIdentity {}
+
+impl BindEvalExpr for EvalOpIdentity {
+    fn bind<const STRICT: bool>(
+        &self,
+        args: Vec<Box<dyn EvalExpr>>,
+    ) -> Result<Box<dyn EvalExpr>, BindError> {
+        return Ok(Box::new(self.clone()));
+    }
+}
+
+impl EvalExpr for EvalOpIdentity {
+    #[inline]
+    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+        Cow::Owned(Value::from(bindings.clone()))
     }
 }
 
