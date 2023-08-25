@@ -118,7 +118,7 @@ pub struct PlanTyper<'c> {
     logical_plan: LogicalPlan<BindingsOp>,
     errors: Vec<TypingError>,
     type_env_stack: Vec<TypeEnvContext>,
-    bop_stack: Vec<BindingsOp>,
+    current_binding_op: Option<BindingsOp>,
     output: Option<PartiqlType>,
 }
 
@@ -132,7 +132,7 @@ impl<'c> PlanTyper<'c> {
             logical_plan: ir.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
-            bop_stack: Default::default(),
+            current_binding_op: Default::default(),
             output: None,
         }
     }
@@ -145,7 +145,7 @@ impl<'c> PlanTyper<'c> {
             logical_plan: lg.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
-            bop_stack: Default::default(),
+            current_binding_op: Default::default(),
             output: None,
         }
     }
@@ -171,7 +171,7 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_bindings_op(&mut self, op: &BindingsOp) {
-        self.bop_stack.push(op.clone());
+        self.current_binding_op = Some(op.clone());
         match op {
             BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
                 self.type_vexpr(expr, LookupOrder::Delegate);
@@ -504,15 +504,11 @@ impl<'c> PlanTyper<'c> {
                 VarRefType::Global => GlobalLocal,
                 VarRefType::Local => LocalGlobal,
             },
-            _ => match self.current_binding_op() {
+            _ => match self.current_binding_op {
                 Some(BindingsOp::Scan(_)) => GlobalLocal,
                 _ => LocalGlobal,
             },
         }
-    }
-
-    fn current_binding_op(&self) -> Option<&BindingsOp> {
-        self.bop_stack.last()
     }
 
     fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
