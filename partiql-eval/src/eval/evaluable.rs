@@ -10,9 +10,9 @@ use partiql_value::{
 use rustc_hash::FxHashMap;
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
 use std::rc::Rc;
@@ -440,7 +440,7 @@ impl AggregateFunction for Avg {
                 let vals = list.to_vec();
                 if let [count, sum] = &vals[..] {
                     if let Value::Integer(n) = sum {
-                        // Avg does not do integer divison; convert to decimal
+                        // Avg does not do integer division; convert to decimal
                         let sum = Value::from(rust_decimal::Decimal::from(*n));
                         Ok(&sum / count)
                     } else {

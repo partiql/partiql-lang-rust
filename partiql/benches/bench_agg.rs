@@ -56,7 +56,7 @@ pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Valu
     }
 }
 
-fn create_query(aggs: &Vec<(&'static str, bool)>, group: bool, group_as: bool) -> (String, String) {
+fn create_query(aggs: &[(&'static str, bool)], group: bool, group_as: bool) -> (String, String) {
     let agg_fns = aggs
         .iter()
         .map(|(name, distinct)| {
@@ -111,7 +111,7 @@ fn create_tests() -> Vec<(String, String)> {
 
     let simple = all_aggs
         .clone()
-        .map(|(a, d)| create_query(&vec![(a, *d)], false, false));
+        .map(|(&a, d)| create_query(vec![(a, *d)].as_slice(), false, false));
 
     let aggs_all = aggs
         .into_iter()
