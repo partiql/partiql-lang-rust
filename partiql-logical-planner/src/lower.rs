@@ -361,6 +361,18 @@ impl<'a> AstToLogical<'a> {
                                                     lookups.push(expr);
                                                 }
                                                 continue;
+                                            } else if let Some(_type_entry) = self
+                                                .catalog
+                                                .resolve_type(name_ref.sym.value.as_ref())
+                                            {
+                                                let expr = ValueExpr::VarRef(
+                                                    var_binding.clone(),
+                                                    VarRefType::Global,
+                                                );
+                                                if !lookups.contains(&expr) {
+                                                    lookups.push(expr);
+                                                }
+                                                continue;
                                             } else {
                                                 let path = logical::ValueExpr::Path(
                                                     Box::new(ValueExpr::VarRef(
