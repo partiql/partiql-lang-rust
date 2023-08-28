@@ -200,7 +200,6 @@ impl ArgChecker for NullArgChecker {
 /// Bridges between [`EvalExpr`] and [`ExecuteEvalExpr`]
 ///
 ///
-#[derive(Debug)]
 pub(crate) struct ArgCheckEvalExpr<
     const STRICT: bool,
     const N: usize,
@@ -214,6 +213,23 @@ pub(crate) struct ArgCheckEvalExpr<
     /// the expression
     pub(crate) expr: E,
     pub(crate) arg_check: PhantomData<ArgC>,
+}
+
+impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker> Debug
+    for ArgCheckEvalExpr<STRICT, N, E, ArgC>
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.expr.fmt(f)?;
+        write!(f, "(")?;
+        let mut sep = "";
+        for arg in &self.args {
+            write!(f, "{sep}")?;
+            arg.fmt(f)?;
+            sep = ", ";
+        }
+        write!(f, ")")?;
+        Ok(())
+    }
 }
 
 impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker>
@@ -332,9 +348,7 @@ where
     E: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EvalExprWrapper")
-            .field("ident", &self.ident)
-            .finish()
+        self.ident.fmt(f)
     }
 }
 

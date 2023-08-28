@@ -4,12 +4,17 @@ use crate::eval::expr::EvalExpr;
 use crate::eval::{EvalContext, EvalPlan};
 use itertools::Itertools;
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{bag, tuple, Bag, List, NullSortedValue, Tuple, Value, ValueIntoIterator};
+use partiql_value::{
+    bag, list, tuple, Bag, List, NullSortedValue, Tuple, Value, ValueIntoIterator,
+};
+use rustc_hash::FxHashMap;
 use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
+use std::collections::HashSet;
+use std::fmt::{Debug, Formatter};
+
 use std::rc::Rc;
 
 #[macro_export]
@@ -48,7 +53,6 @@ pub trait Evaluable: Debug {
 /// Represents an evaluation `Scan` operator; `Scan` operator scans the given bindings from its
 /// input and and the environment and outputs a bag of binding tuples for tuples/values matching the
 /// scan `expr`, e.g. an SQL expression `table1` in SQL expression `FROM table1`.
-#[derive(Debug)]
 pub(crate) struct EvalScan {
     pub(crate) expr: Box<dyn EvalExpr>,
     pub(crate) as_key: String,
@@ -57,6 +61,21 @@ pub(crate) struct EvalScan {
 
     // cached values
     attrs: Vec<String>,
+}
+
+impl Debug for EvalScan {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SCAN ")?;
+        self.expr.fmt(f)?;
+
+        write!(f, " AS {}", self.as_key)?;
+
+        if let Some(at_key) = &self.at_key {
+            write!(f, " AT {}", at_key)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl EvalScan {
@@ -133,7 +152,6 @@ impl Evaluable for EvalScan {
 /// Represents an evaluation `Join` operator; `Join` joins the tuples from its LHS and RHS based on a logic defined
 /// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
 /// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug)]
 pub(crate) struct EvalJoin {
     pub(crate) kind: EvalJoinKind,
     pub(crate) on: Option<Box<dyn EvalExpr>>,
@@ -148,6 +166,17 @@ pub(crate) enum EvalJoinKind {
     Left,
     Right,
     Full,
+}
+
+impl Debug for EvalJoin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?} JOIN", &self.kind)?;
+        if let Some(on) = &self.on {
+            write!(f, "ON ")?;
+            on.fmt(f)?;
+        }
+        Ok(())
+    }
 }
 
 impl EvalJoin {
@@ -332,416 +361,232 @@ impl Evaluable for EvalJoin {
 pub(crate) struct AggregateExpression {
     pub(crate) name: String,
     pub(crate) expr: Box<dyn EvalExpr>,
-    pub(crate) func: AggFunc,
+    pub(crate) func: Box<dyn AggregateFunction>,
+}
+
+impl AggregateFunction for AggregateExpression {
+    #[inline]
+    fn next_distinct(
+        &self,
+        input_value: &Value,
+        state: &mut Option<Value>,
+        seen: &mut FxHashMap<Value, ()>,
+    ) {
+        if input_value.is_present() {
+            self.func.next_distinct(input_value, state, seen);
+        }
+    }
+
+    #[inline]
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        if input_value.is_present() {
+            self.func.next_value(input_value, state);
+        }
+    }
+
+    #[inline]
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        self.func.finalize(state)
+    }
 }
 
 /// Represents an SQL aggregation function computed on a collection of input values.
-pub trait AggregateFunction {
+pub trait AggregateFunction: Debug {
+    #[inline]
+    fn next_distinct(
+        &self,
+        input_value: &Value,
+        state: &mut Option<Value>,
+        seen: &mut FxHashMap<Value, ()>,
+    ) {
+        match seen.entry(input_value.clone()) {
+            Entry::Occupied(_) => {}
+            Entry::Vacant(v) => {
+                v.insert(());
+                self.next_value(input_value, state);
+            }
+        }
+    }
     /// Provides the next value for the given `group`.
-    fn next_value(&mut self, input_value: &Value, group: &Tuple);
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>);
     /// Returns the result of the aggregation function for a given `group`.
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError>;
-}
-
-#[derive(Debug)]
-pub(crate) enum AggFunc {
-    // TODO: modeling COUNT(*)
-    Avg(Avg),
-    Count(Count),
-    Max(Max),
-    Min(Min),
-    Sum(Sum),
-    Any(Any),
-    Every(Every),
-}
-
-impl AggregateFunction for AggFunc {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        match self {
-            AggFunc::Avg(v) => v.next_value(input_value, group),
-            AggFunc::Count(v) => v.next_value(input_value, group),
-            AggFunc::Max(v) => v.next_value(input_value, group),
-            AggFunc::Min(v) => v.next_value(input_value, group),
-            AggFunc::Sum(v) => v.next_value(input_value, group),
-            AggFunc::Any(v) => v.next_value(input_value, group),
-            AggFunc::Every(v) => v.next_value(input_value, group),
-        }
-    }
-
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self {
-            AggFunc::Avg(v) => v.compute(group),
-            AggFunc::Count(v) => v.compute(group),
-            AggFunc::Max(v) => v.compute(group),
-            AggFunc::Min(v) => v.compute(group),
-            AggFunc::Sum(v) => v.compute(group),
-            AggFunc::Any(v) => v.compute(group),
-            AggFunc::Every(v) => v.compute(group),
-        }
-    }
-}
-
-/// Filter values based on the given condition
-#[derive(Debug, Default)]
-pub(crate) enum AggFilterFn {
-    /// Keeps only distinct values in each group
-    Distinct(AggFilterDistinct),
-    /// Keeps all values
-    #[default]
-    All,
-}
-
-impl AggFilterFn {
-    /// Returns true if and only if for the given `group`, `input_value` should be processed
-    /// by the aggregation function
-    fn filter_value(&mut self, input_value: Value, group: &Tuple) -> bool {
-        match self {
-            AggFilterFn::Distinct(d) => d.filter_value(input_value, group),
-            AggFilterFn::All => true,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct AggFilterDistinct {
-    seen_vals: HashMap<Tuple, HashSet<Value>>,
-}
-
-impl AggFilterDistinct {
-    pub(crate) fn new() -> Self {
-        AggFilterDistinct {
-            seen_vals: HashMap::new(),
-        }
-    }
-}
-
-impl Default for AggFilterDistinct {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AggFilterDistinct {
-    fn filter_value(&mut self, input_value: Value, group: &Tuple) -> bool {
-        if let Some(seen_vals_in_group) = self.seen_vals.get_mut(group) {
-            seen_vals_in_group.insert(input_value)
-        } else {
-            let mut new_seen_vals = HashSet::new();
-            new_seen_vals.insert(input_value);
-            self.seen_vals
-                .insert(group.clone(), new_seen_vals)
-                .is_none()
-        }
-    }
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError>;
 }
 
 /// Represents SQL's `AVG` aggregation function
 #[derive(Debug)]
-pub(crate) struct Avg {
-    avgs: HashMap<Tuple, (usize, Value)>,
-    aggregator: AggFilterFn,
-}
-
-impl Avg {
-    pub(crate) fn new_distinct() -> Self {
-        Avg {
-            avgs: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Avg {
-            avgs: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Avg {}
 
 impl AggregateFunction for Avg {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.avgs.get_mut(group) {
-                None => {
-                    self.avgs.insert(group.clone(), (1, input_value.clone()));
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => *state = Some(Value::from(list![Value::from(1), input_value.clone()])),
+            Some(Value::List(list)) => {
+                if let Some(count) = list.get_mut(0) {
+                    *count += &Value::from(1);
                 }
-                Some((count, sum)) => {
-                    *count += 1;
-                    *sum = &sum.clone() + input_value;
+                if let Some(sum) = list.get_mut(1) {
+                    *sum += input_value;
                 }
             }
-        }
+            _ => unreachable!(),
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        match self.avgs.get(group).unwrap_or(&(0, Null)) {
-            (0, _) => Ok(Null),
-            (c, s) => Ok(s / &Value::from(rust_decimal::Decimal::from(*c))),
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        match state {
+            None => Ok(Null),
+            Some(Value::List(list)) => {
+                let vals = list.to_vec();
+                if let [count, sum] = &vals[..] {
+                    if let Value::Integer(n) = sum {
+                        // Avg does not do integer division; convert to decimal
+                        let sum = Value::from(rust_decimal::Decimal::from(*n));
+                        Ok(&sum / count)
+                    } else {
+                        Ok(sum / count)
+                    }
+                } else {
+                    Err(EvaluationError::IllegalState(
+                        "Bad finalize state for Avg".to_string(),
+                    ))
+                }
+            }
+            _ => unreachable!(),
         }
     }
 }
 
 /// Represents SQL's `COUNT` aggregation function
 #[derive(Debug)]
-pub(crate) struct Count {
-    counts: HashMap<Tuple, usize>,
-    aggregator: AggFilterFn,
-}
-
-impl Count {
-    pub(crate) fn new_distinct() -> Self {
-        Count {
-            counts: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Count {
-            counts: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Count {}
 
 impl AggregateFunction for Count {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.counts.get_mut(group) {
-                None => {
-                    self.counts.insert(group.clone(), 1);
-                }
-                Some(count) => {
-                    *count += 1;
-                }
-            };
-        }
+    fn next_value(&self, _: &Value, state: &mut Option<Value>) {
+        match state {
+            None => *state = Some(Value::from(1)),
+            Some(Value::Integer(i)) => {
+                *i += 1;
+            }
+            _ => unreachable!(),
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(Value::from(self.counts.get(group).unwrap_or(&0)))
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Value::from(0)))
     }
 }
 
 /// Represents SQL's `MAX` aggregation function
 #[derive(Debug)]
-pub(crate) struct Max {
-    maxes: HashMap<Tuple, Value>,
-    aggregator: AggFilterFn,
-}
-
-impl Max {
-    pub(crate) fn new_distinct() -> Self {
-        Max {
-            maxes: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Max {
-            maxes: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Max {}
 
 impl AggregateFunction for Max {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.maxes.get_mut(group) {
-                None => {
-                    self.maxes.insert(group.clone(), input_value.clone());
-                }
-                Some(m) => {
-                    *m = max(m.clone(), input_value.clone());
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => *state = Some(input_value.clone()),
+            Some(max) => {
+                if &*max < input_value {
+                    *max = input_value.clone();
                 }
             }
-        }
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(self.maxes.get(group).unwrap_or(&Null).clone())
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Null))
     }
 }
 
 /// Represents SQL's `MIN` aggregation function
 #[derive(Debug)]
-pub(crate) struct Min {
-    mins: HashMap<Tuple, Value>,
-    aggregator: AggFilterFn,
-}
-
-impl Min {
-    pub(crate) fn new_distinct() -> Self {
-        Min {
-            mins: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Min {
-            mins: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Min {}
 
 impl AggregateFunction for Min {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.mins.get_mut(group) {
-                None => {
-                    self.mins.insert(group.clone(), input_value.clone());
-                }
-                Some(m) => {
-                    *m = min(m.clone(), input_value.clone());
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => *state = Some(input_value.clone()),
+            Some(min) => {
+                if &*min > input_value {
+                    *min = input_value.clone();
                 }
             }
-        }
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(self.mins.get(group).unwrap_or(&Null).clone())
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Null))
     }
 }
 
 /// Represents SQL's `SUM` aggregation function
 #[derive(Debug)]
-pub(crate) struct Sum {
-    sums: HashMap<Tuple, Value>,
-    aggregator: AggFilterFn,
-}
-
-impl Sum {
-    pub(crate) fn new_distinct() -> Self {
-        Sum {
-            sums: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Sum {
-            sums: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Sum {}
 
 impl AggregateFunction for Sum {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.sums.get_mut(group) {
-                None => {
-                    self.sums.insert(group.clone(), input_value.clone());
-                }
-                Some(s) => {
-                    *s = &s.clone() + input_value;
-                }
-            }
-        }
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => *state = Some(input_value.clone()),
+            Some(ref mut sum) => *sum += input_value,
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(self.sums.get(group).unwrap_or(&Null).clone())
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Null))
     }
 }
 
 /// Represents SQL's `ANY`/`SOME` aggregation function
 #[derive(Debug)]
-pub(crate) struct Any {
-    anys: HashMap<Tuple, Value>,
-    aggregator: AggFilterFn,
-}
-
-impl Any {
-    pub(crate) fn new_distinct() -> Self {
-        Any {
-            anys: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Any {
-            anys: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Any {}
 
 impl AggregateFunction for Any {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.anys.get_mut(group) {
-                None => {
-                    match input_value {
-                        Boolean(_) => self.anys.insert(group.clone(), input_value.clone()),
-                        _ => self.anys.insert(group.clone(), Missing),
-                    };
-                }
-                Some(acc) => {
-                    *acc = match (acc.clone(), input_value) {
-                        (Boolean(l), Value::Boolean(r)) => Value::Boolean(l || *r),
-                        (_, _) => Missing,
-                    };
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => {
+                *state = Some(match input_value {
+                    Boolean(b) => Value::Boolean(*b),
+                    _ => Missing,
+                })
+            }
+            Some(ref mut acc) => {
+                *acc = match (&acc, input_value) {
+                    (Boolean(acc), Boolean(new)) => Boolean(*acc || *new),
+                    _ => Missing,
                 }
             }
-        }
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(self.anys.get(group).unwrap_or(&Null).clone())
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Null))
     }
 }
 
 /// Represents SQL's `EVERY` aggregation function
 #[derive(Debug)]
-pub(crate) struct Every {
-    everys: HashMap<Tuple, Value>,
-    aggregator: AggFilterFn,
-}
-
-impl Every {
-    pub(crate) fn new_distinct() -> Self {
-        Every {
-            everys: HashMap::new(),
-            aggregator: AggFilterFn::Distinct(AggFilterDistinct::new()),
-        }
-    }
-
-    pub(crate) fn new_all() -> Self {
-        Every {
-            everys: HashMap::new(),
-            aggregator: AggFilterFn::default(),
-        }
-    }
-}
+pub(crate) struct Every {}
 
 impl AggregateFunction for Every {
-    fn next_value(&mut self, input_value: &Value, group: &Tuple) {
-        if input_value.is_present() && self.aggregator.filter_value(input_value.clone(), group) {
-            match self.everys.get_mut(group) {
-                None => {
-                    match input_value {
-                        Boolean(_) => self.everys.insert(group.clone(), input_value.clone()),
-                        _ => self.everys.insert(group.clone(), Missing),
-                    };
-                }
-                Some(acc) => {
-                    *acc = match (acc.clone(), input_value) {
-                        (Boolean(l), Value::Boolean(r)) => Value::Boolean(l && *r),
-                        (_, _) => Missing,
-                    };
+    fn next_value(&self, input_value: &Value, state: &mut Option<Value>) {
+        match state {
+            None => {
+                *state = Some(match input_value {
+                    Boolean(b) => Value::Boolean(*b),
+                    _ => Missing,
+                })
+            }
+            Some(ref mut acc) => {
+                *acc = match (&acc, input_value) {
+                    (Boolean(acc), Boolean(new)) => Boolean(*acc && *new),
+                    _ => Missing,
                 }
             }
-        }
+        };
     }
 
-    fn compute(&self, group: &Tuple) -> Result<Value, EvaluationError> {
-        Ok(self.everys.get(group).unwrap_or(&Null).clone())
+    fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
+        Ok(state.unwrap_or_else(|| Null))
     }
 }
 
@@ -752,11 +597,19 @@ impl AggregateFunction for Every {
 #[derive(Debug)]
 pub(crate) struct EvalGroupBy {
     pub(crate) strategy: EvalGroupingStrategy,
-    pub(crate) exprs: HashMap<String, Box<dyn EvalExpr>>,
-    pub(crate) aggregate_exprs: Vec<AggregateExpression>,
+    pub(crate) group: Vec<Box<dyn EvalExpr>>,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) aggs: Vec<AggregateExpression>,
+    pub(crate) distinct_aggs: Vec<AggregateExpression>,
     pub(crate) group_as_alias: Option<String>,
     pub(crate) input: Option<Value>,
 }
+
+type GroupKey = Vec<Value>;
+type AggState = Vec<Option<Value>>;
+type DAggState = Vec<(Option<Value>, FxHashMap<Value, ()>)>;
+#[derive(Clone)]
+struct CombinedState(AggState, DAggState, Option<Vec<Value>>);
 
 /// Represents the grouping qualifier: ALL or PARTIAL.
 #[derive(Debug)]
@@ -767,16 +620,34 @@ pub(crate) enum EvalGroupingStrategy {
 
 impl EvalGroupBy {
     #[inline]
-    fn eval_group(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> Tuple {
-        self.exprs
+    pub(crate) fn new(
+        strategy: EvalGroupingStrategy,
+        group: Vec<Box<dyn EvalExpr>>,
+        aliases: Vec<String>,
+        aggs: Vec<AggregateExpression>,
+        distinct_aggs: Vec<AggregateExpression>,
+        group_as_alias: Option<String>,
+    ) -> Self {
+        Self {
+            strategy,
+            group,
+            aliases,
+            aggs,
+            distinct_aggs,
+            group_as_alias,
+            input: None,
+        }
+    }
+
+    #[inline]
+    fn group_key(&self, bindings: &Tuple, ctx: &dyn EvalContext) -> GroupKey {
+        self.group
             .iter()
-            .map(
-                |(alias, expr)| match expr.evaluate(bindings, ctx).into_owned() {
-                    Missing => (alias.as_str(), Value::Null),
-                    val => (alias.as_str(), val),
-                },
-            )
-            .collect::<Tuple>()
+            .map(|expr| match expr.evaluate(bindings, ctx).as_ref() {
+                Missing => Value::Null,
+                val => val.clone(),
+            })
+            .collect()
     }
 }
 
@@ -793,54 +664,82 @@ impl Evaluable for EvalGroupBy {
                 Missing
             }
             EvalGroupingStrategy::GroupFull => {
-                let mut groups: HashMap<Tuple, Vec<Value>> = HashMap::new();
+                let mut grouped: FxHashMap<GroupKey, CombinedState> = FxHashMap::default();
+                let state = std::iter::repeat(None).take(self.aggs.len()).collect_vec();
+                let distinct_state = std::iter::repeat_with(|| (None, FxHashMap::default()))
+                    .take(self.distinct_aggs.len())
+                    .collect_vec();
+                let group_as = group_as_alias.as_ref().map(|_| vec![]);
+
+                let combined = CombinedState(state, distinct_state, group_as);
+
                 for v in input_value.into_iter() {
                     let v_as_tuple = v.coerce_into_tuple();
-                    let group = self.eval_group(&v_as_tuple, ctx);
+                    let group_key = self.group_key(&v_as_tuple, ctx);
+                    let CombinedState(state, distinct_state, group_as) =
+                        grouped.entry(group_key).or_insert_with(|| combined.clone());
+
                     // Compute next aggregation result for each of the aggregation expressions
-                    for aggregate_expr in self.aggregate_exprs.iter_mut() {
-                        let evaluated_val =
-                            aggregate_expr.expr.evaluate(&v_as_tuple, ctx).into_owned();
-                        aggregate_expr.func.next_value(&evaluated_val, &group);
+                    for (agg_expr, state) in self.aggs.iter().zip(state.iter_mut()) {
+                        let evaluated = agg_expr.expr.evaluate(&v_as_tuple, ctx);
+                        agg_expr.next_value(evaluated.as_ref(), state);
                     }
-                    groups
-                        .entry(group)
-                        .or_default()
-                        .push(Value::Tuple(Box::new(v_as_tuple.clone())));
+
+                    // Compute next aggregation result for each of the distinct aggregation expressions
+                    for (distinct_expr, (state, seen)) in
+                        self.distinct_aggs.iter().zip(distinct_state.iter_mut())
+                    {
+                        let evaluated = distinct_expr.expr.evaluate(&v_as_tuple, ctx);
+                        distinct_expr.next_distinct(evaluated.as_ref(), state, seen);
+                    }
+
+                    // Add tuple to `GROUP AS` if applicable
+                    if let Some(ref mut tuples) = group_as {
+                        tuples.push(Value::from(v_as_tuple));
+                    }
                 }
 
-                let bag = groups
+                let vals = grouped
                     .into_iter()
-                    .map(|(mut k, v)| {
-                        // Finalize aggregation computation and include result in output binding
-                        // tuple
-                        let mut agg_results: Vec<(&str, Value)> = vec![];
-                        for aggregate_expr in &self.aggregate_exprs {
-                            match aggregate_expr.func.compute(&k) {
-                                Ok(agg_result) => {
-                                    agg_results.push((aggregate_expr.name.as_str(), agg_result))
-                                }
-                                Err(err) => {
-                                    ctx.add_error(err);
-                                    return Missing;
-                                }
-                            }
-                        }
-                        agg_results
-                            .into_iter()
-                            .for_each(|(agg_name, agg_result)| k.insert(agg_name, agg_result));
+                    .map(|(group_key, state)| {
+                        let CombinedState(agg_state, distinct_state, group_as) = state;
+                        let group = self.aliases.iter().cloned().zip(group_key);
 
-                        match group_as_alias {
-                            None => Value::from(k),
-                            Some(alias) => {
-                                let mut tuple_with_group = k;
-                                tuple_with_group.insert(alias, Value::Bag(Box::new(Bag::from(v))));
-                                Value::from(tuple_with_group)
-                            }
+                        // finalize all aggregates
+                        let aggs_with_state = self.aggs.iter().zip(agg_state);
+                        let daggs_with_state = self
+                            .distinct_aggs
+                            .iter()
+                            .zip(distinct_state.into_iter().map(|(state, _)| state));
+                        let agg_data = aggs_with_state.chain(daggs_with_state).map(
+                            |(aggregate_expr, state)| {
+                                let val = match aggregate_expr.finalize(state) {
+                                    Ok(agg_result) => agg_result,
+                                    Err(err) => {
+                                        ctx.add_error(err);
+                                        Missing
+                                    }
+                                };
+
+                                (aggregate_expr.name.to_string(), val)
+                            },
+                        );
+
+                        let mut tuple = Tuple::from_iter(group.chain(agg_data));
+
+                        // insert `GROUP AS` if applicable
+                        if let Some(tuples) = group_as {
+                            tuple.insert(
+                                group_as_alias.as_ref().unwrap(),
+                                Value::from(Bag::from(tuples)),
+                            );
                         }
+
+                        Value::from(tuple)
                     })
-                    .collect::<Bag>();
-                Value::from(bag)
+                    .collect_vec();
+
+                Value::from(Bag::from(vals))
             }
         }
     }
@@ -1222,7 +1121,6 @@ impl Evaluable for EvalSelectValue {
 /// the `Project` selects attributes as specified by expressions in `exprs`. For `Project`
 /// operational semantics, see section `6` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug)]
 pub(crate) struct EvalSelect {
     pub(crate) exprs: Vec<(String, Box<dyn EvalExpr>)>,
     pub(crate) input: Option<Value>,
@@ -1231,6 +1129,21 @@ pub(crate) struct EvalSelect {
 impl EvalSelect {
     pub(crate) fn new(exprs: Vec<(String, Box<dyn EvalExpr>)>) -> Self {
         EvalSelect { exprs, input: None }
+    }
+}
+
+impl Debug for EvalSelect {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SELECT ")?;
+        let mut sep = "";
+        for (alias, expr) in &self.exprs {
+            write!(f, "{sep}")?;
+            expr.fmt(f)?;
+            write!(f, " AS {alias}")?;
+            sep = ", ";
+        }
+
+        Ok(())
     }
 }
 
@@ -1359,7 +1272,6 @@ impl Evaluable for EvalDistinct {
 }
 
 /// Represents an operator that captures the output of a (sub)query in the plan.
-#[derive(Debug)]
 pub(crate) struct EvalSink {
     pub(crate) input: Option<Value>,
 }
@@ -1371,6 +1283,12 @@ impl Evaluable for EvalSink {
 
     fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
+    }
+}
+
+impl Debug for EvalSink {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SINK")
     }
 }
 

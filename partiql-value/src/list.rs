@@ -56,7 +56,7 @@ impl List {
     }
 
     #[inline]
-    pub(crate) fn values(self) -> Vec<Value> {
+    pub fn to_vec(self) -> Vec<Value> {
         self.0
     }
 }
@@ -81,7 +81,7 @@ impl From<Vec<Value>> for List {
 impl From<Bag> for List {
     #[inline]
     fn from(bag: Bag) -> Self {
-        List(bag.values())
+        List(bag.to_vec())
     }
 }
 

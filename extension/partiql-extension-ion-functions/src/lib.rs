@@ -214,22 +214,41 @@ mod tests {
         assert_eq!(&out, expected);
     }
 
-    #[test]
-    fn custom_ion_scan() {
-        let value = bag![
+    fn expected() -> Value {
+        bag![
             tuple![("Program", "p1"), ("Operation", "get")],
             tuple![("Program", "p1"), ("Operation", "put")],
             tuple![("Program", "p2"), ("Operation", "get")],
             tuple![("Program", "p2"), ("Operation", "put")],
             tuple![("Program", "p3"), ("Operation", "update")],
         ]
-        .into();
+        .into()
+    }
 
+    #[track_caller]
+    fn custom_ion_scan(file: &str) {
+        let value = expected();
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("resources/test/test.ion");
+        path.push("resources/test");
+        path.push(file);
         let path = path.as_path().display();
 
         let query = format!("SELECT DISTINCT Program, Operation from read_ion('{path}') as fel");
         pass_eval(&query, &None, &value);
+    }
+
+    #[test]
+    fn custom_ion_scan_text() {
+        custom_ion_scan("test.ion");
+    }
+
+    #[test]
+    fn custom_ion_scan_binary() {
+        custom_ion_scan("test.10n");
+    }
+
+    #[test]
+    fn custom_ion_scan_zstd() {
+        custom_ion_scan("test.10n.zst");
     }
 }

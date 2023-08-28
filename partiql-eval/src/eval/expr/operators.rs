@@ -1,7 +1,7 @@
 use crate::eval::eval_expr_wrapper::{
-    unwrap_args, ArgCheckControlFlow, ArgCheckEvalExpr, ArgChecker, ArgShortCircuit,
-    BinaryValueExpr, DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing,
-    PropagateNull, TernaryValueExpr, UnaryValueExpr,
+    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr, DefaultArgChecker,
+    ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull, TernaryValueExpr,
+    UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -11,33 +11,39 @@ use partiql_types::{
     ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Value};
+use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
 
 use std::borrow::{Borrow, Cow};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
-#[derive(Debug)]
+#[derive(Clone)]
 pub(crate) struct EvalLitExpr {
-    pub(crate) lit: Box<Value>,
+    pub(crate) lit: Value,
+}
+
+impl Debug for EvalLitExpr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.lit.fmt(f)
+    }
 }
 
 impl BindEvalExpr for EvalLitExpr {
     fn bind<const STRICT: bool>(
         &self,
-        args: Vec<Box<dyn EvalExpr>>,
+        _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let expr: ArgCheckEvalExpr<
-            STRICT,
-            0,
-            _,
-            DefaultArgChecker<{ STRICT }, PropagateMissing<false>>,
-        > = ArgCheckEvalExpr::new([], unwrap_args(args)?, self.lit.as_ref().clone());
-        Ok(Box::new(expr))
+        Ok(Box::new(self.clone()))
+    }
+}
+
+impl EvalExpr for EvalLitExpr {
+    fn evaluate<'a>(&'a self, _: &'a Tuple, _: &'a dyn EvalContext) -> Cow<'a, Value> {
+        Cow::Borrowed(&self.lit)
     }
 }
 
