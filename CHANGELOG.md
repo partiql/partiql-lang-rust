@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `NullSortedValue` to specify ordering null or missing values `partiql_value::Value`s before or after all other values
 - Implements the aggregation functions `ANY`, `SOME`, `EVERY` and their `COLL_` versions
 - Add `COUNT(*)` implementation
+- Add `to_vec` method to `List` and `Bag` to convert to a `Vec`
 
 ### Fixes
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
@@ -49,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixes nested list/bag/tuple type ordering for when `ASC NULLS LAST` and `DESC NULLS FIRST` are specified
 - partiql-value fix deep equality of list, bags, and tuples
 - Fixes bug when using multiple aggregations without a `GROUP BY`
+- Performance improvements to grouping/evaluation
 
 ## [0.5.0] - 2023-06-06
 ### Changed

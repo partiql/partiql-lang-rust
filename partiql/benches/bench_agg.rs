@@ -14,7 +14,7 @@ use partiql_parser::{Parser, ParserResult};
 use partiql_value::{tuple, Bag, Value};
 
 fn numbers() -> impl Iterator<Item = Value> {
-    (0..1000i64).into_iter().map(|n| Value::from(n))
+    (0..1000i64).map(Value::from)
 }
 
 fn data() -> MapBindings<Value> {
@@ -26,7 +26,6 @@ fn data() -> MapBindings<Value> {
     .into_iter()
     .cycle();
     let numbers: Bag = numbers()
-        .into_iter()
         .map(|n| tuple![("shard", shards.next().unwrap()), ("n", n)])
         .collect();
     let data = tuple![("numbers", numbers)];
@@ -57,7 +56,7 @@ pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Valu
     }
 }
 
-fn create_query(aggs: &Vec<(&'static str, bool)>, group: bool, group_as: bool) -> (String, String) {
+fn create_query(aggs: &[(&'static str, bool)], group: bool, group_as: bool) -> (String, String) {
     let agg_fns = aggs
         .iter()
         .map(|(name, distinct)| {
@@ -112,15 +111,13 @@ fn create_tests() -> Vec<(String, String)> {
 
     let simple = all_aggs
         .clone()
-        .map(|(a, d)| create_query(&vec![(a, *d)], false, false));
+        .map(|(&a, d)| create_query(vec![(a, *d)].as_slice(), false, false));
 
     let aggs_all = aggs
-        .clone()
         .into_iter()
         .cartesian_product([false].into_iter())
         .collect_vec();
     let aggs_distinct = aggs
-        .clone()
         .into_iter()
         .cartesian_product([true].into_iter())
         .collect_vec();

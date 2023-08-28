@@ -44,7 +44,7 @@ impl Bag {
     }
 
     #[inline]
-    pub(crate) fn values(self) -> Vec<Value> {
+    pub fn to_vec(self) -> Vec<Value> {
         self.0
     }
 }
@@ -76,7 +76,7 @@ impl From<HashSet<Value>> for Bag {
 impl From<List> for Bag {
     #[inline]
     fn from(list: List) -> Self {
-        Bag(list.values())
+        Bag(list.to_vec())
     }
 }
 
