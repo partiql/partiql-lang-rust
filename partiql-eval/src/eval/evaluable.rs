@@ -9,7 +9,7 @@ use std::borrow::{Borrow, Cow};
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
 #[macro_export]
@@ -48,7 +48,6 @@ pub trait Evaluable: Debug {
 /// Represents an evaluation `Scan` operator; `Scan` operator scans the given bindings from its
 /// input and and the environment and outputs a bag of binding tuples for tuples/values matching the
 /// scan `expr`, e.g. an SQL expression `table1` in SQL expression `FROM table1`.
-#[derive(Debug)]
 pub(crate) struct EvalScan {
     pub(crate) expr: Box<dyn EvalExpr>,
     pub(crate) as_key: String,
@@ -57,6 +56,21 @@ pub(crate) struct EvalScan {
 
     // cached values
     attrs: Vec<String>,
+}
+
+impl Debug for EvalScan {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SCAN ")?;
+        self.expr.fmt(f)?;
+
+        write!(f, " AS {}", self.as_key)?;
+
+        if let Some(at_key) = &self.at_key {
+            write!(f, " AT {}", at_key)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl EvalScan {
@@ -133,7 +147,6 @@ impl Evaluable for EvalScan {
 /// Represents an evaluation `Join` operator; `Join` joins the tuples from its LHS and RHS based on a logic defined
 /// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
 /// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug)]
 pub(crate) struct EvalJoin {
     pub(crate) kind: EvalJoinKind,
     pub(crate) on: Option<Box<dyn EvalExpr>>,
@@ -148,6 +161,17 @@ pub(crate) enum EvalJoinKind {
     Left,
     Right,
     Full,
+}
+
+impl Debug for EvalJoin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?} JOIN", &self.kind)?;
+        if let Some(on) = &self.on {
+            write!(f, "ON ")?;
+            on.fmt(f)?;
+        }
+        Ok(())
+    }
 }
 
 impl EvalJoin {
@@ -1222,7 +1246,6 @@ impl Evaluable for EvalSelectValue {
 /// the `Project` selects attributes as specified by expressions in `exprs`. For `Project`
 /// operational semantics, see section `6` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug)]
 pub(crate) struct EvalSelect {
     pub(crate) exprs: Vec<(String, Box<dyn EvalExpr>)>,
     pub(crate) input: Option<Value>,
@@ -1231,6 +1254,21 @@ pub(crate) struct EvalSelect {
 impl EvalSelect {
     pub(crate) fn new(exprs: Vec<(String, Box<dyn EvalExpr>)>) -> Self {
         EvalSelect { exprs, input: None }
+    }
+}
+
+impl Debug for EvalSelect {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SELECT ")?;
+        let mut sep = "";
+        for (alias, expr) in &self.exprs {
+            write!(f, "{sep}")?;
+            expr.fmt(f)?;
+            write!(f, " AS {alias}")?;
+            sep = ", ";
+        }
+
+        Ok(())
     }
 }
 
@@ -1359,7 +1397,6 @@ impl Evaluable for EvalDistinct {
 }
 
 /// Represents an operator that captures the output of a (sub)query in the plan.
-#[derive(Debug)]
 pub(crate) struct EvalSink {
     pub(crate) input: Option<Value>,
 }
@@ -1371,6 +1408,12 @@ impl Evaluable for EvalSink {
 
     fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
         self.input = Some(input);
+    }
+}
+
+impl Debug for EvalSink {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SINK")
     }
 }
 

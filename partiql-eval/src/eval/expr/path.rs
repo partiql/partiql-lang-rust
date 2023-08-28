@@ -9,22 +9,52 @@ use partiql_value::Value::Missing;
 use partiql_value::{BindingsName, Tuple, Value};
 
 use std::borrow::Cow;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 /// Represents an evaluation operator for path navigation expressions as outlined in Section `4` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
-#[derive(Debug)]
 pub(crate) struct EvalPath {
     pub(crate) expr: Box<dyn EvalExpr>,
     pub(crate) components: Vec<EvalPathComponent>,
 }
 
-#[derive(Debug)]
 pub(crate) enum EvalPathComponent {
     Key(BindingsName<'static>),
     KeyExpr(Box<dyn EvalExpr>),
     Index(i64),
     IndexExpr(Box<dyn EvalExpr>),
+}
+
+impl Debug for EvalPathComponent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            EvalPathComponent::Key(name) => match name {
+                BindingsName::CaseSensitive(s) => write!(f, ".\"{s}\""),
+                BindingsName::CaseInsensitive(s) => write!(f, ".{s}"),
+            },
+            EvalPathComponent::KeyExpr(ke) => {
+                write!(f, "[")?;
+                ke.fmt(f)?;
+                write!(f, "]")
+            }
+            EvalPathComponent::Index(i) => write!(f, "[{i}]"),
+            EvalPathComponent::IndexExpr(ie) => {
+                write!(f, "[")?;
+                ie.fmt(f)?;
+                write!(f, "]")
+            }
+        }
+    }
+}
+
+impl Debug for EvalPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.expr.fmt(f)?;
+        for cmp in &self.components {
+            cmp.fmt(f)?;
+        }
+        Ok(())
+    }
 }
 
 #[inline]
@@ -152,7 +182,7 @@ fn borrow_or_missing(value: Option<&Value>) -> Cow<Value> {
 }
 
 /// Represents a local variable reference in a (sub)query, e.g. `b` in `SELECT t.b as a FROM T as t`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct EvalLocalVarRef {
     pub(crate) name: BindingsName<'static>,
 }
@@ -163,10 +193,28 @@ impl EvalExpr for EvalLocalVarRef {
     }
 }
 
+impl Debug for EvalLocalVarRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.name {
+            BindingsName::CaseSensitive(s) => write!(f, "@\"{s}\"",),
+            BindingsName::CaseInsensitive(s) => write!(f, "@{s}",),
+        }
+    }
+}
+
 /// Represents a global variable reference in a (sub)query, e.g. `T` in `SELECT t.b as a FROM T as t`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct EvalGlobalVarRef {
     pub(crate) name: BindingsName<'static>,
+}
+
+impl Debug for EvalGlobalVarRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.name {
+            BindingsName::CaseSensitive(s) => write!(f, "^\"{s}\"",),
+            BindingsName::CaseInsensitive(s) => write!(f, "^{s}",),
+        }
+    }
 }
 
 impl EvalExpr for EvalGlobalVarRef {

@@ -132,7 +132,7 @@ impl<'c> EvaluatorPlanner<'c> {
         let mut graph: StableGraph<_, _> = Default::default();
         let mut seen = HashMap::new();
 
-        for (s, d, w) in flows {
+        for (s, d, branch_num) in flows {
             let mut add_node = |op_id: &OpId| {
                 let logical_op = lg.operator(*op_id).unwrap();
                 *seen
@@ -141,7 +141,7 @@ impl<'c> EvaluatorPlanner<'c> {
             };
 
             let (s, d) = (add_node(s), add_node(d));
-            graph.add_edge(s, d, *w);
+            graph.add_edge(s, d, *branch_num);
         }
 
         EvalPlan(graph)
@@ -415,7 +415,7 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
-                EvalLitExpr { lit: lit.clone() }.bind::<{ STRICT }>(vec![]),
+                EvalLitExpr { lit: *lit.clone() }.bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::Path(expr, components) => (
                 "path",
@@ -535,10 +535,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "simple case default",
-                        EvalLitExpr {
-                            lit: Box::new(Null),
-                        }
-                        .bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr { lit: Null }.bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def),
                 };
@@ -563,10 +560,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "searched case default",
-                        EvalLitExpr {
-                            lit: Box::new(Null),
-                        }
-                        .bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr { lit: Null }.bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def.as_ref()),
                 };
