@@ -33,6 +33,7 @@ const OUTPUT_SCHEMA_KEY: &str = "_output_schema";
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypeErr {
     pub errors: Vec<TypingError>,
+    pub output: Option<PartiqlType>,
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
@@ -49,22 +50,6 @@ pub enum TypingError {
     #[error("TypeCheck: {0}")]
     TypeCheck(String),
 }
-
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// pub struct TypeErrMsg {
-//     msg: String,
-//     output_type: PartiqlType,
-// }
-//
-// impl TypeErrMsg {
-//     pub fn new(msg: &str, output_type: &PartiqlType) -> Self {
-//         TypeErrMsg {
-//             msg: ,
-//             output_type
-//         }
-//     }
-//
-// }
 
 #[derive(Debug, Clone)]
 pub enum TypingMode {
@@ -134,7 +119,7 @@ pub struct PlanTyper<'c> {
     logical_plan: LogicalPlan<BindingsOp>,
     errors: Vec<TypingError>,
     type_env_stack: Vec<TypeEnvContext>,
-    current_binding_op: Option<BindingsOp>,
+    current_bindings_op: Option<BindingsOp>,
     output: Option<PartiqlType>,
 }
 
@@ -148,7 +133,7 @@ impl<'c> PlanTyper<'c> {
             logical_plan: ir.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
-            current_binding_op: Default::default(),
+            current_bindings_op: Default::default(),
             output: None,
         }
     }
@@ -161,7 +146,7 @@ impl<'c> PlanTyper<'c> {
             logical_plan: lg.clone(),
             errors: Default::default(),
             type_env_stack: Default::default(),
-            current_binding_op: Default::default(),
+            current_bindings_op: Default::default(),
             output: None,
         }
     }
@@ -177,53 +162,48 @@ impl<'c> PlanTyper<'c> {
             }
         }
 
-        // dbg!(&self.type_env_stack);
-
         if self.errors.is_empty() {
             Ok(self.output.clone().unwrap_or(undefined!()))
         } else {
             let output_schema = self.get_singleton_type_from_env();
-            self.errors.push(TypingError::IllegalState(format!(
-                "Invalid output Schema: {:?}",
-                &output_schema
-            )));
             Err(TypeErr {
                 errors: self.errors.clone(),
+                output: Some(output_schema),
             })
         }
     }
 
     fn type_bindings_op(&mut self, op: &BindingsOp) {
-        self.current_binding_op = Some(op.clone());
+        self.current_bindings_op = Some(op.clone());
         match op {
-            BindingsOp::Scan(partiql_logical::Scan { expr, as_key, .. }) => {
-                // dbg!("Scan");
-                // dbg!(expr);
-                self.type_vexpr(expr, LookupOrder::Delegate);
-                let type_ctx = &self.local_type_ctx();
-                // dbg!(&type_ctx);
-                for (name, ty) in type_ctx.env().iter() {
-                    let derived_type = self.element_type(ty);
-                    self.type_env_stack.push(ty_ctx![(
-                        &ty_env![(name.clone(), derived_type.clone())],
-                        ty
-                    )]);
+            BindingsOp::Scan(partiql_logical::Scan {
+                expr,
+                as_key,
+                at_key,
+            }) => {
+                if let Some(_at_key) = at_key {
+                    self.errors.push(TypingError::NotYetImplemented(
+                        "Scan operator with AT key is not implemented yet".to_string(),
+                    ))
+                }
 
-                    if !as_key.is_empty() {
-                        self.type_env_stack.push(ty_ctx![(
-                            &ty_env![(string_to_sym(as_key.as_str()), derived_type)],
-                            ty
-                        )]);
+                self.type_vexpr(expr, LookupOrder::Delegate);
+
+                if !as_key.is_empty() {
+                    let type_ctx = &self.local_type_ctx();
+                    for (_name, ty) in type_ctx.env().iter() {
+                        if let TypeKind::Struct(_s) = ty.kind() {
+                            self.type_env_stack.push(ty_ctx![(
+                                &ty_env![(string_to_sym(as_key.as_str()), ty.clone())],
+                                ty
+                            )]);
+                        }
                     }
                 }
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
-                let derived_type_ctx = self.local_type_ctx();
                 for (k, v) in exprs.iter() {
-                    // dbg!("Project");
-                    // dbg!(k);
-                    // dbg!(v);
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
                     fields.push(StructField::new(
                         k.as_str(),
@@ -234,6 +214,8 @@ impl<'c> PlanTyper<'c> {
                 let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
                     StructConstraint::Fields(fields),
                 ])));
+
+                let derived_type_ctx = self.local_type_ctx();
                 let derived_type = &self.derived_type(&derived_type_ctx);
                 let schema = if derived_type.is_ordered_collection() {
                     PartiqlType::new_array(ArrayType::new(Box::new(ty)))
@@ -274,20 +256,6 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_vexpr(&mut self, v: &ValueExpr, lookup_order: LookupOrder) {
-        fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlType)> {
-            s.fields()
-                .into_iter()
-                .map(|field| {
-                    let sym = SymbolPrimitive {
-                        value: field.name().to_string(),
-                        case: CaseSensitivity::CaseInsensitive,
-                    };
-
-                    (sym, field.ty().clone())
-                })
-                .collect()
-        }
-
         fn binding_to_sym(binding: &BindingsName) -> SymbolPrimitive {
             match binding {
                 BindingsName::CaseSensitive(s) => SymbolPrimitive {
@@ -303,71 +271,32 @@ impl<'c> PlanTyper<'c> {
 
         match v {
             ValueExpr::VarRef(binding_name, _) => {
-                let sym = binding_to_sym(binding_name);
-
+                let key = binding_to_sym(binding_name);
                 match lookup_order {
-                    LookupOrder::GlobalLocal => {
-                        let ty = self.resolve_global_then_local(&sym);
-                        // let ty = self.element_type(&ty);
-                        if ty.is_undefined() {
-                            self.type_with_undefined(&sym);
-                        } else {
-                            let mut new_type_env = LocalTypeEnv::new();
-                            if let TypeKind::Struct(s) = ty.kind() {
-                                to_bindings(s).into_iter().for_each(|b| {
-                                    new_type_env.insert(b.0, b.1);
-                                });
-
-                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
-                                self.type_env_stack.push(type_ctx);
-                            } else {
-                                new_type_env.insert(sym, self.element_type(&ty));
-                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
-                                self.type_env_stack.push(type_ctx);
-                            }
-                        }
+                    GlobalLocal => {
+                        let ty = self.resolve_global_then_local(&key);
+                        self.type_varef(&key, &ty);
                     }
-                    LookupOrder::LocalGlobal => {
-                        let ty = self.resolve_local_then_global(&sym);
-
-                        if ty.is_undefined() {
-                            self.type_with_undefined(&sym);
-                        } else {
-                            let mut new_type_env = LocalTypeEnv::new();
-                            if let TypeKind::Struct(s) = ty.kind() {
-                                to_bindings(s).into_iter().for_each(|b| {
-                                    new_type_env.insert(b.0, b.1);
-                                });
-
-                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
-                                self.type_env_stack.push(type_ctx);
-                            } else {
-                                new_type_env.insert(sym, ty.clone());
-                                let type_ctx = ty_ctx![(&new_type_env, &ty)];
-                                self.type_env_stack.push(type_ctx);
-                            }
-                        }
+                    LocalGlobal => {
+                        let ty = self.resolve_local_then_global(&key);
+                        self.type_varef(&key, &ty);
                     }
                     LookupOrder::Delegate => self.type_vexpr(v, self.lookup_order(v)),
-                }
+                };
             }
             ValueExpr::Path(v, components) => {
                 self.type_vexpr(v, LookupOrder::Delegate);
-                // dbg!(&v);
                 for component in components {
                     match component {
                         PathComponent::Key(key) => {
                             let var = ValueExpr::VarRef(key.clone(), VarRefType::Local);
                             self.type_vexpr(&var, LookupOrder::LocalGlobal);
 
-                            // dbg!(&key);
-
                             if let Some(ty) =
                                 self.retrieve_type_from_local_ctx(&binding_to_sym(key))
                             {
                                 let key = binding_to_sym(key);
                                 let ctx = ty_ctx![(&ty_env![(key, ty.clone())], &ty)];
-                                // dbg!(&ctx);
                                 self.type_env_stack.push(ctx);
                             }
                         }
@@ -439,6 +368,7 @@ impl<'c> PlanTyper<'c> {
             errors: vec![TypingError::IllegalState(format!(
                 "Malformed plan detected: {e:?}"
             ))],
+            output: None,
         })
     }
 
@@ -458,6 +388,7 @@ impl<'c> PlanTyper<'c> {
                 } else {
                     Err(TypeErr {
                         errors: vec![TypingError::IllegalState("Malformed IR".to_string())],
+                        output: None,
                     })
                 }
             };
@@ -537,7 +468,7 @@ impl<'c> PlanTyper<'c> {
                 VarRefType::Global => GlobalLocal,
                 VarRefType::Local => LocalGlobal,
             },
-            _ => match self.current_binding_op {
+            _ => match self.current_bindings_op {
                 Some(BindingsOp::Scan(_)) => GlobalLocal,
                 _ => LocalGlobal,
             },
@@ -546,19 +477,8 @@ impl<'c> PlanTyper<'c> {
 
     fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
         let ty = self.resolve_global(key);
-        // let ty = self.element_type(&ty);
         match ty.is_undefined() {
-            true => {
-                let ty = self.resolve_local(key);
-                if ty.is_undefined() {
-                    match &self.typing_mode {
-                        TypingMode::Permissive => missing!(),
-                        TypingMode::Strict => undefined!(),
-                    }
-                } else {
-                    ty
-                }
-            }
+            true => self.resolve_local(key),
             false => ty,
         }
     }
@@ -566,26 +486,15 @@ impl<'c> PlanTyper<'c> {
     fn resolve_local_then_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
         let ty = self.resolve_local(key);
         match ty.is_undefined() {
-            true => {
-                let ty = self.resolve_global(key);
-                if ty.is_undefined() {
-                    match &self.typing_mode {
-                        TypingMode::Permissive => missing!(),
-                        TypingMode::Strict => undefined!(),
-                    }
-                } else {
-                    ty
-                }
-            }
+            true => self.resolve_global(key),
             false => ty,
         }
     }
 
     fn resolve_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
         if let Some(type_entry) = self.catalog.resolve_type(key.value.as_str()) {
-            let ty = self.element_type(&type_entry.ty());
+            let ty = self.element_type(type_entry.ty());
             ty
-            // type_entry.ty().clone()
         } else {
             undefined!()
         }
@@ -614,12 +523,33 @@ impl<'c> PlanTyper<'c> {
         let env = ctx.env();
         if env.len() != 1 {
             self.errors.push(TypingError::IllegalState(format!(
-                "Unexpected Typing Environment {:?}",
-                &env
+                "Unexpected Typing Environment; expected typing environment with only one type but found {:?} types",
+                &env.len()
             )));
             undefined!()
         } else {
             env[0].clone()
+        }
+    }
+
+    fn type_varef(&mut self, key: &SymbolPrimitive, ty: &PartiqlType) {
+        if ty.is_undefined() {
+            self.type_with_undefined(key);
+        } else {
+            let mut new_type_env = LocalTypeEnv::new();
+            if let TypeKind::Struct(s) = ty.kind() {
+                to_bindings(s).into_iter().for_each(|b| {
+                    new_type_env.insert(b.0, b.1);
+                });
+
+                let type_ctx = ty_ctx![(&new_type_env, ty)];
+                self.type_env_stack.push(type_ctx);
+            } else {
+                // new_type_env.insert(sym, self.element_type(&ty));
+                new_type_env.insert(key.clone(), ty.clone());
+                let type_ctx = ty_ctx![(&new_type_env, ty)];
+                self.type_env_stack.push(type_ctx);
+            }
         }
     }
 }
@@ -629,6 +559,20 @@ fn string_to_sym(name: &str) -> SymbolPrimitive {
         value: name.to_string(),
         case: CaseSensitivity::CaseInsensitive,
     }
+}
+
+fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlType)> {
+    s.fields()
+        .into_iter()
+        .map(|field| {
+            let sym = SymbolPrimitive {
+                value: field.name().to_string(),
+                case: CaseSensitivity::CaseInsensitive,
+            };
+
+            (sym, field.ty().clone())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -803,6 +747,9 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "id", ty: PartiqlType(Int) }, StructField { name: "name", ty: PartiqlType(String) }])} }))"#;
+        let err2 = r#"Unexpected Typing Environment; expected typing environment with only one type but found 2 types"#;
+
         assert_err(
             assert_query_typing(
                 TypingMode::Strict,
@@ -816,43 +763,62 @@ mod tests {
                 ),
                 vec![],
             ),
-            vec![TypingError::IllegalState(format!(
-                "Illegal Derive Type PartiqlType(String)"
-            ))],
+            vec![
+                TypingError::TypeCheck(err1.to_string()),
+                TypingError::IllegalState(err2.to_string()),
+            ],
+            Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("age", undefined!()),
+                ]
+            ),])]]),
         );
 
         // Closed Schema with `Strict` typing mode and `bar` non-existent projection from closed nested `details`.
-        // let details_fields = struct_fields![("age", int!())];
-        // let details = r#struct![BTreeSet::from([
-        //     details_fields,
-        //     StructConstraint::Open(false)
-        // ])];
-        // assert_err(
-        //     assert_query_typing(
-        //         TypingMode::Strict,
-        //         "SELECT customers.id, customers.name, customers.details.bar FROM customers",
-        //         create_customer_schema(
-        //             false,
-        //             vec![
-        //                 StructField::new("id", int!()),
-        //                 StructField::new("name", str!()),
-        //                 StructField::new("details", details),
-        //             ],
-        //         ),
-        //         vec![],
-        //     ),
-        //     vec![
-        //         TypingError::TypeCheck(
-        //             "No Typing Information for SymbolPrimitive { value: \"details\", case: CaseInsensitive }".to_string()
-        //         ),
-        //         TypingError::TypeCheck(
-        //             "No Typing Information for SymbolPrimitive { value: \"bar\", case: CaseInsensitive }".to_string()
-        //         )
-        //     ],
-        // );
+        let details_fields = struct_fields![("age", int!())];
+        let details = r#struct![BTreeSet::from([
+            details_fields,
+            StructConstraint::Open(false)
+        ])];
+
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
+        let err2 = r#"No Typing Information for SymbolPrimitive { value: "bar", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
+
+        assert_err(
+            assert_query_typing(
+                TypingMode::Strict,
+                "SELECT customers.id, customers.name, customers.details.bar FROM customers",
+                create_customer_schema(
+                    false,
+                    vec![
+                        StructField::new("id", int!()),
+                        StructField::new("name", str!()),
+                        StructField::new("details", details),
+                    ],
+                ),
+                vec![],
+            ),
+            vec![
+                TypingError::TypeCheck(err1.to_string()),
+                TypingError::TypeCheck(err2.to_string()),
+            ],
+            Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
+                vec![
+                    StructField::new("id", int!()),
+                    StructField::new("name", str!()),
+                    StructField::new("bar", int!()),
+                ]
+            ),])]]),
+        );
     }
 
-    fn assert_err(result: Result<(), TypeErr>, expected_errors: Vec<TypingError>) {
+    fn assert_err(
+        result: Result<(), TypeErr>,
+        expected_errors: Vec<TypingError>,
+        output: Option<PartiqlType>,
+    ) {
         match result {
             Ok(_) => {
                 panic!("Expected Error");
@@ -862,6 +828,7 @@ mod tests {
                     e,
                     TypeErr {
                         errors: expected_errors,
+                        output
                     }
                 )
             }
@@ -902,11 +869,13 @@ mod tests {
                             errors: vec![TypingError::TypeCheck(
                                 "[Struct] type expected".to_string(),
                             )],
+                            output: None,
                         })
                     }
                 }
                 _ => Err(TypeErr {
                     errors: vec![TypingError::TypeCheck("[Bag] type expected".to_string())],
+                    output: None,
                 }),
             },
             Err(e) => Err(e),
@@ -922,7 +891,6 @@ mod tests {
         let _oid = catalog.add_type_entry(type_env_entry);
 
         let parsed = parse(query);
-        // dbg!(&parsed);
         let lg = lower(&parsed, &catalog).expect("Logical plan");
 
         let mut typer = match mode {

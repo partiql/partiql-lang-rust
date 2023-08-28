@@ -363,7 +363,10 @@ impl<'a> AstToLogical<'a> {
                                                 }
 
                                                 continue;
-                                            } else if let Some(_type_entry) = self.catalog.resolve_type(name_ref.sym.value.as_ref()) {
+                                            } else if let Some(_type_entry) = self
+                                                .catalog
+                                                .resolve_type(name_ref.sym.value.as_ref())
+                                            {
                                                 let expr = ValueExpr::VarRef(
                                                     var_binding.clone(),
                                                     VarRefType::Global,
@@ -373,7 +376,6 @@ impl<'a> AstToLogical<'a> {
                                                 }
                                                 continue;
                                             } else {
-
                                                 let path = logical::ValueExpr::Path(
                                                     Box::new(ValueExpr::VarRef(
                                                         sym_to_binding(produce).unwrap_or_else(
@@ -1288,7 +1290,6 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
         if !is_path {
             let options = self.resolve_varref(_var_ref);
-            dbg!(&options);
             self.push_vexpr(options);
         } else {
             let VarRef {
@@ -1303,9 +1304,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     BindingsName::CaseInsensitive(Cow::Owned(value.clone()))
                 }
             };
-            dbg!(&name);
             self.push_vexpr(ValueExpr::VarRef(name, VarRefType::Local));
-            dbg!(self.vexpr_stack.last_mut().unwrap());
         }
         Traverse::Continue
     }

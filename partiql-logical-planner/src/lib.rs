@@ -29,7 +29,6 @@ impl<'c> LogicalPlanner<'c> {
         let catalog = PartiqlCatalog::default();
         let mut resolver = NameResolver::new(&catalog);
         let registry = resolver.resolve(q)?;
-        // dbg!(&registry);
         let planner = AstToLogical::new(self.catalog, registry);
         planner.lower_query(q)
     }

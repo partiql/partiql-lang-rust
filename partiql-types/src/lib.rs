@@ -463,7 +463,8 @@ impl BagType {
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlType>,
-    constraints: Vec<ArrayConstraint>,
+    // TODO Add Array constraint once we have Schema Specification:
+    // https://github.com/partiql/partiql-spec/issues/49
 }
 
 impl ArrayType {
@@ -472,33 +473,12 @@ impl ArrayType {
     }
 
     pub fn new(typ: Box<PartiqlType>) -> Self {
-        ArrayType {
-            element_type: typ,
-            constraints: vec![],
-        }
-    }
-
-    pub fn new_constrained(typ: Box<PartiqlType>, constraints: Vec<ArrayConstraint>) -> Self {
-        ArrayType {
-            element_type: typ,
-            constraints,
-        }
+        ArrayType { element_type: typ }
     }
 
     pub fn element_type(&self) -> &PartiqlType {
         &self.element_type
     }
-
-    pub fn constraints(&self) -> &Vec<ArrayConstraint> {
-        &self.constraints
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-#[non_exhaustive]
-pub enum ArrayConstraint {
-    // TODO Add Array constraint once we have Schema Specification:
-    // https://github.com/partiql/partiql-spec/issues/49
 }
 
 #[cfg(test)]
