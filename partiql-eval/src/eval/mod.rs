@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 
 use petgraph::algo::toposort;
-use petgraph::dot::{Config, Dot};
+use petgraph::dot::Dot;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
@@ -124,7 +124,7 @@ impl EvalPlan {
     }
 
     pub fn to_dot_graph(&self) -> String {
-        format!("{:?}", Dot::with_config(&self.0, &[Config::EdgeNoLabel]))
+        format!("{:?}", Dot::with_config(&self.0, &[]))
     }
 }
 
