@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1693262515755,
+  "lastUpdate": 1693349089322,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -16139,6 +16139,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 36302,
             "range": "± 752",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "14f6e01c2cc22149dbeed4c5329b15f3e55b950f",
+          "message": "Add Catalog to resolve_varref in lowering (#434)\n\nCurrently during lowering, when we want to resolve a variable name we do the following:\r\n\r\n1. If there are any `KeySchema`s  in `KeyRegistry` for the current `id` in the stack (lookup from bottom of the stack to the top)\r\n2. Retrieve the `KeySchema`.\r\n3. Lookup the `scopes` in `KeyRegistry` and see which `NodeId` this `Node` is within the scope of.\r\n4. Get the `KeySchema` of the found `Node`.\r\n5. If the variable name is equal to the `KeySchema`'s produce OR lowered case variable name is equal to `produce`'s lowered case and variable name is case-insensitive, then create a new `VarRef` with `Local` lookup and push it to the lookups (for `DynamicLookup`)\r\n6. else create a `Path` with the `produce` name as `VarRef` and variable name as the key component.\r\n\r\n\r\nThis PR adds a step between 5 and 6 to check to see if there is a type for the variable in the global and if so, adds a `VarRef` resolve global to the lookups.\r\n\r\n### Example\r\n**Query**: `SELECT c.id, customers.name FROM customers AS c`;\r\n**Global Typing Environment (in Catalog)**:  <<`customers`: any>>\r\n\r\n**KeyRegistry**:\r\n\r\n``` rust\r\n{\r\n    in_scope: {\r\n        NodeId(\r\n            12, // From\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n        NodeId(\r\n            13, // Select\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n        NodeId(\r\n            14, // QuerySet\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n        NodeId(\r\n            15, // Query\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n        NodeId(\r\n            16, // TopLevel\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n    },\r\n    schema: {\r\n        NodeId(\r\n            11,\r\n        ): KeySchema {\r\n            consume: {\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"customers\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Global,\r\n                        Local,\r\n                    ],\r\n                },\r\n            },\r\n            produce: {\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"c\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n            },\r\n        },\r\n        NodeId(\r\n            15,\r\n        ): KeySchema {\r\n            consume: {\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"c\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"id\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"customers\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"name\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n            },\r\n            produce: {\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"my_id\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"my_name\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n            },\r\n        },\r\n    },\r\n    aliases: {\r\n        NodeId(\r\n            4,\r\n        ): Known(\r\n            SymbolPrimitive {\r\n                value: \"my_id\",\r\n                case: CaseInsensitive,\r\n            },\r\n        ),\r\n        NodeId(\r\n            8,\r\n        ): Known(\r\n            SymbolPrimitive {\r\n                value: \"my_name\",\r\n                case: CaseInsensitive,\r\n            },\r\n        ),\r\n        NodeId(\r\n            11,\r\n        ): Known(\r\n            SymbolPrimitive {\r\n                value: \"c\",\r\n                case: CaseInsensitive,\r\n            },\r\n        ),\r\n    },\r\n}\r\n```\r\n\r\n\r\nFor resolving `customers` in the projection, we find `NodeId` `15` (`Query` in the `AST`) and get the following `KeySchema` from the `KeyRegistry`:\r\n\r\n```rust\r\nKeySchema {\r\n            consume: {\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"c\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"id\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"customers\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"name\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Local,\r\n                        Global,\r\n                    ],\r\n                },\r\n            },\r\n            produce: {\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"my_id\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"my_name\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n            },\r\n        },\r\n\r\n```\r\n\r\nWe retrieve the following `scope` which says `15` is in the scope of `11`:\r\n\r\n```rust\r\n        NodeId(\r\n            15, // Query\r\n        ): [\r\n            NodeId(\r\n                11, // FromLet\r\n            ),\r\n        ],\r\n```\r\n\r\nWe get the following `KeySchema` for `11`:\r\n\r\n```rust\r\nKeySchema {\r\n            consume: {\r\n                NameRef {\r\n                    sym: SymbolPrimitive {\r\n                        value: \"customers\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                    lookup: [\r\n                        Global,\r\n                        Local,\r\n                    ],\r\n                },\r\n            },\r\n            produce: {\r\n                Known(\r\n                    SymbolPrimitive {\r\n                        value: \"c\",\r\n                        case: CaseInsensitive,\r\n                    },\r\n                ),\r\n            },\r\n        }\r\n```\r\n\r\nWe check the `produce` and it is unequal to `customers`. We then check the global catalog and we find an entry for `customers`, hence we add a `VarRef` with a `Global` lookup to the look-ups.",
+          "timestamp": "2023-08-29T15:28:24-07:00",
+          "tree_id": "b3636e60e29c4a2ca388af471facb7d9a09c51a8",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/14f6e01c2cc22149dbeed4c5329b15f3e55b950f"
+        },
+        "date": 1693349088014,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 1213220,
+            "range": "± 12508",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 1572893,
+            "range": "± 16767",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 1522868,
+            "range": "± 23537",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 1559692,
+            "range": "± 22208",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 1521911,
+            "range": "± 21203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 1579583,
+            "range": "± 17113",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 1550883,
+            "range": "± 8125",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 1578388,
+            "range": "± 16666",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 1517316,
+            "range": "± 24189",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 1557248,
+            "range": "± 31386",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1851214,
+            "range": "± 26914",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 2214797,
+            "range": "± 57988",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 3307202,
+            "range": "± 158680",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 2092775,
+            "range": "± 81306",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 2505991,
+            "range": "± 37844",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 3488942,
+            "range": "± 42833",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 6871,
+            "range": "± 532",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 65207,
+            "range": "± 33597",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 122542,
+            "range": "± 4017",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 6536,
+            "range": "± 206",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 51136,
+            "range": "± 1518",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 110807,
+            "range": "± 7807",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 77594,
+            "range": "± 1283",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1238399,
+            "range": "± 60424",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2444791,
+            "range": "± 68665",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 23777220,
+            "range": "± 782446",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 132054690,
+            "range": "± 948550",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 247631799,
+            "range": "± 4043217",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 15542,
+            "range": "± 392",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 4204,
+            "range": "± 129",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 682,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 52,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 920,
+            "range": "± 125",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2630,
+            "range": "± 34",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 8681,
+            "range": "± 539",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 23262,
+            "range": "± 466",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 33925,
+            "range": "± 968",
             "unit": "ns/iter"
           }
         ]
