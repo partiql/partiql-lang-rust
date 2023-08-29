@@ -418,8 +418,6 @@ impl<'a> AstToLogical<'a> {
             }
         }
 
-        // TODO in the presence of schema, error if the variable reference doesn't correspond to a data table
-
         // assume global
         ValueExpr::VarRef(symprim_to_binding(&varref.name), VarRefType::Global)
     }

@@ -2,7 +2,7 @@ use crate::error::{AstTransformError, AstTransformationError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
-use partiql_ast::ast::{GroupByExpr, GroupKey};
+use partiql_ast::ast::{GroupByExpr, GroupKey, SymbolPrimitive};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::Catalog;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -209,6 +209,19 @@ impl<'c> NameResolver<'c> {
     fn push_consume_name(&mut self, name: NameRef) {
         self.keyref_stack.last_mut().unwrap().consume.insert(name);
     }
+
+    #[inline]
+    fn catalog_resolvable(&mut self, name: &SymbolPrimitive) -> bool {
+        // TODO fix the name look up based on case sensitivity:
+        // https://github.com/partiql/partiql-lang-rust/issues/426
+        dbg!(self.catalog);
+
+        if let Some(_) = self.catalog.resolve_type(name.value.as_str()) {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
@@ -358,19 +371,32 @@ impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
         // in a From path, a prefix `@` means to look locally before globally Cf. specification section 10
         let name = if is_from_path {
             match &var_ref.qualifier {
-                ast::ScopeQualifier::Unqualified => NameRef {
-                    sym: var_ref.name.clone(),
-                    lookup: vec![NameLookup::Global, NameLookup::Local],
-                },
+                ast::ScopeQualifier::Unqualified => {
+                    if self.catalog_resolvable(&var_ref.name) {
+                        NameRef {
+                            sym: var_ref.name.clone(),
+                            lookup: vec![NameLookup::Global],
+                        }
+                    } else {
+                        // self.errors.push(AstTransformError::IllegalState(format!(
+                        //     "No schema found for [{:?}] in the Catalog",
+                        //     &var_ref.name
+                        // )));
+                        NameRef {
+                            sym: var_ref.name.clone(),
+                            lookup: vec![NameLookup::Global],
+                        }
+                    }
+                }
                 ast::ScopeQualifier::Qualified => NameRef {
                     sym: var_ref.name.clone(),
-                    lookup: vec![NameLookup::Local, NameLookup::Global],
+                    lookup: vec![NameLookup::Local],
                 },
             }
         } else {
             NameRef {
                 sym: var_ref.name.clone(),
-                lookup: vec![NameLookup::Local, NameLookup::Global],
+                lookup: vec![NameLookup::Local],
             }
         };
 
