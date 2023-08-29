@@ -43,3 +43,4 @@ thiserror = "1.0"
 
 [dev-dependencies]
 partiql-eval = { path = "../partiql-eval", version = "0.5.*" }
+partiql-types = { path = "../partiql-types", version = "0.5.*" }
