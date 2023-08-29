@@ -375,6 +375,18 @@ impl<'a> AstToLogical<'a> {
                                                     lookups.push(expr);
                                                 }
                                                 continue;
+                                            } else if let Some(_type_entry) = self
+                                                .catalog
+                                                .resolve_type(name_ref.sym.value.as_ref())
+                                            {
+                                                let expr = ValueExpr::VarRef(
+                                                    var_binding.clone(),
+                                                    VarRefType::Global,
+                                                );
+                                                if !lookups.contains(&expr) {
+                                                    lookups.push(expr);
+                                                }
+                                                continue;
                                             } else {
                                                 let path = logical::ValueExpr::Path(
                                                     Box::new(ValueExpr::VarRef(
@@ -1945,7 +1957,10 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
 mod tests {
     use super::*;
     use crate::LogicalPlanner;
-    use partiql_catalog::PartiqlCatalog;
+    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_logical::BindingsOp::Project;
+    use partiql_logical::ValueExpr;
+    use partiql_types::any;
 
     #[test]
     fn test_plan_non_existent_fns() {
@@ -1993,5 +2008,67 @@ mod tests {
                 "mod".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn test_plan_type_entry_in_catalog() {
+        // Expected Logical Plan
+        let mut expected_logical = LogicalPlan::new();
+        let my_id = ValueExpr::Path(
+            Box::new(ValueExpr::DynamicLookup(Box::new(vec![
+                ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive("c".to_string().into()),
+                    VarRefType::Local,
+                ),
+                ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive("c".to_string().into()),
+                    VarRefType::Global,
+                ),
+            ]))),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                "id".to_string().into(),
+            ))],
+        );
+
+        let my_name = ValueExpr::Path(
+            Box::new(ValueExpr::DynamicLookup(Box::new(vec![ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("customers".to_string().into()),
+                VarRefType::Global,
+            )]))),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                "name".to_string().into(),
+            ))],
+        );
+
+        let project = expected_logical.add_operator(Project(logical::Project {
+            exprs: Vec::from([
+                ("my_id".to_string(), my_id),
+                ("my_name".to_string(), my_name),
+            ]),
+        }));
+
+        let scan = expected_logical.add_operator(BindingsOp::Scan(logical::Scan {
+            expr: ValueExpr::DynamicLookup(Box::new(vec![ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("customers".to_string().into()),
+                VarRefType::Global,
+            )])),
+            as_key: "c".to_string(),
+            at_key: None,
+        }));
+        let sink = expected_logical.add_operator(BindingsOp::Sink);
+        expected_logical.add_flow_with_branch_num(scan, project, 0);
+        expected_logical.add_flow_with_branch_num(project, sink, 0);
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid = catalog.add_type_entry(TypeEnvEntry::new("customers", &[], any!()));
+        let statement = "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let logical = planner.lower(&parsed).expect("Expect successful lowering");
+        assert_eq!(expected_logical, logical);
+
+        println!("logical: {:?}", &logical);
     }
 }
