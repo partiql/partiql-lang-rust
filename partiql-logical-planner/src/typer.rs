@@ -205,6 +205,7 @@ impl<'c> PlanTyper<'c> {
                 let mut fields = vec![];
                 for (k, v) in exprs.iter() {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
+
                     fields.push(StructField::new(
                         k.as_str(),
                         self.get_singleton_type_from_env(),
@@ -292,11 +293,13 @@ impl<'c> PlanTyper<'c> {
                             let var = ValueExpr::VarRef(key.clone(), VarRefType::Local);
                             self.type_vexpr(&var, LookupOrder::LocalGlobal);
 
-                            if let Some(ty) =
-                                self.retrieve_type_from_local_ctx(&binding_to_sym(key))
-                            {
-                                let key = binding_to_sym(key);
-                                let ctx = ty_ctx![(&ty_env![(key, ty.clone())], &ty)];
+                            let key_as_sym = binding_to_sym(key);
+                            if let Some(ty) = self.retrieve_type_from_local_ctx(&key_as_sym) {
+                                let ctx = ty_ctx![(&ty_env![(key_as_sym, ty.clone())], &ty)];
+                                self.type_env_stack.push(ctx);
+                            } else {
+                                let ctx =
+                                    ty_ctx![(&ty_env![(key_as_sym, undefined!())], &undefined!())];
                                 self.type_env_stack.push(ctx);
                             }
                         }
@@ -518,6 +521,8 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
+    // A helper function to extract one type out of the environment when we expect it.
+    // E.g., in projections, when we expect to infer one type from the project list items.
     fn get_singleton_type_from_env(&mut self) -> PartiqlType {
         let ctx = self.local_type_ctx();
         let env = ctx.env();
@@ -545,7 +550,6 @@ impl<'c> PlanTyper<'c> {
                 let type_ctx = ty_ctx![(&new_type_env, ty)];
                 self.type_env_stack.push(type_ctx);
             } else {
-                // new_type_env.insert(sym, self.element_type(&ty));
                 new_type_env.insert(key.clone(), ty.clone());
                 let type_ctx = ty_ctx![(&new_type_env, ty)];
                 self.type_env_stack.push(type_ctx);
@@ -725,6 +729,7 @@ mod tests {
         )
         .expect("Type");
 
+        // Closed Schema with Strict typing mode with FROM and Projection aliases.
         assert_query_typing(
             TypingMode::Strict,
             "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c",
@@ -748,7 +753,6 @@ mod tests {
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
         let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "id", ty: PartiqlType(Int) }, StructField { name: "name", ty: PartiqlType(String) }])} }))"#;
-        let err2 = r#"Unexpected Typing Environment; expected typing environment with only one type but found 2 types"#;
 
         assert_err(
             assert_query_typing(
@@ -765,7 +769,7 @@ mod tests {
             ),
             vec![
                 TypingError::TypeCheck(err1.to_string()),
-                TypingError::IllegalState(err2.to_string()),
+                // TypingError::IllegalState(err2.to_string()),
             ],
             Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
                 vec![
@@ -784,7 +788,7 @@ mod tests {
         ])];
 
         let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
-        let err2 = r#"No Typing Information for SymbolPrimitive { value: "bar", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
+        let err2 = r#"Illegal Derive Type PartiqlType(Undefined)"#;
 
         assert_err(
             assert_query_typing(
@@ -802,13 +806,13 @@ mod tests {
             ),
             vec![
                 TypingError::TypeCheck(err1.to_string()),
-                TypingError::TypeCheck(err2.to_string()),
+                TypingError::IllegalState(err2.to_string()),
             ],
             Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
                 vec![
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                    StructField::new("bar", int!()),
+                    StructField::new("bar", undefined!()),
                 ]
             ),])]]),
         );
