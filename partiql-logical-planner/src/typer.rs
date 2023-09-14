@@ -716,6 +716,8 @@ mod tests {
         let details_fields = struct_fields![("age", int!())];
         let details = r#struct![BTreeSet::from([details_fields])];
 
+        // TODO Revise this behavior once the following discussion is conclusive and spec. is
+        // in place: https://github.com/partiql/partiql-spec/discussions/65
         assert_query_typing(
             TypingMode::Strict,
             "SELECT d.age FROM customers.details AS d",
