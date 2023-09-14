@@ -4,7 +4,7 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    any, missing, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
+    any, missing, null, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
     StructType, TypeKind,
 };
 use partiql_value::{BindingsName, Value};
@@ -515,7 +515,9 @@ impl<'c> PlanTyper<'c> {
 
     fn type_with_undefined(&mut self, key: &SymbolPrimitive) {
         if let TypingMode::Permissive = &self.typing_mode {
-            let type_ctx = ty_ctx![(&ty_env![(key.clone(), missing!())], &undefined!())];
+            // TODO Revise this once the following discussion is conclusive and spec. is
+            // in place: https://github.com/partiql/partiql-spec/discussions/64
+            let type_ctx = ty_ctx![(&ty_env![(key.clone(), null!())], &undefined!())];
 
             self.type_env_stack.push(type_ctx);
         }
@@ -661,7 +663,7 @@ mod tests {
             vec![
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
-                StructField::new("age", missing!()),
+                StructField::new("age", null!()),
             ],
         )
         .expect("Type");
