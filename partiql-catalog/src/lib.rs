@@ -128,13 +128,24 @@ impl<'a> TypeEnvEntry<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeEntry {
     id: ObjectId,
     ty: PartiqlType,
 }
 
+impl TypeEntry {
+    pub fn id(&self) -> &ObjectId {
+        &self.id
+    }
+
+    pub fn ty(&self) -> &PartiqlType {
+        &self.ty
+    }
+}
+
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FunctionEntry<'a> {
     id: ObjectId,
     function: &'a FunctionEntryFunction,

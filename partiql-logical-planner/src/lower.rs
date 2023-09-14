@@ -305,6 +305,7 @@ impl<'a> AstToLogical<'a> {
         for id in self.id_stack.iter().rev() {
             if let Some(key_schema) = self.key_registry.schema.get(id) {
                 let key_schema: &name_resolver::KeySchema = key_schema;
+
                 let name_ref: &name_resolver::NameRef = key_schema
                     .consume
                     .iter()
@@ -312,7 +313,6 @@ impl<'a> AstToLogical<'a> {
                     .expect("NameRef");
 
                 let var_binding = symprim_to_binding(&name_ref.sym);
-
                 let mut lookups = vec![];
                 for lookup in &name_ref.lookup {
                     match lookup {
@@ -330,11 +330,12 @@ impl<'a> AstToLogical<'a> {
                                     .filter_map(|scope_id| self.key_registry.schema.get(scope_id))
                                     .collect();
 
-                                let mut exact = scopes.iter().filter(|&scope| {
-                                    scope.produce.contains(&name_resolver::Symbol::Known(
+                                let mut exact = scopes.iter().filter(|key_schema| {
+                                    key_schema.produce.contains(&name_resolver::Symbol::Known(
                                         name_ref.sym.clone(),
                                     ))
                                 });
+
                                 if let Some(_matching) = exact.next() {
                                     let var_ref_expr =
                                         ValueExpr::VarRef(var_binding.clone(), VarRefType::Local);
@@ -342,8 +343,8 @@ impl<'a> AstToLogical<'a> {
                                     continue;
                                 }
 
-                                for scope in scopes {
-                                    for produce in &scope.produce {
+                                for schema in scopes {
+                                    for produce in &schema.produce {
                                         if let name_resolver::Symbol::Known(sym) = produce {
                                             if (sym == &varref.name)
                                                 || (sym.value.to_lowercase()
@@ -360,6 +361,7 @@ impl<'a> AstToLogical<'a> {
                                                 if !lookups.contains(&expr) {
                                                     lookups.push(expr);
                                                 }
+
                                                 continue;
                                             } else if let Some(_type_entry) = self
                                                 .catalog
@@ -1280,7 +1282,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 }
             }
         };
-        self.aggregate_exprs.push(agg_expr.clone());
+        self.aggregate_exprs.push(agg_expr);
         Traverse::Continue
     }
 

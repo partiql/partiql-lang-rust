@@ -84,6 +84,7 @@ enum EnclosingClause {
 /// AST and collecting variable references. Also partially infers alias if no `AS` alias
 /// was provided in the query.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct NameResolver<'c> {
     // environment stack tracking
     id_path_to_root: Vec<ast::NodeId>,

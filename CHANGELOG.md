@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql_ast_passes::static_typer` for type annotating the AST.
 - Add ability to parse `ORDER BY`, `LIMIT`, `OFFSET` in children of set operators
 - Add `OUTER` bag operator (`OUTER UNION`, `OUTER INTERSECT`, `OUTER EXCEPT`) implementation
+- Add experimental `partiql_logical_planner::typer` for typing PartiQL queries with the initial support for simple SFW queries with `SELECT` and `FROM` clauses only with no operators, JOINs, etc.
 - Add `NullSortedValue` to specify ordering null or missing values `partiql_value::Value`s before or after all other values
 - Implements the aggregation functions `ANY`, `SOME`, `EVERY` and their `COLL_` versions
 - Add `COUNT(*)` implementation
