@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1693349089322,
+  "lastUpdate": 1694733606297,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -16385,6 +16385,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 33925,
             "range": "± 968",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fbaac0fe030da669828e3f49123374706a7e20eb",
+          "message": "Type Simple SFW queries using current `LogicalPlan` as an `IR` (#399)\n\nRelates to: https://github.com/partiql/partiql-spec/issues/49\r\n\r\nAdds the code for typing a query using the current `LogicalPlan` as an `IR`. This PR includes the changes to enable simple SFW queries as the following in both `Strict` and `Permissive` typing modes with `Open` and `Closed` schemas.\r\n\r\n#### Closed schema with `Strict` typing mode.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING, age: ANY}>>\r\nSELECT customers.id, customers.name FROM customers;\r\n\r\n-- Output schema: <<{'id': INT, 'name': STRING}>>\r\n```\r\n\r\n#### Open schema with `Strict` typing mode and `age` non-existent projection.\r\n```SQL\r\n\r\n-- customers: <<{'id': INT, 'name': STRING}>>\r\nSELECT customers.id, customers.name, customers.age FROM customers;\r\n\r\n-- Output schema: <<{'id': INT, 'name': STRING, 'age': ANY}>>\r\n```\r\n\r\n#### Closed Schema with `Permissive` typing mode and `age` non-existent projection.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING>>\r\nSELECT customers.id, customers.name, customers.age FROM customers;\r\n\r\n\r\n-- Output schema: <<{'id': INT, 'name': STRING, 'age': NULL}>>\r\n```\r\n\r\nSee: https://github.com/partiql/partiql-spec/discussions/64\r\n\r\n#### Open Schema with `Strict` typing mode and `age` in nested attribute.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING, 'details': {'age': INT}}>>\r\nSELECT customers.id, customers.name, customers.details.age FROM customers;\r\n\r\n\r\n-- Output schema: <<{'id': INT, 'name': STRING, 'age': INT}>>\r\n```\r\n\r\n#### Open Schema (`customers and details`) with `Strict` typing mode.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING, 'details': {'age': INT}}>>\r\nSELECT customers.id, customers.name, customers.details.age, customers.details.foo.bar FROM customers;\r\n\r\n\r\n-- Output schema: <<{'id': INT, 'name': STRING, 'age': INT, 'bar': ANY}>>\r\n```\r\n\r\n#### Open Schema (`customers and details`)  with `Strict` typing mode and `age` in nested attribute with Path in `FROM` with alias.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING, 'details': {'age': INT}}>>\r\nSELECT d.age FROM customers.details AS d;\r\n\r\n\r\n-- Output schema: <<{'age': INT}>>\r\n```\r\n\r\nSee: https://github.com/partiql/partiql-spec/discussions/65\r\n\r\n#### Closed Schema with `Strict` typing mode with `FROM` and `Projection` aliases.\r\n```SQL\r\n-- customers: <<{'id': INT, 'name': STRING, 'age': ANY}>>\r\nSELECT c.id AS my_id, customers.name AS my_name FROM customers AS c;\r\n\r\n\r\n-- Output schema: <<{'my_id': INT, 'my_name': STRING}>>\r\n```\r\n\r\nIn addition:\r\n- fixes some issues with the current `partiql_types` macros, changes the model for some of the types, and adds some helper methods to `PartiqlType`.\r\n- moves constraints to set\r\n- uses ` BTreeSet` for constraints and `AnyOf` to be able to support ordering on the these types; since we're not expecting large number of elements for these types the performance hit seems negligible. \r\n\r\nUpon merging this commit we need to add:\r\n- Support for operators (E.g., unary, binary).\r\n- Support for the rest of the Binding Operators (E.g., `Filter`, `OrderBy`).\r\n- Support for functions.\r\n- Related Conformance Tests.",
+          "timestamp": "2023-09-14T16:03:50-07:00",
+          "tree_id": "0f6100c9aa92a5b6a54e77b723130399df913418",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/fbaac0fe030da669828e3f49123374706a7e20eb"
+        },
+        "date": 1694733604948,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 1212926,
+            "range": "± 19035",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 1582179,
+            "range": "± 27164",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 1511903,
+            "range": "± 14718",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 1533225,
+            "range": "± 31524",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 1488384,
+            "range": "± 19863",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 1553106,
+            "range": "± 17910",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 1524643,
+            "range": "± 56117",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 1560447,
+            "range": "± 21059",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 1523670,
+            "range": "± 12597",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 1576659,
+            "range": "± 13738",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1851634,
+            "range": "± 8243",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 2244821,
+            "range": "± 29424",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 3273668,
+            "range": "± 36373",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 2096917,
+            "range": "± 21530",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 2501800,
+            "range": "± 30606",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 3480626,
+            "range": "± 39961",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 6232,
+            "range": "± 117",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 59143,
+            "range": "± 912",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 118572,
+            "range": "± 1759",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 6634,
+            "range": "± 98",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 50958,
+            "range": "± 392",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 103772,
+            "range": "± 924",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 79923,
+            "range": "± 1133",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1281174,
+            "range": "± 23005",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2552074,
+            "range": "± 36714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 23547100,
+            "range": "± 629248",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 128954574,
+            "range": "± 1564430",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 245984294,
+            "range": "± 3999203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 15317,
+            "range": "± 283",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 4070,
+            "range": "± 77",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 685,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 62,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 937,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2832,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 8551,
+            "range": "± 127",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 23275,
+            "range": "± 464",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 34548,
+            "range": "± 779",
             "unit": "ns/iter"
           }
         ]
