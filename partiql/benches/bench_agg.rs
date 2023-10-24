@@ -115,11 +115,11 @@ fn create_tests() -> Vec<(String, String)> {
 
     let aggs_all = aggs
         .into_iter()
-        .cartesian_product([false].into_iter())
+        .cartesian_product([false])
         .collect_vec();
     let aggs_distinct = aggs
         .into_iter()
-        .cartesian_product([true].into_iter())
+        .cartesian_product([true])
         .collect_vec();
 
     let full_aggs_all = groups
