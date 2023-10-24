@@ -16,6 +16,7 @@ to be the crate that exports all the relevant `partiql-*` sub-crate functionalit
 to make applications needing only some sub-component of the PartiQL implementation possible (e.g. an application
 that only requires the PartiQL parser can depend on `partiql-parser` directly).
 
+
 ## Development
 This project uses a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) to pull in 
 [partiql-tests](https://github.com/partiql/partiql-tests). The easiest way to pull everything in is to clone the 
