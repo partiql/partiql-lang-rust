@@ -113,14 +113,8 @@ fn create_tests() -> Vec<(String, String)> {
         .clone()
         .map(|(&a, d)| create_query(vec![(a, *d)].as_slice(), false, false));
 
-    let aggs_all = aggs
-        .into_iter()
-        .cartesian_product([false])
-        .collect_vec();
-    let aggs_distinct = aggs
-        .into_iter()
-        .cartesian_product([true])
-        .collect_vec();
+    let aggs_all = aggs.into_iter().cartesian_product([false]).collect_vec();
+    let aggs_distinct = aggs.into_iter().cartesian_product([true]).collect_vec();
 
     let full_aggs_all = groups
         .clone()
