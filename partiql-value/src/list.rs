@@ -183,22 +183,7 @@ impl PartialEq for List {
 
 impl PartialOrd for List {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let mut l = self.0.iter();
-        let mut r = other.0.iter();
-
-        loop {
-            match (l.next(), r.next()) {
-                (None, None) => return Some(Ordering::Equal),
-                (Some(_), None) => return Some(Ordering::Greater),
-                (None, Some(_)) => return Some(Ordering::Less),
-                (Some(lv), Some(rv)) => match lv.partial_cmp(rv) {
-                    None => return None,
-                    Some(Ordering::Less) => return Some(Ordering::Less),
-                    Some(Ordering::Greater) => return Some(Ordering::Greater),
-                    Some(Ordering::Equal) => continue,
-                },
-            }
-        }
+        Some(self.cmp(other))
     }
 }
 
