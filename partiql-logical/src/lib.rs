@@ -49,6 +49,8 @@
 /// assert_eq!(2, p.flows().len());
 /// ```
 use partiql_value::{BindingsName, Value};
+use petgraph::dot::Dot;
+use petgraph::stable_graph::{NodeIndex, StableGraph};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
@@ -156,6 +158,34 @@ where
     }
 
     // TODO add DAG validation method.
+}
+
+impl LogicalPlan<BindingsOp> {
+    pub fn to_dot_graph(&self) -> String {
+        let mut graph: StableGraph<String, ()> = Default::default();
+
+        let mut edge_map: HashMap<OpId, NodeIndex> = HashMap::new();
+
+        for (op_id, binding_op) in self.operators_by_id() {
+            let node_index = graph.add_node(format!("{:?}", binding_op));
+            edge_map.insert(op_id, node_index);
+        }
+
+        for (src_op_id, dest_op_id, _) in self.flows() {
+            edge_map
+                .get(src_op_id)
+                .and_then(|src_node_idx_ref| {
+                    edge_map.get(dest_op_id).map(|dest_node_idx_ref| {
+                        (src_node_idx_ref.clone(), dest_node_idx_ref.clone())
+                    })
+                })
+                .map(|(src_node_idx, dest_node_idx)| {
+                    graph.add_edge(src_node_idx, dest_node_idx, ());
+                });
+        }
+
+        format!("{:#?}", Dot::with_config(&graph, &[]))
+    }
 }
 
 /// Represents an operator identifier in a [`LogicalPlan`]
