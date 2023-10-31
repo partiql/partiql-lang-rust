@@ -21,10 +21,10 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-logical = { path = "../partiql-logical", version = "0.5.*" }
-partiql-value = { path = "../partiql-value", version = "0.5.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.5.*" }
-partiql-types = { path = "../partiql-types", version = "0.5.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.6.*" }
+partiql-value = { path = "../partiql-value", version = "0.6.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.6.*" }
+partiql-types = { path = "../partiql-types", version = "0.6.*" }
 petgraph = "0.6.*"
 ordered-float = "3.*"
 itertools = "0.10.*"
