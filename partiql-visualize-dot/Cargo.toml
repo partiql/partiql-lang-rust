@@ -1,0 +1,28 @@
+[package]
+name = "partiql-visualize-dot"
+description = "Visulize PartiQL AST and Logical Plan in DOT format"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["sql", "parser", "query", "compilers", "interpreters"]
+categories = ["database", "compilers"]
+exclude = [
+  "**/.git/**",
+  "**/.github/**",
+  "**/.travis.yml",
+  "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+
+[dependencies]
+partiql-ast = { path = "../partiql-ast", version = "0.5.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.5.*" }
+
+dot-writer = "0.1.*"
+itertools = "0.10.*"
