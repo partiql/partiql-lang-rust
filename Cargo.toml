@@ -25,10 +25,10 @@ members = [
   "partiql-rewriter",
   "partiql-types",
   "partiql-value",
-  "partiql-visualize-dot",
 
   "extension/partiql-extension-ion",
   "extension/partiql-extension-ion-functions",
+  "extension/partiql-extension-visualize",
 ]
 
 [profile.dev.build-override]

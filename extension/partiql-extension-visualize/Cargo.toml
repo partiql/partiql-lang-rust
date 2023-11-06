@@ -1,11 +1,11 @@
 [package]
-name = "partiql-visualize-dot"
-description = "Visulize PartiQL AST and Logical Plan in DOT format"
+name = "partiql-extension-visualize"
+description = "Visualize PartiQL AST and Logical Plan"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
-readme = "../README.md"
+readme = "../../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
@@ -21,8 +21,8 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.5.*" }
-partiql-logical = { path = "../partiql-logical", version = "0.5.*" }
+partiql-ast = { path = "../../partiql-ast", version = "0.6.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.6.*" }
 
 dot-writer = "0.1.*"
 itertools = "0.10.*"
