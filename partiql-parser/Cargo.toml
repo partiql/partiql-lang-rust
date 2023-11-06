@@ -25,8 +25,8 @@ bench = false
 lalrpop = "0.20"
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.5.*" }
-partiql-source-map = { path = "../partiql-source-map", version = "0.5.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.6.*" }
+partiql-source-map = { path = "../partiql-source-map", version = "0.6.*" }
 
 thiserror = "1.0"
 

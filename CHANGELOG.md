@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 
+### Added
+
+### Fixed
+
+## [0.6.0] - 2023-10-31
+### Changed
 - *BREAKING:* partiql-value: `BindingsName` changed to hold `Cow<str>` rather than  `String`
 - *BREAKING:* partiql-eval: Construction of expression evaluators changed to separate binding from evaluation of expression. & implement strict eval
 - *BREAKING:* partiql-value: `Value` trait's `is_null_or_missing` renamed to `is_absent`
@@ -41,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `COUNT(*)` implementation
 - Add `to_vec` method to `List` and `Bag` to convert to a `Vec`
 
-### Fixes
+### Fixed
 - Fixes parsing of multiple consecutive path wildcards (e.g. `a[*][*][*]`), unpivot (e.g. `a.*.*.*`), and path expressions (e.g. `a[1 + 2][3 + 4][5 + 6]`)—previously these would not parse correctly.
 - partiql-parser set quantifier for bag operators fixed to `DISTINCT`
 - partiql-parser set quantifier for bag operators fixed to be `DISTINCT` when unspecified
@@ -60,13 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Ability to add and view errors during evaluation with partiql-eval's `EvalContext`
 - AST sub-trees representing literal values are lowered to `Value`s during planning
-### Fixes
+### Fixed
 
 ## [0.4.1] - 2023-05-25
 ### Changed
 - partiql-extension-ion-functions : Made `IonExtension` `pub`
 ### Added
-### Fixes
+### Fixed
 
 ## [0.4.0] - 2023-05-24
 ### Changed
@@ -86,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-catalog` including an experimental `Catalog` interface and implementation
 - Implements the `COLL_*` functions -- `COLL_AVG`, `COLL_COUNT`, `COLL_MAX`, `COLL_MIN`, `COLL_SUM`
 - Adds AST to logical plan lowering for `IN` expressions
-### Fixes
+### Fixed
 - Fix parsing of `EXTRACT` datetime parts `YEAR`, `TIMEZONE_HOUR`, and `TIMEZONE_MINUTE`
 - Fix logical plan to eval plan conversion for `EvalOrderBySortSpec` with arguments `DESC` and `NULLS LAST`
 - Fix parsing of `EXTRACT` to allow keywords after the `FROM`
@@ -122,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implements `ORDER BY` operator in evaluator
 - Implements SQL aggregation functions (`AVG`, `COUNT`, `MAX`, `MIN`, `SUM`) in evaluator
 
-### Fixes
+### Fixed
 - Some performance improvements from removing extraneous `clone`s and tweaking buffer sizes
 - Fix off by one error when checking preconditions to lower join `ON`
 - Recognize aggregate fn names in parser
@@ -196,7 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.6.0
 [0.5.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.5.0
 [0.4.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.1
 [0.4.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.0
