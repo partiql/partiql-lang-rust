@@ -24,5 +24,12 @@ bench = false
 partiql-ast = { path = "../../partiql-ast", version = "0.6.*" }
 partiql-logical = { path = "../../partiql-logical", version = "0.6.*" }
 
-dot-writer = "0.1.*"
-itertools = "0.10.*"
+dot-writer = { version = "0.1.*", optional = true }
+itertools = { version = "0.10.*", optional = true }
+
+[features]
+default = []
+visualize-dot = [
+  "dep:dot-writer",
+  "dep:itertools",
+]
