@@ -1,4 +1,3 @@
-use ion_rs::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use partiql_catalog::TableFunction;
 use partiql_catalog::{
@@ -14,6 +13,7 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fs::File;
+use std::io;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -142,7 +142,10 @@ fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> BaseTableExprResult<
     }
 }
 
-fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<'a> {
+fn parse_ion_buff<'a, I>(input: BufReader<I>) -> BaseTableExprResult<'a>
+where
+    I: 'a + io::Read,
+{
     let err_map = |e| Box::new(e) as BaseTableExprResultError;
     let reader = ion_rs::ReaderBuilder::new().build(input).unwrap();
     let decoder =

@@ -239,7 +239,7 @@ where
                 )
                 .with_hms(ts.hour() as u32, ts.minute() as u32, ts.second() as u32)
                 .with_nanoseconds(ts.nanosecond())
-                .build_at_unknown_offset()?;
+                .build()?;
 
                 Ok(self.writer.write_timestamp(&ts)?)
             }
@@ -251,7 +251,8 @@ where
                 )
                 .with_hms(ts.hour() as u32, ts.minute() as u32, ts.second() as u32)
                 .with_nanoseconds(ts.nanosecond())
-                .build_at_offset(ts.offset().whole_minutes() as i32)?;
+                .with_offset(ts.offset().whole_minutes() as i32)
+                .build()?;
 
                 Ok(self.writer.write_timestamp(&ts)?)
             }
