@@ -238,9 +238,9 @@ impl Debug for Tuple {
         let mut iter = self.pairs().peekable();
         while let Some((k, v)) = iter.next() {
             if iter.peek().is_some() {
-                write!(f, " {k}: {v:?},")?;
+                write!(f, " '{k}': {v:?},")?;
             } else {
-                write!(f, " {k}: {v:?} ")?;
+                write!(f, " '{k}': {v:?} ")?;
             }
         }
         write!(f, "}}")
