@@ -25,6 +25,7 @@ bench = false
 [dev-dependencies]
 partiql-parser = { path = "../partiql-parser" }
 partiql-ast = { path = "../partiql-ast" }
+partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog"}
 partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
