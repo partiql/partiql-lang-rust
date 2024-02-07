@@ -32,7 +32,7 @@ use partiql_catalog::call_defs::{CallArgument, CallDef};
 
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
-use partiql_ast_passes::name_resolver::{NameLookup, NameRef};
+use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::Catalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
@@ -289,19 +289,6 @@ impl<'a> AstToLogical<'a> {
     }
 
     fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
-        fn binding_to_symprim<'a>(binding: &'a BindingsName<'a>) -> SymbolPrimitive {
-            match binding {
-                BindingsName::CaseSensitive(n) => SymbolPrimitive {
-                    value: n.as_ref().to_owned(),
-                    case: CaseSensitivity::CaseSensitive,
-                },
-                BindingsName::CaseInsensitive(n) => SymbolPrimitive {
-                    value: n.as_ref().to_owned(),
-                    case: CaseSensitivity::CaseInsensitive,
-                },
-            }
-        }
-
         fn binding_to_static<'a>(binding: &'a BindingsName<'a>) -> BindingsName<'static> {
             match binding {
                 BindingsName::CaseSensitive(n) => {
@@ -336,7 +323,7 @@ impl<'a> AstToLogical<'a> {
             if let Some(key_schema) = self.key_registry.schema.get(id) {
                 let key_schema: &name_resolver::KeySchema = key_schema;
 
-                let name_ref: &NameRef = &key_schema
+                let name_ref: &NameRef = key_schema
                     .consume
                     .iter()
                     .find(|name_ref| name_ref.sym == varref.name)
@@ -346,23 +333,24 @@ impl<'a> AstToLogical<'a> {
                 let mut lookups = vec![];
 
                 if matches!(self.current_ctx(), Some(QueryContext::Order)) {
-                    let renames = self.projection_renames.last().unwrap();
-                    let binding = renames
-                        .iter()
-                        .find(|(k, _)| {
-                            let SymbolPrimitive { value, case } = &name_ref.sym;
-                            match case {
-                                CaseSensitivity::CaseSensitive => value == *k,
-                                CaseSensitivity::CaseInsensitive => unicase::eq(value, *k),
-                            }
-                        })
-                        .map(|(k, v)| binding_to_static(v))
-                        .unwrap_or_else(|| symprim_to_binding(&name_ref.sym));
+                    if let Some(renames) = self.projection_renames.last() {
+                        let binding = renames
+                            .iter()
+                            .find(|(k, _)| {
+                                let SymbolPrimitive { value, case } = &name_ref.sym;
+                                match case {
+                                    CaseSensitivity::CaseSensitive => value == *k,
+                                    CaseSensitivity::CaseInsensitive => unicase::eq(value, *k),
+                                }
+                            })
+                            .map(|(_k, v)| binding_to_static(v))
+                            .unwrap_or_else(|| symprim_to_binding(&name_ref.sym));
 
-                    lookups.push(DynamicLookup(Box::new(vec![ValueExpr::VarRef(
-                        binding,
-                        VarRefType::Local,
-                    )])));
+                        lookups.push(DynamicLookup(Box::new(vec![ValueExpr::VarRef(
+                            binding,
+                            VarRefType::Local,
+                        )])));
+                    }
                 }
 
                 for lookup in &name_ref.lookup {
@@ -911,7 +899,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     };
 
                     if !alias.is_empty() {
-                        if let ValueExpr::VarRef(name, vrtype) = &value {
+                        if let ValueExpr::VarRef(name, _vrtype) = &value {
                             self.projection_renames
                                 .last_mut()
                                 .expect("renames")
@@ -2025,7 +2013,7 @@ mod tests {
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
         assert_eq!(
-            lowering_errs.get(0),
+            lowering_errs.first(),
             Some(&AstTransformError::UnsupportedFunction("foo".to_string()))
         );
         assert_eq!(
@@ -2047,7 +2035,7 @@ mod tests {
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
         assert_eq!(
-            lowering_errs.get(0),
+            lowering_errs.first(),
             Some(&AstTransformError::InvalidNumberOfArguments(
                 "abs".to_string()
             ))
