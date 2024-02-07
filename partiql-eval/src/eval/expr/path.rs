@@ -118,22 +118,16 @@ impl EvalPathComponent {
 impl EvalExpr for EvalPath {
     fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
         let value = self.expr.evaluate(bindings, ctx);
+        let mut path_componenents = self.components.iter();
         match value {
-            Cow::Borrowed(borrowed) => self
-                .components
-                .iter()
-                .fold(Some(borrowed), |v, path| {
-                    v.and_then(|v| path.get_val(v, bindings, ctx))
-                })
-                .map_or_else(|| Cow::Owned(Value::Missing), Cow::Borrowed),
-            Cow::Owned(owned) => self
-                .components
-                .iter()
-                .fold(Some(owned), |v, path| {
-                    v.and_then(|v| path.take_val(v, bindings, ctx))
-                })
-                .map_or_else(|| Cow::Owned(Value::Missing), Cow::Owned),
+            Cow::Borrowed(borrowed) => path_componenents
+                .try_fold(borrowed, |v, path| path.get_val(v, bindings, ctx))
+                .map(Cow::Borrowed),
+            Cow::Owned(owned) => path_componenents
+                .try_fold(owned, |v, path| path.take_val(v, bindings, ctx))
+                .map(Cow::Owned),
         }
+        .unwrap_or_else(|| Cow::Owned(Value::Missing))
     }
 }
 

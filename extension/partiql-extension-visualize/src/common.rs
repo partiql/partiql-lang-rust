@@ -3,4 +3,4 @@ pub trait ToDotGraph<T> {
 }
 
 #[cfg(feature = "visualize-dot")]
-pub(crate) const FG_COLOR: &'static str = "\"#839496\"";
+pub(crate) const FG_COLOR: &str = "\"#839496\"";
