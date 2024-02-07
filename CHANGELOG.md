@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `partiql-extension-visualize` for visualizing AST and logical plan
 
 ### Fixed
+- Fixed `ORDER BY`'s ability to see into projection aliases
 
 ## [0.6.0] - 2023-10-31
 ### Changed
