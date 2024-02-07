@@ -4,6 +4,7 @@ homepage = "https://github.com/partiql/partiql-lang-rust"
 repository = "https://github.com/partiql/partiql-lang-rust"
 version = "0.6.0"
 edition = "2021"
+resolver = 2
 
 [workspace]
 

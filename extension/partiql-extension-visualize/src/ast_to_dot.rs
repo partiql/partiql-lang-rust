@@ -29,7 +29,7 @@ impl<'d, 'w> ScopeExt<'d, 'w> for Scope<'d, 'w> {
 
     fn cluster_auto_labelled(&mut self, lbl: &str) -> Scope<'_, 'w> {
         let mut cluster = self.cluster();
-        cluster.set("label", lbl, lbl.contains(" "));
+        cluster.set("label", lbl, lbl.contains(' '));
         cluster
     }
 
@@ -49,7 +49,7 @@ trait ChildEdgeExt {
 impl ChildEdgeExt for Targets {
     fn edges(self, out: &mut Scope, from: &NodeId, lbl: &str) -> Targets {
         for target in &self {
-            out.edge(&from, &target).attributes().set_label(lbl);
+            out.edge(from, target).attributes().set_label(lbl);
         }
         self
     }
@@ -57,13 +57,8 @@ impl ChildEdgeExt for Targets {
 
 type Targets = Vec<NodeId>;
 
+#[derive(Default)]
 pub struct AstToDot {}
-
-impl Default for AstToDot {
-    fn default() -> Self {
-        AstToDot {}
-    }
-}
 
 impl<T> ToDotGraph<T> for AstToDot
 where
@@ -96,7 +91,7 @@ where
             self.to_dot(&mut digraph, ast);
         }
 
-        return String::from_utf8(output_bytes).expect("invalid utf8");
+        String::from_utf8(output_bytes).expect("invalid utf8")
     }
 }
 
@@ -120,7 +115,7 @@ where
     fn to_dot(&mut self, out: &mut Scope, asts: &Vec<T>) -> Targets {
         let mut res = Vec::with_capacity(asts.len());
         for ast in asts {
-            res.extend(self.to_dot(out, &ast));
+            res.extend(self.to_dot(out, ast));
         }
         res
     }
@@ -133,7 +128,7 @@ where
     fn to_dot(&mut self, out: &mut Scope, ast: &Option<T>) -> Targets {
         match ast {
             None => vec![],
-            Some(ast) => self.to_dot(out, &ast),
+            Some(ast) => self.to_dot(out, ast),
         }
     }
 }
@@ -455,7 +450,7 @@ fn symbol_primitive_to_label(sym: &ast::SymbolPrimitive) -> String {
     use ast::CaseSensitivity;
     match &sym.case {
         CaseSensitivity::CaseSensitive => format!("'{}'", sym.value),
-        CaseSensitivity::CaseInsensitive => format!("{}", sym.value),
+        CaseSensitivity::CaseInsensitive => sym.value.to_string(),
     }
 }
 

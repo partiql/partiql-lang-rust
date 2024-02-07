@@ -8,13 +8,8 @@ use std::collections::HashMap;
 
 use crate::common::{ToDotGraph, FG_COLOR};
 
+#[derive(Default)]
 pub struct PlanToDot {}
-
-impl Default for PlanToDot {
-    fn default() -> Self {
-        PlanToDot {}
-    }
-}
 
 impl PlanToDot {
     pub(crate) fn to_dot(&self, scope: &mut Scope, plan: &LogicalPlan<BindingsOp>) {
@@ -71,10 +66,10 @@ impl PlanToDot {
                 let clauses = [
                     lo.limit
                         .as_ref()
-                        .map(|e| format!("limit {}", expr_to_str(&e))),
+                        .map(|e| format!("limit {}", expr_to_str(e))),
                     lo.offset
                         .as_ref()
-                        .map(|e| format!("offset {}", expr_to_str(&e))),
+                        .map(|e| format!("offset {}", expr_to_str(e))),
                 ]
                 .iter()
                 .filter_map(|o| o.as_ref())
@@ -92,10 +87,7 @@ impl PlanToDot {
                 format!(
                     "{{ {} join | {} }}",
                     kind,
-                    join.on
-                        .as_ref()
-                        .map(|e| expr_to_str(e))
-                        .unwrap_or("".to_string())
+                    join.on.as_ref().map(expr_to_str).unwrap_or("".to_string())
                 )
             }
             BindingsOp::BagOp(_) => "bag op (TODO)".to_string(),
@@ -108,9 +100,7 @@ impl PlanToDot {
                         .join(" | "),
                 )
             }
-            BindingsOp::ProjectAll => {
-                format!("{{project  * }}")
-            }
+            BindingsOp::ProjectAll => "{project  * }".to_string(),
             BindingsOp::ProjectValue(pv) => {
                 format!("{{project value | {} }}", expr_to_str(&pv.expr))
             }
@@ -135,8 +125,7 @@ impl PlanToDot {
             }
             BindingsOp::Sink => "sink".to_string(),
         };
-        node.set_shape(Shape::Mrecord)
-            .set_label(&format!("{label}"));
+        node.set_shape(Shape::Mrecord).set_label(&label.to_string());
 
         node.id()
     }
@@ -163,8 +152,8 @@ fn expr_to_str(expr: &ValueExpr) -> String {
             let expr = expr.replace('{', "\\{");
             let expr = expr.replace('}', "\\}");
             let expr = expr.replace('<', "\\<");
-            let expr = expr.replace('>', "\\>");
-            expr
+
+            expr.replace('>', "\\>")
         }
     }
 }
@@ -206,6 +195,6 @@ impl ToDotGraph<LogicalPlan<BindingsOp>> for PlanToDot {
             self.to_dot(&mut digraph, plan);
         }
 
-        return String::from_utf8(output_bytes).expect("invalid utf8");
+        String::from_utf8(output_bytes).expect("invalid utf8")
     }
 }
