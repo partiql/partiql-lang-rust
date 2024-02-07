@@ -25,14 +25,18 @@ bench = false
 [dev-dependencies]
 partiql-parser = { path = "../partiql-parser" }
 partiql-ast = { path = "../partiql-ast" }
+partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog"}
 partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
 
-itertools = "0.10"
-criterion = "0.4"
+
+thiserror = "1.0"
+
+itertools = "0.12"
+criterion = "0.5"
 rand = "0.8"
 
 [[bench]]

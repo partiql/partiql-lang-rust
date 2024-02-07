@@ -1,6 +1,6 @@
 use crate::env::Bindings;
 
-pub use core::borrow::{Borrow, BorrowMut};
+pub use core::borrow::Borrow;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
