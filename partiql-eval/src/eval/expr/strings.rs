@@ -66,11 +66,14 @@ where
     R: Into<Value>,
 {
     #[inline]
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; 1],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let [value] = args;
         Cow::Owned(match value.borrow() {
             Value::String(s) => ((self.f)(s)).into(),

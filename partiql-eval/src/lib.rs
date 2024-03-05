@@ -15,6 +15,7 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::BindingsOp::{Distinct, Project, ProjectAll, ProjectValue};
 
+    use crate::eval::{BasicContext, SystemContext};
     use crate::plan::EvaluationMode;
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
@@ -22,14 +23,17 @@ mod tests {
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
-    use partiql_value::{bag, list, tuple, Bag, BindingsName, List, Tuple, Value};
+    use partiql_value::{bag, list, tuple, Bag, BindingsName, DateTime, List, Tuple, Value};
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
-
-        if let Ok(out) = plan.execute_mut(bindings) {
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        if let Ok(out) = plan.execute_mut(&ctx) {
             out.result
         } else {
             Missing
@@ -2211,8 +2215,8 @@ mod tests {
     mod clause_from {
         use crate::eval::evaluable::{EvalScan, Evaluable};
         use crate::eval::expr::{EvalGlobalVarRef, EvalPath, EvalPathComponent};
-        use crate::eval::BasicContext;
-        use partiql_value::{bag, list, BindingsName};
+        use crate::eval::{BasicContext, SystemContext};
+        use partiql_value::{bag, list, BindingsName, DateTime};
 
         use super::*;
 
@@ -2230,7 +2234,10 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someOrderedTable", some_ordered_table().into());
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
 
             let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
@@ -2256,7 +2263,10 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("someUnorderedTable", some_unordered_table().into());
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
 
             let mut scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
@@ -2300,7 +2310,10 @@ mod tests {
             };
             let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
             let scan_res = scan.evaluate(&ctx);
 
             let expected = bag![tuple![("x", 0)]];
@@ -2325,7 +2338,10 @@ mod tests {
             };
             let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
             let res = scan.evaluate(&ctx);
 
             let expected = bag![tuple![("x", value::Value::Missing)]];
@@ -2334,11 +2350,11 @@ mod tests {
     }
 
     mod clause_unpivot {
-        use partiql_value::{bag, BindingsName, Tuple};
+        use partiql_value::{bag, BindingsName, DateTime, Tuple};
 
         use crate::eval::evaluable::{EvalUnpivot, Evaluable};
         use crate::eval::expr::EvalGlobalVarRef;
-        use crate::eval::BasicContext;
+        use crate::eval::{BasicContext, SystemContext};
 
         use super::*;
 
@@ -2360,7 +2376,10 @@ mod tests {
                 Some("symbol".into()),
             );
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
             let res = unpivot.evaluate(&ctx);
 
             let expected = bag![
@@ -2384,7 +2403,10 @@ mod tests {
                 Some("y".into()),
             );
 
-            let ctx = BasicContext::new(p0);
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(p0, sys);
             let res = unpivot.evaluate(&ctx);
 
             let expected = bag![tuple![("x", 1), ("y", "_1")]];

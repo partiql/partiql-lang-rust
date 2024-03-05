@@ -13,7 +13,14 @@ pub(crate) struct EvalSearchedCaseExpr {
 }
 
 impl EvalExpr for EvalSearchedCaseExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         for (when_expr, then_expr) in &self.cases {
             let when_expr_evaluated = when_expr.evaluate(bindings, ctx);
             if when_expr_evaluated.as_ref() == &Value::Boolean(true) {

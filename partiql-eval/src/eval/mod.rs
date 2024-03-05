@@ -1,6 +1,9 @@
 use itertools::Itertools;
+use std::any::Any;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
+use delegate::delegate;
 use std::fmt::Debug;
 
 use petgraph::algo::toposort;
@@ -8,7 +11,7 @@ use petgraph::dot::Dot;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
-use partiql_value::Value;
+use partiql_value::{DateTime, Value};
 
 use crate::env::basic::MapBindings;
 use crate::env::Bindings;
@@ -62,8 +65,9 @@ impl EvalPlan {
 
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
     /// operators.
-    pub fn execute_mut(&mut self, bindings: MapBindings<Value>) -> Result<Evaluated, EvalErr> {
-        let ctx: Box<dyn EvalContext> = Box::new(BasicContext::new(bindings));
+    pub fn execute_mut<'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Result<Evaluated, EvalErr> {
+        //let ctx: Box<dyn EvalContext> = Box::new(BasicContext::new(bindings));
+
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
         // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
@@ -95,7 +99,7 @@ impl EvalPlan {
                 });
             if graph_managed {
                 let src = self.get_node(idx)?;
-                result = Some(src.evaluate(&*ctx));
+                result = Some(src.evaluate(ctx));
 
                 // return on first evaluation error
                 if ctx.has_errors() {
@@ -114,7 +118,7 @@ impl EvalPlan {
 
                     let res =
                         res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
-                    self.get_node(dst_id)?.update_input(res, branch_num, &*ctx);
+                    self.get_node(dst_id)?.update_input(res, branch_num, ctx);
                 }
             }
         }
@@ -139,32 +143,55 @@ pub struct Evaluated {
     pub result: Value,
 }
 
+#[derive(Debug)]
+pub struct SystemContext {
+    pub now: DateTime,
+}
+
 /// Represents an evaluation context that is used during evaluation of a plan.
-pub trait EvalContext {
+pub trait EvalContext<'a>: Debug {
     fn bindings(&self) -> &dyn Bindings<Value>;
+
+    fn system_context(&self) -> &SystemContext;
+    fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)>;
+
     fn add_error(&self, error: EvaluationError);
     fn has_errors(&self) -> bool;
     fn errors(&self) -> Vec<EvaluationError>;
 }
 
-#[derive(Default, Debug)]
-pub struct BasicContext {
-    bindings: MapBindings<Value>,
-    errors: RefCell<Vec<EvaluationError>>,
+#[derive(Debug)]
+pub struct BasicContext<'a> {
+    pub bindings: MapBindings<Value>,
+
+    pub sys: SystemContext,
+    pub user: HashMap<String, &'a (dyn Any)>, // TODO: Unicase the keys?
+
+    pub errors: RefCell<Vec<EvaluationError>>,
 }
 
-impl BasicContext {
-    pub fn new(bindings: MapBindings<Value>) -> Self {
+impl<'a> BasicContext<'a> {
+    pub fn new(bindings: MapBindings<Value>, sys: SystemContext) -> Self {
         BasicContext {
             bindings,
+            sys,
+            user: Default::default(),
             errors: RefCell::new(vec![]),
         }
     }
 }
 
-impl EvalContext for BasicContext {
+impl<'a> EvalContext<'a> for BasicContext<'a> {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
+    }
+
+    fn system_context(&self) -> &SystemContext {
+        &self.sys
+    }
+
+    fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)> {
+        self.user.get(name).copied()
     }
 
     fn add_error(&self, error: EvaluationError) {
@@ -177,5 +204,34 @@ impl EvalContext for BasicContext {
 
     fn errors(&self) -> Vec<EvaluationError> {
         self.errors.take()
+    }
+}
+
+#[derive(Debug)]
+pub struct NestedContext<'a, 'c> {
+    pub bindings: MapBindings<Value>,
+    pub parent: &'a dyn EvalContext<'c>,
+}
+
+impl<'a, 'c> NestedContext<'a, 'c> {
+    pub fn new(bindings: MapBindings<Value>, parent: &'a dyn EvalContext<'c>) -> Self {
+        NestedContext { bindings, parent }
+    }
+}
+
+impl<'a, 'c> EvalContext<'a> for NestedContext<'a, 'c> {
+    fn bindings(&self) -> &dyn Bindings<Value> {
+        &self.bindings
+    }
+
+    delegate! {
+        to self.parent {
+            fn system_context(&self) -> &SystemContext;
+            fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)>;
+
+            fn add_error(&self, error: EvaluationError);
+            fn has_errors(&self) -> bool;
+            fn errors(&self) -> Vec<EvaluationError>;
+        }
     }
 }

@@ -17,6 +17,10 @@ pub enum DateTime {
 }
 
 impl DateTime {
+    pub fn from_system_now_utc() -> Self {
+        DateTime::TimestampWithTz(time::OffsetDateTime::now_utc())
+    }
+
     pub fn from_hms(hour: u8, minute: u8, second: u8) -> Self {
         DateTime::Time(time::Time::from_hms(hour, minute, second).expect("valid time value"))
     }

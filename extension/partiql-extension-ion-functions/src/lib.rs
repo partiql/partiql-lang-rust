@@ -157,9 +157,10 @@ mod tests {
 
     use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
+    use partiql_eval::eval::{BasicContext, SystemContext};
     use partiql_eval::plan::EvaluationMode;
     use partiql_parser::{Parsed, ParserResult};
-    use partiql_value::{bag, tuple, Value};
+    use partiql_value::{bag, tuple, DateTime, Value};
 
     #[track_caller]
     #[inline]
@@ -189,7 +190,11 @@ mod tests {
 
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
-        if let Ok(out) = plan.execute_mut(bindings) {
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        if let Ok(out) = plan.execute_mut(&ctx) {
             out.result
         } else {
             Value::Missing

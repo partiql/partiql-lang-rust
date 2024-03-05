@@ -1160,7 +1160,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 not_yet_implemented_fault!(self, "PositionalType call argument".to_string());
             }
             CallArg::NamedType(_) => {
-                not_yet_implemented_fault!(self, "PositionalType call argument".to_string());
+                not_yet_implemented_fault!(self, "NamedType call argument".to_string());
             }
         }
         Traverse::Continue

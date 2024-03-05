@@ -20,7 +20,14 @@ pub(crate) struct EvalTupleExpr {
 }
 
 impl EvalExpr for EvalTupleExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let tuple = self
             .attrs
             .iter()
@@ -52,7 +59,14 @@ pub(crate) struct EvalListExpr {
 }
 
 impl EvalExpr for EvalListExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let values = self
             .elements
             .iter()
@@ -70,7 +84,14 @@ pub(crate) struct EvalBagExpr {
 }
 
 impl EvalExpr for EvalBagExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let values = self
             .elements
             .iter()
@@ -89,7 +110,14 @@ pub(crate) struct EvalIsTypeExpr {
 }
 
 impl EvalExpr for EvalIsTypeExpr {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let expr = self.expr.evaluate(bindings, ctx);
         let expr = expr.as_ref();
         let result = match self.is_type {

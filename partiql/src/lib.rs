@@ -5,11 +5,11 @@ mod tests {
     use partiql_eval as eval;
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::error::{EvalErr, PlanErr};
-    use partiql_eval::eval::{EvalPlan, EvalResult, Evaluated};
+    use partiql_eval::eval::{BasicContext, EvalPlan, EvalResult, Evaluated, SystemContext};
     use partiql_eval::plan::EvaluationMode;
     use partiql_logical as logical;
     use partiql_parser::{Parsed, ParserError, ParserResult};
-    use partiql_value::Value;
+    use partiql_value::{DateTime, Value};
     use thiserror::Error;
 
     #[derive(Error, Debug)]
@@ -78,7 +78,11 @@ mod tests {
     #[track_caller]
     #[inline]
     fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
-        plan.execute_mut(bindings)
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        plan.execute_mut(&ctx)
     }
 
     #[track_caller]

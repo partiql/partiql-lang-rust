@@ -56,7 +56,7 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate(&mut self, _ctx: &dyn EvalContext) -> Value {
+    fn evaluate<'a, 'c>(&mut self, _ctx: &'c dyn EvalContext<'c>) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 
@@ -66,7 +66,14 @@ impl Evaluable for ErrorNode {
 }
 
 impl EvalExpr for ErrorNode {
-    fn evaluate<'a>(&'a self, _bindings: &'a Tuple, _ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        _bindings: &'a Tuple,
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         panic!("ErrorNode will not be evaluated")
     }
 }

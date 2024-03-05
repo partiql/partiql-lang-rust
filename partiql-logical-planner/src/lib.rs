@@ -41,6 +41,7 @@ mod tests {
     use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
+    use partiql_eval::eval::{BasicContext, SystemContext};
 
     use partiql_eval::plan;
     use partiql_eval::plan::EvaluationMode;
@@ -49,7 +50,7 @@ mod tests {
     use partiql_logical as logical;
     use partiql_logical::{BindingsOp, LogicalPlan};
     use partiql_parser::{Parsed, Parser};
-    use partiql_value::{bag, tuple, Value};
+    use partiql_value::{bag, tuple, DateTime, Value};
 
     #[track_caller]
     fn parse(text: &str) -> Parsed {
@@ -71,8 +72,11 @@ mod tests {
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
         println!("{}", plan.to_dot_graph());
-
-        if let Ok(out) = plan.execute_mut(bindings) {
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        if let Ok(out) = plan.execute_mut(&ctx) {
             out.result
         } else {
             Value::Missing

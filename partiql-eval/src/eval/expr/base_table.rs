@@ -18,7 +18,14 @@ pub(crate) struct EvalFnBaseTableExpr {
 
 impl EvalExpr for EvalFnBaseTableExpr {
     #[inline]
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let args = self
             .args
             .iter()

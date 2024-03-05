@@ -1,12 +1,14 @@
 use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
-use partiql_eval::env::basic::MapBindings;
+
 use partiql_eval::error::{EvalErr, PlanErr};
-use partiql_eval::eval::{EvalPlan, EvalResult, Evaluated};
+use partiql_eval::eval::{
+    BasicContext, EvalContext, EvalPlan, EvalResult, Evaluated, SystemContext,
+};
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
-use partiql_value::Value;
+use partiql_value::DateTime;
 
 use thiserror::Error;
 
@@ -58,8 +60,8 @@ pub(crate) fn compile(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
-    plan.execute_mut(bindings)
+pub(crate) fn evaluate<'a, 'c>(mut plan: EvalPlan, ctx: &'c dyn EvalContext<'c>) -> EvalResult {
+    plan.execute_mut(ctx)
 }
 
 #[track_caller]
@@ -161,9 +163,15 @@ pub(crate) fn eval<'a>(
 
     let parsed = parse(statement)?;
     let lowered = lower(&catalog, &parsed)?;
+
     let bindings = env.as_ref().map(|e| (&e.value).into()).unwrap_or_default();
+    let sys = SystemContext {
+        now: DateTime::from_system_now_utc(),
+    };
+    let ctx = BasicContext::new(bindings, sys);
     let plan = compile(mode, &catalog, lowered)?;
-    Ok(evaluate(plan, bindings)?)
+
+    Ok(evaluate(plan, &ctx)?)
 }
 
 #[track_caller]
