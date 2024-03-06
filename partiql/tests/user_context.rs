@@ -174,7 +174,7 @@ pub(crate) fn evaluate(
     };
     let mut ctx = BasicContext::new(bindings, sys);
     for (k, v) in ctx_vals {
-        ctx.user.insert(k.to_string(), *v);
+        ctx.user.insert(k.as_str().into(), *v);
     }
     if let Ok(out) = plan.execute_mut(&ctx) {
         out.result

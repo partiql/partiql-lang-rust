@@ -20,6 +20,7 @@ use petgraph::graph::NodeIndex;
 use crate::error::{EvalErr, EvaluationError};
 use partiql_catalog::context::{Bindings, SessionContext, SystemContext};
 use petgraph::visit::EdgeRef;
+use unicase::UniCase;
 
 use crate::eval::evaluable::{EvalType, Evaluable};
 
@@ -66,8 +67,6 @@ impl EvalPlan {
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
     /// operators.
     pub fn execute_mut<'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Result<Evaluated, EvalErr> {
-        //let ctx: Box<dyn EvalContext> = Box::new(BasicContext::new(bindings));
-
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
         // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
@@ -157,7 +156,7 @@ pub struct BasicContext<'a> {
     pub bindings: MapBindings<Value>,
 
     pub sys: SystemContext,
-    pub user: HashMap<String, &'a (dyn Any)>, // TODO: Unicase the keys?
+    pub user: HashMap<UniCase<String>, &'a (dyn Any)>,
 
     pub errors: RefCell<Vec<EvaluationError>>,
 }
@@ -182,7 +181,8 @@ impl<'a> SessionContext<'a> for BasicContext<'a> {
     }
 
     fn user_context(&self, name: &str) -> Option<&(dyn Any)> {
-        self.user.get(name).copied()
+        let key = name.into();
+        self.user.get(&key).copied()
     }
 }
 impl<'a> EvalContext<'a> for BasicContext<'a> {
