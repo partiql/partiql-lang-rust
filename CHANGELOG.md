@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
-- Changes the interface to `EvalPlan` to accept an `EvalContext`
+- [breaking] Changes the interface to `EvalPlan` to accept an `EvalContext`
 
 ### Added
 - Add `partiql-extension-visualize` for visualizing AST and logical plan
