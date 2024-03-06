@@ -92,7 +92,7 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2023-03-09
+          toolchain: nightly-2023-06-09
       - uses: actions/cache@v3
         id: restore-build
         with:
@@ -132,7 +132,7 @@ jobs:
       - name: Rust Toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2023-03-09
+          toolchain: nightly-2023-06-09
       - uses: actions/cache@v3
         id: restore-build-and-conformance
         with:
