@@ -3,13 +3,12 @@ use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 
 use partiql_eval::error::{EvalErr, PlanErr};
-use partiql_eval::eval::{
-    BasicContext, EvalContext, EvalPlan, EvalResult, Evaluated, SystemContext,
-};
+use partiql_eval::eval::{BasicContext, EvalContext, EvalPlan, EvalResult, Evaluated};
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
 use partiql_value::DateTime;
 
+use partiql_catalog::context::SystemContext;
 use thiserror::Error;
 
 mod test_value;
@@ -60,7 +59,7 @@ pub(crate) fn compile(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate<'a, 'c>(mut plan: EvalPlan, ctx: &'c dyn EvalContext<'c>) -> EvalResult {
+pub(crate) fn evaluate<'c>(mut plan: EvalPlan, ctx: &'c dyn EvalContext<'c>) -> EvalResult {
     plan.execute_mut(ctx)
 }
 

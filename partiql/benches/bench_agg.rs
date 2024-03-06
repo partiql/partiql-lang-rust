@@ -2,16 +2,17 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
+use partiql_catalog::context::SystemContext;
 use partiql_catalog::{Catalog, PartiqlCatalog};
 
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::EvalPlan;
+use partiql_eval::eval::{BasicContext, EvalPlan};
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
 use partiql_logical::{BindingsOp, LogicalPlan};
 use partiql_logical_planner::LogicalPlanner;
 
 use partiql_parser::{Parser, ParserResult};
-use partiql_value::{tuple, Bag, Value};
+use partiql_value::{tuple, Bag, DateTime, Value};
 
 fn numbers() -> impl Iterator<Item = Value> {
     (0..1000i64).map(Value::from)
@@ -49,7 +50,11 @@ fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
 }
 #[inline]
 pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Value {
-    if let Ok(out) = eval.execute_mut(bindings) {
+    let sys = SystemContext {
+        now: DateTime::from_system_now_utc(),
+    };
+    let ctx = BasicContext::new(bindings, sys);
+    if let Ok(out) = eval.execute_mut(&ctx) {
         out.result
     } else {
         Value::Missing

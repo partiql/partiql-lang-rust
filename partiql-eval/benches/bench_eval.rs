@@ -2,10 +2,11 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use partiql_catalog::context::SystemContext;
 use partiql_catalog::PartiqlCatalog;
 
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::EvalPlan;
+use partiql_eval::eval::{BasicContext, EvalPlan};
 use partiql_eval::plan;
 use partiql_eval::plan::EvaluationMode;
 use partiql_logical as logical;
@@ -13,7 +14,7 @@ use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{
     BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr, VarRefType,
 };
-use partiql_value::{bag, list, tuple, BindingsName, Value};
+use partiql_value::{bag, list, tuple, BindingsName, DateTime, Value};
 
 fn data() -> MapBindings<Value> {
     let hr = tuple![(
@@ -134,7 +135,11 @@ fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
 }
 
 fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
-    if let Ok(out) = plan.execute_mut(bindings) {
+    let sys = SystemContext {
+        now: DateTime::from_system_now_utc(),
+    };
+    let ctx = BasicContext::new(bindings, sys);
+    if let Ok(out) = plan.execute_mut(&ctx) {
         out.result
     } else {
         Value::Missing

@@ -40,7 +40,7 @@ pub enum EvalType {
 
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
-    fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value;
+    fn evaluate<'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value;
     fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext);
     fn get_vars(&self) -> Option<&[String]> {
         None

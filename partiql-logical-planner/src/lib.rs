@@ -38,10 +38,11 @@ impl<'c> LogicalPlanner<'c> {
 mod tests {
     use assert_matches::assert_matches;
     use partiql_ast_passes::error::AstTransformationError;
+    use partiql_catalog::context::SystemContext;
     use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
-    use partiql_eval::eval::{BasicContext, SystemContext};
+    use partiql_eval::eval::BasicContext;
 
     use partiql_eval::plan;
     use partiql_eval::plan::EvaluationMode;

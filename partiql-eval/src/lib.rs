@@ -9,13 +9,14 @@ mod tests {
 
     use crate::env::basic::MapBindings;
     use crate::plan;
+    use partiql_catalog::context::SystemContext;
     use partiql_catalog::PartiqlCatalog;
     use rust_decimal_macros::dec;
 
     use partiql_logical as logical;
     use partiql_logical::BindingsOp::{Distinct, Project, ProjectAll, ProjectValue};
 
-    use crate::eval::{BasicContext, SystemContext};
+    use crate::eval::BasicContext;
     use crate::plan::EvaluationMode;
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
@@ -2215,7 +2216,8 @@ mod tests {
     mod clause_from {
         use crate::eval::evaluable::{EvalScan, Evaluable};
         use crate::eval::expr::{EvalGlobalVarRef, EvalPath, EvalPathComponent};
-        use crate::eval::{BasicContext, SystemContext};
+        use crate::eval::BasicContext;
+        use partiql_catalog::context::SystemContext;
         use partiql_value::{bag, list, BindingsName, DateTime};
 
         use super::*;
@@ -2354,7 +2356,7 @@ mod tests {
 
         use crate::eval::evaluable::{EvalUnpivot, Evaluable};
         use crate::eval::expr::EvalGlobalVarRef;
-        use crate::eval::{BasicContext, SystemContext};
+        use crate::eval::BasicContext;
 
         use super::*;
 

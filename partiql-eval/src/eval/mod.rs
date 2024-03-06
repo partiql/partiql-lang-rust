@@ -11,14 +11,14 @@ use petgraph::dot::Dot;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
-use partiql_value::{DateTime, Value};
+use partiql_value::Value;
 
 use crate::env::basic::MapBindings;
-use crate::env::Bindings;
 
 use petgraph::graph::NodeIndex;
 
 use crate::error::{EvalErr, EvaluationError};
+use partiql_catalog::context::{Bindings, SessionContext, SystemContext};
 use petgraph::visit::EdgeRef;
 
 use crate::eval::evaluable::{EvalType, Evaluable};
@@ -143,17 +143,9 @@ pub struct Evaluated {
     pub result: Value,
 }
 
-#[derive(Debug)]
-pub struct SystemContext {
-    pub now: DateTime,
-}
-
 /// Represents an evaluation context that is used during evaluation of a plan.
-pub trait EvalContext<'a>: Debug {
-    fn bindings(&self) -> &dyn Bindings<Value>;
-
-    fn system_context(&self) -> &SystemContext;
-    fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)>;
+pub trait EvalContext<'a>: SessionContext<'a> + Debug {
+    fn as_session(&'a self) -> &'a dyn SessionContext<'a>;
 
     fn add_error(&self, error: EvaluationError);
     fn has_errors(&self) -> bool;
@@ -180,8 +172,7 @@ impl<'a> BasicContext<'a> {
         }
     }
 }
-
-impl<'a> EvalContext<'a> for BasicContext<'a> {
+impl<'a> SessionContext<'a> for BasicContext<'a> {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
     }
@@ -190,8 +181,13 @@ impl<'a> EvalContext<'a> for BasicContext<'a> {
         &self.sys
     }
 
-    fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)> {
+    fn user_context(&self, name: &str) -> Option<&(dyn Any)> {
         self.user.get(name).copied()
+    }
+}
+impl<'a> EvalContext<'a> for BasicContext<'a> {
+    fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
+        self
     }
 
     fn add_error(&self, error: EvaluationError) {
@@ -219,7 +215,7 @@ impl<'a, 'c> NestedContext<'a, 'c> {
     }
 }
 
-impl<'a, 'c> EvalContext<'a> for NestedContext<'a, 'c> {
+impl<'a, 'c> SessionContext<'a> for NestedContext<'a, 'c> {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
     }
@@ -227,8 +223,18 @@ impl<'a, 'c> EvalContext<'a> for NestedContext<'a, 'c> {
     delegate! {
         to self.parent {
             fn system_context(&self) -> &SystemContext;
-            fn user_context(&self, name: &str) -> Option<&'a (dyn Any + 'a)>;
+            fn user_context(&self, name: &str) -> Option<& (dyn Any )>;
+        }
+    }
+}
 
+impl<'a, 'c> EvalContext<'a> for NestedContext<'a, 'c> {
+    fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
+        self
+    }
+
+    delegate! {
+        to self.parent {
             fn add_error(&self, error: EvaluationError);
             fn has_errors(&self) -> bool;
             fn errors(&self) -> Vec<EvaluationError>;

@@ -1,5 +1,3 @@
-use crate::env::Bindings;
-
 pub use core::borrow::Borrow;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -8,6 +6,7 @@ use crate::eval::EvalContext;
 use partiql_value::Value::Missing;
 use partiql_value::{BindingsName, Tuple, Value};
 
+use partiql_catalog::context::Bindings;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 
