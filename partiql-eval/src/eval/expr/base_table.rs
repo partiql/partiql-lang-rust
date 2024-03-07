@@ -37,14 +37,14 @@ impl EvalExpr for EvalFnBaseTableExpr {
                 let bag: Result<Bag, _> = it.collect();
                 match bag {
                     Ok(b) => Value::from(b),
-                    Err(_) => {
-                        // TODO hook into pending eval errors
+                    Err(err) => {
+                        ctx.add_error(err.into());
                         Missing
                     }
                 }
             }
-            Err(_) => {
-                // TODO hook into pending eval errors
+            Err(err) => {
+                ctx.add_error(err.into());
                 Missing
             }
         };
