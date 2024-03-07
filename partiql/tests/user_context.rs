@@ -83,14 +83,17 @@ pub enum UserCtxError {
 pub(crate) struct EvalTestCtxTable {}
 
 impl BaseTableExpr for EvalTestCtxTable {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &'a [Cow<Value>],
         ctx: &'c dyn SessionContext<'c>,
-    ) -> BaseTableExprResult<'c> {
+    ) -> BaseTableExprResult<'a>
+    where
+        'c: 'a,
+    {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
-                Value::String(name) => generated_data(name.to_string(), ctx),
+                Value::String(name) => generated_data(name.as_str(), ctx),
                 _ => {
                     let error = UserCtxError::Unknown;
                     Err(Box::new(error) as BaseTableExprResultError)
@@ -103,12 +106,15 @@ impl BaseTableExpr for EvalTestCtxTable {
     }
 }
 
-struct TestDataGen<'a> {
-    ctx: &'a dyn SessionContext<'a>,
-    name: String,
+struct TestDataGen<'a, 'c>
+where
+    'c: 'a,
+{
+    ctx: &'c dyn SessionContext<'c>,
+    name: &'a str,
 }
 
-impl<'a> Iterator for TestDataGen<'a> {
+impl<'a, 'c> Iterator for TestDataGen<'a, 'c> {
     type Item = Result<Value, BaseTableExprResultError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -131,7 +137,10 @@ impl<'a> Iterator for TestDataGen<'a> {
     }
 }
 
-fn generated_data<'a>(name: String, ctx: &'a dyn SessionContext<'a>) -> BaseTableExprResult<'a> {
+fn generated_data<'a, 'c>(name: &'a str, ctx: &'c dyn SessionContext<'c>) -> BaseTableExprResult<'a>
+where
+    'c: 'a,
+{
     Ok(Box::new(TestDataGen { ctx, name }))
 }
 

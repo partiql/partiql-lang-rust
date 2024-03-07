@@ -53,11 +53,13 @@ pub type BaseTableExprResult<'a> =
     Result<BaseTableExprResultValueIter<'a>, BaseTableExprResultError>;
 
 pub trait BaseTableExpr: Debug {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &'a [Cow<Value>],
         ctx: &'c dyn SessionContext<'c>,
-    ) -> BaseTableExprResult<'c>;
+    ) -> BaseTableExprResult<'a>
+    where
+        'c: 'a;
 }
 
 pub trait BaseTableFunctionInfo: Debug {

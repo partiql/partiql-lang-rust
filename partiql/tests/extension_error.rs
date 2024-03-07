@@ -85,11 +85,14 @@ pub enum UserCtxError {
 pub(crate) struct EvalTestCtxTable {}
 
 impl BaseTableExpr for EvalTestCtxTable {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &'a [Cow<Value>],
         _ctx: &'c dyn SessionContext<'c>,
-    ) -> BaseTableExprResult<'c> {
+    ) -> BaseTableExprResult<'a>
+    where
+        'c: 'a,
+    {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
                 Value::String(_name) => Ok(Box::new(TestDataGen {})),

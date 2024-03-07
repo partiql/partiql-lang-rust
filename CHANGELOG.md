@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [breaking] Changes the interface to `EvalPlan` to accept an `EvalContext`
 - [breaking] Changes `EvaluationError` to not implement `Clone` 
 - [breaking] Changes the structure of `EvalPlan`
+- [breaking] Changes the interface of `BaseTableExpr`'s `evaluate` to allow arguments to be held by the returned iterator
 
 ### Added
 - Add `partiql-extension-visualize` for visualizing AST and logical plan
