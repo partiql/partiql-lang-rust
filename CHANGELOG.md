@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
 - [breaking] Changes the interface to `EvalPlan` to accept an `EvalContext`
 - [breaking] Changes `EvaluationError` to not implement `Clone` 
+- [breaking] Changes the structure of `EvalPlan`
 
 ### Added
 - Add `partiql-extension-visualize` for visualizing AST and logical plan
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed `ORDER BY`'s ability to see into projection aliases
 - Fixed errors in `BaseTableExpr`s get added to the evaluation context
+- Fixed certain errors surfacing in Permissive evaluation mode, when they should only be present in Strict mode
 
 ## [0.6.0] - 2023-10-31
 ### Changed

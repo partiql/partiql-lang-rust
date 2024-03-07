@@ -49,6 +49,7 @@ macro_rules! correct_num_args_or_err {
     };
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum EvaluationMode {
     Strict,
     Permissive,
@@ -129,22 +130,26 @@ impl<'c> EvaluatorPlanner<'c> {
     fn plan_eval<const STRICT: bool>(&mut self, lg: &LogicalPlan<BindingsOp>) -> EvalPlan {
         let flows = lg.flows();
 
-        let mut graph: StableGraph<_, _> = Default::default();
+        let mut plan_graph: StableGraph<_, _> = Default::default();
         let mut seen = HashMap::new();
 
         for (s, d, branch_num) in flows {
             let mut add_node = |op_id: &OpId| {
                 let logical_op = lg.operator(*op_id).unwrap();
-                *seen
-                    .entry(*op_id)
-                    .or_insert_with(|| graph.add_node(self.get_eval_node::<{ STRICT }>(logical_op)))
+                *seen.entry(*op_id).or_insert_with(|| {
+                    plan_graph.add_node(self.get_eval_node::<{ STRICT }>(logical_op))
+                })
             };
 
             let (s, d) = (add_node(s), add_node(d));
-            graph.add_edge(s, d, *branch_num);
+            plan_graph.add_edge(s, d, *branch_num);
         }
-
-        EvalPlan(graph)
+        let mode = if STRICT {
+            EvaluationMode::Strict
+        } else {
+            EvaluationMode::Permissive
+        };
+        EvalPlan::new(mode, plan_graph)
     }
 
     fn get_eval_node<const STRICT: bool>(&mut self, be: &BindingsOp) -> Box<dyn Evaluable> {
