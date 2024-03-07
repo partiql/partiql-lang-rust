@@ -13,7 +13,8 @@ use partiql_catalog::{
     Extension, PartiqlCatalog, TableFunction,
 };
 use partiql_eval::env::basic::MapBindings;
-use partiql_eval::eval::BasicContext;
+use partiql_eval::error::{EvalErr, EvaluationError};
+use partiql_eval::eval::{BasicContext, Evaluated};
 use partiql_eval::plan::EvaluationMode;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::{bag, tuple, DateTime, Value};
@@ -75,8 +76,10 @@ impl BaseTableFunctionInfo for TestUserContextFunction {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum UserCtxError {
-    #[error("unknown error")]
-    Unknown,
+    #[error("bad arguments")]
+    BadArgs,
+    #[error("runtime error")]
+    Runtime,
 }
 
 #[derive(Debug)]
@@ -90,56 +93,28 @@ impl BaseTableExpr for EvalTestCtxTable {
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
-                Value::String(name) => generated_data(name.to_string(), ctx),
+                Value::String(name) => Ok(Box::new(TestDataGen {})),
                 _ => {
-                    let error = UserCtxError::Unknown;
+                    let error = UserCtxError::BadArgs;
                     Err(Box::new(error) as BaseTableExprResultError)
                 }
             }
         } else {
-            let error = UserCtxError::Unknown;
+            let error = UserCtxError::BadArgs;
             Err(Box::new(error) as BaseTableExprResultError)
         }
     }
 }
 
-struct TestDataGen<'a> {
-    ctx: &'a dyn SessionContext<'a>,
-    name: String,
-}
+struct TestDataGen {}
 
-impl<'a> Iterator for TestDataGen<'a> {
+impl Iterator for TestDataGen {
     type Item = Result<Value, BaseTableExprResultError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(cv) = self.ctx.user_context(&self.name) {
-            if let Some(counter) = cv.downcast_ref::<Counter>() {
-                let mut n = counter.data.borrow_mut();
-
-                if *n > 0 {
-                    *n -= 1;
-
-                    let idx: u8 = (5 - *n) as u8;
-                    let id = format!("id_{idx}");
-                    let m = idx % 2;
-
-                    return Some(Ok(tuple![("foo", m), ("bar", id)].into()));
-                }
-            }
-        }
-        None
+        Some(Err(Box::new(UserCtxError::Runtime)))
     }
 }
-
-fn generated_data<'a>(name: String, ctx: &'a dyn SessionContext<'a>) -> BaseTableExprResult<'a> {
-    Ok(Box::new(TestDataGen { ctx, name }))
-}
-
-#[derive(Debug)]
-pub struct Counter {
-    data: RefCell<u32>,
-}
-
 #[track_caller]
 #[inline]
 pub(crate) fn parse(statement: &str) -> ParserResult {
@@ -159,13 +134,13 @@ pub(crate) fn lower(
 #[track_caller]
 #[inline]
 pub(crate) fn evaluate(
+    mode: EvaluationMode,
     catalog: &dyn Catalog,
     logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     bindings: MapBindings<Value>,
     ctx_vals: &[(String, &(dyn Any))],
-) -> Value {
-    let mut planner =
-        partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);
+) -> Result<Evaluated, EvalErr> {
+    let mut planner = partiql_eval::plan::EvaluatorPlanner::new(mode, catalog);
 
     let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
@@ -176,23 +151,63 @@ pub(crate) fn evaluate(
     for (k, v) in ctx_vals {
         ctx.user.insert(k.as_str().into(), *v);
     }
-    if let Ok(out) = plan.execute_mut(&ctx) {
-        out.result
-    } else {
-        Value::Missing
-    }
+
+    plan.execute_mut(&ctx)
+}
+
+#[test]
+fn test_context_bad_args_permissive() {
+    use assert_matches::assert_matches;
+    let query = "SELECT foo, bar from test_user_context(9) as data";
+
+    let mut catalog = PartiqlCatalog::default();
+    let ext = UserCtxTestExtension {};
+    ext.load(&mut catalog).expect("extension load to succeed");
+
+    let parsed = parse(query);
+    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let bindings = Default::default();
+
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(
+        EvaluationMode::Permissive,
+        &catalog,
+        lowered,
+        bindings,
+        &ctx,
+    );
+
+    assert!(out.is_ok());
+    assert_eq!(out.unwrap().result, bag!(tuple!()).into());
 }
 #[test]
-fn test_context() {
-    let expected: Value = bag![
-        tuple![("foo", 1), ("bar", "id_1")],
-        tuple![("foo", 0), ("bar", "id_2")],
-        tuple![("foo", 1), ("bar", "id_3")],
-        tuple![("foo", 0), ("bar", "id_4")],
-        tuple![("foo", 1), ("bar", "id_5")],
-    ]
-    .into();
+fn test_context_bad_args_strict() {
+    use assert_matches::assert_matches;
+    let query = "SELECT foo, bar from test_user_context(9) as data";
 
+    let mut catalog = PartiqlCatalog::default();
+    let ext = UserCtxTestExtension {};
+    ext.load(&mut catalog).expect("extension load to succeed");
+
+    let parsed = parse(query);
+    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let bindings = Default::default();
+
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(EvaluationMode::Strict, &catalog, lowered, bindings, &ctx);
+
+    assert!(out.is_err());
+    let err = out.unwrap_err();
+    assert_eq!(err.errors.len(), 1);
+    let err = &err.errors[0];
+    assert_matches!(err, EvaluationError::ExtensioResultError(err) => {
+        assert_eq!(err.to_string(), "bad arguments")
+    });
+}
+
+#[test]
+fn test_context_runtime_permissive() {
+    use assert_matches::assert_matches;
     let query = "SELECT foo, bar from test_user_context('counter') as data";
 
     let mut catalog = PartiqlCatalog::default();
@@ -203,13 +218,40 @@ fn test_context() {
     let lowered = lower(&catalog, &parsed.expect("parse"));
     let bindings = Default::default();
 
-    let counter = Counter {
-        data: RefCell::new(5),
-    };
-    let ctx: [(String, &dyn Any); 1] = [("counter".to_string(), &counter)];
-    let out = evaluate(&catalog, lowered, bindings, &ctx);
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(
+        EvaluationMode::Permissive,
+        &catalog,
+        lowered,
+        bindings,
+        &ctx,
+    );
 
-    assert!(out.is_bag());
-    assert_eq!(&out, &expected);
-    assert_eq!(*counter.data.borrow(), 0);
+    assert!(out.is_ok());
+    assert_eq!(out.unwrap().result, bag!(tuple!()).into());
+}
+
+#[test]
+fn test_context_runtime_strict() {
+    use assert_matches::assert_matches;
+    let query = "SELECT foo, bar from test_user_context('counter') as data";
+
+    let mut catalog = PartiqlCatalog::default();
+    let ext = UserCtxTestExtension {};
+    ext.load(&mut catalog).expect("extension load to succeed");
+
+    let parsed = parse(query);
+    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let bindings = Default::default();
+
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(EvaluationMode::Strict, &catalog, lowered, bindings, &ctx);
+
+    assert!(out.is_err());
+    let err = out.unwrap_err();
+    assert_eq!(err.errors.len(), 1);
+    let err = &err.errors[0];
+    assert_matches!(err, EvaluationError::ExtensioResultError(err) => {
+        assert_eq!(err.to_string(), "runtime error")
+    });
 }
