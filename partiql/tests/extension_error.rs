@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::borrow::Cow;
-use std::cell::RefCell;
 
 use std::error::Error;
 
@@ -89,11 +88,11 @@ impl BaseTableExpr for EvalTestCtxTable {
     fn evaluate<'c>(
         &self,
         args: &[Cow<Value>],
-        ctx: &'c dyn SessionContext<'c>,
+        _ctx: &'c dyn SessionContext<'c>,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
-                Value::String(name) => Ok(Box::new(TestDataGen {})),
+                Value::String(_name) => Ok(Box::new(TestDataGen {})),
                 _ => {
                     let error = UserCtxError::BadArgs;
                     Err(Box::new(error) as BaseTableExprResultError)
@@ -157,7 +156,6 @@ pub(crate) fn evaluate(
 
 #[test]
 fn test_context_bad_args_permissive() {
-    use assert_matches::assert_matches;
     let query = "SELECT foo, bar from test_user_context(9) as data";
 
     let mut catalog = PartiqlCatalog::default();
@@ -207,7 +205,6 @@ fn test_context_bad_args_strict() {
 
 #[test]
 fn test_context_runtime_permissive() {
-    use assert_matches::assert_matches;
     let query = "SELECT foo, bar from test_user_context('counter') as data";
 
     let mut catalog = PartiqlCatalog::default();
