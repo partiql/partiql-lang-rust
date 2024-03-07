@@ -46,16 +46,16 @@ pub enum EvaluationError {
 
     /// Error originating in an extension
     #[error("Base Table Expression Error: {0}")]
-    ExtensionBaseTableExprResultError(BaseTableExprResultError),
+    ExtensioResultError(BaseTableExprResultError),
 }
 
 impl From<BaseTableExprResultError> for EvaluationError {
     fn from(e: BaseTableExprResultError) -> Self {
-        EvaluationError::ExtensionBaseTableExprResultError(e)
+        EvaluationError::ExtensioResultError(e)
     }
 }
 
-/// Used when an error occurs during the the logical to eval plan conversion. Allows the conversion
+/// Used when an error occurs during the logical to eval plan conversion. Allows the conversion
 /// to continue in order to report multiple errors.
 #[derive(Debug)]
 pub(crate) struct ErrorNode {}
