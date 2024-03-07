@@ -26,7 +26,13 @@ use thiserror::Error;
 
 /// A trait for expressions that require evaluation, e.g. `a + b` or `c > 2`.
 pub trait EvalExpr: Debug {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value>;
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a;
 }
 
 #[derive(Error, Debug, Clone, PartialEq)]

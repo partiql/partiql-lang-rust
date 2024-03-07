@@ -1,15 +1,16 @@
 #[cfg(test)]
 mod tests {
     use partiql_ast_passes::error::AstTransformationError;
+    use partiql_catalog::context::SystemContext;
     use partiql_catalog::{Catalog, PartiqlCatalog};
     use partiql_eval as eval;
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::error::{EvalErr, PlanErr};
-    use partiql_eval::eval::{EvalPlan, EvalResult, Evaluated};
+    use partiql_eval::eval::{BasicContext, EvalPlan, EvalResult, Evaluated};
     use partiql_eval::plan::EvaluationMode;
     use partiql_logical as logical;
     use partiql_parser::{Parsed, ParserError, ParserResult};
-    use partiql_value::Value;
+    use partiql_value::{DateTime, Value};
     use thiserror::Error;
 
     #[derive(Error, Debug)]
@@ -78,7 +79,11 @@ mod tests {
     #[track_caller]
     #[inline]
     fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
-        plan.execute_mut(bindings)
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        plan.execute_mut(&ctx)
     }
 
     #[track_caller]
@@ -97,14 +102,14 @@ mod tests {
     fn order_by_count() {
         let query = "select foo, count(1) as n from
             <<
-            { 'foo': 'foo' },
-        { 'foo': 'bar' },
-        { 'foo': 'qux' },
-        { 'foo': 'bar' },
-        { 'foo': 'baz' },
-        { 'foo': 'bar' },
-        { 'foo': 'baz' }
-        >>  group by foo order by n desc";
+                { 'foo': 'foo' },
+                { 'foo': 'bar' },
+                { 'foo': 'qux' },
+                { 'foo': 'bar' },
+                { 'foo': 'baz' },
+                { 'foo': 'bar' },
+                { 'foo': 'baz' }
+            >>  group by foo order by n desc";
 
         let res = eval(query, EvaluationMode::Permissive);
         assert!(res.is_ok());

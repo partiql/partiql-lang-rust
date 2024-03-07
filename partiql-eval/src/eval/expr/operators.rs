@@ -42,17 +42,27 @@ impl BindEvalExpr for EvalLitExpr {
 }
 
 impl EvalExpr for EvalLitExpr {
-    fn evaluate<'a>(&'a self, _: &'a Tuple, _: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        _bindings: &'a Tuple,
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         Cow::Borrowed(&self.lit)
     }
 }
 
 impl ExecuteEvalExpr<0> for Value {
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         _args: [Cow<'a, Value>; 0],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         Cow::Borrowed(self)
     }
 }

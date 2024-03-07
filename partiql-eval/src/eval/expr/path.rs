@@ -1,5 +1,3 @@
-use crate::env::Bindings;
-
 pub use core::borrow::Borrow;
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -8,6 +6,7 @@ use crate::eval::EvalContext;
 use partiql_value::Value::Missing;
 use partiql_value::{BindingsName, Tuple, Value};
 
+use partiql_catalog::context::Bindings;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 
@@ -80,11 +79,11 @@ fn as_int(v: &Value) -> Option<i64> {
 
 impl EvalPathComponent {
     #[inline]
-    fn get_val<'a>(
+    fn get_val<'a, 'c>(
         &self,
         value: &'a Value,
         bindings: &'a Tuple,
-        ctx: &dyn EvalContext,
+        ctx: &'c dyn EvalContext<'c>,
     ) -> Option<&'a Value> {
         match (self, value) {
             (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.get(k),
@@ -100,7 +99,12 @@ impl EvalPathComponent {
     }
 
     #[inline]
-    fn take_val(&self, value: Value, bindings: &Tuple, ctx: &dyn EvalContext) -> Option<Value> {
+    fn take_val<'c>(
+        &self,
+        value: Value,
+        bindings: &Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Option<Value> {
         match (self, value) {
             (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.take_val(k),
             (EvalPathComponent::Index(idx), Value::List(list)) => list.take_val(*idx),
@@ -116,7 +120,14 @@ impl EvalPathComponent {
 }
 
 impl EvalExpr for EvalPath {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let value = self.expr.evaluate(bindings, ctx);
         let mut path_componenents = self.components.iter();
         match value {
@@ -138,7 +149,14 @@ pub(crate) struct EvalDynamicLookup {
 }
 
 impl EvalExpr for EvalDynamicLookup {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let mut lookups = self.lookups.iter().filter_map(|lookup| {
             let val = lookup.evaluate(bindings, ctx);
             match val.as_ref() {
@@ -182,7 +200,14 @@ pub(crate) struct EvalLocalVarRef {
 }
 
 impl EvalExpr for EvalLocalVarRef {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, _: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         borrow_or_missing(Bindings::get(bindings, &self.name))
     }
 }
@@ -212,7 +237,14 @@ impl Debug for EvalGlobalVarRef {
 }
 
 impl EvalExpr for EvalGlobalVarRef {
-    fn evaluate<'a>(&'a self, _: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        _bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         borrow_or_missing(ctx.bindings().get(&self.name))
     }
 }

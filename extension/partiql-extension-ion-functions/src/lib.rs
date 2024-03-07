@@ -11,6 +11,7 @@ use partiql_logical as logical;
 use partiql_value::Value;
 use std::borrow::Cow;
 
+use partiql_catalog::context::SessionContext;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fs::File;
@@ -98,7 +99,11 @@ impl BaseTableFunctionInfo for ReadIonFunction {
 pub(crate) struct EvalFnReadIon {}
 
 impl BaseTableExpr for EvalFnReadIon {
-    fn evaluate(&self, args: &[Cow<Value>]) -> BaseTableExprResult {
+    fn evaluate<'c>(
+        &self,
+        args: &[Cow<Value>],
+        _ctx: &'c dyn SessionContext<'c>,
+    ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
                 Value::String(path) => parse_ion_file(path),
@@ -155,11 +160,13 @@ fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<
 mod tests {
     use super::*;
 
+    use partiql_catalog::context::SystemContext;
     use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
+    use partiql_eval::eval::BasicContext;
     use partiql_eval::plan::EvaluationMode;
     use partiql_parser::{Parsed, ParserResult};
-    use partiql_value::{bag, tuple, Value};
+    use partiql_value::{bag, tuple, DateTime, Value};
 
     #[track_caller]
     #[inline]
@@ -189,7 +196,11 @@ mod tests {
 
         let mut plan = planner.compile(&logical).expect("Expect no plan error");
 
-        if let Ok(out) = plan.execute_mut(bindings) {
+        let sys = SystemContext {
+            now: DateTime::from_system_now_utc(),
+        };
+        let ctx = BasicContext::new(bindings, sys);
+        if let Ok(out) = plan.execute_mut(&ctx) {
             out.result
         } else {
             Value::Missing

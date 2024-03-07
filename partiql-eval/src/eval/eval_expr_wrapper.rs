@@ -66,11 +66,13 @@ pub(crate) fn unwrap_args<const N: usize>(
 /// An expression that is evaluated over `N` input arguments
 pub(crate) trait ExecuteEvalExpr<const N: usize>: Debug {
     /// Evaluate the expression
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; N],
-        ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value>;
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a;
 }
 
 /// Used to tell argument checking whether it should exit early or go on as usual.
@@ -249,11 +251,14 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
     ///
     /// If type-checking fails, the appropriate failure case of [`ArgCheckControlFlow`] is returned,
     /// else [`ArgCheckControlFlow::Continue`] is returned containing the `N` values.
-    pub fn evaluate_args<'a>(
+    pub fn evaluate_args<'a, 'c>(
         &'a self,
         bindings: &'a Tuple,
-        ctx: &'a dyn EvalContext,
-    ) -> ControlFlow<Value, [Cow<Value>; N]> {
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> ControlFlow<Value, [Cow<Value>; N]>
+    where
+        'c: 'a,
+    {
         let err_arg_count_mismatch = |args: Vec<_>| {
             if STRICT {
                 ctx.add_error(EvaluationError::IllegalState(format!(
@@ -326,7 +331,14 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
 impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker> EvalExpr
     for ArgCheckEvalExpr<STRICT, N, E, ArgC>
 {
-    fn evaluate<'a>(&'a self, bindings: &'a Tuple, ctx: &'a dyn EvalContext) -> Cow<'a, Value> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         if STRICT && ctx.has_errors() {
             return Cow::Owned(Missing);
         }
@@ -379,11 +391,14 @@ where
     F: Fn(&Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; 1],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let [arg] = args;
         Cow::Owned((self.f)(arg.borrow()))
     }
@@ -440,11 +455,14 @@ where
     F: Fn(&Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; 2],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let [arg1, arg2] = args;
         Cow::Owned((self.f)(arg1.borrow(), arg2.borrow()))
     }
@@ -501,11 +519,14 @@ where
     F: Fn(&Value, &Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; 3],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let [arg1, arg2, arg3] = args;
         Cow::Owned((self.f)(arg1.borrow(), arg2.borrow(), arg3.borrow()))
     }
@@ -562,11 +583,14 @@ where
     F: Fn(&Value, &Value, &Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a>(
+    fn evaluate<'a, 'c>(
         &'a self,
         args: [Cow<'a, Value>; 4],
-        _ctx: &'a dyn EvalContext,
-    ) -> Cow<'a, Value> {
+        _ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
         let [arg1, arg2, arg3, arg4] = args;
         Cow::Owned((self.f)(
             arg1.borrow(),

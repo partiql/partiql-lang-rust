@@ -36,6 +36,7 @@ assert_matches = "1.5.*"
 regex = "1.7"
 regex-syntax = "0.6"
 rustc-hash = "1"
+delegate = "0.12"
 
 [dev-dependencies]
 criterion = "0.4"

@@ -1,16 +1,7 @@
+use partiql_catalog::context::Bindings;
 use partiql_value::{BindingsName, Tuple, Value};
 use std::fmt::Debug;
 use unicase::UniCase;
-
-pub trait Bindings<T>: Debug {
-    fn get(&self, name: &BindingsName) -> Option<&T>;
-}
-
-impl Bindings<Value> for Tuple {
-    fn get(&self, name: &BindingsName) -> Option<&Value> {
-        self.get(name)
-    }
-}
 
 pub mod basic {
     use super::*;

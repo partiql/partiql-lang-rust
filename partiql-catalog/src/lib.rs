@@ -4,6 +4,7 @@ use partiql_types::PartiqlType;
 use partiql_value::Value;
 use std::borrow::Cow;
 
+use crate::context::SessionContext;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -12,6 +13,8 @@ use thiserror::Error;
 use unicase::UniCase;
 
 pub mod call_defs;
+
+pub mod context;
 
 pub trait Extension: Debug {
     fn name(&self) -> String;
@@ -49,7 +52,11 @@ pub type BaseTableExprResult<'a> =
     Result<BaseTableExprResultValueIter<'a>, BaseTableExprResultError>;
 
 pub trait BaseTableExpr: Debug {
-    fn evaluate(&self, args: &[Cow<Value>]) -> BaseTableExprResult;
+    fn evaluate<'c>(
+        &self,
+        args: &[Cow<Value>],
+        ctx: &'c dyn SessionContext<'c>,
+    ) -> BaseTableExprResult<'c>;
 }
 
 pub trait BaseTableFunctionInfo: Debug {
