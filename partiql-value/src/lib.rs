@@ -1112,6 +1112,34 @@ impl From<u8> for Value {
     }
 }
 
+impl From<u16> for Value {
+    #[inline]
+    fn from(n: u16) -> Self {
+        (n as usize).into()
+    }
+}
+
+impl From<u32> for Value {
+    #[inline]
+    fn from(n: u32) -> Self {
+        (n as usize).into()
+    }
+}
+
+impl From<u64> for Value {
+    #[inline]
+    fn from(n: u64) -> Self {
+        (n as usize).into()
+    }
+}
+
+impl From<u128> for Value {
+    #[inline]
+    fn from(n: u128) -> Self {
+        (n as usize).into()
+    }
+}
+
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
@@ -1277,6 +1305,11 @@ mod tests {
             Value::from(-123.456),
             Value::Decimal(Box::new(dec!(1.23456))),
             Value::from(123456),
+            Value::from(138u8),
+            Value::from(1348u16),
+            Value::from(13849u32),
+            Value::from(1384449u64),
+            Value::from(138444339u128),
             Value::from(f64::INFINITY),
             Value::from(""),
             Value::from("abc"),
