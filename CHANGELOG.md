@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
+- Adds u8, u16, u32, u64, and u128 support to partiql_value::Value::from(type)
 - [breaking] Changes the interface to `EvalPlan` to accept an `EvalContext`
 
 ### Added
