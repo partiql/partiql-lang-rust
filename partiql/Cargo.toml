@@ -39,6 +39,8 @@ itertools = "0.12"
 criterion = "0.5"
 rand = "0.8"
 
+assert_matches = "1.5"
+
 [[bench]]
 name = "bench_eval_multi_like"
 harness = false

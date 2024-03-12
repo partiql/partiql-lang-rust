@@ -46,6 +46,7 @@ pub struct ObjectId {
 }
 
 pub type BaseTableExprResultError = Box<dyn Error>;
+
 pub type BaseTableExprResultValueIter<'a> =
     Box<dyn 'a + Iterator<Item = Result<Value, BaseTableExprResultError>>>;
 pub type BaseTableExprResult<'a> =

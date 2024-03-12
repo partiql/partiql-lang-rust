@@ -23,6 +23,7 @@ use petgraph::visit::EdgeRef;
 use unicase::UniCase;
 
 use crate::eval::evaluable::{EvalType, Evaluable};
+use crate::plan::EvaluationMode;
 
 pub(crate) mod eval_expr_wrapper;
 pub mod evaluable;
@@ -31,11 +32,14 @@ pub mod expr;
 /// Represents a PartiQL evaluation query plan which is a plan that can be evaluated to produce
 /// a result. The plan uses a directed `petgraph::StableGraph`.
 #[derive(Debug)]
-pub struct EvalPlan(pub StableGraph<Box<dyn Evaluable>, u8, Directed>);
+pub struct EvalPlan {
+    mode: EvaluationMode,
+    plan_graph: StableGraph<Box<dyn Evaluable>, u8, Directed>,
+}
 
 impl Default for EvalPlan {
     fn default() -> Self {
-        Self::new()
+        Self::new(EvaluationMode::Permissive, Default::default())
     }
 }
 
@@ -48,13 +52,16 @@ fn err_illegal_state(msg: impl AsRef<str>) -> EvalErr {
 
 impl EvalPlan {
     /// Creates a new evaluation plan.
-    fn new() -> Self {
-        EvalPlan(StableGraph::<Box<dyn Evaluable>, u8, Directed>::new())
+    pub fn new(
+        mode: EvaluationMode,
+        plan_graph: StableGraph<Box<dyn Evaluable>, u8, Directed>,
+    ) -> Self {
+        EvalPlan { mode, plan_graph }
     }
 
     #[inline]
     fn plan_graph(&mut self) -> &mut StableGraph<Box<dyn Evaluable>, u8> {
-        &mut self.0
+        &mut self.plan_graph
     }
 
     #[inline]
@@ -73,7 +80,7 @@ impl EvalPlan {
         // that all v ∈ V \{v0} are reachable from v0. Note that this is the definition of trees
         // without the condition |E| = |V | − 1. Hence, all trees are DAGs.
         // Reference: https://link.springer.com/article/10.1007/s00450-009-0061-0
-        let ops = toposort(&self.0, None).map_err(|e| EvalErr {
+        let ops = toposort(&self.plan_graph, None).map_err(|e| EvalErr {
             errors: vec![EvaluationError::InvalidEvaluationPlan(format!(
                 "Malformed evaluation plan detected: {e:?}"
             ))],
@@ -101,7 +108,7 @@ impl EvalPlan {
                 result = Some(src.evaluate(ctx));
 
                 // return on first evaluation error
-                if ctx.has_errors() {
+                if ctx.has_errors() && self.mode == EvaluationMode::Strict {
                     return Err(EvalErr {
                         errors: ctx.errors(),
                     });
@@ -127,7 +134,7 @@ impl EvalPlan {
     }
 
     pub fn to_dot_graph(&self) -> String {
-        format!("{:?}", Dot::with_config(&self.0, &[]))
+        format!("{:?}", Dot::with_config(&self.plan_graph, &[]))
     }
 }
 

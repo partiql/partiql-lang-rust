@@ -1,6 +1,7 @@
 use crate::eval::evaluable::Evaluable;
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
+use partiql_catalog::BaseTableExprResultError;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use thiserror::Error;
@@ -30,7 +31,7 @@ pub struct EvalErr {
 }
 
 /// An error that can happen during evaluation.
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum EvaluationError {
     /// Internal error that was not due to user input or API violation.
@@ -42,9 +43,13 @@ pub enum EvaluationError {
     /// Feature has not yet been implemented.
     #[error("Not yet implemented: {0}")]
     NotYetImplemented(String),
+
+    /// Error originating in an extension
+    #[error("Base Table Expression Error")]
+    ExtensionResultError(#[from] BaseTableExprResultError),
 }
 
-/// Used when an error occurs during the the logical to eval plan conversion. Allows the conversion
+/// Used when an error occurs during the logical to eval plan conversion. Allows the conversion
 /// to continue in order to report multiple errors.
 #[derive(Debug)]
 pub(crate) struct ErrorNode {}
