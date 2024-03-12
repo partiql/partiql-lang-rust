@@ -99,11 +99,14 @@ impl BaseTableFunctionInfo for ReadIonFunction {
 pub(crate) struct EvalFnReadIon {}
 
 impl BaseTableExpr for EvalFnReadIon {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &'a [Cow<Value>],
         _ctx: &'c dyn SessionContext<'c>,
-    ) -> BaseTableExprResult<'c> {
+    ) -> BaseTableExprResult<'a>
+    where
+        'c: 'a,
+    {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
                 Value::String(path) => parse_ion_file(path),
