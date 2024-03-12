@@ -7,20 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
-- Adds u8, u16, u32, u64, and u128 support to partiql_value::Value::from(type)
-- [breaking] Changes the interface to `EvalPlan` to accept an `EvalContext`
-- [breaking] Changes `EvaluationError` to not implement `Clone` 
-- [breaking] Changes the structure of `EvalPlan`
 
 ### Added
-- Add `partiql-extension-visualize` for visualizing AST and logical plan
-- Add a `SessionContext` containing both a system-level and a user-level context object usable by expression evaluation 
 
 ### Fixed
-- Fixed `ORDER BY`'s ability to see into projection aliases
-- Fixed errors in `BaseTableExpr`s get added to the evaluation context
-- Fixed certain errors surfacing in Permissive evaluation mode, when they should only be present in Strict mode
+
+## [0.7.0] - 2024-03-12
+### Changed
+- Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
+- *BREAKING:*  partiql-eval: Changes the interface to `EvalPlan` to accept an `EvalContext`
+- *BREAKING:*  partiql-eval: Changes `EvaluationError` to not implement `Clone` 
+- *BREAKING:*  partiql-eval: Changes the structure of `EvalPlan`
+
+### Added
+- partiql-extension-visualize: Add `partiql-extension-visualize` for visualizing AST and logical plan
+- partiql-eval: Add a `SessionContext` containing both a system-level and a user-level context object usable by expression evaluation 
+
+### Fixed
+- partiql-logical-planner: Fixed `ORDER BY`'s ability to see into projection aliases
+- partiql-eval: Fixed errors in `BaseTableExpr`s get added to the evaluation context
+- partiql-eval: Fixed certain errors surfacing in Permissive evaluation mode, when they should only be present in Strict mode
 
 ## [0.6.0] - 2023-10-31
 ### Changed
@@ -40,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Affects the AST and visitor
 - *BREAKING:* partiql-parser: `Parsed` struct's `ast` field is now an `ast::AstNode<ast::TopLevelQuery>`
 - *BREAKING:* partiql-eval: `Evaluable` trait's `update_input` fn now also takes in an `EvalContext`
-- *BREAKING:* partiql-logical: changed modeling of `Project` `exprs` to be a `Vec<(String, ValueExpr)>` rather than a `HashMap<String, ValueExpr>` to support multiple project items with the same alias
+- *BREAKING:* partiql-eval: changed modeling of `Project` `exprs` to be a `Vec<(String, ValueExpr)>` rather than a `HashMap<String, ValueExpr>` to support multiple project items with the same alias
 - *BREAKING:* partiql-logical: changed modeling of `VarRef` to include a `VarRefType` to indicate whether to do a local vs global binding lookup
 
 ### Added
@@ -212,7 +218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.0
 [0.6.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.6.0
 [0.5.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.5.0
 [0.4.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.4.1
