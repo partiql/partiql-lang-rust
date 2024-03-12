@@ -198,7 +198,7 @@ fn test_context_bad_args_strict() {
     let err = out.unwrap_err();
     assert_eq!(err.errors.len(), 1);
     let err = &err.errors[0];
-    assert_matches!(err, EvaluationError::ExtensioResultError(err) => {
+    assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
         assert_eq!(err.to_string(), "bad arguments")
     });
 }
@@ -248,7 +248,7 @@ fn test_context_runtime_strict() {
     let err = out.unwrap_err();
     assert_eq!(err.errors.len(), 1);
     let err = &err.errors[0];
-    assert_matches!(err, EvaluationError::ExtensioResultError(err) => {
+    assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
         assert_eq!(err.to_string(), "runtime error")
     });
 }

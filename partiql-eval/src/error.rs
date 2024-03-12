@@ -45,14 +45,8 @@ pub enum EvaluationError {
     NotYetImplemented(String),
 
     /// Error originating in an extension
-    #[error("Base Table Expression Error: {0}")]
-    ExtensioResultError(BaseTableExprResultError),
-}
-
-impl From<BaseTableExprResultError> for EvaluationError {
-    fn from(e: BaseTableExprResultError) -> Self {
-        EvaluationError::ExtensioResultError(e)
-    }
+    #[error("Base Table Expression Error")]
+    ExtensionResultError(#[from] BaseTableExprResultError),
 }
 
 /// Used when an error occurs during the logical to eval plan conversion. Allows the conversion
