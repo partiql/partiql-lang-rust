@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Default, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-/// Represents a PartiQL BAG value, e.g.: <<1, 'two', 4>>
+/// Represents a `PartiQL` BAG value, e.g.: <<1, 'two', 4>>
 pub struct Bag(Vec<Value>);
 
 impl Bag {
@@ -24,16 +24,19 @@ impl Bag {
     }
 
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     #[inline]
+    #[must_use]
     pub fn iter(&self) -> BagIter<'_> {
         BagIter(self.0.iter())
     }
@@ -44,6 +47,7 @@ impl Bag {
     }
 
     #[inline]
+    #[must_use]
     pub fn to_vec(self) -> Vec<Value> {
         self.0
     }

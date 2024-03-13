@@ -21,6 +21,7 @@ pub struct Tuple {
 }
 
 impl Tuple {
+    #[must_use]
     pub fn new() -> Self {
         Tuple {
             attrs: vec![],
@@ -35,11 +36,13 @@ impl Tuple {
     }
 
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.attrs.len()
     }
 
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -50,6 +53,7 @@ impl Tuple {
     /// contains unique attributes. In the case of duplicate attributes between `self` and `other`,
     /// the result `Tuple` will contain the attribute provided by `other`. See section 3.4 of the
     /// spec for details: https://partiql.org/assets/PartiQL-Specification.pdf#subsection.3.4.
+    #[must_use]
     pub fn tuple_concat(&self, other: &Tuple) -> Self {
         other
             .pairs()
@@ -60,11 +64,13 @@ impl Tuple {
     }
 
     #[inline]
+    #[must_use]
     pub fn get(&self, attr: &BindingsName<'_>) -> Option<&Value> {
         self.find_value(attr).map(|i| &self.vals[i])
     }
 
     #[inline]
+    #[must_use]
     pub fn take_val(self, attr: &BindingsName<'_>) -> Option<Value> {
         self.find_value(attr)
             .and_then(|i| self.vals.into_iter().nth(i))
@@ -95,11 +101,13 @@ impl Tuple {
     }
 
     #[inline]
+    #[must_use]
     pub fn pairs(&self) -> PairsIter<'_> {
         PairsIter(zip(self.attrs.iter(), self.vals.iter()))
     }
 
     #[inline]
+    #[must_use]
     pub fn into_pairs(self) -> PairsIntoIter {
         PairsIntoIter(zip(self.attrs, self.vals))
     }

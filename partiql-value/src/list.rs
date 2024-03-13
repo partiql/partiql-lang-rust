@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Default, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-/// Represents a PartiQL List value, e.g. [1, 2, 'one']
+/// Represents a `PartiQL` List value, e.g. [1, 2, 'one']
 pub struct List(Vec<Value>);
 
 impl List {
@@ -21,16 +21,19 @@ impl List {
     }
 
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     #[inline]
+    #[must_use]
     pub fn get(&self, idx: i64) -> Option<&Value> {
         self.0.get(idx as usize)
     }
@@ -41,11 +44,13 @@ impl List {
     }
 
     #[inline]
+    #[must_use]
     pub fn take_val(self, idx: i64) -> Option<Value> {
         self.0.into_iter().nth(idx as usize)
     }
 
     #[inline]
+    #[must_use]
     pub fn iter(&self) -> ListIter<'_> {
         ListIter(self.0.iter())
     }
@@ -56,6 +61,7 @@ impl List {
     }
 
     #[inline]
+    #[must_use]
     pub fn to_vec(self) -> Vec<Value> {
         self.0
     }
@@ -231,7 +237,7 @@ impl Ord for List {
 
 impl Hash for List {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for v in self.0.iter() {
+        for v in &self.0 {
             v.hash(state);
         }
     }

@@ -556,9 +556,9 @@ mod tests {
         impl<'ast> Visitor<'ast> for Accum {
             fn enter_lit(&mut self, literal: &'ast Lit) -> Traverse {
                 match literal {
-                    Lit::Int8Lit(l) => self.val.get_or_insert(0i64).add_assign(*l as i64),
-                    Lit::Int16Lit(l) => self.val.get_or_insert(0i64).add_assign(*l as i64),
-                    Lit::Int32Lit(l) => self.val.get_or_insert(0i64).add_assign(*l as i64),
+                    Lit::Int8Lit(l) => self.val.get_or_insert(0i64).add_assign(i64::from(*l)),
+                    Lit::Int16Lit(l) => self.val.get_or_insert(0i64).add_assign(i64::from(*l)),
+                    Lit::Int32Lit(l) => self.val.get_or_insert(0i64).add_assign(i64::from(*l)),
                     Lit::Int64Lit(l) => self.val.get_or_insert(0i64).add_assign(l),
                     _ => {}
                 }

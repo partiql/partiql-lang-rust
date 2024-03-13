@@ -293,10 +293,8 @@ impl BinaryAnd for Value {
     fn and(&self, rhs: &Self) -> Self::Output {
         match (self, rhs) {
             (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l && *r),
-            (Value::Null, Value::Boolean(false))
-            | (Value::Boolean(false), Value::Null)
-            | (Value::Missing, Value::Boolean(false))
-            | (Value::Boolean(false), Value::Missing) => Value::from(false),
+            (Value::Null | Value::Missing, Value::Boolean(false))
+            | (Value::Boolean(false), Value::Null | Value::Missing) => Value::from(false),
             _ => {
                 if matches!(self, Value::Missing | Value::Null | Value::Boolean(true))
                     && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(true))
@@ -321,10 +319,8 @@ impl BinaryOr for Value {
     fn or(&self, rhs: &Self) -> Self::Output {
         match (self, rhs) {
             (Value::Boolean(l), Value::Boolean(r)) => Value::from(*l || *r),
-            (Value::Null, Value::Boolean(true))
-            | (Value::Boolean(true), Value::Null)
-            | (Value::Missing, Value::Boolean(true))
-            | (Value::Boolean(true), Value::Missing) => Value::from(true),
+            (Value::Null | Value::Missing, Value::Boolean(true))
+            | (Value::Boolean(true), Value::Null | Value::Missing) => Value::from(true),
             _ => {
                 if matches!(self, Value::Missing | Value::Null | Value::Boolean(false))
                     && matches!(rhs, Value::Missing | Value::Null | Value::Boolean(false))
@@ -370,27 +366,22 @@ impl Comparable for Value {
     /// Returns true if and only if `self` is comparable to `rhs`
     fn is_comparable_to(&self, rhs: &Self) -> bool {
         match (self, rhs) {
-            (Value::Missing, _) |
-            (_, Value::Missing) |
-            (Value::Null, _) |
-            (_, Value::Null) |
-            (Value::Boolean(_), Value::Boolean(_)) |
-            (Value::Integer(_), Value::Integer(_)) |
-            (Value::Real(_), Value::Real(_)) |
-            (Value::Decimal(_), Value::Decimal(_)) |
-            (Value::String(_), Value::String(_)) |
-            (Value::Blob(_), Value::Blob(_)) |
-            (Value::List(_), Value::List(_)) |
-            (Value::Bag(_), Value::Bag(_)) |
-            (Value::Tuple(_), Value::Tuple(_)) |
-            // Numeric types are comparable to one another
-            (Value::Integer(_), Value::Real(_)) |
-            (Value::Integer(_), Value::Decimal(_)) |
-            (Value::Real(_), Value::Integer(_)) |
-            (Value::Real(_), Value::Decimal(_)) |
-            (Value::Decimal(_), Value::Integer(_)) |
-            (Value::Decimal(_), Value::Real(_)) => true,
-            (_, _) => false
+            // Null/Missing compare to anything
+            (Value::Missing | Value::Null, _)
+            | (_, Value::Missing | Value::Null)
+            // Everything compares to its own type
+            | (Value::Boolean(_), Value::Boolean(_))
+            | (Value::String(_), Value::String(_))
+            | (Value::Blob(_), Value::Blob(_))
+            | (Value::List(_), Value::List(_))
+            | (Value::Bag(_), Value::Bag(_))
+            | (Value::Tuple(_), Value::Tuple(_))
+            // Numerics compare to each other
+            | (
+                Value::Integer(_) | Value::Real(_) | Value::Decimal(_),
+                Value::Integer(_) | Value::Real(_) | Value::Decimal(_),
+            )=> true,
+            (_, _) => false,
         }
     }
 }
@@ -422,10 +413,9 @@ impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, 
     fn eq(&self, rhs: &Self) -> Self::Output {
         match GROUP_NULLS {
             true => match (self.0, rhs.0) {
-                (Value::Missing, Value::Missing)
-                | (Value::Null, Value::Null)
-                | (Value::Missing, Value::Null)
-                | (Value::Null, Value::Missing) => return Value::Boolean(true),
+                (Value::Missing | Value::Null, Value::Missing | Value::Null) => {
+                    return Value::Boolean(true)
+                }
                 _ => {}
             },
             false => match (self.0, rhs.0) {
@@ -571,48 +561,57 @@ fn coerce_int_to_real(value: &Value) -> Value {
 
 impl Value {
     #[inline]
+    #[must_use]
     pub fn is_tuple(&self) -> bool {
         matches!(self, Value::Tuple(_))
     }
 
     #[inline]
+    #[must_use]
     pub fn is_list(&self) -> bool {
         matches!(self, Value::List(_))
     }
 
     #[inline]
+    #[must_use]
     pub fn is_bag(&self) -> bool {
         matches!(self, Value::Bag(_))
     }
 
     #[inline]
+    #[must_use]
     pub fn is_sequence(&self) -> bool {
         self.is_bag() || self.is_list()
     }
 
     #[inline]
     /// Returns true if and only if Value is an integer, real, or decimal
+    #[must_use]
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
     }
     #[inline]
     /// Returns true if and only if Value is null or missing
+    #[must_use]
     pub fn is_absent(&self) -> bool {
         matches!(self, Value::Missing | Value::Null)
     }
 
     #[inline]
     /// Returns true if Value is neither null nor missing
+    #[must_use]
     pub fn is_present(&self) -> bool {
         !self.is_absent()
     }
 
     #[inline]
+    #[must_use]
     pub fn is_ordered(&self) -> bool {
         self.is_list()
     }
 
     #[inline]
+    #[must_use]
     pub fn coerce_into_tuple(self) -> Tuple {
         match self {
             Value::Tuple(t) => *t,
@@ -624,6 +623,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn coerce_to_tuple(&self) -> Tuple {
         match self {
             Value::Tuple(t) => t.as_ref().clone(),
@@ -637,6 +637,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn as_tuple_ref(&self) -> Cow<'_, Tuple> {
         if let Value::Tuple(t) = self {
             Cow::Borrowed(t)
@@ -646,6 +647,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn as_bindings(&self) -> BindingIter<'_> {
         match self {
             Value::Tuple(t) => BindingIter::Tuple(t.pairs()),
@@ -655,6 +657,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn into_bindings(self) -> BindingIntoIter {
         match self {
             Value::Tuple(t) => BindingIntoIter::Tuple(t.into_pairs()),
@@ -664,6 +667,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn coerce_into_bag(self) -> Bag {
         if let Value::Bag(b) = self {
             *b
@@ -673,6 +677,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn as_bag_ref(&self) -> Cow<'_, Bag> {
         if let Value::Bag(b) = self {
             Cow::Borrowed(b)
@@ -682,6 +687,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn coerce_into_list(self) -> List {
         if let Value::List(b) = self {
             *b
@@ -691,6 +697,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn as_list_ref(&self) -> Cow<'_, List> {
         if let Value::List(l) = self {
             Cow::Borrowed(l)
@@ -700,6 +707,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn iter(&self) -> ValueIter<'_> {
         match self {
             Value::Null | Value::Missing => ValueIter::Single(None),
@@ -710,6 +718,7 @@ impl Value {
     }
 
     #[inline]
+    #[must_use]
     pub fn sequence_iter(&self) -> Option<ValueIter<'_>> {
         if self.is_sequence() {
             Some(self.iter())
@@ -1082,21 +1091,21 @@ impl From<i64> for Value {
 impl From<i32> for Value {
     #[inline]
     fn from(n: i32) -> Self {
-        (n as i64).into()
+        i64::from(n).into()
     }
 }
 
 impl From<i16> for Value {
     #[inline]
     fn from(n: i16) -> Self {
-        (n as i64).into()
+        i64::from(n).into()
     }
 }
 
 impl From<i8> for Value {
     #[inline]
     fn from(n: i8) -> Self {
-        (n as i64).into()
+        i64::from(n).into()
     }
 }
 
@@ -1310,9 +1319,9 @@ mod tests {
             Value::from(138u8),
             Value::from(1348u16),
             Value::from(13849u32),
-            Value::from(123456),
-            Value::from(1384449u64),
-            Value::from(138444339u128),
+            Value::from(123_456),
+            Value::from(1_384_449_u64),
+            Value::from(138_444_339_u128),
             Value::from(f64::INFINITY),
             Value::from(""),
             Value::from("abc"),

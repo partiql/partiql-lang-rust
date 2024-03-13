@@ -11,7 +11,10 @@ use std::str::FromStr;
 use thiserror::Error;
 use time::Duration;
 
-use crate::common::*;
+use crate::common::{
+    Encoding, BAG_ANNOT, DATE_ANNOT, MISSING_ANNOT, RE_SET_TIME_PARTS, TIME_ANNOT, TIME_PARTS_HOUR,
+    TIME_PARTS_MINUTE, TIME_PARTS_SECOND, TIME_PARTS_TZ_HOUR, TIME_PARTS_TZ_MINUTE,
+};
 
 /// Errors in ion decoding.
 ///
@@ -63,6 +66,7 @@ pub struct IonDecoderConfig {
 
 impl IonDecoderConfig {
     /// Set the mode to `mode`
+    #[must_use]
     pub fn with_mode(mut self, mode: crate::Encoding) -> Self {
         self.mode = mode;
         self
@@ -84,6 +88,7 @@ pub struct IonDecoderBuilder {
 
 impl IonDecoderBuilder {
     /// Create the builder from 'config'
+    #[must_use]
     pub fn new(config: IonDecoderConfig) -> Self {
         Self { config }
     }

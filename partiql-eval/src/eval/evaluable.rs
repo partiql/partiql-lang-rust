@@ -71,7 +71,7 @@ impl Debug for EvalScan {
         write!(f, " AS {}", self.as_key)?;
 
         if let Some(at_key) = &self.at_key {
-            write!(f, " AT {}", at_key)?;
+            write!(f, " AT {at_key}")?;
         }
 
         Ok(())
@@ -118,7 +118,7 @@ impl Evaluable for EvalScan {
             let ordered = &v.is_ordered();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
-                for t in v.into_iter() {
+                for t in v {
                     let mut out = Tuple::from([(self.as_key.as_str(), t)]);
                     let at_id = if *ordered {
                         at_index_counter.into()
@@ -130,7 +130,7 @@ impl Evaluable for EvalScan {
                     at_index_counter += 1;
                 }
             } else {
-                for t in v.into_iter() {
+                for t in v {
                     let out = Tuple::from([(self.as_key.as_str(), t)]);
                     value.push(Value::Tuple(Box::new(out)));
                 }
@@ -150,7 +150,7 @@ impl Evaluable for EvalScan {
 }
 
 /// Represents an evaluation `Join` operator; `Join` joins the tuples from its LHS and RHS based on a logic defined
-/// by [`EvalJoinKind`]. For semantics of PartiQL joins and their distinction with SQL's see sections
+/// by [`EvalJoinKind`]. For semantics of `PartiQL` joins and their distinction with SQL's see sections
 /// 5.3 – 5.7 of [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 pub(crate) struct EvalJoin {
     pub(crate) kind: EvalJoinKind,
@@ -241,7 +241,7 @@ impl Evaluable for EvalJoin {
                     };
 
                     // for each binding b_r in eval (p0, (p || b_l), r)
-                    for b_r in right_bindings.iter() {
+                    for b_r in &right_bindings {
                         match &self.on {
                             None => {
                                 let b_l_b_r = b_l
@@ -285,7 +285,7 @@ impl Evaluable for EvalJoin {
                     };
 
                     // for each binding b_r in eval (p0, (p || b_l), r)
-                    for b_r in right_bindings.iter() {
+                    for b_r in &right_bindings {
                         match &self.on {
                             None => {
                                 let b_l_b_r = b_l
@@ -321,8 +321,8 @@ impl Evaluable for EvalJoin {
                         output_bag.push(Value::from(new_binding));
                     } else {
                         // otherwise for each binding b_r in q_r, add b_l || b_r to output bag
-                        for elem in output_bag_left.into_iter() {
-                            output_bag.push(elem)
+                        for elem in output_bag_left {
+                            output_bag.push(elem);
                         }
                     }
                 });
@@ -354,7 +354,7 @@ impl Evaluable for EvalJoin {
 ///
 /// For example, `SELECT a AS a, SUM(b) AS b FROM t GROUP BY a` is rewritten to the following form
 ///              `SELECT a AS a, $__agg_1 AS b FROM t GROUP BY a`
-/// In the above example, `name` corresponds to '$__agg_1', `expr` refers to the expression within
+/// In the above example, `name` corresponds to '$__`agg_1`', `expr` refers to the expression within
 /// the aggregation function, `b`, and `func` corresponds to the sum aggregation function,
 /// `[AggSum]`.
 #[derive(Debug)]
@@ -547,7 +547,7 @@ impl AggregateFunction for Any {
                 *state = Some(match input_value {
                     Boolean(b) => Value::Boolean(*b),
                     _ => Missing,
-                })
+                });
             }
             Some(ref mut acc) => {
                 *acc = match (&acc, input_value) {
@@ -574,7 +574,7 @@ impl AggregateFunction for Every {
                 *state = Some(match input_value {
                     Boolean(b) => Value::Boolean(*b),
                     _ => Missing,
-                })
+                });
             }
             Some(ref mut acc) => {
                 *acc = match (&acc, input_value) {
@@ -673,7 +673,7 @@ impl Evaluable for EvalGroupBy {
 
                 let combined = CombinedState(state, distinct_state, group_as);
 
-                for v in input_value.into_iter() {
+                for v in input_value {
                     let v_as_tuple = v.coerce_into_tuple();
                     let group_key = self.group_key(&v_as_tuple, ctx);
                     let CombinedState(state, distinct_state, group_as) =
@@ -1080,7 +1080,7 @@ impl Evaluable for EvalLimitOffset {
     }
 }
 
-/// Represents an evaluation `SelectValue` operator; `SelectValue` implements PartiQL Core's
+/// Represents an evaluation `SelectValue` operator; `SelectValue` implements `PartiQL` Core's
 /// `SELECT VALUE` clause semantics. For `SelectValue` operational semantics, see section `6.1` of
 /// [PartiQL Specification — August 1, 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug)]
@@ -1215,7 +1215,7 @@ impl Evaluable for EvalSelectAll {
     }
 }
 
-/// Represents an evaluation `ExprQuery` operator; in PartiQL as opposed to SQL, the following
+/// Represents an evaluation `ExprQuery` operator; in `PartiQL` as opposed to SQL, the following
 /// expression by its own is valid: `2 * 2`. Considering this, evaluation plan designates an operator
 /// for evaluating such stand-alone expressions.
 #[derive(Debug)]
@@ -1333,11 +1333,11 @@ impl EvalExpr for EvalSubQueryExpr {
 
 ///
 /// Coercion function F for bag operators described in RFC-0007
-/// - F(absent_value) -> << >>
-/// - F(scalar_value) -> << scalar_value >> # singleton bag
-/// - F(tuple_value)  -> << tuple_value >>  # singleton bag, see future extensions
-/// - F(array_value)  -> bag_value          # discard ordering
-/// - F(bag_value)    -> bag_value          # identity
+/// - `F(absent_value`) -> << >>
+/// - `F(scalar_value`) -> << `scalar_value` >> # singleton bag
+/// - `F(tuple_value`)  -> << `tuple_value` >>  # singleton bag, see future extensions
+/// - `F(array_value`)  -> `bag_value`          # discard ordering
+/// - `F(bag_value`)    -> `bag_value`          # identity
 ///
 #[inline]
 fn bagop_iter(v: Value) -> ValueIntoIterator {

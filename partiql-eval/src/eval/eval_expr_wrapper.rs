@@ -280,7 +280,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
             match ArgC::arg_check(typ, arg) {
                 ArgCheckControlFlow::Continue(v) => {
                     if propagate.is_none() {
-                        result.push(v)
+                        result.push(v);
                     }
                 }
                 ArgCheckControlFlow::Propagate(v) => {

@@ -17,18 +17,22 @@ pub enum DateTime {
 }
 
 impl DateTime {
+    #[must_use]
     pub fn from_system_now_utc() -> Self {
         DateTime::TimestampWithTz(time::OffsetDateTime::now_utc())
     }
 
+    #[must_use]
     pub fn from_hms(hour: u8, minute: u8, second: u8) -> Self {
         DateTime::Time(time::Time::from_hms(hour, minute, second).expect("valid time value"))
     }
 
+    #[must_use]
     pub fn from_hms_nano(hour: u8, minute: u8, second: u8, nanosecond: u32) -> Self {
         Self::from_hms_nano_offset(hour, minute, second, nanosecond, None)
     }
 
+    #[must_use]
     pub fn from_hms_nano_tz(
         hour: u8,
         minute: u8,
@@ -47,6 +51,7 @@ impl DateTime {
         Self::from_hms_nano_offset(hour, minute, second, nanosecond, offset)
     }
 
+    #[must_use]
     pub fn from_ymd(year: i32, month: NonZeroU8, day: u8) -> Self {
         let month: time::Month = month.get().try_into().expect("valid month");
         let date = time::Date::from_calendar_date(year, month, day).expect("valid ymd");
@@ -54,6 +59,7 @@ impl DateTime {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn from_ymdhms_nano_offset_minutes(
         year: i32,
         month: NonZeroU8,
@@ -137,8 +143,8 @@ impl Ord for DateTime {
             (_, DateTime::Time(_)) => Ordering::Greater,
 
             (DateTime::TimeWithTz(l, lo), DateTime::TimeWithTz(r, ro)) => {
-                let lod = Duration::new(lo.whole_seconds() as i64, 0);
-                let rod = Duration::new(ro.whole_seconds() as i64, 0);
+                let lod = Duration::new(i64::from(lo.whole_seconds()), 0);
+                let rod = Duration::new(i64::from(ro.whole_seconds()), 0);
                 let l_adjusted = *l + lod;
                 let r_adjusted = *r + rod;
                 l_adjusted.cmp(&r_adjusted)

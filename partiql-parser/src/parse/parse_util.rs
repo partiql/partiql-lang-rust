@@ -8,7 +8,7 @@ bitflags! {
     /// Set of AST node attributes to use as synthesized attributes.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub(crate) struct Attrs: u8 {
-        const LIT = 0b00000001;
+        const LIT = 0b0000_0001;
 
         const INTERSECTABLE = Self::LIT.bits();
         const UNIONABLE = 0;

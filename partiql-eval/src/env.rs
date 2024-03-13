@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use unicase::UniCase;
 
 pub mod basic {
-    use super::*;
+    use super::{Bindings, BindingsName, Debug, Tuple, UniCase, Value};
     use std::collections::HashMap;
 
     #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ pub mod basic {
         fn from(t: &Tuple) -> Self {
             let mut bindings = MapBindings::default();
             for (k, v) in t.pairs() {
-                bindings.insert(k, v.clone())
+                bindings.insert(k, v.clone());
             }
             bindings
         }

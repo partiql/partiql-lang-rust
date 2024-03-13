@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! Provides the [`parse_partiql`] function to parse a PartiQL query.
+//! Provides the [`parse_partiql`] function to parse a `PartiQL` query.
 
 mod parse_util;
 mod parser_state;
@@ -48,7 +48,7 @@ pub(crate) struct ErrorData<'input> {
 
 pub(crate) type AstResult<'input> = Result<AstData, ErrorData<'input>>;
 
-/// Parse PartiQL query text into an AST.
+/// Parse `PartiQL` query text into an AST.
 pub(crate) fn parse_partiql(s: &str) -> AstResult<'_> {
     parse_partiql_with_state(s, ParserState::default())
 }
@@ -234,7 +234,7 @@ mod tests {
         }
         #[test]
         fn array() {
-            parse!(r#"[]"#);
+            parse!(r"[]");
             parse!(r#"[1, 'moo', "some variable", [], 'a', MISSING]"#);
             // In the interest of compatibility to SQL, PartiQL also allows array constructors to be
             // denoted with parentheses instead of brackets, when there are at least two elements in the array
@@ -242,15 +242,15 @@ mod tests {
         }
         #[test]
         fn bag() {
-            parse!(r#"<<>>"#);
-            parse!(r#"<<1>>"#);
-            parse!(r#"<<1,2>>"#);
-            parse!(r#"<<1, <<>>, 'boo', some_variable, 'a'>>"#);
+            parse!(r"<<>>");
+            parse!(r"<<1>>");
+            parse!(r"<<1,2>>");
+            parse!(r"<<1, <<>>, 'boo', some_variable, 'a'>>");
         }
         #[test]
         fn tuple() {
-            parse!(r#"{}"#);
-            parse!(r#"{a_variable: 1, 'cow': 'moo', 'a': NULL}"#);
+            parse!(r"{}");
+            parse!(r"{a_variable: 1, 'cow': 'moo', 'a': NULL}");
         }
     }
 
@@ -259,43 +259,43 @@ mod tests {
 
         #[test]
         fn or_simple() {
-            parse!(r#"TRUE OR FALSE"#);
+            parse!(r"TRUE OR FALSE");
         }
 
         #[test]
         fn or() {
-            parse!(r#"t1.super OR test(t2.name, t1.name)"#);
+            parse!(r"t1.super OR test(t2.name, t1.name)");
         }
 
         #[test]
         fn and_simple() {
-            parse!(r#"TRUE and FALSE"#);
+            parse!(r"TRUE and FALSE");
         }
 
         #[test]
         fn and() {
-            parse!(r#"test(t2.name, t1.name) AND t1.id = t2.id"#);
+            parse!(r"test(t2.name, t1.name) AND t1.id = t2.id");
         }
 
         #[test]
         fn or_and() {
-            parse!(r#"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#);
+            parse!(r"t1.super OR test(t2.name, t1.name) AND t1.id = t2.id");
         }
 
         #[test]
         fn infix() {
-            parse!(r#"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'"#);
+            parse!(r"1 + -2 * +3 % 4^5 / 6 - 7  <= 3.14 AND 'foo' || 'bar' LIKE '%oba%'");
         }
 
         #[test]
         fn expr_in() {
-            parse!(r#"a in (1,2,3,4)"#);
-            parse!(r#"a in [1,2,3,4]"#);
+            parse!(r"a in (1,2,3,4)");
+            parse!(r"a in [1,2,3,4]");
         }
 
         #[test]
         fn expr_between() {
-            parse!(r#"a between 2 and 3"#);
+            parse!(r"a between 2 and 3");
         }
     }
 
@@ -304,51 +304,51 @@ mod tests {
 
         #[test]
         fn nested() {
-            parse!(r#"a.b"#);
+            parse!(r"a.b");
             parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
-            parse!(r#"a.b.*"#);
-            parse!(r#"a.b[*]"#);
-            parse!(r#"@a.b[*]"#);
+            parse!(r"a.b.*");
+            parse!(r"a.b[*]");
+            parse!(r"@a.b[*]");
             parse!(r#"@"a".b[*]"#);
-            parse!(r#"tables.items[*].product.*.nest"#);
+            parse!(r"tables.items[*].product.*.nest");
             parse!(r#"a.b.c['item']."d"[5].e['s'].f[1+2]"#);
         }
 
         #[test]
         fn tuple() {
-            parse!(r#"{'a':1 , 'data': 2}.a"#);
-            parse!(r#"{'a':1 , 'data': 2}.'a'"#);
+            parse!(r"{'a':1 , 'data': 2}.a");
+            parse!(r"{'a':1 , 'data': 2}.'a'");
             parse!(r#"{'A':1 , 'data': 2}."A""#);
-            parse!(r#"{'A':1 , 'data': 2}['a']"#);
-            parse!(r#"{'attr': 1, 'b':2}[v || w]"#);
-            parse!(r#"{'a':1, 'b':2}.*"#);
+            parse!(r"{'A':1 , 'data': 2}['a']");
+            parse!(r"{'attr': 1, 'b':2}[v || w]");
+            parse!(r"{'a':1, 'b':2}.*");
         }
 
         #[test]
         fn array() {
-            parse!(r#"[1,2,3][0]"#);
-            parse!(r#"[1,2,3][1 + 1]"#);
-            parse!(r#"[1,2,3][*]"#);
+            parse!(r"[1,2,3][0]");
+            parse!(r"[1,2,3][1 + 1]");
+            parse!(r"[1,2,3][*]");
         }
 
         #[test]
         fn query() {
-            parse!(r#"(SELECT a FROM t).a"#);
-            parse!(r#"(SELECT a FROM t).'a'"#);
+            parse!(r"(SELECT a FROM t).a");
+            parse!(r"(SELECT a FROM t).'a'");
             parse!(r#"(SELECT a FROM t)."a""#);
-            parse!(r#"(SELECT a FROM t)['a']"#);
-            parse!(r#"(SELECT a FROM t).*"#);
-            parse!(r#"(SELECT a FROM t)[*]"#);
+            parse!(r"(SELECT a FROM t)['a']");
+            parse!(r"(SELECT a FROM t).*");
+            parse!(r"(SELECT a FROM t)[*]");
         }
 
         #[test]
         fn function_call() {
-            parse!(r#"foo(x, y).a"#);
-            parse!(r#"foo(x, y).*"#);
-            parse!(r#"foo(x, y)[*]"#);
-            parse!(r#"foo(x, y)[5]"#);
-            parse!(r#"foo(x, y).a.*"#);
-            parse!(r#"foo(x, y)[*].*.b[5]"#);
+            parse!(r"foo(x, y).a");
+            parse!(r"foo(x, y).*");
+            parse!(r"foo(x, y)[*]");
+            parse!(r"foo(x, y)[5]");
+            parse!(r"foo(x, y).a.*");
+            parse!(r"foo(x, y)[*].*.b[5]");
         }
 
         #[test]
@@ -377,7 +377,7 @@ mod tests {
             } = res
             {
                 if let ast::Expr::Path(p) = &**e {
-                    assert_eq!(9, p.node.steps.len())
+                    assert_eq!(9, p.node.steps.len());
                 } else {
                     panic!("PathExpr test failed!");
                 }
@@ -389,10 +389,10 @@ mod tests {
         #[test]
         #[should_panic]
         fn erroneous() {
-            parse!(r#"a.b.['item']"#);
-            parse!(r#"a.b.{'a': 1, 'b': 2}.a"#);
-            parse!(r#"a.b.[1, 2, 3][2]"#);
-            parse!(r#"a.b.[*]"#);
+            parse!(r"a.b.['item']");
+            parse!(r"a.b.{'a': 1, 'b': 2}.a");
+            parse!(r"a.b.[1, 2, 3][2]");
+            parse!(r"a.b.[*]");
         }
     }
 
@@ -416,7 +416,7 @@ mod tests {
 
         #[test]
         fn fun_call() {
-            parse!(r#"fun_call('bar', 1,2,3,4,5,'foo')"#);
+            parse!(r"fun_call('bar', 1,2,3,4,5,'foo')");
         }
 
         #[test]
@@ -436,41 +436,39 @@ mod tests {
 
         #[test]
         fn order_by() {
-            parse!(r#"SELECT a FROM tb ORDER BY PRESERVE"#);
-            parse!(r#"SELECT a FROM tb ORDER BY rk1"#);
-            parse!(r#"SELECT a FROM tb ORDER BY rk1 ASC, rk2 DESC"#);
+            parse!(r"SELECT a FROM tb ORDER BY PRESERVE");
+            parse!(r"SELECT a FROM tb ORDER BY rk1");
+            parse!(r"SELECT a FROM tb ORDER BY rk1 ASC, rk2 DESC");
         }
 
         #[test]
         fn where_simple() {
-            parse!(r#"SELECT a FROM tb WHERE hk = 1"#);
+            parse!(r"SELECT a FROM tb WHERE hk = 1");
         }
 
         #[test]
         fn where_boolean() {
-            parse!(
-                r#"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id"#
-            );
+            parse!(r"SELECT a FROM tb WHERE t1.super OR test(t2.name, t1.name) AND t1.id = t2.id");
         }
 
         #[test]
         fn limit() {
-            parse!(r#"SELECT * FROM a LIMIT 10"#);
+            parse!(r"SELECT * FROM a LIMIT 10");
         }
 
         #[test]
         fn offset() {
-            parse!(r#"SELECT * FROM a OFFSET 10"#);
+            parse!(r"SELECT * FROM a OFFSET 10");
         }
 
         #[test]
         fn limit_offset() {
-            parse!(r#"SELECT * FROM a LIMIT 10 OFFSET 2"#);
+            parse!(r"SELECT * FROM a LIMIT 10 OFFSET 2");
         }
 
         #[test]
         fn complex() {
-            let q = r#"
+            let q = r"
             SELECT (
                 SELECT numRec, data
                 FROM delta_full_transactions.deltas delta0,
@@ -481,20 +479,20 @@ mod tests {
                 delta2.numRec as numRec
             )
             AS deltas FROM SOURCE_VIEW_DELTA_FULL_TRANSACTIONS delta_full_transactions
-            "#;
+            ";
             parse!(q);
         }
 
         #[test]
         fn select_with_case() {
-            parse!(r#"SELECT a WHERE CASE WHEN x <> 0 THEN y/x > 1.5 ELSE false END"#);
+            parse!(r"SELECT a WHERE CASE WHEN x <> 0 THEN y/x > 1.5 ELSE false END");
             parse!(
-                r#"SELECT a,
+                r"SELECT a,
                     CASE WHEN a=1 THEN 'one'
                          WHEN a=2 THEN 'two'
                          ELSE 'other'
                     END
-                    FROM test"#
+                    FROM test"
             );
 
             parse!(
@@ -518,20 +516,20 @@ mod tests {
 
         #[test]
         fn select_with_cross_join_and_at() {
-            parse!(r#"SELECT * FROM a AS a CROSS JOIN c AS c AT q"#);
+            parse!(r"SELECT * FROM a AS a CROSS JOIN c AS c AT q");
         }
 
         #[test]
         fn select_with_at_and_cross_join_and_at() {
-            parse!(r#"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q"#);
+            parse!(r"SELECT * FROM a AS a AT b CROSS JOIN c AS c AT q");
         }
 
         #[test]
         fn multiline_with_comments() {
             parse!(
-                r#"SELECT * FROM hr.employees               -- T1
+                r"SELECT * FROM hr.employees               -- T1
                                   UNION
-                                  SELECT title FROM engineering.employees  -- T2"#
+                                  SELECT title FROM engineering.employees  -- T2"
             );
         }
     }
@@ -575,14 +573,14 @@ mod tests {
         #[test]
         fn set_ops() {
             parse!(
-                r#"(SELECT * FROM a LIMIT 10 OFFSET 2) UNION SELECT * FROM b INTERSECT c EXCEPT SELECT * FROM d"#
+                r"(SELECT * FROM a LIMIT 10 OFFSET 2) UNION SELECT * FROM b INTERSECT c EXCEPT SELECT * FROM d"
             );
         }
 
         #[test]
         fn union_prec() {
-            let l = parse_null_id!(r#"a union b union c"#);
-            let r = parse_null_id!(r#"(a union b) union c"#);
+            let l = parse_null_id!(r"a union b union c");
+            let r = parse_null_id!(r"(a union b) union c");
             assert_eq!(l, r);
         }
 
@@ -590,22 +588,22 @@ mod tests {
         #[test]
         #[ignore]
         fn intersec_prec() {
-            let l = parse_null_id!(r#"a union b intersect c"#);
-            let r = parse_null_id!(r#"a union (b intersect c)"#);
+            let l = parse_null_id!(r"a union b intersect c");
+            let r = parse_null_id!(r"a union (b intersect c)");
             assert_eq!(l, r);
         }
 
         #[test]
         fn limit() {
             let l = parse_null_id!(
-                r#"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"#
+                r"SELECT a FROM b UNION SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5"
             );
             let r = parse_null_id!(
-                r#"(SELECT a FROM b UNION SELECT x FROM y) ORDER BY a LIMIT 10 OFFSET 5"#
+                r"(SELECT a FROM b UNION SELECT x FROM y) ORDER BY a LIMIT 10 OFFSET 5"
             );
             assert_eq!(l, r);
             let r2 = parse_null_id!(
-                r#"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"#
+                r"SELECT a FROM b UNION (SELECT x FROM y ORDER BY a LIMIT 10 OFFSET 5)"
             );
             assert_ne!(l, r2);
             assert_ne!(r, r2);
@@ -614,32 +612,32 @@ mod tests {
         #[test]
         fn complex_set() {
             parse_null_id!(
-                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                r"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
                    OUTER UNION ALL
                    (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
-                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+                   ORDER BY c3 LIMIT d3 OFFSET e3"
             );
             parse_null_id!(
-                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                r"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
                    OUTER INTERSECT ALL
                    (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
-                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+                   ORDER BY c3 LIMIT d3 OFFSET e3"
             );
             parse_null_id!(
-                r#"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                r"(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
                    OUTER EXCEPT ALL
                    (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
-                   ORDER BY c3 LIMIT d3 OFFSET e3"#
+                   ORDER BY c3 LIMIT d3 OFFSET e3"
             );
             parse_null_id!(
-                r#"(
+                r"(
                        (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
                        UNION DISTINCT
                        (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
                    )
                    OUTER UNION ALL
                    (SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3)
-                   ORDER BY c4 LIMIT d4 OFFSET e4"#
+                   ORDER BY c4 LIMIT d4 OFFSET e4"
             );
         }
     }
@@ -649,15 +647,15 @@ mod tests {
 
         #[test]
         fn searched_case() {
-            parse!(r#"CASE WHEN TRUE THEN 2 END"#);
-            parse!(r#"CASE WHEN id IS 1 THEN 2 WHEN titanId IS 2 THEN 3 ELSE 1 END"#);
-            parse!(r#"CASE hello WHEN id IS NOT NULL THEN (SELECT * FROM data) ELSE 1 END"#);
+            parse!(r"CASE WHEN TRUE THEN 2 END");
+            parse!(r"CASE WHEN id IS 1 THEN 2 WHEN titanId IS 2 THEN 3 ELSE 1 END");
+            parse!(r"CASE hello WHEN id IS NOT NULL THEN (SELECT * FROM data) ELSE 1 END");
         }
 
         #[test]
         #[should_panic]
         fn searched_case_failure() {
-            parse!(r#"CASE hello WHEN id IS NOT NULL THEN SELECT * FROM data ELSE 1 END"#);
+            parse!(r"CASE hello WHEN id IS NOT NULL THEN SELECT * FROM data ELSE 1 END");
         }
     }
 
@@ -666,61 +664,61 @@ mod tests {
 
         #[test]
         fn position() {
-            parse!(r#"position('oB' in 'FooBar')"#);
+            parse!(r"position('oB' in 'FooBar')");
         }
 
         #[test]
         fn substring() {
-            parse!(r#"substring('FooBar' from 2 for 3)"#);
-            parse!(r#"substring('FooBar' from 2)"#);
-            parse!(r#"substring('FooBar' for 3)"#);
+            parse!(r"substring('FooBar' from 2 for 3)");
+            parse!(r"substring('FooBar' from 2)");
+            parse!(r"substring('FooBar' for 3)");
         }
 
         #[test]
         fn trim() {
-            parse!(r#"trim(LEADING 'Foo' from 'FooBar')"#);
-            parse!(r#"trim(leading from '   Bar')"#);
-            parse!(r#"trim(TrAiLiNg 'Bar' from 'FooBar')"#);
-            parse!(r#"trim(TRAILING from 'Bar   ')"#);
-            parse!(r#"trim(BOTH 'Foo' from 'FooBarBar')"#);
-            parse!(r#"trim(botH from '   Bar   ')"#);
-            parse!(r#"trim(from '   Bar   ')"#);
+            parse!(r"trim(LEADING 'Foo' from 'FooBar')");
+            parse!(r"trim(leading from '   Bar')");
+            parse!(r"trim(TrAiLiNg 'Bar' from 'FooBar')");
+            parse!(r"trim(TRAILING from 'Bar   ')");
+            parse!(r"trim(BOTH 'Foo' from 'FooBarBar')");
+            parse!(r"trim(botH from '   Bar   ')");
+            parse!(r"trim(from '   Bar   ')");
         }
 
         #[test]
         fn cast() {
-            parse!(r#"CAST(9 AS b)"#);
-            parse!(r#"CAST(a AS VARCHAR)"#);
-            parse!(r#"CAST(a AS VARCHAR(20))"#);
-            parse!(r#"CAST(a AS TIME)"#);
-            parse!(r#"CAST(a AS TIME(20))"#);
-            parse!(r#"CAST( TRUE AS INTEGER)"#);
-            parse!(r#"CAST( (4 in (1,2,3,4)) AS INTEGER)"#);
-            parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
-            parse!(r#"CAST(a AS TIME WITH TIME ZONE)"#);
-            parse!(r#"CAST(a AS TIME(20) WITH TIME ZONE)"#);
+            parse!(r"CAST(9 AS b)");
+            parse!(r"CAST(a AS VARCHAR)");
+            parse!(r"CAST(a AS VARCHAR(20))");
+            parse!(r"CAST(a AS TIME)");
+            parse!(r"CAST(a AS TIME(20))");
+            parse!(r"CAST( TRUE AS INTEGER)");
+            parse!(r"CAST( (4 in (1,2,3,4)) AS INTEGER)");
+            parse!(r"CAST(a AS TIME WITH TIME ZONE)");
+            parse!(r"CAST(a AS TIME WITH TIME ZONE)");
+            parse!(r"CAST(a AS TIME(20) WITH TIME ZONE)");
         }
 
         #[test]
         fn extract() {
-            parse!(r#"extract(day from a)"#);
-            parse!(r#"extract(hour from a)"#);
-            parse!(r#"extract(minute from a)"#);
-            parse!(r#"extract(second from a)"#);
+            parse!(r"extract(day from a)");
+            parse!(r"extract(hour from a)");
+            parse!(r"extract(minute from a)");
+            parse!(r"extract(second from a)");
         }
 
         #[test]
         fn agg() {
-            parse!(r#"count(a)"#);
-            parse!(r#"count(distinct a)"#);
-            parse!(r#"count(all a)"#);
-            parse!(r#"count(*)"#);
+            parse!(r"count(a)");
+            parse!(r"count(distinct a)");
+            parse!(r"count(all a)");
+            parse!(r"count(*)");
         }
 
         #[test]
         fn composed() {
             parse!(
-                r#"cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))"#
+                r"cast(trim(LEADING 'Foo' from substring('BarFooBar' from 4 for 6)) AS VARCHAR(20))"
             );
         }
     }
@@ -732,38 +730,38 @@ mod tests {
 
         #[test]
         fn projection_list_trim_spec() {
-            parse!(r#"SELECT leading FROM t"#);
-            parse!(r#"SELECT leading, a FROM t"#);
-            parse!(r#"SELECT leading + trailing, b FROM t"#);
-            parse!(r#"SELECT both + leading + trailing, a, b, c FROM t"#);
+            parse!(r"SELECT leading FROM t");
+            parse!(r"SELECT leading, a FROM t");
+            parse!(r"SELECT leading + trailing, b FROM t");
+            parse!(r"SELECT both + leading + trailing, a, b, c FROM t");
         }
 
         #[test]
         fn from_source_trim_spec() {
-            parse!(r#"SELECT leading, trailing, both FROM leading, trailing, both"#);
+            parse!(r"SELECT leading, trailing, both FROM leading, trailing, both");
         }
 
         #[test]
         fn complex_trim() {
             parse!(
-                r#"SELECT leading + trim(leading leading FROM '  hello world'), both FROM leading, trailing, both"#
+                r"SELECT leading + trim(leading leading FROM '  hello world'), both FROM leading, trailing, both"
             );
         }
 
         #[test]
         fn graph_pattern_matching() {
-            parse!(r#"SELECT acyclic, trail, simple FROM t"#);
-            parse!(r#"AcYcLiC"#);
-            parse!(r#"TrAiL"#);
-            parse!(r#"SiMpLe"#);
+            parse!(r"SELECT acyclic, trail, simple FROM t");
+            parse!(r"AcYcLiC");
+            parse!(r"TrAiL");
+            parse!(r"SiMpLe");
         }
 
         #[test]
         fn user_public_domain() {
-            parse!(r#"SELECT user, puBlIC, DOMAIN FROM USER, pUbLIc, domain"#);
-            parse!(r#"USER"#);
-            parse!(r#"pUbLIC"#);
-            parse!(r#"domain"#);
+            parse!(r"SELECT user, puBlIC, DOMAIN FROM USER, pUbLIc, domain");
+            parse!(r"USER");
+            parse!(r"pUbLIC");
+            parse!(r"domain");
         }
     }
 
@@ -775,7 +773,7 @@ mod tests {
 
         #[test]
         fn eof() {
-            let res = parse_partiql(r#"SELECT"#);
+            let res = parse_partiql(r"SELECT");
             assert!(res.is_err());
             let err_data = res.unwrap_err();
             assert_eq!(1, err_data.errors.len());
@@ -784,7 +782,7 @@ mod tests {
 
         #[test]
         fn unterminated_ion_unicode() {
-            let q = r#"/`܋"#;
+            let q = r"/`܋";
             let res = parse_partiql(q);
             assert!(res.is_err());
             let err_data = res.unwrap_err();

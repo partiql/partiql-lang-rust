@@ -118,7 +118,7 @@ impl QueryClauses {
             self.distinct,
         ]
         .iter()
-        .cloned()
+        .copied()
         .flatten()
         .collect()
     }
@@ -343,8 +343,10 @@ impl<'a> AstToLogical<'a> {
                                     CaseSensitivity::CaseInsensitive => unicase::eq(value, *k),
                                 }
                             })
-                            .map(|(_k, v)| binding_to_static(v))
-                            .unwrap_or_else(|| symprim_to_binding(&name_ref.sym));
+                            .map_or_else(
+                                || symprim_to_binding(&name_ref.sym),
+                                |(_k, v)| binding_to_static(v),
+                            );
 
                         lookups.push(DynamicLookup(Box::new(vec![ValueExpr::VarRef(
                             binding,
@@ -359,7 +361,7 @@ impl<'a> AstToLogical<'a> {
                             let var_ref_expr =
                                 ValueExpr::VarRef(var_binding.clone(), VarRefType::Global);
                             if !lookups.contains(&var_ref_expr) {
-                                lookups.push(var_ref_expr.clone())
+                                lookups.push(var_ref_expr.clone());
                             }
                         }
                         name_resolver::NameLookup::Local => {
@@ -426,12 +428,12 @@ impl<'a> AstToLogical<'a> {
                                                 );
 
                                                 if !lookups.contains(&path) {
-                                                    lookups.push(path)
+                                                    lookups.push(path);
                                                 }
                                             }
                                         } else if let name_resolver::Symbol::Unknown(num) = produce
                                         {
-                                            let formatted_num = format!("_{}", num);
+                                            let formatted_num = format!("_{num}");
                                             if formatted_num == varref.name.value {
                                                 let expr = ValueExpr::VarRef(
                                                     BindingsName::CaseInsensitive(Cow::Owned(
@@ -457,7 +459,7 @@ impl<'a> AstToLogical<'a> {
                                                 );
 
                                                 if !lookups.contains(&path) {
-                                                    lookups.push(path)
+                                                    lookups.push(path);
                                                 }
                                             }
                                         }
@@ -886,7 +888,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                                 self.errors.push(AstTransformError::IllegalState(
                                     "Unexpected literal type".to_string(),
                                 ));
-                                "".to_string()
+                                String::new()
                             }
                         },
                         _ => {
@@ -894,7 +896,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                             self.errors.push(AstTransformError::IllegalState(
                                 "Invalid alias type".to_string(),
                             ));
-                            "".to_string()
+                            String::new()
                         }
                     };
 
@@ -1070,7 +1072,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let escape_ve = if env.len() == 3 {
             env.pop().unwrap()
         } else {
-            ValueExpr::Lit(Box::new(Value::String(Box::new("".to_string()))))
+            ValueExpr::Lit(Box::new(Value::String(Box::default())))
         };
         let pattern_ve = env.pop().unwrap();
         let value = Box::new(env.pop().unwrap());
@@ -1540,9 +1542,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let right = Box::new(self.plan.operator(rid).unwrap().clone());
         let join = logical::BindingsOp::Join(logical::Join {
             kind,
-            on,
             left,
             right,
+            on,
         });
         let join = self.plan.add_operator(join);
         self.plan.add_flow_with_branch_num(lid, join, 0);
@@ -1674,7 +1676,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                         self.errors.push(AstTransformError::IllegalState(
                             "Unexpected literal type".to_string(),
                         ));
-                        "".to_string()
+                        String::new()
                     }
                 },
                 _ => {
@@ -1688,7 +1690,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                 if *expr == value {
                     let new_binding_name = BindingsName::CaseSensitive(Cow::Owned(alias.clone()));
                     let new_expr = ValueExpr::VarRef(new_binding_name, VarRefType::Local);
-                    *expr = new_expr
+                    *expr = new_expr;
                 }
             }
             exprs.insert(alias, value);
@@ -1913,14 +1915,14 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
     let val = match lit {
         Lit::Null => Value::Null,
         Lit::Missing => Value::Missing,
-        Lit::Int8Lit(n) => Value::Integer(*n as i64),
-        Lit::Int16Lit(n) => Value::Integer(*n as i64),
-        Lit::Int32Lit(n) => Value::Integer(*n as i64),
+        Lit::Int8Lit(n) => Value::Integer(i64::from(*n)),
+        Lit::Int16Lit(n) => Value::Integer(i64::from(*n)),
+        Lit::Int32Lit(n) => Value::Integer(i64::from(*n)),
         Lit::Int64Lit(n) => Value::Integer(*n),
         Lit::DecimalLit(d) => Value::Decimal(Box::new(*d)),
         Lit::NumericLit(n) => Value::Decimal(Box::new(*n)),
-        Lit::RealLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
-        Lit::FloatLit(f) => Value::Real(OrderedFloat::from(*f as f64)),
+        Lit::RealLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
+        Lit::FloatLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
         Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
         Lit::BoolLit(b) => Value::Boolean(*b),
         Lit::IonStringLit(s) => parse_embedded_ion_str(s)?,

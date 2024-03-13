@@ -45,6 +45,7 @@ pub struct IonEncoderConfig {
 
 impl IonEncoderConfig {
     /// Set the mode to `mode`
+    #[must_use]
     pub fn with_mode(mut self, mode: crate::Encoding) -> Self {
         self.mode = mode;
         self
@@ -66,6 +67,7 @@ pub struct IonEncoderBuilder {
 
 impl IonEncoderBuilder {
     /// Create the builder from 'config'
+    #[must_use]
     pub fn new(config: IonEncoderConfig) -> Self {
         Self { config }
     }
@@ -214,7 +216,7 @@ where
     }
 
     fn encode_decimal(&mut self, val: &Decimal) -> IonEncodeResult {
-        let scale = val.scale() as i64;
+        let scale = i64::from(val.scale());
         let mantissa = val.mantissa();
         let dec = ion_rs::Decimal::new(mantissa, -scale);
         Ok(self.writer.write_decimal(&dec)?)
@@ -234,9 +236,13 @@ where
                 let ts = ion_rs::Timestamp::with_ymd(
                     ts.year() as u32,
                     ts.month() as u32,
-                    ts.day() as u32,
+                    u32::from(ts.day()),
                 )
-                .with_hms(ts.hour() as u32, ts.minute() as u32, ts.second() as u32)
+                .with_hms(
+                    u32::from(ts.hour()),
+                    u32::from(ts.minute()),
+                    u32::from(ts.second()),
+                )
                 .with_nanoseconds(ts.nanosecond())
                 .build_at_unknown_offset()?;
 
@@ -246,11 +252,15 @@ where
                 let ts = ion_rs::Timestamp::with_ymd(
                     ts.year() as u32,
                     ts.month() as u32,
-                    ts.day() as u32,
+                    u32::from(ts.day()),
                 )
-                .with_hms(ts.hour() as u32, ts.minute() as u32, ts.second() as u32)
+                .with_hms(
+                    u32::from(ts.hour()),
+                    u32::from(ts.minute()),
+                    u32::from(ts.second()),
+                )
                 .with_nanoseconds(ts.nanosecond())
-                .build_at_offset(ts.offset().whole_minutes() as i32)?;
+                .build_at_offset(i32::from(ts.offset().whole_minutes()))?;
 
                 Ok(self.writer.write_timestamp(&ts)?)
             }
@@ -324,9 +334,12 @@ where
         self.inner
             .writer
             .set_annotations(std::iter::once(DATE_ANNOT));
-        let ts =
-            ion_rs::Timestamp::with_ymd(date.year() as u32, date.month() as u32, date.day() as u32)
-                .build()?;
+        let ts = ion_rs::Timestamp::with_ymd(
+            date.year() as u32,
+            date.month() as u32,
+            u32::from(date.day()),
+        )
+        .build()?;
 
         Ok(self.inner.writer.write_timestamp(&ts)?)
     }
@@ -336,19 +349,19 @@ where
         writer.set_annotations(std::iter::once(TIME_ANNOT));
         writer.step_in(IonType::Struct)?;
         writer.set_field_name(TIME_PART_HOUR_KEY);
-        writer.write_i64(time.hour() as i64)?;
+        writer.write_i64(i64::from(time.hour()))?;
         writer.set_field_name(TIME_PART_MINUTE_KEY);
-        writer.write_i64(time.minute() as i64)?;
+        writer.write_i64(i64::from(time.minute()))?;
         writer.set_field_name(TIME_PART_SECOND_KEY);
 
-        let seconds = Duration::new(time.second() as i64, time.nanosecond() as i32);
+        let seconds = Duration::new(i64::from(time.second()), time.nanosecond() as i32);
         writer.write_f64(seconds.as_seconds_f64())?;
 
         if let Some(offset) = offset {
             writer.set_field_name(TIME_PART_TZ_HOUR_KEY);
-            writer.write_i64(offset.whole_hours() as i64)?;
+            writer.write_i64(i64::from(offset.whole_hours()))?;
             writer.set_field_name(TIME_PART_TZ_MINUTE_KEY);
-            writer.write_i64(offset.minutes_past_hour() as i64)?;
+            writer.write_i64(i64::from(offset.minutes_past_hour()))?;
         }
 
         writer.step_out()?;

@@ -1,8 +1,8 @@
-//! A PartiQL abstract syntax tree (AST).
+//! A `PartiQL` abstract syntax tree (AST).
 //!
 //! This module contains the structures for the language AST.
 //! Two main entities in the module are [`Item`] and [`AstNode`]. `AstNode` represents an AST node
-//! and `Item` represents a PartiQL statement type, e.g. query, data definition language (DDL)
+//! and `Item` represents a `PartiQL` statement type, e.g. query, data definition language (DDL)
 //! data manipulation language (DML).
 
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
@@ -409,10 +409,10 @@ pub enum Expr {
     Error,
 }
 
-/// `Lit` is mostly inspired by SQL-92 Literals standard and PartiQL specification.
+/// `Lit` is mostly inspired by SQL-92 Literals standard and `PartiQL` specification.
 /// See section 5.3 in the following:
 /// <https://www.contrib.andrew.cmu.edu/~shadow/sql/sql1992.txt>
-/// and Section 2 of the following (Figure 1: BNF Grammar for PartiQL Values):
+/// and Section 2 of the following (Figure 1: BNF Grammar for `PartiQL` Values):
 /// <https://partiql.org/assets/PartiQL-Specification.pdf>
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -745,7 +745,7 @@ pub struct FromLet {
     pub by_alias: Option<SymbolPrimitive>,
 }
 
-/// Indicates the type of FromLet, see the following for more details:
+/// Indicates the type of `FromLet`, see the following for more details:
 /// https:///github.com/partiql/partiql-lang-kotlin/issues/242
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -784,7 +784,7 @@ pub enum JoinSpec {
     Natural,
 }
 
-/// GROUP BY <grouping_strategy> <group_key>[, <group_key>]... \[AS <symbol>\]
+/// GROUP BY <`grouping_strategy`> <`group_key`>[, <`group_key`>]... \[AS <symbol>\]
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupByExpr {
@@ -813,7 +813,7 @@ pub struct GroupKey {
     pub as_alias: Option<SymbolPrimitive>,
 }
 
-/// ORDER BY <sort_spec>...
+/// ORDER BY <`sort_spec`>...
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OrderByExpr {
@@ -852,7 +852,7 @@ pub enum NullOrderingSpec {
     Last,
 }
 
-/// Represents all possible PartiQL data types.
+/// Represents all possible `PartiQL` data types.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Type {

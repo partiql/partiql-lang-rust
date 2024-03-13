@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! Types representing positions, spans, locations, etc of parsed PartiQL text.
+//! Types representing positions, spans, locations, etc of parsed `PartiQL` text.
 
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -43,12 +43,14 @@ macro_rules! impl_pos {
         impl $pos_type {
             /// Constructs from a `usize`
             #[inline(always)]
+            #[must_use]
             pub fn from_usize(n: usize) -> Self {
                 Self(n as $primitive)
             }
 
             /// Converts to a `usize`
             #[inline(always)]
+            #[must_use]
             pub fn to_usize(&self) -> usize {
                 self.0 as usize
             }
@@ -133,6 +135,7 @@ pub struct LineAndCharPosition {
 impl LineAndCharPosition {
     /// Constructs at [`LineAndCharPosition`]
     #[inline]
+    #[must_use]
     pub fn new(line: usize, char: usize) -> Self {
         Self {
             line: LineOffset::from_usize(line),
@@ -162,6 +165,7 @@ pub struct LineAndColumn {
 impl LineAndColumn {
     /// Constructs at [`LineAndColumn`] if non-zero-index invariants, else [`None`]
     #[inline]
+    #[must_use]
     pub fn new(line: usize, column: usize) -> Option<Self> {
         Some(Self {
             line: NonZeroUsize::new(line)?,
@@ -176,6 +180,7 @@ impl LineAndColumn {
     ///
     /// Both `line` and `column` values must not be zero.
     #[inline]
+    #[must_use]
     pub const unsafe fn new_unchecked(line: usize, column: usize) -> Self {
         Self {
             line: NonZeroUsize::new_unchecked(line),

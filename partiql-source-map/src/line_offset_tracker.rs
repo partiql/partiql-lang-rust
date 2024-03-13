@@ -72,6 +72,7 @@ impl LineOffsetTracker {
 
     /// Calculate the number of lines of source seen so far.
     #[inline(always)]
+    #[must_use]
     pub fn num_lines(&self) -> usize {
         self.line_starts.len()
     }
@@ -276,28 +277,28 @@ mod tests {
 
         //lines
         let idx = s.find('2').unwrap();
-        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(&s[idx..=idx], "2");
         assert_eq!(
             tracker.at(s, idx.into()).unwrap(),
             LineAndCharPosition::new(0, 2)
         );
 
         let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
-        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(&s[idx..=idx], "2");
         assert_eq!(
             tracker.at(s, idx.into()).unwrap(),
             LineAndCharPosition::new(1, 2)
         );
 
         let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
-        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(&s[idx..=idx], "2");
         assert_eq!(
             tracker.at(s, idx.into()).unwrap(),
             LineAndCharPosition::new(2, 2)
         );
 
         let idx = 1 + idx + s[idx + 1..].find('2').unwrap();
-        assert_eq!(&s[idx..idx + 1], "2");
+        assert_eq!(&s[idx..=idx], "2");
         assert_eq!(
             tracker.at(s, idx.into()).unwrap(),
             LineAndCharPosition::new(3, 2)

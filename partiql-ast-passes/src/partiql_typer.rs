@@ -125,7 +125,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
         let ty = PartiqlType::new(kind);
         let id = *self.current_node();
         if let Some(c) = self.container_stack.last_mut() {
-            c.push(ty.clone())
+            c.push(ty.clone());
         }
         self.type_map.insert(id, ty);
         Traverse::Continue
@@ -165,7 +165,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
         self.type_map.insert(id, ty.clone());
 
         if let Some(c) = self.container_stack.last_mut() {
-            c.push(ty)
+            c.push(ty);
         }
 
         Traverse::Continue
@@ -188,7 +188,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
-            s.push(ty)
+            s.push(ty);
         }
         Traverse::Continue
     }
@@ -210,7 +210,7 @@ impl<'c, 'ast> Visitor<'ast> for AstPartiqlTyper<'c> {
 
         self.type_map.insert(id, ty.clone());
         if let Some(s) = self.container_stack.last_mut() {
-            s.push(ty)
+            s.push(ty);
         }
         Traverse::Continue
     }
