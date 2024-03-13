@@ -179,7 +179,6 @@ where
 
 struct SimpleIonValueEncoder<'a, W, I>
 where
-    W: 'a,
     I: IonWriter<Output = W>,
 {
     pub(crate) writer: &'a mut I,
@@ -311,7 +310,6 @@ where
 
 struct PartiqlEncodedIonValueEncoder<'a, W, I>
 where
-    W: 'a,
     I: IonWriter<Output = W>,
 {
     inner: SimpleIonValueEncoder<'a, W, I>,

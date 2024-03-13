@@ -34,7 +34,7 @@ impl Bag {
     }
 
     #[inline]
-    pub fn iter(&self) -> BagIter {
+    pub fn iter(&self) -> BagIter<'_> {
         BagIter(self.0.iter())
     }
 

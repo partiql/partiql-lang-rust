@@ -257,7 +257,7 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_vexpr(&mut self, v: &ValueExpr, lookup_order: LookupOrder) {
-        fn binding_to_sym(binding: &BindingsName) -> SymbolPrimitive {
+        fn binding_to_sym(binding: &BindingsName<'_>) -> SymbolPrimitive {
             match binding {
                 BindingsName::CaseSensitive(s) => SymbolPrimitive {
                     value: s.to_string(),
@@ -893,7 +893,7 @@ mod tests {
     fn type_query(
         mode: TypingMode,
         query: &str,
-        type_env_entry: TypeEnvEntry,
+        type_env_entry: TypeEnvEntry<'_>,
     ) -> Result<PartiqlType, TypeErr> {
         let mut catalog = PartiqlCatalog::default();
         let _oid = catalog.add_type_entry(type_env_entry);
@@ -910,13 +910,13 @@ mod tests {
     }
 
     #[track_caller]
-    fn parse(text: &str) -> Parsed {
+    fn parse(text: &str) -> Parsed<'_> {
         Parser::default().parse(text).unwrap()
     }
 
     #[track_caller]
     fn lower(
-        parsed: &Parsed,
+        parsed: &Parsed<'_>,
         catalog: &dyn Catalog,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let planner = LogicalPlanner::new(catalog);

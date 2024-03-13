@@ -636,7 +636,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_tuple_ref(&self) -> Cow<Tuple> {
+    pub fn as_tuple_ref(&self) -> Cow<'_, Tuple> {
         if let Value::Tuple(t) = self {
             Cow::Borrowed(t)
         } else {
@@ -645,7 +645,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_bindings(&self) -> BindingIter {
+    pub fn as_bindings(&self) -> BindingIter<'_> {
         match self {
             Value::Tuple(t) => BindingIter::Tuple(t.pairs()),
             Value::Missing => BindingIter::Empty,
@@ -672,7 +672,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_bag_ref(&self) -> Cow<Bag> {
+    pub fn as_bag_ref(&self) -> Cow<'_, Bag> {
         if let Value::Bag(b) = self {
             Cow::Borrowed(b)
         } else {
@@ -690,7 +690,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn as_list_ref(&self) -> Cow<List> {
+    pub fn as_list_ref(&self) -> Cow<'_, List> {
         if let Value::List(l) = self {
             Cow::Borrowed(l)
         } else {
@@ -699,7 +699,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn iter(&self) -> ValueIter {
+    pub fn iter(&self) -> ValueIter<'_> {
         match self {
             Value::Null | Value::Missing => ValueIter::Single(None),
             Value::List(list) => ValueIter::List(list.iter()),
@@ -709,7 +709,7 @@ impl Value {
     }
 
     #[inline]
-    pub fn sequence_iter(&self) -> Option<ValueIter> {
+    pub fn sequence_iter(&self) -> Option<ValueIter<'_>> {
         if self.is_sequence() {
             Some(self.iter())
         } else {
@@ -1213,15 +1213,15 @@ mod tests {
             "Rc<RefCell<Tuple>> size: {}",
             mem::size_of::<Rc<RefCell<Tuple>>>()
         );
-        println!("Cow<&Tuple> size: {}", mem::size_of::<Cow<&Tuple>>());
+        println!("Cow<&Tuple> size: {}", mem::size_of::<Cow<'_, &Tuple>>());
         println!("Value size: {}", mem::size_of::<Value>());
         println!("Option<Value> size: {}", mem::size_of::<Option<Value>>());
         println!(
             "Option<Option<Value>> size: {}",
             mem::size_of::<Option<Option<Value>>>()
         );
-        println!("Cow<Value> size: {}", mem::size_of::<Cow<Value>>());
-        println!("Cow<&Value> size: {}", mem::size_of::<Cow<&Value>>());
+        println!("Cow<'_, Value> size: {}", mem::size_of::<Cow<'_, Value>>());
+        println!("Cow<&Value> size: {}", mem::size_of::<Cow<'_, &Value>>());
 
         assert_eq!(mem::size_of::<Value>(), 16);
         assert_eq!(mem::size_of::<Option<Option<Value>>>(), 16);

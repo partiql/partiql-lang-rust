@@ -43,11 +43,11 @@ impl<'d, 'w> ScopeExt<'d, 'w> for Scope<'d, 'w> {
 }
 
 trait ChildEdgeExt {
-    fn edges(self, out: &mut Scope, from: &NodeId, lbl: &str) -> Targets;
+    fn edges(self, out: &mut Scope<'_, '_>, from: &NodeId, lbl: &str) -> Targets;
 }
 
 impl ChildEdgeExt for Targets {
-    fn edges(self, out: &mut Scope, from: &NodeId, lbl: &str) -> Targets {
+    fn edges(self, out: &mut Scope<'_, '_>, from: &NodeId, lbl: &str) -> Targets {
         for target in &self {
             out.edge(from, target).attributes().set_label(lbl);
         }
@@ -96,14 +96,14 @@ where
 }
 
 trait ToDot<T> {
-    fn to_dot(&mut self, out: &mut Scope, ast: &T) -> Targets;
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &T) -> Targets;
 }
 
 impl<T> ToDot<Box<T>> for AstToDot
 where
     AstToDot: ToDot<T>,
 {
-    fn to_dot(&mut self, out: &mut Scope, ast: &Box<T>) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &Box<T>) -> Targets {
         self.to_dot(out, &**ast)
     }
 }
@@ -112,7 +112,7 @@ impl<T> ToDot<Vec<T>> for AstToDot
 where
     AstToDot: ToDot<T>,
 {
-    fn to_dot(&mut self, out: &mut Scope, asts: &Vec<T>) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, asts: &Vec<T>) -> Targets {
         let mut res = Vec::with_capacity(asts.len());
         for ast in asts {
             res.extend(self.to_dot(out, ast));
@@ -125,7 +125,7 @@ impl<T> ToDot<Option<T>> for AstToDot
 where
     AstToDot: ToDot<T>,
 {
-    fn to_dot(&mut self, out: &mut Scope, ast: &Option<T>) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &Option<T>) -> Targets {
         match ast {
             None => vec![],
             Some(ast) => self.to_dot(out, ast),
@@ -137,13 +137,13 @@ impl<T> ToDot<ast::AstNode<T>> for AstToDot
 where
     AstToDot: ToDot<T>,
 {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::AstNode<T>) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::AstNode<T>) -> Targets {
         self.to_dot(out, &ast.node)
     }
 }
 
 impl ToDot<ast::Expr> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Expr) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Expr) -> Targets {
         let mut expr_subgraph = out.subgraph();
 
         use ast::Expr;
@@ -240,7 +240,7 @@ fn type_to_str(ty: &ast::Type) -> String {
 }
 
 impl ToDot<ast::Lit> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Lit) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Lit) -> Targets {
         let lbl = lit_to_str(ast);
 
         let mut node = out.node_auto();
@@ -251,7 +251,7 @@ impl ToDot<ast::Lit> for AstToDot {
 }
 
 impl ToDot<ast::BinOp> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::BinOp) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::BinOp) -> Targets {
         use ast::BinOpKind;
         let lbl = match ast.kind {
             BinOpKind::Add => "+",
@@ -281,7 +281,7 @@ impl ToDot<ast::BinOp> for AstToDot {
 }
 
 impl ToDot<ast::UniOp> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::UniOp) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::UniOp) -> Targets {
         use ast::UniOpKind;
         let lbl = match ast.kind {
             UniOpKind::Pos => "+",
@@ -297,7 +297,7 @@ impl ToDot<ast::UniOp> for AstToDot {
 }
 
 impl ToDot<ast::Like> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Like) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Like) -> Targets {
         let id = out.node_auto_labelled("LIKE").id();
 
         self.to_dot(out, &ast.value).edges(out, &id, "value");
@@ -309,7 +309,7 @@ impl ToDot<ast::Like> for AstToDot {
 }
 
 impl ToDot<ast::Between> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Between) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Between) -> Targets {
         let id = out.node_auto_labelled("BETWEEN").id();
 
         self.to_dot(out, &ast.value).edges(out, &id, "value");
@@ -321,7 +321,7 @@ impl ToDot<ast::Between> for AstToDot {
 }
 
 impl ToDot<ast::In> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::In) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::In) -> Targets {
         let id = out.node_auto_labelled("IN").id();
 
         self.to_dot(out, &ast.lhs).edges(out, &id, "");
@@ -332,7 +332,7 @@ impl ToDot<ast::In> for AstToDot {
 }
 
 impl ToDot<ast::Query> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Query) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Query) -> Targets {
         let id = out.node_auto_labelled("Query").id();
 
         self.to_dot(out, &ast.set).edges(out, &id, "");
@@ -343,7 +343,7 @@ impl ToDot<ast::Query> for AstToDot {
     }
 }
 impl ToDot<ast::QuerySet> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::QuerySet) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::QuerySet) -> Targets {
         use ast::QuerySet;
         match &ast {
             QuerySet::BagOp(_) => todo!(),
@@ -356,7 +356,7 @@ impl ToDot<ast::QuerySet> for AstToDot {
 }
 
 impl ToDot<ast::Select> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Select) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Select) -> Targets {
         let id = out.node_auto_labelled("Select").id();
 
         out.with_cluster("PROJECT", |mut cl| self.to_dot(&mut cl, &ast.project))
@@ -377,19 +377,19 @@ impl ToDot<ast::Select> for AstToDot {
 }
 
 impl ToDot<ast::WhereClause> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::WhereClause) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::WhereClause) -> Targets {
         self.to_dot(out, &ast.expr)
     }
 }
 
 impl ToDot<ast::HavingClause> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::HavingClause) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::HavingClause) -> Targets {
         self.to_dot(out, &ast.expr)
     }
 }
 
 impl ToDot<ast::LimitOffsetClause> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::LimitOffsetClause) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::LimitOffsetClause) -> Targets {
         let mut list = self.to_dot(out, &ast.limit);
         list.extend(self.to_dot(out, &ast.offset));
         list
@@ -397,7 +397,7 @@ impl ToDot<ast::LimitOffsetClause> for AstToDot {
 }
 
 impl ToDot<ast::Projection> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Projection) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Projection) -> Targets {
         let lbl = match &ast.setq {
             Some(ast::SetQuantifier::Distinct) => "Projection | Distinct",
             _ => "Projection | All",
@@ -429,7 +429,7 @@ impl ToDot<ast::Projection> for AstToDot {
 }
 
 impl ToDot<ast::ProjectItem> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::ProjectItem) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::ProjectItem) -> Targets {
         match ast {
             ast::ProjectItem::ProjectAll(all) => {
                 let id = out.node_auto_labelled("ProjectAll").id();
@@ -455,7 +455,7 @@ fn symbol_primitive_to_label(sym: &ast::SymbolPrimitive) -> String {
 }
 
 impl ToDot<ast::SymbolPrimitive> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::SymbolPrimitive) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::SymbolPrimitive) -> Targets {
         let lbl = symbol_primitive_to_label(ast);
         let id = out.node_auto_labelled(&lbl).id();
         vec![id]
@@ -463,7 +463,7 @@ impl ToDot<ast::SymbolPrimitive> for AstToDot {
 }
 
 impl ToDot<ast::VarRef> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::VarRef) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::VarRef) -> Targets {
         let lbl = symbol_primitive_to_label(&ast.name);
         let lbl = match &ast.qualifier {
             ast::ScopeQualifier::Unqualified => lbl,
@@ -476,25 +476,25 @@ impl ToDot<ast::VarRef> for AstToDot {
 }
 
 impl ToDot<ast::OrderByExpr> for AstToDot {
-    fn to_dot(&mut self, _out: &mut Scope, _ast: &ast::OrderByExpr) -> Targets {
+    fn to_dot(&mut self, _out: &mut Scope<'_, '_>, _ast: &ast::OrderByExpr) -> Targets {
         todo!("OrderByExpr");
     }
 }
 
 impl ToDot<ast::GroupByExpr> for AstToDot {
-    fn to_dot(&mut self, _out: &mut Scope, _ast: &ast::GroupByExpr) -> Targets {
+    fn to_dot(&mut self, _out: &mut Scope<'_, '_>, _ast: &ast::GroupByExpr) -> Targets {
         todo!("GroupByExpr");
     }
 }
 
 impl ToDot<ast::FromClause> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::FromClause) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::FromClause) -> Targets {
         self.to_dot(out, &ast.source)
     }
 }
 
 impl ToDot<ast::FromSource> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::FromSource) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::FromSource) -> Targets {
         match &ast {
             ast::FromSource::FromLet(fl) => self.to_dot(out, fl),
             ast::FromSource::Join(j) => self.to_dot(out, j),
@@ -503,7 +503,7 @@ impl ToDot<ast::FromSource> for AstToDot {
 }
 
 impl ToDot<ast::FromLet> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::FromLet) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::FromLet) -> Targets {
         let lbl = match &ast.kind {
             ast::FromLetKind::Scan => "Scan",
             ast::FromLetKind::Unpivot => "Unpivot",
@@ -520,7 +520,7 @@ impl ToDot<ast::FromLet> for AstToDot {
 }
 
 impl ToDot<ast::Join> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Join) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Join) -> Targets {
         let lbl = match &ast.kind {
             ast::JoinKind::Inner => "Inner Join",
             ast::JoinKind::Left => "Left Join",
@@ -540,7 +540,7 @@ impl ToDot<ast::Join> for AstToDot {
 }
 
 impl ToDot<ast::JoinSpec> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::JoinSpec) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::JoinSpec) -> Targets {
         match &ast {
             ast::JoinSpec::On(fl) => {
                 let id = out.node_auto_labelled("On").id();
@@ -558,7 +558,7 @@ impl ToDot<ast::JoinSpec> for AstToDot {
 }
 
 impl ToDot<ast::Call> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Call) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Call) -> Targets {
         let id = out.node_auto_labelled("Call").id();
 
         self.to_dot(out, &ast.func_name).edges(out, &id, "name");
@@ -569,7 +569,7 @@ impl ToDot<ast::Call> for AstToDot {
 }
 
 impl ToDot<ast::CallArg> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::CallArg) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::CallArg) -> Targets {
         use ast::CallArg;
         match ast {
             ast::CallArg::Star() => vec![out.node_auto_labelled("*").id()],
@@ -606,7 +606,7 @@ impl ToDot<ast::CallArg> for AstToDot {
 }
 
 impl ToDot<ast::CallAgg> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::CallAgg) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::CallAgg) -> Targets {
         // Set quantifier is defined in `CallAgg.args`
         let id = out.node_auto_labelled("CallAgg").id();
 
@@ -618,7 +618,7 @@ impl ToDot<ast::CallAgg> for AstToDot {
 }
 
 impl ToDot<ast::Path> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::Path) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::Path) -> Targets {
         let id = out.node_auto_labelled("Path").id();
 
         self.to_dot(out, &ast.root).edges(out, &id, "root");
@@ -629,7 +629,7 @@ impl ToDot<ast::Path> for AstToDot {
 }
 
 impl ToDot<ast::PathStep> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::PathStep) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::PathStep) -> Targets {
         match &ast {
             ast::PathStep::PathExpr(e) => self.to_dot(out, e),
             ast::PathStep::PathWildCard => vec![out.node_auto_labelled("*").id()],
@@ -639,7 +639,7 @@ impl ToDot<ast::PathStep> for AstToDot {
 }
 
 impl ToDot<ast::PathExpr> for AstToDot {
-    fn to_dot(&mut self, out: &mut Scope, ast: &ast::PathExpr) -> Targets {
+    fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::PathExpr) -> Targets {
         let id = out.node_auto_labelled("PathExpr").id();
 
         self.to_dot(out, &ast.index).edges(out, &id, "index");
@@ -649,7 +649,7 @@ impl ToDot<ast::PathExpr> for AstToDot {
 }
 
 impl ToDot<ast::Let> for AstToDot {
-    fn to_dot(&mut self, _out: &mut Scope, _ast: &ast::Let) -> Targets {
+    fn to_dot(&mut self, _out: &mut Scope<'_, '_>, _ast: &ast::Let) -> Targets {
         todo!("Let");
     }
 }

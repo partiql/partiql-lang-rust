@@ -53,7 +53,7 @@ mod tests {
 
     #[track_caller]
     #[inline]
-    fn parse(statement: &str) -> ParserResult {
+    fn parse(statement: &str) -> ParserResult<'_> {
         partiql_parser::Parser::default().parse(statement)
     }
 
@@ -61,7 +61,7 @@ mod tests {
     #[inline]
     fn lower(
         catalog: &dyn Catalog,
-        parsed: &Parsed,
+        parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
         planner.lower(parsed)

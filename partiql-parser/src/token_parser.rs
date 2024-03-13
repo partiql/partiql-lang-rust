@@ -78,7 +78,10 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
     ///
     /// If there are no tokens to buffer or the match fails, returns [`Err`].
     #[inline]
-    pub fn expect(&mut self, target: &Token) -> Result<(), Spanned<LexError<'input>, ByteOffset>> {
+    pub fn expect(
+        &mut self,
+        target: &Token<'_>,
+    ) -> Result<(), Spanned<LexError<'input>, ByteOffset>> {
         match self.peek_n(0) {
             Some(((_, tok, _), _)) if target == tok => {
                 self.consumed_c += 1;

@@ -983,7 +983,7 @@ mod tests {
 
         let mut offset_tracker = LineOffsetTracker::default();
         let nonnested_lex = CommentLexer::new(comments, &mut offset_tracker);
-        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> = nonnested_lex.collect();
+        let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = nonnested_lex.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(
@@ -1299,7 +1299,7 @@ mod tests {
         let query = r#" `/*12345678`"#;
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(query, &mut offset_tracker);
-        let toks: Result<Vec<_>, Spanned<LexError, ByteOffset>> = ion_lexer.collect();
+        let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = ion_lexer.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
         assert!(matches!(

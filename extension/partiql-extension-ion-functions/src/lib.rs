@@ -103,7 +103,7 @@ pub(crate) struct EvalFnReadIon {}
 impl BaseTableExpr for EvalFnReadIon {
     fn evaluate<'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &[Cow<'_, Value>],
         _ctx: &'c dyn SessionContext<'c>,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
@@ -155,7 +155,7 @@ fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<
     let decoder =
         IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion)).build(reader);
     let decoder = decoder.map_err(err_map)?.map(move |it| it.map_err(err_map));
-    Ok(Box::new(decoder) as BaseTableExprResultValueIter)
+    Ok(Box::new(decoder) as BaseTableExprResultValueIter<'_>)
 }
 
 #[cfg(test)]
@@ -172,7 +172,7 @@ mod tests {
 
     #[track_caller]
     #[inline]
-    pub(crate) fn parse(statement: &str) -> ParserResult {
+    pub(crate) fn parse(statement: &str) -> ParserResult<'_> {
         partiql_parser::Parser::default().parse(statement)
     }
 
@@ -180,7 +180,7 @@ mod tests {
     #[inline]
     pub(crate) fn lower(
         catalog: &dyn Catalog,
-        parsed: &Parsed,
+        parsed: &Parsed<'_>,
     ) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
         let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
         planner.lower(parsed).expect("lower")

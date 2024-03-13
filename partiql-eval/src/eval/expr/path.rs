@@ -65,7 +65,7 @@ fn as_str(v: &Value) -> Option<&str> {
 }
 
 #[inline]
-fn as_name(v: &Value) -> Option<BindingsName> {
+fn as_name(v: &Value) -> Option<BindingsName<'_>> {
     as_str(v).map(|key| BindingsName::CaseInsensitive(Cow::Borrowed(key)))
 }
 
@@ -189,7 +189,7 @@ impl BindEvalExpr for EvalVarRef {
 }
 
 #[inline]
-fn borrow_or_missing(value: Option<&Value>) -> Cow<Value> {
+fn borrow_or_missing(value: Option<&Value>) -> Cow<'_, Value> {
     value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
 }
 

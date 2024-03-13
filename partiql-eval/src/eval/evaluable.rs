@@ -41,7 +41,7 @@ pub enum EvalType {
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
     fn evaluate<'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value;
-    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext);
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext<'_>);
     fn get_vars(&self) -> Option<&[String]> {
         None
     }
@@ -140,7 +140,7 @@ impl Evaluable for EvalScan {
         Value::Bag(Box::new(value))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 
@@ -337,7 +337,7 @@ impl Evaluable for EvalJoin {
         Value::Bag(Box::new(output_bag))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 
@@ -744,7 +744,7 @@ impl Evaluable for EvalGroupBy {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -789,7 +789,7 @@ impl Evaluable for EvalPivot {
         Value::from(tuple)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -847,7 +847,7 @@ impl Evaluable for EvalUnpivot {
         Value::from(unpivoted)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 
@@ -894,7 +894,7 @@ impl Evaluable for EvalFilter {
         Value::from(filtered.collect::<Bag>())
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -939,7 +939,7 @@ impl Evaluable for EvalHaving {
         Value::from(filtered.collect::<Bag>())
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1013,7 +1013,7 @@ impl Evaluable for EvalOrderBy {
         Value::from(List::from(values))
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1075,7 +1075,7 @@ impl Evaluable for EvalLimitOffset {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1112,7 +1112,7 @@ impl Evaluable for EvalSelectValue {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1173,7 +1173,7 @@ impl Evaluable for EvalSelect {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1210,7 +1210,7 @@ impl Evaluable for EvalSelectAll {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1237,7 +1237,7 @@ impl Evaluable for EvalExprQuery {
         self.expr.evaluate(&input_value, ctx).into_owned()
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1266,7 +1266,7 @@ impl Evaluable for EvalDistinct {
         }
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1281,7 +1281,7 @@ impl Evaluable for EvalSink {
         self.input.take().unwrap_or_else(|| Missing)
     }
 
-    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
         self.input = Some(input);
     }
 }
@@ -1318,7 +1318,7 @@ impl EvalExpr for EvalSubQueryExpr {
     {
         let bindings = MapBindings::from(bindings);
         let value = {
-            let nested_ctx: NestedContext = NestedContext::new(bindings, ctx);
+            let nested_ctx: NestedContext<'_, '_> = NestedContext::new(bindings, ctx);
 
             let mut plan = self.plan.borrow_mut();
             if let Ok(evaluated) = plan.execute_mut(&nested_ctx) {
@@ -1377,7 +1377,7 @@ impl Evaluable for EvalOuterUnion {
         Value::from(Bag::from(vals))
     }
 
-    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext<'_>) {
         match branch_num {
             0 => self.l_input = Some(input),
             1 => self.r_input = Some(input),
@@ -1433,7 +1433,7 @@ impl Evaluable for EvalOuterIntersect {
         Value::from(bag)
     }
 
-    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext<'_>) {
         match branch_num {
             0 => self.l_input = Some(input),
             1 => self.r_input = Some(input),
@@ -1482,7 +1482,7 @@ impl Evaluable for EvalOuterExcept {
         Value::from(Bag::from(vals))
     }
 
-    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext) {
+    fn update_input(&mut self, input: Value, branch_num: u8, ctx: &dyn EvalContext<'_>) {
         match branch_num {
             0 => self.l_input = Some(input),
             1 => self.r_input = Some(input),

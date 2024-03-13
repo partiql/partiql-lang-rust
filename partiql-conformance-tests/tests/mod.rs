@@ -40,7 +40,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[inline]
 pub(crate) fn lower(
     catalog: &dyn Catalog,
-    parsed: &Parsed,
+    parsed: &Parsed<'_>,
 ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
     planner.lower(parsed)

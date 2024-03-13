@@ -104,7 +104,7 @@ pub(crate) fn strip_query(q: ast::AstNode<ast::Query>) -> ast::AstNode<ast::Quer
 // in a `Query` with `None` as the `OrderBy` and `LimitOffset`
 pub(crate) fn strip_query_set<Id>(
     qs: ast::AstNode<ast::QuerySet>,
-    state: &mut ParserState<Id>,
+    state: &mut ParserState<'_, Id>,
     lo: ByteOffset,
     hi: ByteOffset,
 ) -> ast::AstNode<ast::Query>
