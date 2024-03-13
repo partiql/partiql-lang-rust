@@ -17,17 +17,12 @@ use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use partiql_source_map::metadata::LocationMap;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
-#[allow(clippy::clone_on_copy)]
-#[allow(clippy::type_complexity)]
-#[allow(clippy::needless_lifetimes)]
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::ptr_arg)]
-#[allow(clippy::vec_box)]
-#[allow(clippy::let_unit_value)]
-#[allow(clippy::unused_unit)]
+#[allow(clippy::all)]
+#[allow(clippy::pedantic)]
 #[allow(unused_variables)]
 #[allow(dead_code)]
-#[allow(rust_2018_idioms)]
+#[allow(unused_extern_crates)]
+#[allow(explicit_outlives_requirements)]
 mod grammar {
     include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
 }

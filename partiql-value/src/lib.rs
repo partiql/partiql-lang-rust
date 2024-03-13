@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;

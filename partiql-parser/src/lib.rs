@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 // Copyright Amazon.com, Inc. or its affiliates.
 
 //! Provides a parser for the [PartiQL][partiql] query language.

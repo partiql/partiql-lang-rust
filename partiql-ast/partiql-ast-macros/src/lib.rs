@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 use darling::{FromDeriveInput, FromField, FromVariant};
 use inflector::Inflector;
