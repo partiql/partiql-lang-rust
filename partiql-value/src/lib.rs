@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use ordered_float::OrderedFloat;
 use std::cmp::Ordering;
 

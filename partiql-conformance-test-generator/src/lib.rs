@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use crate::generator::{Generator, GeneratorConfig};
 use crate::reader::read_schema;
 use crate::writer::Writer;

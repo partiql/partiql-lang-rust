@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use crate::call_defs::CallDef;
 
 use partiql_types::PartiqlType;

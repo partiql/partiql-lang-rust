@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 mod common;
 pub mod decode;
 pub mod encode;

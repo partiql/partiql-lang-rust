@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use darling::{FromDeriveInput, FromField, FromVariant};
 use inflector::Inflector;
 use proc_macro2::TokenStream;

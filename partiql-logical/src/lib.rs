@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 //! A PartiQL logical plan.
 //!
 //! This module contains the structures for a PartiQL logical plan. Three main entities in the

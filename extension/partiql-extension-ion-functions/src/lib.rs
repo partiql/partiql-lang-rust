@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use ion_rs::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use partiql_catalog::TableFunction;

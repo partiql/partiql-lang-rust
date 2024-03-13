@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use crate::lower::AstToLogical;
 
 use partiql_ast_passes::error::AstTransformationError;
