@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use crate::lower::AstToLogical;
 
 use partiql_ast_passes::error::AstTransformationError;
@@ -23,7 +25,7 @@ impl<'c> LogicalPlanner<'c> {
     #[inline]
     pub fn lower(
         &self,
-        parsed: &Parsed,
+        parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let q = &parsed.ast;
         let catalog = PartiqlCatalog::default();
@@ -54,13 +56,13 @@ mod tests {
     use partiql_value::{bag, tuple, DateTime, Value};
 
     #[track_caller]
-    fn parse(text: &str) -> Parsed {
+    fn parse(text: &str) -> Parsed<'_> {
         Parser::default().parse(text).unwrap()
     }
 
     #[track_caller]
     fn lower(
-        parsed: &Parsed,
+        parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let catalog = PartiqlCatalog::default();
         let planner = LogicalPlanner::new(&catalog);

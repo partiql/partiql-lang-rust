@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 #[cfg(feature = "visualize-dot")]
 mod ast_to_dot;
 

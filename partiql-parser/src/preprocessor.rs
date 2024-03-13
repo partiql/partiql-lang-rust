@@ -349,7 +349,7 @@ where
         self.parser.expect(&Token::OpenParen)?;
 
         let fn_expr_args = &fn_expr.patterns;
-        let mut patterns: Vec<(&[FnExprArgMatch], Substitutions)> = fn_expr_args
+        let mut patterns: Vec<(&[FnExprArgMatch<'_>], Substitutions<'_>)> = fn_expr_args
             .iter()
             .map(|args| (args.as_slice(), vec![]))
             .collect();
@@ -711,12 +711,12 @@ mod tests {
                 .map(|result| result.map(|(_, t, _)| t))
                 .collect::<Result<Vec<_>, _>>()
         }
-        fn lex(query: &str) -> Result<Vec<Token>, ParseError> {
+        fn lex(query: &str) -> Result<Vec<Token<'_>>, ParseError<'_>> {
             let mut offset_tracker = LineOffsetTracker::default();
             let lexer = PartiqlLexer::new(query, &mut offset_tracker);
             to_tokens(lexer)
         }
-        fn preprocess(query: &str) -> Result<Vec<Token>, ParseError> {
+        fn preprocess(query: &str) -> Result<Vec<Token<'_>>, ParseError<'_>> {
             let mut offset_tracker = LineOffsetTracker::default();
             let lexer = PreprocessingPartiqlLexer::new(query, &mut offset_tracker, &BUILT_INS);
             to_tokens(lexer)

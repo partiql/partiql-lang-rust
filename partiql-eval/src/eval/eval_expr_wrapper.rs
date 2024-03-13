@@ -247,7 +247,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
     }
 
     /// Evaluate the input argument expressions in [`self.args`] in the environment, type check them,
-    /// and convert them into an array of `N` `Cow<Value>`s.
+    /// and convert them into an array of `N` `Cow<'_, Value>`s.
     ///
     /// If type-checking fails, the appropriate failure case of [`ArgCheckControlFlow`] is returned,
     /// else [`ArgCheckControlFlow::Continue`] is returned containing the `N` values.
@@ -255,7 +255,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
         &'a self,
         bindings: &'a Tuple,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> ControlFlow<Value, [Cow<Value>; N]>
+    ) -> ControlFlow<Value, [Cow<'_, Value>; N]>
     where
         'c: 'a,
     {

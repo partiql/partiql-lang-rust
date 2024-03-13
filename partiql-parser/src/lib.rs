@@ -1,3 +1,4 @@
+#![deny(rust_2018_idioms)]
 // Copyright Amazon.com, Inc. or its affiliates.
 
 //! Provides a parser for the [PartiQL][partiql] query language.

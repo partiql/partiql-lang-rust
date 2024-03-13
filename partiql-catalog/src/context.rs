@@ -3,11 +3,11 @@ use std::any::Any;
 use std::fmt::Debug;
 
 pub trait Bindings<T>: Debug {
-    fn get(&self, name: &BindingsName) -> Option<&T>;
+    fn get(&self, name: &BindingsName<'_>) -> Option<&T>;
 }
 
 impl Bindings<Value> for Tuple {
-    fn get(&self, name: &BindingsName) -> Option<&Value> {
+    fn get(&self, name: &BindingsName<'_>) -> Option<&Value> {
         self.get(name)
     }
 }

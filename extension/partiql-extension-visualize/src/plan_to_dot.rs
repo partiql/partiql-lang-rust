@@ -12,7 +12,7 @@ use crate::common::{ToDotGraph, FG_COLOR};
 pub struct PlanToDot {}
 
 impl PlanToDot {
-    pub(crate) fn to_dot(&self, scope: &mut Scope, plan: &LogicalPlan<BindingsOp>) {
+    pub(crate) fn to_dot(&self, scope: &mut Scope<'_, '_>, plan: &LogicalPlan<BindingsOp>) {
         let mut graph_nodes = HashMap::new();
         for (opid, op) in plan.operators_by_id() {
             graph_nodes.insert(opid, self.op_to_dot(scope, op));
@@ -29,7 +29,7 @@ impl PlanToDot {
         }
     }
 
-    fn op_to_dot(&self, scope: &mut Scope, op: &BindingsOp) -> NodeId {
+    fn op_to_dot(&self, scope: &mut Scope<'_, '_>, op: &BindingsOp) -> NodeId {
         let mut node = scope.node_auto();
         let label = match op {
             BindingsOp::Scan(s) => {

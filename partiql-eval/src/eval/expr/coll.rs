@@ -43,7 +43,7 @@ impl BindEvalExpr for EvalCollFn {
             f: F,
         ) -> Result<Box<dyn EvalExpr>, BindError>
         where
-            F: Fn(ValueIter) -> Value + 'static,
+            F: Fn(ValueIter<'_>) -> Value + 'static,
         {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, move |value| {
                 value.sequence_iter().map(&f).unwrap_or(Missing)

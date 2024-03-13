@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 //! The PartiQL Abstract Syntax Tree (AST).
 //!
 //! # Note

@@ -27,6 +27,7 @@ use partiql_source_map::metadata::LocationMap;
 #[allow(clippy::unused_unit)]
 #[allow(unused_variables)]
 #[allow(dead_code)]
+#[allow(rust_2018_idioms)]
 mod grammar {
     include!(concat!(env!("OUT_DIR"), "/partiql.rs"));
 }
@@ -53,7 +54,7 @@ pub(crate) struct ErrorData<'input> {
 pub(crate) type AstResult<'input> = Result<AstData, ErrorData<'input>>;
 
 /// Parse PartiQL query text into an AST.
-pub(crate) fn parse_partiql(s: &str) -> AstResult {
+pub(crate) fn parse_partiql(s: &str) -> AstResult<'_> {
     parse_partiql_with_state(s, ParserState::default())
 }
 
@@ -65,7 +66,7 @@ fn parse_partiql_with_state<'input, Id: IdGenerator>(
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
     let lexer = CommentSkippingLexer::new(lexer);
 
-    let result: LalrpopResult = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
+    let result: LalrpopResult<'_> = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
 
     let ParserState {
         locations, errors, ..
@@ -143,7 +144,7 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn parse_partiql(s: &str) -> AstResult {
+    fn parse_partiql(s: &str) -> AstResult<'_> {
         super::parse_partiql(s)
     }
 
@@ -559,7 +560,7 @@ mod tests {
             }
         }
 
-        fn parse_partiql_null_id(s: &str) -> AstResult {
+        fn parse_partiql_null_id(s: &str) -> AstResult<'_> {
             super::parse_partiql_with_state(s, ParserState::new_null_id())
         }
 

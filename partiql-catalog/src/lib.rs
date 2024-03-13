@@ -1,3 +1,5 @@
+#![deny(rust_2018_idioms)]
+
 use crate::call_defs::CallDef;
 
 use partiql_types::PartiqlType;
@@ -55,7 +57,7 @@ pub type BaseTableExprResult<'a> =
 pub trait BaseTableExpr: Debug {
     fn evaluate<'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &[Cow<'_, Value>],
         ctx: &'c dyn SessionContext<'c>,
     ) -> BaseTableExprResult<'c>;
 }
@@ -112,9 +114,9 @@ pub enum CatalogErrorKind {
 pub trait Catalog: Debug {
     fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError>;
 
-    fn add_type_entry(&mut self, entry: TypeEnvEntry) -> Result<ObjectId, CatalogError>;
+    fn add_type_entry(&mut self, entry: TypeEnvEntry<'_>) -> Result<ObjectId, CatalogError>;
 
-    fn get_function(&self, name: &str) -> Option<FunctionEntry>;
+    fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
 
     fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
 }
@@ -222,7 +224,7 @@ impl Catalog for PartiqlCatalog {
         }
     }
 
-    fn add_type_entry(&mut self, entry: TypeEnvEntry) -> Result<ObjectId, CatalogError> {
+    fn add_type_entry(&mut self, entry: TypeEnvEntry<'_>) -> Result<ObjectId, CatalogError> {
         let id = self
             .types
             .add(entry.name.as_ref(), entry.aliases.as_slice(), entry.ty);
@@ -236,7 +238,7 @@ impl Catalog for PartiqlCatalog {
         }
     }
 
-    fn get_function(&self, name: &str) -> Option<FunctionEntry> {
+    fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>> {
         self.functions
             .find_by_name(name)
             .map(|(eid, entry)| FunctionEntry {

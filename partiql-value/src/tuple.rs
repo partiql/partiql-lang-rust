@@ -60,18 +60,18 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn get(&self, attr: &BindingsName) -> Option<&Value> {
+    pub fn get(&self, attr: &BindingsName<'_>) -> Option<&Value> {
         self.find_value(attr).map(|i| &self.vals[i])
     }
 
     #[inline]
-    pub fn take_val(self, attr: &BindingsName) -> Option<Value> {
+    pub fn take_val(self, attr: &BindingsName<'_>) -> Option<Value> {
         self.find_value(attr)
             .and_then(|i| self.vals.into_iter().nth(i))
     }
 
     #[inline(always)]
-    fn find_value(&self, attr: &BindingsName) -> Option<usize> {
+    fn find_value(&self, attr: &BindingsName<'_>) -> Option<usize> {
         match attr {
             BindingsName::CaseSensitive(s) => {
                 self.attrs.iter().position(|a| a.as_str() == s.as_ref())
@@ -84,7 +84,7 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn remove(&mut self, attr: &BindingsName) -> Option<Value> {
+    pub fn remove(&mut self, attr: &BindingsName<'_>) -> Option<Value> {
         match self.find_value(attr) {
             Some(i) => {
                 self.attrs.remove(i);
@@ -95,7 +95,7 @@ impl Tuple {
     }
 
     #[inline]
-    pub fn pairs(&self) -> PairsIter {
+    pub fn pairs(&self) -> PairsIter<'_> {
         PairsIter(zip(self.attrs.iter(), self.vals.iter()))
     }
 

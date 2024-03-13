@@ -87,7 +87,7 @@ pub(crate) struct EvalTestCtxTable {}
 impl BaseTableExpr for EvalTestCtxTable {
     fn evaluate<'c>(
         &self,
-        args: &[Cow<Value>],
+        args: &[Cow<'_, Value>],
         _ctx: &'c dyn SessionContext<'c>,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
@@ -124,7 +124,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[inline]
 pub(crate) fn lower(
     catalog: &dyn Catalog,
-    parsed: &Parsed,
+    parsed: &Parsed<'_>,
 ) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
     planner.lower(parsed).expect("lower")

@@ -44,7 +44,7 @@ pub mod basic {
         T: Debug,
     {
         #[inline]
-        fn get(&self, name: &BindingsName) -> Option<&T> {
+        fn get(&self, name: &BindingsName<'_>) -> Option<&T> {
             let idx = match name {
                 BindingsName::CaseSensitive(s) => self.sensitive.get(s.as_ref()),
                 BindingsName::CaseInsensitive(s) => {

@@ -46,7 +46,7 @@ impl List {
     }
 
     #[inline]
-    pub fn iter(&self) -> ListIter {
+    pub fn iter(&self) -> ListIter<'_> {
         ListIter(self.0.iter())
     }
 

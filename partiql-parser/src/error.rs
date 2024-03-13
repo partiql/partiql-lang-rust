@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn illegal_state() {
-        let e1: ParseError<BytePosition> = ParseError::IllegalState("uh oh".to_string());
+        let e1: ParseError<'_, BytePosition> = ParseError::IllegalState("uh oh".to_string());
 
         let e2 = e1.map_loc(|x| x);
         assert_eq!(e2.to_string(), "Illegal State: uh oh")
