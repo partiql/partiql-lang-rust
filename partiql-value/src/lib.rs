@@ -411,21 +411,15 @@ impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, 
     type Output = Value;
 
     fn eq(&self, rhs: &Self) -> Self::Output {
-        match GROUP_NULLS {
-            true => match (self.0, rhs.0) {
-                (Value::Missing | Value::Null, Value::Missing | Value::Null) => {
-                    return Value::Boolean(true)
-                }
-                _ => {}
-            },
-            false => match (self.0, rhs.0) {
-                (Value::Missing, _) => return Value::Missing,
-                (_, Value::Missing) => return Value::Missing,
-                (Value::Null, _) => return Value::Null,
-                (_, Value::Null) => return Value::Null,
-                _ => {}
-            },
-        };
+        if GROUP_NULLS {
+            if let (Value::Missing | Value::Null, Value::Missing | Value::Null) = (self.0, rhs.0) {
+                return Value::Boolean(true);
+            }
+        } else if matches!(self.0, Value::Missing) || matches!(rhs.0, Value::Missing) {
+            return Value::Missing;
+        } else if matches!(self.0, Value::Null) || matches!(rhs.0, Value::Null) {
+            return Value::Null;
+        }
 
         match (self.0, rhs.0) {
             (Value::Integer(_), Value::Real(_)) => {

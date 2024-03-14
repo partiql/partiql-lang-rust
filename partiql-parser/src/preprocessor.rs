@@ -323,20 +323,18 @@ where
         (tok, _): BufferedToken<'input>,
         next_idx: usize,
     ) -> (SpannedToken<'input>, Option<SpannedTokenVec<'input>>) {
-        match tok {
-            (_, Token::UnquotedIdent(id) | Token::QuotedIdent(id), _) => {
-                if let Some(((_, Token::OpenParen, _), _)) = self.parser.peek_n(next_idx) {
-                    if let Some(fn_expr) = self.fn_exprs.find(id) {
-                        let replacement = match self.rewrite_fn_expr(fn_expr) {
-                            Ok(rewrites) => rewrites,
-                            Err(_err) => self.parser.flush().into_iter().map(|(t, _)| t).collect(),
-                        };
-                        return (tok, Some(replacement));
-                    }
+        if let (_, Token::UnquotedIdent(id) | Token::QuotedIdent(id), _) = tok {
+            if let Some(((_, Token::OpenParen, _), _)) = self.parser.peek_n(next_idx) {
+                if let Some(fn_expr) = self.fn_exprs.find(id) {
+                    let replacement = match self.rewrite_fn_expr(fn_expr) {
+                        Ok(rewrites) => rewrites,
+                        Err(_err) => self.parser.flush().into_iter().map(|(t, _)| t).collect(),
+                    };
+                    return (tok, Some(replacement));
                 }
             }
-            _ => (),
         }
+
         (tok, None)
     }
 
