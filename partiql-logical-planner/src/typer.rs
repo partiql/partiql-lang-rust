@@ -125,7 +125,7 @@ pub struct PlanTyper<'c> {
 
 #[allow(dead_code)]
 impl<'c> PlanTyper<'c> {
-    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Strict` Typing Mode.
+    /// Creates a new [`PlanTyper`] for the given Catalog and Intermediate Representation with `Strict` Typing Mode.
     pub fn new_strict(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Strict,
@@ -138,7 +138,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    /// Creates a new [PlanTyper] for the given Catalog and Intermediate Representation with `Permissive` Typing Mode.
+    /// Creates a new [`PlanTyper`] for the given Catalog and Intermediate Representation with `Permissive` Typing Mode.
     pub fn new_permissive(catalog: &'c dyn Catalog, lg: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Permissive,
@@ -158,7 +158,7 @@ impl<'c> PlanTyper<'c> {
         for idx in ops {
             let graph = self.to_stable_graph()?;
             if let Some(binop) = graph.node_weight(idx) {
-                self.type_bindings_op(binop)
+                self.type_bindings_op(binop);
             }
         }
 
@@ -184,14 +184,14 @@ impl<'c> PlanTyper<'c> {
                 if let Some(_at_key) = at_key {
                     self.errors.push(TypingError::NotYetImplemented(
                         "Scan operator with AT key is not implemented yet".to_string(),
-                    ))
+                    ));
                 }
 
                 self.type_vexpr(expr, LookupOrder::Delegate);
 
                 if !as_key.is_empty() {
                     let type_ctx = &self.local_type_ctx();
-                    for (_name, ty) in type_ctx.env().iter() {
+                    for (_name, ty) in type_ctx.env() {
                         if let TypeKind::Struct(_s) = ty.kind() {
                             self.type_env_stack.push(ty_ctx![(
                                 &ty_env![(string_to_sym(as_key.as_str()), ty.clone())],
@@ -203,7 +203,7 @@ impl<'c> PlanTyper<'c> {
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
                 let mut fields = vec![];
-                for (k, v) in exprs.iter() {
+                for (k, v) in exprs {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
 
                     fields.push(StructField::new(
@@ -306,17 +306,17 @@ impl<'c> PlanTyper<'c> {
                         PathComponent::Index(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
                                 "Typing [Index] [PathComponent]s".to_string(),
-                            ))
+                            ));
                         }
                         PathComponent::KeyExpr(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
                                 "Typing [KeyExpr] [PathComponent]s".to_string(),
-                            ))
+                            ));
                         }
                         PathComponent::IndexExpr(_) => {
                             self.errors.push(TypingError::NotYetImplemented(
                                 "Typing [IndexExpr] [PathComponent]s".to_string(),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -355,7 +355,7 @@ impl<'c> PlanTyper<'c> {
                 // TODO for Typing we handle multiple lookups through `[LookupOrder]` hence using
                 // the first element. Remove this workaround once we remove DynamicLookup
                 let expr = &v[0];
-                self.type_vexpr(expr, self.lookup_order(expr))
+                self.type_vexpr(expr, self.lookup_order(expr));
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
@@ -545,9 +545,9 @@ impl<'c> PlanTyper<'c> {
         } else {
             let mut new_type_env = LocalTypeEnv::new();
             if let TypeKind::Struct(s) = ty.kind() {
-                to_bindings(s).into_iter().for_each(|b| {
+                for b in to_bindings(s) {
                     new_type_env.insert(b.0, b.1);
-                });
+                }
 
                 let type_ctx = ty_ctx![(&new_type_env, ty)];
                 self.type_env_stack.push(type_ctx);
@@ -792,7 +792,7 @@ mod tests {
         ])];
 
         let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
-        let err2 = r#"Illegal Derive Type PartiqlType(Undefined)"#;
+        let err2 = r"Illegal Derive Type PartiqlType(Undefined)";
 
         assert_err(
             assert_query_typing(
@@ -828,7 +828,7 @@ mod tests {
         output: Option<PartiqlType>,
     ) {
         match result {
-            Ok(_) => {
+            Ok(()) => {
                 panic!("Expected Error");
             }
             Err(e) => {
@@ -838,7 +838,7 @@ mod tests {
                         errors: expected_errors,
                         output
                     }
-                )
+                );
             }
         };
     }
@@ -869,8 +869,8 @@ mod tests {
                             .collect();
                         assert!(f.is_empty());
                         assert_eq!(expected_fields.len(), fields.len());
-                        println!("query: {:?}", query);
-                        println!("actual: {:?}", actual);
+                        println!("query: {query:?}");
+                        println!("actual: {actual:?}");
                         Ok(())
                     } else {
                         Err(TypeErr {

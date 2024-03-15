@@ -1,15 +1,16 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
-//! A PartiQL logical plan.
+//! A `PartiQL` logical plan.
 //!
-//! This module contains the structures for a PartiQL logical plan. Three main entities in the
+//! This module contains the structures for a `PartiQL` logical plan. Three main entities in the
 //! module are [`LogicalPlan`], [`BindingsOp`], and [`ValueExpr`].
 //! `LogicalPlan` represents a graph based logical plan. `BindingsOp` represent operations that
-//! operate on binding tuples and `ValueExpr` represents PartiQL expressions that produce PartiQL
+//! operate on binding tuples and `ValueExpr` represents `PartiQL` expressions that produce `PartiQL`
 //! values; all as specified in [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 //!
 //! Plan graph nodes are called _operators_ and edges are called _flows_ re-instating the fact that
-//! the plan captures data flows for a given PartiQL statement.
+//! the plan captures data flows for a given `PartiQL` statement.
 //!
 /// # Examples
 /// ```
@@ -57,7 +58,7 @@ use std::fmt::{Debug, Display, Formatter};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Represents a PartiQL logical plan.
+/// Represents a `PartiQL` logical plan.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogicalPlan<T>
@@ -74,6 +75,7 @@ where
     T: Default,
 {
     /// Creates a new default logical plan.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -130,11 +132,13 @@ where
 
     /// Returns the number of operators in the plan.
     #[inline]
+    #[must_use]
     pub fn operator_count(&self) -> usize {
         self.nodes.len()
     }
 
     /// Returns the operators of the plan.
+    #[must_use]
     pub fn operators(&self) -> &Vec<T> {
         &self.nodes
     }
@@ -145,10 +149,12 @@ where
     }
 
     /// Returns the data flows of the plan.
+    #[must_use]
     pub fn flows(&self) -> &Vec<(OpId, OpId, u8)> {
         &self.edges
     }
 
+    #[must_use]
     pub fn operator(&self, id: OpId) -> Option<&T> {
         self.nodes.get(id.0 - 1)
     }
@@ -167,6 +173,7 @@ pub struct OpId(usize);
 
 impl OpId {
     /// Returns operator's index
+    #[must_use]
     pub fn index(&self) -> usize {
         self.0
     }
@@ -189,7 +196,7 @@ where
     }
 }
 
-/// Represents PartiQL binding operators; A `BindingOp` is an operator that operates on
+/// Represents `PartiQL` binding operators; A `BindingOp` is an operator that operates on
 /// binding tuples as specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -277,7 +284,7 @@ pub enum SortSpecNullOrder {
     Last,
 }
 
-/// Represents a PartiQL sort specification.
+/// Represents a `PartiQL` sort specification.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SortSpec {
@@ -367,7 +374,7 @@ pub enum AggFunc {
     AggEvery,
 }
 
-/// Represents `GROUP BY` <strategy> <group_key>[, <group_key>] ... \[AS <as_alias>\]
+/// Represents `GROUP BY` <strategy> <`group_key`>[, <`group_key`>] ... \[AS <`as_alias`>\]
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupBy {
@@ -407,7 +414,7 @@ pub struct ExprQuery {
     pub expr: ValueExpr,
 }
 
-/// Represents a PartiQL value expression. Evaluation of a [`ValueExpr`] leads to a PartiQL value as
+/// Represents a `PartiQL` value expression. Evaluation of a [`ValueExpr`] leads to a `PartiQL` value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -480,7 +487,7 @@ pub enum PathComponent {
     IndexExpr(Box<ValueExpr>),
 }
 
-/// Represents a PartiQL tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.
+/// Represents a `PartiQL` tuple expression, e.g: `{ a.b: a.c * 2, 'count': a.c + 10}`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TupleExpr {
@@ -490,12 +497,13 @@ pub struct TupleExpr {
 
 impl TupleExpr {
     /// Creates a new default [`TupleExpr`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Represents a PartiQL list expression, e.g. `[a.c * 2, 5]`.
+/// Represents a `PartiQL` list expression, e.g. `[a.c * 2, 5]`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ListExpr {
@@ -504,12 +512,13 @@ pub struct ListExpr {
 
 impl ListExpr {
     /// Creates a new default [`ListExpr`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Represents a PartiQL bag expression, e.g. `<<a.c * 2, 5>>`.
+/// Represents a `PartiQL` bag expression, e.g. `<<a.c * 2, 5>>`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BagExpr {
@@ -518,12 +527,13 @@ pub struct BagExpr {
 
 impl BagExpr {
     /// Creates a new default [`BagExpr`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Represents a PartiQL `BETWEEN` expression, e.g. `BETWEEN 500 AND 600`.
+/// Represents a `PartiQL` `BETWEEN` expression, e.g. `BETWEEN 500 AND 600`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BetweenExpr {
@@ -532,7 +542,7 @@ pub struct BetweenExpr {
     pub to: Box<ValueExpr>,
 }
 
-/// Represents a PartiQL Pattern Match expression, e.g. `'foo' LIKE 'foo'`.
+/// Represents a `PartiQL` Pattern Match expression, e.g. `'foo' LIKE 'foo'`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PatternMatchExpr {
@@ -573,7 +583,7 @@ pub struct SubQueryExpr {
     pub plan: LogicalPlan<BindingsOp>,
 }
 
-/// Represents a PartiQL's simple case expressions,
+/// Represents a `PartiQL`'s simple case expressions,
 /// e.g.`CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -583,7 +593,7 @@ pub struct SimpleCase {
     pub default: Option<Box<ValueExpr>>,
 }
 
-/// Represents a PartiQL's searched case expressions,
+/// Represents a `PartiQL`'s searched case expressions,
 /// e.g.`CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -601,7 +611,7 @@ pub struct IsTypeExpr {
     pub is_type: Type,
 }
 
-/// Represents a PartiQL Type.
+/// Represents a `PartiQL` Type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Type {

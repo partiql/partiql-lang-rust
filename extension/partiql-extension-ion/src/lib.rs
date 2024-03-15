@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 mod common;
 pub mod decode;
@@ -180,7 +181,7 @@ mod tests {
                 1,
                 2,
                 3,
-                400000000,
+                400_000_000,
                 Some(30),
             ),
         );
@@ -198,7 +199,7 @@ mod tests {
                 1,
                 2,
                 3,
-                400000000,
+                400_000_000,
                 None,
             ),
         );
@@ -296,7 +297,7 @@ mod tests {
                 1,
                 2,
                 3,
-                400000000,
+                400_000_000,
                 Some(30),
             ),
         );
@@ -314,7 +315,7 @@ mod tests {
                 1,
                 2,
                 3,
-                400000000,
+                400_000_000,
                 None,
             ),
         );
@@ -330,7 +331,7 @@ mod tests {
                     .build(),
             )
             .with_annotations(["$time"]),
-            DateTime::from_hms_nano(12, 11, 10, 80000000),
+            DateTime::from_hms_nano(12, 11, 10, 80_000_000),
         );
         assert_partiql_encoded_ion(
             "$time::{ hour: 12, minute: 11, second: 10.08, timezone_hour: 0, timezone_minute: 30}",
@@ -346,7 +347,7 @@ mod tests {
                     .build(),
             )
             .with_annotations(["$time"]),
-            DateTime::from_hms_nano_tz(12, 11, 10, 80000000, None, Some(30)),
+            DateTime::from_hms_nano_tz(12, 11, 10, 80_000_000, None, Some(30)),
         );
         assert_partiql_encoded_ion(
             "$date::1957-05-25T",

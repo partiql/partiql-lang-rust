@@ -139,11 +139,9 @@ impl BindEvalExpr for EvalFnPosition {
             [TYPE_STRING, TYPE_STRING],
             args,
             |needle, haystack| match (needle, haystack) {
-                (Value::String(needle), Value::String(haystack)) => haystack
-                    .find(needle.as_ref())
-                    .map(|l| l + 1)
-                    .unwrap_or(0)
-                    .into(),
+                (Value::String(needle), Value::String(haystack)) => {
+                    haystack.find(needle.as_ref()).map_or(0, |l| l + 1).into()
+                }
                 _ => Missing,
             },
         )

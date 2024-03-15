@@ -11,7 +11,7 @@ use partiql_types::{
     ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, BinaryOr, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
+use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Formatter};
@@ -86,7 +86,7 @@ impl BindEvalExpr for EvalOpUnary {
         };
 
         match self {
-            EvalOpUnary::Pos => unop([any_num], |operand| operand.clone()),
+            EvalOpUnary::Pos => unop([any_num], std::clone::Clone::clone),
             EvalOpUnary::Neg => unop([any_num], |operand| -operand),
             EvalOpUnary::Not => unop([TYPE_BOOL], |operand| !operand),
         }
@@ -184,8 +184,8 @@ impl BindEvalExpr for EvalOpBinary {
         }
 
         match self {
-            EvalOpBinary::And => logical!(AndCheck, |lhs, rhs| lhs.and(rhs)),
-            EvalOpBinary::Or => logical!(OrCheck, |lhs, rhs| lhs.or(rhs)),
+            EvalOpBinary::And => logical!(AndCheck, partiql_value::BinaryAnd::and),
+            EvalOpBinary::Or => logical!(OrCheck, partiql_value::BinaryOr::or),
             EvalOpBinary::Eq => equality!(|lhs, rhs| {
                 let wrap = EqualityValue::<false, Value>;
                 NullableEq::eq(&wrap(lhs), &wrap(rhs))
@@ -268,7 +268,7 @@ impl BindEvalExpr for EvalOpBinary {
     }
 }
 
-/// Represents an evaluation PartiQL `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
+/// Represents an evaluation `PartiQL` `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EvalBetweenExpr {}
 

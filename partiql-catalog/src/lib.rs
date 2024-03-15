@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 use crate::call_defs::CallDef;
 
@@ -73,6 +74,7 @@ pub struct TableFunction {
 }
 
 impl TableFunction {
+    #[must_use]
     pub fn new(info: Box<dyn BaseTableFunctionInfo>) -> Self {
         TableFunction { info }
     }
@@ -86,6 +88,7 @@ pub struct CatalogError {
 }
 
 impl CatalogError {
+    #[must_use]
     pub fn new(errors: Vec<CatalogErrorKind>) -> Self {
         CatalogError { errors }
     }
@@ -129,6 +132,7 @@ pub struct TypeEnvEntry<'a> {
 }
 
 impl<'a> TypeEnvEntry<'a> {
+    #[must_use]
     pub fn new(name: &str, aliases: &[&'a str], ty: PartiqlType) -> Self {
         TypeEnvEntry {
             name: UniCase::from(name.to_string()),
@@ -145,10 +149,12 @@ pub struct TypeEntry {
 }
 
 impl TypeEntry {
+    #[must_use]
     pub fn id(&self) -> &ObjectId {
         &self.id
     }
 
+    #[must_use]
     pub fn ty(&self) -> &PartiqlType {
         &self.ty
     }
@@ -169,6 +175,7 @@ pub enum FunctionEntryFunction {
 }
 
 impl<'a> FunctionEntry<'a> {
+    #[must_use]
     pub fn call_def(&'a self) -> &'a CallDef {
         match &self.function {
             FunctionEntryFunction::Table(tf) => tf.info.call_def(),
@@ -177,6 +184,7 @@ impl<'a> FunctionEntry<'a> {
         }
     }
 
+    #[must_use]
     pub fn plan_eval(&'a self) -> Box<dyn BaseTableExpr> {
         match &self.function {
             FunctionEntryFunction::Table(tf) => tf.info.plan_eval(),
@@ -287,14 +295,14 @@ impl<T> CatalogEntrySet<T> {
         let name = UniCase::from(name);
         let aliases: Vec<UniCase<String>> = aliases
             .iter()
-            .map(|a| UniCase::from(a.to_string()))
+            .map(|a| UniCase::from((*a).to_string()))
             .collect();
 
-        aliases.iter().for_each(|a| {
+        for a in &aliases {
             if self.by_alias.contains_key(a) {
-                errors.push(CatalogErrorKind::EntryExists(a.as_ref().to_string()))
+                errors.push(CatalogErrorKind::EntryExists(a.as_ref().to_string()));
             }
-        });
+        }
 
         if self.by_name.contains_key(&name) {
             errors.push(CatalogErrorKind::EntryExists(name.to_string()));
@@ -310,7 +318,7 @@ impl<T> CatalogEntrySet<T> {
             true => {
                 self.by_name.insert(name, id);
 
-                for a in aliases.into_iter() {
+                for a in aliases {
                     self.by_alias.insert(a, id);
                 }
 

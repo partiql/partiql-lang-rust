@@ -29,11 +29,7 @@ pub struct CallDef {
 }
 
 impl CallDef {
-    pub fn lookup(
-        &self,
-        args: &Vec<CallArgument>,
-        name: &str,
-    ) -> Result<ValueExpr, CallLookupError> {
+    pub fn lookup(&self, args: &[CallArgument], name: &str) -> Result<ValueExpr, CallLookupError> {
         'overload: for overload in &self.overloads {
             let formals = &overload.input;
             if formals.len() != args.len() {

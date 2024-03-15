@@ -162,7 +162,7 @@ fn write_re_pattern<F>(
             (_, false) if Some(ch) == escape_ch => escaped = true,
             ('%', false) => {
                 if !is_any {
-                    buf.push_str(".*?")
+                    buf.push_str(".*?");
                 }
                 wildcard = true;
             }
@@ -184,35 +184,29 @@ mod tests {
 
     #[test]
     fn like() {
-        assert_eq!(like_to_re_pattern("foo", Some('\\')), r#"^foo$"#);
-        assert_eq!(like_to_re_pattern("%foo", Some('\\')), r#"^.*?foo$"#);
-        assert_eq!(like_to_re_pattern("foo%", Some('\\')), r#"^foo.*?$"#);
-        assert_eq!(like_to_re_pattern("foo%bar", Some('\\')), r#"^foo.*?bar$"#);
-        assert_eq!(like_to_re_pattern("foo%%bar", Some('\\')), r#"^foo.*?bar$"#);
-        assert_eq!(
-            like_to_re_pattern("foo%%%bar", Some('\\')),
-            r#"^foo.*?bar$"#
-        );
-        assert_eq!(
-            like_to_re_pattern("foo%%%%bar", Some('\\')),
-            r#"^foo.*?bar$"#
-        );
+        assert_eq!(like_to_re_pattern("foo", Some('\\')), r"^foo$");
+        assert_eq!(like_to_re_pattern("%foo", Some('\\')), r"^.*?foo$");
+        assert_eq!(like_to_re_pattern("foo%", Some('\\')), r"^foo.*?$");
+        assert_eq!(like_to_re_pattern("foo%bar", Some('\\')), r"^foo.*?bar$");
+        assert_eq!(like_to_re_pattern("foo%%bar", Some('\\')), r"^foo.*?bar$");
+        assert_eq!(like_to_re_pattern("foo%%%bar", Some('\\')), r"^foo.*?bar$");
+        assert_eq!(like_to_re_pattern("foo%%%%bar", Some('\\')), r"^foo.*?bar$");
         assert_eq!(
             like_to_re_pattern("%foo%%%%bar%", Some('\\')),
-            r#"^.*?foo.*?bar.*?$"#
+            r"^.*?foo.*?bar.*?$"
         );
         assert_eq!(
             like_to_re_pattern("%foo%%%%bar\\%baz%", Some('\\')),
-            r#"^.*?foo.*?bar%baz.*?$"#
+            r"^.*?foo.*?bar%baz.*?$"
         );
         assert_eq!(
             like_to_re_pattern("%foo%%%%bar*%baz%", Some('*')),
-            r#"^.*?foo.*?bar%baz.*?$"#
+            r"^.*?foo.*?bar%baz.*?$"
         );
-        assert_eq!(like_to_re_pattern("_foo", Some('\\')), r#"^.foo$"#);
-        assert_eq!(like_to_re_pattern("foo_", Some('\\')), r#"^foo.$"#);
-        assert_eq!(like_to_re_pattern("foo_bar", Some('\\')), r#"^foo.bar$"#);
-        assert_eq!(like_to_re_pattern("foo__bar", Some('\\')), r#"^foo..bar$"#);
+        assert_eq!(like_to_re_pattern("_foo", Some('\\')), r"^.foo$");
+        assert_eq!(like_to_re_pattern("foo_", Some('\\')), r"^foo.$");
+        assert_eq!(like_to_re_pattern("foo_bar", Some('\\')), r"^foo.bar$");
+        assert_eq!(like_to_re_pattern("foo__bar", Some('\\')), r"^foo..bar$");
         assert_eq!(
             like_to_re_pattern("foo_.*?_bar", Some('\\')),
             r"^foo.\.\*\?.bar$"
@@ -229,10 +223,10 @@ mod tests {
 
     #[test]
     fn similar() {
-        assert_eq!(similar_to_re_pattern("(b|c)%", Some('\\')), r#"^(b|c).*?$"#);
+        assert_eq!(similar_to_re_pattern("(b|c)%", Some('\\')), r"^(b|c).*?$");
         assert_eq!(
             similar_to_re_pattern("%(b|d)%", Some('\\')),
-            r#"^.*?(b|d).*?$"#
+            r"^.*?(b|d).*?$"
         );
     }
 

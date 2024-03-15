@@ -28,7 +28,7 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
     #[inline]
     pub fn consume(&mut self) -> Option<Result<(), Spanned<LexError<'input>, ByteOffset>>> {
         match self.buffer(1) {
-            Some(Ok(_)) => {
+            Some(Ok(())) => {
                 self.consumed_c += 1;
                 Some(Ok(()))
             }

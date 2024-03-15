@@ -269,7 +269,9 @@ impl<'c> EvaluatorPlanner<'c> {
                         SetQuantifier::Distinct => Either::Right(plan_agg(ae)),
                     });
 
-                let group_as_alias = group_as_alias.as_ref().map(|alias| alias.to_string());
+                let group_as_alias = group_as_alias
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
                 Box::new(eval::evaluable::EvalGroupBy::new(
                     strategy,
                     exprs,

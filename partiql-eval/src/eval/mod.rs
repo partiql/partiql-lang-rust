@@ -29,7 +29,7 @@ pub(crate) mod eval_expr_wrapper;
 pub mod evaluable;
 pub mod expr;
 
-/// Represents a PartiQL evaluation query plan which is a plan that can be evaluated to produce
+/// Represents a `PartiQL` evaluation query plan which is a plan that can be evaluated to produce
 /// a result. The plan uses a directed `petgraph::StableGraph`.
 #[derive(Debug)]
 pub struct EvalPlan {
@@ -52,6 +52,7 @@ fn err_illegal_state(msg: impl AsRef<str>) -> EvalErr {
 
 impl EvalPlan {
     /// Creates a new evaluation plan.
+    #[must_use]
     pub fn new(
         mode: EvaluationMode,
         plan_graph: StableGraph<Box<dyn Evaluable>, u8, Directed>,
@@ -87,7 +88,7 @@ impl EvalPlan {
         })?;
 
         let mut result = None;
-        for idx in ops.into_iter() {
+        for idx in ops {
             let destinations: Vec<(usize, (u8, NodeIndex))> = self
                 .plan_graph()
                 .edges_directed(idx, Outgoing)
@@ -133,6 +134,7 @@ impl EvalPlan {
         Ok(Evaluated { result })
     }
 
+    #[must_use]
     pub fn to_dot_graph(&self) -> String {
         format!("{:?}", Dot::with_config(&self.plan_graph, &[]))
     }
@@ -169,6 +171,7 @@ pub struct BasicContext<'a> {
 }
 
 impl<'a> BasicContext<'a> {
+    #[must_use]
     pub fn new(bindings: MapBindings<Value>, sys: SystemContext) -> Self {
         BasicContext {
             bindings,
@@ -198,7 +201,7 @@ impl<'a> EvalContext<'a> for BasicContext<'a> {
     }
 
     fn add_error(&self, error: EvaluationError) {
-        self.errors.borrow_mut().push(error)
+        self.errors.borrow_mut().push(error);
     }
 
     fn has_errors(&self) -> bool {

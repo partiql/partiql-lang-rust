@@ -1,4 +1,4 @@
-/// The encoding to use when decoding/encoding Ion to/from PartiQL [`partiql_value::Value`]
+/// The encoding to use when decoding/encoding Ion to/from `PartiQL` [`partiql_value::Value`]
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Encoding {
     /// 'Unlifted'/'Unlowered' Ion to/from PartiQL [`partiql_value::Value`]. [`partiql_value::Value`]s that do not have a direct

@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates.
 
-//! [`Error`] and [`Result`] types for parsing PartiQL.
+//! [`Error`] and [`Result`] types for parsing `PartiQL`.
 
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
@@ -11,7 +11,7 @@ use thiserror::Error;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Errors in the lexical structure of a PartiQL query.
+/// Errors in the lexical structure of a `PartiQL` query.
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
@@ -33,7 +33,7 @@ pub enum LexError<'input> {
     Unknown,
 }
 
-/// Errors in the syntactic structure of a PartiQL query.
+/// Errors in the syntactic structure of a `PartiQL` query.
 ///
 /// ### Notes
 /// This is marked `#[non_exhaustive]`, to reserve the right to add more variants in the future.
@@ -112,7 +112,7 @@ mod tests {
         ));
 
         let e2 = e1.map_loc(|BytePosition(x)| BytePosition(x - 2));
-        assert_eq!(e2.to_string(), "Syntax Error: oops at `(b253..b510)`")
+        assert_eq!(e2.to_string(), "Syntax Error: oops at `(b253..b510)`");
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
         );
 
         let e2 = e1.map_loc(|x| BytePosition(x.0 + 1));
-        assert_eq!(e2.to_string(), "Unexpected token `/` at `(b1..b2)`")
+        assert_eq!(e2.to_string(), "Unexpected token `/` at `(b1..b2)`");
     }
 
     #[test]
@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(
             e2.to_string(),
             "Lexing error: invalid input `🤷` at `(1:11..5:15)`"
-        )
+        );
     }
 
     #[test]
@@ -147,6 +147,6 @@ mod tests {
         let e1: ParseError<'_, BytePosition> = ParseError::IllegalState("uh oh".to_string());
 
         let e2 = e1.map_loc(|x| x);
-        assert_eq!(e2.to_string(), "Illegal State: uh oh")
+        assert_eq!(e2.to_string(), "Illegal State: uh oh");
     }
 }

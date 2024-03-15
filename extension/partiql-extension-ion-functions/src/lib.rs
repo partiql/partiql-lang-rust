@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 use ion_rs::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
@@ -220,7 +221,10 @@ mod tests {
 
         let parsed = parse(statement);
         let lowered = lower(&catalog, &parsed.expect("parse"));
-        let bindings = env.as_ref().map(|e| (e).into()).unwrap_or_default();
+        let bindings = env
+            .as_ref()
+            .map(std::convert::Into::into)
+            .unwrap_or_default();
         let out = evaluate(&catalog, lowered, bindings);
 
         assert!(out.is_bag());

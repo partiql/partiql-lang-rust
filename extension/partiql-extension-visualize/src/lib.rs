@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 #[cfg(feature = "visualize-dot")]
 mod ast_to_dot;

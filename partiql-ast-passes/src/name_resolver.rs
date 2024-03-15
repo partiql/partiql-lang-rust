@@ -157,8 +157,7 @@ impl<'c> NameResolver<'c> {
         let is_qnode = |typ, id| {
             self.enclosing_clause
                 .get(&typ)
-                .map(|nodes| nodes.contains(id))
-                .unwrap_or(false)
+                .is_some_and(|nodes| nodes.contains(id))
         };
         for id in self.id_path_to_root.iter().rev() {
             if is_qnode(EnclosingClause::Query, id) {
@@ -252,7 +251,11 @@ impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
             produce_optional,
         } = keyrefs;
         let mut produce: Names = produce_required;
-        produce.extend(produce_optional.iter().flat_map(|sym| sym.to_owned()));
+        produce.extend(
+            produce_optional
+                .iter()
+                .filter_map(std::borrow::ToOwned::to_owned),
+        );
 
         let schema = KeySchema { consume, produce };
 
@@ -412,7 +415,7 @@ impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
         {
             self.errors.push(AstTransformError::IllegalState(
                 "group_key expects a FromLet enclosing clause".to_string(),
-            ))
+            ));
         }
 
         self.enclosing_clause

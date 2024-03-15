@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 
 use itertools::Itertools;
 use std::collections::BTreeSet;
@@ -187,7 +188,7 @@ impl Display for TypeKind {
             TypeKind::AnyOf(anyof) => {
                 format!(
                     "AnyOf({})",
-                    anyof.types.iter().map(|pt| pt.kind()).join(",")
+                    anyof.types.iter().map(PartiqlType::kind).join(",")
                 )
             }
             TypeKind::Null => "Null".to_string(),
@@ -217,7 +218,7 @@ impl Display for TypeKind {
             TypeKind::Array(_) => "Array".to_string(),
             TypeKind::Undefined => "Undefined".to_string(),
         };
-        write!(f, "{}", x)
+        write!(f, "{x}")
     }
 }
 
@@ -239,22 +240,27 @@ pub const TYPE_NUMERIC_TYPES: [PartiqlType; 4] = [TYPE_INT, TYPE_REAL, TYPE_DOUB
 
 #[allow(dead_code)]
 impl PartiqlType {
+    #[must_use]
     pub const fn new(kind: TypeKind) -> PartiqlType {
         PartiqlType(kind)
     }
 
+    #[must_use]
     pub fn new_any() -> PartiqlType {
         PartiqlType(TypeKind::Any)
     }
 
+    #[must_use]
     pub fn new_struct(s: StructType) -> PartiqlType {
         PartiqlType(TypeKind::Struct(s))
     }
 
+    #[must_use]
     pub fn new_bag(b: BagType) -> PartiqlType {
         PartiqlType(TypeKind::Bag(b))
     }
 
+    #[must_use]
     pub fn new_array(a: ArrayType) -> PartiqlType {
         PartiqlType(TypeKind::Array(a))
     }
@@ -274,6 +280,7 @@ impl PartiqlType {
         }
     }
 
+    #[must_use]
     pub fn union_with(self, other: PartiqlType) -> PartiqlType {
         match (self.0, other.0) {
             (TypeKind::Any, _) | (_, TypeKind::Any) => PartiqlType::new(TypeKind::Any),
@@ -292,44 +299,54 @@ impl PartiqlType {
         }
     }
 
+    #[must_use]
     pub fn is_string(&self) -> bool {
         matches!(&self, PartiqlType(TypeKind::String))
     }
 
+    #[must_use]
     pub fn kind(&self) -> &TypeKind {
         &self.0
     }
 
+    #[must_use]
     pub fn is_struct(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Struct(_)))
     }
 
+    #[must_use]
     pub fn is_collection(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Bag(_)))
             || matches!(*self, PartiqlType(TypeKind::Array(_)))
     }
 
+    #[must_use]
     pub fn is_unordered_collection(&self) -> bool {
         !self.is_ordered_collection()
     }
 
+    #[must_use]
     pub fn is_ordered_collection(&self) -> bool {
         // TODO Add Sexp when added
         matches!(*self, PartiqlType(TypeKind::Array(_)))
     }
 
+    #[must_use]
     pub fn is_bag(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Bag(_)))
     }
 
+    #[must_use]
     pub fn is_array(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Array(_)))
     }
 
+    #[must_use]
     pub fn is_any(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Any))
     }
 
+    #[must_use]
     pub fn is_undefined(&self) -> bool {
         matches!(*self, PartiqlType(TypeKind::Undefined))
     }
@@ -342,6 +359,7 @@ pub struct AnyOf {
 }
 
 impl AnyOf {
+    #[must_use]
     pub const fn new(types: BTreeSet<PartiqlType>) -> Self {
         AnyOf { types }
     }
@@ -366,16 +384,19 @@ pub struct StructType {
 }
 
 impl StructType {
+    #[must_use]
     pub fn new(constraints: BTreeSet<StructConstraint>) -> Self {
         StructType { constraints }
     }
 
+    #[must_use]
     pub fn new_any() -> Self {
         StructType {
             constraints: Default::default(),
         }
     }
 
+    #[must_use]
     pub fn fields(&self) -> Vec<StructField> {
         self.constraints
             .iter()
@@ -389,10 +410,12 @@ impl StructType {
             .collect()
     }
 
+    #[must_use]
     pub fn is_partial(&self) -> bool {
         !self.is_closed()
     }
 
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.constraints.contains(&StructConstraint::Open(false))
     }
@@ -416,6 +439,7 @@ pub struct StructField {
 }
 
 impl StructField {
+    #[must_use]
     pub fn new(name: &str, ty: PartiqlType) -> Self {
         StructField {
             name: name.to_string(),
@@ -423,10 +447,12 @@ impl StructField {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
+    #[must_use]
     pub fn ty(&self) -> &PartiqlType {
         &self.ty
     }
@@ -448,14 +474,17 @@ pub struct BagType {
 }
 
 impl BagType {
+    #[must_use]
     pub fn new_any() -> Self {
         BagType::new(Box::new(PartiqlType(TypeKind::Any)))
     }
 
+    #[must_use]
     pub fn new(typ: Box<PartiqlType>) -> Self {
         BagType { element_type: typ }
     }
 
+    #[must_use]
     pub fn element_type(&self) -> &PartiqlType {
         &self.element_type
     }
@@ -470,14 +499,17 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
+    #[must_use]
     pub fn new_any() -> Self {
         ArrayType::new(Box::new(PartiqlType(TypeKind::Any)))
     }
 
+    #[must_use]
     pub fn new(typ: Box<PartiqlType>) -> Self {
         ArrayType { element_type: typ }
     }
 
+    #[must_use]
     pub fn element_type(&self) -> &PartiqlType {
         &self.element_type
     }

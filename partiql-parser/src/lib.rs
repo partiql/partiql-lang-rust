@@ -1,4 +1,5 @@
 #![deny(rust_2018_idioms)]
+#![deny(clippy::all)]
 // Copyright Amazon.com, Inc. or its affiliates.
 
 //! Provides a parser for the [PartiQL][partiql] query language.
@@ -35,22 +36,22 @@ use partiql_source_map::metadata::LocationMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// [`std::error::Error`] type for errors in the lexical structure for the PartiQL parser.
+/// [`std::error::Error`] type for errors in the lexical structure for the `PartiQL` parser.
 pub type LexicalError<'input> = error::LexError<'input>;
 
-/// [`std::error::Error`] type for errors in the syntactic structure for the PartiQL parser.
+/// [`std::error::Error`] type for errors in the syntactic structure for the `PartiQL` parser.
 pub type ParseError<'input> = error::ParseError<'input, BytePosition>;
 
-/// General [`Result`] type for the PartiQL [`Parser`].
+/// General [`Result`] type for the `PartiQL` [`Parser`].
 pub type ParserResult<'input> = Result<Parsed<'input>, ParserError<'input>>;
 
-/// A PartiQL parser from statement strings to AST.
+/// A `PartiQL` parser from statement strings to AST.
 #[non_exhaustive]
 #[derive(Debug, Default)]
 pub struct Parser {}
 
 impl Parser {
-    /// Parse a PartiQL statement into an AST.
+    /// Parse a `PartiQL` statement into an AST.
     pub fn parse<'input>(&self, text: &'input str) -> ParserResult<'input> {
         match parse_partiql(text) {
             Ok(AstData {
@@ -72,7 +73,7 @@ impl Parser {
     }
 }
 
-/// The output of parsing PartiQL statement strings: an AST and auxiliary data.
+/// The output of parsing `PartiQL` statement strings: an AST and auxiliary data.
 #[non_exhaustive]
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -84,7 +85,7 @@ pub struct Parsed<'input> {
     pub locations: LocationMap,
 }
 
-/// The output of errors when parsing PartiQL statement strings: an errors and auxiliary data.
+/// The output of errors when parsing `PartiQL` statement strings: an errors and auxiliary data.
 #[non_exhaustive]
 #[allow(dead_code)]
 #[derive(Debug)]

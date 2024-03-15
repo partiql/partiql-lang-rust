@@ -59,7 +59,7 @@ pub(crate) struct FnExpr<'a> {
 }
 
 mod built_ins {
-    use super::*;
+    use super::{FnExpr, FnExprArgMatch, Token};
     use regex::Regex;
 
     use FnExprArgMatch::{
@@ -272,7 +272,7 @@ impl<'input, 'tracker> PreprocessingPartiqlLexer<'input, 'tracker>
 where
     'input: 'tracker,
 {
-    /// Creates a new PartiQL lexer over `input` text.
+    /// Creates a new `PartiQL` lexer over `input` text.
     #[inline]
     pub fn new(
         input: &'input str,
@@ -294,7 +294,7 @@ where
             self.buff.pop_front()
         } else {
             match self.parser.consume() {
-                Some(Ok(_)) => match self.parser.flush_1() {
+                Some(Ok(())) => match self.parser.flush_1() {
                     None => None,
                     Some(token) => {
                         let (tok, buffered) = self.parse_fn_expr(token, 0);
@@ -323,20 +323,18 @@ where
         (tok, _): BufferedToken<'input>,
         next_idx: usize,
     ) -> (SpannedToken<'input>, Option<SpannedTokenVec<'input>>) {
-        match tok {
-            (_, Token::UnquotedIdent(id), _) | (_, Token::QuotedIdent(id), _) => {
-                if let Some(((_, Token::OpenParen, _), _)) = self.parser.peek_n(next_idx) {
-                    if let Some(fn_expr) = self.fn_exprs.find(id) {
-                        let replacement = match self.rewrite_fn_expr(fn_expr) {
-                            Ok(rewrites) => rewrites,
-                            Err(_err) => self.parser.flush().into_iter().map(|(t, _)| t).collect(),
-                        };
-                        return (tok, Some(replacement));
-                    }
+        if let (_, Token::UnquotedIdent(id) | Token::QuotedIdent(id), _) = tok {
+            if let Some(((_, Token::OpenParen, _), _)) = self.parser.peek_n(next_idx) {
+                if let Some(fn_expr) = self.fn_exprs.find(id) {
+                    let replacement = match self.rewrite_fn_expr(fn_expr) {
+                        Ok(rewrites) => rewrites,
+                        Err(_err) => self.parser.flush().into_iter().map(|(t, _)| t).collect(),
+                    };
+                    return (tok, Some(replacement));
                 }
             }
-            _ => (),
         }
+
         (tok, None)
     }
 
@@ -436,10 +434,10 @@ where
         }
 
         // Get the first successful matching pattern's substitutions
-        let pattern = patterns
-            .into_iter()
-            .filter_map(|(args, subs)| if args.len() == 1 { Some(subs) } else { None })
-            .next();
+        let pattern =
+            patterns
+                .into_iter()
+                .find_map(|(args, subs)| if args.len() == 1 { Some(subs) } else { None });
 
         // Rewrite the consumed tokens as per the substitution list
         match pattern {
@@ -503,7 +501,7 @@ where
         is_init_arg: bool,
         matchers: &[FnExprArgMatch<'input>],
     ) -> ArgMatch<'input> {
-        use FnExprArgMatch::*;
+        use FnExprArgMatch::{AnyOne, AnyZeroOrMore, Match, NamedArgId, NamedArgKw, Synthesize};
 
         match (&matchers[0], tok) {
             (AnyZeroOrMore(_), _) if is_nested => ArgMatch::Consume(0),
@@ -587,7 +585,7 @@ where
 
         // insert final ')'
         if let Some(t) = toks.pop().map(|(t, _)| t) {
-            rewrite.push(t)
+            rewrite.push(t);
         }
 
         rewrite
@@ -602,7 +600,7 @@ where
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next().map(|res| res.map_err(|e| e.into()))
+        self.next().map(|res| res.map_err(std::convert::Into::into))
     }
 }
 
@@ -722,30 +720,30 @@ mod tests {
             to_tokens(lexer)
         }
         assert_eq!(
-            preprocess(r#"trim(both from missing)"#)?,
+            preprocess(r"trim(both from missing)")?,
             lex(r#"trim(both: ' ', "from": missing)"#)?
         );
 
         // Valid, but missing final paren
         assert_eq!(
-            preprocess(r#"substring('FooBar' from 2 for 3"#)?,
+            preprocess(r"substring('FooBar' from 2 for 3")?,
             lex(r#"substring('FooBar', "from": 2, "for": 3"#)?
         );
 
         assert_eq!(
-            preprocess(r#"trim(LEADING 'Foo' from 'FooBar')"#)?,
+            preprocess(r"trim(LEADING 'Foo' from 'FooBar')")?,
             lex(r#"trim(LEADING : 'Foo', "from" : 'FooBar')"#)?
         );
 
         assert_eq!(
-            preprocess(r#"trim(LEADING /*blah*/ 'Foo' from 'FooBar')"#)?,
+            preprocess(r"trim(LEADING /*blah*/ 'Foo' from 'FooBar')")?,
             lex(r#"trim(LEADING : /*blah*/ 'Foo', "from" : 'FooBar')"#)?
         );
 
         assert_eq!(
             preprocess(
-                r#"trim(LEADING --blah
-                                             'Foo' from 'FooBar')"#
+                r"trim(LEADING --blah
+                                             'Foo' from 'FooBar')"
             )?,
             lex(r#"trim(LEADING : --blah
                                          'Foo', "from" : 'FooBar')"#)?
@@ -753,202 +751,200 @@ mod tests {
 
         // Trim Specification in all 3 spots
         assert_eq!(
-            preprocess(r#"trim(BOTH TrAiLiNg from TRAILING)"#)?,
+            preprocess(r"trim(BOTH TrAiLiNg from TRAILING)")?,
             lex(r#"trim(BOTH : TrAiLiNg, "from" : TRAILING)"#)?
         );
 
         // Trim specification in 1st and 2nd spot
         assert_eq!(
-            preprocess(r#"trim(LEADING LEADING from 'FooBar')"#)?,
+            preprocess(r"trim(LEADING LEADING from 'FooBar')")?,
             lex(r#"trim(LEADING : LEADING, "from" : 'FooBar')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(LEADING TrAiLiNg from 'FooBar')"#)?,
+            preprocess(r"trim(LEADING TrAiLiNg from 'FooBar')")?,
             lex(r#"trim(LEADING : TrAiLiNg, "from" : 'FooBar')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(tRaIlInG TrAiLiNg from 'FooBar')"#)?,
+            preprocess(r"trim(tRaIlInG TrAiLiNg from 'FooBar')")?,
             lex(r#"trim(tRaIlInG : TrAiLiNg, "from" : 'FooBar')"#)?
         );
 
         // Trim specification in 1st and 3rd spot
         assert_eq!(
-            preprocess(r#"trim(LEADING 'Foo' from leaDing)"#)?,
+            preprocess(r"trim(LEADING 'Foo' from leaDing)")?,
             lex(r#"trim(LEADING : 'Foo', "from" : leaDing)"#)?
         );
 
         // Trim Specification (quoted) in 2nd and 3rd spot
         assert_eq!(
-            preprocess(r#"trim('LEADING' from leaDing)"#)?,
+            preprocess(r"trim('LEADING' from leaDing)")?,
             lex(r#"trim('LEADING', "from" : leaDing)"#)?
         );
 
         // Trim Specification in 3rd spot only
         assert_eq!(
-            preprocess(r#"trim('a' from leaDing)"#)?,
+            preprocess(r"trim('a' from leaDing)")?,
             lex(r#"trim('a', "from" : leaDing)"#)?
         );
 
         assert_eq!(
-            preprocess(r#"trim(leading from '   Bar')"#)?,
+            preprocess(r"trim(leading from '   Bar')")?,
             lex(r#"trim(leading : ' ',  "from" : '   Bar')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(TrAiLiNg 'Bar' from 'FooBar')"#)?,
+            preprocess(r"trim(TrAiLiNg 'Bar' from 'FooBar')")?,
             lex(r#"trim(TrAiLiNg : 'Bar',  "from" : 'FooBar')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(TRAILING from 'Bar   ')"#)?,
+            preprocess(r"trim(TRAILING from 'Bar   ')")?,
             lex(r#"trim(TRAILING: ' ', "from": 'Bar   ')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(BOTH 'Foo' from 'FooBarBar')"#)?,
+            preprocess(r"trim(BOTH 'Foo' from 'FooBarBar')")?,
             lex(r#"trim(BOTH: 'Foo', "from": 'FooBarBar')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(botH from '   Bar   ')"#)?,
+            preprocess(r"trim(botH from '   Bar   ')")?,
             lex(r#"trim(botH: ' ', "from": '   Bar   ')"#)?
         );
         assert_eq!(
-            preprocess(r#"trim(from '   Bar   ')"#)?,
+            preprocess(r"trim(from '   Bar   ')")?,
             lex(r#"trim("from": '   Bar   ')"#)?
         );
 
         assert_eq!(
-            preprocess(r#"position('o' in 'foo')"#)?,
+            preprocess(r"position('o' in 'foo')")?,
             lex(r#"position('o', "in" : 'foo')"#)?
         );
 
         assert_eq!(
-            preprocess(r#"substring('FooBar' from 2 for 3)"#)?,
+            preprocess(r"substring('FooBar' from 2 for 3)")?,
             lex(r#"substring('FooBar', "from": 2, "for": 3)"#)?
         );
         assert_eq!(
-            preprocess(r#"substring('FooBar' from 2)"#)?,
+            preprocess(r"substring('FooBar' from 2)")?,
             lex(r#"substring('FooBar', "from": 2)"#)?
         );
         assert_eq!(
-            preprocess(r#"substring('FooBar' for 3)"#)?,
+            preprocess(r"substring('FooBar' for 3)")?,
             lex(r#"substring('FooBar', "for": 3)"#)?
         );
         assert_eq!(
-            preprocess(r#"substring('FooBar',1,3)"#)?,
-            lex(r#"substring('FooBar', 1,3)"#)?
+            preprocess(r"substring('FooBar',1,3)")?,
+            lex(r"substring('FooBar', 1,3)")?
         );
         assert_eq!(
-            preprocess(r#"substring('FooBar',3)"#)?,
-            lex(r#"substring('FooBar', 3)"#)?
+            preprocess(r"substring('FooBar',3)")?,
+            lex(r"substring('FooBar', 3)")?
         );
 
-        assert_eq!(preprocess(r#"CAST(9 AS b)"#)?, lex(r#"CAST(9, "AS": b)"#)?);
+        assert_eq!(preprocess(r"CAST(9 AS b)")?, lex(r#"CAST(9, "AS": b)"#)?);
         assert_eq!(
-            preprocess(r#"CAST(a AS VARCHAR)"#)?,
+            preprocess(r"CAST(a AS VARCHAR)")?,
             lex(r#"CAST(a, "AS": VARCHAR)"#)?
         );
         assert_eq!(
-            preprocess(r#"CAST(a AS VARCHAR(20))"#)?,
+            preprocess(r"CAST(a AS VARCHAR(20))")?,
             lex(r#"CAST(a, "AS": VARCHAR(20))"#)?
         );
         assert_eq!(
-            preprocess(r#"CAST(TRUE AS INTEGER)"#)?,
+            preprocess(r"CAST(TRUE AS INTEGER)")?,
             lex(r#"CAST(TRUE, "AS": INTEGER)"#)?
         );
         assert_eq!(
-            preprocess(r#"CAST( (4 in (1,2,3,4))  AS INTEGER)"#)?,
+            preprocess(r"CAST( (4 in (1,2,3,4))  AS INTEGER)")?,
             lex(r#"CAST( (4 in (1,2,3,4)) , "AS": INTEGER)"#)?
         );
         assert_eq!(
-            preprocess(r#"cast([1, 2] as INT)"#)?,
+            preprocess(r"cast([1, 2] as INT)")?,
             lex(r#"cast([1, 2] , "as": INT)"#)?
         );
         assert_eq!(
-            preprocess(r#"cast(<<1, 2>> as INT)"#)?,
+            preprocess(r"cast(<<1, 2>> as INT)")?,
             lex(r#"cast(<<1, 2>> , "as": INT)"#)?
         );
         assert_eq!(
-            preprocess(r#"cast({a:1} as INT)"#)?,
+            preprocess(r"cast({a:1} as INT)")?,
             lex(r#"cast({a:1} , "as": INT)"#)?
         );
 
         assert_eq!(
-            preprocess(r#"extract(timezone_minute from a)"#)?,
+            preprocess(r"extract(timezone_minute from a)")?,
             lex(r#"extract(timezone_minute:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(timezone_hour from a)"#)?,
+            preprocess(r"extract(timezone_hour from a)")?,
             lex(r#"extract(timezone_hour:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(year from a)"#)?,
+            preprocess(r"extract(year from a)")?,
             lex(r#"extract(year:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(month from a)"#)?,
+            preprocess(r"extract(month from a)")?,
             lex(r#"extract(month:True, "from" : a)"#)?
         );
 
         assert_eq!(
-            preprocess(r#"extract(day from a)"#)?,
+            preprocess(r"extract(day from a)")?,
             lex(r#"extract(day:True, "from" : a)"#)?
         );
 
         assert_eq!(
-            preprocess(r#"extract(day from day)"#)?,
+            preprocess(r"extract(day from day)")?,
             lex(r#"extract(day:True, "from" : day)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(hour from a)"#)?,
+            preprocess(r"extract(hour from a)")?,
             lex(r#"extract(hour:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(minute from a)"#)?,
+            preprocess(r"extract(minute from a)")?,
             lex(r#"extract(minute:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(second from a)"#)?,
+            preprocess(r"extract(second from a)")?,
             lex(r#"extract(second:True, "from" : a)"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(hour from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(hour from TIME WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(hour:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(minute from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(minute from TIME WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(minute:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(second from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(second from TIME WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(second:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(timezone_hour from TIME WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(timezone_hour from TIME WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(
                 r#"extract(timezone_hour:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#
             )?
         );
         assert_eq!(
-            preprocess(
-                r#"extract(timezone_minute from TIME WITH TIME ZONE '01:23:45.678-06:30')"#
-            )?,
+            preprocess(r"extract(timezone_minute from TIME WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(
                 r#"extract(timezone_minute:True, "from" : TIME WITH TIME ZONE '01:23:45.678-06:30')"#
             )?
         );
         assert_eq!(
-            preprocess(r#"extract(hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(hour:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(minute:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
-            preprocess(r#"extract(second from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?,
+            preprocess(r"extract(second from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')")?,
             lex(r#"extract(second:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#)?
         );
         assert_eq!(
             preprocess(
-                r#"extract(timezone_hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+                r"extract(timezone_hour from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"
             )?,
             lex(
                 r#"extract(timezone_hour:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
@@ -956,37 +952,37 @@ mod tests {
         );
         assert_eq!(
             preprocess(
-                r#"extract(timezone_minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
+                r"extract(timezone_minute from TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"
             )?,
             lex(
                 r#"extract(timezone_minute:True, "from" : TIME (2) WITH TIME ZONE '01:23:45.678-06:30')"#
             )?
         );
 
-        assert_eq!(preprocess(r#"count(a)"#)?, lex(r#"count(a)"#)?);
+        assert_eq!(preprocess(r"count(a)")?, lex(r"count(a)")?);
         assert_eq!(
-            preprocess(r#"count(DISTINCT a)"#)?,
+            preprocess(r"count(DISTINCT a)")?,
             lex(r#"count("DISTINCT": a)"#)?
         );
-        assert_eq!(preprocess(r#"count(all a)"#)?, lex(r#"count("all": a)"#)?);
-        let q_count_1 = r#"count(1)"#;
+        assert_eq!(preprocess(r"count(all a)")?, lex(r#"count("all": a)"#)?);
+        let q_count_1 = r"count(1)";
         assert_eq!(preprocess(q_count_1)?, lex(q_count_1)?);
-        let q_count_star = r#"count(*)"#;
+        let q_count_star = r"count(*)";
         assert_eq!(preprocess(q_count_star)?, lex(q_count_star)?);
 
-        assert_eq!(preprocess(r#"sum(a)"#)?, lex(r#"sum(a)"#)?);
+        assert_eq!(preprocess(r"sum(a)")?, lex(r"sum(a)")?);
         assert_eq!(
-            preprocess(r#"sum(DISTINCT a)"#)?,
+            preprocess(r"sum(DISTINCT a)")?,
             lex(r#"sum("DISTINCT": a)"#)?
         );
-        assert_eq!(preprocess(r#"sum(all a)"#)?, lex(r#"sum("all": a)"#)?);
-        let q_sum_1 = r#"sum(1)"#;
+        assert_eq!(preprocess(r"sum(all a)")?, lex(r#"sum("all": a)"#)?);
+        let q_sum_1 = r"sum(1)";
         assert_eq!(preprocess(q_sum_1)?, lex(q_sum_1)?);
-        let q_sum_star = r#"sum(*)"#;
+        let q_sum_star = r"sum(*)";
         assert_eq!(preprocess(q_sum_star)?, lex(q_sum_star)?);
 
         assert_eq!(
-            preprocess(r#"COUNT(DISTINCT [1,1,1,1,2])"#)?,
+            preprocess(r"COUNT(DISTINCT [1,1,1,1,2])")?,
             lex(r#"COUNT("DISTINCT" : [1,1,1,1,2])"#)?
         );
 

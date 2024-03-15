@@ -38,7 +38,7 @@ impl BindEvalExpr for EvalExtractFn {
         #[inline]
         fn total_seconds(second: u8, nanosecond: u32) -> Value {
             const NANOSECOND_SCALE: u32 = 9;
-            let total = Duration::new(second as u64, nanosecond).as_nanos() as i128;
+            let total = Duration::new(u64::from(second), nanosecond).as_nanos() as i128;
             Decimal::from_i128_with_scale(total, NANOSECOND_SCALE).into()
         }
 

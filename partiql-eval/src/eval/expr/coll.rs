@@ -46,7 +46,7 @@ impl BindEvalExpr for EvalCollFn {
             F: Fn(ValueIter<'_>) -> Value + 'static,
         {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, move |value| {
-                value.sequence_iter().map(&f).unwrap_or(Missing)
+                value.sequence_iter().map_or(Missing, &f)
             })
         }
         let boolean_elems = [PartiqlType::any_of([

@@ -20,7 +20,7 @@ pub(crate) type SpannedResult<Tok, Loc, Broke> = Result<Spanned<Tok, Loc>, Spann
 ///
 /// Note:
 /// - The returned string includes the comment start (`/*`) and end (`*/`) tokens.
-/// - The returned ByteOffset span includes the comment start (`/*`) and end (`*/`) tokens.
+/// - The returned `ByteOffset` span includes the comment start (`/*`) and end (`*/`) tokens.
 type CommentStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse block comment
@@ -126,7 +126,7 @@ impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
 ///  Note:
 /// - The lexer parses the embedded ion value enclosed in backticks.
 /// - The returned string *does not* include the backticks
-/// - The returned ByteOffset span *does* include the backticks
+/// - The returned `ByteOffset` span *does* include the backticks
 type EmbeddedIonStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
 /// Tokens used to parse Ion literals embedded in backticks (\`)
@@ -202,7 +202,7 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
                             match comment_lexer.next_internal() {
                                 Some(Ok((s, _c, e))) => {
                                     self.tracker.append(&comment_tracker, embed.start.into());
-                                    self.lexer.bump((e - s).to_usize() - embed.len())
+                                    self.lexer.bump((e - s).to_usize() - embed.len());
                                 }
                                 Some(Err((s, err, e))) => {
                                     let offset: ByteOffset = embed.start.into();
@@ -254,7 +254,7 @@ impl<'input, 'tracker> Iterator for EmbeddedIonLexer<'input, 'tracker> {
     }
 }
 
-/// A lexer from PartiQL text strings to [`Token`]s
+/// A lexer from `PartiQL` text strings to [`Token`]s
 pub(crate) struct PartiqlLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'input, Token<'input>>,
@@ -276,7 +276,7 @@ impl<'input> From<Spanned<LexError<'input>, ByteOffset>> for ParseError<'input, 
 }
 
 impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
-    /// Creates a new PartiQL lexer over `input` text.
+    /// Creates a new `PartiQL` lexer over `input` text.
     #[inline]
     pub fn new(input: &'input str, tracker: &'tracker mut LineOffsetTracker) -> Self {
         PartiqlLexer {
@@ -382,7 +382,8 @@ impl<'input, 'tracker> Iterator for PartiqlLexer<'input, 'tracker> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_internal().map(|res| res.map_err(|e| e.into()))
+        self.next_internal()
+            .map(|res| res.map_err(std::convert::Into::into))
     }
 }
 
@@ -842,7 +843,7 @@ impl<'input, L> CommentSkippingLexer<'input, L>
 where
     L: Iterator<Item = LexResult<'input>>,
 {
-    /// Creates a new CommentSkippingLexer wrapping `lexer`
+    /// Creates a new `CommentSkippingLexer` wrapping `lexer`
     #[inline]
     pub fn new(lexer: L) -> Self {
         Self { lexer }
@@ -924,7 +925,7 @@ mod tests {
 
     #[test]
     fn ion_simple() {
-        let ion_value = r#"    `{'input':1,  'b':1}`--comment "#;
+        let ion_value = r"    `{'input':1,  'b':1}`--comment ";
 
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
@@ -1225,7 +1226,7 @@ mod tests {
         let error = toks.unwrap_err();
         assert_eq!(
             error.to_string(),
-            r##"Lexing error: invalid input `#` at `(b7..b8)`"##
+            r"Lexing error: invalid input `#` at `(b7..b8)`"
         );
         assert!(matches!(error,
             ParseError::LexicalError(Located {
@@ -1269,7 +1270,7 @@ mod tests {
 
     #[test]
     fn err_unterminated_comment() {
-        let query = r#" /*12345678"#;
+        let query = r" /*12345678";
         let mut offset_tracker = LineOffsetTracker::default();
         let toks: Result<Vec<_>, _> = PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
@@ -1296,7 +1297,7 @@ mod tests {
 
     #[test]
     fn err_unterminated_ion_comment() {
-        let query = r#" `/*12345678`"#;
+        let query = r" `/*12345678`";
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedIonLexer::new(query, &mut offset_tracker);
         let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = ion_lexer.collect();

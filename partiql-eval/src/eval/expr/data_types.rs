@@ -101,7 +101,7 @@ impl EvalExpr for EvalBagExpr {
     }
 }
 
-/// Represents a PartiQL evaluation `IS` operator, e.g. `a IS INT`.
+/// Represents a `PartiQL` evaluation `IS` operator, e.g. `a IS INT`.
 #[derive(Debug)]
 pub(crate) struct EvalIsTypeExpr {
     pub(crate) expr: Box<dyn EvalExpr>,
