@@ -1321,10 +1321,15 @@ impl EvalExpr for EvalSubQueryExpr {
             let nested_ctx: NestedContext<'_, '_> = NestedContext::new(bindings, ctx);
 
             let mut plan = self.plan.borrow_mut();
-            if let Ok(evaluated) = plan.execute_mut(&nested_ctx) {
-                evaluated.result
-            } else {
-                Missing
+
+            match plan.execute_mut(&nested_ctx) {
+                Ok(evaluated) => evaluated.result,
+                Err(err) => {
+                    for e in err.errors {
+                        ctx.add_error(e);
+                    }
+                    Missing
+                }
             }
         };
         Cow::Owned(value)

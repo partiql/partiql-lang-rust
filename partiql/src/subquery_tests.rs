@@ -4,15 +4,15 @@
 
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
-    use partiql_catalog::{Catalog, PartiqlCatalog};
     use partiql_catalog::context::SystemContext;
+    use partiql_catalog::{Catalog, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::error::EvalErr;
     use partiql_eval::eval::BasicContext;
     use partiql_eval::plan::EvaluationMode;
     use partiql_logical::{LogicalPlan, ProjectValue, VarRefType};
-    use partiql_value::{Bag, bag, BindingsName, DateTime, tuple, Value};
+    use partiql_value::{bag, tuple, Bag, BindingsName, DateTime, Value};
+    use std::any::Any;
 
     #[track_caller]
     #[inline]
@@ -73,7 +73,10 @@ mod tests {
 
         let project_value_op_id =
             plan.add_operator(partiql_logical::BindingsOp::ProjectValue(ProjectValue {
-                expr: partiql_logical::ValueExpr::VarRef(BindingsName::CaseSensitive("_1".into()), VarRefType::Local),
+                expr: partiql_logical::ValueExpr::VarRef(
+                    BindingsName::CaseSensitive("_1".into()),
+                    VarRefType::Local,
+                ),
             }));
         plan.add_flow(scan_op_id, project_value_op_id);
 
@@ -85,6 +88,7 @@ mod tests {
         let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
+        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]))
     }
 
     #[test]
@@ -112,7 +116,6 @@ mod tests {
         let sink_op_id = sub_query.add_operator(partiql_logical::BindingsOp::Sink);
         sub_query.add_flow(project_value_op_id, sink_op_id);
 
-
         let mut plan = LogicalPlan::new();
         let scan_op_id =
             plan.add_operator(partiql_logical::BindingsOp::Scan(partiql_logical::Scan {
@@ -125,7 +128,10 @@ mod tests {
 
         let project_value_op_id =
             plan.add_operator(partiql_logical::BindingsOp::ProjectValue(ProjectValue {
-                expr: partiql_logical::ValueExpr::VarRef(BindingsName::CaseSensitive("_1".into()), VarRefType::Local),
+                expr: partiql_logical::ValueExpr::VarRef(
+                    BindingsName::CaseSensitive("_1".into()),
+                    VarRefType::Local,
+                ),
             }));
         plan.add_flow(scan_op_id, project_value_op_id);
 
@@ -141,6 +147,6 @@ mod tests {
         let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
+        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]))
     }
 }
-

@@ -13,7 +13,7 @@ use petgraph::{Directed, Outgoing};
 
 use partiql_value::Value;
 
-use crate::env::basic::MapBindings;
+use crate::env::basic::{MapBindings, NestedBindings};
 
 use petgraph::graph::NodeIndex;
 
@@ -181,6 +181,7 @@ impl<'a> BasicContext<'a> {
         }
     }
 }
+
 impl<'a> SessionContext<'a> for BasicContext<'a> {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
@@ -195,6 +196,7 @@ impl<'a> SessionContext<'a> for BasicContext<'a> {
         self.user.get(&key).copied()
     }
 }
+
 impl<'a> EvalContext<'a> for BasicContext<'a> {
     fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
         self
@@ -215,12 +217,13 @@ impl<'a> EvalContext<'a> for BasicContext<'a> {
 
 #[derive(Debug)]
 pub struct NestedContext<'a, 'c> {
-    pub bindings: MapBindings<Value>,
+    pub bindings: NestedBindings<'a, Value>,
     pub parent: &'a dyn EvalContext<'c>,
 }
 
 impl<'a, 'c> NestedContext<'a, 'c> {
     pub fn new(bindings: MapBindings<Value>, parent: &'a dyn EvalContext<'c>) -> Self {
+        let bindings = NestedBindings::new(bindings, parent.bindings());
         NestedContext { bindings, parent }
     }
 }
