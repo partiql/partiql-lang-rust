@@ -39,6 +39,7 @@ mod tests {
 
     #[test]
     fn locals_in_subqueries() {
+        //  `SELECT VALUE _1 from (SELECT VALUE foo from <<{'a': 'b'}>> AS foo) AS _1;`
         let mut sub_query = partiql_logical::LogicalPlan::new();
         let scan_op_id =
             sub_query.add_operator(partiql_logical::BindingsOp::Scan(partiql_logical::Scan {
@@ -93,6 +94,8 @@ mod tests {
 
     #[test]
     fn globals_in_subqueries() {
+        //  `foo` is defined in global environment as `<<{'a': 'b'}>>`
+        //  `SELECT VALUE _1 FROM (SELECT VALUE foo FROM foo AS foo) AS _1;`
         let mut sub_query = partiql_logical::LogicalPlan::new();
         let scan_op_id =
             sub_query.add_operator(partiql_logical::BindingsOp::Scan(partiql_logical::Scan {
