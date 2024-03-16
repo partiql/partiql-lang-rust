@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Fixed
+
+## [0.7.1] - 2024-03-15
+### Changed
+
+### Added
+
+### Fixed
 - partiql-eval: Fixed propagation of errors in subqueries to outer query
 - partiql-eval: Fixed handling of nested binding environments in subqueries
 
@@ -220,7 +227,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.0
 [0.7.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.0
 [0.6.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.6.0
 [0.5.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.5.0
