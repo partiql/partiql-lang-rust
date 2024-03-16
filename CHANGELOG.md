@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Fixed
+- partiql-eval: Fixed propagation of errors in subqueries to outer query
+- partiql-eval: Fixed handling of nested binding environments in subqueries
 
 ## [0.7.0] - 2024-03-12
 ### Changed

@@ -96,6 +96,33 @@ pub mod basic {
             }
         }
     }
+
+    #[derive(Debug)]
+    pub struct NestedBindings<'a, T>
+    where
+        T: Debug,
+    {
+        bindings: MapBindings<T>,
+        parent: &'a dyn Bindings<T>,
+    }
+
+    impl<'a, T> NestedBindings<'a, T>
+    where
+        T: Debug,
+    {
+        pub fn new(bindings: MapBindings<T>, parent: &'a dyn Bindings<T>) -> Self {
+            Self { bindings, parent }
+        }
+    }
+
+    impl<'a, T> Bindings<T> for NestedBindings<'a, T>
+    where
+        T: Debug,
+    {
+        fn get(&self, name: &BindingsName<'_>) -> Option<&T> {
+            self.bindings.get(name).or_else(|| self.parent.get(name))
+        }
+    }
 }
 
 #[cfg(test)]

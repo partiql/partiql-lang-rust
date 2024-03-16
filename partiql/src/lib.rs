@@ -1,6 +1,8 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
+mod subquery_tests;
+
 #[cfg(test)]
 mod tests {
     use partiql_ast_passes::error::AstTransformationError;

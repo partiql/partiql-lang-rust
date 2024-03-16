@@ -2,7 +2,10 @@ use partiql_value::{BindingsName, DateTime, Tuple, Value};
 use std::any::Any;
 use std::fmt::Debug;
 
-pub trait Bindings<T>: Debug {
+pub trait Bindings<T>: Debug
+where
+    T: Debug,
+{
     fn get(&self, name: &BindingsName<'_>) -> Option<&T>;
 }
 
