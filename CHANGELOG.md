@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Fixed
+- Evaluation of logical ops (AND, OR, NOT) with `MISSING` argument
 
 ## [0.7.1] - 2024-03-15
 ### Changed

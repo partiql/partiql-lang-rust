@@ -80,15 +80,25 @@ impl BindEvalExpr for EvalOpUnary {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let any_num = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
-
-        let unop = |types, f: fn(&Value) -> Value| {
-            UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
-        };
+        type CheckNull<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateNull<true>>;
+        type CheckMissing<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
 
         match self {
-            EvalOpUnary::Pos => unop([any_num], std::clone::Clone::clone),
-            EvalOpUnary::Neg => unop([any_num], |operand| -operand),
-            EvalOpUnary::Not => unop([TYPE_BOOL], |operand| !operand),
+            EvalOpUnary::Pos => UnaryValueExpr::create_checked::<
+                { STRICT },
+                CheckMissing<STRICT>,
+                fn(&Value) -> Value,
+            >([any_num], args, std::clone::Clone::clone),
+            EvalOpUnary::Neg => UnaryValueExpr::create_checked::<
+                { STRICT },
+                CheckMissing<STRICT>,
+                fn(&Value) -> Value,
+            >([any_num], args, |operand| -operand),
+            EvalOpUnary::Not => UnaryValueExpr::create_checked::<
+                { STRICT },
+                CheckNull<STRICT>,
+                fn(&Value) -> Value,
+            >([TYPE_BOOL], args, |operand| !operand),
         }
     }
 }
@@ -138,7 +148,7 @@ impl<const TARGET: bool, OnMissing: ArgShortCircuit> ArgChecker
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
         match arg.borrow() {
             Boolean(b) if b == &TARGET => ArgCheckControlFlow::ShortCircuit(Value::Boolean(*b)),
-            Missing => ArgCheckControlFlow::ShortCircuit(OnMissing::propagate()),
+            Missing => ArgCheckControlFlow::Propagate(OnMissing::propagate()),
             Null => ArgCheckControlFlow::Propagate(Null),
             _ => ArgCheckControlFlow::Continue(arg),
         }

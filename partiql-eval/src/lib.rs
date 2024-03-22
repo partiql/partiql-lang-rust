@@ -23,7 +23,8 @@ mod tests {
     use crate::plan::EvaluationMode;
     use partiql_logical::{
         BagExpr, BetweenExpr, BinaryOp, BindingsOp, CoalesceExpr, ExprQuery, IsTypeExpr, JoinKind,
-        ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, ValueExpr, VarRefType,
+        ListExpr, LogicalPlan, NullIfExpr, PathComponent, TupleExpr, Type, UnaryOp, ValueExpr,
+        VarRefType,
     };
     use partiql_value as value;
     use partiql_value::Value::{Missing, Null};
@@ -641,9 +642,23 @@ mod tests {
     }
 
     #[test]
-    fn and_or_null() {
+    fn logical_ops() {
         #[track_caller]
-        fn eval_to_null(op: BinaryOp, lhs: Value, rhs: Value) {
+        fn eval_unary(op: UnaryOp, expr: Value, expected: Value) {
+            let mut plan = LogicalPlan::new();
+            let expq = plan.add_operator(BindingsOp::ExprQuery(ExprQuery {
+                expr: ValueExpr::UnExpr(op, Box::new(ValueExpr::Lit(Box::new(expr)))),
+            }));
+
+            let sink = plan.add_operator(BindingsOp::Sink);
+            plan.add_flow(expq, sink);
+
+            let actual = evaluate(plan, MapBindings::default());
+            assert_eq!(expected, actual);
+        }
+
+        #[track_caller]
+        fn eval_binary(op: BinaryOp, lhs: Value, rhs: Value, expected: Value) {
             let mut plan = LogicalPlan::new();
             let expq = plan.add_operator(BindingsOp::ExprQuery(ExprQuery {
                 expr: ValueExpr::BinaryExpr(
@@ -656,18 +671,175 @@ mod tests {
             let sink = plan.add_operator(BindingsOp::Sink);
             plan.add_flow(expq, sink);
 
-            let result = evaluate(plan, MapBindings::default());
-            assert_eq!(result, Value::Null);
+            let actual = evaluate(plan, MapBindings::default());
+            assert_eq!(expected, actual);
         }
 
-        eval_to_null(BinaryOp::And, Value::Null, Value::Boolean(true));
-        eval_to_null(BinaryOp::And, Value::Missing, Value::Boolean(true));
-        eval_to_null(BinaryOp::And, Value::Boolean(true), Value::Null);
-        eval_to_null(BinaryOp::And, Value::Boolean(true), Value::Missing);
-        eval_to_null(BinaryOp::Or, Value::Null, Value::Boolean(false));
-        eval_to_null(BinaryOp::Or, Value::Missing, Value::Boolean(false));
-        eval_to_null(BinaryOp::Or, Value::Boolean(false), Value::Null);
-        eval_to_null(BinaryOp::Or, Value::Boolean(false), Value::Missing);
+        // NOT bools only
+        eval_unary(UnaryOp::Not, Value::Boolean(true), Value::Boolean(false));
+        eval_unary(UnaryOp::Not, Value::Boolean(false), Value::Boolean(true));
+        // NOT null propagation
+        eval_unary(UnaryOp::Not, Value::Null, Value::Null);
+        eval_unary(UnaryOp::Not, Value::Missing, Value::Null);
+
+        // AND/OR bools only
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(true),
+            Value::Boolean(true),
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(false),
+            Value::Boolean(true),
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(true),
+            Value::Boolean(false),
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(true),
+            Value::Boolean(true),
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(true),
+            Value::Boolean(false),
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(false),
+            Value::Boolean(true),
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(false),
+            Value::Boolean(false),
+            Value::Boolean(false),
+        );
+
+        // AND/OR short circuit
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(false),
+            Value::Null,
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(false),
+            Value::Missing,
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Null,
+            Value::Boolean(false),
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Missing,
+            Value::Boolean(false),
+            Value::Boolean(false),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(true),
+            Value::Null,
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(true),
+            Value::Missing,
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Null,
+            Value::Boolean(true),
+            Value::Boolean(true),
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Missing,
+            Value::Boolean(true),
+            Value::Boolean(true),
+        );
+
+        // AND/OR propagate null
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(true),
+            Value::Null,
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Boolean(true),
+            Value::Missing,
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Null,
+            Value::Boolean(true),
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::And,
+            Value::Missing,
+            Value::Boolean(true),
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(false),
+            Value::Null,
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Boolean(false),
+            Value::Missing,
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Null,
+            Value::Boolean(false),
+            Value::Null,
+        );
+        eval_binary(
+            BinaryOp::Or,
+            Value::Missing,
+            Value::Boolean(false),
+            Value::Null,
+        );
+
+        eval_binary(BinaryOp::And, Value::Null, Value::Null, Value::Null);
+        eval_binary(BinaryOp::And, Value::Null, Value::Missing, Value::Null);
+        eval_binary(BinaryOp::And, Value::Missing, Value::Null, Value::Null);
+        eval_binary(BinaryOp::And, Value::Missing, Value::Missing, Value::Null);
+        eval_binary(BinaryOp::Or, Value::Null, Value::Null, Value::Null);
+        eval_binary(BinaryOp::Or, Value::Null, Value::Missing, Value::Null);
+        eval_binary(BinaryOp::Or, Value::Missing, Value::Null, Value::Null);
+        eval_binary(BinaryOp::Or, Value::Missing, Value::Missing, Value::Null);
     }
 
     #[test]
