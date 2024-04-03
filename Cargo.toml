@@ -2,34 +2,33 @@
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
 homepage = "https://github.com/partiql/partiql-lang-rust"
 repository = "https://github.com/partiql/partiql-lang-rust"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 
 [workspace]
 resolver = "2"
 
 members = [
-  "partiql",
-  "partiql-ast",
-  "partiql-ast/partiql-ast-macros",
-  "partiql-ast-passes",
-  "partiql-catalog",
-  "partiql-conformance-tests",
-  "partiql-conformance-test-generator",
-  "partiql-source-map",
-  "partiql-logical-planner",
-  "partiql-logical",
-  "partiql-eval",
-  "partiql-ir",
-  "partiql-irgen",
-  "partiql-parser",
-  "partiql-rewriter",
-  "partiql-types",
-  "partiql-value",
-
-  "extension/partiql-extension-ion",
-  "extension/partiql-extension-ion-functions",
-  "extension/partiql-extension-visualize",
+    "partiql",
+    "partiql-ast",
+    "partiql-ast/partiql-ast-macros",
+    "partiql-ast-passes",
+    "partiql-catalog",
+    "partiql-conformance-tests",
+    "partiql-conformance-test-generator",
+    "partiql-source-map",
+    "partiql-logical-planner",
+    "partiql-logical",
+    "partiql-eval",
+    "partiql-ir",
+    "partiql-irgen",
+    "partiql-parser",
+    "partiql-rewriter",
+    "partiql-types",
+    "partiql-value",
+    "extension/partiql-extension-ion",
+    "extension/partiql-extension-ion-functions",
+    "extension/partiql-extension-visualize",
 ]
 
 [profile.dev.build-override]

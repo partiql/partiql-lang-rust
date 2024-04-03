@@ -109,7 +109,7 @@ macro_rules! r#struct {
 #[macro_export]
 macro_rules! struct_fields {
     ($(($x:expr, $y:expr)),+ $(,)?) => (
-        $crate::StructConstraint::Fields(vec![$(($x, $y).into()),+])
+        $crate::StructConstraint::Fields([$(($x, $y).into()),+].into())
     );
 }
 
@@ -397,14 +397,14 @@ impl StructType {
     }
 
     #[must_use]
-    pub fn fields(&self) -> Vec<StructField> {
+    pub fn fields(&self) -> BTreeSet<StructField> {
         self.constraints
             .iter()
             .flat_map(|c| {
                 if let StructConstraint::Fields(fields) = c.clone() {
                     fields
                 } else {
-                    vec![]
+                    Default::default()
                 }
             })
             .collect()
@@ -428,7 +428,7 @@ pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
     DuplicateAttrs(bool),
-    Fields(Vec<StructField>),
+    Fields(BTreeSet<StructField>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
