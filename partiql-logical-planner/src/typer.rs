@@ -202,18 +202,13 @@ impl<'c> PlanTyper<'c> {
                 }
             }
             BindingsOp::Project(partiql_logical::Project { exprs }) => {
-                let mut fields = vec![];
-                for (k, v) in exprs {
+                let fields = exprs.iter().map(|(k, v)| {
                     self.type_vexpr(v, LookupOrder::LocalGlobal);
-
-                    fields.push(StructField::new(
-                        k.as_str(),
-                        self.get_singleton_type_from_env(),
-                    ));
-                }
+                    StructField::new(k.as_str(), self.get_singleton_type_from_env())
+                });
 
                 let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
-                    StructConstraint::Fields(fields),
+                    StructConstraint::Fields(fields.collect()),
                 ])));
 
                 let derived_type_ctx = self.local_type_ctx();
@@ -598,11 +593,12 @@ mod tests {
             "SELECT customers.id, customers.name FROM customers",
             create_customer_schema(
                 false,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("age", any!()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("id", int!()),
@@ -617,11 +613,12 @@ mod tests {
             "SELECT id, customers.name FROM customers",
             create_customer_schema(
                 false,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("age", any!()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("id", int!()),
@@ -636,11 +633,12 @@ mod tests {
             "SELECT customers.id, customers.name, customers.age FROM customers",
             create_customer_schema(
                 true,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("age", any!()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("id", int!()),
@@ -655,10 +653,11 @@ mod tests {
             "SELECT customers.id, customers.name, customers.age FROM customers",
             create_customer_schema(
                 false,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("id", int!()),
@@ -677,11 +676,12 @@ mod tests {
             "SELECT customers.id, customers.name, customers.details.age FROM customers",
             create_customer_schema(
                 true,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("details", details.clone()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("id", int!()),
@@ -695,11 +695,11 @@ mod tests {
         assert_query_typing(
             TypingMode::Strict,
             "SELECT customers.id, customers.name, customers.details.age, customers.details.foo.bar FROM customers",
-            create_customer_schema(true,vec![
+            create_customer_schema(true, [
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
                 StructField::new("details", details.clone()),
-            ]),
+            ].into()),
             vec![
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
@@ -707,7 +707,7 @@ mod tests {
                 StructField::new("bar", any!()),
             ],
         )
-        .expect("Type");
+            .expect("Type");
     }
 
     #[test]
@@ -723,11 +723,12 @@ mod tests {
             "SELECT d.age FROM customers.details AS d",
             create_customer_schema(
                 true,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("details", details.clone()),
-                ],
+                ]
+                .into(),
             ),
             vec![StructField::new("age", int!())],
         )
@@ -739,11 +740,12 @@ mod tests {
             "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c",
             create_customer_schema(
                 false,
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("age", any!()),
-                ],
+                ]
+                .into(),
             ),
             vec![
                 StructField::new("my_id", int!()),
@@ -756,7 +758,7 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "id", ty: PartiqlType(Int) }, StructField { name: "name", ty: PartiqlType(String) }])} }))"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields({StructField { name: "id", ty: PartiqlType(Int) }, StructField { name: "name", ty: PartiqlType(String) }})} }))"#;
 
         assert_err(
             assert_query_typing(
@@ -764,10 +766,11 @@ mod tests {
                 "SELECT customers.id, customers.name, customers.age FROM customers",
                 create_customer_schema(
                     false,
-                    vec![
+                    [
                         StructField::new("id", int!()),
                         StructField::new("name", str!()),
-                    ],
+                    ]
+                    .into(),
                 ),
                 vec![],
             ),
@@ -776,11 +779,12 @@ mod tests {
                 // TypingError::IllegalState(err2.to_string()),
             ],
             Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("age", undefined!()),
                 ]
+                .into()
             ),])]]),
         );
 
@@ -791,7 +795,7 @@ mod tests {
             StructConstraint::Open(false)
         ])];
 
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields([StructField { name: "age", ty: PartiqlType(Int) }])} }))"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields({StructField { name: "age", ty: PartiqlType(Int) }})} }))"#;
         let err2 = r"Illegal Derive Type PartiqlType(Undefined)";
 
         assert_err(
@@ -800,11 +804,12 @@ mod tests {
                 "SELECT customers.id, customers.name, customers.details.bar FROM customers",
                 create_customer_schema(
                     false,
-                    vec![
+                    [
                         StructField::new("id", int!()),
                         StructField::new("name", str!()),
                         StructField::new("details", details),
-                    ],
+                    ]
+                    .into(),
                 ),
                 vec![],
             ),
@@ -813,11 +818,12 @@ mod tests {
                 TypingError::IllegalState(err2.to_string()),
             ],
             Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
-                vec![
+                [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
                     StructField::new("bar", undefined!()),
                 ]
+                .into()
             ),])]]),
         );
     }
@@ -836,14 +842,14 @@ mod tests {
                     e,
                     TypeErr {
                         errors: expected_errors,
-                        output
+                        output,
                     }
                 );
             }
         };
     }
 
-    fn create_customer_schema(is_open: bool, fields: Vec<StructField>) -> PartiqlType {
+    fn create_customer_schema(is_open: bool, fields: BTreeSet<StructField>) -> PartiqlType {
         bag![r#struct![BTreeSet::from([
             StructConstraint::Fields(fields),
             StructConstraint::Open(is_open)
@@ -856,6 +862,7 @@ mod tests {
         schema: PartiqlType,
         expected_fields: Vec<StructField>,
     ) -> Result<(), TypeErr> {
+        let expected_fields: BTreeSet<_> = expected_fields.into_iter().collect();
         let actual = type_query(mode, query, TypeEnvEntry::new("customers", &[], schema));
 
         match actual {

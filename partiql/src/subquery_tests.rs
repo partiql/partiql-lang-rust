@@ -89,7 +89,7 @@ mod tests {
         let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
-        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]))
+        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]));
     }
 
     #[test]
@@ -150,6 +150,6 @@ mod tests {
         let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
-        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]))
+        assert_eq!(res, Value::from(bag![tuple![("a", "b")]]));
     }
 }
