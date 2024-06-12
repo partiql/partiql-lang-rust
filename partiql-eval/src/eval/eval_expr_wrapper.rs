@@ -407,25 +407,25 @@ where
 impl UnaryValueExpr {
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_with_any<const STRICT: bool, F>(
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value) -> Value,
+        F: 'static + Fn(&Value) -> Value,
     {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 1], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_typed<const STRICT: bool, F>(
         types: [PartiqlType; 1],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value) -> Value,
+        F: 'static + Fn(&Value) -> Value,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
@@ -433,13 +433,13 @@ impl UnaryValueExpr {
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
+    pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
         types: [PartiqlType; 1],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value) -> Value,
+        F: 'static + Fn(&Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
         EvalExprWrapper::create_checked::<{ STRICT }, 1, ArgC>(Self::default(), types, args, f)
@@ -471,25 +471,25 @@ where
 impl BinaryValueExpr {
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_with_any<const STRICT: bool, F>(
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value) -> Value,
     {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 2], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_typed<const STRICT: bool, F>(
         types: [PartiqlType; 2],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value) -> Value,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
@@ -497,13 +497,13 @@ impl BinaryValueExpr {
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
+    pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
         types: [PartiqlType; 2],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
         EvalExprWrapper::create_checked::<{ STRICT }, 2, ArgC>(Self::default(), types, args, f)
@@ -535,25 +535,25 @@ where
 impl TernaryValueExpr {
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_with_any<const STRICT: bool, F>(
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value) -> Value,
     {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 3], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_typed<const STRICT: bool, F>(
         types: [PartiqlType; 3],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value) -> Value,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
@@ -561,13 +561,13 @@ impl TernaryValueExpr {
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
+    pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
         types: [PartiqlType; 3],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
         EvalExprWrapper::create_checked::<{ STRICT }, 3, ArgC>(Self::default(), types, args, f)
@@ -604,25 +604,25 @@ where
 impl QuaternaryValueExpr {
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_with_any<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_with_any<const STRICT: bool, F>(
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
     {
         Self::create_typed::<STRICT, F>([TYPE_ANY; 4], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_typed<const STRICT: bool, F: 'static>(
+    pub(crate) fn create_typed<const STRICT: bool, F>(
         types: [PartiqlType; 4],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
@@ -630,13 +630,13 @@ impl QuaternaryValueExpr {
 
     #[allow(dead_code)]
     #[inline]
-    pub(crate) fn create_checked<const STRICT: bool, ArgC, F: 'static>(
+    pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
         types: [PartiqlType; 4],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
     where
-        F: Fn(&Value, &Value, &Value, &Value) -> Value,
+        F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
         EvalExprWrapper::create_checked::<{ STRICT }, 4, ArgC>(Self::default(), types, args, f)

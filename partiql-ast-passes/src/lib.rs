@@ -9,4 +9,3 @@
 
 pub mod error;
 pub mod name_resolver;
-pub mod partiql_typer;
