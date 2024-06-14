@@ -18,20 +18,6 @@ macro_rules! any {
 }
 
 #[macro_export]
-macro_rules! null {
-    () => {
-        $crate::PartiqlType::new($crate::TypeKind::Null)
-    };
-}
-
-#[macro_export]
-macro_rules! missing {
-    () => {
-        $crate::PartiqlType::new($crate::TypeKind::Missing)
-    };
-}
-
-#[macro_export]
 macro_rules! int {
     () => {
         $crate::PartiqlType::new($crate::TypeKind::Int)
@@ -149,10 +135,6 @@ pub enum TypeKind {
     Any,
     AnyOf(AnyOf),
 
-    // Absent Types
-    Null,
-    Missing,
-
     // Scalar Types
     Int,
     Int8,
@@ -191,8 +173,6 @@ impl Display for TypeKind {
                     anyof.types.iter().map(PartiqlType::kind).join(",")
                 )
             }
-            TypeKind::Null => "Null".to_string(),
-            TypeKind::Missing => "Missing".to_string(),
             TypeKind::Int => "Int".to_string(),
             TypeKind::Int8 => "Int8".to_string(),
             TypeKind::Int16 => "Int16".to_string(),
@@ -223,8 +203,6 @@ impl Display for TypeKind {
 }
 
 pub const TYPE_ANY: PartiqlType = PartiqlType::new(TypeKind::Any);
-pub const TYPE_NULL: PartiqlType = PartiqlType::new(TypeKind::Null);
-pub const TYPE_MISSING: PartiqlType = PartiqlType::new(TypeKind::Missing);
 pub const TYPE_BOOL: PartiqlType = PartiqlType::new(TypeKind::Bool);
 pub const TYPE_INT: PartiqlType = PartiqlType::new(TypeKind::Int);
 pub const TYPE_INT8: PartiqlType = PartiqlType::new(TypeKind::Int8);

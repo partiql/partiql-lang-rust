@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING:* Removed `NULL` and `MISSING` types from `partiql_types::PartiQLType`
+- *BREAKING:* Removed `partiql_ast_passes::partiql_type`
 
 ### Added
 

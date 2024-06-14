@@ -4,8 +4,8 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    any, missing, null, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField,
-    StructType, TypeKind,
+    any, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField, StructType,
+    TypeKind,
 };
 use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
@@ -318,8 +318,8 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Lit(v) => {
                 let kind = match **v {
-                    Value::Null => TypeKind::Null,
-                    Value::Missing => TypeKind::Missing,
+                    Value::Null => TypeKind::Undefined,
+                    Value::Missing => TypeKind::Undefined,
                     Value::Integer(_) => TypeKind::Int,
                     Value::Decimal(_) => TypeKind::Decimal,
                     Value::Boolean(_) => TypeKind::Bool,
@@ -419,7 +419,7 @@ impl<'c> PlanTyper<'c> {
                 Some(any!())
             } else {
                 match &self.typing_mode {
-                    TypingMode::Permissive => Some(missing!()),
+                    TypingMode::Permissive => Some(undefined!()),
                     TypingMode::Strict => {
                         self.errors.push(TypingError::TypeCheck(format!(
                             "No Typing Information for {:?} in closed Schema {:?}",
@@ -512,7 +512,7 @@ impl<'c> PlanTyper<'c> {
         if let TypingMode::Permissive = &self.typing_mode {
             // TODO Revise this once the following discussion is conclusive and spec. is
             // in place: https://github.com/partiql/partiql-spec/discussions/64
-            let type_ctx = ty_ctx![(&ty_env![(key.clone(), null!())], &undefined!())];
+            let type_ctx = ty_ctx![(&ty_env![(key.clone(), undefined!())], &undefined!())];
 
             self.type_env_stack.push(type_ctx);
         }
@@ -662,7 +662,7 @@ mod tests {
             vec![
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
-                StructField::new("age", null!()),
+                StructField::new("age", undefined!()),
             ],
         )
         .expect("Type");
