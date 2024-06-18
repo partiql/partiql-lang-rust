@@ -4,8 +4,8 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    any, undefined, ArrayType, BagType, PartiqlType, StructConstraint, StructField, StructType,
-    TypeKind,
+    any, undefined, ArrayType, BagType, PartiqlShape, StructConstraint, StructField, StructType,
+    PartiqlType,
 };
 use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
@@ -33,7 +33,7 @@ const OUTPUT_SCHEMA_KEY: &str = "_output_schema";
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypeErr {
     pub errors: Vec<TypingError>,
-    pub output: Option<PartiqlType>,
+    pub output: Option<PartiqlShape>,
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
@@ -73,7 +73,7 @@ enum LookupOrder {
 struct TypeEnvContext {
     env: LocalTypeEnv,
     /// Represents the type that is used for creating the `env` in the [TypeEnvContext]
-    derived_type: PartiqlType,
+    derived_type: PartiqlShape,
 }
 
 #[allow(dead_code)]
@@ -86,7 +86,7 @@ impl TypeEnvContext {
         &self.env
     }
 
-    fn derived_type(&self) -> &PartiqlType {
+    fn derived_type(&self) -> &PartiqlShape {
         &self.derived_type
     }
 }
@@ -100,8 +100,8 @@ impl Default for TypeEnvContext {
     }
 }
 
-impl From<(&LocalTypeEnv, &PartiqlType)> for TypeEnvContext {
-    fn from(value: (&LocalTypeEnv, &PartiqlType)) -> Self {
+impl From<(&LocalTypeEnv, &PartiqlShape)> for TypeEnvContext {
+    fn from(value: (&LocalTypeEnv, &PartiqlShape)) -> Self {
         TypeEnvContext {
             env: value.0.clone(),
             derived_type: value.1.clone(),
@@ -110,7 +110,7 @@ impl From<(&LocalTypeEnv, &PartiqlType)> for TypeEnvContext {
 }
 
 /// Represents a Local Type Environment as opposed to the Global Type Environment in the Catalog.
-type LocalTypeEnv = IndexMap<SymbolPrimitive, PartiqlType>;
+type LocalTypeEnv = IndexMap<SymbolPrimitive, PartiqlShape>;
 
 #[derive(Debug, Clone)]
 pub struct PlanTyper<'c> {
@@ -120,7 +120,7 @@ pub struct PlanTyper<'c> {
     errors: Vec<TypingError>,
     type_env_stack: Vec<TypeEnvContext>,
     current_bindings_op: Option<BindingsOp>,
-    output: Option<PartiqlType>,
+    output: Option<PartiqlShape>,
 }
 
 #[allow(dead_code)]
@@ -152,7 +152,7 @@ impl<'c> PlanTyper<'c> {
     }
 
     /// Returns the typing result for the Typer
-    pub fn type_plan(&mut self) -> Result<PartiqlType, TypeErr> {
+    pub fn type_plan(&mut self) -> Result<PartiqlShape, TypeErr> {
         let ops = self.sort()?;
 
         for idx in ops {
@@ -192,7 +192,7 @@ impl<'c> PlanTyper<'c> {
                 if !as_key.is_empty() {
                     let type_ctx = &self.local_type_ctx();
                     for (_name, ty) in type_ctx.env() {
-                        if let TypeKind::Struct(_s) = ty.kind() {
+                        if let PartiqlType::Struct(_s) = ty.ty() {
                             self.type_env_stack.push(ty_ctx![(
                                 &ty_env![(string_to_sym(as_key.as_str()), ty.clone())],
                                 ty
@@ -207,16 +207,16 @@ impl<'c> PlanTyper<'c> {
                     StructField::new(k.as_str(), self.get_singleton_type_from_env())
                 });
 
-                let ty = PartiqlType::new_struct(StructType::new(BTreeSet::from([
+                let ty = PartiqlShape::new_struct(StructType::new(BTreeSet::from([
                     StructConstraint::Fields(fields.collect()),
                 ])));
 
                 let derived_type_ctx = self.local_type_ctx();
                 let derived_type = &self.derived_type(&derived_type_ctx);
                 let schema = if derived_type.is_ordered_collection() {
-                    PartiqlType::new_array(ArrayType::new(Box::new(ty)))
+                    PartiqlShape::new_array(ArrayType::new(Box::new(ty)))
                 } else if derived_type.is_unordered_collection() {
-                    PartiqlType::new_bag(BagType::new(Box::new(ty)))
+                    PartiqlShape::new_bag(BagType::new(Box::new(ty)))
                 } else {
                     self.errors.push(TypingError::IllegalState(format!(
                         "Expecting Collection for the output Schema but found {:?}",
@@ -318,24 +318,24 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Lit(v) => {
                 let kind = match **v {
-                    Value::Null => TypeKind::Undefined,
-                    Value::Missing => TypeKind::Undefined,
-                    Value::Integer(_) => TypeKind::Int,
-                    Value::Decimal(_) => TypeKind::Decimal,
-                    Value::Boolean(_) => TypeKind::Bool,
-                    Value::String(_) => TypeKind::String,
-                    Value::Tuple(_) => TypeKind::Struct(StructType::new_any()),
-                    Value::List(_) => TypeKind::Array(ArrayType::new_any()),
-                    Value::Bag(_) => TypeKind::Bag(BagType::new_any()),
+                    Value::Null => PartiqlType::Undefined,
+                    Value::Missing => PartiqlType::Undefined,
+                    Value::Integer(_) => PartiqlType::Int,
+                    Value::Decimal(_) => PartiqlType::Decimal,
+                    Value::Boolean(_) => PartiqlType::Bool,
+                    Value::String(_) => PartiqlType::String,
+                    Value::Tuple(_) => PartiqlType::Struct(StructType::new_any()),
+                    Value::List(_) => PartiqlType::Array(ArrayType::new_any()),
+                    Value::Bag(_) => PartiqlType::Bag(BagType::new_any()),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
                         ));
-                        TypeKind::Undefined
+                        PartiqlType::Undefined
                     }
                 };
 
-                let ty = PartiqlType::new(kind);
+                let ty = PartiqlShape::new(kind);
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
@@ -398,23 +398,23 @@ impl<'c> PlanTyper<'c> {
         Ok(graph)
     }
 
-    fn element_type<'a>(&'a mut self, ty: &'a PartiqlType) -> PartiqlType {
-        match ty.kind() {
-            TypeKind::Bag(b) => b.element_type().clone(),
-            TypeKind::Array(a) => a.element_type().clone(),
-            TypeKind::Any => any!(),
+    fn element_type<'a>(&'a mut self, ty: &'a PartiqlShape) -> PartiqlShape {
+        match ty.ty() {
+            PartiqlType::Bag(b) => b.element_type().clone(),
+            PartiqlType::Array(a) => a.element_type().clone(),
+            PartiqlType::Any => any!(),
             _ => ty.clone(),
         }
     }
 
-    fn retrieve_type_from_local_ctx(&mut self, key: &SymbolPrimitive) -> Option<PartiqlType> {
+    fn retrieve_type_from_local_ctx(&mut self, key: &SymbolPrimitive) -> Option<PartiqlShape> {
         let type_ctx = self.local_type_ctx();
         let env = type_ctx.env().clone();
         let derived_type = self.derived_type(&type_ctx);
 
         if let Some(ty) = env.get(key) {
             Some(ty.clone())
-        } else if let TypeKind::Struct(s) = derived_type.kind() {
+        } else if let PartiqlType::Struct(s) = derived_type.ty() {
             if s.is_partial() {
                 Some(any!())
             } else {
@@ -440,7 +440,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn derived_type(&mut self, ty_ctx: &TypeEnvContext) -> PartiqlType {
+    fn derived_type(&mut self, ty_ctx: &TypeEnvContext) -> PartiqlShape {
         let ty = ty_ctx.derived_type();
         ty.clone()
     }
@@ -473,7 +473,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+    fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlShape {
         let ty = self.resolve_global(key);
         match ty.is_undefined() {
             true => self.resolve_local(key),
@@ -481,7 +481,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn resolve_local_then_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+    fn resolve_local_then_global(&mut self, key: &SymbolPrimitive) -> PartiqlShape {
         let ty = self.resolve_local(key);
         match ty.is_undefined() {
             true => self.resolve_global(key),
@@ -489,7 +489,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn resolve_global(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+    fn resolve_global(&mut self, key: &SymbolPrimitive) -> PartiqlShape {
         if let Some(type_entry) = self.catalog.resolve_type(key.value.as_str()) {
             let ty = self.element_type(type_entry.ty());
             ty
@@ -498,7 +498,7 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn resolve_local(&mut self, key: &SymbolPrimitive) -> PartiqlType {
+    fn resolve_local(&mut self, key: &SymbolPrimitive) -> PartiqlShape {
         for type_ctx in self.type_env_stack.iter().rev() {
             if let Some(ty) = type_ctx.env().get(key) {
                 return ty.clone();
@@ -520,7 +520,7 @@ impl<'c> PlanTyper<'c> {
 
     // A helper function to extract one type out of the environment when we expect it.
     // E.g., in projections, when we expect to infer one type from the project list items.
-    fn get_singleton_type_from_env(&mut self) -> PartiqlType {
+    fn get_singleton_type_from_env(&mut self) -> PartiqlShape {
         let ctx = self.local_type_ctx();
         let env = ctx.env();
         if env.len() != 1 {
@@ -534,13 +534,13 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn type_varef(&mut self, key: &SymbolPrimitive, ty: &PartiqlType) {
+    fn type_varef(&mut self, key: &SymbolPrimitive, ty: &PartiqlShape) {
         if ty.is_undefined() {
             self.type_with_undefined(key);
         } else {
             let mut new_type_env = LocalTypeEnv::new();
-            if let TypeKind::Struct(s) = ty.kind() {
-                for b in to_bindings(s) {
+            if let PartiqlType::Struct(s) = ty.ty() {
+                for b in to_bindings(&s) {
                     new_type_env.insert(b.0, b.1);
                 }
 
@@ -562,7 +562,7 @@ fn string_to_sym(name: &str) -> SymbolPrimitive {
     }
 }
 
-fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlType)> {
+fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlShape)> {
     s.fields()
         .into_iter()
         .map(|field| {
@@ -647,6 +647,7 @@ mod tests {
             ],
         )
         .expect("Type");
+
         // Closed Schema with `Permissive` typing mode and `age` non-existent projection.
         assert_query_typing(
             TypingMode::Permissive,
@@ -704,7 +705,7 @@ mod tests {
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
                 StructField::new("age", int!()),
-                StructField::new("bar", any!()),
+                StructField::new("bar", undefined!()),
             ],
         )
             .expect("Type");
@@ -831,7 +832,7 @@ mod tests {
     fn assert_err(
         result: Result<(), TypeErr>,
         expected_errors: Vec<TypingError>,
-        output: Option<PartiqlType>,
+        output: Option<PartiqlShape>,
     ) {
         match result {
             Ok(()) => {
@@ -849,7 +850,7 @@ mod tests {
         };
     }
 
-    fn create_customer_schema(is_open: bool, fields: BTreeSet<StructField>) -> PartiqlType {
+    fn create_customer_schema(is_open: bool, fields: BTreeSet<StructField>) -> PartiqlShape {
         bag![r#struct![BTreeSet::from([
             StructConstraint::Fields(fields),
             StructConstraint::Open(is_open)
@@ -859,21 +860,24 @@ mod tests {
     fn assert_query_typing(
         mode: TypingMode,
         query: &str,
-        schema: PartiqlType,
+        schema: PartiqlShape,
         expected_fields: Vec<StructField>,
     ) -> Result<(), TypeErr> {
         let expected_fields: BTreeSet<_> = expected_fields.into_iter().collect();
         let actual = type_query(mode, query, TypeEnvEntry::new("customers", &[], schema));
 
         match actual {
-            Ok(actual) => match &actual.kind() {
-                TypeKind::Bag(b) => {
-                    if let TypeKind::Struct(s) = b.element_type().kind() {
+            Ok(actual) => match &actual.ty() {
+                PartiqlType::Bag(b) => {
+                    if let PartiqlType::Struct(s) = b.element_type().ty() {
                         let fields = s.fields();
                         let f: Vec<_> = expected_fields
                             .iter()
                             .filter(|f| !fields.contains(f))
                             .collect();
+
+                        dbg!(&f);
+
                         assert!(f.is_empty());
                         assert_eq!(expected_fields.len(), fields.len());
                         println!("query: {query:?}");
@@ -901,7 +905,7 @@ mod tests {
         mode: TypingMode,
         query: &str,
         type_env_entry: TypeEnvEntry<'_>,
-    ) -> Result<PartiqlType, TypeErr> {
+    ) -> Result<PartiqlShape, TypeErr> {
         let mut catalog = PartiqlCatalog::default();
         let _oid = catalog.add_type_entry(type_env_entry);
 

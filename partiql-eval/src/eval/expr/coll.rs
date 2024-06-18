@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
 use itertools::{Itertools, Unique};
 
-use partiql_types::{ArrayType, BagType, PartiqlType, TypeKind, TYPE_BOOL, TYPE_NUMERIC_TYPES};
+use partiql_types::{ArrayType, BagType, PartiqlShape, PartiqlType, TYPE_BOOL, TYPE_NUMERIC_TYPES};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
 
@@ -38,7 +38,7 @@ impl BindEvalExpr for EvalCollFn {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         fn create<const STRICT: bool, F>(
-            types: [PartiqlType; 1],
+            types: [PartiqlShape; 1],
             args: Vec<Box<dyn EvalExpr>>,
             f: F,
         ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -49,21 +49,21 @@ impl BindEvalExpr for EvalCollFn {
                 value.sequence_iter().map_or(Missing, &f)
             })
         }
-        let boolean_elems = [PartiqlType::any_of([
-            PartiqlType::new(TypeKind::Array(ArrayType::new(Box::new(TYPE_BOOL)))),
-            PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(TYPE_BOOL)))),
+        let boolean_elems = [PartiqlShape::any_of([
+            PartiqlShape::new(PartiqlType::Array(ArrayType::new(Box::new(TYPE_BOOL)))),
+            PartiqlShape::new(PartiqlType::Bag(BagType::new(Box::new(TYPE_BOOL)))),
         ])];
-        let numeric_elems = [PartiqlType::any_of([
-            PartiqlType::new(TypeKind::Array(ArrayType::new(Box::new(
-                PartiqlType::any_of(TYPE_NUMERIC_TYPES),
+        let numeric_elems = [PartiqlShape::any_of([
+            PartiqlShape::new(PartiqlType::Array(ArrayType::new(Box::new(
+                PartiqlShape::any_of(TYPE_NUMERIC_TYPES),
             )))),
-            PartiqlType::new(TypeKind::Bag(BagType::new(Box::new(PartiqlType::any_of(
+            PartiqlShape::new(PartiqlType::Bag(BagType::new(Box::new(PartiqlShape::any_of(
                 TYPE_NUMERIC_TYPES,
             ))))),
         ])];
-        let any_elems = [PartiqlType::any_of([
-            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
-            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
+        let any_elems = [PartiqlShape::any_of([
+            PartiqlShape::new(PartiqlType::Array(ArrayType::new_any())),
+            PartiqlShape::new(PartiqlType::Bag(BagType::new_any())),
         ])];
 
         match *self {

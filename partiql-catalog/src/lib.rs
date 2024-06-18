@@ -3,7 +3,7 @@
 
 use crate::call_defs::CallDef;
 
-use partiql_types::PartiqlType;
+use partiql_types::{PartiqlShape};
 use partiql_value::Value;
 use std::borrow::Cow;
 
@@ -128,12 +128,12 @@ pub trait Catalog: Debug {
 pub struct TypeEnvEntry<'a> {
     name: UniCase<String>,
     aliases: Vec<&'a str>,
-    ty: PartiqlType,
+    ty: PartiqlShape,
 }
 
 impl<'a> TypeEnvEntry<'a> {
     #[must_use]
-    pub fn new(name: &str, aliases: &[&'a str], ty: PartiqlType) -> Self {
+    pub fn new(name: &str, aliases: &[&'a str], ty: PartiqlShape) -> Self {
         TypeEnvEntry {
             name: UniCase::from(name.to_string()),
             aliases: aliases.to_vec(),
@@ -145,7 +145,7 @@ impl<'a> TypeEnvEntry<'a> {
 #[derive(Debug, Clone)]
 pub struct TypeEntry {
     id: ObjectId,
-    ty: PartiqlType,
+    ty: PartiqlShape,
 }
 
 impl TypeEntry {
@@ -155,7 +155,7 @@ impl TypeEntry {
     }
 
     #[must_use]
-    pub fn ty(&self) -> &PartiqlType {
+    pub fn ty(&self) -> &PartiqlShape {
         &self.ty
     }
 }
@@ -197,7 +197,7 @@ impl<'a> FunctionEntry<'a> {
 #[derive(Debug)]
 pub struct PartiqlCatalog {
     functions: CatalogEntrySet<FunctionEntryFunction>,
-    types: CatalogEntrySet<PartiqlType>,
+    types: CatalogEntrySet<PartiqlShape>,
     id: CatalogId,
 }
 

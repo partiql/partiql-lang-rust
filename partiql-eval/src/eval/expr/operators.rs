@@ -8,7 +8,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    ArrayType, BagType, PartiqlType, StructType, TypeKind, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
+    ArrayType, BagType, PartiqlShape, StructType, PartiqlType, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
@@ -79,7 +79,7 @@ impl BindEvalExpr for EvalOpUnary {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let any_num = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
+        let any_num = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
 
         let unop = |types, f: fn(&Value) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
@@ -133,7 +133,7 @@ impl<const TARGET: bool, OnMissing: ArgShortCircuit> ArgChecker
     for BoolShortCircuitArgChecker<TARGET, OnMissing>
 {
     fn arg_check<'a>(
-        _typ: &PartiqlType,
+        _typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
         match arg.borrow() {
@@ -178,7 +178,7 @@ impl BindEvalExpr for EvalOpBinary {
 
         macro_rules! math {
             ($f:expr) => {{
-                let nums = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
+                let nums = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
                 create!(MathCheck<STRICT>, [nums.clone(), nums], $f)
             }};
         }
@@ -209,9 +209,9 @@ impl BindEvalExpr for EvalOpBinary {
                     InCheck<STRICT>,
                     [
                         TYPE_ANY,
-                        PartiqlType::any_of([
-                            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
-                            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
+                        PartiqlShape::any_of([
+                            PartiqlShape::new(PartiqlType::Array(ArrayType::new_any())),
+                            PartiqlShape::new(PartiqlType::Bag(BagType::new_any())),
                         ])
                     ],
                     |lhs, rhs| {
@@ -315,7 +315,7 @@ impl BindEvalExpr for EvalFnAbs {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let nums = PartiqlType::any_of(TYPE_NUMERIC_TYPES);
+        let nums = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
         UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
             match NullableOrd::lt(v, &Value::from(0)) {
                 Null => Null,
@@ -336,10 +336,10 @@ impl BindEvalExpr for EvalFnCardinality {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let collections = PartiqlType::any_of([
-            PartiqlType::new(TypeKind::Array(ArrayType::new_any())),
-            PartiqlType::new(TypeKind::Bag(BagType::new_any())),
-            PartiqlType::new(TypeKind::Struct(StructType::new_any())),
+        let collections = PartiqlShape::any_of([
+            PartiqlShape::new(PartiqlType::Array(ArrayType::new_any())),
+            PartiqlShape::new(PartiqlType::Bag(BagType::new_any())),
+            PartiqlShape::new(PartiqlType::Struct(StructType::new_any())),
         ]);
 
         UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
