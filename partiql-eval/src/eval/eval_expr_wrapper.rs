@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{PartiqlShape, PartiqlType, TYPE_ANY};
+use partiql_types::{PartiqlShape, StaticTypeVariant, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -19,35 +19,46 @@ use std::ops::ControlFlow;
 // TODO replace with type system's subsumption once it is in place
 #[inline]
 pub(crate) fn subsumes(typ: &PartiqlShape, value: &Value) -> bool {
-    match (typ.ty(), value) {
+    match (typ, value) {
         (_, Value::Null) => true,
         (_, Value::Missing) => true,
-        (PartiqlType::Any, _) => true,
-        (PartiqlType::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
-        (
-            PartiqlType::Int | PartiqlType::Int8 | PartiqlType::Int16 | PartiqlType::Int32 | PartiqlType::Int64,
-            Value::Integer(_),
-        ) => true,
-        (PartiqlType::Bool, Value::Boolean(_)) => true,
-        (PartiqlType::Decimal | PartiqlType::DecimalP(_, _), Value::Decimal(_)) => true,
-        (PartiqlType::Float32 | PartiqlType::Float64, Value::Real(_)) => true,
-        (
-            PartiqlType::String | PartiqlType::StringFixed(_) | PartiqlType::StringVarying(_),
-            Value::String(_),
-        ) => true,
-        (PartiqlType::Struct(_), Value::Tuple(_)) => true,
-        (PartiqlType::Bag(b_type), Value::Bag(b_values)) => {
-            let bag_element_type = b_type.element_type();
-            let mut b_values = b_values.iter();
-            b_values.all(|b_value| subsumes(bag_element_type, b_value))
-        }
-        (PartiqlType::DateTime, Value::DateTime(_)) => true,
+        (PartiqlShape::Dynamic, _) => true,
+        (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
+        (PartiqlShape::Static(s), val) => match (s.ty(), val) {
+            (
+                StaticTypeVariant::Int
+                | StaticTypeVariant::Int8
+                | StaticTypeVariant::Int16
+                | StaticTypeVariant::Int32
+                | StaticTypeVariant::Int64,
+                Value::Integer(_),
+            ) => true,
+            (StaticTypeVariant::Bool, Value::Boolean(_)) => true,
+            (StaticTypeVariant::Decimal | StaticTypeVariant::DecimalP(_, _), Value::Decimal(_)) => {
+                true
+            }
+            (StaticTypeVariant::Float32 | StaticTypeVariant::Float64, Value::Real(_)) => true,
+            (
+                StaticTypeVariant::String
+                | StaticTypeVariant::StringFixed(_)
+                | StaticTypeVariant::StringVarying(_),
+                Value::String(_),
+            ) => true,
+            (StaticTypeVariant::Struct(_), Value::Tuple(_)) => true,
+            (StaticTypeVariant::Bag(b_type), Value::Bag(b_values)) => {
+                let bag_element_type = b_type.element_type();
+                let mut b_values = b_values.iter();
+                b_values.all(|b_value| subsumes(bag_element_type, b_value))
+            }
+            (StaticTypeVariant::DateTime, Value::DateTime(_)) => true,
 
-        (PartiqlType::Array(a_type), Value::List(l_values)) => {
-            let array_element_type = a_type.element_type();
-            let mut l_values = l_values.iter();
-            l_values.all(|l_value| subsumes(array_element_type, l_value))
-        }
+            (StaticTypeVariant::Array(a_type), Value::List(l_values)) => {
+                let array_element_type = a_type.element_type();
+                let mut l_values = l_values.iter();
+                l_values.all(|l_value| subsumes(array_element_type, l_value))
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -298,11 +309,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
                 ArgCheckControlFlow::ShortCircuit(v) => return ControlFlow::Break(v),
                 ArgCheckControlFlow::ErrorOrShortCircuit(v) => {
                     if STRICT {
-                        let signature = self
-                            .types
-                            .iter()
-                            .map(|typ| format!("{}", typ.ty()))
-                            .join(",");
+                        let signature = self.types.iter().map(|typ| format!("{}", typ)).join(",");
                         let before = (0..i).map(|_| "_");
                         let arg = "MISSING"; // TODO display actual argument?
                         let after = (i + 1..N).map(|_| "_");
@@ -414,7 +421,7 @@ impl UnaryValueExpr {
     where
         F: 'static + Fn(&Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 1], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 1], args, f)
     }
 
     #[allow(dead_code)]
@@ -478,7 +485,7 @@ impl BinaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 2], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 2], args, f)
     }
 
     #[allow(dead_code)]
@@ -542,7 +549,7 @@ impl TernaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 3], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 3], args, f)
     }
 
     #[allow(dead_code)]
@@ -611,7 +618,7 @@ impl QuaternaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 4], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 4], args, f)
     }
 
     #[allow(dead_code)]

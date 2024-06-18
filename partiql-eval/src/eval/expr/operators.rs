@@ -8,7 +8,8 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    ArrayType, BagType, PartiqlShape, StructType, PartiqlType, TYPE_ANY, TYPE_BOOL, TYPE_NUMERIC_TYPES,
+    ArrayType, BagType, PartiqlShape, StaticTypeVariant, StructType, TYPE_BOOL, TYPE_DYNAMIC,
+    TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
@@ -172,7 +173,7 @@ impl BindEvalExpr for EvalOpBinary {
 
         macro_rules! equality {
             ($f:expr) => {
-                create!(EqCheck<STRICT>, [TYPE_ANY, TYPE_ANY], $f)
+                create!(EqCheck<STRICT>, [TYPE_DYNAMIC, TYPE_DYNAMIC], $f)
             };
         }
 
@@ -208,10 +209,10 @@ impl BindEvalExpr for EvalOpBinary {
                 create!(
                     InCheck<STRICT>,
                     [
-                        TYPE_ANY,
+                        TYPE_DYNAMIC,
                         PartiqlShape::any_of([
-                            PartiqlShape::new(PartiqlType::Array(ArrayType::new_any())),
-                            PartiqlShape::new(PartiqlType::Bag(BagType::new_any())),
+                            PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any())),
+                            PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
                         ])
                     ],
                     |lhs, rhs| {
@@ -249,7 +250,7 @@ impl BindEvalExpr for EvalOpBinary {
                 )
             }
             EvalOpBinary::Concat => {
-                create!(Check<STRICT>, [TYPE_ANY, TYPE_ANY], |lhs, rhs| {
+                create!(Check<STRICT>, [TYPE_DYNAMIC, TYPE_DYNAMIC], |lhs, rhs| {
                     // TODO non-naive concat (i.e., don't just use debug print for non-strings).
                     let lhs = if let Value::String(s) = lhs {
                         s.as_ref().clone()
@@ -277,7 +278,7 @@ impl BindEvalExpr for EvalBetweenExpr {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let types = [TYPE_ANY, TYPE_ANY, TYPE_ANY];
+        let types = [TYPE_DYNAMIC, TYPE_DYNAMIC, TYPE_DYNAMIC];
         TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
             types,
             args,
@@ -337,9 +338,9 @@ impl BindEvalExpr for EvalFnCardinality {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let collections = PartiqlShape::any_of([
-            PartiqlShape::new(PartiqlType::Array(ArrayType::new_any())),
-            PartiqlShape::new(PartiqlType::Bag(BagType::new_any())),
-            PartiqlShape::new(PartiqlType::Struct(StructType::new_any())),
+            PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any())),
+            PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
+            PartiqlShape::new(StaticTypeVariant::Struct(StructType::new_any())),
         ]);
 
         UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {

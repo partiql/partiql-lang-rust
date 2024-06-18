@@ -3,7 +3,7 @@
 
 use crate::call_defs::CallDef;
 
-use partiql_types::{PartiqlShape};
+use partiql_types::PartiqlShape;
 use partiql_value::Value;
 use std::borrow::Cow;
 

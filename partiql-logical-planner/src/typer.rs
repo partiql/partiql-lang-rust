@@ -4,8 +4,8 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    any, undefined, ArrayType, BagType, PartiqlShape, StructConstraint, StructField, StructType,
-    PartiqlType,
+    dynamic, undefined, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticTypeVariant,
+    StructConstraint, StructField, StructType,
 };
 use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
@@ -36,6 +36,15 @@ pub struct TypeErr {
     pub output: Option<PartiqlShape>,
 }
 
+impl From<ShapeResultError> for TypeErr {
+    fn from(value: ShapeResultError) -> Self {
+        TypeErr {
+            errors: vec![TypingError::InvalidType(value)],
+            output: None,
+        }
+    }
+}
+
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 #[non_exhaustive]
@@ -49,6 +58,9 @@ pub enum TypingError {
     /// Represents an error in type checking
     #[error("TypeCheck: {0}")]
     TypeCheck(String),
+
+    #[error("TypeCheck: {0}")]
+    InvalidType(#[from] ShapeResultError),
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +107,7 @@ impl Default for TypeEnvContext {
     fn default() -> Self {
         TypeEnvContext {
             env: LocalTypeEnv::new(),
-            derived_type: any!(),
+            derived_type: dynamic!(),
         }
     }
 }
@@ -188,11 +200,10 @@ impl<'c> PlanTyper<'c> {
                 }
 
                 self.type_vexpr(expr, LookupOrder::Delegate);
-
                 if !as_key.is_empty() {
                     let type_ctx = &self.local_type_ctx();
                     for (_name, ty) in type_ctx.env() {
-                        if let PartiqlType::Struct(_s) = ty.ty() {
+                        if let Ok(_s) = ty.expect_struct() {
                             self.type_env_stack.push(ty_ctx![(
                                 &ty_env![(string_to_sym(as_key.as_str()), ty.clone())],
                                 ty
@@ -317,25 +328,28 @@ impl<'c> PlanTyper<'c> {
                 }
             }
             ValueExpr::Lit(v) => {
-                let kind = match **v {
-                    Value::Null => PartiqlType::Undefined,
-                    Value::Missing => PartiqlType::Undefined,
-                    Value::Integer(_) => PartiqlType::Int,
-                    Value::Decimal(_) => PartiqlType::Decimal,
-                    Value::Boolean(_) => PartiqlType::Bool,
-                    Value::String(_) => PartiqlType::String,
-                    Value::Tuple(_) => PartiqlType::Struct(StructType::new_any()),
-                    Value::List(_) => PartiqlType::Array(ArrayType::new_any()),
-                    Value::Bag(_) => PartiqlType::Bag(BagType::new_any()),
+                let ty = match **v {
+                    Value::Null => PartiqlShape::Undefined,
+                    Value::Missing => PartiqlShape::Undefined,
+                    Value::Integer(_) => PartiqlShape::new(StaticTypeVariant::Int),
+                    Value::Decimal(_) => PartiqlShape::new(StaticTypeVariant::Decimal),
+                    Value::Boolean(_) => PartiqlShape::new(StaticTypeVariant::Bool),
+                    Value::String(_) => PartiqlShape::new(StaticTypeVariant::String),
+                    Value::Tuple(_) => {
+                        PartiqlShape::new(StaticTypeVariant::Struct(StructType::new_any()))
+                    }
+                    Value::List(_) => {
+                        PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any()))
+                    }
+                    Value::Bag(_) => PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
                         ));
-                        PartiqlType::Undefined
+                        PartiqlShape::Undefined
                     }
                 };
 
-                let ty = PartiqlShape::new(kind);
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
@@ -399,11 +413,17 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn element_type<'a>(&'a mut self, ty: &'a PartiqlShape) -> PartiqlShape {
-        match ty.ty() {
-            PartiqlType::Bag(b) => b.element_type().clone(),
-            PartiqlType::Array(a) => a.element_type().clone(),
-            PartiqlType::Any => any!(),
-            _ => ty.clone(),
+        match ty {
+            PartiqlShape::Dynamic => dynamic!(),
+            PartiqlShape::Static(s) => match s.ty() {
+                StaticTypeVariant::Bag(b) => b.element_type().clone(),
+                StaticTypeVariant::Array(a) => a.element_type().clone(),
+                _ => ty.clone(),
+            },
+            undefined!() => {
+                todo!("Undefined type in catalog")
+            }
+            PartiqlShape::AnyOf(_any_of) => ty.clone(),
         }
     }
 
@@ -414,9 +434,9 @@ impl<'c> PlanTyper<'c> {
 
         if let Some(ty) = env.get(key) {
             Some(ty.clone())
-        } else if let PartiqlType::Struct(s) = derived_type.ty() {
+        } else if let Ok(s) = derived_type.expect_struct() {
             if s.is_partial() {
-                Some(any!())
+                Some(dynamic!())
             } else {
                 match &self.typing_mode {
                     TypingMode::Permissive => Some(undefined!()),
@@ -429,8 +449,8 @@ impl<'c> PlanTyper<'c> {
                     }
                 }
             }
-        } else if derived_type.is_any() {
-            Some(any!())
+        } else if derived_type.is_dynamic() {
+            Some(dynamic!())
         } else {
             self.errors.push(TypingError::IllegalState(format!(
                 "Illegal Derive Type {:?}",
@@ -539,7 +559,7 @@ impl<'c> PlanTyper<'c> {
             self.type_with_undefined(key);
         } else {
             let mut new_type_env = LocalTypeEnv::new();
-            if let PartiqlType::Struct(s) = ty.ty() {
+            if let Ok(s) = ty.expect_struct() {
                 for b in to_bindings(&s) {
                     new_type_env.insert(b.0, b.1);
                 }
@@ -596,7 +616,7 @@ mod tests {
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                    StructField::new("age", any!()),
+                    StructField::new("age", dynamic!()),
                 ]
                 .into(),
             ),
@@ -616,7 +636,7 @@ mod tests {
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                    StructField::new("age", any!()),
+                    StructField::new("age", dynamic!()),
                 ]
                 .into(),
             ),
@@ -636,14 +656,14 @@ mod tests {
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                    StructField::new("age", any!()),
+                    StructField::new("age", dynamic!()),
                 ]
                 .into(),
             ),
             vec![
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
-                StructField::new("age", any!()),
+                StructField::new("age", dynamic!()),
             ],
         )
         .expect("Type");
@@ -705,7 +725,7 @@ mod tests {
                 StructField::new("id", int!()),
                 StructField::new("name", str!()),
                 StructField::new("age", int!()),
-                StructField::new("bar", undefined!()),
+                StructField::new("bar", dynamic!()),
             ],
         )
             .expect("Type");
@@ -744,7 +764,7 @@ mod tests {
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
-                    StructField::new("age", any!()),
+                    StructField::new("age", dynamic!()),
                 ]
                 .into(),
             ),
@@ -759,7 +779,7 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields({StructField { name: "id", ty: PartiqlType(Int) }, StructField { name: "name", ty: PartiqlType(String) }})} }))"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { name: "name", ty: Static(StaticType { ty: String, nullable: true }) }})} }), nullable: true })"#;
 
         assert_err(
             assert_query_typing(
@@ -775,10 +795,7 @@ mod tests {
                 ),
                 vec![],
             ),
-            vec![
-                TypingError::TypeCheck(err1.to_string()),
-                // TypingError::IllegalState(err2.to_string()),
-            ],
+            vec![TypingError::TypeCheck(err1.to_string())],
             Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
                 [
                     StructField::new("id", int!()),
@@ -796,8 +813,8 @@ mod tests {
             StructConstraint::Open(false)
         ])];
 
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema PartiqlType(Struct(StructType { constraints: {Open(false), Fields({StructField { name: "age", ty: PartiqlType(Int) }})} }))"#;
-        let err2 = r"Illegal Derive Type PartiqlType(Undefined)";
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }})} }), nullable: true })"#;
+        let err2 = r"Illegal Derive Type Undefined";
 
         assert_err(
             assert_query_typing(
@@ -864,40 +881,34 @@ mod tests {
         expected_fields: Vec<StructField>,
     ) -> Result<(), TypeErr> {
         let expected_fields: BTreeSet<_> = expected_fields.into_iter().collect();
-        let actual = type_query(mode, query, TypeEnvEntry::new("customers", &[], schema));
+        let actual = type_query(mode, query, TypeEnvEntry::new("customers", &[], schema))?
+            .expect_static()?;
 
-        match actual {
-            Ok(actual) => match &actual.ty() {
-                PartiqlType::Bag(b) => {
-                    if let PartiqlType::Struct(s) = b.element_type().ty() {
-                        let fields = s.fields();
-                        let f: Vec<_> = expected_fields
-                            .iter()
-                            .filter(|f| !fields.contains(f))
-                            .collect();
+        match &actual.ty() {
+            StaticTypeVariant::Bag(b) => {
+                if let Ok(s) = b.element_type().expect_struct() {
+                    let fields = s.fields();
 
-                        dbg!(&f);
-
-                        assert!(f.is_empty());
-                        assert_eq!(expected_fields.len(), fields.len());
-                        println!("query: {query:?}");
-                        println!("actual: {actual:?}");
-                        Ok(())
-                    } else {
-                        Err(TypeErr {
-                            errors: vec![TypingError::TypeCheck(
-                                "[Struct] type expected".to_string(),
-                            )],
-                            output: None,
-                        })
-                    }
+                    let f: Vec<_> = expected_fields
+                        .iter()
+                        .filter(|f| !fields.contains(f))
+                        .collect();
+                    assert!(f.is_empty());
+                    assert_eq!(expected_fields.len(), fields.len());
+                    println!("query: {query:?}");
+                    println!("actual: {actual:?}");
+                    Ok(())
+                } else {
+                    Err(TypeErr {
+                        errors: vec![TypingError::TypeCheck("[Struct] type expected".to_string())],
+                        output: None,
+                    })
                 }
-                _ => Err(TypeErr {
-                    errors: vec![TypingError::TypeCheck("[Bag] type expected".to_string())],
-                    output: None,
-                }),
-            },
-            Err(e) => Err(e),
+            }
+            _ => Err(TypeErr {
+                errors: vec![TypingError::TypeCheck("[Bag] type expected".to_string())],
+                output: None,
+            }),
         }
     }
 
