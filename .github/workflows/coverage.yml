@@ -5,6 +5,7 @@ on: [push, pull_request]
 env:
   RUST_TEST_TIME_UNIT: 150,5000
   RUST_TEST_TIME_INTEGRATION: 150,5000
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
 jobs:
   build:
