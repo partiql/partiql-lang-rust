@@ -572,6 +572,7 @@ pub enum StructConstraint {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub struct StructField {
+    optional: bool,
     name: String,
     ty: PartiqlShape,
 }
@@ -582,6 +583,16 @@ impl StructField {
         StructField {
             name: name.to_string(),
             ty,
+            optional: false,
+        }
+    }
+
+    #[must_use]
+    pub fn new_optional(name: &str, ty: PartiqlShape) -> Self {
+        StructField {
+            name: name.to_string(),
+            ty,
+            optional: true,
         }
     }
 
@@ -601,6 +612,17 @@ impl From<(&str, PartiqlShape)> for StructField {
         StructField {
             name: value.0.to_string(),
             ty: value.1,
+            optional: false,
+        }
+    }
+}
+
+impl From<(&str, PartiqlShape, bool)> for StructField {
+    fn from(value: (&str, PartiqlShape, bool)) -> Self {
+        StructField {
+            name: value.0.to_string(),
+            ty: value.1,
+            optional: value.2,
         }
     }
 }

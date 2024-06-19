@@ -779,7 +779,7 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { name: "name", ty: Static(StaticType { ty: String, nullable: true }) }})} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { optional: false, name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { ty: String, nullable: true }) }})} }), nullable: true })"#;
 
         assert_err(
             assert_query_typing(
@@ -813,7 +813,7 @@ mod tests {
             StructConstraint::Open(false)
         ])];
 
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }})} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { optional: false, name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }})} }), nullable: true })"#;
         let err2 = r"Illegal Derive Type Undefined";
 
         assert_err(
