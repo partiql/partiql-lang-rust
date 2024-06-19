@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{PartiqlType, TypeKind, TYPE_ANY};
+use partiql_types::{PartiqlShape, StaticTypeVariant, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -18,36 +18,47 @@ use std::ops::ControlFlow;
 
 // TODO replace with type system's subsumption once it is in place
 #[inline]
-pub(crate) fn subsumes(typ: &PartiqlType, value: &Value) -> bool {
-    match (typ.kind(), value) {
+pub(crate) fn subsumes(typ: &PartiqlShape, value: &Value) -> bool {
+    match (typ, value) {
         (_, Value::Null) => true,
         (_, Value::Missing) => true,
-        (TypeKind::Any, _) => true,
-        (TypeKind::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
-        (
-            TypeKind::Int | TypeKind::Int8 | TypeKind::Int16 | TypeKind::Int32 | TypeKind::Int64,
-            Value::Integer(_),
-        ) => true,
-        (TypeKind::Bool, Value::Boolean(_)) => true,
-        (TypeKind::Decimal | TypeKind::DecimalP(_, _), Value::Decimal(_)) => true,
-        (TypeKind::Float32 | TypeKind::Float64, Value::Real(_)) => true,
-        (
-            TypeKind::String | TypeKind::StringFixed(_) | TypeKind::StringVarying(_),
-            Value::String(_),
-        ) => true,
-        (TypeKind::Struct(_), Value::Tuple(_)) => true,
-        (TypeKind::Bag(b_type), Value::Bag(b_values)) => {
-            let bag_element_type = b_type.element_type();
-            let mut b_values = b_values.iter();
-            b_values.all(|b_value| subsumes(bag_element_type, b_value))
-        }
-        (TypeKind::DateTime, Value::DateTime(_)) => true,
+        (PartiqlShape::Dynamic, _) => true,
+        (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
+        (PartiqlShape::Static(s), val) => match (s.ty(), val) {
+            (
+                StaticTypeVariant::Int
+                | StaticTypeVariant::Int8
+                | StaticTypeVariant::Int16
+                | StaticTypeVariant::Int32
+                | StaticTypeVariant::Int64,
+                Value::Integer(_),
+            ) => true,
+            (StaticTypeVariant::Bool, Value::Boolean(_)) => true,
+            (StaticTypeVariant::Decimal | StaticTypeVariant::DecimalP(_, _), Value::Decimal(_)) => {
+                true
+            }
+            (StaticTypeVariant::Float32 | StaticTypeVariant::Float64, Value::Real(_)) => true,
+            (
+                StaticTypeVariant::String
+                | StaticTypeVariant::StringFixed(_)
+                | StaticTypeVariant::StringVarying(_),
+                Value::String(_),
+            ) => true,
+            (StaticTypeVariant::Struct(_), Value::Tuple(_)) => true,
+            (StaticTypeVariant::Bag(b_type), Value::Bag(b_values)) => {
+                let bag_element_type = b_type.element_type();
+                let mut b_values = b_values.iter();
+                b_values.all(|b_value| subsumes(bag_element_type, b_value))
+            }
+            (StaticTypeVariant::DateTime, Value::DateTime(_)) => true,
 
-        (TypeKind::Array(a_type), Value::List(l_values)) => {
-            let array_element_type = a_type.element_type();
-            let mut l_values = l_values.iter();
-            l_values.all(|l_value| subsumes(array_element_type, l_value))
-        }
+            (StaticTypeVariant::Array(a_type), Value::List(l_values)) => {
+                let array_element_type = a_type.element_type();
+                let mut l_values = l_values.iter();
+                l_values.all(|l_value| subsumes(array_element_type, l_value))
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -95,7 +106,7 @@ pub(crate) enum ArgCheckControlFlow<B, C, R = B> {
 pub(crate) trait ArgChecker: Debug {
     /// Check an argument against an expected type.
     fn arg_check<'a>(
-        typ: &PartiqlType,
+        typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>>;
 }
@@ -158,7 +169,7 @@ impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
     for DefaultArgChecker<STRICT, OnMissing>
 {
     fn arg_check<'a>(
-        typ: &PartiqlType,
+        typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
         let err = || {
@@ -189,7 +200,7 @@ pub(crate) struct NullArgChecker {}
 
 impl ArgChecker for NullArgChecker {
     fn arg_check<'a>(
-        _typ: &PartiqlType,
+        _typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
         ArgCheckControlFlow::Continue(arg)
@@ -209,7 +220,7 @@ pub(crate) struct ArgCheckEvalExpr<
     ArgC: ArgChecker,
 > {
     /// The expected type of expression's positional arguments
-    pub(crate) types: [PartiqlType; N],
+    pub(crate) types: [PartiqlShape; N],
     /// The expression's positional arguments
     pub(crate) args: [Box<dyn EvalExpr>; N],
     /// the expression
@@ -237,7 +248,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
 impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker>
     ArgCheckEvalExpr<STRICT, N, E, ArgC>
 {
-    pub fn new(types: [PartiqlType; N], args: [Box<dyn EvalExpr>; N], expr: E) -> Self {
+    pub fn new(types: [PartiqlShape; N], args: [Box<dyn EvalExpr>; N], expr: E) -> Self {
         Self {
             types,
             args,
@@ -298,11 +309,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
                 ArgCheckControlFlow::ShortCircuit(v) => return ControlFlow::Break(v),
                 ArgCheckControlFlow::ErrorOrShortCircuit(v) => {
                     if STRICT {
-                        let signature = self
-                            .types
-                            .iter()
-                            .map(|typ| format!("{}", typ.kind()))
-                            .join(",");
+                        let signature = self.types.iter().map(|typ| format!("{}", typ)).join(",");
                         let before = (0..i).map(|_| "_");
                         let arg = "MISSING"; // TODO display actual argument?
                         let after = (i + 1..N).map(|_| "_");
@@ -368,7 +375,7 @@ impl<E: 'static, F: 'static> EvalExprWrapper<E, F> {
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, const N: usize, ArgC: 'static + ArgChecker>(
         ident: E,
-        types: [PartiqlType; N],
+        types: [PartiqlShape; N],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -414,13 +421,13 @@ impl UnaryValueExpr {
     where
         F: 'static + Fn(&Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 1], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 1], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F>(
-        types: [PartiqlType; 1],
+        types: [PartiqlShape; 1],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -434,7 +441,7 @@ impl UnaryValueExpr {
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
-        types: [PartiqlType; 1],
+        types: [PartiqlShape; 1],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -478,13 +485,13 @@ impl BinaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 2], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 2], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F>(
-        types: [PartiqlType; 2],
+        types: [PartiqlShape; 2],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -498,7 +505,7 @@ impl BinaryValueExpr {
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
-        types: [PartiqlType; 2],
+        types: [PartiqlShape; 2],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -542,13 +549,13 @@ impl TernaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 3], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 3], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F>(
-        types: [PartiqlType; 3],
+        types: [PartiqlShape; 3],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -562,7 +569,7 @@ impl TernaryValueExpr {
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
-        types: [PartiqlType; 3],
+        types: [PartiqlShape; 3],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -611,13 +618,13 @@ impl QuaternaryValueExpr {
     where
         F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([TYPE_ANY; 4], args, f)
+        Self::create_typed::<STRICT, F>([TYPE_DYNAMIC; 4], args, f)
     }
 
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_typed<const STRICT: bool, F>(
-        types: [PartiqlType; 4],
+        types: [PartiqlShape; 4],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
@@ -631,7 +638,7 @@ impl QuaternaryValueExpr {
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn create_checked<const STRICT: bool, ArgC, F>(
-        types: [PartiqlType; 4],
+        types: [PartiqlShape; 4],
         args: Vec<Box<dyn EvalExpr>>,
         f: F,
     ) -> Result<Box<dyn EvalExpr>, BindError>
