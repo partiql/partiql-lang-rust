@@ -605,6 +605,11 @@ impl StructField {
     pub fn ty(&self) -> &PartiqlShape {
         &self.ty
     }
+
+    #[must_use]
+    pub fn is_optional(&self) -> &bool {
+        &self.optional
+    }
 }
 
 impl From<(&str, PartiqlShape)> for StructField {
