@@ -655,7 +655,7 @@ impl ArrayType {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PartiqlShape, StaticType, TYPE_INT, TYPE_REAL};
+    use crate::{PartiqlShape, TYPE_INT, TYPE_REAL};
 
     #[test]
     fn union() {
