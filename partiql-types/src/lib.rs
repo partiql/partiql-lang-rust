@@ -208,6 +208,11 @@ impl StaticType {
     pub fn is_nullable(&self) -> bool {
         self.nullable
     }
+
+    #[must_use]
+    pub fn is_not_nullable(&self) -> bool {
+        !self.nullable
+    }
 }
 
 impl Display for StaticType {
@@ -272,13 +277,24 @@ impl PartiqlShape {
     pub const fn new(ty: StaticTypeVariant) -> PartiqlShape {
         PartiqlShape::Static(StaticType { ty, nullable: true })
     }
-
     #[must_use]
     pub const fn new_non_nullable(ty: StaticTypeVariant) -> PartiqlShape {
         PartiqlShape::Static(StaticType {
             ty,
             nullable: false,
         })
+    }
+
+    #[must_use]
+    pub fn as_non_nullable(&self) -> Option<PartiqlShape> {
+        if let PartiqlShape::Static(stype) = self {
+            Some(PartiqlShape::Static(StaticType {
+                ty: stype.ty.clone(),
+                nullable: false,
+            }))
+        } else {
+            None
+        }
     }
 
     #[must_use]
@@ -607,8 +623,8 @@ impl StructField {
     }
 
     #[must_use]
-    pub fn is_optional(&self) -> &bool {
-        &self.optional
+    pub fn is_optional(&self) -> bool {
+        self.optional
     }
 }
 
