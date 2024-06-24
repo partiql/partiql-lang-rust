@@ -7,13 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- *BREAKING:* Removed `NULL` and `MISSING` types from `partiql_types::PartiQLType`
-- *BREAKING:* Removed `partiql_ast_passes::partiql_type`
 
 ### Added
 
 ### Fixed
 
+## [0.8.0]
+### Changed
+- *BREAKING:* Adds `optionality` to `StructField` in `partiql-types`
+- *BREAKING:* Removed `NULL` and `MISSING` types from `partiql_types::PartiQLType`
+- *BREAKING:* Removed `partiql_ast_passes::partiql_type`
+
+### Added
+- *BREAKING:* Introduces `PartiqlShape` and removes `PartiqlType`
+- Adds `partiql-extension-ddl` that allows generation of PartiQL Basic DDL Syntax for a PartiQL Shape.
+
+### Fixed
 
 ## [0.7.2] - 2024-04-12
 ### Changed
@@ -238,7 +247,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.8.0
 [0.7.2]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.2
 [0.7.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.1
 [0.7.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.0

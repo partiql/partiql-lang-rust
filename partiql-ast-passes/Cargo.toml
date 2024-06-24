@@ -20,9 +20,9 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.7.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.7.*" }
-partiql-types = { path = "../partiql-types", version = "0.7.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.8.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.8.*" }
+partiql-types = { path = "../partiql-types", version = "0.8.*" }
 
 assert_matches = "1.5.*"
 fnv = "1"
@@ -30,7 +30,7 @@ indexmap = "1.9"
 thiserror = "1.0"
 
 [dev-dependencies]
-partiql-parser = { path = "../partiql-parser", version = "0.7.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.8.*" }
 
 [features]
 default = []
