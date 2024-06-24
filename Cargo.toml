@@ -26,6 +26,7 @@ members = [
     "partiql-rewriter",
     "partiql-types",
     "partiql-value",
+    "extension/partiql-extension-ddl",
     "extension/partiql-extension-ion",
     "extension/partiql-extension-ion-functions",
     "extension/partiql-extension-visualize",

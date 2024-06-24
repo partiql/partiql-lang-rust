@@ -1,0 +1,35 @@
+[package]
+name = "partiql-extension-ddl"
+description = "PartiQL DDL extensions"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["sql", "parser", "query", "compilers", "interpreters"]
+categories = ["database", "compilers",]
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+
+[dependencies]
+partiql-types = { path = "../../partiql-types", version = "0.7.*" }
+
+ion-rs = "0.18.1"
+thiserror = "1.0"
+miette = { version = "7.2", features = ["fancy"] }
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[features]
+default = []
