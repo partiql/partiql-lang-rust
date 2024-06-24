@@ -10,10 +10,7 @@ fn basic_ddl_test() {
     let fields = [
         StructField::new("id", int!()),
         StructField::new("name", str!()),
-        StructField::new(
-            "address",
-            PartiqlShape::new_non_nullable(Static::String),
-        ),
+        StructField::new("address", PartiqlShape::new_non_nullable(Static::String)),
         StructField::new_optional("details", details.clone()),
     ]
     .into();

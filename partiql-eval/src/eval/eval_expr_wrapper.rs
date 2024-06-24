@@ -26,22 +26,14 @@ pub(crate) fn subsumes(typ: &PartiqlShape, value: &Value) -> bool {
         (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
         (PartiqlShape::Static(s), val) => match (s.ty(), val) {
             (
-                Static::Int
-                | Static::Int8
-                | Static::Int16
-                | Static::Int32
-                | Static::Int64,
+                Static::Int | Static::Int8 | Static::Int16 | Static::Int32 | Static::Int64,
                 Value::Integer(_),
             ) => true,
             (Static::Bool, Value::Boolean(_)) => true,
-            (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_)) => {
-                true
-            }
+            (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_)) => true,
             (Static::Float32 | Static::Float64, Value::Real(_)) => true,
             (
-                Static::String
-                | Static::StringFixed(_)
-                | Static::StringVarying(_),
+                Static::String | Static::StringFixed(_) | Static::StringVarying(_),
                 Value::String(_),
             ) => true,
             (Static::Struct(_), Value::Tuple(_)) => true,

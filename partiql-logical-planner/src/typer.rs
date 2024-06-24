@@ -335,12 +335,8 @@ impl<'c> PlanTyper<'c> {
                     Value::Decimal(_) => PartiqlShape::new(Static::Decimal),
                     Value::Boolean(_) => PartiqlShape::new(Static::Bool),
                     Value::String(_) => PartiqlShape::new(Static::String),
-                    Value::Tuple(_) => {
-                        PartiqlShape::new(Static::Struct(StructType::new_any()))
-                    }
-                    Value::List(_) => {
-                        PartiqlShape::new(Static::Array(ArrayType::new_any()))
-                    }
+                    Value::Tuple(_) => PartiqlShape::new(Static::Struct(StructType::new_any())),
+                    Value::List(_) => PartiqlShape::new(Static::Array(ArrayType::new_any())),
                     Value::Bag(_) => PartiqlShape::new(Static::Bag(BagType::new_any())),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(

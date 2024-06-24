@@ -4,9 +4,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
 use itertools::{Itertools, Unique};
 
-use partiql_types::{
-    ArrayType, BagType, PartiqlShape, Static, TYPE_BOOL, TYPE_NUMERIC_TYPES,
-};
+use partiql_types::{ArrayType, BagType, PartiqlShape, Static, TYPE_BOOL, TYPE_NUMERIC_TYPES};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
 
@@ -52,18 +50,16 @@ impl BindEvalExpr for EvalCollFn {
             })
         }
         let boolean_elems = [PartiqlShape::any_of([
-            PartiqlShape::new(Static::Array(ArrayType::new(Box::new(
-                TYPE_BOOL,
-            )))),
+            PartiqlShape::new(Static::Array(ArrayType::new(Box::new(TYPE_BOOL)))),
             PartiqlShape::new(Static::Bag(BagType::new(Box::new(TYPE_BOOL)))),
         ])];
         let numeric_elems = [PartiqlShape::any_of([
             PartiqlShape::new(Static::Array(ArrayType::new(Box::new(
                 PartiqlShape::any_of(TYPE_NUMERIC_TYPES),
             )))),
-            PartiqlShape::new(Static::Bag(BagType::new(Box::new(
-                PartiqlShape::any_of(TYPE_NUMERIC_TYPES),
-            )))),
+            PartiqlShape::new(Static::Bag(BagType::new(Box::new(PartiqlShape::any_of(
+                TYPE_NUMERIC_TYPES,
+            ))))),
         ])];
         let any_elems = [PartiqlShape::any_of([
             PartiqlShape::new(Static::Array(ArrayType::new_any())),

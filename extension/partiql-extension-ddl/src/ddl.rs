@@ -1,8 +1,7 @@
 use ion_rs::IonError;
 use miette::Diagnostic;
 use partiql_types::{
-    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticType, Static,
-    StructType,
+    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, Static, StaticType, StructType,
 };
 use std::fmt::{Display, Formatter};
 use std::string::ToString;
@@ -247,10 +246,7 @@ mod tests {
         let fields = struct_fields![
             ("employee_id", int8![]),
             ("full_name", str![]),
-            (
-                "salary",
-                PartiqlShape::new(Static::DecimalP(8, 2))
-            ),
+            ("salary", PartiqlShape::new(Static::DecimalP(8, 2))),
             ("details", details),
             ("dependents", array![str![]])
         ];
