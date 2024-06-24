@@ -8,7 +8,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    ArrayType, BagType, PartiqlShape, StaticTypeVariant, StructType, TYPE_BOOL, TYPE_DYNAMIC,
+    ArrayType, BagType, PartiqlShape, Static, StructType, TYPE_BOOL, TYPE_DYNAMIC,
     TYPE_NUMERIC_TYPES,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
@@ -211,8 +211,8 @@ impl BindEvalExpr for EvalOpBinary {
                     [
                         TYPE_DYNAMIC,
                         PartiqlShape::any_of([
-                            PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any())),
-                            PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
+                            PartiqlShape::new(Static::Array(ArrayType::new_any())),
+                            PartiqlShape::new(Static::Bag(BagType::new_any())),
                         ])
                     ],
                     |lhs, rhs| {
@@ -338,9 +338,9 @@ impl BindEvalExpr for EvalFnCardinality {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let collections = PartiqlShape::any_of([
-            PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any())),
-            PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
-            PartiqlShape::new(StaticTypeVariant::Struct(StructType::new_any())),
+            PartiqlShape::new(Static::Array(ArrayType::new_any())),
+            PartiqlShape::new(Static::Bag(BagType::new_any())),
+            PartiqlShape::new(Static::Struct(StructType::new_any())),
         ]);
 
         UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
