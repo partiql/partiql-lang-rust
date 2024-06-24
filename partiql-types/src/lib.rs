@@ -33,42 +33,42 @@ macro_rules! dynamic {
 #[macro_export]
 macro_rules! int {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Int)
+        $crate::PartiqlShape::new($crate::Static::Int)
     };
 }
 
 #[macro_export]
 macro_rules! int8 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Int8)
+        $crate::PartiqlShape::new($crate::Static::Int8)
     };
 }
 
 #[macro_export]
 macro_rules! int16 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Int16)
+        $crate::PartiqlShape::new($crate::Static::Int16)
     };
 }
 
 #[macro_export]
 macro_rules! int32 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Int32)
+        $crate::PartiqlShape::new($crate::Static::Int32)
     };
 }
 
 #[macro_export]
 macro_rules! int64 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Int64)
+        $crate::PartiqlShape::new($crate::Static::Int64)
     };
 }
 
 #[macro_export]
 macro_rules! dec {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Decimal)
+        $crate::PartiqlShape::new($crate::Static::Decimal)
     };
 }
 
@@ -77,21 +77,21 @@ macro_rules! dec {
 #[macro_export]
 macro_rules! f32 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Float32)
+        $crate::PartiqlShape::new($crate::Static::Float32)
     };
 }
 
 #[macro_export]
 macro_rules! f64 {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::Float64)
+        $crate::PartiqlShape::new($crate::Static::Float64)
     };
 }
 
 #[macro_export]
 macro_rules! str {
     () => {
-        $crate::PartiqlShape::new($crate::StaticTypeVariant::String)
+        $crate::PartiqlShape::new($crate::Static::String)
     };
 }
 
@@ -153,12 +153,12 @@ pub enum PartiqlShape {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct StaticType {
-    ty: StaticTypeVariant,
+    ty: Static,
     nullable: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub enum StaticTypeVariant {
+pub enum Static {
     // Scalar Types
     Int,
     Int8,
@@ -187,12 +187,12 @@ pub enum StaticTypeVariant {
 
 impl StaticType {
     #[must_use]
-    pub fn new(&self, ty: StaticTypeVariant) -> StaticType {
+    pub fn new(&self, ty: Static) -> StaticType {
         StaticType { ty, nullable: true }
     }
 
     #[must_use]
-    pub fn new_non_nullable(&self, ty: StaticTypeVariant) -> StaticType {
+    pub fn new_non_nullable(&self, ty: Static) -> StaticType {
         StaticType {
             ty,
             nullable: false,
@@ -200,7 +200,7 @@ impl StaticType {
     }
 
     #[must_use]
-    pub fn ty(&self) -> StaticTypeVariant {
+    pub fn ty(&self) -> Static {
         self.ty.clone()
     }
 
@@ -226,59 +226,59 @@ impl Display for StaticType {
     }
 }
 
-impl Display for StaticTypeVariant {
+impl Display for Static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let x = match self {
-            StaticTypeVariant::Int => "Int".to_string(),
-            StaticTypeVariant::Int8 => "Int8".to_string(),
-            StaticTypeVariant::Int16 => "Int16".to_string(),
-            StaticTypeVariant::Int32 => "Int32".to_string(),
-            StaticTypeVariant::Int64 => "Int64".to_string(),
-            StaticTypeVariant::Bool => "Bool".to_string(),
-            StaticTypeVariant::Decimal => "Decimal".to_string(),
-            StaticTypeVariant::DecimalP(_, _) => {
+            Static::Int => "Int".to_string(),
+            Static::Int8 => "Int8".to_string(),
+            Static::Int16 => "Int16".to_string(),
+            Static::Int32 => "Int32".to_string(),
+            Static::Int64 => "Int64".to_string(),
+            Static::Bool => "Bool".to_string(),
+            Static::Decimal => "Decimal".to_string(),
+            Static::DecimalP(_, _) => {
                 todo!()
             }
-            StaticTypeVariant::Float32 => "Float32".to_string(),
-            StaticTypeVariant::Float64 => "Float64".to_string(),
-            StaticTypeVariant::String => "String".to_string(),
-            StaticTypeVariant::StringFixed(_) => {
+            Static::Float32 => "Float32".to_string(),
+            Static::Float64 => "Float64".to_string(),
+            Static::String => "String".to_string(),
+            Static::StringFixed(_) => {
                 todo!()
             }
-            StaticTypeVariant::StringVarying(_) => {
+            Static::StringVarying(_) => {
                 todo!()
             }
-            StaticTypeVariant::DateTime => "DateTime".to_string(),
-            StaticTypeVariant::Struct(_) => "Struct".to_string(),
-            StaticTypeVariant::Bag(_) => "Bag".to_string(),
-            StaticTypeVariant::Array(_) => "Array".to_string(),
+            Static::DateTime => "DateTime".to_string(),
+            Static::Struct(_) => "Struct".to_string(),
+            Static::Bag(_) => "Bag".to_string(),
+            Static::Array(_) => "Array".to_string(),
         };
         write!(f, "{x}")
     }
 }
 
 pub const TYPE_DYNAMIC: PartiqlShape = PartiqlShape::Dynamic;
-pub const TYPE_BOOL: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Bool);
-pub const TYPE_INT: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Int);
-pub const TYPE_INT8: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Int8);
-pub const TYPE_INT16: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Int16);
-pub const TYPE_INT32: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Int32);
-pub const TYPE_INT64: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Int64);
-pub const TYPE_REAL: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Float32);
-pub const TYPE_DOUBLE: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Float64);
-pub const TYPE_DECIMAL: PartiqlShape = PartiqlShape::new(StaticTypeVariant::Decimal);
-pub const TYPE_STRING: PartiqlShape = PartiqlShape::new(StaticTypeVariant::String);
-pub const TYPE_DATETIME: PartiqlShape = PartiqlShape::new(StaticTypeVariant::DateTime);
+pub const TYPE_BOOL: PartiqlShape = PartiqlShape::new(Static::Bool);
+pub const TYPE_INT: PartiqlShape = PartiqlShape::new(Static::Int);
+pub const TYPE_INT8: PartiqlShape = PartiqlShape::new(Static::Int8);
+pub const TYPE_INT16: PartiqlShape = PartiqlShape::new(Static::Int16);
+pub const TYPE_INT32: PartiqlShape = PartiqlShape::new(Static::Int32);
+pub const TYPE_INT64: PartiqlShape = PartiqlShape::new(Static::Int64);
+pub const TYPE_REAL: PartiqlShape = PartiqlShape::new(Static::Float32);
+pub const TYPE_DOUBLE: PartiqlShape = PartiqlShape::new(Static::Float64);
+pub const TYPE_DECIMAL: PartiqlShape = PartiqlShape::new(Static::Decimal);
+pub const TYPE_STRING: PartiqlShape = PartiqlShape::new(Static::String);
+pub const TYPE_DATETIME: PartiqlShape = PartiqlShape::new(Static::DateTime);
 pub const TYPE_NUMERIC_TYPES: [PartiqlShape; 4] = [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL];
 
 #[allow(dead_code)]
 impl PartiqlShape {
     #[must_use]
-    pub const fn new(ty: StaticTypeVariant) -> PartiqlShape {
+    pub const fn new(ty: Static) -> PartiqlShape {
         PartiqlShape::Static(StaticType { ty, nullable: true })
     }
     #[must_use]
-    pub const fn new_non_nullable(ty: StaticTypeVariant) -> PartiqlShape {
+    pub const fn new_non_nullable(ty: Static) -> PartiqlShape {
         PartiqlShape::Static(StaticType {
             ty,
             nullable: false,
@@ -304,17 +304,17 @@ impl PartiqlShape {
 
     #[must_use]
     pub fn new_struct(s: StructType) -> PartiqlShape {
-        PartiqlShape::new(StaticTypeVariant::Struct(s))
+        PartiqlShape::new(Static::Struct(s))
     }
 
     #[must_use]
     pub fn new_bag(b: BagType) -> PartiqlShape {
-        PartiqlShape::new(StaticTypeVariant::Bag(b))
+        PartiqlShape::new(Static::Bag(b))
     }
 
     #[must_use]
     pub fn new_array(a: ArrayType) -> PartiqlShape {
-        PartiqlShape::new(StaticTypeVariant::Array(a))
+        PartiqlShape::new(Static::Array(a))
     }
 
     pub fn any_of<I>(types: I) -> PartiqlShape
@@ -357,7 +357,7 @@ impl PartiqlShape {
         matches!(
             &self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::String,
+                ty: Static::String,
                 nullable: true
             })
         )
@@ -368,7 +368,7 @@ impl PartiqlShape {
         matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Struct(_),
+                ty: Static::Struct(_),
                 nullable: true
             })
         )
@@ -379,13 +379,13 @@ impl PartiqlShape {
         matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Bag(_),
+                ty: Static::Bag(_),
                 nullable: true
             })
         ) || matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Array(_),
+                ty: Static::Array(_),
                 nullable: true
             })
         )
@@ -402,7 +402,7 @@ impl PartiqlShape {
         matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Array(_),
+                ty: Static::Array(_),
                 nullable: true
             })
         )
@@ -413,7 +413,7 @@ impl PartiqlShape {
         matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Bag(_),
+                ty: Static::Bag(_),
                 nullable: true
             })
         )
@@ -424,7 +424,7 @@ impl PartiqlShape {
         matches!(
             *self,
             PartiqlShape::Static(StaticType {
-                ty: StaticTypeVariant::Array(_),
+                ty: Static::Array(_),
                 nullable: true
             })
         )
@@ -442,12 +442,12 @@ impl PartiqlShape {
 
     pub fn expect_bool(&self) -> ShapeResult<StaticType> {
         if let PartiqlShape::Static(StaticType {
-            ty: StaticTypeVariant::Bool,
+            ty: Static::Bool,
             nullable: n,
         }) = self
         {
             Ok(StaticType {
-                ty: StaticTypeVariant::Bool,
+                ty: Static::Bool,
                 nullable: *n,
             })
         } else {
@@ -457,7 +457,7 @@ impl PartiqlShape {
 
     pub fn expect_struct(&self) -> ShapeResult<StructType> {
         if let PartiqlShape::Static(StaticType {
-            ty: StaticTypeVariant::Struct(stct),
+            ty: Static::Struct(stct),
             ..
         }) = self
         {

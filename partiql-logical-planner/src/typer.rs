@@ -4,7 +4,7 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    dynamic, undefined, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticTypeVariant,
+    dynamic, undefined, ArrayType, BagType, PartiqlShape, ShapeResultError, Static,
     StructConstraint, StructField, StructType,
 };
 use partiql_value::{BindingsName, Value};
@@ -331,17 +331,17 @@ impl<'c> PlanTyper<'c> {
                 let ty = match **v {
                     Value::Null => PartiqlShape::Undefined,
                     Value::Missing => PartiqlShape::Undefined,
-                    Value::Integer(_) => PartiqlShape::new(StaticTypeVariant::Int),
-                    Value::Decimal(_) => PartiqlShape::new(StaticTypeVariant::Decimal),
-                    Value::Boolean(_) => PartiqlShape::new(StaticTypeVariant::Bool),
-                    Value::String(_) => PartiqlShape::new(StaticTypeVariant::String),
+                    Value::Integer(_) => PartiqlShape::new(Static::Int),
+                    Value::Decimal(_) => PartiqlShape::new(Static::Decimal),
+                    Value::Boolean(_) => PartiqlShape::new(Static::Bool),
+                    Value::String(_) => PartiqlShape::new(Static::String),
                     Value::Tuple(_) => {
-                        PartiqlShape::new(StaticTypeVariant::Struct(StructType::new_any()))
+                        PartiqlShape::new(Static::Struct(StructType::new_any()))
                     }
                     Value::List(_) => {
-                        PartiqlShape::new(StaticTypeVariant::Array(ArrayType::new_any()))
+                        PartiqlShape::new(Static::Array(ArrayType::new_any()))
                     }
-                    Value::Bag(_) => PartiqlShape::new(StaticTypeVariant::Bag(BagType::new_any())),
+                    Value::Bag(_) => PartiqlShape::new(Static::Bag(BagType::new_any())),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
@@ -416,8 +416,8 @@ impl<'c> PlanTyper<'c> {
         match ty {
             PartiqlShape::Dynamic => dynamic!(),
             PartiqlShape::Static(s) => match s.ty() {
-                StaticTypeVariant::Bag(b) => b.element_type().clone(),
-                StaticTypeVariant::Array(a) => a.element_type().clone(),
+                Static::Bag(b) => b.element_type().clone(),
+                Static::Array(a) => a.element_type().clone(),
                 _ => ty.clone(),
             },
             undefined!() => {
@@ -885,7 +885,7 @@ mod tests {
             .expect_static()?;
 
         match &actual.ty() {
-            StaticTypeVariant::Bag(b) => {
+            Static::Bag(b) => {
                 if let Ok(s) = b.element_type().expect_struct() {
                     let fields = s.fields();
 

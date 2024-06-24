@@ -1,7 +1,7 @@
 use ion_rs::IonError;
 use miette::Diagnostic;
 use partiql_types::{
-    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticType, StaticTypeVariant,
+    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticType, Static,
     StructType,
 };
 use std::fmt::{Display, Formatter};
@@ -111,21 +111,21 @@ impl PartiqlBasicDdlEncoder {
         let mut out = String::new();
 
         match ty.ty() {
-            StaticTypeVariant::Int => out.push_str("INT"),
-            StaticTypeVariant::Int8 => out.push_str("TINYINT"),
-            StaticTypeVariant::Int16 => out.push_str("SMALLINT"),
-            StaticTypeVariant::Int32 => out.push_str("INTEGER"),
-            StaticTypeVariant::Int64 => out.push_str("INT8"),
-            StaticTypeVariant::Bool => out.push_str("BOOL"),
-            StaticTypeVariant::Decimal => out.push_str("DECIMAL"),
-            StaticTypeVariant::DecimalP(p, s) => out.push_str(&format!("DECIMAL({p}, {s})")),
-            StaticTypeVariant::DateTime => out.push_str("TIMESTAMP"),
-            StaticTypeVariant::Float32 => out.push_str("REAL"),
-            StaticTypeVariant::Float64 => out.push_str("DOUBLE"),
-            StaticTypeVariant::String => out.push_str("VARCHAR"),
-            StaticTypeVariant::Struct(s) => out.push_str(&self.write_struct(&s)?),
-            StaticTypeVariant::Bag(b) => out.push_str(&self.write_bag(&b)?),
-            StaticTypeVariant::Array(a) => out.push_str(&self.write_array(&a)?),
+            Static::Int => out.push_str("INT"),
+            Static::Int8 => out.push_str("TINYINT"),
+            Static::Int16 => out.push_str("SMALLINT"),
+            Static::Int32 => out.push_str("INTEGER"),
+            Static::Int64 => out.push_str("INT8"),
+            Static::Bool => out.push_str("BOOL"),
+            Static::Decimal => out.push_str("DECIMAL"),
+            Static::DecimalP(p, s) => out.push_str(&format!("DECIMAL({p}, {s})")),
+            Static::DateTime => out.push_str("TIMESTAMP"),
+            Static::Float32 => out.push_str("REAL"),
+            Static::Float64 => out.push_str("DOUBLE"),
+            Static::String => out.push_str("VARCHAR"),
+            Static::Struct(s) => out.push_str(&self.write_struct(&s)?),
+            Static::Bag(b) => out.push_str(&self.write_bag(&b)?),
+            Static::Array(a) => out.push_str(&self.write_array(&a)?),
 
             // non-exhaustive catch-all
             _ => todo!("handle type for {}", ty),
@@ -192,7 +192,7 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
         let mut output = String::new();
         let ty = ty.expect_static()?;
 
-        if let StaticTypeVariant::Bag(bag) = ty.ty() {
+        if let Static::Bag(bag) = ty.ty() {
             let s = bag.element_type().expect_struct()?;
             let fields = s.fields();
             let mut fields = fields.iter().peekable();
@@ -235,8 +235,8 @@ mod tests {
             (
                 "a",
                 PartiqlShape::any_of(vec![
-                    PartiqlShape::new(StaticTypeVariant::DecimalP(5, 4)),
-                    PartiqlShape::new(StaticTypeVariant::Int8),
+                    PartiqlShape::new(Static::DecimalP(5, 4)),
+                    PartiqlShape::new(Static::Int8),
                 ])
             ),
             ("b", array![str![]]),
@@ -249,7 +249,7 @@ mod tests {
             ("full_name", str![]),
             (
                 "salary",
-                PartiqlShape::new(StaticTypeVariant::DecimalP(8, 2))
+                PartiqlShape::new(Static::DecimalP(8, 2))
             ),
             ("details", details),
             ("dependents", array![str![]])

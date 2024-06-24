@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{PartiqlShape, StaticTypeVariant, TYPE_DYNAMIC};
+use partiql_types::{PartiqlShape, Static, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -26,33 +26,33 @@ pub(crate) fn subsumes(typ: &PartiqlShape, value: &Value) -> bool {
         (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
         (PartiqlShape::Static(s), val) => match (s.ty(), val) {
             (
-                StaticTypeVariant::Int
-                | StaticTypeVariant::Int8
-                | StaticTypeVariant::Int16
-                | StaticTypeVariant::Int32
-                | StaticTypeVariant::Int64,
+                Static::Int
+                | Static::Int8
+                | Static::Int16
+                | Static::Int32
+                | Static::Int64,
                 Value::Integer(_),
             ) => true,
-            (StaticTypeVariant::Bool, Value::Boolean(_)) => true,
-            (StaticTypeVariant::Decimal | StaticTypeVariant::DecimalP(_, _), Value::Decimal(_)) => {
+            (Static::Bool, Value::Boolean(_)) => true,
+            (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_)) => {
                 true
             }
-            (StaticTypeVariant::Float32 | StaticTypeVariant::Float64, Value::Real(_)) => true,
+            (Static::Float32 | Static::Float64, Value::Real(_)) => true,
             (
-                StaticTypeVariant::String
-                | StaticTypeVariant::StringFixed(_)
-                | StaticTypeVariant::StringVarying(_),
+                Static::String
+                | Static::StringFixed(_)
+                | Static::StringVarying(_),
                 Value::String(_),
             ) => true,
-            (StaticTypeVariant::Struct(_), Value::Tuple(_)) => true,
-            (StaticTypeVariant::Bag(b_type), Value::Bag(b_values)) => {
+            (Static::Struct(_), Value::Tuple(_)) => true,
+            (Static::Bag(b_type), Value::Bag(b_values)) => {
                 let bag_element_type = b_type.element_type();
                 let mut b_values = b_values.iter();
                 b_values.all(|b_value| subsumes(bag_element_type, b_value))
             }
-            (StaticTypeVariant::DateTime, Value::DateTime(_)) => true,
+            (Static::DateTime, Value::DateTime(_)) => true,
 
-            (StaticTypeVariant::Array(a_type), Value::List(l_values)) => {
+            (Static::Array(a_type), Value::List(l_values)) => {
                 let array_element_type = a_type.element_type();
                 let mut l_values = l_values.iter();
                 l_values.all(|l_value| subsumes(array_element_type, l_value))
