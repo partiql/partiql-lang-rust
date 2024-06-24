@@ -125,7 +125,6 @@ impl PartiqlBasicDdlEncoder {
             Static::Struct(s) => out.push_str(&self.write_struct(&s)?),
             Static::Bag(b) => out.push_str(&self.write_bag(&b)?),
             Static::Array(a) => out.push_str(&self.write_array(&a)?),
-
             // non-exhaustive catch-all
             _ => todo!("handle type for {}", ty),
         }
