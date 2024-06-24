@@ -1,7 +1,7 @@
-use partiql_types::{StructType, BagType, PartiqlShape, StaticTypeVariant};
-use std::collections::BTreeSet;
 use partiql_extension_ddl::ddl::{DdlFormat, PartiqlBasicDdlEncoder, PartiqlDdlEncoder};
 use partiql_types::{bag, int, r#struct, str, struct_fields, StructConstraint, StructField};
+use partiql_types::{BagType, PartiqlShape, StaticTypeVariant, StructType};
+use std::collections::BTreeSet;
 
 #[test]
 fn basic_ddl_test() {
@@ -10,12 +10,16 @@ fn basic_ddl_test() {
     let fields = [
         StructField::new("id", int!()),
         StructField::new("name", str!()),
-        StructField::new("address", PartiqlShape::new_non_nullable(StaticTypeVariant::String)),
+        StructField::new(
+            "address",
+            PartiqlShape::new_non_nullable(StaticTypeVariant::String),
+        ),
         StructField::new_optional("details", details.clone()),
-    ].into();
+    ]
+    .into();
     let shape = bag![r#struct![BTreeSet::from([
-            StructConstraint::Fields(fields),
-            StructConstraint::Open(false)
+        StructConstraint::Fields(fields),
+        StructConstraint::Open(false)
     ])]];
 
     let ddl_compact = PartiqlBasicDdlEncoder::new(DdlFormat::Compact);

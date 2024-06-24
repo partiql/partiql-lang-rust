@@ -6,7 +6,7 @@ homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
 readme = "../../README.md"
-keywords = ["sql", "parser", "query", "compilers", "interpreters"]
+keywords = ["sql", "ddl", "definition-language", "compilers", "interpreters"]
 categories = ["database", "compilers",]
 exclude = [
     "**/.git/**",

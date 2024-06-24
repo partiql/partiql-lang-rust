@@ -24,17 +24,19 @@ pub enum ShapeEncodingError {
     UnexpectedType(#[from] ShapeResultError),
 }
 
-/// Result of attempts to encode to Ion.
+/// Result of attempts to encode as data definition language (DDL_.
 pub type ShapeDdlEncodeResult<T> = Result<T, ShapeEncodingError>;
 
 const PARTIQL_DATA_TYPE_SYNTAX: &str = "partiql_datatype_syntax";
 
+/// Represents s PartiQL DDL Format
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DdlFormat {
     Compact,
     Pretty,
 }
 
+/// Represents s PartiQL DDL Syntax
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DdlSyntax {
     name: String,
@@ -61,12 +63,14 @@ impl DdlSyntax {
     }
 }
 
+/// Represents a PartiQL DDL Syntax Version
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DdlSyntaxVersion {
     major: u8,
     minor: u8,
 }
 
+/// Represents a PartiQL DDL Encoder
 pub trait PartiqlDdlEncoder {
     type Output;
 
@@ -75,6 +79,7 @@ pub trait PartiqlDdlEncoder {
     fn syntax(&self) -> DdlSyntax;
 }
 
+/// Represents a PartiQL Basic DDL Encoder
 #[derive(Debug, Clone)]
 pub struct PartiqlBasicDdlEncoder {
     format: DdlFormat,
