@@ -1,9 +1,12 @@
-use ion_rs::{IonError, IonWriter};
-use thiserror::Error;
+use ion_rs::IonError;
 use miette::Diagnostic;
-use partiql_types::{AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticType, StaticTypeVariant, StructType};
+use partiql_types::{
+    AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, StaticType, StaticTypeVariant,
+    StructType,
+};
 use std::fmt::{Display, Formatter};
 use std::string::ToString;
+use thiserror::Error;
 
 #[derive(Debug, Error, Diagnostic)]
 #[error("ShapeEncodingError Error")]
