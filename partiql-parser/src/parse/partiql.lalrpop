@@ -102,7 +102,7 @@ WithCycleClause : () = {
 //    - all set operations are left-associative and are thus expressed as left-self-recursive rules
 
 QuerySet: ast::AstNode<ast::QuerySet> = {
-    <lo:@L> <lhs:Query> <bag_op:BagOp> <setq:SetQuantifier> <rhs:SingleQuery> <hi:@R> => {
+    <lo:@L> <lhs:Query> <bag_op:BagOp> <setq:SetQuantifierStrategy> <rhs:SingleQuery> <hi:@R> => {
         let lhs = strip_query(lhs);
         let rhs = strip_query_set(rhs, state, lo, hi);
         let bag_expr = state.node(ast::BagOpExpr {
@@ -223,31 +223,26 @@ FwsClauses: ast::AstNode<ast::Select> = {
 SelectClause: ast::AstNode<ast::Projection> = {
     <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "*" <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectStar,
-        setq: Some(strategy)
+        setq: strategy,
     }, lo..hi),
     <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> <project_items:CommaSepPlus<Projection>> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectList(project_items),
-        setq: Some(strategy),
+        setq: strategy,
     }, lo..hi),
     <lo:@L> "SELECT" <strategy: SetQuantifierStrategy> "VALUE" <value:ExprQuery> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectValue(value),
-        setq: Some(strategy),
+        setq: strategy,
     }, lo..hi),
     <lo:@L> "PIVOT" <value:ExprQuery> "AT" <key:ExprQuery> <hi:@R> => state.node(ast::Projection {
         kind: ast::ProjectionKind::ProjectPivot(ast::ProjectPivot { key, value }),
-        setq: None
+        setq: None,
     }, lo..hi),
 }
 
 #[inline]
-SetQuantifierStrategy: ast::SetQuantifier = {
-    "ALL" => ast::SetQuantifier::All,
-    <distinct: "DISTINCT"?> => {
-        match distinct {
-            Some(_) => ast::SetQuantifier::Distinct,
-            None => ast::SetQuantifier::All,
-        }
-    }
+SetQuantifierStrategy: Option<ast::SetQuantifier> = {
+    "ALL" => Some(ast::SetQuantifier::All),
+    <distinct: "DISTINCT"?> => distinct.map(|_|ast::SetQuantifier::Distinct)
 }
 
 #[inline]
@@ -436,14 +431,9 @@ GroupClause: Box<ast::AstNode<ast::GroupByExpr>> = {
     }
 }
 #[inline]
-GroupStrategy: ast::GroupingStrategy = {
-    "ALL" => ast::GroupingStrategy::GroupFull,
-    <partial:"PARTIAL"?> => {
-        match partial {
-            Some(_) => ast::GroupingStrategy::GroupPartial,
-            None => ast::GroupingStrategy::GroupFull,
-        }
-    }
+GroupStrategy: Option<ast::GroupingStrategy> = {
+    "ALL" => Some(ast::GroupingStrategy::GroupFull),
+    <partial:"PARTIAL"?> => partial.map(|_| ast::GroupingStrategy::GroupPartial),
 }
 #[inline]
 GroupByKeys: Vec<ast::AstNode<ast::GroupKey>> = {
@@ -842,7 +832,6 @@ ExprPrecedence02: Synth<ast::Expr> = {
 
 PathExpr: ast::Path = {
     <l:ExprPrecedence01> <s:PathSteps> => {
-        let step = ast::PathStep::PathWildCard;
         ast::Path {
             root: Box::new(l.data),
             steps: s
@@ -1109,16 +1098,16 @@ PathSteps: Vec<ast::PathStep> = {
 }
 PathStep: ast::PathStep = {
     "." <v:PathExprVarRef> => {
-        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(v) })
+        ast::PathStep::PathProject( ast::PathExpr{ index: Box::new(v) })
     },
     "[" "*" "]" => {
-        ast::PathStep::PathWildCard
+        ast::PathStep::PathForEach
     },
     "." "*" => {
         ast::PathStep::PathUnpivot
     },
     "[" <expr:ExprQuery> "]" => {
-        ast::PathStep::PathExpr( ast::PathExpr{ index: Box::new(*expr) })
+        ast::PathStep::PathIndex( ast::PathExpr{ index: Box::new(*expr) })
     },
 }
 

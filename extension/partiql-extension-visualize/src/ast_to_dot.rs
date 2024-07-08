@@ -631,8 +631,9 @@ impl ToDot<ast::Path> for AstToDot {
 impl ToDot<ast::PathStep> for AstToDot {
     fn to_dot(&mut self, out: &mut Scope<'_, '_>, ast: &ast::PathStep) -> Targets {
         match &ast {
-            ast::PathStep::PathExpr(e) => self.to_dot(out, e),
-            ast::PathStep::PathWildCard => vec![out.node_auto_labelled("*").id()],
+            ast::PathStep::PathProject(e) => self.to_dot(out, e),
+            ast::PathStep::PathIndex(e) => self.to_dot(out, e),
+            ast::PathStep::PathForEach => vec![out.node_auto_labelled("*").id()],
             ast::PathStep::PathUnpivot => vec![out.node_auto_labelled("Unpivot").id()],
         }
     }

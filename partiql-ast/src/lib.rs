@@ -8,4 +8,7 @@
 //! This API is currently unstable and subject to change.
 
 pub mod ast;
+
+pub mod pretty;
+
 pub mod visit;

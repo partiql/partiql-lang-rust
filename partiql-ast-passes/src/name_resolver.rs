@@ -514,7 +514,8 @@ fn infer_alias(expr: &ast::Expr) -> Option<ast::SymbolPrimitive> {
     match expr {
         ast::Expr::VarRef(ast::AstNode { node, .. }) => Some(node.name.clone()),
         ast::Expr::Path(ast::AstNode { node, .. }) => match node.steps.last() {
-            Some(ast::PathStep::PathExpr(expr)) => infer_alias(&expr.index),
+            Some(ast::PathStep::PathProject(expr)) => infer_alias(&expr.index),
+            Some(ast::PathStep::PathIndex(expr)) => infer_alias(&expr.index),
             _ => None,
         },
         _ => None,

@@ -33,7 +33,20 @@ impl From<EvaluationMode> for eval::plan::EvaluationMode {
 #[track_caller]
 #[inline]
 pub(crate) fn parse(statement: &str) -> ParserResult {
-    partiql_parser::Parser::default().parse(statement)
+    let result = partiql_parser::Parser::default().parse(statement);
+
+    #[cfg(feature = "test_pretty_print")]
+    if let Ok(result) = &result {
+        use partiql_ast::pretty::ToPretty;
+        let pretty = result.ast.to_pretty_string(80);
+        if let Ok(pretty) = pretty {
+            println!("{pretty}");
+        } else {
+            panic!("failed pretty print");
+        }
+    }
+
+    result
 }
 
 #[track_caller]

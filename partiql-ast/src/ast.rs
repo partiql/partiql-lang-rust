@@ -283,7 +283,7 @@ pub struct BagOpExpr {
     #[visit(skip)]
     pub bag_op: BagOperator,
     #[visit(skip)]
-    pub setq: SetQuantifier,
+    pub setq: Option<SetQuantifier>,
     pub lhs: Box<AstNode<Query>>,
     pub rhs: Box<AstNode<Query>>,
 }
@@ -644,7 +644,7 @@ pub enum CallArg {
     PositionalType(Type),
     /// named argument to a function call (e.g., the `"from" : 2` in `substring(a, "from":2)`
     Named(CallArgNamed),
-    /// E.g. `AS: VARCHAR` in `CAST('abc' AS VARCHAR`
+    /// E.g. `AS: VARCHAR` in `CAST('abc' AS VARCHAR)`
     NamedType(CallArgNamedType),
 }
 
@@ -676,9 +676,10 @@ pub struct Path {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PathStep {
-    PathExpr(PathExpr),
+    PathProject(PathExpr),
+    PathIndex(PathExpr),
     #[visit(skip)]
-    PathWildCard,
+    PathForEach,
     #[visit(skip)]
     PathUnpivot,
 }
@@ -789,7 +790,7 @@ pub enum JoinSpec {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupByExpr {
     #[visit(skip)]
-    pub strategy: GroupingStrategy,
+    pub strategy: Option<GroupingStrategy>,
     pub keys: Vec<AstNode<GroupKey>>,
     #[visit(skip)]
     pub group_as_alias: Option<SymbolPrimitive>,
