@@ -1,0 +1,89 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT VALUE CASE WHEN x + 1 < i THEN '< ONE' WHEN x + 1 = f THEN 'TWO' WHEN (x + 1 > d) AND (x + 1 < 100) THEN '>= THREE < 100' ELSE '?' END FROM << -1.0000, i, f, d, 100e0, null, missing >> AS x
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE CASE WHEN ((x + 1) < i) THEN '< ONE' WHEN ((x + 1) = f) THEN 'TWO' WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100' ELSE '?' FROM <<
+    -1.0000,
+    i,
+    f,
+    d,
+    100,
+    NULL,
+    MISSING
+  >> AS x
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE CASE WHEN ((x + 1) < i) THEN '< ONE' WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100' ELSE '?' FROM << -1.0000, i, f, d, 100, NULL, MISSING
+  >> AS x
+
+--------------------------------------------------------------------------------
+SELECT VALUE CASE WHEN ((x + 1) < i) THEN '< ONE' WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100' ELSE '?'
+FROM << -1.0000, i, f, d, 100, NULL, MISSING >> AS x
+
+----------------------------------------
+SELECT VALUE CASE
+  WHEN ((x + 1) < i) THEN '< ONE'
+    WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100'
+  ELSE '?' FROM <<
+    -1.0000,
+    i,
+    f,
+    d,
+    100,
+    NULL,
+    MISSING
+  >> AS x
+
+------------------------------
+SELECT VALUE CASE
+  WHEN ((x + 1) < i) THEN '< ONE'
+    WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100'
+  ELSE '?' FROM <<
+    -1.0000,
+    i,
+    f,
+    d,
+    100,
+    NULL,
+    MISSING
+  >> AS x
+
+--------------------
+SELECT VALUE CASE
+  WHEN ((x + 1) < i) THEN '< ONE'
+    WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100'
+  ELSE '?' FROM <<
+    -1.0000,
+    i,
+    f,
+    d,
+    100,
+    NULL,
+    MISSING
+  >> AS x
+
+----------
+SELECT VALUE CASE
+  WHEN ((x + 1) < i) THEN '< ONE'
+    WHEN ((x + 1) = f) THEN 'TWO'
+    WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100'
+  ELSE '?'
+FROM <<
+    -1.0000,
+    i,
+    f,
+    d,
+    100,
+    NULL,
+    MISSING
+  >> AS x

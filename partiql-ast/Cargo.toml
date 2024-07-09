@@ -28,6 +28,8 @@ thiserror = "1.0"
 
 [dev-dependencies]
 partiql-parser = { path = "../partiql-parser", version = "0.8" }
+itertools = "0.13"
+insta = "1.38.0"
 
 [features]
 default = []

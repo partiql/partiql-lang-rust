@@ -1,0 +1,149 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+select foo,bar, baz,thud.*,grunt.a[*].b[2].*, count(1) as n from
+            <<
+                { 'foo': 'foo', 'x': 9, 'y':5, z:-11 },
+                { 'foo': 'bar' },
+                { 'foo': 'qux' },
+                { 'foo': 'bar' },
+                { 'foo': 'baz' },
+                { 'foo': 'bar' },
+                { 'foo': 'baz' }
+            >>  group by foo order by n desc
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
+    { 'foo': 'foo', 'x': 9, 'y': 5, z: -11 },
+    { 'foo': 'bar' },
+    { 'foo': 'qux' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' }
+  >> GROUP BY foo ORDER BY n DESC
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
+    { 'foo': 'foo', 'x': 9, 'y': 5, z: -11 },
+    { 'foo': 'bar' },
+    { 'foo': 'qux' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' }
+  >> GROUP BY foo ORDER BY n DESC
+
+--------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
+    { 'foo': 'foo', 'x': 9, 'y': 5, z: -11 },
+    { 'foo': 'bar' },
+    { 'foo': 'qux' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' }
+  >> GROUP BY foo ORDER BY n DESC
+
+----------------------------------------
+SELECT foo, bar, baz, thud.*,
+  grunt.a[*].b[2].*, count(1) AS n
+FROM <<
+    {
+      'foo': 'foo',
+      'x': 9,
+      'y': 5,
+      z: -11
+    },
+    { 'foo': 'bar' },
+    { 'foo': 'qux' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' }
+  >> GROUP BY foo ORDER BY n DESC
+
+------------------------------
+SELECT foo, bar, baz, thud.*,
+  grunt.a[*].b[2].*,
+  count(1) AS n FROM <<
+    {
+      'foo': 'foo',
+      'x': 9,
+      'y': 5,
+      z: -11
+    },
+    { 'foo': 'bar' },
+    { 'foo': 'qux' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' },
+    { 'foo': 'bar' },
+    { 'foo': 'baz' }
+  >> GROUP BY foo
+ORDER BY n DESC
+
+--------------------
+SELECT foo, bar,
+  baz, thud.*,
+  grunt.a[*].b[2].*,
+  count(1) AS n
+FROM <<
+    {
+      'foo': 'foo',
+      'x': 9,
+      'y': 5,
+      z: -11
+    },
+    { 'foo': 'bar'
+    },
+    { 'foo': 'qux'
+    },
+    { 'foo': 'bar'
+    },
+    { 'foo': 'baz'
+    },
+    { 'foo': 'bar'
+    },
+    { 'foo': 'baz' }
+  >> GROUP BY foo
+ORDER BY n DESC
+
+----------
+SELECT foo,
+  bar,
+  baz,
+  thud.*,
+  grunt.a[*].b[2].*,
+  count(1) AS n
+FROM <<
+    {
+      'foo': 'foo',
+      'x': 9,
+      'y': 5,
+      z: -11
+    },
+    {
+      'foo': 'bar'
+    },
+    {
+      'foo': 'qux'
+    },
+    {
+      'foo': 'bar'
+    },
+    {
+      'foo': 'baz'
+    },
+    {
+      'foo': 'bar'
+    },
+    {
+      'foo': 'baz'
+    }
+  >>
+GROUP BY
+foo
+ORDER BY n DESC

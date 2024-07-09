@@ -1,0 +1,35 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT VALUE foo FROM (SELECT VALUE v FROM UNPIVOT e AS v) AS foo
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE foo FROM (SELECT VALUE v FROM UNPIVOT e AS v) AS foo
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE foo FROM (SELECT VALUE v FROM UNPIVOT e AS v) AS foo
+
+--------------------------------------------------------------------------------
+SELECT VALUE foo FROM (SELECT VALUE v FROM UNPIVOT e AS v) AS foo
+
+----------------------------------------
+SELECT VALUE foo FROM (SELECT VALUE v
+        FROM UNPIVOT e AS v) AS foo
+
+------------------------------
+SELECT VALUE foo
+FROM (SELECT VALUE v
+        FROM UNPIVOT e AS v) AS foo
+
+--------------------
+SELECT VALUE foo
+FROM (SELECT VALUE v
+        FROM UNPIVOT e AS v) AS foo
+
+----------
+SELECT VALUE foo
+FROM (SELECT VALUE v
+        FROM UNPIVOT e AS v) AS foo

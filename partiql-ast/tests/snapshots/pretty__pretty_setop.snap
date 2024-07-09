@@ -1,0 +1,73 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+(SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                            UNION
+                            (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                            ORDER BY c3 LIMIT d3 OFFSET e3
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+UNION
+( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) ORDER BY c3 LIMIT d3 OFFSET e3
+
+------------------------------------------------------------------------------------------------------------------------
+( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+UNION
+( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) ORDER BY c3 LIMIT d3 OFFSET e3
+
+--------------------------------------------------------------------------------
+( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+UNION
+( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) ORDER BY c3 LIMIT d3
+OFFSET e3
+
+----------------------------------------
+( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1
+  OFFSET e1 )
+UNION
+( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2
+  OFFSET e2 ) ORDER BY c3 LIMIT d3
+OFFSET e3
+
+------------------------------
+( SELECT a1 FROM b1
+  ORDER BY c1 LIMIT d1
+  OFFSET e1 )
+UNION
+( SELECT a2 FROM b2
+  ORDER BY c2 LIMIT d2
+  OFFSET e2 ) ORDER BY c3
+LIMIT d3 OFFSET e3
+
+--------------------
+( SELECT a1 FROM b1
+  ORDER BY c1
+  LIMIT d1
+  OFFSET e1 )
+UNION
+( SELECT a2 FROM b2
+  ORDER BY c2
+  LIMIT d2
+  OFFSET e2 )
+ORDER BY c3 LIMIT d3
+OFFSET e3
+
+----------
+( SELECT a1
+  FROM b1
+  ORDER BY c1
+  LIMIT d1
+  OFFSET e1 )
+UNION
+( SELECT a2
+  FROM b2
+  ORDER BY c2
+  LIMIT d2
+  OFFSET e2 )
+ORDER BY c3
+LIMIT d3
+OFFSET e3
