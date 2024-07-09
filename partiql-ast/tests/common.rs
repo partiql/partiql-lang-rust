@@ -17,7 +17,7 @@ fn pretty_print_test(statement: &str) {
     let res = parse(statement);
     assert!(res.is_ok());
     let res = res.unwrap();
-
+// TODO https://github.com/partiql/partiql-lang-rust/issues/473
     for w in [180, 120, 80, 40, 30, 20, 10] {
         println!("{:-<w$}", "");
         println!("{}\n", res.ast.to_pretty_string(w).unwrap());
