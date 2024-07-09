@@ -771,8 +771,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     BagOperator::OuterIntersect => logical::BagOperator::OuterIntersect,
                 };
                 let setq = match bag_op.node.setq {
-                    SetQuantifier::All => logical::SetQuantifier::All,
-                    SetQuantifier::Distinct => logical::SetQuantifier::Distinct,
+                    Some(SetQuantifier::All) => logical::SetQuantifier::All,
+                    Some(SetQuantifier::Distinct) => logical::SetQuantifier::Distinct,
+                    None => logical::SetQuantifier::Distinct,
                 };
 
                 let id = self.plan.add_operator(BindingsOp::BagOp(BagOp {
@@ -845,14 +846,14 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn exit_projection(&mut self, _projection: &'ast Projection) -> Traverse {
+    fn exit_projection(&mut self, projection: &'ast Projection) -> Traverse {
         let benv = self.exit_benv();
         eq_or_fault!(self, benv.len(), 0, "benv.len() != 0");
 
         let env = self.exit_env();
         eq_or_fault!(self, env.len(), 0, "env.len() != 0");
 
-        if let Some(SetQuantifier::Distinct) = _projection.setq {
+        if let Some(SetQuantifier::Distinct) = projection.setq {
             let id = self.plan.add_operator(BindingsOp::Distinct);
             self.current_clauses_mut().distinct.replace(id);
         }
@@ -1382,8 +1383,8 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn enter_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
-        if let PathStep::PathExpr(expr) = _path_step {
+    fn enter_path_step(&mut self, path_step: &'ast PathStep) -> Traverse {
+        if let PathStep::PathIndex(expr) | PathStep::PathProject(expr) = path_step {
             self.enter_env();
             match *(expr.index) {
                 Expr::VarRef(_) => {
@@ -1401,9 +1402,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         Traverse::Continue
     }
 
-    fn exit_path_step(&mut self, _path_step: &'ast PathStep) -> Traverse {
-        let step = match _path_step {
-            PathStep::PathExpr(_s) => {
+    fn exit_path_step(&mut self, path_step: &'ast PathStep) -> Traverse {
+        let step = match path_step {
+            PathStep::PathProject(_s) | PathStep::PathIndex(_s) => {
                 let mut env = self.exit_env();
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
@@ -1425,8 +1426,8 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
                     }
                 }
             }
-            PathStep::PathWildCard => {
-                not_yet_implemented_fault!(self, "PathStep::PathWildCard".to_string());
+            PathStep::PathForEach => {
+                not_yet_implemented_fault!(self, "PathStep::PathForEach".to_string());
             }
             PathStep::PathUnpivot => {
                 not_yet_implemented_fault!(self, "PathStep::PathUnpivot".to_string());
@@ -1627,8 +1628,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
         let strategy = match _group_by_expr.strategy {
-            GroupingStrategy::GroupFull => logical::GroupingStrategy::GroupFull,
-            GroupingStrategy::GroupPartial => logical::GroupingStrategy::GroupPartial,
+            None => logical::GroupingStrategy::GroupFull,
+            Some(GroupingStrategy::GroupFull) => logical::GroupingStrategy::GroupFull,
+            Some(GroupingStrategy::GroupPartial) => logical::GroupingStrategy::GroupPartial,
         };
 
         // What follows is an approach to implement section 11.2.1 of the PartiQL spec

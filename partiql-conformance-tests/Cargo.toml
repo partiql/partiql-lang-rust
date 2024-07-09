@@ -28,7 +28,7 @@ required-features = ["report_tool"]
 bench = false
 
 [build-dependencies]
-miette = { version ="5.*", features = ["fancy"] }
+miette = { version = "5.*", features = ["fancy"] }
 partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.8.*" }
 
 [dependencies]
@@ -40,7 +40,7 @@ partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.8.
 partiql-logical = { path = "../partiql-logical", version = "0.8.*" }
 partiql-value = { path = "../partiql-value", version = "0.8.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.8.*" }
-partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.8.*" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.8.*" }
 
 ion-rs = "0.18"
 
@@ -57,11 +57,12 @@ serde_json = { version = "1.*", optional = true }
 [features]
 default = ["base"]
 base = ["syntax", "semantics", "strict", "permissive"]
-syntax=[]
-semantics=[]
-strict=[]
-permissive=[]
-experimental=[]
-conformance_test=[]
+syntax = []
+semantics = []
+strict = []
+permissive = []
+experimental = []
+conformance_test = []
 report_tool = ["serde"]
+test_pretty_print = []
 serde = ["dep:serde", "dep:serde_json"]
