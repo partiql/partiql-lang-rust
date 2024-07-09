@@ -2,6 +2,9 @@ use crate::ast::*;
 use pretty::{Arena, DocAllocator, DocBuilder, Pretty};
 use std::io;
 use std::io::Write;
+use std::string::FromUtf8Error;
+use thiserror::Error;
+
 const MINOR_NEST_INDENT: isize = 2;
 const SUBQUERY_INDENT: isize = 6;
 
@@ -13,16 +16,28 @@ pub(crate) trait PrettyDoc {
         A: Clone;
 }
 
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ToPrettyError {
+    #[error("IO error: `{0}`")]
+    IoError(#[from] std::io::Error),
+
+    #[error("FromUtf8Error: `{0}`")]
+    FromUtf8Error(#[from] FromUtf8Error),
+}
+
+type ToPrettyResult<T> = Result<T, ToPrettyError>;
+
 pub trait ToPretty {
-    fn to_pretty_string(&self, width: usize) -> io::Result<String> {
+    /// Pretty-prints to a `String`.
+    fn to_pretty_string(&self, width: usize) -> ToPrettyResult<String> {
         let mut out = Vec::new();
         self.to_pretty(width, &mut out)?;
-        // TODO error instead of unwrap
-        Ok(String::from_utf8(out).unwrap())
+        Ok(String::from_utf8(out)?)
     }
 
-    /// Writes a rendered document to a `std::io::Write` object.
-    fn to_pretty<W>(&self, width: usize, out: &mut W) -> io::Result<()>
+    /// Pretty-prints to a `std::io::Write` object.
+    fn to_pretty<W>(&self, width: usize, out: &mut W) -> ToPrettyResult<()>
     where
         W: ?Sized + io::Write;
 }
@@ -31,13 +46,13 @@ impl<T> ToPretty for AstNode<T>
 where
     T: PrettyDoc,
 {
-    fn to_pretty<W>(&self, width: usize, out: &mut W) -> io::Result<()>
+    fn to_pretty<W>(&self, width: usize, out: &mut W) -> ToPrettyResult<()>
     where
         W: ?Sized + Write,
     {
         let arena = Arena::new();
         let DocBuilder(_, doc) = self.node.pretty_doc::<_, ()>(&arena);
-        doc.render(width, out)
+        Ok(doc.render(width, out)?)
     }
 }
 
@@ -53,21 +68,6 @@ where
         A: Clone,
     {
         self.node.pretty_doc(arena)
-    }
-}
-
-impl<T> PrettyDoc for &T
-where
-    T: PrettyDoc,
-{
-    #[inline]
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        self.pretty_doc(arena)
     }
 }
 
@@ -117,7 +117,9 @@ impl PrettyDoc for TopLevelQuery {
         D::Doc: Clone,
         A: Clone,
     {
-        // TODO With
+        if self.with.is_some() {
+            todo!("WITH Clause")
+        }
         self.query.pretty_doc(arena)
     }
 }
@@ -928,8 +930,6 @@ impl PrettyDoc for Join {
             predicate,
         } = self;
 
-        //let left = left.pretty_doc(arena).group();
-        //let right = right.pretty_doc(arena).group();
         let arms = [left.as_ref(), right.as_ref()];
         let kw_join = match kind {
             JoinKind::Cross => " CROSS JOIN ",
@@ -940,7 +940,7 @@ impl PrettyDoc for Join {
         };
 
         match (kind, predicate) {
-            (JoinKind::Cross, Some(pred)) => {
+            (JoinKind::Cross, Some(_)) => {
                 todo!("CROSS JOIN with predicate")
             }
             (JoinKind::Cross, None) => pretty_list(arms, 0, arena),

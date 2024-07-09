@@ -24,6 +24,7 @@ indexmap = { version = "1.9", default-features = false }
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 serde = { version = "1.*", features = ["derive"], optional = true }
 pretty = "0.12"
+thiserror = "1.0"
 
 [dev-dependencies]
 partiql-parser = { path = "../partiql-parser", version = "0.8" }
