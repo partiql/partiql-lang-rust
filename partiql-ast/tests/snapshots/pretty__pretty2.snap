@@ -1,0 +1,62 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+select foo,bar, baz,thud,grunt, count(1) as n from
+            (SELECT * FROM table1)
+            where (bar between 3 and 25 AND baz NOT LIKE 'example%') OR foo.a.b[*] IS MISSING
+            group by foo
+            order by n desc
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1) WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING)) GROUP BY foo
+ORDER BY n DESC
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING)) GROUP BY foo ORDER BY n DESC
+
+--------------------------------------------------------------------------------
+SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
+
+----------------------------------------
+SELECT foo, bar, baz, thud, grunt,
+  count(1) AS n FROM (SELECT *
+        FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
+
+------------------------------
+SELECT foo, bar, baz, thud,
+  grunt, count(1) AS n
+FROM (SELECT * FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
+
+--------------------
+SELECT foo, bar,
+  baz, thud, grunt,
+  count(1) AS n
+FROM (SELECT *
+        FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo
+ORDER BY n DESC
+
+----------
+SELECT foo,
+  bar,
+  baz,
+  thud,
+  grunt,
+  count(1) AS n
+FROM (SELECT *
+        FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY
+foo
+ORDER BY n DESC

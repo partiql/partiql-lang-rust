@@ -1,0 +1,104 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+
+                (
+                    (SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1)
+                    UNION DISTINCT
+                    (SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2)
+                )
+                OUTER UNION ALL
+                (SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3)
+                ORDER BY c4 LIMIT d4 OFFSET e4
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+( ( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3 ) ORDER BY c4 LIMIT d4 OFFSET e4
+
+------------------------------------------------------------------------------------------------------------------------
+( ( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3 ) ORDER BY c4 LIMIT d4 OFFSET e4
+
+--------------------------------------------------------------------------------
+( ( SELECT a1 FROM b1 ORDER BY c1 LIMIT d1 OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2 FROM b2 ORDER BY c2 LIMIT d2 OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3 ORDER BY c3 LIMIT d3 OFFSET e3 ) ORDER BY c4 LIMIT d4
+OFFSET e4
+
+----------------------------------------
+( ( SELECT a1 FROM b1 ORDER BY c1
+    LIMIT d1 OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2 FROM b2 ORDER BY c2
+    LIMIT d2 OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3 ORDER BY c3 LIMIT d3
+  OFFSET e3 ) ORDER BY c4 LIMIT d4
+OFFSET e4
+
+------------------------------
+( ( SELECT a1 FROM b1
+    ORDER BY c1 LIMIT d1
+    OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2 FROM b2
+    ORDER BY c2 LIMIT d2
+    OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3
+  ORDER BY c3 LIMIT d3
+  OFFSET e3 ) ORDER BY c4
+LIMIT d4 OFFSET e4
+
+--------------------
+( ( SELECT a1
+    FROM b1
+    ORDER BY c1
+    LIMIT d1
+    OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2
+    FROM b2
+    ORDER BY c2
+    LIMIT d2
+    OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3 FROM b3
+  ORDER BY c3
+  LIMIT d3
+  OFFSET e3 )
+ORDER BY c4 LIMIT d4
+OFFSET e4
+
+----------
+( ( SELECT a1
+    FROM b1
+    ORDER BY c1
+    LIMIT d1
+    OFFSET e1 )
+  UNION DISTINCT
+  ( SELECT a2
+    FROM b2
+    ORDER BY c2
+    LIMIT d2
+    OFFSET e2 ) )
+OUTER UNION ALL
+( SELECT a3
+  FROM b3
+  ORDER BY c3
+  LIMIT d3
+  OFFSET e3 )
+ORDER BY c4
+LIMIT d4
+OFFSET e4

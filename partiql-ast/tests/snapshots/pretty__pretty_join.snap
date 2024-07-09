@@ -1,0 +1,47 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+
+                  SELECT t1.id AS id, t1.val AS val1, t2.val AS val2
+                  FROM table1 AS t1 JOIN table1_null_row AS t2 ON t1.id = t2.id
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT t1.id AS id, t1.val AS val1, t2.val AS val2 FROM table1 AS t1 INNER JOIN table1_null_row AS t2 ON (t1.id = t2.id)
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT t1.id AS id, t1.val AS val1, t2.val AS val2 FROM table1 AS t1 INNER JOIN table1_null_row AS t2 ON (t1.id = t2.id)
+
+--------------------------------------------------------------------------------
+SELECT t1.id AS id, t1.val AS val1, t2.val AS val2
+FROM table1 AS t1 INNER JOIN table1_null_row AS t2 ON (t1.id = t2.id)
+
+----------------------------------------
+SELECT t1.id AS id, t1.val AS val1,
+  t2.val AS val2
+FROM table1 AS t1 INNER JOIN table1_null_row AS t2
+  ON (t1.id = t2.id)
+
+------------------------------
+SELECT t1.id AS id,
+  t1.val AS val1,
+  t2.val AS val2
+FROM table1 AS t1 INNER JOIN table1_null_row AS t2
+  ON (t1.id = t2.id)
+
+--------------------
+SELECT t1.id AS id,
+  t1.val AS val1,
+  t2.val AS val2
+FROM table1 AS t1 INNER JOIN table1_null_row AS t2
+  ON (t1.id = t2.id)
+
+----------
+SELECT t1.id AS id,
+  t1.val AS val1,
+  t2.val AS val2
+FROM table1 AS t1 INNER JOIN table1_null_row AS t2
+  ON
+  (t1.id = t2.id)

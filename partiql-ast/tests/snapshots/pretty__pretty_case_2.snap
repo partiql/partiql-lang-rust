@@ -1,0 +1,80 @@
+---
+source: partiql-ast/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT VALUE CASE x + 1 WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE' WHEN f THEN 'TWO' WHEN d THEN 'THREE' END FROM << i, f, d, null, missing >> AS x
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE' WHEN f THEN 'TWO' WHEN d THEN 'THREE' FROM <<
+    i,
+    f,
+    d,
+    NULL,
+    MISSING
+  >> AS x
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE'
+    WHEN f THEN 'TWO' WHEN d THEN 'THREE' FROM << i, f, d, NULL, MISSING >> AS x
+
+--------------------------------------------------------------------------------
+SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null'
+    WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE' WHEN f THEN 'TWO'
+    WHEN d THEN 'THREE' FROM << i, f, d, NULL, MISSING >> AS x
+
+----------------------------------------
+SELECT VALUE CASE (x + 1)
+  WHEN NULL THEN 'shouldnt be null'
+    WHEN MISSING THEN 'shouldnt be missing'
+    WHEN i THEN 'ONE' WHEN f THEN 'TWO'
+    WHEN d THEN 'THREE' FROM <<
+    i,
+    f,
+    d,
+    NULL,
+    MISSING
+  >> AS x
+
+------------------------------
+SELECT VALUE CASE (x + 1)
+  WHEN NULL THEN 'shouldnt be null'
+    WHEN MISSING THEN 'shouldnt be missing'
+    WHEN i THEN 'ONE'
+    WHEN f THEN 'TWO'
+    WHEN d THEN 'THREE'
+FROM << i, f, d, NULL, MISSING
+  >> AS x
+
+--------------------
+SELECT VALUE CASE
+  (x + 1)
+  WHEN NULL THEN 'shouldnt be null'
+    WHEN MISSING THEN 'shouldnt be missing'
+    WHEN i THEN 'ONE'
+    WHEN f THEN 'TWO'
+    WHEN d THEN 'THREE'
+FROM <<
+    i,
+    f,
+    d,
+    NULL,
+    MISSING
+  >> AS x
+
+----------
+SELECT VALUE CASE
+  (x + 1)
+  WHEN NULL THEN 'shouldnt be null'
+    WHEN MISSING THEN 'shouldnt be missing'
+    WHEN i THEN 'ONE'
+    WHEN f THEN 'TWO'
+    WHEN d THEN 'THREE'
+FROM <<
+    i,
+    f,
+    d,
+    NULL,
+    MISSING
+  >> AS x
