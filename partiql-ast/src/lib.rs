@@ -11,4 +11,6 @@ pub mod ast;
 
 pub mod pretty;
 
+pub mod builder;
+
 pub mod visit;
