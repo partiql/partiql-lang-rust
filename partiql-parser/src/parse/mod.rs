@@ -8,10 +8,11 @@ mod parser_state;
 use crate::error::{ParseError, UnexpectedTokenData};
 use crate::lexer;
 use crate::lexer::CommentSkippingLexer;
-use crate::parse::parser_state::{IdGenerator, ParserState};
+use crate::parse::parser_state::ParserState;
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
 use partiql_ast::ast;
+use partiql_ast::builder::IdGenerator;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use partiql_source_map::metadata::LocationMap;
@@ -536,16 +537,8 @@ mod tests {
 
     mod set_ops {
         use super::*;
-        use partiql_ast::ast::NodeId;
 
-        #[derive(Default)]
-        pub(crate) struct NullIdGenerator {}
-
-        impl IdGenerator for NullIdGenerator {
-            fn id(&mut self) -> NodeId {
-                NodeId(0)
-            }
-        }
+        use partiql_ast::builder::NullIdGenerator;
 
         impl<'input> ParserState<'input, NullIdGenerator> {
             pub(crate) fn new_null_id() -> ParserState<'input, NullIdGenerator> {

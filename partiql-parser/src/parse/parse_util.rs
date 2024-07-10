@@ -1,7 +1,8 @@
 use partiql_ast::ast;
 
-use crate::parse::parser_state::{IdGenerator, ParserState};
+use crate::parse::parser_state::ParserState;
 use bitflags::bitflags;
+use partiql_ast::builder::IdGenerator;
 use partiql_source_map::location::ByteOffset;
 
 bitflags! {

@@ -2,13 +2,12 @@ use crate::error::ParseError;
 use crate::parse::lexer;
 use std::ops::Range;
 
-use partiql_ast::ast;
-
 use lalrpop_util::ErrorRecovery;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use partiql_ast::ast::{AstNode, NodeId, SymbolPrimitive};
+use partiql_ast::ast::{AstNode, SymbolPrimitive};
+use partiql_ast::builder::{AutoNodeIdGenerator, IdGenerator, NodeBuilder};
 
 use partiql_source_map::location::{ByteOffset, BytePosition, Location};
 use partiql_source_map::metadata::LocationMap;
@@ -19,39 +18,10 @@ type ParseErrors<'input> = Vec<ParseErrorRecovery<'input>>;
 
 const INIT_LOCATIONS: usize = 100;
 
-/// A provider of 'fresh' [`NodeId`]s.
-// NOTE `pub` instead of `pub(crate)` only because LALRPop's generated code uses this in `pub trait __ToTriple`
-//       which leads to compile time errors.
-//       However, since this module is included privately, this type doesn't leak outside the crate anyway.
-pub trait IdGenerator {
-    /// Provides a 'fresh' [`NodeId`].
-    fn id(&mut self) -> NodeId;
-}
-
-/// Auto-incrementing [`IdGenerator`]
-pub(crate) struct NodeIdGenerator {
-    next_id: ast::NodeId,
-}
-
-impl Default for NodeIdGenerator {
-    fn default() -> Self {
-        NodeIdGenerator { next_id: NodeId(1) }
-    }
-}
-
-impl IdGenerator for NodeIdGenerator {
-    #[inline]
-    fn id(&mut self) -> NodeId {
-        let mut next = NodeId(&self.next_id.0 + 1);
-        std::mem::swap(&mut self.next_id, &mut next);
-        next
-    }
-}
-
 /// State of the parsing during parse.
 pub(crate) struct ParserState<'input, Id: IdGenerator> {
     /// Generator for 'fresh' [`NodeId`]s
-    pub id_gen: Id,
+    pub node_builder: NodeBuilder<Id>,
     /// Maps AST [`NodeId`]s to the location in the source from which each was derived.
     pub locations: LocationMap,
     /// Any errors accumulated during parse.
@@ -61,9 +31,9 @@ pub(crate) struct ParserState<'input, Id: IdGenerator> {
     aggregates_pat: &'static Regex,
 }
 
-impl<'input> Default for ParserState<'input, NodeIdGenerator> {
+impl<'input> Default for ParserState<'input, AutoNodeIdGenerator> {
     fn default() -> Self {
-        ParserState::with_id_gen(NodeIdGenerator::default())
+        ParserState::with_id_gen(AutoNodeIdGenerator::default())
     }
 }
 
@@ -79,7 +49,7 @@ where
 {
     pub fn with_id_gen(id_gen: I) -> Self {
         ParserState {
-            id_gen,
+            node_builder: NodeBuilder::new(id_gen),
             locations: LocationMap::with_capacity(INIT_LOCATIONS),
             errors: ParseErrors::default(),
             aggregates_pat: &KNOWN_AGGREGATE_PATTERN,
@@ -93,12 +63,9 @@ impl<'input, Id: IdGenerator> ParserState<'input, Id> {
     where
         IntoLoc: Into<Location<BytePosition>>,
     {
-        let location = location.into();
-        let id = self.id_gen.id();
-
-        self.locations.insert(id, location);
-
-        AstNode { id, node }
+        let node = self.node_builder.node(node);
+        self.locations.insert(node.id, location.into());
+        node
     }
 
     /// Create a new [`AstNode`] from the inner data which it is to hold and a [`ByteOffset`] range.

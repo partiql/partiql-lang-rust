@@ -1,4 +1,3 @@
-#![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
 
@@ -18,14 +17,14 @@ mod tests {
     #[inline]
     pub(crate) fn evaluate(
         catalog: &dyn Catalog,
-        logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
+        logical: &LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
         ctx_vals: &[(String, &(dyn Any))],
     ) -> Result<Value, EvalErr> {
         let mut planner =
             partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Strict, catalog);
 
-        let mut plan = planner.compile(&logical).expect("Expect no plan error");
+        let mut plan = planner.compile(logical).expect("Expect no plan error");
 
         let sys = SystemContext {
             now: DateTime::from_system_now_utc(),
@@ -40,7 +39,7 @@ mod tests {
     #[test]
     fn locals_in_subqueries() {
         //  `SELECT VALUE _1 from (SELECT VALUE foo from <<{'a': 'b'}>> AS foo) AS _1;`
-        let mut sub_query = partiql_logical::LogicalPlan::new();
+        let mut sub_query = LogicalPlan::new();
         let scan_op_id =
             sub_query.add_operator(partiql_logical::BindingsOp::Scan(partiql_logical::Scan {
                 expr: partiql_logical::ValueExpr::Lit(Box::new(Value::Bag(Box::new(Bag::from(
@@ -86,7 +85,7 @@ mod tests {
 
         let catalog = PartiqlCatalog::default();
         let bindings = MapBindings::default();
-        let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
+        let res = evaluate(&catalog, &plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
         assert_eq!(res, Value::from(bag![tuple![("a", "b")]]));
@@ -147,7 +146,7 @@ mod tests {
             "foo",
             Value::Bag(Box::new(Bag::from(vec![tuple![("a", "b")].into()]))),
         );
-        let res = evaluate(&catalog, plan, bindings, &[]).expect("should eval correctly");
+        let res = evaluate(&catalog, &plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
         assert!(res != Value::Missing);
         assert_eq!(res, Value::from(bag![tuple![("a", "b")]]));

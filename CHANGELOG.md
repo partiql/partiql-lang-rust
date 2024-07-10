@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - partiql-ast: Pretty-printing of AST via `ToPretty` trait
+- partiql-ast: Added `NodeBuilder` to make building ASTs easier
 
 ### Fixed
 - Minor documentation issues
