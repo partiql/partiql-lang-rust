@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1720556394996,
+  "lastUpdate": 1720653699081,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -23027,6 +23027,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 21781,
             "range": "± 130",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "josh@pschorr.dev",
+            "name": "Josh Pschorr",
+            "username": "jpschorr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b22fb6cdf70b33062ca1f28d99464afc16af809",
+          "message": "Add `NodeBuilder` for building ASTs (#476)",
+          "timestamp": "2024-07-10T16:09:29-07:00",
+          "tree_id": "86612cfa44ae18127eef6d392431d1c17e580c15",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/1b22fb6cdf70b33062ca1f28d99464afc16af809"
+        },
+        "date": 1720653697912,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 775078,
+            "range": "± 8705",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 862652,
+            "range": "± 6626",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 830846,
+            "range": "± 7811",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 855765,
+            "range": "± 2496",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 843309,
+            "range": "± 3129",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 871031,
+            "range": "± 11411",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 840150,
+            "range": "± 3401",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 870457,
+            "range": "± 1793",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 833829,
+            "range": "± 2930",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 863680,
+            "range": "± 2889",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 971146,
+            "range": "± 7271",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1228144,
+            "range": "± 5068",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1825750,
+            "range": "± 17664",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1171155,
+            "range": "± 7797",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1475823,
+            "range": "± 17342",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2067865,
+            "range": "± 12643",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 4149,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 39532,
+            "range": "± 211",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 76008,
+            "range": "± 562",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4432,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 35043,
+            "range": "± 104",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 71338,
+            "range": "± 331",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 69546,
+            "range": "± 702",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1078664,
+            "range": "± 86226",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2153387,
+            "range": "± 13338",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12766894,
+            "range": "± 60043",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 86920998,
+            "range": "± 1270499",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 167856739,
+            "range": "± 489213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9891,
+            "range": "± 173",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2474,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 427,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 57,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 586,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1762,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 5772,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 15496,
+            "range": "± 188",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 22579,
+            "range": "± 111",
             "unit": "ns/iter"
           }
         ]
