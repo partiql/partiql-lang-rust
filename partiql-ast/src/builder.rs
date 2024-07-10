@@ -37,6 +37,7 @@ impl IdGenerator for NullIdGenerator {
     }
 }
 
+/// A Builder for [`AstNode`]s that uses a [`IdGenerator`] to assign [`NodeId`]s
 pub struct NodeBuilder<Id: IdGenerator> {
     /// Generator for 'fresh' [`NodeId`]s
     pub id_gen: Id,
@@ -65,5 +66,8 @@ where
     }
 }
 
+/// A [`NodeBuilder`] whose 'fresh' [`NodeId`]s are Auto-incrementing.
 pub type NodeBuilderWithAutoId = NodeBuilder<AutoNodeIdGenerator>;
+
+/// A [`NodeBuilder`] whose 'fresh' [`NodeId`]s are always `0`; Useful for testing
 pub type NodeBuilderWithNullId = NodeBuilder<NullIdGenerator>;
