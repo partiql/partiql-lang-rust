@@ -1,11 +1,12 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
+use derivative::Derivative;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
-use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Diagnostic)]
@@ -22,6 +23,16 @@ pub type ShapeResult<T> = Result<T, ShapeResultError>;
 pub trait Type {}
 
 impl Type for StaticType {}
+
+fn indexset_hash<H, T>(set: &IndexSet<T>, state: &mut H)
+where
+    H: Hasher,
+    T: Hash,
+{
+    for val in set {
+        val.hash(state)
+    }
+}
 
 #[macro_export]
 macro_rules! dynamic {
@@ -140,7 +151,7 @@ macro_rules! undefined {
 }
 
 /// Represents a PartiQL Shape
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 // With this implementation `Dynamic` and `AnyOf` cannot have `nullability`; this does not mean their
 // `null` value at runtime cannot belong to their domain.
 // TODO adopt the correct model Pending PartiQL Types semantics finalization: https://github.com/partiql/partiql-lang/issues/18
@@ -151,13 +162,13 @@ pub enum PartiqlShape {
     Undefined,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct StaticType {
     ty: Static,
     nullable: bool,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Static {
     // Scalar Types
     Int,
@@ -506,15 +517,17 @@ impl Display for PartiqlShape {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Ord, PartialOrd)]
+#[derive(Derivative, Eq, Debug, Clone)]
+#[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct AnyOf {
-    types: BTreeSet<PartiqlShape>,
+    #[derivative(Hash(hash_with = "indexset_hash"))]
+    types: IndexSet<PartiqlShape>,
 }
 
 impl AnyOf {
     #[must_use]
-    pub const fn new(types: BTreeSet<PartiqlShape>) -> Self {
+    pub const fn new(types: IndexSet<PartiqlShape>) -> Self {
         AnyOf { types }
     }
 
@@ -531,15 +544,17 @@ impl FromIterator<PartiqlShape> for AnyOf {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Derivative, Eq, Debug, Clone)]
+#[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct StructType {
-    constraints: BTreeSet<StructConstraint>,
+    #[derivative(Hash(hash_with = "indexset_hash"))]
+    constraints: IndexSet<StructConstraint>,
 }
 
 impl StructType {
     #[must_use]
-    pub fn new(constraints: BTreeSet<StructConstraint>) -> Self {
+    pub fn new(constraints: IndexSet<StructConstraint>) -> Self {
         StructType { constraints }
     }
 
@@ -551,7 +566,7 @@ impl StructType {
     }
 
     #[must_use]
-    pub fn fields(&self) -> BTreeSet<StructField> {
+    pub fn fields(&self) -> IndexSet<StructField> {
         self.constraints
             .iter()
             .flat_map(|c| {
@@ -575,17 +590,18 @@ impl StructType {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Derivative, Eq, Debug, Clone)]
+#[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
 #[non_exhaustive]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
     DuplicateAttrs(bool),
-    Fields(BTreeSet<StructField>),
+    Fields(#[derivative(Hash(hash_with = "indexset_hash"))] IndexSet<StructField>),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 #[allow(dead_code)]
 pub struct StructField {
     optional: bool,
@@ -648,7 +664,8 @@ impl From<(&str, PartiqlShape, bool)> for StructField {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Derivative, Eq, Debug, Clone)]
+#[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlShape>,
@@ -671,7 +688,8 @@ impl BagType {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Derivative, Eq, Debug, Clone)]
+#[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlShape>,

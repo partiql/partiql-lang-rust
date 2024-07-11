@@ -224,8 +224,8 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexSet;
     use partiql_types::{array, bag, f64, int8, r#struct, str, struct_fields, StructConstraint};
-    use std::collections::BTreeSet;
 
     #[test]
     fn ddl_test() {
@@ -240,7 +240,7 @@ mod tests {
             ("b", array![str![]]),
             ("c", f64!()),
         ];
-        let details = r#struct![BTreeSet::from([nested_attrs])];
+        let details = r#struct![IndexSet::from([nested_attrs])];
 
         let fields = struct_fields![
             ("employee_id", int8![]),
@@ -249,17 +249,17 @@ mod tests {
             ("details", details),
             ("dependents", array![str![]])
         ];
-        let ty = bag![r#struct![BTreeSet::from([
+        let ty = bag![r#struct![IndexSet::from([
             fields,
             StructConstraint::Open(false)
         ])]];
 
-        let expected_compact = r#""dependents" ARRAY<VARCHAR>,"details" STRUCT<"a": UNION<TINYINT,DECIMAL(5, 4)>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,"employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2)"#;
-        let expected_pretty = r#""dependents" ARRAY<VARCHAR>,
-"details" STRUCT<"a": UNION<TINYINT,DECIMAL(5, 4)>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,
-"employee_id" TINYINT,
+        let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,"dependents" ARRAY<VARCHAR>"#;
+        let expected_pretty = r#""employee_id" TINYINT,
 "full_name" VARCHAR,
-"salary" DECIMAL(8, 2)"#;
+"salary" DECIMAL(8, 2),
+"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,
+"dependents" ARRAY<VARCHAR>"#;
 
         let ddl_compact = PartiqlBasicDdlEncoder::new(DdlFormat::Compact);
         assert_eq!(ddl_compact.ddl(&ty).expect("write shape"), expected_compact);
