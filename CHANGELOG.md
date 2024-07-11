@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING:* partiql-ast: changed modeling of `GroupByExpr` `strategy` field to be an `Option`
 - *BREAKING:* partiql-ast: changed modeling of `PathStep` to split `PathExpr` to `PathIndex` (e.g., `[2]`) and `PathProject` (e.g., `.a`)
 - *BREAKING:* partiql-ast: changed modeling of `PathStep` to rename `PathWildcard` to `PathForEach` (for `[*]`)
+- *BREAKING:* partiql-types: changed type ordering to match specification order
 
 ### Added
 - partiql-ast: Pretty-printing of AST via `ToPretty` trait
