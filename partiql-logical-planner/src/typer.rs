@@ -1,5 +1,5 @@
 use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
@@ -11,7 +11,7 @@ use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[macro_export]
@@ -218,7 +218,7 @@ impl<'c> PlanTyper<'c> {
                     StructField::new(k.as_str(), self.get_singleton_type_from_env())
                 });
 
-                let ty = PartiqlShape::new_struct(StructType::new(BTreeSet::from([
+                let ty = PartiqlShape::new_struct(StructType::new(IndexSet::from([
                     StructConstraint::Fields(fields.collect()),
                 ])));
 
@@ -686,7 +686,7 @@ mod tests {
 
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
         let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![BTreeSet::from([details_fields])];
+        let details = r#struct![IndexSet::from([details_fields])];
 
         assert_query_typing(
             TypingMode::Strict,
@@ -731,7 +731,7 @@ mod tests {
     fn simple_sfw_with_alias() {
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
         let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![BTreeSet::from([details_fields])];
+        let details = r#struct![IndexSet::from([details_fields])];
 
         // TODO Revise this behavior once the following discussion is conclusive and spec. is
         // in place: https://github.com/partiql/partiql-spec/discussions/65
@@ -775,7 +775,7 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { optional: false, name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { ty: String, nullable: true }) }})} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { ty: String, nullable: true }) }}), Open(false)} }), nullable: true })"#;
 
         assert_err(
             assert_query_typing(
@@ -792,7 +792,7 @@ mod tests {
                 vec![],
             ),
             vec![TypingError::TypeCheck(err1.to_string())],
-            Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
+            Some(bag![r#struct![IndexSet::from([StructConstraint::Fields(
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
@@ -804,12 +804,12 @@ mod tests {
 
         // Closed Schema with `Strict` typing mode and `bar` non-existent projection from closed nested `details`.
         let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![BTreeSet::from([
+        let details = r#struct![IndexSet::from([
             details_fields,
             StructConstraint::Open(false)
         ])];
 
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Open(false), Fields({StructField { optional: false, name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }})} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }}), Open(false)} }), nullable: true })"#;
         let err2 = r"Illegal Derive Type Undefined";
 
         assert_err(
@@ -831,7 +831,7 @@ mod tests {
                 TypingError::TypeCheck(err1.to_string()),
                 TypingError::IllegalState(err2.to_string()),
             ],
-            Some(bag![r#struct![BTreeSet::from([StructConstraint::Fields(
+            Some(bag![r#struct![IndexSet::from([StructConstraint::Fields(
                 [
                     StructField::new("id", int!()),
                     StructField::new("name", str!()),
@@ -863,8 +863,8 @@ mod tests {
         };
     }
 
-    fn create_customer_schema(is_open: bool, fields: BTreeSet<StructField>) -> PartiqlShape {
-        bag![r#struct![BTreeSet::from([
+    fn create_customer_schema(is_open: bool, fields: IndexSet<StructField>) -> PartiqlShape {
+        bag![r#struct![IndexSet::from([
             StructConstraint::Fields(fields),
             StructConstraint::Open(is_open)
         ])]]
@@ -876,7 +876,7 @@ mod tests {
         schema: PartiqlShape,
         expected_fields: Vec<StructField>,
     ) -> Result<(), TypeErr> {
-        let expected_fields: BTreeSet<_> = expected_fields.into_iter().collect();
+        let expected_fields: IndexSet<_> = expected_fields.into_iter().collect();
         let actual = type_query(mode, query, TypeEnvEntry::new("customers", &[], schema))?
             .expect_static()?;
 
@@ -887,7 +887,7 @@ mod tests {
 
                     let f: Vec<_> = expected_fields
                         .iter()
-                        .filter(|f| !fields.contains(f))
+                        .filter(|f| !fields.contains(*f))
                         .collect();
                     assert!(f.is_empty());
                     assert_eq!(expected_fields.len(), fields.len());

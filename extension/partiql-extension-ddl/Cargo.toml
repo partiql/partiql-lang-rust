@@ -28,6 +28,8 @@ thiserror = "1.0"
 miette = { version = "7.2", features = ["fancy"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 
+indexmap = "2.2"
+
 [dev-dependencies]
 criterion = "0.4"
 
