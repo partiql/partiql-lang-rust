@@ -7,7 +7,7 @@ repository.workspace = true
 license = "Apache-2.0"
 readme = "../README.md"
 keywords = ["sql", "ast", "query", "compilers", "interpreters"]
-categories = ["database", "compilers", "ast-implementations"]
+categories = ["database", "compilers"]
 exclude = [
     "**/.git/**",
     "**/.github/**",
@@ -26,11 +26,6 @@ serde = { version = "1.*", features = ["derive"], optional = true }
 pretty = "0.12"
 thiserror = "1.0"
 
-[dev-dependencies]
-partiql-parser = { path = "../partiql-parser", version = "0.8" }
-itertools = "0.13"
-insta = "1.38.0"
-
 [features]
 default = []
 serde = [
@@ -42,4 +37,4 @@ serde = [
 
 [dependencies.partiql-ast-macros]
 path = "partiql-ast-macros"
-version = "0.8.*"
+version = "0.9.*"

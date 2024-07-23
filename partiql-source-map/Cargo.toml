@@ -19,7 +19,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.8.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.9.*" }
 
 smallvec = { version = "1.*" }
 serde = { version = "1.*", features = ["derive"], optional = true }
