@@ -580,7 +580,6 @@ fn string_to_sym(name: &str) -> SymbolPrimitive {
 
 fn to_bindings(s: &StructType) -> Vec<(SymbolPrimitive, PartiqlShape)> {
     s.fields()
-        .into_iter()
         .map(|field| {
             let sym = SymbolPrimitive {
                 value: field.name().to_string(),
@@ -883,7 +882,7 @@ mod tests {
         match &actual.ty() {
             Static::Bag(b) => {
                 if let Ok(s) = b.element_type().expect_struct() {
-                    let fields = s.fields();
+                    let fields: IndexSet<_> = s.fields().collect();
 
                     let f: Vec<_> = expected_fields
                         .iter()
