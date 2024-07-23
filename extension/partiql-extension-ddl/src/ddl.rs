@@ -122,9 +122,9 @@ impl PartiqlBasicDdlEncoder {
             Static::Float32 => out.push_str("REAL"),
             Static::Float64 => out.push_str("DOUBLE"),
             Static::String => out.push_str("VARCHAR"),
-            Static::Struct(s) => out.push_str(&self.write_struct(&s)?),
-            Static::Bag(b) => out.push_str(&self.write_bag(&b)?),
-            Static::Array(a) => out.push_str(&self.write_array(&a)?),
+            Static::Struct(s) => out.push_str(&self.write_struct(s)?),
+            Static::Bag(b) => out.push_str(&self.write_bag(b)?),
+            Static::Array(a) => out.push_str(&self.write_array(a)?),
             // non-exhaustive catch-all
             _ => todo!("handle type for {}", ty),
         }
@@ -147,8 +147,7 @@ impl PartiqlBasicDdlEncoder {
     fn write_struct(&self, strct: &StructType) -> ShapeDdlEncodeResult<String> {
         let mut struct_out = String::from("STRUCT<");
 
-        let fields = strct.fields();
-        let mut fields = fields.iter().peekable();
+        let mut fields = strct.fields().peekable();
         while let Some(field) = fields.next() {
             struct_out.push_str(&format!("\"{}\": ", field.name()));
             struct_out.push_str(&self.write_shape(field.ty())?);
@@ -192,8 +191,7 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
 
         if let Static::Bag(bag) = ty.ty() {
             let s = bag.element_type().expect_struct()?;
-            let fields = s.fields();
-            let mut fields = fields.iter().peekable();
+            let mut fields = s.fields().peekable();
             while let Some(field) = fields.next() {
                 output.push_str(&format!("\"{}\" ", field.name()));
 

@@ -196,14 +196,28 @@ pub enum Static {
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
+impl Static {
+    pub fn is_scalar(&self) -> bool {
+        !matches!(self, Static::Struct(_) | Static::Bag(_) | Static::Array(_))
+    }
+
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Static::Bag(_) | Static::Array(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, Static::Struct(_))
+    }
+}
+
 impl StaticType {
     #[must_use]
-    pub fn new(&self, ty: Static) -> StaticType {
+    pub fn new(ty: Static) -> StaticType {
         StaticType { ty, nullable: true }
     }
 
     #[must_use]
-    pub fn new_non_nullable(&self, ty: Static) -> StaticType {
+    pub fn new_non_nullable(ty: Static) -> StaticType {
         StaticType {
             ty,
             nullable: false,
@@ -211,8 +225,8 @@ impl StaticType {
     }
 
     #[must_use]
-    pub fn ty(&self) -> Static {
-        self.ty.clone()
+    pub fn ty(&self) -> &Static {
+        &self.ty
     }
 
     #[must_use]
@@ -223,6 +237,18 @@ impl StaticType {
     #[must_use]
     pub fn is_not_nullable(&self) -> bool {
         !self.nullable
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.ty.is_scalar()
+    }
+
+    pub fn is_sequence(&self) -> bool {
+        self.ty.is_sequence()
+    }
+
+    pub fn is_struct(&self) -> bool {
+        self.ty.is_struct()
     }
 }
 
@@ -565,8 +591,7 @@ impl StructType {
         }
     }
 
-    #[must_use]
-    pub fn fields(&self) -> IndexSet<StructField> {
+    pub fn fields_set(&self) -> IndexSet<StructField> {
         self.constraints
             .iter()
             .flat_map(|c| {
@@ -577,6 +602,19 @@ impl StructType {
                 }
             })
             .collect()
+    }
+
+    pub fn fields(&self) -> impl Iterator<Item = &StructField> {
+        self.constraints
+            .iter()
+            .filter_map(|c| {
+                if let StructConstraint::Fields(fields) = c {
+                    Some(fields)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|f| f.iter())
     }
 
     #[must_use]
