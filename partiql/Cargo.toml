@@ -32,6 +32,8 @@ partiql-logical = { path = "../partiql-logical" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
 
+insta = "1.38.0"
+
 
 thiserror = "1.0"
 

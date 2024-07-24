@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Fixed
+
+
+## [0.9.0]
+### Changed
 - *BREAKING:* partiql-ast: changed modeling of `BagOpExpr` `setq` field to be an `Option`
 - *BREAKING:* partiql-ast: changed modeling of `GroupByExpr` `strategy` field to be an `Option`
 - *BREAKING:* partiql-ast: changed modeling of `PathStep` to split `PathExpr` to `PathIndex` (e.g., `[2]`) and `PathProject` (e.g., `.a`)
@@ -256,7 +264,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.9.0
 [0.8.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.8.0
 [0.7.2]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.2
 [0.7.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.1
