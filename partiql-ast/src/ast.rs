@@ -704,7 +704,7 @@ pub struct ExcludePath {
     pub steps: Vec<ExcludePathStep>,
 }
 
-/// A "step" within a path expression; that is the components of the expression following the root.
+/// A "step" within an exclude path; that is the components of the exclude path following the root.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExcludePathStep {
