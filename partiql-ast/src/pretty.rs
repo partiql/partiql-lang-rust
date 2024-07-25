@@ -213,8 +213,19 @@ impl PrettyDoc for Select {
         D::Doc: Clone,
         A: Clone,
     {
+        fn delegate<'b, C, D, A>(child: &'b Option<C>, arena: &'b D) -> Option<DocBuilder<'b, D, A>>
+        where
+            D: DocAllocator<'b, A>,
+            D::Doc: Clone,
+            A: Clone,
+            C: PrettyDoc,
+        {
+            child.as_ref().map(|inner| inner.pretty_doc(arena).group())
+        }
+
         let Select {
             project,
+            exclude,
             from,
             from_let,
             where_clause,
@@ -223,6 +234,7 @@ impl PrettyDoc for Select {
         } = self;
         let clauses = [
             Some(project.pretty_doc(arena).group()),
+            delegate(exclude, arena),
             from.as_ref().map(|inner| inner.pretty_doc(arena).group()),
             from_let
                 .as_ref()
@@ -310,6 +322,46 @@ impl PrettyDoc for ProjectExpr {
     {
         pretty_source_as_alias(&self.expr, self.as_alias.as_ref(), arena)
             .unwrap_or_else(|| self.expr.pretty_doc(arena))
+    }
+}
+
+impl PrettyDoc for Exclusion {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        pretty_annotated_doc(
+            "EXCLUDE",
+            pretty_list(&self.items, MINOR_NEST_INDENT, arena),
+            arena,
+        )
+    }
+}
+
+impl PrettyDoc for ExcludePath {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let ExcludePath { root, steps } = self;
+        let mut path = root.pretty_doc(arena);
+        for step in steps {
+            path = path.append(match step {
+                ExcludePathStep::PathProject(e) => arena.text(".").append(e.pretty_doc(arena)),
+                ExcludePathStep::PathIndex(e) => arena
+                    .text("[")
+                    .append(e.pretty_doc(arena))
+                    .append(arena.text("]")),
+                ExcludePathStep::PathForEach => arena.text("[*]"),
+                ExcludePathStep::PathUnpivot => arena.text(".*"),
+            });
+        }
+
+        path
     }
 }
 

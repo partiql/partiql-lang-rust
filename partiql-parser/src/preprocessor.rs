@@ -489,9 +489,9 @@ where
     ///
     /// * `tok` - The current [`Token`] being considered for matching.
     /// * `is_nested` - Whether the preprocessor is considering [`Tokens`] inside a nested expression
-    /// (i.e., inside parens).
+    ///   (i.e., inside parens).
     /// * `is_init_arg` - Whether this is the first argument being considered for the function expression's
-    /// parameters.
+    ///   parameters.
     /// * `matchers` - A slice of the remaining arguments for a single pattern for the function expression.
     #[allow(clippy::only_used_in_recursion)]
     fn match_arg(

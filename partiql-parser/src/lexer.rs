@@ -545,6 +545,8 @@ pub enum Token<'input> {
     Escape,
     #[regex("(?i:Except)")]
     Except,
+    #[regex("(?i:Exclude)")]
+    Exclude,
     #[regex("(?i:False)")]
     False,
     #[regex("(?i:First)")]
@@ -776,6 +778,7 @@ impl<'input> fmt::Display for Token<'input> {
             | Token::End
             | Token::Escape
             | Token::Except
+            | Token::Exclude
             | Token::False
             | Token::First
             | Token::For
