@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING:* partiql-ast: added modeling of `EXCLUDE`
+- *BREAKING:* partiql-ast: added pretty-printing of `EXCLUDE`
 
 ### Added
+- *BREAKING:* partiql-parser: added parsing of `EXCLUDE`
 
 ### Fixed
 

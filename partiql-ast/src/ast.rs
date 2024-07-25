@@ -311,6 +311,7 @@ pub enum SetQuantifier {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
     pub project: AstNode<Projection>,
+    pub exclude: Option<AstNode<Exclusion>>,
     pub from: Option<AstNode<FromClause>>,
     pub from_let: Option<AstNode<Let>>,
     pub where_clause: Option<Box<AstNode<WhereClause>>>,
@@ -373,6 +374,12 @@ pub struct ProjectExpr {
     pub expr: Box<Expr>,
     #[visit(skip)]
     pub as_alias: Option<SymbolPrimitive>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Exclusion {
+    pub items: Vec<AstNode<ExcludePath>>,
 }
 
 /// The expressions that can result in values.
@@ -688,6 +695,27 @@ pub enum PathStep {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PathExpr {
     pub index: Box<Expr>,
+}
+
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExcludePath {
+    pub root: AstNode<VarRef>,
+    pub steps: Vec<ExcludePathStep>,
+}
+
+/// A "step" within a path expression; that is the components of the expression following the root.
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExcludePathStep {
+    #[visit(skip)]
+    PathProject(AstNode<SymbolPrimitive>),
+    #[visit(skip)]
+    PathIndex(AstNode<Lit>),
+    #[visit(skip)]
+    PathForEach,
+    #[visit(skip)]
+    PathUnpivot,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]

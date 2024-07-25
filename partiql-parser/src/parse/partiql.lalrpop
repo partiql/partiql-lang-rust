@@ -182,6 +182,7 @@ SfwQuery: ast::AstNode<ast::Select> = {
 SfwClauses: ast::AstNode<ast::Select> = {
     <lo:@L>
     <project:SelectClause>
+    <exclude:ExcludeClause?>
     <from:FromClause?>
     <where_clause:WhereClause?>
     <group_by:GroupClause?>
@@ -189,6 +190,7 @@ SfwClauses: ast::AstNode<ast::Select> = {
     <hi:@R> => {
         state.node(ast::Select {
             project,
+            exclude,
             from,
             from_let: None,
             where_clause,
@@ -206,9 +208,11 @@ FwsClauses: ast::AstNode<ast::Select> = {
     <group_by:GroupClause?>
     <having:HavingClause?>
     <project:SelectClause>
+    <exclude:ExcludeClause?>
     <hi:@R> => {
         state.node(ast::Select {
             project,
+            exclude,
             from: Some(from),
             from_let: None,
             where_clause,
@@ -253,6 +257,13 @@ Projection: ast::AstNode<ast::ProjectItem> = {
     <lo:@L> <expr:ExprQuery> "AS"? <as_alias:SymbolPrimitive> <hi:@R> => {
         state.node(ast::ProjectItem::ProjectExpr( ast::ProjectExpr{ expr, as_alias: Some(as_alias) } ), lo..hi)
     },
+}
+
+// ------------------------------------------------------------------------------ //
+//                                    Exclude                                     //
+// ------------------------------------------------------------------------------ //
+ExcludeClause: ast::AstNode<ast::Exclusion> = {
+    <lo:@L> "EXCLUDE"  <items:CommaSepPlus<ExcludePath>> <hi:@R> => state.node(ast::Exclusion {items}, lo..hi),
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1121,22 +1132,60 @@ PathExprVarRef: ast::Expr = {
 }
 
 VarRefExpr: ast::Expr = {
-    <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => ast::Expr::VarRef(state.node(ast::VarRef {
+    <varref:VarRef> => ast::Expr::VarRef(varref),
+}
+
+VarRef: ast::AstNode<ast::VarRef> = {
+    <lo:@L> <ident:"UnquotedIdent"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
             qualifier: ast::ScopeQualifier::Unqualified
-        }, lo..hi)),
-    <lo:@L> <ident:"QuotedIdent"> <hi:@R> => ast::Expr::VarRef(state.node(ast::VarRef {
+        }, lo..hi),
+    <lo:@L> <ident:"QuotedIdent"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
             qualifier: ast::ScopeQualifier::Unqualified
-      }, lo..hi)),
-    <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => ast::Expr::VarRef(state.node(ast::VarRef {
+      }, lo..hi),
+    <lo:@L> <ident:"UnquotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
             qualifier: ast::ScopeQualifier::Unqualified
-        }, lo..hi)),
-    <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => ast::Expr::VarRef(state.node(ast::VarRef {
+        }, lo..hi),
+    <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
             qualifier: ast::ScopeQualifier::Unqualified
-        },lo..hi)),
+        },lo..hi),
+}
+
+ExcludePath: ast::AstNode<ast::ExcludePath> = {
+    <lo:@L> <root:VarRef> <steps:ExcludePathSteps> <hi:@R> => state.node(ast::ExcludePath { root, steps },lo..hi),
+}
+
+ExcludePathSteps: Vec<ast::ExcludePathStep> = {
+    <path:ExcludePathSteps> <step:ExcludePathStep> => {
+        let mut steps = path;
+        steps.push(step);
+        steps
+    },
+    <step:ExcludePathStep> => {
+        vec![step]
+    },
+}
+
+ExcludePathStep: ast::ExcludePathStep = {
+    "." <lo:@L> <s:SymbolPrimitive> <hi:@R> => {
+        ast::ExcludePathStep::PathProject( state.node(s, lo..hi)  )
+    },
+    "[" "*" "]" => {
+        ast::ExcludePathStep::PathForEach
+    },
+    "." "*" => {
+        ast::ExcludePathStep::PathUnpivot
+    },
+    "[" <lo:@L> <l:LiteralNumber> <hi:@R> "]" => {
+        ast::ExcludePathStep::PathIndex( state.node(l, lo..hi) )
+    },
+    "[" <lo:@L> <s:"String"> <hi:@R> "]" => {
+        let sym = ast::SymbolPrimitive { value: s.to_string(), case: ast::CaseSensitivity::CaseSensitive };
+        ast::ExcludePathStep::PathProject( state.node(sym, lo..hi) )
+    },
 }
 
 // ------------------------------------------------------------------------------ //
@@ -1392,6 +1441,7 @@ extern {
         "DATE" => lexer::Token::Date,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
+        "EXCLUDE" => lexer::Token::Exclude,
         "ELSE" => lexer::Token::Else,
         "END" => lexer::Token::End,
         "ESCAPE" => lexer::Token::Escape,

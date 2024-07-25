@@ -1,0 +1,110 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+
+                    SELECT * EXCLUDE c.ssn, c.address.street FROM [{
+                        'name': 'Alan',
+                        'custId': 1,
+                        'address': {
+                            'city': 'Seattle',
+                            'zipcode': 98109,
+                            'street': '123 Seaplane Dr.'
+                        },
+                        'ssn': 123456789
+                    }] AS c
+                
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT * EXCLUDE c.ssn, c.address.street FROM [ { 'name': 'Alan', 'custId': 1, 'address': { 'city': 'Seattle', 'zipcode': 98109, 'street': '123 Seaplane Dr.' }, 'ssn': 123456789 }
+  ] AS c
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT * EXCLUDE c.ssn, c.address.street FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': { 'city': 'Seattle', 'zipcode': 98109, 'street': '123 Seaplane Dr.' },
+      'ssn': 123456789
+    }
+  ] AS c
+
+--------------------------------------------------------------------------------
+SELECT * EXCLUDE c.ssn, c.address.street FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': {
+        'city': 'Seattle',
+        'zipcode': 98109,
+        'street': '123 Seaplane Dr.'
+      },
+      'ssn': 123456789
+    }
+  ] AS c
+
+----------------------------------------
+SELECT * EXCLUDE c.ssn, c.address.street
+FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': {
+        'city': 'Seattle',
+        'zipcode': 98109,
+        'street': '123 Seaplane Dr.'
+      },
+      'ssn': 123456789
+    }
+  ] AS c
+
+------------------------------
+SELECT * EXCLUDE c.ssn,
+  c.address.street FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': {
+        'city': 'Seattle',
+        'zipcode': 98109,
+        'street': '123 Seaplane Dr.'
+      },
+      'ssn': 123456789
+    }
+  ] AS c
+
+--------------------
+SELECT *
+EXCLUDE c.ssn,
+  c.address.street
+FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': {
+        'city': 'Seattle',
+        'zipcode': 98109,
+        'street': '123 Seaplane Dr.'
+      },
+      'ssn': 123456789
+    }
+  ] AS c
+
+----------
+SELECT *
+EXCLUDE c.ssn,
+  c.address.street
+FROM [
+    {
+      'name': 'Alan',
+      'custId': 1,
+      'address': {
+        'city': 'Seattle',
+        'zipcode': 98109,
+        'street': '123 Seaplane Dr.'
+      },
+      'ssn': 123456789
+    }
+  ] AS c

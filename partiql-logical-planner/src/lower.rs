@@ -6,7 +6,7 @@ use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
     CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
-    DropIndex, DropTable, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
+    DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
     GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId,
     NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
     Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
@@ -808,6 +808,10 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 
     fn exit_bag_op_expr(&mut self, _set_expr: &'ast BagOpExpr) -> Traverse {
         Traverse::Continue
+    }
+
+    fn enter_exclusion(&mut self, _exclusion: &'ast Exclusion) -> Traverse {
+        not_yet_implemented_fault!(self, "EXCLUDE");
     }
 
     fn enter_select(&mut self, select: &'ast Select) -> Traverse {

@@ -168,3 +168,104 @@ fn pretty_pivot() {
                 ",
     );
 }
+
+#[test]
+fn pretty_exclude() {
+    pretty_print_test(
+        "pretty_exclude_1",
+        "
+                    SELECT * EXCLUDE c.ssn, c.address.street FROM [{
+                        'name': 'Alan',
+                        'custId': 1,
+                        'address': {
+                            'city': 'Seattle',
+                            'zipcode': 98109,
+                            'street': '123 Seaplane Dr.'
+                        },
+                        'ssn': 123456789
+                    }] AS c
+                ",
+    );
+    pretty_print_test(
+        "pretty_exclude_2",
+        "
+                    SELECT * EXCLUDE t.a.b.c[0], t.a.b.c[1].field
+                    FROM [{
+                        'a': {
+                        'b': {
+                        'c': [
+                        {
+                        'field': 0    -- c[0]
+                        },
+                        {
+                        'field': 1    -- c[1]
+                        },
+                        {
+                        'field': 2    -- c[2]
+                        }
+                        ]
+                        }
+                        },
+                        'foo': 'bar'
+                        }] AS t
+                ",
+    );
+    pretty_print_test(
+        "pretty_exclude_3",
+        "
+                SELECT *
+                    EXCLUDE
+                t.a.b.c[*].field_x
+                FROM [{
+                    'a': {
+                        'b': {
+                            'c': [
+                            {                    -- c[0]
+                                'field_x': 0,
+                                'field_y': 0
+                            },
+                            {                    -- c[1]
+                                'field_x': 1,
+                                'field_y': 1
+                            },
+                            {                    -- c[2]
+                                'field_x': 2,
+                                'field_y': 2
+                            }
+                            ]
+                        }
+                    },
+                    'foo': 'bar'
+                }] AS t
+                ",
+    );
+    pretty_print_test(
+        "pretty_exclude_4",
+        "
+                SELECT *
+                    EXCLUDE
+                t.a.b.c[*].*
+                    FROM [{
+                        'a': {
+                            'b': {
+                                'c': [
+                                {                    -- c[0]
+                                    'field_x': 0,
+                                    'field_y': 0
+                                },
+                                {                    -- c[1]
+                                    'field_x': 1,
+                                    'field_y': 1
+                                },
+                                {                    -- c[2]
+                                    'field_x': 2,
+                                    'field_y': 2
+                                }
+                                ]
+                            }
+                        },
+                        'foo': 'bar'
+                    }] AS t
+                ",
+    );
+}

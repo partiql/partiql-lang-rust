@@ -291,6 +291,24 @@ pub trait Visitor<'ast> {
     fn exit_project_expr(&mut self, _project_expr: &'ast ast::ProjectExpr) -> Traverse {
         Traverse::Continue
     }
+    fn enter_exclusion(&mut self, _exclusion: &'ast ast::Exclusion) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_exclusion(&mut self, _exclusion: &'ast ast::Exclusion) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_exclude_path(&mut self, _path: &'ast ast::ExcludePath) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_exclude_path(&mut self, _path: &'ast ast::ExcludePath) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_exclude_path_step(&mut self, _step: &'ast ast::ExcludePathStep) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_exclude_path_step(&mut self, _step: &'ast ast::ExcludePathStep) -> Traverse {
+        Traverse::Continue
+    }
     fn enter_expr(&mut self, _expr: &'ast ast::Expr) -> Traverse {
         Traverse::Continue
     }
