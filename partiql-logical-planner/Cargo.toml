@@ -21,14 +21,14 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-value = { path = "../partiql-value", version = "0.9.*" }
-partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.9.*" }
-partiql-logical = { path = "../partiql-logical", version = "0.9.*" }
-partiql-ast = { path = "../partiql-ast", version = "0.9.*" }
-partiql-parser = { path = "../partiql-parser", version = "0.9.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.9.*" }
-partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.9.*" }
-partiql-types = { path = "../partiql-types", version = "0.9.*" }
+partiql-value = { path = "../partiql-value", version = "0.10.*" }
+partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.10.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.10.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.10.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.10.*" }
+partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.10.*" }
+partiql-types = { path = "../partiql-types", version = "0.10.*" }
 
 ion-rs = "0.18"
 ordered-float = "3.*"
@@ -43,5 +43,5 @@ once_cell = "1"
 thiserror = "1.0"
 
 [dev-dependencies]
-partiql-eval = { path = "../partiql-eval", version = "0.9.*" }
-partiql-types = { path = "../partiql-types", version = "0.9.*" }
+partiql-eval = { path = "../partiql-eval", version = "0.10.*" }
+partiql-types = { path = "../partiql-types", version = "0.10.*" }
