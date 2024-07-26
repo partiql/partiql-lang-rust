@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Fixed
+
+## [0.10.0]
+### Changed
 - *BREAKING:* partiql-ast: added modeling of `EXCLUDE`
 - *BREAKING:* partiql-ast: added pretty-printing of `EXCLUDE`
 
@@ -267,7 +274,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.0
 [0.9.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.9.0
 [0.8.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.8.0
 [0.7.2]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.7.2

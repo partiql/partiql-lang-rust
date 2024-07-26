@@ -21,8 +21,8 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-ast = { path = "../../partiql-ast", version = "0.9.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.9.*" }
+partiql-ast = { path = "../../partiql-ast", version = "0.10.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.10.*" }
 
 dot-writer = { version = "0.1.*", optional = true }
 itertools = { version = "0.10.*", optional = true }
