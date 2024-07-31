@@ -69,11 +69,17 @@ FROM [
       'a': {
         'b': {
           'c': [
-            { 'field_x': 0, 'field_y': 0
+            {
+              'field_x': 0,
+              'field_y': 0
             },
-            { 'field_x': 1, 'field_y': 1
+            {
+              'field_x': 1,
+              'field_y': 1
             },
-            { 'field_x': 2, 'field_y': 2
+            {
+              'field_x': 2,
+              'field_y': 2
             }
           ]
         }

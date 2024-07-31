@@ -213,6 +213,16 @@ impl PrettyDoc for Select {
         D::Doc: Clone,
         A: Clone,
     {
+        fn format<'b, C, D, A>(child: &'b C, arena: &'b D) -> DocBuilder<'b, D, A>
+        where
+            D: DocAllocator<'b, A>,
+            D::Doc: Clone,
+            A: Clone,
+            C: PrettyDoc,
+        {
+            child.pretty_doc(arena).group()
+        }
+
         fn delegate<'b, C, D, A>(child: &'b Option<C>, arena: &'b D) -> Option<DocBuilder<'b, D, A>>
         where
             D: DocAllocator<'b, A>,
@@ -220,7 +230,7 @@ impl PrettyDoc for Select {
             A: Clone,
             C: PrettyDoc,
         {
-            child.as_ref().map(|inner| inner.pretty_doc(arena).group())
+            child.as_ref().map(|inner| format(inner, arena))
         }
 
         let Select {
@@ -232,25 +242,32 @@ impl PrettyDoc for Select {
             group_by,
             having,
         } = self;
-        let clauses = [
-            Some(project.pretty_doc(arena).group()),
+        let mut clauses = [
+            Some(format(project, arena)),
             delegate(exclude, arena),
-            from.as_ref().map(|inner| inner.pretty_doc(arena).group()),
-            from_let
-                .as_ref()
-                .map(|inner| inner.pretty_doc(arena).group()),
-            where_clause
-                .as_ref()
-                .map(|inner| inner.pretty_doc(arena).group()),
-            group_by
-                .as_ref()
-                .map(|inner| inner.pretty_doc(arena).group()),
-            having.as_ref().map(|inner| inner.pretty_doc(arena).group()),
+            delegate(from, arena),
+            delegate(from_let, arena),
+            delegate(where_clause, arena),
+            delegate(group_by, arena),
+            delegate(having, arena),
         ]
         .into_iter()
         .flatten();
 
-        arena.intersperse(clauses, arena.softline()).group()
+        let mut result = arena.nil();
+        let separator = arena.line();
+        if let Some(first) = clauses.next() {
+            let mut curr = first;
+
+            for clause in clauses {
+                result = result.append(curr.append(separator.clone()).group());
+                curr = clause;
+            }
+
+            result = result.append(curr);
+        }
+
+        result
     }
 }
 
@@ -401,6 +418,7 @@ impl PrettyDoc for Expr {
                 unreachable!();
             }
         }
+        .group()
     }
 }
 
@@ -576,8 +594,6 @@ impl PrettyDoc for BinOp {
             arena.softline()
         };
         let expr = arena.intersperse([lhs, op, rhs], sep).group();
-        //let paren_expr = [arena.text("("), expr, arena.text(")")];
-        //arena.concat(paren_expr).group()
         pretty_parenthesized_doc(expr, arena).group()
     }
 }
@@ -704,24 +720,7 @@ impl PrettyDoc for SimpleCase {
         } = self;
 
         let search = expr.pretty_doc(arena);
-
-        let branches = cases
-            .iter()
-            .map(|ExprPair { first, second }| {
-                let kw_when = arena.text("WHEN");
-                let test = first.pretty_doc(arena);
-                let kw_then = arena.text("THEN");
-                let then = second.pretty_doc(arena);
-                arena
-                    .intersperse([kw_when, test, kw_then, then], arena.space())
-                    .group()
-            })
-            .chain(
-                default
-                    .iter()
-                    .map(|d| arena.text("ELSE ").append(d.pretty_doc(arena)).group()),
-            );
-
+        let branches = case_branches(arena, cases, default);
         pretty_seq_doc(branches, "CASE", Some(search), "END", " ", arena)
     }
 }
@@ -735,25 +734,37 @@ impl PrettyDoc for SearchedCase {
     {
         let SearchedCase { cases, default } = self;
 
-        let branches = cases
-            .iter()
-            .map(|ExprPair { first, second }| {
-                let kw_when = arena.text("WHEN");
-                let test = first.pretty_doc(arena);
-                let kw_then = arena.text("THEN");
-                let then = second.pretty_doc(arena);
-                arena
-                    .intersperse([kw_when, test, kw_then, then], arena.space())
-                    .group()
-            })
-            .chain(
-                default
-                    .iter()
-                    .map(|d| arena.text("ELSE ").append(d.pretty_doc(arena)).group()),
-            );
-
+        let branches = case_branches(arena, cases, default);
         pretty_seq_doc(branches, "CASE", None, "END", " ", arena)
     }
+}
+
+fn case_branches<'b, D, A>(
+    arena: &'b D,
+    cases: &'b Vec<ExprPair>,
+    default: &'b Option<Box<Expr>>,
+) -> impl Iterator<Item = DocBuilder<'b, D, A>>
+where
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone + 'b,
+{
+    cases
+        .iter()
+        .map(|ExprPair { first, second }| {
+            let kw_when = arena.text("WHEN");
+            let test = first.pretty_doc(arena);
+            let kw_then = arena.text("THEN");
+            let then = second.pretty_doc(arena);
+            arena
+                .intersperse([kw_when, test, kw_then, then], arena.space())
+                .group()
+        })
+        .chain(
+            default
+                .iter()
+                .map(|d| arena.text("ELSE ").append(d.pretty_doc(arena)).group()),
+        )
 }
 
 impl PrettyDoc for Struct {
@@ -1280,10 +1291,13 @@ where
     } else {
         start
     };
-    let body = arena.line().append(arena.intersperse(seq, sep)).group();
+    let body = arena
+        .line()
+        .append(arena.intersperse(seq, sep))
+        .append(arena.line())
+        .group();
     start
         .append(body.nest(MINOR_NEST_INDENT))
-        .append(arena.line())
         .append(end)
         .group()
 }

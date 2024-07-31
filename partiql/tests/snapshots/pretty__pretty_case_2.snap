@@ -1,5 +1,5 @@
 ---
-source: partiql-ast/tests/pretty.rs
+source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
@@ -7,7 +7,7 @@ SELECT VALUE CASE x + 1 WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'sho
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE' WHEN f THEN 'TWO' WHEN d THEN 'THREE' FROM <<
+SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null'  WHEN MISSING THEN 'shouldnt be missing'  WHEN i THEN 'ONE'  WHEN f THEN 'TWO'  WHEN d THEN 'THREE' END FROM <<
     i,
     f,
     d,
@@ -16,20 +16,44 @@ SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 's
   >> AS x
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null' WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE'
-    WHEN f THEN 'TWO' WHEN d THEN 'THREE' FROM << i, f, d, NULL, MISSING >> AS x
+SELECT VALUE CASE (x + 1)
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
+    WHEN d THEN 'THREE'
+  END
+FROM << i, f, d, NULL, MISSING >> AS x
 
 --------------------------------------------------------------------------------
-SELECT VALUE CASE (x + 1) WHEN NULL THEN 'shouldnt be null'
-    WHEN MISSING THEN 'shouldnt be missing' WHEN i THEN 'ONE' WHEN f THEN 'TWO'
-    WHEN d THEN 'THREE' FROM << i, f, d, NULL, MISSING >> AS x
+SELECT VALUE CASE (x + 1)
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
+    WHEN d THEN 'THREE'
+  END
+FROM << i, f, d, NULL, MISSING >> AS x
 
 ----------------------------------------
 SELECT VALUE CASE (x + 1)
-  WHEN NULL THEN 'shouldnt be null'
-    WHEN MISSING THEN 'shouldnt be missing'
-    WHEN i THEN 'ONE' WHEN f THEN 'TWO'
-    WHEN d THEN 'THREE' FROM <<
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
+    WHEN d THEN 'THREE'
+  END
+FROM << i, f, d, NULL, MISSING >> AS x
+
+------------------------------
+SELECT VALUE CASE (x + 1)
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
+    WHEN d THEN 'THREE'
+  END
+FROM <<
     i,
     f,
     d,
@@ -37,24 +61,14 @@ SELECT VALUE CASE (x + 1)
     MISSING
   >> AS x
 
-------------------------------
-SELECT VALUE CASE (x + 1)
-  WHEN NULL THEN 'shouldnt be null'
-    WHEN MISSING THEN 'shouldnt be missing'
-    WHEN i THEN 'ONE'
-    WHEN f THEN 'TWO'
-    WHEN d THEN 'THREE'
-FROM << i, f, d, NULL, MISSING
-  >> AS x
-
 --------------------
-SELECT VALUE CASE
-  (x + 1)
-  WHEN NULL THEN 'shouldnt be null'
-    WHEN MISSING THEN 'shouldnt be missing'
-    WHEN i THEN 'ONE'
-    WHEN f THEN 'TWO'
+SELECT VALUE CASE (x + 1)
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
     WHEN d THEN 'THREE'
+  END
 FROM <<
     i,
     f,
@@ -64,13 +78,13 @@ FROM <<
   >> AS x
 
 ----------
-SELECT VALUE CASE
-  (x + 1)
-  WHEN NULL THEN 'shouldnt be null'
-    WHEN MISSING THEN 'shouldnt be missing'
-    WHEN i THEN 'ONE'
-    WHEN f THEN 'TWO'
+SELECT VALUE CASE (x + 1)
+    WHEN NULL THEN 'shouldnt be null' 
+    WHEN MISSING THEN 'shouldnt be missing' 
+    WHEN i THEN 'ONE' 
+    WHEN f THEN 'TWO' 
     WHEN d THEN 'THREE'
+  END
 FROM <<
     i,
     f,

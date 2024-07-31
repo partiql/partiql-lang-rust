@@ -23,7 +23,8 @@ SELECT VALUE CASE
     WHEN ((x + 1) = f) THEN 'TWO' 
     WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100' 
     ELSE '?'
-  END FROM << -1.0000, i, f, d, 100, NULL, MISSING >> AS x
+  END
+FROM << -1.0000, i, f, d, 100, NULL, MISSING >> AS x
 
 --------------------------------------------------------------------------------
 SELECT VALUE CASE
@@ -31,7 +32,8 @@ SELECT VALUE CASE
     WHEN ((x + 1) = f) THEN 'TWO' 
     WHEN (((x + 1) > d) AND ((x + 1) < 100)) THEN '>= THREE < 100' 
     ELSE '?'
-  END FROM << -1.0000, i, f, d, 100, NULL, MISSING >> AS x
+  END
+FROM << -1.0000, i, f, d, 100, NULL, MISSING >> AS x
 
 ----------------------------------------
 SELECT VALUE CASE
@@ -40,7 +42,8 @@ SELECT VALUE CASE
     WHEN (((x + 1) > d) AND
     ((x + 1) < 100)) THEN '>= THREE < 100' 
     ELSE '?'
-  END FROM <<
+  END
+FROM <<
     -1.0000,
     i,
     f,
@@ -57,7 +60,8 @@ SELECT VALUE CASE
     WHEN (((x + 1) > d) AND
     ((x + 1) < 100)) THEN '>= THREE < 100' 
     ELSE '?'
-  END FROM <<
+  END
+FROM <<
     -1.0000,
     i,
     f,
@@ -75,7 +79,8 @@ SELECT VALUE CASE
     AND
     ((x + 1) < 100)) THEN '>= THREE < 100' 
     ELSE '?'
-  END FROM <<
+  END
+FROM <<
     -1.0000,
     i,
     f,

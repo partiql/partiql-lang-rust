@@ -16,21 +16,23 @@ ORDER BY n DESC
 
 ------------------------------------------------------------------------------------------------------------------------
 SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1) WHERE ((bar BETWEEN 3 AND 25 AND
-    NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING)) GROUP BY foo ORDER BY n DESC
+    NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
 
 --------------------------------------------------------------------------------
 SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1)
 WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR
-  (foo.a.b[*] IS MISSING)) GROUP BY foo ORDER BY n DESC
+  (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
 
 ----------------------------------------
 SELECT foo, bar, baz, thud, grunt,
-  count(1) AS n FROM (SELECT *
-        FROM table1)
+  count(1) AS n
+FROM (SELECT * FROM table1)
 WHERE ((bar BETWEEN 3 AND 25 AND
     NOT (baz LIKE 'example%')) OR
-  (foo.a.b[*] IS MISSING)) GROUP BY foo
-ORDER BY n DESC
+  (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
 
 ------------------------------
 SELECT foo, bar, baz, thud,

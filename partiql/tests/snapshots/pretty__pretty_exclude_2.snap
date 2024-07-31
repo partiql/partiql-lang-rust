@@ -44,7 +44,8 @@ SELECT * EXCLUDE t.a.b.c[0], t.a.b.c[1].field FROM [
 
 ----------------------------------------
 SELECT * EXCLUDE t.a.b.c[0],
-  t.a.b.c[1].field FROM [
+  t.a.b.c[1].field
+FROM [
     {
       'a': {
         'b': {
@@ -61,7 +62,8 @@ SELECT * EXCLUDE t.a.b.c[0],
 
 ------------------------------
 SELECT * EXCLUDE t.a.b.c[0],
-  t.a.b.c[1].field FROM [
+  t.a.b.c[1].field
+FROM [
     {
       'a': {
         'b': {
