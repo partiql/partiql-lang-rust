@@ -299,9 +299,9 @@ impl PrettyDoc for ProjectionKind {
             }
             ProjectionKind::ProjectPivot(ProjectPivot { key, value }) => {
                 let parts = [
-                    key.pretty_doc(arena),
-                    arena.text("AT"),
                     value.pretty_doc(arena),
+                    arena.text("AT"),
+                    key.pretty_doc(arena),
                 ];
                 let decl = arena.intersperse(parts, arena.space()).group();
                 pretty_annotated_doc("PIVOT", decl, arena)
@@ -741,7 +741,7 @@ impl PrettyDoc for SearchedCase {
 
 fn case_branches<'b, D, A>(
     arena: &'b D,
-    cases: &'b Vec<ExprPair>,
+    cases: &'b [ExprPair],
     default: &'b Option<Box<Expr>>,
 ) -> impl Iterator<Item = DocBuilder<'b, D, A>>
 where

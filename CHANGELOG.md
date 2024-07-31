@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-
+- partiql-ast: fixed pretty-printing of `PIVOT`
+- partiql-ast: improved pretty-printing of `CASE` and various clauses
+- 
 ### Added
 
 ### Fixed

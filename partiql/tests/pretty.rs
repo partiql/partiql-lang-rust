@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use partiql_ast::ast::{AstNode, TopLevelQuery};
 use partiql_ast::pretty::ToPretty;
 use partiql_parser::ParserResult;
 
@@ -15,13 +16,18 @@ fn pretty_print_test(name: &str, statement: &str) {
     assert!(res.is_ok());
     let res = res.unwrap();
 
-    // TODO https://github.com/partiql/partiql-lang-rust/issues/473
+    pretty_print_output_test(name, statement, &res.ast);
+    pretty_print_roundtrip_test(&res.ast);
+}
 
+#[track_caller]
+fn pretty_print_output_test(name: &str, statement: &str, statement_ast: &AstNode<TopLevelQuery>) {
+    // TODO https://github.com/partiql/partiql-lang-rust/issues/473
     let doc = [180, 120, 80, 40, 30, 20, 10]
         .into_iter()
         .map(|w| {
             let header = format!("{:-<w$}", "");
-            let ast = format!("{}\n", res.ast.to_pretty_string(w).unwrap());
+            let ast = format!("{}\n", statement_ast.to_pretty_string(w).unwrap());
             format!("{header}\n{ast}")
         })
         .join("\n");
@@ -31,6 +37,18 @@ fn pretty_print_test(name: &str, statement: &str) {
     let doc = format!("{header}\n{statement}\n{header}\n\n{doc}");
 
     insta::assert_snapshot!(name, doc)
+}
+
+#[track_caller]
+fn pretty_print_roundtrip_test(statement_ast: &AstNode<TopLevelQuery>) {
+    let pretty = statement_ast.to_pretty_string(40).unwrap();
+
+    let reparsed = parse(pretty.as_str());
+    assert!(reparsed.is_ok());
+
+    let pretty2 = reparsed.unwrap().ast.to_pretty_string(40).unwrap();
+
+    assert_eq!(pretty, pretty2);
 }
 
 #[test]
