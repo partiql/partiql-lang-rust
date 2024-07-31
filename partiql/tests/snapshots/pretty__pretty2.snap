@@ -1,5 +1,5 @@
 ---
-source: partiql-ast/tests/pretty.rs
+source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
@@ -15,26 +15,33 @@ SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1) WHE
 ORDER BY n DESC
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING)) GROUP BY foo ORDER BY n DESC
+SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1) WHERE ((bar BETWEEN 3 AND 25 AND
+    NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+GROUP BY foo ORDER BY n DESC
 
 --------------------------------------------------------------------------------
 SELECT foo, bar, baz, thud, grunt, count(1) AS n FROM (SELECT * FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR
+  (foo.a.b[*] IS MISSING))
 GROUP BY foo ORDER BY n DESC
 
 ----------------------------------------
 SELECT foo, bar, baz, thud, grunt,
-  count(1) AS n FROM (SELECT *
-        FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+  count(1) AS n
+FROM (SELECT * FROM table1)
+WHERE ((bar BETWEEN 3 AND 25 AND
+    NOT (baz LIKE 'example%')) OR
+  (foo.a.b[*] IS MISSING))
 GROUP BY foo ORDER BY n DESC
 
 ------------------------------
 SELECT foo, bar, baz, thud,
   grunt, count(1) AS n
 FROM (SELECT * FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+WHERE ((bar BETWEEN 3 AND 25
+    AND
+    NOT (baz LIKE 'example%'))
+  OR (foo.a.b[*] IS MISSING))
 GROUP BY foo ORDER BY n DESC
 
 --------------------
@@ -43,7 +50,11 @@ SELECT foo, bar,
   count(1) AS n
 FROM (SELECT *
         FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+WHERE ((bar BETWEEN 3 AND 25
+    AND
+    NOT (baz LIKE 'example%'))
+  OR
+  (foo.a.b[*] IS MISSING))
 GROUP BY foo
 ORDER BY n DESC
 
@@ -56,7 +67,11 @@ SELECT foo,
   count(1) AS n
 FROM (SELECT *
         FROM table1)
-WHERE ((bar BETWEEN 3 AND 25 AND NOT (baz LIKE 'example%')) OR (foo.a.b[*] IS MISSING))
+WHERE ((bar BETWEEN 3 AND 25
+    AND
+    NOT (baz LIKE 'example%'))
+  OR
+  (foo.a.b[*] IS MISSING))
 GROUP BY
 foo
 ORDER BY n DESC

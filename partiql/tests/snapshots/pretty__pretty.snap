@@ -1,5 +1,5 @@
 ---
-source: partiql-ast/tests/pretty.rs
+source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
@@ -24,7 +24,8 @@ SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
     { 'foo': 'baz' },
     { 'foo': 'bar' },
     { 'foo': 'baz' }
-  >> GROUP BY foo ORDER BY n DESC
+  >>
+GROUP BY foo ORDER BY n DESC
 
 ------------------------------------------------------------------------------------------------------------------------
 SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
@@ -35,7 +36,8 @@ SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
     { 'foo': 'baz' },
     { 'foo': 'bar' },
     { 'foo': 'baz' }
-  >> GROUP BY foo ORDER BY n DESC
+  >>
+GROUP BY foo ORDER BY n DESC
 
 --------------------------------------------------------------------------------
 SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
@@ -46,7 +48,8 @@ SELECT foo, bar, baz, thud.*, grunt.a[*].b[2].*, count(1) AS n FROM <<
     { 'foo': 'baz' },
     { 'foo': 'bar' },
     { 'foo': 'baz' }
-  >> GROUP BY foo ORDER BY n DESC
+  >>
+GROUP BY foo ORDER BY n DESC
 
 ----------------------------------------
 SELECT foo, bar, baz, thud.*,
@@ -64,12 +67,14 @@ FROM <<
     { 'foo': 'baz' },
     { 'foo': 'bar' },
     { 'foo': 'baz' }
-  >> GROUP BY foo ORDER BY n DESC
+  >>
+GROUP BY foo ORDER BY n DESC
 
 ------------------------------
 SELECT foo, bar, baz, thud.*,
   grunt.a[*].b[2].*,
-  count(1) AS n FROM <<
+  count(1) AS n
+FROM <<
     {
       'foo': 'foo',
       'x': 9,
@@ -82,8 +87,8 @@ SELECT foo, bar, baz, thud.*,
     { 'foo': 'baz' },
     { 'foo': 'bar' },
     { 'foo': 'baz' }
-  >> GROUP BY foo
-ORDER BY n DESC
+  >>
+GROUP BY foo ORDER BY n DESC
 
 --------------------
 SELECT foo, bar,
@@ -97,18 +102,24 @@ FROM <<
       'y': 5,
       z: -11
     },
-    { 'foo': 'bar'
+    {
+      'foo': 'bar'
     },
-    { 'foo': 'qux'
+    {
+      'foo': 'qux'
     },
-    { 'foo': 'bar'
+    {
+      'foo': 'bar'
     },
-    { 'foo': 'baz'
+    {
+      'foo': 'baz'
     },
-    { 'foo': 'bar'
+    {
+      'foo': 'bar'
     },
     { 'foo': 'baz' }
-  >> GROUP BY foo
+  >>
+GROUP BY foo
 ORDER BY n DESC
 
 ----------

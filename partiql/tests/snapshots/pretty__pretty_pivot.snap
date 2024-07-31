@@ -1,5 +1,5 @@
 ---
-source: partiql-ast/tests/pretty.rs
+source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
@@ -12,28 +12,28 @@ expression: doc
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-PIVOT foo.b AT foo.a FROM << { 'a': 1, 'b': 'I' }, { 'a': 2, 'b': 'II' }, { 'a': 3, 'b': 'III' } >> AS foo ORDER BY a LIMIT 1 OFFSET 1
+PIVOT foo.a AT foo.b FROM << { 'a': 1, 'b': 'I' }, { 'a': 2, 'b': 'II' }, { 'a': 3, 'b': 'III' } >> AS foo ORDER BY a LIMIT 1 OFFSET 1
 
 ------------------------------------------------------------------------------------------------------------------------
-PIVOT foo.b AT foo.a FROM << { 'a': 1, 'b': 'I' }, { 'a': 2, 'b': 'II' }, { 'a': 3, 'b': 'III' } >> AS foo ORDER BY a
+PIVOT foo.a AT foo.b FROM << { 'a': 1, 'b': 'I' }, { 'a': 2, 'b': 'II' }, { 'a': 3, 'b': 'III' } >> AS foo ORDER BY a
 LIMIT 1 OFFSET 1
 
 --------------------------------------------------------------------------------
-PIVOT foo.b AT foo.a FROM <<
+PIVOT foo.a AT foo.b FROM <<
     { 'a': 1, 'b': 'I' },
     { 'a': 2, 'b': 'II' },
     { 'a': 3, 'b': 'III' }
   >> AS foo ORDER BY a LIMIT 1 OFFSET 1
 
 ----------------------------------------
-PIVOT foo.b AT foo.a FROM <<
+PIVOT foo.a AT foo.b FROM <<
     { 'a': 1, 'b': 'I' },
     { 'a': 2, 'b': 'II' },
     { 'a': 3, 'b': 'III' }
   >> AS foo ORDER BY a LIMIT 1 OFFSET 1
 
 ------------------------------
-PIVOT foo.b AT foo.a FROM <<
+PIVOT foo.a AT foo.b FROM <<
     { 'a': 1, 'b': 'I' },
     { 'a': 2, 'b': 'II' },
     { 'a': 3, 'b': 'III' }
@@ -41,7 +41,7 @@ PIVOT foo.b AT foo.a FROM <<
 OFFSET 1
 
 --------------------
-PIVOT foo.b AT foo.a
+PIVOT foo.a AT foo.b
 FROM <<
     {
       'a': 1,
@@ -60,7 +60,7 @@ ORDER BY a LIMIT 1
 OFFSET 1
 
 ----------
-PIVOT foo.b AT foo.a
+PIVOT foo.a AT foo.b
 FROM <<
     {
       'a': 1,

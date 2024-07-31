@@ -1,0 +1,85 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+
+                SELECT *
+                FROM test_data AS test_data
+                WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false) AND (NOT (test_data.description LIKE 'Esse solam.') AND NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR (test_data.test_address <> 'Potest. Sed.')) AND (test_data.* > -28.146858383543243))
+                
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM test_data AS test_data WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false) AND (NOT (test_data.description LIKE 'Esse solam.') AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR (test_data.test_address <> 'Potest. Sed.')) AND (test_data.* > -28.146858383543243))
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM test_data AS test_data WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false) AND
+        (NOT (test_data.description LIKE 'Esse solam.') AND NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR
+    (test_data.test_address <> 'Potest. Sed.')) AND (test_data.* > -28.146858383543243))
+
+--------------------------------------------------------------------------------
+SELECT * FROM test_data AS test_data
+WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false)
+        AND (NOT (test_data.description LIKE 'Esse solam.') AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR
+    (test_data.test_address <> 'Potest. Sed.')) AND
+  (test_data.* > -28.146858383543243))
+
+----------------------------------------
+SELECT * FROM test_data AS test_data
+WHERE ((((test_data.country_code <> 'Distinctio.')
+      AND ((test_data.* < false) AND
+        (NOT (test_data.description LIKE 'Esse solam.')
+          AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.'))))
+    OR
+    (test_data.test_address <> 'Potest. Sed.'))
+  AND
+  (test_data.* > -28.146858383543243))
+
+------------------------------
+SELECT *
+FROM test_data AS test_data
+WHERE ((((test_data.country_code <> 'Distinctio.')
+      AND
+      ((test_data.* < false)
+        AND
+        (NOT (test_data.description LIKE 'Esse solam.')
+          AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.'))))
+    OR
+    (test_data.test_address <> 'Potest. Sed.'))
+  AND
+  (test_data.* > -28.146858383543243))
+
+--------------------
+SELECT *
+FROM test_data AS test_data
+WHERE ((((test_data.country_code <> 'Distinctio.')
+      AND
+      ((test_data.* < false)
+        AND
+        (NOT (test_data.description LIKE 'Esse solam.')
+          AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.'))))
+    OR
+    (test_data.test_address <> 'Potest. Sed.'))
+  AND
+  (test_data.* > -28.146858383543243))
+
+----------
+SELECT *
+FROM test_data AS test_data
+WHERE ((((test_data.country_code <> 'Distinctio.')
+      AND
+      ((test_data.* < false)
+        AND
+        (NOT (test_data.description LIKE 'Esse solam.')
+          AND
+          NOT (test_data.transaction_id LIKE 'Esset accusata.'))))
+    OR
+    (test_data.test_address <> 'Potest. Sed.'))
+  AND
+  (test_data.* > -28.146858383543243))
