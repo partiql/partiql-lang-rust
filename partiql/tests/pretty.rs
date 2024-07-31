@@ -170,6 +170,18 @@ fn pretty_pivot() {
 }
 
 #[test]
+fn pretty_ands_and_ors() {
+    pretty_print_test(
+        "pretty_ands_and_ors",
+        "
+                SELECT *
+                FROM test_data AS test_data
+                WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false) AND (NOT (test_data.description LIKE 'Esse solam.') AND NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR (test_data.test_address <> 'Potest. Sed.')) AND (test_data.* > -28.146858383543243))
+                ",
+    );
+}
+
+#[test]
 fn pretty_exclude() {
     pretty_print_test(
         "pretty_exclude_1",
