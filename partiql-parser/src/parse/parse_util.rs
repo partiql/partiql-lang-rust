@@ -2,7 +2,7 @@ use partiql_ast::ast;
 
 use crate::parse::parser_state::ParserState;
 use bitflags::bitflags;
-use partiql_ast::builder::IdGenerator;
+use partiql_core::node::NodeIdGenerator;
 use partiql_source_map::location::ByteOffset;
 
 bitflags! {
@@ -110,7 +110,7 @@ pub(crate) fn strip_query_set<Id>(
     hi: ByteOffset,
 ) -> ast::AstNode<ast::Query>
 where
-    Id: IdGenerator,
+    Id: NodeIdGenerator,
 {
     if let ast::AstNode {
         node: ast::QuerySet::Expr(q),

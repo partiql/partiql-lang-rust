@@ -12,7 +12,7 @@ use crate::parse::parser_state::ParserState;
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
 use partiql_ast::ast;
-use partiql_ast::builder::IdGenerator;
+use partiql_core::node::NodeIdGenerator;
 use partiql_source_map::line_offset_tracker::LineOffsetTracker;
 use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
 use partiql_source_map::metadata::LocationMap;
@@ -54,7 +54,7 @@ pub(crate) fn parse_partiql(s: &str) -> AstResult<'_> {
     parse_partiql_with_state(s, ParserState::default())
 }
 
-fn parse_partiql_with_state<'input, Id: IdGenerator>(
+fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
     s: &'input str,
     mut state: ParserState<'input, Id>,
 ) -> AstResult<'input> {
@@ -537,8 +537,7 @@ mod tests {
 
     mod set_ops {
         use super::*;
-
-        use partiql_ast::builder::NullIdGenerator;
+        use partiql_core::node::NullIdGenerator;
 
         impl<'input> ParserState<'input, NullIdGenerator> {
             pub(crate) fn new_null_id() -> ParserState<'input, NullIdGenerator> {

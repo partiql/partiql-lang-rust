@@ -5,6 +5,7 @@ use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::Catalog;
+use partiql_core::node::NodeId;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
@@ -40,9 +41,9 @@ pub struct KeySchema {
 
 #[derive(Default, Debug, Clone)]
 pub struct KeyRegistry {
-    pub in_scope: FnvIndexMap<ast::NodeId, Vec<ast::NodeId>>,
-    pub schema: FnvIndexMap<ast::NodeId, KeySchema>,
-    pub aliases: FnvIndexMap<ast::NodeId, Symbol>,
+    pub in_scope: FnvIndexMap<NodeId, Vec<NodeId>>,
+    pub schema: FnvIndexMap<NodeId, KeySchema>,
+    pub aliases: FnvIndexMap<NodeId, Symbol>,
 }
 
 #[derive(Debug)]
@@ -87,17 +88,17 @@ enum EnclosingClause {
 #[allow(dead_code)]
 pub struct NameResolver<'c> {
     // environment stack tracking
-    id_path_to_root: Vec<ast::NodeId>,
-    id_child_stack: Vec<Vec<ast::NodeId>>,
+    id_path_to_root: Vec<NodeId>,
+    id_child_stack: Vec<Vec<NodeId>>,
     keyref_stack: Vec<KeyRefs>,
-    lateral_stack: Vec<Vec<ast::NodeId>>,
+    lateral_stack: Vec<Vec<NodeId>>,
     id_gen: IdGenerator,
 
     // data flow tracking
-    enclosing_clause: FnvIndexMap<EnclosingClause, Vec<ast::NodeId>>,
-    in_scope: FnvIndexMap<ast::NodeId, Vec<ast::NodeId>>,
-    schema: FnvIndexMap<ast::NodeId, KeySchema>,
-    aliases: FnvIndexMap<ast::NodeId, Symbol>,
+    enclosing_clause: FnvIndexMap<EnclosingClause, Vec<NodeId>>,
+    in_scope: FnvIndexMap<NodeId, Vec<NodeId>>,
+    schema: FnvIndexMap<NodeId, KeySchema>,
+    aliases: FnvIndexMap<NodeId, Symbol>,
 
     // errors that occur during name resolution
     errors: Vec<AstTransformError>,
@@ -148,7 +149,7 @@ impl<'c> NameResolver<'c> {
     }
 
     #[inline]
-    fn current_node(&self) -> &ast::NodeId {
+    fn current_node(&self) -> &NodeId {
         self.id_path_to_root.last().unwrap()
     }
 
@@ -175,7 +176,7 @@ impl<'c> NameResolver<'c> {
     }
 
     #[inline]
-    fn exit_lateral(&mut self) -> Result<Vec<ast::NodeId>, AstTransformError> {
+    fn exit_lateral(&mut self) -> Result<Vec<NodeId>, AstTransformError> {
         self.lateral_stack.pop().ok_or_else(|| {
             AstTransformError::IllegalState("Expected non-empty lateral stack".to_string())
         })
@@ -187,7 +188,7 @@ impl<'c> NameResolver<'c> {
     }
 
     #[inline]
-    fn exit_child_stack(&mut self) -> Result<Vec<ast::NodeId>, AstTransformError> {
+    fn exit_child_stack(&mut self) -> Result<Vec<NodeId>, AstTransformError> {
         self.id_child_stack.pop().ok_or_else(|| {
             AstTransformError::IllegalState("Expected non-empty child stack".to_string())
         })
@@ -212,14 +213,14 @@ impl<'c> NameResolver<'c> {
 }
 
 impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
-    fn enter_ast_node(&mut self, id: ast::NodeId) -> Traverse {
+    fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {
             children.push(id);
         }
         Traverse::Continue
     }
-    fn exit_ast_node(&mut self, id: ast::NodeId) -> Traverse {
+    fn exit_ast_node(&mut self, id: NodeId) -> Traverse {
         assert_eq!(self.id_path_to_root.pop(), Some(id));
         Traverse::Continue
     }

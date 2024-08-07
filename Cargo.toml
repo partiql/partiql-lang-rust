@@ -16,6 +16,7 @@ members = [
     "partiql-catalog",
     "partiql-conformance-tests",
     "partiql-conformance-test-generator",
+    "partiql-core",
     "partiql-source-map",
     "partiql-logical-planner",
     "partiql-logical",

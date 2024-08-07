@@ -11,9 +11,9 @@ use partiql_source_map::location::{ByteOffset, BytePosition, Location, ToLocated
 
 use crate::parse::parse_util::{strip_expr, strip_query, strip_query_set, CallSite, Attrs, Synth};
 use crate::parse::parser_state::ParserState;
-use partiql_ast::builder::IdGenerator;
+use partiql_core::node::NodeIdGenerator;
 
-grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: IdGenerator;
+grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: NodeIdGenerator;
 
 
 pub(crate) TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {

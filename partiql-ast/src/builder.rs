@@ -1,53 +1,17 @@
-use crate::ast;
-use crate::ast::{AstNode, NodeId};
+use crate::ast::AstNode;
+use partiql_core::node::{AutoNodeIdGenerator, NodeIdGenerator, NullIdGenerator};
 
-/// A provider of 'fresh' [`NodeId`]s.
-pub trait IdGenerator {
-    /// Provides a 'fresh' [`NodeId`].
-    fn id(&mut self) -> NodeId;
-}
-
-/// Auto-incrementing [`IdGenerator`]
-pub struct AutoNodeIdGenerator {
-    next_id: ast::NodeId,
-}
-
-impl Default for AutoNodeIdGenerator {
-    fn default() -> Self {
-        AutoNodeIdGenerator { next_id: NodeId(1) }
-    }
-}
-
-impl IdGenerator for AutoNodeIdGenerator {
-    #[inline]
-    fn id(&mut self) -> NodeId {
-        let mut next = NodeId(&self.next_id.0 + 1);
-        std::mem::swap(&mut self.next_id, &mut next);
-        next
-    }
-}
-
-/// A provider of [`NodeId`]s that are always `0`; Useful for testing
-#[derive(Default)]
-pub struct NullIdGenerator {}
-
-impl IdGenerator for NullIdGenerator {
-    fn id(&mut self) -> NodeId {
-        NodeId(0)
-    }
-}
-
-/// A Builder for [`AstNode`]s that uses a [`IdGenerator`] to assign [`NodeId`]s
-pub struct NodeBuilder<Id: IdGenerator> {
+/// A Builder for [`AstNode`]s that uses a [`NodeIdGenerator`] to assign [`NodeId`]s
+pub struct AstNodeBuilder<IdGen: NodeIdGenerator> {
     /// Generator for 'fresh' [`NodeId`]s
-    pub id_gen: Id,
+    pub id_gen: IdGen,
 }
 
-impl<Id> NodeBuilder<Id>
+impl<IdGen> AstNodeBuilder<IdGen>
 where
-    Id: IdGenerator,
+    IdGen: NodeIdGenerator,
 {
-    pub fn new(id_gen: Id) -> Self {
+    pub fn new(id_gen: IdGen) -> Self {
         Self { id_gen }
     }
 
@@ -57,17 +21,17 @@ where
     }
 }
 
-impl<T> Default for NodeBuilder<T>
+impl<T> Default for AstNodeBuilder<T>
 where
-    T: IdGenerator + Default,
+    T: NodeIdGenerator + Default,
 {
     fn default() -> Self {
         Self::new(T::default())
     }
 }
 
-/// A [`NodeBuilder`] whose 'fresh' [`NodeId`]s are Auto-incrementing.
-pub type NodeBuilderWithAutoId = NodeBuilder<AutoNodeIdGenerator>;
+/// A [`AstNodeBuilder`] whose 'fresh' [`NodeId`]s are Auto-incrementing.
+pub type AstNodeBuilderWithAutoId = AstNodeBuilder<AutoNodeIdGenerator>;
 
-/// A [`NodeBuilder`] whose 'fresh' [`NodeId`]s are always `0`; Useful for testing
-pub type NodeBuilderWithNullId = NodeBuilder<NullIdGenerator>;
+/// A [`AstNodeBuilder`] whose 'fresh' [`NodeId`]s are always `0`; Useful for testing
+pub type AstNodeBuilderWithNullId = AstNodeBuilder<NullIdGenerator>;

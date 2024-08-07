@@ -26,6 +26,7 @@ lalrpop = "0.20"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast", version = "0.10.*" }
+partiql-core = { path = "../partiql-core", version = "0.10.*" }
 partiql-source-map = { path = "../partiql-source-map", version = "0.10.*" }
 
 thiserror = "1.0"
@@ -56,6 +57,7 @@ serde = [
   "dep:serde",
   "rust_decimal/serde-with-str",
   "partiql-ast/serde",
+  "partiql-core/serde",
   "partiql-source-map/serde"
 ]
 

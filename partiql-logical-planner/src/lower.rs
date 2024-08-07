@@ -7,7 +7,7 @@ use partiql_ast::ast::{
     Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
     CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
     DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
-    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit, NodeId,
+    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
     NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
     Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
     Sexp, SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
@@ -34,6 +34,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::Catalog;
+use partiql_core::node::NodeId;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
@@ -161,7 +162,7 @@ pub struct AstToLogical<'a> {
     sort_stack: Vec<Vec<logical::SortSpec>>,
     aggregate_exprs: Vec<AggregateExpression>,
 
-    from_lets: HashSet<ast::NodeId>,
+    from_lets: HashSet<NodeId>,
 
     projection_renames: Vec<FnvIndexMap<String, BindingsName<'a>>>,
 
