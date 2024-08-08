@@ -19,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use partiql_ast_macros::Visit;
 use partiql_core::node::NodeId;
 
-pub type AstTypeMap<T> = IndexMap<NodeId, T>;
-
 /// Represents an AST node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

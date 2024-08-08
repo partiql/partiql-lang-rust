@@ -1,5 +1,5 @@
 use crate::location::{BytePosition, Location};
-use partiql_ast::ast::AstTypeMap;
+use partiql_core::node::NodeMap;
 
 /// Map of `T` to a [`Location<BytePosition>>`]
-pub type LocationMap = AstTypeMap<Location<BytePosition>>;
+pub type LocationMap = NodeMap<Location<BytePosition>>;
