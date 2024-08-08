@@ -1,5 +1,5 @@
 use crate::ast::AstNode;
-use partiql_core::node::{AutoNodeIdGenerator, NodeIdGenerator, NullIdGenerator};
+use partiql_common::node::{AutoNodeIdGenerator, NodeIdGenerator, NullIdGenerator};
 
 /// A Builder for [`AstNode`]s that uses a [`NodeIdGenerator`] to assign [`NodeId`]s
 pub struct AstNodeBuilder<IdGen: NodeIdGenerator> {

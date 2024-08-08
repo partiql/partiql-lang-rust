@@ -119,7 +119,7 @@ impl fmt::Display for BytePosition {
 ///
 /// ## Example
 /// ```
-/// # use partiql_source_map::location::LineAndCharPosition;
+/// # use partiql_common::syntax::location::LineAndCharPosition;
 /// assert_eq!("Beginning of &str: LineAndCharPosition { line: LineOffset(0), char: CharOffset(0) }",
 ///             format!("Beginning of &str: {:?}", LineAndCharPosition::new(0, 0)));
 /// ```
@@ -150,7 +150,7 @@ impl LineAndCharPosition {
 ///
 /// ## Example
 /// ```
-/// # use partiql_source_map::location::LineAndColumn;
+/// # use partiql_common::syntax::location::LineAndColumn;
 /// assert_eq!("Beginning of &str: 1:1",format!("Beginning of &str: {}", LineAndColumn::new(1, 1).unwrap()));
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -253,7 +253,7 @@ pub struct Located<T, Loc: Display> {
 /// ## Example
 ///
 /// ```rust
-/// # use partiql_source_map::location::{ByteOffset, BytePosition, Located, ToLocated};
+/// # use partiql_common::syntax::location::{ByteOffset, BytePosition, Located, ToLocated};
 /// assert_eq!("blah".to_string().to_located(BytePosition::from(5)..BytePosition::from(10)),
 ///             Located{
 ///                 inner: "blah".to_string(),
@@ -284,7 +284,7 @@ impl<T, Loc: Display> Located<T, Loc> {
     /// ## Example
     ///
     /// ```rust
-    /// # use partiql_source_map::location::{ByteOffset, BytePosition, Located, ToLocated};
+    /// # use partiql_common::syntax::location::{ByteOffset, BytePosition, Located, ToLocated};
     /// assert_eq!("blah".to_string()
     ///                 .to_located(BytePosition::from(5)..BytePosition::from(10))
     ///                 .map_loc(|BytePosition(o)| BytePosition(o+5)),

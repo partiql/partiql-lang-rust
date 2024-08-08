@@ -34,7 +34,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::Catalog;
-use partiql_core::node::NodeId;
+use partiql_common::node::NodeId;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};

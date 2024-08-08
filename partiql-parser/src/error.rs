@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 
-use partiql_source_map::location::Located;
+use partiql_common::syntax::location::Located;
 use thiserror::Error;
 
 #[cfg(feature = "serde")]
@@ -102,7 +102,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_source_map::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
+    use partiql_common::syntax::location::{ByteOffset, BytePosition, LineAndColumn, ToLocated};
     use std::num::NonZeroUsize;
 
     #[test]

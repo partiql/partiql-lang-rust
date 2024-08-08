@@ -1,6 +1,6 @@
 use crate::error::LexError;
 use crate::lexer::{PartiqlLexer, Spanned, Token};
-use partiql_source_map::location::ByteOffset;
+use partiql_common::syntax::location::ByteOffset;
 use std::collections::VecDeque;
 
 /// A [`Token`] and its associated `&str` slice; buffered from the lexer for parsing/matching.

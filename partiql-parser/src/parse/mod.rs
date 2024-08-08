@@ -12,10 +12,10 @@ use crate::parse::parser_state::ParserState;
 use crate::preprocessor::{PreprocessingPartiqlLexer, BUILT_INS};
 use lalrpop_util as lpop;
 use partiql_ast::ast;
-use partiql_core::node::NodeIdGenerator;
-use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
-use partiql_source_map::metadata::LocationMap;
+use partiql_common::node::NodeIdGenerator;
+use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
+use partiql_common::syntax::location::{ByteOffset, BytePosition, ToLocated};
+use partiql_common::syntax::metadata::LocationMap;
 
 #[allow(clippy::just_underscores_and_digits)] // LALRPOP generates a lot of names like this
 #[allow(clippy::all)]
@@ -537,7 +537,7 @@ mod tests {
 
     mod set_ops {
         use super::*;
-        use partiql_core::node::NullIdGenerator;
+        use partiql_common::node::NullIdGenerator;
 
         impl<'input> ParserState<'input, NullIdGenerator> {
             pub(crate) fn new_null_id() -> ParserState<'input, NullIdGenerator> {
@@ -760,7 +760,7 @@ mod tests {
     mod errors {
         use super::*;
         use crate::error::{LexError, UnexpectedToken, UnexpectedTokenData};
-        use partiql_source_map::location::{Located, Location};
+        use partiql_common::syntax::location::{Located, Location};
         use std::borrow::Cow;
 
         #[test]

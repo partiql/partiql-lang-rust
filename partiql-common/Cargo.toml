@@ -1,12 +1,12 @@
 [package]
-name = "partiql-source-map"
-description = "PartiQL Source Map"
+name = "partiql-common"
+description = "PartiQL Core"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
 readme = "../README.md"
-keywords = ["sql", "sourcemap", "query", "compilers", "interpreters"]
+keywords = ["sql", "ast", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
     "**/.git/**",
@@ -16,21 +16,19 @@ version.workspace = true
 edition.workspace = true
 
 [lib]
+path = "src/lib.rs"
 bench = false
 
 [dependencies]
-partiql-core = { path = "../partiql-core", version = "0.10.*" }
-
-smallvec = { version = "1.*" }
+indexmap = "2.2"
+pretty = "0.12"
 serde = { version = "1.*", features = ["derive"], optional = true }
-
-
-[dev-dependencies]
+smallvec = { version = "1.*" }
+thiserror = "1.0"
 
 [features]
 default = []
 serde = [
     "dep:serde",
-    "smallvec/serde",
-    "partiql-core/serde"
+    "indexmap/serde",
 ]

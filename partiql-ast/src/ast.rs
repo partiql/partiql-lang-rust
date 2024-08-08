@@ -8,7 +8,6 @@
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
 // in this crate directly is not recommended.
 
-use indexmap::IndexMap;
 use rust_decimal::Decimal as RustDecimal;
 
 use std::fmt;
@@ -17,7 +16,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use partiql_ast_macros::Visit;
-use partiql_core::node::NodeId;
+use partiql_common::node::NodeId;
 
 /// Represents an AST node.
 #[derive(Clone, Debug, Eq, PartialEq)]
