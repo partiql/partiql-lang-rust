@@ -1,5 +1,5 @@
-use crate::location::{BytePosition, Location};
-use partiql_core::node::NodeMap;
+use crate::node::NodeMap;
+use crate::syntax::location::{BytePosition, Location};
 
 /// Map of `T` to a [`Location<BytePosition>>`]
 pub type LocationMap = NodeMap<Location<BytePosition>>;

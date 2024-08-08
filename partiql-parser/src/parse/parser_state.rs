@@ -8,10 +8,10 @@ use regex::Regex;
 
 use partiql_ast::ast::{AstNode, SymbolPrimitive};
 use partiql_ast::builder::AstNodeBuilder;
-use partiql_core::node::{AutoNodeIdGenerator, NodeIdGenerator};
+use partiql_common::node::{AutoNodeIdGenerator, NodeIdGenerator};
 
-use partiql_source_map::location::{ByteOffset, BytePosition, Location};
-use partiql_source_map::metadata::LocationMap;
+use partiql_common::syntax::location::{ByteOffset, BytePosition, Location};
+use partiql_common::syntax::metadata::LocationMap;
 
 type ParseErrorRecovery<'input> =
     ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;

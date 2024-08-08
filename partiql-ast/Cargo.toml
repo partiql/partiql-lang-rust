@@ -20,7 +20,7 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-partiql-core = { path = "../partiql-core", version = "0.10.*" }
+partiql-common = { path = "../partiql-common", version = "0.10.*" }
 indexmap = "2.2"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 serde = { version = "1.*", features = ["derive"], optional = true }
@@ -34,7 +34,7 @@ serde = [
     "rust_decimal/serde-with-str",
     "rust_decimal/serde",
     "indexmap/serde",
-    "partiql-core/serde"
+    "partiql-common/serde"
 ]
 
 [dependencies.partiql-ast-macros]

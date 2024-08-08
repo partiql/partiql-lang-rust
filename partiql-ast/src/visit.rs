@@ -1,5 +1,5 @@
 use crate::ast;
-use partiql_core::node::NodeId;
+use partiql_common::node::NodeId;
 
 /// Indicates if tree traversal of the entire tree should continue or not.
 #[derive(PartialEq, Debug)]
@@ -562,7 +562,7 @@ mod tests {
     use crate::ast;
     use crate::visit::{Traverse, Visitor};
     use ast::{AstNode, BinOp, BinOpKind, Expr, Lit};
-    use partiql_core::node::NodeId;
+    use partiql_common::node::NodeId;
     use std::ops::AddAssign;
 
     #[test]

@@ -1,4 +1,4 @@
-use partiql_source_map::location::{ByteOffset, BytePosition, ToLocated};
+use partiql_common::syntax::location::{ByteOffset, BytePosition, ToLocated};
 use std::borrow::Cow;
 
 use logos::{Logos, Span};
@@ -9,7 +9,7 @@ use std::fmt;
 use std::fmt::Formatter;
 
 use crate::error::{LexError, ParseError};
-use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
 
 /// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
 pub type Spanned<Tok, Loc> = (Loc, Tok, Loc);
@@ -877,8 +877,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_source_map::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
-    use partiql_source_map::location::{
+    use partiql_common::syntax::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
+    use partiql_common::syntax::location::{
         CharOffset, LineAndCharPosition, LineAndColumn, LineOffset, Located, Location,
     };
 

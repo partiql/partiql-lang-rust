@@ -2,8 +2,8 @@ use partiql_ast::ast;
 
 use crate::parse::parser_state::ParserState;
 use bitflags::bitflags;
-use partiql_core::node::NodeIdGenerator;
-use partiql_source_map::location::ByteOffset;
+use partiql_common::node::NodeIdGenerator;
+use partiql_common::syntax::location::ByteOffset;
 
 bitflags! {
     /// Set of AST node attributes to use as synthesized attributes.
