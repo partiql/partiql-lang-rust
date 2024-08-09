@@ -312,7 +312,7 @@ mod tests {
     use super::*;
     use std::num::NonZeroUsize;
 
-    use crate::location::{ByteOffset, BytePosition, Located, Location};
+    use crate::syntax::location::{ByteOffset, BytePosition, Located, Location};
 
     #[test]
     fn located() {
