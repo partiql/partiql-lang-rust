@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Fixed
+
+## [0.10.1]
+### Changed
 - partiql-ast: fixed pretty-printing of `PIVOT`
 - partiql-ast: improved pretty-printing of `CASE` and various clauses
-- 
+
 ### Added
 
 ### Fixed
@@ -59,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Fixed
-- partiql-types: Fixed handling of struct fields to be resilient to field order w.r.t. equality and hashing 
+- partiql-types: Fixed handling of struct fields to be resilient to field order w.r.t. equality and hashing
 
 ## [0.7.1] - 2024-03-15
 ### Changed
@@ -74,12 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Adds quotes to the attributes of PartiQL tuple's debug output so it can be read and transformed using Kotlin `partiql-cli`
 - *BREAKING:*  partiql-eval: Changes the interface to `EvalPlan` to accept an `EvalContext`
-- *BREAKING:*  partiql-eval: Changes `EvaluationError` to not implement `Clone` 
+- *BREAKING:*  partiql-eval: Changes `EvaluationError` to not implement `Clone`
 - *BREAKING:*  partiql-eval: Changes the structure of `EvalPlan`
 
 ### Added
 - partiql-extension-visualize: Add `partiql-extension-visualize` for visualizing AST and logical plan
-- partiql-eval: Add a `SessionContext` containing both a system-level and a user-level context object usable by expression evaluation 
+- partiql-eval: Add a `SessionContext` containing both a system-level and a user-level context object usable by expression evaluation
 
 ### Fixed
 - partiql-logical-planner: Fixed `ORDER BY`'s ability to see into projection aliases
@@ -276,7 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.1
 [0.10.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.0
 [0.9.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.9.0
 [0.8.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.8.0
