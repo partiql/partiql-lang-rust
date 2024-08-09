@@ -1,4 +1,4 @@
-use partiql_source_map::location::ByteOffset;
+use partiql_common::syntax::location::ByteOffset;
 use regex::{Regex, RegexSet, RegexSetBuilder};
 
 use std::collections::VecDeque;
@@ -11,7 +11,7 @@ use crate::lexer::{InternalLexResult, LexResult, PartiqlLexer, Spanned, Token};
 
 use crate::token_parser::{BufferedToken, TokenParser};
 use once_cell::sync::Lazy;
-use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
 
 pub(crate) static BUILT_INS: Lazy<FnExprSet<'static>> = Lazy::new(built_ins);
 
@@ -607,7 +607,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_source_map::line_offset_tracker::LineOffsetTracker;
+    use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
 
     use crate::ParseError;
 

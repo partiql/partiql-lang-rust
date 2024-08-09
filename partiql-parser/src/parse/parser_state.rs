@@ -7,10 +7,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use partiql_ast::ast::{AstNode, SymbolPrimitive};
-use partiql_ast::builder::{AutoNodeIdGenerator, IdGenerator, NodeBuilder};
+use partiql_ast::builder::AstNodeBuilder;
+use partiql_common::node::{AutoNodeIdGenerator, NodeIdGenerator};
 
-use partiql_source_map::location::{ByteOffset, BytePosition, Location};
-use partiql_source_map::metadata::LocationMap;
+use partiql_common::syntax::location::{ByteOffset, BytePosition, Location};
+use partiql_common::syntax::metadata::LocationMap;
 
 type ParseErrorRecovery<'input> =
     ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
@@ -19,9 +20,9 @@ type ParseErrors<'input> = Vec<ParseErrorRecovery<'input>>;
 const INIT_LOCATIONS: usize = 100;
 
 /// State of the parsing during parse.
-pub(crate) struct ParserState<'input, Id: IdGenerator> {
+pub(crate) struct ParserState<'input, Id: NodeIdGenerator> {
     /// Generator for 'fresh' [`NodeId`]s
-    pub node_builder: NodeBuilder<Id>,
+    pub node_builder: AstNodeBuilder<Id>,
     /// Maps AST [`NodeId`]s to the location in the source from which each was derived.
     pub locations: LocationMap,
     /// Any errors accumulated during parse.
@@ -45,11 +46,11 @@ static KNOWN_AGGREGATE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(KNOWN_AGGR
 
 impl<'input, I> ParserState<'input, I>
 where
-    I: IdGenerator,
+    I: NodeIdGenerator,
 {
     pub fn with_id_gen(id_gen: I) -> Self {
         ParserState {
-            node_builder: NodeBuilder::new(id_gen),
+            node_builder: AstNodeBuilder::new(id_gen),
             locations: LocationMap::with_capacity(INIT_LOCATIONS),
             errors: ParseErrors::default(),
             aggregates_pat: &KNOWN_AGGREGATE_PATTERN,
@@ -57,7 +58,7 @@ where
     }
 }
 
-impl<'input, Id: IdGenerator> ParserState<'input, Id> {
+impl<'input, IdGen: NodeIdGenerator> ParserState<'input, IdGen> {
     /// Create a new [`AstNode`] from the inner data which it is to hold and a source location.
     pub fn create_node<T, IntoLoc>(&mut self, node: T, location: IntoLoc) -> AstNode<T>
     where

@@ -30,9 +30,9 @@ mod token_parser;
 
 use parse::{parse_partiql, AstData, ErrorData};
 use partiql_ast::ast;
-use partiql_source_map::line_offset_tracker::LineOffsetTracker;
-use partiql_source_map::location::BytePosition;
-use partiql_source_map::metadata::LocationMap;
+use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
+use partiql_common::syntax::location::BytePosition;
+use partiql_common::syntax::metadata::LocationMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

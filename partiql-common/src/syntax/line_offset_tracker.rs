@@ -1,6 +1,6 @@
 //! [`LineOffsetTracker`] and related types for mapping locations in source `str`s.
 
-use crate::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
+use crate::syntax::location::{ByteOffset, BytePosition, LineAndCharPosition, LineOffset};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Range;
 
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 /// ## Example
 ///
 /// ```rust
-/// use partiql_source_map::location::{ByteOffset, LineAndCharPosition};
-/// use partiql_source_map::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
+/// use partiql_common::syntax::location::{ByteOffset, LineAndCharPosition};
+/// use partiql_common::syntax::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
 ///
 /// let source = "12345\n789012345\n789012345\n789012345";
 /// let mut tracker = LineOffsetTracker::default();
