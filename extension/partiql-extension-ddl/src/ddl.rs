@@ -230,8 +230,8 @@ mod tests {
     use super::*;
     use indexmap::IndexSet;
     use partiql_types::{
-        shape_builder, struct_fields, type_array, type_bag, type_float64, type_int8, type_string,
-        type_struct, StructConstraint,
+        struct_fields, type_array, type_bag, type_float64, type_int8, type_string, type_struct,
+        PartiqlShapeBuilder, StructConstraint,
     };
 
     #[test]
@@ -239,9 +239,9 @@ mod tests {
         let nested_attrs = struct_fields![
             (
                 "a",
-                shape_builder().any_of(vec![
-                    shape_builder().new_static(Static::DecimalP(5, 4)),
-                    shape_builder().new_static(Static::Int8),
+                PartiqlShapeBuilder::init_or_get().any_of(vec![
+                    PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(5, 4)),
+                    PartiqlShapeBuilder::init_or_get().new_static(Static::Int8),
                 ])
             ),
             ("b", type_array![type_string![]]),
@@ -252,7 +252,10 @@ mod tests {
         let fields = struct_fields![
             ("employee_id", type_int8![]),
             ("full_name", type_string![]),
-            ("salary", shape_builder().new_static(Static::DecimalP(8, 2))),
+            (
+                "salary",
+                PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(8, 2))
+            ),
             ("details", details),
             ("dependents", type_array![type_string![]])
         ];

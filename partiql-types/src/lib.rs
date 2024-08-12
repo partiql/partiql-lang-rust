@@ -12,12 +12,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 use thiserror::Error;
 
-#[track_caller]
-pub fn shape_builder() -> &'static PartiqlShapeBuilder {
-    static SHAPE_BUILDER: OnceLock<PartiqlShapeBuilder> = OnceLock::new();
-    SHAPE_BUILDER.get_or_init(PartiqlShapeBuilder::default)
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Diagnostic)]
 #[error("ShapeResult Error")]
 #[non_exhaustive]
@@ -46,49 +40,49 @@ where
 #[macro_export]
 macro_rules! type_dynamic {
     () => {
-        $crate::shape_builder().new_dynamic()
+        $crate::PartiqlShapeBuilder::init_or_get().new_dynamic()
     };
 }
 
 #[macro_export]
 macro_rules! type_int {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Int)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int)
     };
 }
 
 #[macro_export]
 macro_rules! type_int8 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Int8)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int8)
     };
 }
 
 #[macro_export]
 macro_rules! type_int16 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Int16)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int16)
     };
 }
 
 #[macro_export]
 macro_rules! type_int32 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Int32)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int32)
     };
 }
 
 #[macro_export]
 macro_rules! type_int64 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Int64)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int64)
     };
 }
 
 #[macro_export]
 macro_rules! type_decimal {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Decimal)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal)
     };
 }
 
@@ -97,28 +91,28 @@ macro_rules! type_decimal {
 #[macro_export]
 macro_rules! type_float32 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Float32)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32)
     };
 }
 
 #[macro_export]
 macro_rules! type_float64 {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Float64)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64)
     };
 }
 
 #[macro_export]
 macro_rules! type_string {
     () => {
-        $crate::shape_builder().new_static($crate::Static::String)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::String)
     };
 }
 
 #[macro_export]
 macro_rules! type_bool {
     () => {
-        $crate::shape_builder().new_static($crate::Static::Bool)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Bool)
     };
 }
 
@@ -126,10 +120,10 @@ macro_rules! type_bool {
 macro_rules! type_numeric {
     () => {
         [
-            $crate::shape_builder().new_static($crate::Static::Int),
-            $crate::shape_builder().new_static($crate::Static::Float32),
-            $crate::shape_builder().new_static($crate::Static::Float64),
-            $crate::shape_builder().new_static($crate::Static::Decimal),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal),
         ]
     };
 }
@@ -137,17 +131,17 @@ macro_rules! type_numeric {
 #[macro_export]
 macro_rules! type_datetime {
     () => {
-        $crate::shape_builder().new_static($crate::Static::DateTime)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::DateTime)
     };
 }
 
 #[macro_export]
 macro_rules! type_struct {
     () => {
-        $crate::shape_builder().new_struct(StructType::new_any())
+        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new_any())
     };
     ($elem:expr) => {
-        $crate::shape_builder().new_struct(StructType::new($elem))
+        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new($elem))
     };
 }
 
@@ -161,20 +155,20 @@ macro_rules! struct_fields {
 #[macro_export]
 macro_rules! type_bag {
     () => {
-        $crate::shape_builder().new_bag(BagType::new_any());
+        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new_any());
     };
     ($elem:expr) => {
-        $crate::shape_builder().new_bag(BagType::new(Box::new($elem)))
+        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new(Box::new($elem)))
     };
 }
 
 #[macro_export]
 macro_rules! type_array {
     () => {
-        $crate::shape_builder().new_array(ArrayType::new_any());
+        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new_any());
     };
     ($elem:expr) => {
-        $crate::shape_builder().new_array(ArrayType::new(Box::new($elem)))
+        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new(Box::new($elem)))
     };
 }
 
@@ -191,31 +185,33 @@ macro_rules! type_undefined {
 #[macro_export]
 macro_rules! type_int_with_const_id {
     () => {
-        $crate::shape_builder().new_static_with_const_id($crate::Static::Int)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Int)
     };
 }
 
 #[macro_export]
 macro_rules! type_float32_with_const_id {
     () => {
-        $crate::shape_builder().new_static_with_const_id($crate::Static::Float32)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Float32)
     };
 }
 
 #[macro_export]
 macro_rules! type_string_with_const_id {
     () => {
-        $crate::shape_builder().new_static_with_const_id($crate::Static::String)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::String)
     };
 }
 
 #[macro_export]
 macro_rules! type_struct_with_const_id {
     () => {
-        $crate::shape_builder().new_static_with_const_id(Static::Struct(StructType::new_any()))
+        $crate::PartiqlShapeBuilder::init_or_get()
+            .new_static_with_const_id(Static::Struct(StructType::new_any()))
     };
     ($elem:expr) => {
-        $crate::shape_builder().new_static_with_const_id(Static::Struct(StructType::new($elem)))
+        $crate::PartiqlShapeBuilder::init_or_get()
+            .new_static_with_const_id(Static::Struct(StructType::new($elem)))
     };
 }
 
@@ -238,16 +234,16 @@ impl PartiqlShape {
         match (self, other) {
             (PartiqlShape::Dynamic, _) | (_, PartiqlShape::Dynamic) => PartiqlShape::Dynamic,
             (PartiqlShape::AnyOf(lhs), PartiqlShape::AnyOf(rhs)) => {
-                shape_builder().any_of(lhs.types.into_iter().chain(rhs.types))
+                PartiqlShapeBuilder::init_or_get().any_of(lhs.types.into_iter().chain(rhs.types))
             }
             (PartiqlShape::AnyOf(anyof), other) | (other, PartiqlShape::AnyOf(anyof)) => {
                 let mut types = anyof.types;
                 types.insert(other);
-                shape_builder().any_of(types)
+                PartiqlShapeBuilder::init_or_get().any_of(types)
             }
             (l, r) => {
                 let types = [l, r];
-                shape_builder().any_of(types)
+                PartiqlShapeBuilder::init_or_get().any_of(types)
             }
         }
     }
@@ -442,9 +438,17 @@ pub struct PartiqlShapeBuilder {
 }
 
 impl PartiqlShapeBuilder {
+    /// A thread-safe method for creating PartiQL shapes with guaranteed uniqueness over
+    /// generated `NodeId`s.
+    #[track_caller]
+    pub fn init_or_get() -> &'static PartiqlShapeBuilder {
+        static SHAPE_BUILDER: OnceLock<PartiqlShapeBuilder> = OnceLock::new();
+        SHAPE_BUILDER.get_or_init(PartiqlShapeBuilder::default)
+    }
+
     #[must_use]
     pub fn new_static(&self, ty: Static) -> PartiqlShape {
-        let id = self.id_gen.next_id();
+        let id = self.id_gen.id();
         let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
             id: *id,
@@ -464,7 +468,7 @@ impl PartiqlShapeBuilder {
 
     #[must_use]
     pub fn new_non_nullable_static(&self, ty: Static) -> PartiqlShape {
-        let id = self.id_gen.next_id();
+        let id = self.id_gen.id();
         let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
             id: *id,
@@ -557,46 +561,6 @@ impl FromIterator<PartiqlShape> for AnyOf {
         AnyOf {
             types: iter.into_iter().collect(),
         }
-    }
-}
-
-/// A Builder for [`AstNode`]s that uses a [`NodeIdGenerator`] to assign [`NodeId`]s
-pub struct StaticTypeBuilder<IdGen: NodeIdGenerator> {
-    /// Generator for 'fresh' [`NodeId`]s
-    pub id_gen: IdGen,
-}
-
-impl<IdGen> StaticTypeBuilder<IdGen>
-where
-    IdGen: NodeIdGenerator,
-{
-    pub fn new(id_gen: IdGen) -> Self {
-        Self { id_gen }
-    }
-
-    pub fn nullable_ty(&mut self, ty: Static) -> StaticType {
-        let id = self.id_gen.id();
-        let id = id.read().expect("NodeId read lock");
-        self.ty(ty, *id, true)
-    }
-
-    pub fn non_nullable_ty(&self, ty: Static) -> StaticType {
-        let id = self.id_gen.id();
-        let id = id.read().expect("NodeId read lock");
-        self.ty(ty, *id, false)
-    }
-
-    pub fn ty(&self, ty: Static, id: NodeId, nullable: bool) -> StaticType {
-        StaticType { id, ty, nullable }
-    }
-}
-
-impl<T> Default for StaticTypeBuilder<T>
-where
-    T: NodeIdGenerator + Default,
-{
-    fn default() -> Self {
-        Self::new(T::default())
     }
 }
 
@@ -913,7 +877,8 @@ impl ArrayType {
 #[cfg(test)]
 mod tests {
     use crate::{
-        shape_builder, BagType, PartiqlShape, Static, StructConstraint, StructField, StructType,
+        BagType, PartiqlShape, PartiqlShapeBuilder, Static, StructConstraint, StructField,
+        StructType,
     };
     use indexmap::IndexSet;
 
@@ -925,25 +890,25 @@ mod tests {
             type_int_with_const_id!().union_with(type_int_with_const_id!())
         );
 
-        let expect_nums =
-            shape_builder().any_of([type_int_with_const_id!(), type_float32_with_const_id!()]);
+        let expect_nums = PartiqlShapeBuilder::init_or_get()
+            .any_of([type_int_with_const_id!(), type_float32_with_const_id!()]);
         assert_eq!(
             expect_nums,
             type_int_with_const_id!().union_with(type_float32_with_const_id!())
         );
         assert_eq!(
             expect_nums,
-            shape_builder().any_of([
+            PartiqlShapeBuilder::init_or_get().any_of([
                 type_int_with_const_id!().union_with(type_float32_with_const_id!()),
                 type_int_with_const_id!().union_with(type_float32_with_const_id!())
             ])
         );
         assert_eq!(
             expect_nums,
-            shape_builder().any_of([
+            PartiqlShapeBuilder::init_or_get().any_of([
                 type_int_with_const_id!().union_with(type_float32_with_const_id!()),
                 type_int_with_const_id!().union_with(type_float32_with_const_id!()),
-                shape_builder().any_of([
+                PartiqlShapeBuilder::init_or_get().any_of([
                     type_int_with_const_id!().union_with(type_float32_with_const_id!()),
                     type_int_with_const_id!().union_with(type_float32_with_const_id!())
                 ])

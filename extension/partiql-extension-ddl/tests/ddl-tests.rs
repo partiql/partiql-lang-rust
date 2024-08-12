@@ -1,8 +1,8 @@
 use indexmap::IndexSet;
 use partiql_extension_ddl::ddl::{DdlFormat, PartiqlBasicDdlEncoder, PartiqlDdlEncoder};
 use partiql_types::{
-    shape_builder, struct_fields, type_bag, type_int, type_string, type_struct, StructConstraint,
-    StructField,
+    struct_fields, type_bag, type_int, type_string, type_struct, PartiqlShapeBuilder,
+    StructConstraint, StructField,
 };
 use partiql_types::{BagType, Static, StructType};
 
@@ -15,7 +15,7 @@ fn basic_ddl_test() {
         StructField::new("name", type_string!()),
         StructField::new(
             "address",
-            shape_builder().new_non_nullable_static(Static::String),
+            PartiqlShapeBuilder::init_or_get().new_non_nullable_static(Static::String),
         ),
         StructField::new_optional("details", details.clone()),
     ]

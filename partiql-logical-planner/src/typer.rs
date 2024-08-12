@@ -4,7 +4,8 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    shape_builder, type_dynamic, type_undefined, ArrayType, BagType, PartiqlShape,
+    type_array, type_bag, type_bool, type_decimal, type_dynamic, type_int, type_string,
+    type_struct, type_undefined, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
     ShapeResultError, Static, StructConstraint, StructField, StructType,
 };
 use partiql_value::{BindingsName, Value};
@@ -218,16 +219,17 @@ impl<'c> PlanTyper<'c> {
                     StructField::new(k.as_str(), self.get_singleton_type_from_env())
                 });
 
-                let ty = shape_builder().new_struct(StructType::new(IndexSet::from([
-                    StructConstraint::Fields(fields.collect()),
-                ])));
+                let ty = PartiqlShapeBuilder::init_or_get().new_struct(StructType::new(
+                    IndexSet::from([StructConstraint::Fields(fields.collect())]),
+                ));
 
                 let derived_type_ctx = self.local_type_ctx();
                 let derived_type = &self.derived_type(&derived_type_ctx);
                 let schema = if derived_type.is_ordered_collection() {
-                    shape_builder().new_array(ArrayType::new(Box::new(ty)))
+                    PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new(Box::new(ty)))
                 } else if derived_type.is_unordered_collection() {
-                    shape_builder().new_static(Static::Bag(BagType::new(Box::new(ty))))
+                    PartiqlShapeBuilder::init_or_get()
+                        .new_static(Static::Bag(BagType::new(Box::new(ty))))
                 } else {
                     self.errors.push(TypingError::IllegalState(format!(
                         "Expecting Collection for the output Schema but found {:?}",
@@ -331,24 +333,20 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Lit(v) => {
                 let ty = match **v {
-                    Value::Null => shape_builder().new_undefined(),
-                    Value::Missing => shape_builder().new_undefined(),
-                    Value::Integer(_) => shape_builder().new_static(Static::Int),
-                    Value::Decimal(_) => shape_builder().new_static(Static::Decimal),
-                    Value::Boolean(_) => shape_builder().new_static(Static::Bool),
-                    Value::String(_) => shape_builder().new_static(Static::String),
-                    Value::Tuple(_) => {
-                        shape_builder().new_static(Static::Struct(StructType::new_any()))
-                    }
-                    Value::List(_) => {
-                        shape_builder().new_static(Static::Array(ArrayType::new_any()))
-                    }
-                    Value::Bag(_) => shape_builder().new_static(Static::Bag(BagType::new_any())),
+                    Value::Null => type_undefined!(),
+                    Value::Missing => type_undefined!(),
+                    Value::Integer(_) => type_int!(),
+                    Value::Decimal(_) => type_decimal!(),
+                    Value::Boolean(_) => type_bool!(),
+                    Value::String(_) => type_string!(),
+                    Value::Tuple(_) => type_struct!(),
+                    Value::List(_) => type_array!(),
+                    Value::Bag(_) => type_bag!(),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
                         ));
-                        shape_builder().new_undefined()
+                        type_undefined!()
                     }
                 };
 
