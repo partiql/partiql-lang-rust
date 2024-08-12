@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use std::hash::Hash;
+use std::sync::{Arc, RwLock};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,27 +13,37 @@ pub struct NodeId(pub u32);
 
 /// Auto-incrementing [`NodeIdGenerator`]
 pub struct AutoNodeIdGenerator {
-    next_id: NodeId,
+    next_id: Arc<RwLock<NodeId>>,
 }
 
 impl Default for AutoNodeIdGenerator {
     fn default() -> Self {
-        AutoNodeIdGenerator { next_id: NodeId(1) }
+        AutoNodeIdGenerator {
+            next_id: Arc::new(RwLock::from(NodeId(1))),
+        }
+    }
+}
+
+impl AutoNodeIdGenerator {
+    pub fn next_id(&self) -> Arc<RwLock<NodeId>> {
+        self.id()
     }
 }
 
 /// A provider of 'fresh' [`NodeId`]s.
 pub trait NodeIdGenerator {
     /// Provides a 'fresh' [`NodeId`].
-    fn id(&mut self) -> NodeId;
+    fn id(&self) -> Arc<RwLock<NodeId>>;
 }
 
 impl NodeIdGenerator for AutoNodeIdGenerator {
     #[inline]
-    fn id(&mut self) -> NodeId {
-        let mut next = NodeId(&self.next_id.0 + 1);
-        std::mem::swap(&mut self.next_id, &mut next);
-        next
+    fn id(&self) -> Arc<RwLock<NodeId>> {
+        let id = &self.next_id.read().expect("NodeId read lock");
+        let next = NodeId(id.0 + 1);
+        let mut w = self.next_id.write().expect("NodeId write lock");
+        *w = next;
+        Arc::clone(&self.next_id)
     }
 }
 
@@ -41,7 +52,7 @@ impl NodeIdGenerator for AutoNodeIdGenerator {
 pub struct NullIdGenerator {}
 
 impl NodeIdGenerator for NullIdGenerator {
-    fn id(&mut self) -> NodeId {
-        NodeId(0)
+    fn id(&self) -> Arc<RwLock<NodeId>> {
+        Arc::new(RwLock::new(NodeId(0)))
     }
 }

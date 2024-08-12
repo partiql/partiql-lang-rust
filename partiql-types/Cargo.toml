@@ -21,7 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-
+partiql-common = { path = "../partiql-common", version = "0.10.*"}
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.6"
@@ -32,6 +32,7 @@ thiserror = "1.*"
 indexmap = "2.2"
 
 derivative = "2.2"
+lazy_static = "1.5.0"
 
 [dev-dependencies]
 criterion = "0.4"

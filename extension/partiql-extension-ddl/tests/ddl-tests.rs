@@ -1,20 +1,26 @@
 use indexmap::IndexSet;
 use partiql_extension_ddl::ddl::{DdlFormat, PartiqlBasicDdlEncoder, PartiqlDdlEncoder};
-use partiql_types::{bag, int, r#struct, str, struct_fields, StructConstraint, StructField};
-use partiql_types::{BagType, PartiqlShape, Static, StructType};
+use partiql_types::{
+    shape_builder, struct_fields, type_bag, type_int, type_string, type_struct, StructConstraint,
+    StructField,
+};
+use partiql_types::{BagType, Static, StructType};
 
 #[test]
 fn basic_ddl_test() {
-    let details_fields = struct_fields![("age", int!())];
-    let details = r#struct![IndexSet::from([details_fields])];
+    let details_fields = struct_fields![("age", type_int!())];
+    let details = type_struct![IndexSet::from([details_fields])];
     let fields = [
-        StructField::new("id", int!()),
-        StructField::new("name", str!()),
-        StructField::new("address", PartiqlShape::new_non_nullable(Static::String)),
+        StructField::new("id", type_int!()),
+        StructField::new("name", type_string!()),
+        StructField::new(
+            "address",
+            shape_builder().new_non_nullable_static(Static::String),
+        ),
         StructField::new_optional("details", details.clone()),
     ]
     .into();
-    let shape = bag![r#struct![IndexSet::from([
+    let shape = type_bag![type_struct![IndexSet::from([
         StructConstraint::Fields(fields),
         StructConstraint::Open(false)
     ])]];
