@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use std::hash::Hash;
-use std::mem;
 use std::sync::{Arc, RwLock};
 
 #[cfg(feature = "serde")]
