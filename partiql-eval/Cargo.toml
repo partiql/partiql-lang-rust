@@ -41,6 +41,9 @@ delegate = "0.12"
 [dev-dependencies]
 criterion = "0.4"
 
+[features]
+default = []
+
 [[bench]]
 name = "bench_eval"
 harness = false

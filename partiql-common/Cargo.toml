@@ -32,5 +32,6 @@ default = []
 serde = [
     "dep:serde",
     "indexmap/serde",
-    "smallvec/serde"
+    "smallvec/serde",
+    "dashmap/serde"
 ]
