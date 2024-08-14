@@ -288,9 +288,7 @@ FromClause: ast::AstNode<ast::FromClause> = {
                 };
 
                 let start = state.locations.get(&start_id).map_or(total.start.0.clone(), |v| v.start.0.clone());
-	            // let start = state.locations.get_or(&start_id, &total).start.0.clone();
                 let end = state.locations.get(&end_id).map_or(total.end.0.clone(), |v| v.end.0.clone());
-                // let end = state.locations.get_or(&end_id, &total).end.0.clone();
                 let range = start..end;
                 let join = state.node(ast::Join {
                     kind: ast::JoinKind::Cross,
