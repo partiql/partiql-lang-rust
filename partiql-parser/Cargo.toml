@@ -36,6 +36,7 @@ bigdecimal = "~0.2.0"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 
 bitflags = "2"
+dashmap = "6.0.1"
 
 lalrpop-util = "0.20"
 logos = "0.12"

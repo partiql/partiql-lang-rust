@@ -25,11 +25,13 @@ pretty = "0.12"
 serde = { version = "1.*", features = ["derive"], optional = true }
 smallvec = { version = "1.*" }
 thiserror = "1.0"
+dashmap = "6.0"
 
 [features]
 default = []
 serde = [
     "dep:serde",
     "indexmap/serde",
-    "smallvec/serde"
+    "smallvec/serde",
+    "dashmap/serde"
 ]

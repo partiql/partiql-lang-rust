@@ -1,11 +1,52 @@
-use indexmap::IndexMap;
-use std::hash::Hash;
+use dashmap::DashMap;
 use std::sync::{Arc, RwLock};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub type NodeMap<T> = IndexMap<NodeId, T>;
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NodeMap<T> {
+    map: DashMap<NodeId, T>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    order: Arc<RwLock<Vec<NodeId>>>,
+}
+
+impl<T> Default for NodeMap<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> NodeMap<T> {
+    pub fn new() -> Self {
+        NodeMap {
+            map: DashMap::new(),
+            order: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        NodeMap {
+            map: DashMap::with_capacity(capacity),
+            order: Arc::new(RwLock::new(Vec::with_capacity(capacity))),
+        }
+    }
+
+    pub fn insert(&self, node_id: NodeId, value: T) -> Option<T> {
+        let mut order = self.order.write().expect("NodeMap order write lock");
+        if self.map.contains_key(&node_id) {
+            self.map.insert(node_id, value)
+        } else {
+            order.push(node_id);
+            self.map.insert(node_id, value)
+        }
+    }
+
+    pub fn get(&self, node_id: &NodeId) -> Option<dashmap::mapref::one::Ref<'_, NodeId, T>> {
+        self.map.get(node_id)
+    }
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
