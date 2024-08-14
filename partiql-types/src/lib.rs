@@ -5,7 +5,7 @@ use derivative::Derivative;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
-use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator};
+use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator, NodeMap};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
