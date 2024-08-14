@@ -511,10 +511,9 @@ impl PartiqlShapeBuilder {
         self.new_static(Static::Array(a))
     }
 
-
-    // The AnyOf::from_iter(types) uses an IndexSet internally to 
-    // deduplicate types, thus the match on any_of.types.len() could 
-    // "flatten" AnyOfs that had duplicates. 
+    // The AnyOf::from_iter(types) uses an IndexSet internally to
+    // deduplicate types, thus the match on any_of.types.len() could
+    // "flatten" AnyOfs that had duplicates.
     // With the addition of IDs, this deduplication no longer happens.
     // TODO revisit the current implementaion and consider an implementation
     // that allows merging of the `metas` for the same type, e.g., with a
