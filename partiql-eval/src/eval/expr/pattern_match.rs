@@ -2,7 +2,7 @@ use crate::error::PlanningError;
 
 use crate::eval::eval_expr_wrapper::{TernaryValueExpr, UnaryValueExpr};
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
-use partiql_types::TYPE_STRING;
+use partiql_types::type_string;
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 use regex::{Regex, RegexBuilder};
@@ -47,10 +47,11 @@ impl BindEvalExpr for EvalLikeMatch {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let pattern = self.pattern.clone();
-        UnaryValueExpr::create_typed::<{ STRICT }, _>([TYPE_STRING], args, move |value| match value
-        {
-            Value::String(s) => Value::Boolean(pattern.is_match(s.as_ref())),
-            _ => Missing,
+        UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!()], args, move |value| {
+            match value {
+                Value::String(s) => Value::Boolean(pattern.is_match(s.as_ref())),
+                _ => Missing,
+            }
         })
     }
 }
@@ -65,7 +66,7 @@ impl BindEvalExpr for EvalLikeNonStringNonLiteralMatch {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let types = [TYPE_STRING, TYPE_STRING, TYPE_STRING];
+        let types = [type_string!(), type_string!(), type_string!()];
         TernaryValueExpr::create_typed::<{ STRICT }, _>(
             types,
             args,

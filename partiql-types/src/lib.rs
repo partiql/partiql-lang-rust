@@ -5,8 +5,11 @@ use derivative::Derivative;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
+use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator};
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Diagnostic)]
@@ -35,84 +38,110 @@ where
 }
 
 #[macro_export]
-macro_rules! dynamic {
+macro_rules! type_dynamic {
     () => {
-        $crate::PartiqlShape::Dynamic
+        $crate::PartiqlShapeBuilder::init_or_get().new_dynamic()
     };
 }
 
 #[macro_export]
-macro_rules! int {
+macro_rules! type_int {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Int)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int)
     };
 }
 
 #[macro_export]
-macro_rules! int8 {
+macro_rules! type_int8 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Int8)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int8)
     };
 }
 
 #[macro_export]
-macro_rules! int16 {
+macro_rules! type_int16 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Int16)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int16)
     };
 }
 
 #[macro_export]
-macro_rules! int32 {
+macro_rules! type_int32 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Int32)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int32)
     };
 }
 
 #[macro_export]
-macro_rules! int64 {
+macro_rules! type_int64 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Int64)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int64)
     };
 }
 
 #[macro_export]
-macro_rules! dec {
+macro_rules! type_decimal {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Decimal)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal)
     };
 }
 
 // TODO add macro_rule for Decimal with precision and scale
 
 #[macro_export]
-macro_rules! f32 {
+macro_rules! type_float32 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Float32)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32)
     };
 }
 
 #[macro_export]
-macro_rules! f64 {
+macro_rules! type_float64 {
     () => {
-        $crate::PartiqlShape::new($crate::Static::Float64)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64)
     };
 }
 
 #[macro_export]
-macro_rules! str {
+macro_rules! type_string {
     () => {
-        $crate::PartiqlShape::new($crate::Static::String)
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::String)
     };
 }
 
 #[macro_export]
-macro_rules! r#struct {
+macro_rules! type_bool {
     () => {
-        $crate::PartiqlShape::new_struct(StructType::new_any())
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Bool)
+    };
+}
+
+#[macro_export]
+macro_rules! type_numeric {
+    () => {
+        [
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64),
+            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal),
+        ]
+    };
+}
+
+#[macro_export]
+macro_rules! type_datetime {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::DateTime)
+    };
+}
+
+#[macro_export]
+macro_rules! type_struct {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new_any())
     };
     ($elem:expr) => {
-        $crate::PartiqlShape::new_struct(StructType::new($elem))
+        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new($elem))
     };
 }
 
@@ -124,29 +153,65 @@ macro_rules! struct_fields {
 }
 
 #[macro_export]
-macro_rules! r#bag {
+macro_rules! type_bag {
     () => {
-        $crate::PartiqlShape::new_bag(BagType::new_any());
+        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlShape::new_bag(BagType::new(Box::new($elem)))
+        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new(Box::new($elem)))
     };
 }
 
 #[macro_export]
-macro_rules! r#array {
+macro_rules! type_array {
     () => {
-        $crate::PartiqlShape::new_array(ArrayType::new_any());
+        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new_any());
     };
     ($elem:expr) => {
-        $crate::PartiqlShape::new_array(ArrayType::new(Box::new($elem)))
+        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new(Box::new($elem)))
     };
 }
 
 #[macro_export]
-macro_rules! undefined {
+macro_rules! type_undefined {
     () => {
         $crate::PartiqlShape::Undefined
+    };
+}
+
+// Types with constant `NodeId`, e.g., `NodeId(1)` convenient for testing or use-cases with no
+// requirement for unique node ids.
+
+#[macro_export]
+macro_rules! type_int_with_const_id {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Int)
+    };
+}
+
+#[macro_export]
+macro_rules! type_float32_with_const_id {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Float32)
+    };
+}
+
+#[macro_export]
+macro_rules! type_string_with_const_id {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::String)
+    };
+}
+
+#[macro_export]
+macro_rules! type_struct_with_const_id {
+    () => {
+        $crate::PartiqlShapeBuilder::init_or_get()
+            .new_static_with_const_id(Static::Struct(StructType::new_any()))
+    };
+    ($elem:expr) => {
+        $crate::PartiqlShapeBuilder::init_or_get()
+            .new_static_with_const_id(Static::Struct(StructType::new($elem)))
     };
 }
 
@@ -162,230 +227,33 @@ pub enum PartiqlShape {
     Undefined,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct StaticType {
-    ty: Static,
-    nullable: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum Static {
-    // Scalar Types
-    Int,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Bool,
-    Decimal,
-    DecimalP(usize, usize),
-
-    Float32,
-    Float64,
-
-    String,
-    StringFixed(usize),
-    StringVarying(usize),
-
-    DateTime,
-
-    // Container Types
-    Struct(StructType),
-    Bag(BagType),
-    Array(ArrayType),
-    // TODO Add BitString, ByteString, Blob, Clob, and Graph types
-}
-
-impl Static {
-    pub fn is_scalar(&self) -> bool {
-        !matches!(self, Static::Struct(_) | Static::Bag(_) | Static::Array(_))
-    }
-
-    pub fn is_sequence(&self) -> bool {
-        matches!(self, Static::Bag(_) | Static::Array(_))
-    }
-
-    pub fn is_struct(&self) -> bool {
-        matches!(self, Static::Struct(_))
-    }
-}
-
-impl StaticType {
-    #[must_use]
-    pub fn new(ty: Static) -> StaticType {
-        StaticType { ty, nullable: true }
-    }
-
-    #[must_use]
-    pub fn new_non_nullable(ty: Static) -> StaticType {
-        StaticType {
-            ty,
-            nullable: false,
-        }
-    }
-
-    #[must_use]
-    pub fn ty(&self) -> &Static {
-        &self.ty
-    }
-
-    #[must_use]
-    pub fn is_nullable(&self) -> bool {
-        self.nullable
-    }
-
-    #[must_use]
-    pub fn is_not_nullable(&self) -> bool {
-        !self.nullable
-    }
-
-    pub fn is_scalar(&self) -> bool {
-        self.ty.is_scalar()
-    }
-
-    pub fn is_sequence(&self) -> bool {
-        self.ty.is_sequence()
-    }
-
-    pub fn is_struct(&self) -> bool {
-        self.ty.is_struct()
-    }
-}
-
-impl Display for StaticType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let nullable = if self.nullable {
-            "nullable"
-        } else {
-            "non_nullable"
-        };
-        write!(f, "({}, {})", self.ty, nullable)
-    }
-}
-
-impl Display for Static {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let x = match self {
-            Static::Int => "Int".to_string(),
-            Static::Int8 => "Int8".to_string(),
-            Static::Int16 => "Int16".to_string(),
-            Static::Int32 => "Int32".to_string(),
-            Static::Int64 => "Int64".to_string(),
-            Static::Bool => "Bool".to_string(),
-            Static::Decimal => "Decimal".to_string(),
-            Static::DecimalP(_, _) => {
-                todo!()
-            }
-            Static::Float32 => "Float32".to_string(),
-            Static::Float64 => "Float64".to_string(),
-            Static::String => "String".to_string(),
-            Static::StringFixed(_) => {
-                todo!()
-            }
-            Static::StringVarying(_) => {
-                todo!()
-            }
-            Static::DateTime => "DateTime".to_string(),
-            Static::Struct(_) => "Struct".to_string(),
-            Static::Bag(_) => "Bag".to_string(),
-            Static::Array(_) => "Array".to_string(),
-        };
-        write!(f, "{x}")
-    }
-}
-
-pub const TYPE_DYNAMIC: PartiqlShape = PartiqlShape::Dynamic;
-pub const TYPE_BOOL: PartiqlShape = PartiqlShape::new(Static::Bool);
-pub const TYPE_INT: PartiqlShape = PartiqlShape::new(Static::Int);
-pub const TYPE_INT8: PartiqlShape = PartiqlShape::new(Static::Int8);
-pub const TYPE_INT16: PartiqlShape = PartiqlShape::new(Static::Int16);
-pub const TYPE_INT32: PartiqlShape = PartiqlShape::new(Static::Int32);
-pub const TYPE_INT64: PartiqlShape = PartiqlShape::new(Static::Int64);
-pub const TYPE_REAL: PartiqlShape = PartiqlShape::new(Static::Float32);
-pub const TYPE_DOUBLE: PartiqlShape = PartiqlShape::new(Static::Float64);
-pub const TYPE_DECIMAL: PartiqlShape = PartiqlShape::new(Static::Decimal);
-pub const TYPE_STRING: PartiqlShape = PartiqlShape::new(Static::String);
-pub const TYPE_DATETIME: PartiqlShape = PartiqlShape::new(Static::DateTime);
-pub const TYPE_NUMERIC_TYPES: [PartiqlShape; 4] = [TYPE_INT, TYPE_REAL, TYPE_DOUBLE, TYPE_DECIMAL];
-
 #[allow(dead_code)]
 impl PartiqlShape {
     #[must_use]
-    pub const fn new(ty: Static) -> PartiqlShape {
-        PartiqlShape::Static(StaticType { ty, nullable: true })
-    }
-    #[must_use]
-    pub const fn new_non_nullable(ty: Static) -> PartiqlShape {
-        PartiqlShape::Static(StaticType {
-            ty,
-            nullable: false,
-        })
-    }
-
-    #[must_use]
-    pub fn as_non_nullable(&self) -> Option<PartiqlShape> {
-        if let PartiqlShape::Static(stype) = self {
-            Some(PartiqlShape::Static(StaticType {
-                ty: stype.ty.clone(),
-                nullable: false,
-            }))
-        } else {
-            None
-        }
-    }
-
-    #[must_use]
-    pub fn new_dynamic() -> PartiqlShape {
-        PartiqlShape::Dynamic
-    }
-
-    #[must_use]
-    pub fn new_struct(s: StructType) -> PartiqlShape {
-        PartiqlShape::new(Static::Struct(s))
-    }
-
-    #[must_use]
-    pub fn new_bag(b: BagType) -> PartiqlShape {
-        PartiqlShape::new(Static::Bag(b))
-    }
-
-    #[must_use]
-    pub fn new_array(a: ArrayType) -> PartiqlShape {
-        PartiqlShape::new(Static::Array(a))
-    }
-
-    pub fn any_of<I>(types: I) -> PartiqlShape
-    where
-        I: IntoIterator<Item = PartiqlShape>,
-    {
-        let any_of = AnyOf::from_iter(types);
-        match any_of.types.len() {
-            0 => TYPE_DYNAMIC,
-            1 => {
-                let AnyOf { types } = any_of;
-                types.into_iter().next().unwrap()
-            }
-            // TODO figure out what does it mean for a Union to be nullable or not
-            _ => PartiqlShape::AnyOf(any_of),
-        }
-    }
-
-    #[must_use]
     pub fn union_with(self, other: PartiqlShape) -> PartiqlShape {
         match (self, other) {
-            (PartiqlShape::Dynamic, _) | (_, PartiqlShape::Dynamic) => PartiqlShape::new_dynamic(),
+            (PartiqlShape::Dynamic, _) | (_, PartiqlShape::Dynamic) => PartiqlShape::Dynamic,
             (PartiqlShape::AnyOf(lhs), PartiqlShape::AnyOf(rhs)) => {
-                PartiqlShape::any_of(lhs.types.into_iter().chain(rhs.types))
+                PartiqlShapeBuilder::init_or_get().any_of(lhs.types.into_iter().chain(rhs.types))
             }
             (PartiqlShape::AnyOf(anyof), other) | (other, PartiqlShape::AnyOf(anyof)) => {
                 let mut types = anyof.types;
                 types.insert(other);
-                PartiqlShape::any_of(types)
+                PartiqlShapeBuilder::init_or_get().any_of(types)
             }
             (l, r) => {
                 let types = [l, r];
-                PartiqlShape::any_of(types)
+                PartiqlShapeBuilder::init_or_get().any_of(types)
             }
+        }
+    }
+
+    #[must_use]
+    pub fn static_type_id(&self) -> Option<NodeId> {
+        if let PartiqlShape::Static(StaticType { id, .. }) = self {
+            Some(*id)
+        } else {
+            None
         }
     }
 
@@ -395,7 +263,8 @@ impl PartiqlShape {
             &self,
             PartiqlShape::Static(StaticType {
                 ty: Static::String,
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -406,7 +275,8 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Struct(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -417,13 +287,15 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Bag(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         ) || matches!(
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Array(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -440,7 +312,8 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Array(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -451,7 +324,8 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Bag(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -462,7 +336,8 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Array(_),
-                nullable: true
+                nullable: true,
+                ..
             })
         )
     }
@@ -479,14 +354,28 @@ impl PartiqlShape {
 
     pub fn expect_bool(&self) -> ShapeResult<StaticType> {
         if let PartiqlShape::Static(StaticType {
+            id,
             ty: Static::Bool,
             nullable: n,
         }) = self
         {
             Ok(StaticType {
+                id: *id,
                 ty: Static::Bool,
                 nullable: *n,
             })
+        } else {
+            Err(ShapeResultError::UnexpectedType(format!("{self}")))
+        }
+    }
+
+    pub fn expect_bag(&self) -> ShapeResult<BagType> {
+        if let PartiqlShape::Static(StaticType {
+            ty: Static::Bag(bag),
+            ..
+        }) = self
+        {
+            Ok(bag.clone())
         } else {
             Err(ShapeResultError::UnexpectedType(format!("{self}")))
         }
@@ -543,6 +432,118 @@ impl Display for PartiqlShape {
     }
 }
 
+#[derive(Default)]
+pub struct PartiqlShapeBuilder {
+    id_gen: AutoNodeIdGenerator,
+}
+
+impl PartiqlShapeBuilder {
+    /// A thread-safe method for creating PartiQL shapes with guaranteed uniqueness over
+    /// generated `NodeId`s.
+    #[track_caller]
+    pub fn init_or_get() -> &'static PartiqlShapeBuilder {
+        static SHAPE_BUILDER: OnceLock<PartiqlShapeBuilder> = OnceLock::new();
+        SHAPE_BUILDER.get_or_init(PartiqlShapeBuilder::default)
+    }
+
+    #[must_use]
+    pub fn new_static(&self, ty: Static) -> PartiqlShape {
+        let id = self.id_gen.id();
+        let id = id.read().expect("NodeId read lock");
+        PartiqlShape::Static(StaticType {
+            id: *id,
+            ty,
+            nullable: true,
+        })
+    }
+
+    #[must_use]
+    pub fn new_static_with_const_id(&self, ty: Static) -> PartiqlShape {
+        PartiqlShape::Static(StaticType {
+            id: NodeId(1),
+            ty,
+            nullable: true,
+        })
+    }
+
+    #[must_use]
+    pub fn new_non_nullable_static(&self, ty: Static) -> PartiqlShape {
+        let id = self.id_gen.id();
+        let id = id.read().expect("NodeId read lock");
+        PartiqlShape::Static(StaticType {
+            id: *id,
+            ty,
+            nullable: false,
+        })
+    }
+
+    #[must_use]
+    pub fn new_non_nullable_static_with_const_id(&self, ty: Static) -> PartiqlShape {
+        PartiqlShape::Static(StaticType {
+            id: NodeId(1),
+            ty,
+            nullable: false,
+        })
+    }
+
+    #[must_use]
+    pub fn new_dynamic(&self) -> PartiqlShape {
+        PartiqlShape::Dynamic
+    }
+
+    #[must_use]
+    pub fn new_undefined(&self) -> PartiqlShape {
+        PartiqlShape::Dynamic
+    }
+
+    #[must_use]
+    pub fn new_struct(&self, s: StructType) -> PartiqlShape {
+        self.new_static(Static::Struct(s))
+    }
+
+    #[must_use]
+    pub fn new_bag(&self, b: BagType) -> PartiqlShape {
+        self.new_static(Static::Bag(b))
+    }
+
+    #[must_use]
+    pub fn new_array(&self, a: ArrayType) -> PartiqlShape {
+        self.new_static(Static::Array(a))
+    }
+
+    // The AnyOf::from_iter(types) uses an IndexSet internally to
+    // deduplicate types, thus the match on any_of.types.len() could
+    // "flatten" AnyOfs that had duplicates.
+    // With the addition of IDs, this deduplication no longer happens.
+    // TODO revisit the current implementaion and consider an implementation
+    // that allows merging of the `metas` for the same type, e.g., with a
+    // user-defined control.
+    pub fn any_of<I>(&self, types: I) -> PartiqlShape
+    where
+        I: IntoIterator<Item = PartiqlShape>,
+    {
+        let any_of = AnyOf::from_iter(types);
+        match any_of.types.len() {
+            0 => type_dynamic!(),
+            1 => {
+                let AnyOf { types } = any_of;
+                types.into_iter().next().unwrap()
+            }
+            // TODO figure out what does it mean for a Union to be nullable or not
+            _ => PartiqlShape::AnyOf(any_of),
+        }
+    }
+
+    #[must_use]
+    pub fn as_non_nullable(&self, shape: &PartiqlShape) -> Option<PartiqlShape> {
+        if let PartiqlShape::Static(stype) = shape {
+            Some(self.new_non_nullable_static(stype.ty.clone()))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Derivative, Eq, Debug, Clone)]
 #[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
@@ -569,6 +570,134 @@ impl FromIterator<PartiqlShape> for AnyOf {
         }
     }
 }
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct StaticType {
+    id: NodeId,
+    ty: Static,
+    nullable: bool,
+}
+
+impl StaticType {
+    #[must_use]
+    pub fn ty(&self) -> &Static {
+        &self.ty
+    }
+
+    pub fn ty_id(&self) -> &NodeId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn is_nullable(&self) -> bool {
+        self.nullable
+    }
+
+    #[must_use]
+    pub fn is_not_nullable(&self) -> bool {
+        !self.nullable
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.ty.is_scalar()
+    }
+
+    pub fn is_sequence(&self) -> bool {
+        self.ty.is_sequence()
+    }
+
+    pub fn is_struct(&self) -> bool {
+        self.ty.is_struct()
+    }
+}
+
+impl Display for StaticType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let nullable = if self.nullable {
+            "nullable"
+        } else {
+            "non_nullable"
+        };
+        write!(f, "({}, {})", self.ty, nullable)
+    }
+}
+
+pub type StaticTypeMetas = HashMap<String, String>;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum Static {
+    // Scalar Types
+    Int,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Bool,
+    Decimal,
+    DecimalP(usize, usize),
+
+    Float32,
+    Float64,
+
+    String,
+    StringFixed(usize),
+    StringVarying(usize),
+
+    DateTime,
+
+    // Container Types
+    Struct(StructType),
+    Bag(BagType),
+    Array(ArrayType),
+    // TODO Add BitString, ByteString, Blob, Clob, and Graph types
+}
+
+impl Static {
+    pub fn is_scalar(&self) -> bool {
+        !matches!(self, Static::Struct(_) | Static::Bag(_) | Static::Array(_))
+    }
+
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Static::Bag(_) | Static::Array(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, Static::Struct(_))
+    }
+}
+
+impl Display for Static {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let x = match self {
+            Static::Int => "Int".to_string(),
+            Static::Int8 => "Int8".to_string(),
+            Static::Int16 => "Int16".to_string(),
+            Static::Int32 => "Int32".to_string(),
+            Static::Int64 => "Int64".to_string(),
+            Static::Bool => "Bool".to_string(),
+            Static::Decimal => "Decimal".to_string(),
+            Static::DecimalP(_, _) => {
+                todo!()
+            }
+            Static::Float32 => "Float32".to_string(),
+            Static::Float64 => "Float64".to_string(),
+            Static::String => "String".to_string(),
+            Static::StringFixed(_) => {
+                todo!()
+            }
+            Static::StringVarying(_) => {
+                todo!()
+            }
+            Static::DateTime => "DateTime".to_string(),
+            Static::Struct(_) => "Struct".to_string(),
+            Static::Bag(_) => "Bag".to_string(),
+            Static::Array(_) => "Array".to_string(),
+        };
+        write!(f, "{x}")
+    }
+}
+
+pub const TYPE_DYNAMIC: PartiqlShape = PartiqlShape::Dynamic;
 
 #[derive(Derivative, Eq, Debug, Clone)]
 #[derivative(PartialEq, Hash)]
@@ -754,32 +883,93 @@ impl ArrayType {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PartiqlShape, TYPE_INT, TYPE_REAL};
+    use crate::{
+        BagType, PartiqlShape, PartiqlShapeBuilder, Static, StructConstraint, StructField,
+        StructType,
+    };
+    use indexmap::IndexSet;
 
     #[test]
     fn union() {
-        let expect_int = TYPE_INT;
-        assert_eq!(expect_int, TYPE_INT.union_with(TYPE_INT));
+        let expect_int = type_int_with_const_id!();
+        assert_eq!(
+            expect_int,
+            type_int_with_const_id!().union_with(type_int_with_const_id!())
+        );
 
-        let expect_nums = PartiqlShape::any_of([TYPE_INT, TYPE_REAL]);
-        assert_eq!(expect_nums, TYPE_INT.union_with(TYPE_REAL));
+        let expect_nums = PartiqlShapeBuilder::init_or_get()
+            .any_of([type_int_with_const_id!(), type_float32_with_const_id!()]);
         assert_eq!(
             expect_nums,
-            PartiqlShape::any_of([
-                TYPE_INT.union_with(TYPE_REAL),
-                TYPE_INT.union_with(TYPE_REAL)
+            type_int_with_const_id!().union_with(type_float32_with_const_id!())
+        );
+        assert_eq!(
+            expect_nums,
+            PartiqlShapeBuilder::init_or_get().any_of([
+                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
+                type_int_with_const_id!().union_with(type_float32_with_const_id!())
             ])
         );
         assert_eq!(
             expect_nums,
-            PartiqlShape::any_of([
-                TYPE_INT.union_with(TYPE_REAL),
-                TYPE_INT.union_with(TYPE_REAL),
-                PartiqlShape::any_of([
-                    TYPE_INT.union_with(TYPE_REAL),
-                    TYPE_INT.union_with(TYPE_REAL)
+            PartiqlShapeBuilder::init_or_get().any_of([
+                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
+                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
+                PartiqlShapeBuilder::init_or_get().any_of([
+                    type_int_with_const_id!().union_with(type_float32_with_const_id!()),
+                    type_int_with_const_id!().union_with(type_float32_with_const_id!())
                 ])
             ])
         );
+    }
+
+    #[test]
+    fn unique_node_ids() {
+        let age_field = struct_fields![("age", type_int!())];
+        let details = type_struct![IndexSet::from([age_field])];
+
+        let fields = [
+            StructField::new("id", type_int!()),
+            StructField::new("name", type_string!()),
+            StructField::new("details", details.clone()),
+        ];
+
+        let row = type_struct![IndexSet::from([
+            StructConstraint::Fields(IndexSet::from(fields)),
+            StructConstraint::Open(false)
+        ])];
+
+        let shape = type_bag![row.clone()];
+
+        let mut ids = collect_ids(shape);
+        ids.sort_unstable();
+        assert!(ids.windows(2).all(|w| w[0] != w[1]));
+    }
+
+    fn collect_ids(row: PartiqlShape) -> Vec<u32> {
+        let mut out = vec![];
+        match row {
+            PartiqlShape::Dynamic => {}
+            PartiqlShape::AnyOf(anyof) => {
+                for shape in anyof.types {
+                    out.push(collect_ids(shape));
+                }
+            }
+            PartiqlShape::Static(static_type) => {
+                out.push(vec![static_type.id.0]);
+                match static_type.ty {
+                    Static::Struct(struct_type) => {
+                        for f in struct_type.fields() {
+                            out.push(collect_ids(f.ty.clone()));
+                        }
+                    }
+                    Static::Bag(bag_type) => out.push(collect_ids(*bag_type.element_type)),
+                    Static::Array(array_type) => out.push(collect_ids(*array_type.element_type)),
+                    _ => {}
+                }
+            }
+            PartiqlShape::Undefined => {}
+        }
+        out.into_iter().flatten().collect()
     }
 }

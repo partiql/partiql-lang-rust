@@ -11,13 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - partiql-ast: improved pretty-printing of `CASE` and various clauses
 - 
 ### Added
+- Added `partiql-common`.
+- Added `NodeId` to `StaticType`.
+- *BREAKING* Added thread-safe `PartiqlShapeBuilder` and automatic `NodeId` generation for the `StaticType`.
+- Added a static thread safe `shape_builder` function that provides a convenient way for using `PartiqlShapeBuilder` for creating new shapes.
 
-### Fixed
+### Removed
+- *BREAKING* Removed `partiql-source-map`.
+- *BREAKING* Removed `const` PartiQL types under `partiql-types` in favor of `PartiqlShapeBuilder`.
+- *BREAKING* Removed `StaticType`'s `new`, `new_non_nullable`, and `as_non-nullable` APIs in favor of `PartiqlShapeBuilder`.
 
 ## [0.10.0]
 ### Changed
 - *BREAKING:* partiql-ast: added modeling of `EXCLUDE`
 - *BREAKING:* partiql-ast: added pretty-printing of `EXCLUDE`
+- *BREAKING* Moved some of the `PartiqlShape` APIs to the `PartiqlShapeBuilder`.
+- *BREAKING* Prepended existing type macros with `type` to make macro names more friendly: e.g., `type_int!`
+- *BREAKING* Moved node id generation and `partiql-source-map` to it.
+- *BREAKING* Changed `AutoNodeIdGenerator` to a thread-safe version
 
 ### Added
 - *BREAKING:* partiql-parser: added parsing of `EXCLUDE`

@@ -4,8 +4,9 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    dynamic, undefined, ArrayType, BagType, PartiqlShape, ShapeResultError, Static,
-    StructConstraint, StructField, StructType,
+    type_array, type_bag, type_bool, type_decimal, type_dynamic, type_int, type_string,
+    type_struct, type_undefined, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
+    ShapeResultError, Static, StructConstraint, StructField, StructType,
 };
 use partiql_value::{BindingsName, Value};
 use petgraph::algo::toposort;
@@ -107,7 +108,7 @@ impl Default for TypeEnvContext {
     fn default() -> Self {
         TypeEnvContext {
             env: LocalTypeEnv::new(),
-            derived_type: dynamic!(),
+            derived_type: type_dynamic!(),
         }
     }
 }
@@ -175,7 +176,7 @@ impl<'c> PlanTyper<'c> {
         }
 
         if self.errors.is_empty() {
-            Ok(self.output.clone().unwrap_or(undefined!()))
+            Ok(self.output.clone().unwrap_or(type_undefined!()))
         } else {
             let output_schema = self.get_singleton_type_from_env();
             Err(TypeErr {
@@ -218,16 +219,17 @@ impl<'c> PlanTyper<'c> {
                     StructField::new(k.as_str(), self.get_singleton_type_from_env())
                 });
 
-                let ty = PartiqlShape::new_struct(StructType::new(IndexSet::from([
-                    StructConstraint::Fields(fields.collect()),
-                ])));
+                let ty = PartiqlShapeBuilder::init_or_get().new_struct(StructType::new(
+                    IndexSet::from([StructConstraint::Fields(fields.collect())]),
+                ));
 
                 let derived_type_ctx = self.local_type_ctx();
                 let derived_type = &self.derived_type(&derived_type_ctx);
                 let schema = if derived_type.is_ordered_collection() {
-                    PartiqlShape::new_array(ArrayType::new(Box::new(ty)))
+                    PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new(Box::new(ty)))
                 } else if derived_type.is_unordered_collection() {
-                    PartiqlShape::new_bag(BagType::new(Box::new(ty)))
+                    PartiqlShapeBuilder::init_or_get()
+                        .new_static(Static::Bag(BagType::new(Box::new(ty))))
                 } else {
                     self.errors.push(TypingError::IllegalState(format!(
                         "Expecting Collection for the output Schema but found {:?}",
@@ -304,8 +306,10 @@ impl<'c> PlanTyper<'c> {
                                 let ctx = ty_ctx![(&ty_env![(key_as_sym, ty.clone())], &ty)];
                                 self.type_env_stack.push(ctx);
                             } else {
-                                let ctx =
-                                    ty_ctx![(&ty_env![(key_as_sym, undefined!())], &undefined!())];
+                                let ctx = ty_ctx![(
+                                    &ty_env![(key_as_sym, type_undefined!())],
+                                    &type_undefined!()
+                                )];
                                 self.type_env_stack.push(ctx);
                             }
                         }
@@ -329,20 +333,20 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Lit(v) => {
                 let ty = match **v {
-                    Value::Null => PartiqlShape::Undefined,
-                    Value::Missing => PartiqlShape::Undefined,
-                    Value::Integer(_) => PartiqlShape::new(Static::Int),
-                    Value::Decimal(_) => PartiqlShape::new(Static::Decimal),
-                    Value::Boolean(_) => PartiqlShape::new(Static::Bool),
-                    Value::String(_) => PartiqlShape::new(Static::String),
-                    Value::Tuple(_) => PartiqlShape::new(Static::Struct(StructType::new_any())),
-                    Value::List(_) => PartiqlShape::new(Static::Array(ArrayType::new_any())),
-                    Value::Bag(_) => PartiqlShape::new(Static::Bag(BagType::new_any())),
+                    Value::Null => type_undefined!(),
+                    Value::Missing => type_undefined!(),
+                    Value::Integer(_) => type_int!(),
+                    Value::Decimal(_) => type_decimal!(),
+                    Value::Boolean(_) => type_bool!(),
+                    Value::String(_) => type_string!(),
+                    Value::Tuple(_) => type_struct!(),
+                    Value::List(_) => type_array!(),
+                    Value::Bag(_) => type_bag!(),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),
                         ));
-                        PartiqlShape::Undefined
+                        type_undefined!()
                     }
                 };
 
@@ -410,14 +414,14 @@ impl<'c> PlanTyper<'c> {
 
     fn element_type<'a>(&'a mut self, ty: &'a PartiqlShape) -> PartiqlShape {
         match ty {
-            PartiqlShape::Dynamic => dynamic!(),
+            PartiqlShape::Dynamic => type_dynamic!(),
             PartiqlShape::Static(s) => match s.ty() {
                 Static::Bag(b) => b.element_type().clone(),
                 Static::Array(a) => a.element_type().clone(),
                 _ => ty.clone(),
             },
-            undefined!() => {
-                todo!("Undefined type in catalog")
+            type_undefined!() => {
+                todo!("type_undefined type in catalog")
             }
             PartiqlShape::AnyOf(_any_of) => ty.clone(),
         }
@@ -432,10 +436,10 @@ impl<'c> PlanTyper<'c> {
             Some(ty.clone())
         } else if let Ok(s) = derived_type.expect_struct() {
             if s.is_partial() {
-                Some(dynamic!())
+                Some(type_dynamic!())
             } else {
                 match &self.typing_mode {
-                    TypingMode::Permissive => Some(undefined!()),
+                    TypingMode::Permissive => Some(type_undefined!()),
                     TypingMode::Strict => {
                         self.errors.push(TypingError::TypeCheck(format!(
                             "No Typing Information for {:?} in closed Schema {:?}",
@@ -446,7 +450,7 @@ impl<'c> PlanTyper<'c> {
                 }
             }
         } else if derived_type.is_dynamic() {
-            Some(dynamic!())
+            Some(type_dynamic!())
         } else {
             self.errors.push(TypingError::IllegalState(format!(
                 "Illegal Derive Type {:?}",
@@ -510,7 +514,7 @@ impl<'c> PlanTyper<'c> {
             let ty = self.element_type(type_entry.ty());
             ty
         } else {
-            undefined!()
+            type_undefined!()
         }
     }
 
@@ -521,14 +525,17 @@ impl<'c> PlanTyper<'c> {
             }
         }
 
-        undefined!()
+        type_undefined!()
     }
 
-    fn type_with_undefined(&mut self, key: &SymbolPrimitive) {
+    fn type_with_type_undefined(&mut self, key: &SymbolPrimitive) {
         if let TypingMode::Permissive = &self.typing_mode {
             // TODO Revise this once the following discussion is conclusive and spec. is
             // in place: https://github.com/partiql/partiql-spec/discussions/64
-            let type_ctx = ty_ctx![(&ty_env![(key.clone(), undefined!())], &undefined!())];
+            let type_ctx = ty_ctx![(
+                &ty_env![(key.clone(), type_undefined!())],
+                &type_undefined!()
+            )];
 
             self.type_env_stack.push(type_ctx);
         }
@@ -544,7 +551,7 @@ impl<'c> PlanTyper<'c> {
                 "Unexpected Typing Environment; expected typing environment with only one type but found {:?} types",
                 &env.len()
             )));
-            undefined!()
+            type_undefined!()
         } else {
             env[0].clone()
         }
@@ -552,7 +559,7 @@ impl<'c> PlanTyper<'c> {
 
     fn type_varef(&mut self, key: &SymbolPrimitive, ty: &PartiqlShape) {
         if ty.is_undefined() {
-            self.type_with_undefined(key);
+            self.type_with_type_undefined(key);
         } else {
             let mut new_type_env = LocalTypeEnv::new();
             if let Ok(s) = ty.expect_struct() {
@@ -598,7 +605,10 @@ mod tests {
     use partiql_ast_passes::error::AstTransformationError;
     use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_parser::{Parsed, Parser};
-    use partiql_types::{bag, int, r#struct, str, struct_fields, BagType, StructType};
+    use partiql_types::{
+        struct_fields, type_bag, type_int_with_const_id, type_string_with_const_id,
+        type_struct_with_const_id, type_undefined, BagType, StructType,
+    };
 
     #[test]
     fn simple_sfw() {
@@ -609,15 +619,15 @@ mod tests {
             create_customer_schema(
                 false,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", dynamic!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
+                    StructField::new("age", type_dynamic!()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
             ],
         )
         .expect("Type");
@@ -629,15 +639,15 @@ mod tests {
             create_customer_schema(
                 false,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", dynamic!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
+                    StructField::new("age", type_dynamic!()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
             ],
         )
         .expect("Type");
@@ -649,16 +659,16 @@ mod tests {
             create_customer_schema(
                 true,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", dynamic!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
+                    StructField::new("age", type_dynamic!()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", dynamic!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
+                StructField::new("age", type_dynamic!()),
             ],
         )
         .expect("Type");
@@ -670,22 +680,22 @@ mod tests {
             create_customer_schema(
                 false,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", undefined!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
+                StructField::new("age", type_undefined!()),
             ],
         )
         .expect("Type");
 
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
-        let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![IndexSet::from([details_fields])];
+        let details_fields = struct_fields![("age", type_int_with_const_id!())];
+        let details = type_struct_with_const_id![IndexSet::from([details_fields])];
 
         assert_query_typing(
             TypingMode::Strict,
@@ -693,16 +703,16 @@ mod tests {
             create_customer_schema(
                 true,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
                     StructField::new("details", details.clone()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", int!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
+                StructField::new("age", type_int_with_const_id!()),
             ],
         )
         .expect("Type");
@@ -712,15 +722,15 @@ mod tests {
             TypingMode::Strict,
             "SELECT customers.id, customers.name, customers.details.age, customers.details.foo.bar FROM customers",
             create_customer_schema(true, [
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
                 StructField::new("details", details.clone()),
             ].into()),
             vec![
-                StructField::new("id", int!()),
-                StructField::new("name", str!()),
-                StructField::new("age", int!()),
-                StructField::new("bar", dynamic!()),
+                StructField::new("id", type_int_with_const_id!()),
+                StructField::new("name", type_string_with_const_id!()),
+                StructField::new("age", type_int_with_const_id!()),
+                StructField::new("bar", type_dynamic!()),
             ],
         )
             .expect("Type");
@@ -729,8 +739,8 @@ mod tests {
     #[test]
     fn simple_sfw_with_alias() {
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
-        let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![IndexSet::from([details_fields])];
+        let details_fields = struct_fields![("age", type_int_with_const_id!())];
+        let details = type_struct_with_const_id![IndexSet::from([details_fields])];
 
         // TODO Revise this behavior once the following discussion is conclusive and spec. is
         // in place: https://github.com/partiql/partiql-spec/discussions/65
@@ -740,13 +750,13 @@ mod tests {
             create_customer_schema(
                 true,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
                     StructField::new("details", details.clone()),
                 ]
                 .into(),
             ),
-            vec![StructField::new("age", int!())],
+            vec![StructField::new("age", type_int_with_const_id!())],
         )
         .expect("Type");
 
@@ -757,15 +767,15 @@ mod tests {
             create_customer_schema(
                 false,
                 [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", dynamic!()),
+                    StructField::new("id", type_int_with_const_id!()),
+                    StructField::new("name", type_string_with_const_id!()),
+                    StructField::new("age", type_dynamic!()),
                 ]
                 .into(),
             ),
             vec![
-                StructField::new("my_id", int!()),
-                StructField::new("my_name", str!()),
+                StructField::new("my_id", type_int_with_const_id!()),
+                StructField::new("my_name", type_string_with_const_id!()),
             ],
         )
         .expect("Type");
@@ -774,7 +784,7 @@ mod tests {
     #[test]
     fn simple_sfw_err() {
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "id", ty: Static(StaticType { ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { ty: String, nullable: true }) }}), Open(false)} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { id: NodeId(1), ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "id", ty: Static(StaticType { id: NodeId(1), ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { id: NodeId(1), ty: String, nullable: true }) }}), Open(false)} }), nullable: true })"#;
 
         assert_err(
             assert_query_typing(
@@ -783,32 +793,24 @@ mod tests {
                 create_customer_schema(
                     false,
                     [
-                        StructField::new("id", int!()),
-                        StructField::new("name", str!()),
+                        StructField::new("id", type_int_with_const_id!()),
+                        StructField::new("name", type_string_with_const_id!()),
                     ]
                     .into(),
                 ),
                 vec![],
             ),
             vec![TypingError::TypeCheck(err1.to_string())],
-            Some(bag![r#struct![IndexSet::from([StructConstraint::Fields(
-                [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("age", undefined!()),
-                ]
-                .into()
-            ),])]]),
         );
 
         // Closed Schema with `Strict` typing mode and `bar` non-existent projection from closed nested `details`.
-        let details_fields = struct_fields![("age", int!())];
-        let details = r#struct![IndexSet::from([
+        let details_fields = struct_fields![("age", type_int_with_const_id!())];
+        let details = type_struct_with_const_id![IndexSet::from([
             details_fields,
             StructConstraint::Open(false)
         ])];
 
-        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "age", ty: Static(StaticType { ty: Int, nullable: true }) }}), Open(false)} }), nullable: true })"#;
+        let err1 = r#"No Typing Information for SymbolPrimitive { value: "details", case: CaseInsensitive } in closed Schema Static(StaticType { id: NodeId(1), ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "age", ty: Static(StaticType { id: NodeId(1), ty: Int, nullable: true }) }}), Open(false)} }), nullable: true })"#;
         let err2 = r"Illegal Derive Type Undefined";
 
         assert_err(
@@ -818,8 +820,8 @@ mod tests {
                 create_customer_schema(
                     false,
                     [
-                        StructField::new("id", int!()),
-                        StructField::new("name", str!()),
+                        StructField::new("id", type_int_with_const_id!()),
+                        StructField::new("name", type_string_with_const_id!()),
                         StructField::new("details", details),
                     ]
                     .into(),
@@ -830,40 +832,22 @@ mod tests {
                 TypingError::TypeCheck(err1.to_string()),
                 TypingError::IllegalState(err2.to_string()),
             ],
-            Some(bag![r#struct![IndexSet::from([StructConstraint::Fields(
-                [
-                    StructField::new("id", int!()),
-                    StructField::new("name", str!()),
-                    StructField::new("bar", undefined!()),
-                ]
-                .into()
-            ),])]]),
         );
     }
 
-    fn assert_err(
-        result: Result<(), TypeErr>,
-        expected_errors: Vec<TypingError>,
-        output: Option<PartiqlShape>,
-    ) {
+    fn assert_err(result: Result<(), TypeErr>, expected_errors: Vec<TypingError>) {
         match result {
             Ok(()) => {
                 panic!("Expected Error");
             }
             Err(e) => {
-                assert_eq!(
-                    e,
-                    TypeErr {
-                        errors: expected_errors,
-                        output,
-                    }
-                );
+                assert_eq!(e.errors, expected_errors);
             }
         };
     }
 
     fn create_customer_schema(is_open: bool, fields: IndexSet<StructField>) -> PartiqlShape {
-        bag![r#struct![IndexSet::from([
+        type_bag![type_struct_with_const_id![IndexSet::from([
             StructConstraint::Fields(fields),
             StructConstraint::Open(is_open)
         ])]]

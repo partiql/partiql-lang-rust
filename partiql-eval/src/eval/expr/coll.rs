@@ -4,7 +4,9 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
 use itertools::{Itertools, Unique};
 
-use partiql_types::{ArrayType, BagType, PartiqlShape, Static, TYPE_BOOL, TYPE_NUMERIC_TYPES};
+use partiql_types::{
+    type_bool, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder, Static,
+};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
 
@@ -49,21 +51,23 @@ impl BindEvalExpr for EvalCollFn {
                 value.sequence_iter().map_or(Missing, &f)
             })
         }
-        let boolean_elems = [PartiqlShape::any_of([
-            PartiqlShape::new(Static::Array(ArrayType::new(Box::new(TYPE_BOOL)))),
-            PartiqlShape::new(Static::Bag(BagType::new(Box::new(TYPE_BOOL)))),
+        let boolean_elems = [PartiqlShapeBuilder::init_or_get().any_of([
+            PartiqlShapeBuilder::init_or_get()
+                .new_static(Static::Array(ArrayType::new(Box::new(type_bool!())))),
+            PartiqlShapeBuilder::init_or_get()
+                .new_static(Static::Bag(BagType::new(Box::new(type_bool!())))),
         ])];
-        let numeric_elems = [PartiqlShape::any_of([
-            PartiqlShape::new(Static::Array(ArrayType::new(Box::new(
-                PartiqlShape::any_of(TYPE_NUMERIC_TYPES),
+        let numeric_elems = [PartiqlShapeBuilder::init_or_get().any_of([
+            PartiqlShapeBuilder::init_or_get().new_static(Static::Array(ArrayType::new(Box::new(
+                PartiqlShapeBuilder::init_or_get().any_of(type_numeric!()),
             )))),
-            PartiqlShape::new(Static::Bag(BagType::new(Box::new(PartiqlShape::any_of(
-                TYPE_NUMERIC_TYPES,
-            ))))),
+            PartiqlShapeBuilder::init_or_get().new_static(Static::Bag(BagType::new(Box::new(
+                PartiqlShapeBuilder::init_or_get().any_of(type_numeric!()),
+            )))),
         ])];
-        let any_elems = [PartiqlShape::any_of([
-            PartiqlShape::new(Static::Array(ArrayType::new_any())),
-            PartiqlShape::new(Static::Bag(BagType::new_any())),
+        let any_elems = [PartiqlShapeBuilder::init_or_get().any_of([
+            PartiqlShapeBuilder::init_or_get().new_static(Static::Array(ArrayType::new_any())),
+            PartiqlShapeBuilder::init_or_get().new_static(Static::Bag(BagType::new_any())),
         ])];
 
         match *self {

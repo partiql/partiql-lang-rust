@@ -7,7 +7,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{TYPE_INT, TYPE_STRING};
+use partiql_types::{type_int, type_string};
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 
@@ -43,7 +43,7 @@ impl BindEvalExpr for EvalStringFn {
             F: Fn(&Box<String>) -> R + 'static,
             R: Into<Value> + 'static,
         {
-            UnaryValueExpr::create_typed::<{ STRICT }, _>([TYPE_STRING], args, move |value| {
+            UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!()], args, move |value| {
                 match value {
                     Value::String(value) => (f(value)).into(),
                     _ => Missing,
@@ -99,7 +99,7 @@ impl BindEvalExpr for EvalTrimFn {
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let create = |f: for<'a> fn(&'a str, &'a str) -> &'a str| {
             BinaryValueExpr::create_typed::<{ STRICT }, _>(
-                [TYPE_STRING, TYPE_STRING],
+                [type_string!(), type_string!()],
                 args,
                 move |to_trim, value| match (to_trim, value) {
                     (Value::String(to_trim), Value::String(value)) => {
@@ -136,7 +136,7 @@ impl BindEvalExpr for EvalFnPosition {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         BinaryValueExpr::create_typed::<STRICT, _>(
-            [TYPE_STRING, TYPE_STRING],
+            [type_string!(), type_string!()],
             args,
             |needle, haystack| match (needle, haystack) {
                 (Value::String(needle), Value::String(haystack)) => {
@@ -159,7 +159,7 @@ impl BindEvalExpr for EvalFnSubstring {
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         match args.len() {
             2 => BinaryValueExpr::create_typed::<STRICT, _>(
-                [TYPE_STRING, TYPE_INT],
+                [type_string!(), type_int!()],
                 args,
                 |value, offset| match (value, offset) {
                     (Value::String(value), Value::Integer(offset)) => {
@@ -171,7 +171,7 @@ impl BindEvalExpr for EvalFnSubstring {
                 },
             ),
             3 => TernaryValueExpr::create_typed::<STRICT, _>(
-                [TYPE_STRING, TYPE_INT, TYPE_INT],
+                [type_string!(), type_int!(), type_int!()],
                 args,
                 |value, offset, length| match (value, offset, length) {
                     (Value::String(value), Value::Integer(offset), Value::Integer(length)) => {
@@ -222,7 +222,7 @@ impl BindEvalExpr for EvalFnOverlay {
 
         match args.len() {
             3 => TernaryValueExpr::create_typed::<STRICT, _>(
-                [TYPE_STRING, TYPE_STRING, TYPE_INT],
+                [type_string!(), type_string!(), type_int!()],
                 args,
                 |value, replacement, offset| match (value, replacement, offset) {
                     (Value::String(value), Value::String(replacement), Value::Integer(offset)) => {
@@ -233,7 +233,7 @@ impl BindEvalExpr for EvalFnOverlay {
                 },
             ),
             4 => QuaternaryValueExpr::create_typed::<STRICT, _>(
-                [TYPE_STRING, TYPE_STRING, TYPE_INT, TYPE_INT],
+                [type_string!(), type_string!(), type_int!(), type_int!()],
                 args,
                 |value, replacement, offset, length| match (value, replacement, offset, length) {
                     (

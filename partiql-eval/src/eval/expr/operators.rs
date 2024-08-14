@@ -8,8 +8,8 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    ArrayType, BagType, PartiqlShape, Static, StructType, TYPE_BOOL, TYPE_DYNAMIC,
-    TYPE_NUMERIC_TYPES,
+    type_bool, type_dynamic, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
+    Static, StructType,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
@@ -80,7 +80,7 @@ impl BindEvalExpr for EvalOpUnary {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let any_num = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
+        let any_num = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
 
         let unop = |types, f: fn(&Value) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
@@ -89,7 +89,7 @@ impl BindEvalExpr for EvalOpUnary {
         match self {
             EvalOpUnary::Pos => unop([any_num], std::clone::Clone::clone),
             EvalOpUnary::Neg => unop([any_num], |operand| -operand),
-            EvalOpUnary::Not => unop([TYPE_BOOL], |operand| !operand),
+            EvalOpUnary::Not => unop([type_bool!()], |operand| !operand),
         }
     }
 }
@@ -167,19 +167,19 @@ impl BindEvalExpr for EvalOpBinary {
 
         macro_rules! logical {
             ($check: ty, $f:expr) => {
-                create!($check, [TYPE_BOOL, TYPE_BOOL], $f)
+                create!($check, [type_bool!(), type_bool!()], $f)
             };
         }
 
         macro_rules! equality {
             ($f:expr) => {
-                create!(EqCheck<STRICT>, [TYPE_DYNAMIC, TYPE_DYNAMIC], $f)
+                create!(EqCheck<STRICT>, [type_dynamic!(), type_dynamic!()], $f)
             };
         }
 
         macro_rules! math {
             ($f:expr) => {{
-                let nums = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
+                let nums = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
                 create!(MathCheck<STRICT>, [nums.clone(), nums], $f)
             }};
         }
@@ -209,10 +209,12 @@ impl BindEvalExpr for EvalOpBinary {
                 create!(
                     InCheck<STRICT>,
                     [
-                        TYPE_DYNAMIC,
-                        PartiqlShape::any_of([
-                            PartiqlShape::new(Static::Array(ArrayType::new_any())),
-                            PartiqlShape::new(Static::Bag(BagType::new_any())),
+                        type_dynamic!(),
+                        PartiqlShapeBuilder::init_or_get().any_of([
+                            PartiqlShapeBuilder::init_or_get()
+                                .new_static(Static::Array(ArrayType::new_any())),
+                            PartiqlShapeBuilder::init_or_get()
+                                .new_static(Static::Bag(BagType::new_any())),
                         ])
                     ],
                     |lhs, rhs| {
@@ -250,20 +252,24 @@ impl BindEvalExpr for EvalOpBinary {
                 )
             }
             EvalOpBinary::Concat => {
-                create!(Check<STRICT>, [TYPE_DYNAMIC, TYPE_DYNAMIC], |lhs, rhs| {
-                    // TODO non-naive concat (i.e., don't just use debug print for non-strings).
-                    let lhs = if let Value::String(s) = lhs {
-                        s.as_ref().clone()
-                    } else {
-                        format!("{lhs:?}")
-                    };
-                    let rhs = if let Value::String(s) = rhs {
-                        s.as_ref().clone()
-                    } else {
-                        format!("{rhs:?}")
-                    };
-                    Value::String(Box::new(format!("{lhs}{rhs}")))
-                })
+                create!(
+                    Check<STRICT>,
+                    [type_dynamic!(), type_dynamic!()],
+                    |lhs, rhs| {
+                        // TODO non-naive concat (i.e., don't just use debug print for non-strings).
+                        let lhs = if let Value::String(s) = lhs {
+                            s.as_ref().clone()
+                        } else {
+                            format!("{lhs:?}")
+                        };
+                        let rhs = if let Value::String(s) = rhs {
+                            s.as_ref().clone()
+                        } else {
+                            format!("{rhs:?}")
+                        };
+                        Value::String(Box::new(format!("{lhs}{rhs}")))
+                    }
+                )
             }
         }
     }
@@ -278,7 +284,7 @@ impl BindEvalExpr for EvalBetweenExpr {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let types = [TYPE_DYNAMIC, TYPE_DYNAMIC, TYPE_DYNAMIC];
+        let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
         TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
             types,
             args,
@@ -316,7 +322,7 @@ impl BindEvalExpr for EvalFnAbs {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let nums = PartiqlShape::any_of(TYPE_NUMERIC_TYPES);
+        let nums = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
         UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
             match NullableOrd::lt(v, &Value::from(0)) {
                 Null => Null,
@@ -337,10 +343,11 @@ impl BindEvalExpr for EvalFnCardinality {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let collections = PartiqlShape::any_of([
-            PartiqlShape::new(Static::Array(ArrayType::new_any())),
-            PartiqlShape::new(Static::Bag(BagType::new_any())),
-            PartiqlShape::new(Static::Struct(StructType::new_any())),
+        let shape_builder = PartiqlShapeBuilder::init_or_get();
+        let collections = PartiqlShapeBuilder::init_or_get().any_of([
+            shape_builder.new_static(Static::Array(ArrayType::new_any())),
+            shape_builder.new_static(Static::Bag(BagType::new_any())),
+            shape_builder.new_static(Static::Struct(StructType::new_any())),
         ]);
 
         UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {

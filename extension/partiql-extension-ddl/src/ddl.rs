@@ -123,8 +123,8 @@ impl PartiqlBasicDdlEncoder {
             Static::Float64 => out.push_str("DOUBLE"),
             Static::String => out.push_str("VARCHAR"),
             Static::Struct(s) => out.push_str(&self.write_struct(s)?),
-            Static::Bag(b) => out.push_str(&self.write_bag(b)?),
-            Static::Array(a) => out.push_str(&self.write_array(a)?),
+            Static::Bag(b) => out.push_str(&self.write_type_bag(b)?),
+            Static::Array(a) => out.push_str(&self.write_type_array(a)?),
             // non-exhaustive catch-all
             _ => todo!("handle type for {}", ty),
         }
@@ -136,12 +136,18 @@ impl PartiqlBasicDdlEncoder {
         Ok(out)
     }
 
-    fn write_bag(&self, bag: &BagType) -> ShapeDdlEncodeResult<String> {
-        Ok(format!("BAG<{}>", self.write_shape(bag.element_type())?))
+    fn write_type_bag(&self, type_bag: &BagType) -> ShapeDdlEncodeResult<String> {
+        Ok(format!(
+            "type_bag<{}>",
+            self.write_shape(type_bag.element_type())?
+        ))
     }
 
-    fn write_array(&self, arr: &ArrayType) -> ShapeDdlEncodeResult<String> {
-        Ok(format!("ARRAY<{}>", self.write_shape(arr.element_type())?))
+    fn write_type_array(&self, arr: &ArrayType) -> ShapeDdlEncodeResult<String> {
+        Ok(format!(
+            "type_array<{}>",
+            self.write_shape(arr.element_type())?
+        ))
     }
 
     fn write_struct(&self, strct: &StructType) -> ShapeDdlEncodeResult<String> {
@@ -189,8 +195,8 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
         let mut output = String::new();
         let ty = ty.expect_static()?;
 
-        if let Static::Bag(bag) = ty.ty() {
-            let s = bag.element_type().expect_struct()?;
+        if let Static::Bag(type_bag) = ty.ty() {
+            let s = type_bag.element_type().expect_struct()?;
             let mut fields = s.fields().peekable();
             while let Some(field) = fields.next() {
                 output.push_str(&format!("\"{}\" ", field.name()));
@@ -223,41 +229,47 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
 mod tests {
     use super::*;
     use indexmap::IndexSet;
-    use partiql_types::{array, bag, f64, int8, r#struct, str, struct_fields, StructConstraint};
+    use partiql_types::{
+        struct_fields, type_array, type_bag, type_float64, type_int8, type_string, type_struct,
+        PartiqlShapeBuilder, StructConstraint,
+    };
 
     #[test]
     fn ddl_test() {
         let nested_attrs = struct_fields![
             (
                 "a",
-                PartiqlShape::any_of(vec![
-                    PartiqlShape::new(Static::DecimalP(5, 4)),
-                    PartiqlShape::new(Static::Int8),
+                PartiqlShapeBuilder::init_or_get().any_of(vec![
+                    PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(5, 4)),
+                    PartiqlShapeBuilder::init_or_get().new_static(Static::Int8),
                 ])
             ),
-            ("b", array![str![]]),
-            ("c", f64!()),
+            ("b", type_array![type_string![]]),
+            ("c", type_float64!()),
         ];
-        let details = r#struct![IndexSet::from([nested_attrs])];
+        let details = type_struct![IndexSet::from([nested_attrs])];
 
         let fields = struct_fields![
-            ("employee_id", int8![]),
-            ("full_name", str![]),
-            ("salary", PartiqlShape::new(Static::DecimalP(8, 2))),
+            ("employee_id", type_int8![]),
+            ("full_name", type_string![]),
+            (
+                "salary",
+                PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(8, 2))
+            ),
             ("details", details),
-            ("dependents", array![str![]])
+            ("dependents", type_array![type_string![]])
         ];
-        let ty = bag![r#struct![IndexSet::from([
+        let ty = type_bag![type_struct![IndexSet::from([
             fields,
             StructConstraint::Open(false)
         ])]];
 
-        let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,"dependents" ARRAY<VARCHAR>"#;
+        let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": type_array<VARCHAR>,"c": DOUBLE>,"dependents" type_array<VARCHAR>"#;
         let expected_pretty = r#""employee_id" TINYINT,
 "full_name" VARCHAR,
 "salary" DECIMAL(8, 2),
-"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,
-"dependents" ARRAY<VARCHAR>"#;
+"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": type_array<VARCHAR>,"c": DOUBLE>,
+"dependents" type_array<VARCHAR>"#;
 
         let ddl_compact = PartiqlBasicDdlEncoder::new(DdlFormat::Compact);
         assert_eq!(ddl_compact.ddl(&ty).expect("write shape"), expected_compact);
