@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1723168319479,
+  "lastUpdate": 1723674563068,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -24995,6 +24995,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 25839,
             "range": "± 81",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7203852bec2bc30b145f6af775076a2b7a2f6efd",
+          "message": "Adds `PartiqlShapeBuilder` with `NodeId` generation for the `StaticType` (#485)\n\n* Adds `NodeId` to the `StaticType`\r\n\r\nThis PR\r\n- adds `NodeId` to `StaticType`; this is to be able to use the `id` as a reference to add additional data to the types out of band.\r\n- makes `AutoNodeIdGenerator` thread-safe\r\n- adds `PartiqlShapeBuilder` and moves some `PartiqlShape` APIs to it; this is to be able to generate unique `NodeId`s for a `PartiqlShape` that includes static types that themselves can include other static types.\r\n- adds a static thread safe `shape_builder` function that provides a convenient way for using `PartiqlShapeBuilder` for creating new shapes.\r\n- prepends existing type macros with `type` such as `type_int!` to make macro names more friendly.\r\n- removes `const` PartiQL types under `partiql-types` in favor of `PartiqlShapeBuilder`.\r\n\r\n**_The majority of the diffs are related to the macro renames or replacement with the previous `const` types. The main change is in `partiql-types/src/lib.rs` file._**",
+          "timestamp": "2024-08-14T15:17:22-07:00",
+          "tree_id": "2403551931147ad0c8020ca89bbad8fcbbe42b51",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/7203852bec2bc30b145f6af775076a2b7a2f6efd"
+        },
+        "date": 1723674562040,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 761989,
+            "range": "± 2584",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 856629,
+            "range": "± 2352",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 813071,
+            "range": "± 16235",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 849796,
+            "range": "± 3499",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 817287,
+            "range": "± 12938",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 854925,
+            "range": "± 1637",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 828374,
+            "range": "± 15165",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 863610,
+            "range": "± 3061",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 817340,
+            "range": "± 4491",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 857382,
+            "range": "± 5483",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 962352,
+            "range": "± 2579",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1184994,
+            "range": "± 37004",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1802258,
+            "range": "± 23102",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1258025,
+            "range": "± 50557",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1517674,
+            "range": "± 8829",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2111719,
+            "range": "± 14340",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5949,
+            "range": "± 77",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 49885,
+            "range": "± 225",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 100431,
+            "range": "± 280",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4345,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 33556,
+            "range": "± 98",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 69779,
+            "range": "± 296",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 67795,
+            "range": "± 269",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1047210,
+            "range": "± 9506",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2098549,
+            "range": "± 5644",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12755601,
+            "range": "± 45848",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 86481769,
+            "range": "± 851403",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 166749677,
+            "range": "± 551437",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9733,
+            "range": "± 210",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2478,
+            "range": "± 76",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 435,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 57,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 901,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2510,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 7341,
+            "range": "± 55",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 19828,
+            "range": "± 92",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 27149,
+            "range": "± 181",
             "unit": "ns/iter"
           }
         ]
