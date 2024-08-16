@@ -14,6 +14,7 @@ where
     inner: IndexMap<T, PartiqlMetaValue<T>>,
 }
 
+#[allow(dead_code)]
 impl<T> PartiqlMetadata<T>
 where
     T: Eq + Clone + Hash + Borrow<str>,
@@ -192,6 +193,7 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum PartiqlMetaValue<T>
 where
     T: Eq + Clone + Hash + Borrow<str>,
