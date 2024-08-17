@@ -23,6 +23,7 @@ bench = false
 indexmap = "2.2"
 pretty = "0.12"
 serde = { version = "1.*", features = ["derive"], optional = true }
+rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 smallvec = { version = "1.*" }
 thiserror = "1.0"
 

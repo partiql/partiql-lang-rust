@@ -6,7 +6,6 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
 use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator};
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
@@ -621,8 +620,6 @@ impl Display for StaticType {
         write!(f, "({}, {})", self.ty, nullable)
     }
 }
-
-pub type StaticTypeMetas = HashMap<String, String>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Static {

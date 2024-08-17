@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - partiql-ast: fixed pretty-printing of `PIVOT`
 - partiql-ast: improved pretty-printing of `CASE` and various clauses
-- 
+
 ### Added
 - Added `partiql-common`.
 - Added `NodeId` to `StaticType`.
 - *BREAKING* Added thread-safe `PartiqlShapeBuilder` and automatic `NodeId` generation for the `StaticType`.
 - Added a static thread safe `shape_builder` function that provides a convenient way for using `PartiqlShapeBuilder` for creating new shapes.
+- Added `partiql_common::meta::PartiqlMetadata`
 
 ### Removed
 - *BREAKING* Removed `partiql-source-map`.
