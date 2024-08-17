@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1723674563068,
+  "lastUpdate": 1723858298029,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -25241,6 +25241,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 27149,
             "range": "± 181",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "27716912+am357@users.noreply.github.com",
+            "name": "Arash Maymandi",
+            "username": "am357"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "843d3eedc5f25f7743c6e182769d6669d16a7dff",
+          "message": "Add metas to PartiQL Common (#488)\n\nAdds an implementation for storing metadata for PartiQL objects. Currently, the implementation does not include any traits. It introduces `PartiqlMetadata` and `PartiqlMetaValue` structures:\r\n\r\n```rust\r\n        let foo_val = PartiqlMetaValue::String(\"foo\".to_string());\r\n        let i64_val = PartiqlMetaValue::Int64(2);\r\n\r\n        let expected_vec_val = vec![foo_val, i64_val];\r\n        let expected_bool_val = true;\r\n        let expected_int_val = 2;\r\n        let expected_float_val = 2.5;\r\n        let expected_str_val = \"foo\";\r\n\r\n        let mut expected_map = PartiqlMetadata::new();\r\n        expected_map.insert(\"bool value\", expected_bool_val.into());\r\n        expected_map.insert(\"integer value\", expected_int_val.into());\r\n\r\n        let mut metas = PartiqlMetadata::new();\r\n        metas.insert(\"vec value\", expected_vec_val.clone().into());\r\n        metas.insert(\"bool value\", expected_bool_val.into());\r\n        metas.insert(\"integer value\", expected_int_val.into());\r\n        metas.insert(\"float value\", expected_float_val.into());\r\n        metas.insert(\"string value\", expected_str_val.into());\r\n        metas.insert(\"map value\", expected_map.clone().into());\r\n\r\n        let vec_val = metas.vec_value(\"vec value\").expect(\"vec meta value\");\r\n        let bool_val = metas.bool_value(\"bool value\").expect(\"bool meta value\");\r\n        let int_val = metas.i32_value(\"integer value\").expect(\"i32 meta value\");\r\n        let float_val = metas.f64_value(\"float value\").expect(\"f64 meta value\");\r\n        let string_val = metas.string_value(\"string value\").expect(\"string meta value\");\r\n        let map_val = metas.map_value(\"map value\").expect(\"map meta value\");\r\n\r\n        assert_eq!(vec_val, expected_vec_val.clone());\r\n        assert_eq!(bool_val, expected_bool_val.clone());\r\n        assert_eq!(int_val, expected_int_val.clone());\r\n        assert_eq!(float_val, expected_float_val.clone());\r\n        assert_eq!(string_val, expected_str_val);\r\n        assert_eq!(map_val, expected_map.clone());\r\n```",
+          "timestamp": "2024-08-16T18:19:33-07:00",
+          "tree_id": "d0af1aa6d5ffb8e18199902ab098b8c2e7d5b95b",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/843d3eedc5f25f7743c6e182769d6669d16a7dff"
+        },
+        "date": 1723858297577,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 759774,
+            "range": "± 16111",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 851602,
+            "range": "± 1675",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 809485,
+            "range": "± 31348",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 850096,
+            "range": "± 2714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 813205,
+            "range": "± 2203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 851965,
+            "range": "± 18121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 832033,
+            "range": "± 4653",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 861344,
+            "range": "± 4073",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 815417,
+            "range": "± 2226",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 855702,
+            "range": "± 2666",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 957159,
+            "range": "± 4904",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1213008,
+            "range": "± 15351",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1814083,
+            "range": "± 5194",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1263534,
+            "range": "± 15338",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1528754,
+            "range": "± 12065",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2132246,
+            "range": "± 21947",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5994,
+            "range": "± 90",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 52257,
+            "range": "± 560",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 101862,
+            "range": "± 335",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4264,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 32659,
+            "range": "± 226",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 69444,
+            "range": "± 1090",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 67184,
+            "range": "± 484",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1052870,
+            "range": "± 8363",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2111762,
+            "range": "± 8350",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12633251,
+            "range": "± 38348",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 85671873,
+            "range": "± 809621",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 164703537,
+            "range": "± 499568",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9731,
+            "range": "± 39",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2489,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 432,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 57,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 847,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2525,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 7762,
+            "range": "± 504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 19915,
+            "range": "± 679",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 27020,
+            "range": "± 208",
             "unit": "ns/iter"
           }
         ]
