@@ -6,6 +6,47 @@ use std::fmt::Result;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 
+/// Provides a mean to store meta-data for PartiQL objects.
+///
+/// # Examples
+/// ```
+/// use partiql_common::metadata::{PartiqlMetadata, PartiqlMetaValue};
+///
+/// let foo_val = PartiqlMetaValue::String("foo".to_string());
+/// let i64_val = PartiqlMetaValue::Int64(2);///
+/// let expected_vec_val = vec![foo_val, i64_val];
+///
+/// let expected_bool_val = true;///
+/// let expected_int_val = 2;///
+/// let expected_float_val = 2.5;///
+/// let expected_str_val = "foo";///
+///
+/// let mut expected_map = PartiqlMetadata::new();///
+/// expected_map.insert("bool value", expected_bool_val.into());///
+/// expected_map.insert("integer value", expected_int_val.into());///
+///
+/// let mut metas = PartiqlMetadata::new();///
+/// metas.insert("vec value", expected_vec_val.clone().into());
+/// metas.insert("bool value", expected_bool_val.into());///
+/// metas.insert("integer value", expected_int_val.into());///
+/// metas.insert("float value", expected_float_val.into());///
+/// metas.insert("string value", expected_str_val.into());///
+/// metas.insert("map value", expected_map.clone().into());///
+///
+/// let vec_val = metas.vec_value("vec value").expect("vec meta value");///
+/// let bool_val = metas.bool_value("bool value").expect("bool meta value");///
+/// let int_val = metas.i32_value("integer value").expect("i32 meta value");///
+/// let float_val = metas.f64_value("float value").expect("f64 meta value");///
+/// let string_val = metas.string_value("string value").expect("string meta value");///
+/// let map_val = metas.map_value("map value").expect("map meta value");///
+///
+/// assert_eq!(vec_val, expected_vec_val.clone());///
+/// assert_eq!(bool_val, expected_bool_val.clone());///
+/// assert_eq!(int_val, expected_int_val.clone());///
+/// assert_eq!(float_val, expected_float_val.clone());///
+/// assert_eq!(string_val, expected_str_val);///
+/// assert_eq!(map_val, expected_map.clone());
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartiqlMetadata<T>
 where
@@ -67,6 +108,10 @@ where
 
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&T, &PartiqlMetaValue<T>)> {
