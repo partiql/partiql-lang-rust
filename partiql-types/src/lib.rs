@@ -422,7 +422,7 @@ impl Display for PartiqlShape {
         let x = match self {
             PartiqlShape::Dynamic => "Dynamic".to_string(),
             PartiqlShape::AnyOf(anyof) => {
-                format!("AnyOf({})", anyof.types.iter().cloned().join(","))
+                format!("AnyOf({})", anyof.types.iter().cloned().join(", "))
             }
             PartiqlShape::Static(s) => format!("{s}"),
             PartiqlShape::Undefined => "Undefined".to_string(),
@@ -612,12 +612,12 @@ impl StaticType {
 
 impl Display for StaticType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let nullable = if self.nullable {
-            "nullable"
+        let ty = &self.ty;
+        if self.nullable {
+            write!(f, "{ty}")
         } else {
-            "non_nullable"
-        };
-        write!(f, "({}, {})", self.ty, nullable)
+            write!(f, "NOT NULL {ty}")
+        }
     }
 }
 
@@ -663,34 +663,34 @@ impl Static {
     }
 }
 
+// TODO, this should probably be via a prettyprint...
 impl Display for Static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let x = match self {
-            Static::Int => "Int".to_string(),
-            Static::Int8 => "Int8".to_string(),
-            Static::Int16 => "Int16".to_string(),
-            Static::Int32 => "Int32".to_string(),
-            Static::Int64 => "Int64".to_string(),
-            Static::Bool => "Bool".to_string(),
-            Static::Decimal => "Decimal".to_string(),
-            Static::DecimalP(_, _) => {
-                todo!()
+        match self {
+            Static::Int => write!(f, "Int"),
+            Static::Int8 => write!(f, "Int8"),
+            Static::Int16 => write!(f, "Int16"),
+            Static::Int32 => write!(f, "Int32"),
+            Static::Int64 => write!(f, "Int64"),
+            Static::Bool => write!(f, "Bool"),
+            Static::Decimal => write!(f, "Decimal"),
+            Static::DecimalP(p, s) => {
+                write!(f, "Decimal({p},{s})")
             }
-            Static::Float32 => "Float32".to_string(),
-            Static::Float64 => "Float64".to_string(),
-            Static::String => "String".to_string(),
+            Static::Float32 => write!(f, "Float32"),
+            Static::Float64 => write!(f, "Float64"),
+            Static::String => write!(f, "String"),
             Static::StringFixed(_) => {
                 todo!()
             }
             Static::StringVarying(_) => {
                 todo!()
             }
-            Static::DateTime => "DateTime".to_string(),
-            Static::Struct(_) => "Struct".to_string(),
-            Static::Bag(_) => "Bag".to_string(),
-            Static::Array(_) => "Array".to_string(),
-        };
-        write!(f, "{x}")
+            Static::DateTime => write!(f, "DateTime"),
+            Static::Struct(inner) => std::fmt::Display::fmt(inner, f),
+            Static::Bag(inner) => std::fmt::Display::fmt(inner, f),
+            Static::Array(inner) => std::fmt::Display::fmt(inner, f),
+        }
     }
 }
 
@@ -751,6 +751,32 @@ impl StructType {
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.constraints.contains(&StructConstraint::Open(false))
+    }
+}
+
+impl Display for StructType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let partial = self.is_partial();
+        write!(f, "{{")?;
+        let mut first = true;
+        for StructField { name, ty, optional } in self.fields() {
+            if !first {
+                write!(f, ", ")?;
+            }
+            if *optional {
+                write!(f, "{name}?: {ty}")?;
+            } else {
+                write!(f, "{name}: {ty}")?;
+            }
+            first = false
+        }
+        if partial {
+            if !first {
+                write!(f, ", ")?;
+            }
+            write!(f, "...")?;
+        }
+        write!(f, "}}")
     }
 }
 
@@ -852,6 +878,13 @@ impl BagType {
     }
 }
 
+impl Display for BagType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ty = &self.element_type;
+        write!(f, "<<{ty}>>")
+    }
+}
+
 #[derive(Derivative, Eq, Debug, Clone)]
 #[derivative(PartialEq, Hash)]
 #[allow(dead_code)]
@@ -875,6 +908,13 @@ impl ArrayType {
     #[must_use]
     pub fn element_type(&self) -> &PartiqlShape {
         &self.element_type
+    }
+}
+
+impl Display for ArrayType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let ty = &self.element_type;
+        write!(f, "[{ty}]")
     }
 }
 
