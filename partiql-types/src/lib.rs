@@ -46,42 +46,60 @@ macro_rules! type_dynamic {
 #[macro_export]
 macro_rules! type_int {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int)
+        type_int!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Int)
     };
 }
 
 #[macro_export]
 macro_rules! type_int8 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int8)
+        type_int8!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Int8)
     };
 }
 
 #[macro_export]
 macro_rules! type_int16 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int16)
+        type_int16!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Int16)
     };
 }
 
 #[macro_export]
 macro_rules! type_int32 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int32)
+        type_int32!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Int32)
     };
 }
 
 #[macro_export]
 macro_rules! type_int64 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int64)
+        type_int64!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Int64)
     };
 }
 
 #[macro_export]
 macro_rules! type_decimal {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal)
+        type_decimal!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Decimal)
     };
 }
 
@@ -90,28 +108,40 @@ macro_rules! type_decimal {
 #[macro_export]
 macro_rules! type_float32 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32)
+        type_float32!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Float32)
     };
 }
 
 #[macro_export]
 macro_rules! type_float64 {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64)
+        type_float64!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Float64)
     };
 }
 
 #[macro_export]
 macro_rules! type_string {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::String)
+        type_string!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::String)
     };
 }
 
 #[macro_export]
 macro_rules! type_bool {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Bool)
+        type_bool!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::Bool)
     };
 }
 
@@ -130,7 +160,10 @@ macro_rules! type_numeric {
 #[macro_export]
 macro_rules! type_datetime {
     () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::DateTime)
+        type_datetime!($crate::PartiqlShapeBuilder::init_or_get())
+    };
+    ($bld:expr) => {
+        $bld.new_static($crate::Static::DateTime)
     };
 }
 
@@ -506,6 +539,14 @@ impl PartiqlShapeBuilder {
     }
 
     #[must_use]
+    pub fn new_bag_of<E>(&self, element_type: E) -> PartiqlShape
+    where
+        E: Into<PartiqlShape>,
+    {
+        self.new_bag(BagType::new_of(element_type))
+    }
+
+    #[must_use]
     pub fn new_array(&self, a: ArrayType) -> PartiqlShape {
         self.new_static(Static::Array(a))
     }
@@ -607,6 +648,12 @@ impl StaticType {
 
     pub fn is_struct(&self) -> bool {
         self.ty.is_struct()
+    }
+}
+
+impl From<StaticType> for PartiqlShape {
+    fn from(value: StaticType) -> Self {
+        PartiqlShape::Static(value)
     }
 }
 
@@ -862,17 +909,23 @@ pub struct BagType {
 }
 
 impl BagType {
-    #[must_use]
+    #[inline]
     pub fn new_any() -> Self {
-        BagType::new(Box::new(PartiqlShape::Dynamic))
+        Self::new_of(PartiqlShape::Dynamic)
     }
 
-    #[must_use]
+    #[inline]
     pub fn new(typ: Box<PartiqlShape>) -> Self {
         BagType { element_type: typ }
     }
 
-    #[must_use]
+    pub fn new_of<E>(element_type: E) -> Self
+    where
+        E: Into<PartiqlShape>,
+    {
+        Self::new(Box::new(element_type.into()))
+    }
+
     pub fn element_type(&self) -> &PartiqlShape {
         &self.element_type
     }
