@@ -59,3 +59,21 @@ impl NodeIdGenerator for NullIdGenerator {
         NodeId(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::node::{AutoNodeIdGenerator, NodeIdGenerator};
+
+    #[test]
+    fn unique_ids() {
+        let gen = AutoNodeIdGenerator::default();
+
+        let ids: Vec<_> = std::iter::repeat_with(|| gen.next_id()).take(15).collect();
+        dbg!(&ids);
+        for i in 0..ids.len() {
+            for j in i + 1..ids.len() {
+                assert_ne!(ids[i], ids[j]);
+            }
+        }
+    }
+}
