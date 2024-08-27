@@ -16,9 +16,8 @@ where
     }
 
     pub fn node<T>(&mut self, node: T) -> AstNode<T> {
-        let id = self.id_gen.id();
-        let id = id.read().expect("NodId read lock");
-        AstNode { id: *id, node }
+        let id = self.id_gen.next_id();
+        AstNode { id, node }
     }
 }
 

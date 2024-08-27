@@ -386,10 +386,10 @@ impl PartiqlShape {
 
     pub fn expect_bool(&self) -> ShapeResult<StaticType> {
         if let PartiqlShape::Static(StaticType {
-            id,
-            ty: Static::Bool,
-            nullable: n,
-        }) = self
+                                        id,
+                                        ty: Static::Bool,
+                                        nullable: n,
+                                    }) = self
         {
             Ok(StaticType {
                 id: *id,
@@ -403,9 +403,9 @@ impl PartiqlShape {
 
     pub fn expect_bag(&self) -> ShapeResult<BagType> {
         if let PartiqlShape::Static(StaticType {
-            ty: Static::Bag(bag),
-            ..
-        }) = self
+                                        ty: Static::Bag(bag),
+                                        ..
+                                    }) = self
         {
             Ok(bag.clone())
         } else {
@@ -415,9 +415,9 @@ impl PartiqlShape {
 
     pub fn expect_struct(&self) -> ShapeResult<StructType> {
         if let PartiqlShape::Static(StaticType {
-            ty: Static::Struct(stct),
-            ..
-        }) = self
+                                        ty: Static::Struct(stct),
+                                        ..
+                                    }) = self
         {
             Ok(stct.clone())
         } else {
@@ -480,7 +480,7 @@ impl PartiqlShapeBuilder {
 
     #[must_use]
     pub fn new_static(&self, ty: Static) -> PartiqlShape {
-        let id = self.id_gen.id();
+        let id = self.id_gen.next_id();
         let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
             id: *id,
@@ -500,7 +500,7 @@ impl PartiqlShapeBuilder {
 
     #[must_use]
     pub fn new_non_nullable_static(&self, ty: Static) -> PartiqlShape {
-        let id = self.id_gen.id();
+        let id = self.id_gen.next_id();
         let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
             id: *id,
@@ -560,7 +560,7 @@ impl PartiqlShapeBuilder {
     // user-defined control.
     pub fn any_of<I>(&self, types: I) -> PartiqlShape
     where
-        I: IntoIterator<Item = PartiqlShape>,
+        I: IntoIterator<Item=PartiqlShape>,
     {
         let any_of = AnyOf::from_iter(types);
         match any_of.types.len() {
@@ -598,13 +598,13 @@ impl AnyOf {
         AnyOf { types }
     }
 
-    pub fn types(&self) -> impl Iterator<Item = &PartiqlShape> {
+    pub fn types(&self) -> impl Iterator<Item=&PartiqlShape> {
         self.types.iter()
     }
 }
 
 impl FromIterator<PartiqlShape> for AnyOf {
-    fn from_iter<T: IntoIterator<Item = PartiqlShape>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item=PartiqlShape>>(iter: T) -> Self {
         AnyOf {
             types: iter.into_iter().collect(),
         }
@@ -777,7 +777,7 @@ impl StructType {
             .collect()
     }
 
-    pub fn fields(&self) -> impl Iterator<Item = &StructField> {
+    pub fn fields(&self) -> impl Iterator<Item=&StructField> {
         self.constraints
             .iter()
             .filter_map(|c| {
