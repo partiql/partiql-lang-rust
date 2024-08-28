@@ -1,11 +1,16 @@
 use indexmap::IndexMap;
 use std::hash::Hash;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub type NodeMap<T> = IndexMap<NodeId, T>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeId(pub u32);
 
+#[derive(Debug)]
 /// Auto-incrementing [`NodeIdGenerator`]
 pub struct AutoNodeIdGenerator {
     next_id: NodeId,

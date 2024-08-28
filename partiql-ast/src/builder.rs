@@ -43,6 +43,7 @@ mod tests {
     use crate::pretty::*;
     use crate::visit::{Traverse, Visit, Visitor};
     use partiql_common::node::NodeId;
+    use partiql_common::pretty::ToPretty;
 
     #[test]
     fn unique_ids() {

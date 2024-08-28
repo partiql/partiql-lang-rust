@@ -8,8 +8,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    type_bool, type_dynamic, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
-    Static, StructType,
+    type_bool, type_dynamic, type_numeric, DummyShapeBuilder, PartiqlShape, ShapeBuilderExtensions,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, Comparable, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
@@ -80,7 +79,9 @@ impl BindEvalExpr for EvalOpUnary {
         self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let any_num = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
+        let any_num = type_numeric!(&mut bld);
 
         let unop = |types, f: fn(&Value) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(types, args, f)
@@ -89,7 +90,7 @@ impl BindEvalExpr for EvalOpUnary {
         match self {
             EvalOpUnary::Pos => unop([any_num], std::clone::Clone::clone),
             EvalOpUnary::Neg => unop([any_num], |operand| -operand),
-            EvalOpUnary::Not => unop([type_bool!()], |operand| !operand),
+            EvalOpUnary::Not => unop([type_bool!(bld)], |operand| !operand),
         }
     }
 }
@@ -188,6 +189,9 @@ impl BindEvalExpr for EvalOpBinary {
         type CompCheck<const STRICT: bool> = ComparisonArgChecker<STRICT, PropagateMissing<true>>;
         type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
 
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
+
         macro_rules! create {
             ($check: ty, $types: expr, $f:expr) => {
                 BinaryValueExpr::create_checked::<{ STRICT }, $check, _>($types, args, $f)
@@ -196,25 +200,33 @@ impl BindEvalExpr for EvalOpBinary {
 
         macro_rules! logical {
             ($check: ty, $f:expr) => {
-                create!($check, [type_bool!(), type_bool!()], $f)
+                create!($check, [type_bool!(bld), type_bool!(bld)], $f)
             };
         }
 
         macro_rules! equality {
             ($f:expr) => {
-                create!(EqCheck<STRICT>, [type_dynamic!(), type_dynamic!()], $f)
+                create!(
+                    EqCheck<STRICT>,
+                    [PartiqlShape::Dynamic, PartiqlShape::Dynamic],
+                    $f
+                )
             };
         }
 
         macro_rules! comparison {
             ($f:expr) => {
-                create!(CompCheck<STRICT>, [type_dynamic!(), type_dynamic!()], $f)
+                create!(
+                    CompCheck<STRICT>,
+                    [PartiqlShape::Dynamic, PartiqlShape::Dynamic],
+                    $f
+                )
             };
         }
 
         macro_rules! math {
             ($f:expr) => {{
-                let nums = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
+                let nums = type_numeric!(&mut bld);
                 create!(MathCheck<STRICT>, [nums.clone(), nums], $f)
             }};
         }
@@ -244,13 +256,8 @@ impl BindEvalExpr for EvalOpBinary {
                 create!(
                     InCheck<STRICT>,
                     [
-                        type_dynamic!(),
-                        PartiqlShapeBuilder::init_or_get().any_of([
-                            PartiqlShapeBuilder::init_or_get()
-                                .new_static(Static::Array(ArrayType::new_any())),
-                            PartiqlShapeBuilder::init_or_get()
-                                .new_static(Static::Bag(BagType::new_any())),
-                        ])
+                        type_dynamic!(bld),
+                        [bld.new_array_of_dyn(), bld.new_bag_of_dyn()].into_any_of(&mut bld)
                     ],
                     |lhs, rhs| {
                         match rhs.sequence_iter() {
@@ -289,7 +296,7 @@ impl BindEvalExpr for EvalOpBinary {
             EvalOpBinary::Concat => {
                 create!(
                     Check<STRICT>,
-                    [type_dynamic!(), type_dynamic!()],
+                    [PartiqlShape::Dynamic, PartiqlShape::Dynamic],
                     |lhs, rhs| {
                         // TODO non-naive concat (i.e., don't just use debug print for non-strings).
                         let lhs = if let Value::String(s) = lhs {
@@ -348,7 +355,11 @@ impl BindEvalExpr for EvalBetweenExpr {
         self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
+        let types = [
+            PartiqlShape::Dynamic,
+            PartiqlShape::Dynamic,
+            PartiqlShape::Dynamic,
+        ];
         TernaryValueExpr::create_checked::<{ STRICT }, BetweenArgChecker<{ STRICT }>, _>(
             types,
             args,
@@ -386,7 +397,9 @@ impl BindEvalExpr for EvalFnAbs {
         self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let nums = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
+        let nums = type_numeric!(&mut bld);
         UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
             match NullableOrd::lt(v, &Value::from(0)) {
                 Null => Null,
@@ -407,12 +420,14 @@ impl BindEvalExpr for EvalFnCardinality {
         self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let shape_builder = PartiqlShapeBuilder::init_or_get();
-        let collections = PartiqlShapeBuilder::init_or_get().any_of([
-            shape_builder.new_static(Static::Array(ArrayType::new_any())),
-            shape_builder.new_static(Static::Bag(BagType::new_any())),
-            shape_builder.new_static(Static::Struct(StructType::new_any())),
-        ]);
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
+        let collections = [
+            bld.new_array_of_dyn(),
+            bld.new_bag_of_dyn(),
+            bld.new_struct_of_dyn(),
+        ]
+        .into_any_of(&mut bld);
 
         UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
             Value::List(l) => Value::from(l.len()),

@@ -5,7 +5,7 @@ use educe::Educe;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
-use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator};
+use partiql_common::node::{AutoNodeIdGenerator, NodeId, NodeIdGenerator, NullIdGenerator};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
@@ -38,16 +38,13 @@ where
 
 #[macro_export]
 macro_rules! type_dynamic {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_dynamic()
+    ($bld:expr) => {
+        $bld.new_dynamic()
     };
 }
 
 #[macro_export]
 macro_rules! type_int {
-    () => {
-        type_int!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Int)
     };
@@ -55,9 +52,6 @@ macro_rules! type_int {
 
 #[macro_export]
 macro_rules! type_int8 {
-    () => {
-        type_int8!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Int8)
     };
@@ -65,9 +59,6 @@ macro_rules! type_int8 {
 
 #[macro_export]
 macro_rules! type_int16 {
-    () => {
-        type_int16!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Int16)
     };
@@ -75,9 +66,6 @@ macro_rules! type_int16 {
 
 #[macro_export]
 macro_rules! type_int32 {
-    () => {
-        type_int32!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Int32)
     };
@@ -85,9 +73,6 @@ macro_rules! type_int32 {
 
 #[macro_export]
 macro_rules! type_int64 {
-    () => {
-        type_int64!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Int64)
     };
@@ -95,9 +80,6 @@ macro_rules! type_int64 {
 
 #[macro_export]
 macro_rules! type_decimal {
-    () => {
-        type_decimal!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Decimal)
     };
@@ -107,9 +89,6 @@ macro_rules! type_decimal {
 
 #[macro_export]
 macro_rules! type_float32 {
-    () => {
-        type_float32!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Float32)
     };
@@ -117,9 +96,6 @@ macro_rules! type_float32 {
 
 #[macro_export]
 macro_rules! type_float64 {
-    () => {
-        type_float64!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Float64)
     };
@@ -127,9 +103,6 @@ macro_rules! type_float64 {
 
 #[macro_export]
 macro_rules! type_string {
-    () => {
-        type_string!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::String)
     };
@@ -137,9 +110,6 @@ macro_rules! type_string {
 
 #[macro_export]
 macro_rules! type_bool {
-    () => {
-        type_bool!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::Bool)
     };
@@ -147,21 +117,19 @@ macro_rules! type_bool {
 
 #[macro_export]
 macro_rules! type_numeric {
-    () => {
+    ($bld:expr) => {
         [
-            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Int),
-            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float32),
-            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Float64),
-            $crate::PartiqlShapeBuilder::init_or_get().new_static($crate::Static::Decimal),
+            $crate::type_int!($bld),
+            $crate::type_float32!($bld),
+            $crate::type_float64!($bld),
+            $crate::type_decimal!($bld),
         ]
+        .into_any_of($bld)
     };
 }
 
 #[macro_export]
 macro_rules! type_datetime {
-    () => {
-        type_datetime!($crate::PartiqlShapeBuilder::init_or_get())
-    };
     ($bld:expr) => {
         $bld.new_static($crate::Static::DateTime)
     };
@@ -169,12 +137,13 @@ macro_rules! type_datetime {
 
 #[macro_export]
 macro_rules! type_struct {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new_any())
+    ($bld:expr) => {
+        $bld.new_struct(StructType::new_any())
     };
-    ($elem:expr) => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_struct(StructType::new($elem))
-    };
+    ($bld:expr, $elem:expr) => {{
+        let elem = $elem;
+        $bld.new_struct(StructType::new(elem))
+    }};
 }
 
 #[macro_export]
@@ -186,65 +155,24 @@ macro_rules! struct_fields {
 
 #[macro_export]
 macro_rules! type_bag {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new_any());
+    ($bld:expr) => {
+        $bld.new_bag(BagType::new_any());
     };
-    ($elem:expr) => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_bag(BagType::new(Box::new($elem)))
-    };
+    ($bld:expr, $elem:expr) => {{
+        let elem = $elem;
+        $bld.new_bag($crate::BagType::new(Box::new(elem)))
+    }};
 }
 
 #[macro_export]
 macro_rules! type_array {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new_any());
+    ($bld:expr) => {
+        $bld.new_array(ArrayType::new_any());
     };
-    ($elem:expr) => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_array(ArrayType::new(Box::new($elem)))
-    };
-}
-
-#[macro_export]
-macro_rules! type_undefined {
-    () => {
-        $crate::PartiqlShape::Undefined
-    };
-}
-
-// Types with constant `NodeId`, e.g., `NodeId(1)` convenient for testing or use-cases with no
-// requirement for unique node ids.
-
-#[macro_export]
-macro_rules! type_int_with_const_id {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Int)
-    };
-}
-
-#[macro_export]
-macro_rules! type_float32_with_const_id {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::Float32)
-    };
-}
-
-#[macro_export]
-macro_rules! type_string_with_const_id {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get().new_static_with_const_id($crate::Static::String)
-    };
-}
-
-#[macro_export]
-macro_rules! type_struct_with_const_id {
-    () => {
-        $crate::PartiqlShapeBuilder::init_or_get()
-            .new_static_with_const_id(Static::Struct(StructType::new_any()))
-    };
-    ($elem:expr) => {
-        $crate::PartiqlShapeBuilder::init_or_get()
-            .new_static_with_const_id(Static::Struct(StructType::new($elem)))
-    };
+    ($bld:expr, $elem:expr) => {{
+        let elem = $elem;
+        $bld.new_array($crate::ArrayType::new(Box::new(elem)))
+    }};
 }
 
 /// Represents a PartiQL Shape
@@ -261,26 +189,7 @@ pub enum PartiqlShape {
 
 #[allow(dead_code)]
 impl PartiqlShape {
-    #[must_use]
-    pub fn union_with(self, other: PartiqlShape) -> PartiqlShape {
-        match (self, other) {
-            (PartiqlShape::Dynamic, _) | (_, PartiqlShape::Dynamic) => PartiqlShape::Dynamic,
-            (PartiqlShape::AnyOf(lhs), PartiqlShape::AnyOf(rhs)) => {
-                PartiqlShapeBuilder::init_or_get().any_of(lhs.types.into_iter().chain(rhs.types))
-            }
-            (PartiqlShape::AnyOf(anyof), other) | (other, PartiqlShape::AnyOf(anyof)) => {
-                let mut types = anyof.types;
-                types.insert(other);
-                PartiqlShapeBuilder::init_or_get().any_of(types)
-            }
-            (l, r) => {
-                let types = [l, r];
-                PartiqlShapeBuilder::init_or_get().any_of(types)
-            }
-        }
-    }
-
-    #[must_use]
+    #[inline]
     pub fn static_type_id(&self) -> Option<NodeId> {
         if let PartiqlShape::Static(StaticType { id, .. }) = self {
             Some(*id)
@@ -289,7 +198,7 @@ impl PartiqlShape {
         }
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_string(&self) -> bool {
         matches!(
             &self,
@@ -301,7 +210,7 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_struct(&self) -> bool {
         matches!(
             *self,
@@ -313,7 +222,7 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_collection(&self) -> bool {
         matches!(
             *self,
@@ -332,12 +241,12 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_unordered_collection(&self) -> bool {
         !self.is_ordered_collection()
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_ordered_collection(&self) -> bool {
         // TODO Add Sexp when added
         matches!(
@@ -350,7 +259,7 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_bag(&self) -> bool {
         matches!(
             *self,
@@ -362,7 +271,7 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_array(&self) -> bool {
         matches!(
             *self,
@@ -374,22 +283,22 @@ impl PartiqlShape {
         )
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_dynamic(&self) -> bool {
         matches!(*self, PartiqlShape::Dynamic)
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_undefined(&self) -> bool {
         matches!(*self, PartiqlShape::Undefined)
     }
 
     pub fn expect_bool(&self) -> ShapeResult<StaticType> {
         if let PartiqlShape::Static(StaticType {
-                                        id,
-                                        ty: Static::Bool,
-                                        nullable: n,
-                                    }) = self
+            id,
+            ty: Static::Bool,
+            nullable: n,
+        }) = self
         {
             Ok(StaticType {
                 id: *id,
@@ -403,9 +312,9 @@ impl PartiqlShape {
 
     pub fn expect_bag(&self) -> ShapeResult<BagType> {
         if let PartiqlShape::Static(StaticType {
-                                        ty: Static::Bag(bag),
-                                        ..
-                                    }) = self
+            ty: Static::Bag(bag),
+            ..
+        }) = self
         {
             Ok(bag.clone())
         } else {
@@ -415,9 +324,9 @@ impl PartiqlShape {
 
     pub fn expect_struct(&self) -> ShapeResult<StructType> {
         if let PartiqlShape::Static(StaticType {
-                                        ty: Static::Struct(stct),
-                                        ..
-                                    }) = self
+            ty: Static::Struct(stct),
+            ..
+        }) = self
         {
             Ok(stct.clone())
         } else {
@@ -464,91 +373,139 @@ impl Display for PartiqlShape {
     }
 }
 
-#[derive(Default)]
-pub struct PartiqlShapeBuilder {
-    id_gen: AutoNodeIdGenerator,
+#[derive(Default, Debug)]
+pub struct ShapeBuilder<Id: NodeIdGenerator> {
+    id_gen: Id,
 }
 
-impl PartiqlShapeBuilder {
+pub type PartiqlShapeBuilder = ShapeBuilder<AutoNodeIdGenerator>;
+pub type DummyShapeBuilder = ShapeBuilder<NullIdGenerator>;
+
+impl<Id: NodeIdGenerator + Default> ShapeBuilder<Id> {
     /// A thread-safe method for creating PartiQL shapes with guaranteed uniqueness over
     /// generated `NodeId`s.
     #[track_caller]
-    pub fn init_or_get() -> &'static PartiqlShapeBuilder {
+    pub fn singleton() -> &'static PartiqlShapeBuilder {
         static SHAPE_BUILDER: OnceLock<PartiqlShapeBuilder> = OnceLock::new();
         SHAPE_BUILDER.get_or_init(PartiqlShapeBuilder::default)
     }
 
-    #[must_use]
-    pub fn new_static(&self, ty: Static) -> PartiqlShape {
+    #[track_caller]
+    pub fn dummy_singleton() -> &'static DummyShapeBuilder {
+        static SHAPE_BUILDER: OnceLock<DummyShapeBuilder> = OnceLock::new();
+        SHAPE_BUILDER.get_or_init(DummyShapeBuilder::default)
+    }
+}
+
+impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
+    #[inline]
+    pub fn new_static(&mut self, ty: Static) -> PartiqlShape {
         let id = self.id_gen.next_id();
-        let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
-            id: *id,
+            id,
             ty,
             nullable: true,
         })
     }
 
-    #[must_use]
-    pub fn new_static_with_const_id(&self, ty: Static) -> PartiqlShape {
-        PartiqlShape::Static(StaticType {
-            id: NodeId(1),
-            ty,
-            nullable: true,
-        })
-    }
-
-    #[must_use]
-    pub fn new_non_nullable_static(&self, ty: Static) -> PartiqlShape {
+    #[inline]
+    pub fn new_non_nullable_static(&mut self, ty: Static) -> PartiqlShape {
         let id = self.id_gen.next_id();
-        let id = id.read().expect("NodeId read lock");
         PartiqlShape::Static(StaticType {
-            id: *id,
+            id,
             ty,
             nullable: false,
         })
     }
 
-    #[must_use]
-    pub fn new_non_nullable_static_with_const_id(&self, ty: Static) -> PartiqlShape {
-        PartiqlShape::Static(StaticType {
-            id: NodeId(1),
-            ty,
-            nullable: false,
-        })
-    }
-
-    #[must_use]
-    pub fn new_dynamic(&self) -> PartiqlShape {
+    #[inline]
+    pub fn new_dynamic(&mut self) -> PartiqlShape {
         PartiqlShape::Dynamic
     }
 
-    #[must_use]
-    pub fn new_undefined(&self) -> PartiqlShape {
-        PartiqlShape::Dynamic
+    #[inline]
+    pub fn new_undefined(&mut self) -> PartiqlShape {
+        PartiqlShape::Undefined
     }
 
-    #[must_use]
-    pub fn new_struct(&self, s: StructType) -> PartiqlShape {
+    #[inline]
+    pub fn new_struct(&mut self, s: StructType) -> PartiqlShape {
         self.new_static(Static::Struct(s))
     }
 
-    #[must_use]
-    pub fn new_bag(&self, b: BagType) -> PartiqlShape {
+    #[inline]
+    pub fn new_struct_of_dyn(&mut self) -> PartiqlShape {
+        self.new_struct(StructType::new_any())
+    }
+
+    #[inline]
+    pub fn new_bag(&mut self, b: BagType) -> PartiqlShape {
         self.new_static(Static::Bag(b))
     }
 
-    #[must_use]
-    pub fn new_bag_of<E>(&self, element_type: E) -> PartiqlShape
+    #[inline]
+    pub fn new_bag_of<E>(&mut self, element_type: E) -> PartiqlShape
     where
         E: Into<PartiqlShape>,
     {
         self.new_bag(BagType::new_of(element_type))
     }
 
-    #[must_use]
-    pub fn new_array(&self, a: ArrayType) -> PartiqlShape {
+    #[inline]
+    pub fn new_bag_of_dyn(&mut self) -> PartiqlShape {
+        let element_type = self.new_dynamic();
+        self.new_bag_of(element_type)
+    }
+
+    #[inline]
+    pub fn new_bag_of_static(&mut self, ty: Static) -> PartiqlShape {
+        let element_type = self.new_static(ty);
+        self.new_bag_of(element_type)
+    }
+
+    #[inline]
+    pub fn new_bag_any_of<I>(&mut self, types: I) -> PartiqlShape
+    where
+        I: IntoIterator<Item = PartiqlShape>,
+    {
+        let shape = self.any_of(types);
+        let bag_type = BagType::new(Box::new(shape));
+        self.new_bag(bag_type)
+    }
+
+    #[inline]
+    pub fn new_array(&mut self, a: ArrayType) -> PartiqlShape {
         self.new_static(Static::Array(a))
+    }
+
+    #[inline]
+    pub fn new_array_of<E>(&mut self, element_type: E) -> PartiqlShape
+    where
+        E: Into<PartiqlShape>,
+    {
+        self.new_array(ArrayType::new_of(element_type))
+    }
+
+    #[inline]
+    pub fn new_array_of_dyn(&mut self) -> PartiqlShape {
+        let element_type = self.new_dynamic();
+        self.new_array_of(element_type)
+    }
+
+    #[inline]
+    pub fn new_array_of_static(&mut self, ty: Static) -> PartiqlShape {
+        let element_type = self.new_static(ty);
+        self.new_array_of(element_type)
+    }
+
+    #[inline]
+    pub fn new_array_any_of<I>(&mut self, types: I) -> PartiqlShape
+    where
+        I: IntoIterator<Item = PartiqlShape>,
+    {
+        let shape = self.any_of(types);
+        let array_type = ArrayType::new(Box::new(shape));
+        self.new_array(array_type)
     }
 
     // The AnyOf::from_iter(types) uses an IndexSet internally to
@@ -558,13 +515,13 @@ impl PartiqlShapeBuilder {
     // TODO revisit the current implementaion and consider an implementation
     // that allows merging of the `metas` for the same type, e.g., with a
     // user-defined control.
-    pub fn any_of<I>(&self, types: I) -> PartiqlShape
+    pub fn any_of<I>(&mut self, types: I) -> PartiqlShape
     where
-        I: IntoIterator<Item=PartiqlShape>,
+        I: IntoIterator<Item = PartiqlShape>,
     {
         let any_of = AnyOf::from_iter(types);
         match any_of.types.len() {
-            0 => type_dynamic!(),
+            0 => self.new_dynamic(),
             1 => {
                 let AnyOf { types } = any_of;
                 types.into_iter().next().unwrap()
@@ -574,13 +531,102 @@ impl PartiqlShapeBuilder {
         }
     }
 
-    #[must_use]
-    pub fn as_non_nullable(&self, shape: &PartiqlShape) -> Option<PartiqlShape> {
+    #[inline]
+    pub fn union(&mut self, lhs: PartiqlShape, rhs: PartiqlShape) -> PartiqlShape {
+        match (lhs, rhs) {
+            (PartiqlShape::Dynamic, _) | (_, PartiqlShape::Dynamic) => PartiqlShape::Dynamic,
+            (PartiqlShape::AnyOf(lhs), PartiqlShape::AnyOf(rhs)) => {
+                self.any_of(lhs.types.into_iter().chain(rhs.types))
+            }
+            (PartiqlShape::AnyOf(anyof), other) | (other, PartiqlShape::AnyOf(anyof)) => {
+                let mut types = anyof.types;
+                types.insert(other);
+                self.any_of(types)
+            }
+            (l, r) => {
+                let types = [l, r];
+                self.any_of(types)
+            }
+        }
+    }
+
+    pub fn union_of<I>(&mut self, types: I) -> PartiqlShape
+    where
+        I: IntoIterator<Item = PartiqlShape>,
+    {
+        let types: Vec<_> = types.into_iter().collect();
+        match types.len() {
+            0 => self.new_undefined(),
+            1 => types.into_iter().next().unwrap(),
+            _ => types.into_iter().reduce(|l, r| self.union(l, r)).unwrap(),
+        }
+    }
+
+    #[inline]
+    pub fn as_non_nullable(&mut self, shape: &PartiqlShape) -> Option<PartiqlShape> {
         if let PartiqlShape::Static(stype) = shape {
             Some(self.new_non_nullable_static(stype.ty.clone()))
         } else {
             None
         }
+    }
+}
+
+pub trait ShapeBuilderExtensions<Id: NodeIdGenerator> {
+    fn into_union(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape;
+
+    fn into_any_of(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape;
+
+    fn into_array(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape;
+
+    fn into_bag(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape;
+}
+
+impl<const N: usize, Id: NodeIdGenerator, E: Into<PartiqlShape>> ShapeBuilderExtensions<Id>
+    for [E; N]
+{
+    #[inline]
+    fn into_union(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        bld.union_of(self.into_iter().map(|e| e.into()))
+    }
+
+    #[inline]
+    fn into_any_of(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        bld.any_of(self.into_iter().map(|e| e.into()))
+    }
+
+    #[inline]
+    fn into_array(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        let ty = self.into_any_of(bld);
+        bld.new_array_of(ty)
+    }
+
+    #[inline]
+    fn into_bag(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        let ty = self.into_any_of(bld);
+        bld.new_bag_of(ty)
+    }
+}
+
+impl<Id: NodeIdGenerator, E: Into<PartiqlShape>> ShapeBuilderExtensions<Id> for E {
+    #[inline]
+    fn into_union(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        [self].into_union(bld)
+    }
+
+    #[inline]
+    fn into_any_of(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        [self].into_any_of(bld)
+    }
+
+    #[inline]
+    fn into_array(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        bld.new_array_of(self)
+    }
+
+    #[inline]
+    fn into_bag(self, bld: &mut ShapeBuilder<Id>) -> PartiqlShape {
+        bld.new_bag_of(self)
     }
 }
 
@@ -593,18 +639,18 @@ pub struct AnyOf {
 }
 
 impl AnyOf {
-    #[must_use]
+    #[inline]
     pub const fn new(types: IndexSet<PartiqlShape>) -> Self {
         AnyOf { types }
     }
 
-    pub fn types(&self) -> impl Iterator<Item=&PartiqlShape> {
+    pub fn types(&self) -> impl Iterator<Item = &PartiqlShape> {
         self.types.iter()
     }
 }
 
 impl FromIterator<PartiqlShape> for AnyOf {
-    fn from_iter<T: IntoIterator<Item=PartiqlShape>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = PartiqlShape>>(iter: T) -> Self {
         AnyOf {
             types: iter.into_iter().collect(),
         }
@@ -619,7 +665,7 @@ pub struct StaticType {
 }
 
 impl StaticType {
-    #[must_use]
+    #[inline]
     pub fn ty(&self) -> &Static {
         &self.ty
     }
@@ -628,12 +674,12 @@ impl StaticType {
         &self.id
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_nullable(&self) -> bool {
         self.nullable
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_not_nullable(&self) -> bool {
         !self.nullable
     }
@@ -752,12 +798,12 @@ pub struct StructType {
 }
 
 impl StructType {
-    #[must_use]
+    #[inline]
     pub fn new(constraints: IndexSet<StructConstraint>) -> Self {
         StructType { constraints }
     }
 
-    #[must_use]
+    #[inline]
     pub fn new_any() -> Self {
         StructType {
             constraints: Default::default(),
@@ -777,7 +823,7 @@ impl StructType {
             .collect()
     }
 
-    pub fn fields(&self) -> impl Iterator<Item=&StructField> {
+    pub fn fields(&self) -> impl Iterator<Item = &StructField> {
         self.constraints
             .iter()
             .filter_map(|c| {
@@ -790,12 +836,12 @@ impl StructType {
             .flat_map(|f| f.iter())
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_partial(&self) -> bool {
         !self.is_closed()
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_closed(&self) -> bool {
         self.constraints.contains(&StructConstraint::Open(false))
     }
@@ -847,7 +893,7 @@ pub struct StructField {
 }
 
 impl StructField {
-    #[must_use]
+    #[inline]
     pub fn new(name: &str, ty: PartiqlShape) -> Self {
         StructField {
             name: name.to_string(),
@@ -856,7 +902,7 @@ impl StructField {
         }
     }
 
-    #[must_use]
+    #[inline]
     pub fn new_optional(name: &str, ty: PartiqlShape) -> Self {
         StructField {
             name: name.to_string(),
@@ -865,17 +911,17 @@ impl StructField {
         }
     }
 
-    #[must_use]
+    #[inline]
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
-    #[must_use]
+    #[inline]
     pub fn ty(&self) -> &PartiqlShape {
         &self.ty
     }
 
-    #[must_use]
+    #[inline]
     pub fn is_optional(&self) -> bool {
         self.optional
     }
@@ -910,20 +956,21 @@ pub struct BagType {
 
 impl BagType {
     #[inline]
-    pub fn new_any() -> Self {
-        Self::new_of(PartiqlShape::Dynamic)
-    }
-
-    #[inline]
     pub fn new(typ: Box<PartiqlShape>) -> Self {
         BagType { element_type: typ }
     }
 
+    #[inline]
     pub fn new_of<E>(element_type: E) -> Self
     where
         E: Into<PartiqlShape>,
     {
         Self::new(Box::new(element_type.into()))
+    }
+
+    #[inline]
+    pub fn new_any() -> Self {
+        Self::new_of(PartiqlShape::Dynamic)
     }
 
     pub fn element_type(&self) -> &PartiqlShape {
@@ -948,17 +995,25 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
-    #[must_use]
-    pub fn new_any() -> Self {
-        ArrayType::new(Box::new(PartiqlShape::Dynamic))
-    }
-
-    #[must_use]
+    #[inline]
     pub fn new(typ: Box<PartiqlShape>) -> Self {
         ArrayType { element_type: typ }
     }
 
-    #[must_use]
+    #[inline]
+    pub fn new_of<E>(element_type: E) -> Self
+    where
+        E: Into<PartiqlShape>,
+    {
+        Self::new(Box::new(element_type.into()))
+    }
+
+    #[inline]
+    pub fn new_any() -> Self {
+        Self::new_of(PartiqlShape::Dynamic)
+    }
+
+    #[inline]
     pub fn element_type(&self) -> &PartiqlShape {
         &self.element_type
     }
@@ -974,62 +1029,71 @@ impl Display for ArrayType {
 #[cfg(test)]
 mod tests {
     use crate::{
-        BagType, PartiqlShape, PartiqlShapeBuilder, Static, StructConstraint, StructField,
-        StructType,
+        DummyShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeBuilderExtensions, Static,
+        StructConstraint, StructField, StructType,
     };
     use indexmap::IndexSet;
 
     #[test]
     fn union() {
-        let expect_int = type_int_with_const_id!();
+        let mut bld = DummyShapeBuilder::default();
+
+        let expect_int = bld.new_static(Static::Int);
         assert_eq!(
             expect_int,
-            type_int_with_const_id!().union_with(type_int_with_const_id!())
+            [type_int!(bld), type_int!(bld)].into_union(&mut bld)
         );
 
-        let expect_nums = PartiqlShapeBuilder::init_or_get()
-            .any_of([type_int_with_const_id!(), type_float32_with_const_id!()]);
+        let numbers = [bld.new_static(Static::Int), bld.new_static(Static::Float32)];
+        let expect_nums = bld.any_of(numbers);
         assert_eq!(
             expect_nums,
-            type_int_with_const_id!().union_with(type_float32_with_const_id!())
+            [type_int!(bld), type_float32!(bld)].into_union(&mut bld)
         );
         assert_eq!(
             expect_nums,
-            PartiqlShapeBuilder::init_or_get().any_of([
-                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
-                type_int_with_const_id!().union_with(type_float32_with_const_id!())
-            ])
+            [
+                [type_int!(bld), type_float32!(bld)].into_union(&mut bld),
+                [type_int!(bld), type_float32!(bld)].into_union(&mut bld),
+            ]
+            .into_any_of(&mut bld)
         );
         assert_eq!(
             expect_nums,
-            PartiqlShapeBuilder::init_or_get().any_of([
-                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
-                type_int_with_const_id!().union_with(type_float32_with_const_id!()),
-                PartiqlShapeBuilder::init_or_get().any_of([
-                    type_int_with_const_id!().union_with(type_float32_with_const_id!()),
-                    type_int_with_const_id!().union_with(type_float32_with_const_id!())
-                ])
-            ])
+            [
+                [type_int!(bld), type_float32!(bld)].into_union(&mut bld),
+                [type_int!(bld), type_float32!(bld)].into_union(&mut bld),
+                [
+                    [type_int!(bld), type_float32!(bld)].into_union(&mut bld),
+                    [type_int!(bld), type_float32!(bld)].into_union(&mut bld)
+                ]
+                .into_any_of(&mut bld)
+            ]
+            .into_any_of(&mut bld)
         );
     }
 
     #[test]
     fn unique_node_ids() {
-        let age_field = struct_fields![("age", type_int!())];
-        let details = type_struct![IndexSet::from([age_field])];
+        let mut bld = PartiqlShapeBuilder::default();
+        let age_field = struct_fields![("age", type_int!(bld))];
+        let details = type_struct![bld, IndexSet::from([age_field])];
 
         let fields = [
-            StructField::new("id", type_int!()),
-            StructField::new("name", type_string!()),
+            StructField::new("id", type_int!(bld)),
+            StructField::new("name", type_string!(bld)),
             StructField::new("details", details.clone()),
         ];
 
-        let row = type_struct![IndexSet::from([
-            StructConstraint::Fields(IndexSet::from(fields)),
-            StructConstraint::Open(false)
-        ])];
+        let row = type_struct![
+            bld,
+            IndexSet::from([
+                StructConstraint::Fields(IndexSet::from(fields)),
+                StructConstraint::Open(false)
+            ])
+        ];
 
-        let shape = type_bag![row.clone()];
+        let shape = type_bag![bld, row.clone()];
 
         let mut ids = collect_ids(shape);
         ids.sort_unstable();

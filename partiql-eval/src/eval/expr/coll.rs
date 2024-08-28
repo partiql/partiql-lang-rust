@@ -5,7 +5,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use itertools::{Itertools, Unique};
 
 use partiql_types::{
-    type_bool, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder, Static,
+    type_numeric, DummyShapeBuilder, PartiqlShape, ShapeBuilderExtensions, Static,
 };
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
@@ -51,46 +51,45 @@ impl BindEvalExpr for EvalCollFn {
                 value.sequence_iter().map_or(Missing, &f)
             })
         }
-        let boolean_elems = [PartiqlShapeBuilder::init_or_get().any_of([
-            PartiqlShapeBuilder::init_or_get()
-                .new_static(Static::Array(ArrayType::new(Box::new(type_bool!())))),
-            PartiqlShapeBuilder::init_or_get()
-                .new_static(Static::Bag(BagType::new(Box::new(type_bool!())))),
-        ])];
-        let numeric_elems = [PartiqlShapeBuilder::init_or_get().any_of([
-            PartiqlShapeBuilder::init_or_get().new_static(Static::Array(ArrayType::new(Box::new(
-                PartiqlShapeBuilder::init_or_get().any_of(type_numeric!()),
-            )))),
-            PartiqlShapeBuilder::init_or_get().new_static(Static::Bag(BagType::new(Box::new(
-                PartiqlShapeBuilder::init_or_get().any_of(type_numeric!()),
-            )))),
-        ])];
-        let any_elems = [PartiqlShapeBuilder::init_or_get().any_of([
-            PartiqlShapeBuilder::init_or_get().new_static(Static::Array(ArrayType::new_any())),
-            PartiqlShapeBuilder::init_or_get().new_static(Static::Bag(BagType::new_any())),
-        ])];
+
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
+
+        let boolean_elems = [
+            bld.new_array_of_static(Static::Bool),
+            bld.new_bag_of_static(Static::Bool),
+        ]
+        .into_any_of(&mut bld);
+
+        let numeric_elems = [
+            type_numeric!(&mut bld).into_array(&mut bld),
+            type_numeric!(&mut bld).into_bag(&mut bld),
+        ]
+        .into_any_of(&mut bld);
+
+        let any_elems = [bld.new_array_of_dyn(), bld.new_bag_of_dyn()].into_any_of(&mut bld);
 
         match self {
             EvalCollFn::Count(setq) => {
-                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_count(setq))
+                create::<{ STRICT }, _>([any_elems], args, move |it| it.coll_count(setq))
             }
             EvalCollFn::Avg(setq) => {
-                create::<{ STRICT }, _>(numeric_elems, args, move |it| it.coll_avg(setq))
+                create::<{ STRICT }, _>([numeric_elems], args, move |it| it.coll_avg(setq))
             }
             EvalCollFn::Max(setq) => {
-                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_max(setq))
+                create::<{ STRICT }, _>([any_elems], args, move |it| it.coll_max(setq))
             }
             EvalCollFn::Min(setq) => {
-                create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_min(setq))
+                create::<{ STRICT }, _>([any_elems], args, move |it| it.coll_min(setq))
             }
             EvalCollFn::Sum(setq) => {
-                create::<{ STRICT }, _>(numeric_elems, args, move |it| it.coll_sum(setq))
+                create::<{ STRICT }, _>([numeric_elems], args, move |it| it.coll_sum(setq))
             }
             EvalCollFn::Any(setq) => {
-                create::<{ STRICT }, _>(boolean_elems, args, move |it| it.coll_any(setq))
+                create::<{ STRICT }, _>([boolean_elems], args, move |it| it.coll_any(setq))
             }
             EvalCollFn::Every(setq) => {
-                create::<{ STRICT }, _>(boolean_elems, args, move |it| it.coll_every(setq))
+                create::<{ STRICT }, _>([boolean_elems], args, move |it| it.coll_every(setq))
             }
         }
     }

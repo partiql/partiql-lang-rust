@@ -1966,7 +1966,7 @@ mod tests {
     use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_logical::BindingsOp::Project;
     use partiql_logical::ValueExpr;
-    use partiql_types::type_dynamic;
+    use partiql_types::PartiqlShape;
 
     #[test]
     fn test_plan_non_existent_fns() {
@@ -2062,7 +2062,8 @@ mod tests {
         expected_logical.add_flow_with_branch_num(project, sink, 0);
 
         let mut catalog = PartiqlCatalog::default();
-        let _oid = catalog.add_type_entry(TypeEnvEntry::new("customers", &[], type_dynamic!()));
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
         let statement = "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
