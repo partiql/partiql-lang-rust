@@ -7,7 +7,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{type_int, type_string};
+use partiql_types::{type_int, type_string, DummyShapeBuilder};
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 
@@ -43,7 +43,9 @@ impl BindEvalExpr for EvalStringFn {
             F: Fn(&Box<String>) -> R + 'static,
             R: Into<Value> + 'static,
         {
-            UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!()], args, move |value| {
+            // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+            let mut bld = DummyShapeBuilder::default();
+            UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!(bld)], args, move |value| {
                 match value {
                     Value::String(value) => (f(value)).into(),
                     _ => Missing,
@@ -97,9 +99,11 @@ impl BindEvalExpr for EvalTrimFn {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
         let create = |f: for<'a> fn(&'a str, &'a str) -> &'a str| {
             BinaryValueExpr::create_typed::<{ STRICT }, _>(
-                [type_string!(), type_string!()],
+                [type_string!(bld), type_string!(bld)],
                 args,
                 move |to_trim, value| match (to_trim, value) {
                     (Value::String(to_trim), Value::String(value)) => {
@@ -135,8 +139,10 @@ impl BindEvalExpr for EvalFnPosition {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
         BinaryValueExpr::create_typed::<STRICT, _>(
-            [type_string!(), type_string!()],
+            [type_string!(bld), type_string!(bld)],
             args,
             |needle, haystack| match (needle, haystack) {
                 (Value::String(needle), Value::String(haystack)) => {
@@ -157,9 +163,11 @@ impl BindEvalExpr for EvalFnSubstring {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
         match args.len() {
             2 => BinaryValueExpr::create_typed::<STRICT, _>(
-                [type_string!(), type_int!()],
+                [type_string!(bld), type_int!(bld)],
                 args,
                 |value, offset| match (value, offset) {
                     (Value::String(value), Value::Integer(offset)) => {
@@ -171,7 +179,7 @@ impl BindEvalExpr for EvalFnSubstring {
                 },
             ),
             3 => TernaryValueExpr::create_typed::<STRICT, _>(
-                [type_string!(), type_int!(), type_int!()],
+                [type_string!(bld), type_int!(bld), type_int!(bld)],
                 args,
                 |value, offset, length| match (value, offset, length) {
                     (Value::String(value), Value::Integer(offset), Value::Integer(length)) => {
@@ -207,6 +215,8 @@ impl BindEvalExpr for EvalFnOverlay {
         &self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
+        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
+        let mut bld = DummyShapeBuilder::default();
         fn overlay(value: &str, replacement: &str, offset: i64, length: usize) -> Value {
             let mut value = value.to_string();
             let start = std::cmp::max(offset - 1, 0) as usize;
@@ -222,7 +232,7 @@ impl BindEvalExpr for EvalFnOverlay {
 
         match args.len() {
             3 => TernaryValueExpr::create_typed::<STRICT, _>(
-                [type_string!(), type_string!(), type_int!()],
+                [type_string!(bld), type_string!(bld), type_int!(bld)],
                 args,
                 |value, replacement, offset| match (value, replacement, offset) {
                     (Value::String(value), Value::String(replacement), Value::Integer(offset)) => {
@@ -233,7 +243,12 @@ impl BindEvalExpr for EvalFnOverlay {
                 },
             ),
             4 => QuaternaryValueExpr::create_typed::<STRICT, _>(
-                [type_string!(), type_string!(), type_int!(), type_int!()],
+                [
+                    type_string!(bld),
+                    type_string!(bld),
+                    type_int!(bld),
+                    type_int!(bld),
+                ],
                 args,
                 |value, replacement, offset, length| match (value, replacement, offset, length) {
                     (
