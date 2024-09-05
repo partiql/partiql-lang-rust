@@ -1,5 +1,5 @@
 use delegate::delegate;
-use ion_rs::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
+use ion_rs_old::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
 use once_cell::sync::Lazy;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use regex::RegexSet;

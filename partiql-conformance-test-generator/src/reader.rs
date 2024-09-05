@@ -1,4 +1,4 @@
-use ion_rs::{IonType, ReaderBuilder};
+use ion_rs_old::{IonType, ReaderBuilder};
 use miette::{miette, IntoDiagnostic};
 use std::ffi::OsStr;
 use std::fs;
@@ -6,8 +6,8 @@ use std::fs::DirEntry;
 
 use crate::schema::spec::*;
 use crate::schema::structure::*;
-use ion_rs::element::reader::ElementReader;
-use ion_rs::element::{Element, Struct};
+use ion_rs_old::element::reader::ElementReader;
+use ion_rs_old::element::{Element, Struct};
 use std::path::Path;
 
 macro_rules! expect_value {
