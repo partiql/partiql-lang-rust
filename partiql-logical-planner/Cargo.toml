@@ -31,7 +31,7 @@ partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
 partiql-types = { path = "../partiql-types", version = "0.10.*" }
 partiql-value = { path = "../partiql-value", version = "0.10.*" }
 
-ion-rs = "0.18"
+ion-rs_old = { version = "0.18", package = "ion-rs" }
 ordered-float = "3.*"
 itertools = "0.10.*"
 unicase = "2.6"

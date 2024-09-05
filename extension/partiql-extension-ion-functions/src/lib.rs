@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
-use ion_rs::data_source::ToIonDataSource;
+use ion_rs_old::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use partiql_catalog::TableFunction;
 use partiql_catalog::{
@@ -152,7 +152,7 @@ fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> BaseTableExprResult<
 
 fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<'a> {
     let err_map = |e| Box::new(e) as BaseTableExprResultError;
-    let reader = ion_rs::ReaderBuilder::new().build(input).unwrap();
+    let reader = ion_rs_old::ReaderBuilder::new().build(input).unwrap();
     let decoder =
         IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion)).build(reader);
     let decoder = decoder.map_err(err_map)?.map(move |it| it.map_err(err_map));

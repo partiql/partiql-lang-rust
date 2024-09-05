@@ -42,7 +42,7 @@ partiql-value = { path = "../partiql-value", version = "0.10.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.10.*" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.10.*" }
 
-ion-rs = "0.18"
+ion-rs_old = { version = "0.18", package = "ion-rs" }
 
 regex = "1.7"
 once_cell = "1"
