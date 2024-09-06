@@ -9,10 +9,10 @@ readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
-  "**/.travis.yml",
-  "**/.appveyor.yml",
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
 ]
 version.workspace = true
 edition.workspace = true
@@ -25,21 +25,21 @@ partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
 partiql-value = { path = "../partiql-value", version = "0.10.*" }
 partiql-catalog = { path = "../partiql-catalog", version = "0.10.*" }
 partiql-types = { path = "../partiql-types", version = "0.10.*" }
-petgraph = "0.6.*"
-ordered-float = "3.*"
-itertools = "0.10.*"
-unicase = "2.6"
-rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
-rust_decimal_macros = "1.26"
-thiserror = "1.0"
-assert_matches = "1.5.*"
-regex = "1.7"
-regex-syntax = "0.6"
-rustc-hash = "1"
-delegate = "0.12"
+petgraph = "0.6"
+ordered-float = "4"
+itertools = "0.13"
+unicase = "2"
+rust_decimal = { version = "1", default-features = false, features = ["std"] }
+rust_decimal_macros = "1"
+thiserror = "1"
+assert_matches = "1"
+regex = "1"
+regex-syntax = "0.8"
+rustc-hash = "2"
+delegate = "0.13"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5"
 
 [[bench]]
 name = "bench_eval"
