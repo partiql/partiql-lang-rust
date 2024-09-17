@@ -6,11 +6,7 @@
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-vulnerability = "deny"
-unsound = "deny"
-unmaintained = "deny"
-yanked = "deny"
-notice = "warn"
+version = 2
 
 ignore = [
     # Advisory: https://rustsec.org/advisories/RUSTSEC-2021-0145
@@ -28,8 +24,7 @@ ignore = [
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-# The lint level for crates which do not have a detectable license
-unlicensed = "deny"
+version = 2
 # ignores workspace crates that aren't published, or are only published to private registries.
 private = { ignore = true }
 
@@ -61,29 +56,6 @@ allow = [
 exceptions = [
     { allow = ["Unicode-DFS-2016"], name = "unicode-ident" },
 ]
-
-# Lint level for licenses considered copyleft
-copyleft = "deny"
-
-# List of explicitly disallowed licenses
-# See https://spdx.org/licenses/ for list of possible licenses
-# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
-deny = [
-]
-
-# Blanket approval or denial for OSI-approved or FSF Free/Libre licenses
-# * both - The license will be approved if it is both OSI-approved *AND* FSF
-# * either - The license will be approved if it is either OSI-approved *OR* FSF
-# * osi-only - The license will be approved if is OSI-approved *AND NOT* FSF
-# * fsf-only - The license will be approved if is FSF *AND NOT* OSI-approved
-# * neither - This predicate is ignored and the default lint level is used
-allow-osi-fsf-free = "neither"
-
-# Lint level used when no other predicates are matched
-# 1. License isn't in the allow or deny lists
-# 2. License isn't copyleft
-# 3. License isn't OSI/FSF, or allow-osi-fsf-free = "neither"
-default = "deny"
 
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -125,7 +97,7 @@ allow = [
 deny = [
     # Use `once_cell` instead
     #   `OnceCell`s API is under consideration for inclusion in `std`: https://github.com/rust-lang/rust/issues/74465
-    { name = "lazy_static", wrappers = ["Inflector", "criterion", "insta", "console"] },
+    { name = "lazy_static", wrappers = ["Inflector", "criterion", "insta", "console", "logos-codegen"] },
     # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
     # `time` < 0.2.23 has a potential (though unlikely) potential segfault
     { name = "time", version = "<0.2.23", wrappers = ["chrono"] },

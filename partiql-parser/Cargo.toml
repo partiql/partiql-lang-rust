@@ -9,10 +9,10 @@ readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers", "parser-implementations"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
-  "**/.travis.yml",
-  "**/.appveyor.yml",
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
 ]
 version.workspace = true
 edition.workspace = true
@@ -22,7 +22,7 @@ bench = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [build-dependencies]
-lalrpop = "0.20"
+lalrpop = "0.21"
 
 [dependencies]
 partiql-ast = { path = "../partiql-ast", version = "0.10.*" }
@@ -30,33 +30,33 @@ partiql-common = { path = "../partiql-common", version = "0.10.*" }
 
 thiserror = "1.0"
 
-num-traits = "~0.2.14"
-num-bigint = "~0.4.0"
-bigdecimal = "~0.2.0"
-rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
+num-traits = "0.2"
+num-bigint = "0.4"
+bigdecimal = "0.4"
+rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 
 bitflags = "2"
 
-lalrpop-util = "0.20"
-logos = "0.12"
+lalrpop-util = "0.21"
+logos = "0.14"
 
-itertools = "~0.10.3"
+itertools = "0.13"
 
-regex = "1.7"
+regex = "1.10"
 once_cell = "1"
 
-serde = { version = "1.*", features = ["derive"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5"
 
 [features]
 default = []
 serde = [
-  "dep:serde",
-  "rust_decimal/serde-with-str",
-  "partiql-ast/serde",
-  "partiql-common/serde"
+    "dep:serde",
+    "rust_decimal/serde-with-str",
+    "partiql-ast/serde",
+    "partiql-common/serde"
 ]
 
 [[bench]]

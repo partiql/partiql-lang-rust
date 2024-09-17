@@ -24,7 +24,7 @@ pub mod structure {
 }
 
 pub mod spec {
-    use ion_rs::element::{Element, Struct};
+    use ion_rs_old::element::{Element, Struct};
 
     #[derive(Debug, Clone)]
     pub enum TestVariant {

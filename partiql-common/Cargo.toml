@@ -20,12 +20,12 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-indexmap = "2.2"
+indexmap = "2.5"
 pretty = "0.12"
-serde = { version = "1.*", features = ["derive"], optional = true }
-rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
-smallvec = { version = "1.*" }
-thiserror = "1.0"
+serde = { version = "1", features = ["derive"], optional = true }
+rust_decimal = { version = "1.36", default-features = false, features = ["std"] }
+smallvec = { version = "1" }
+thiserror = "1"
 
 [features]
 default = []

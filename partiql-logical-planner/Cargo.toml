@@ -9,10 +9,10 @@ readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
-  "**/.travis.yml",
-  "**/.appveyor.yml",
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
 ]
 version.workspace = true
 edition.workspace = true
@@ -25,23 +25,23 @@ partiql-ast = { path = "../partiql-ast", version = "0.10.*" }
 partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.10.*" }
 partiql-catalog = { path = "../partiql-catalog", version = "0.10.*" }
 partiql-common = { path = "../partiql-common", version = "0.10.*" }
-partiql-extension-ion = {path = "../extension/partiql-extension-ion", version = "0.10.*" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.10.*" }
 partiql-parser = { path = "../partiql-parser", version = "0.10.*" }
 partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
 partiql-types = { path = "../partiql-types", version = "0.10.*" }
 partiql-value = { path = "../partiql-value", version = "0.10.*" }
 
-ion-rs = "0.18"
-ordered-float = "3.*"
-itertools = "0.10.*"
-unicase = "2.6"
-indexmap = "2.2"
-petgraph = "0.6.*"
+ion-rs_old = { version = "0.18", package = "ion-rs" }
+ordered-float = "4"
+itertools = "0.13"
+unicase = "2.7"
+indexmap = "2.5"
+petgraph = "0.6"
 num = "0.4"
 fnv = "1"
-assert_matches = "1.5.*"
+assert_matches = "1"
 once_cell = "1"
-thiserror = "1.0"
+thiserror = "1"
 
 [dev-dependencies]
 partiql-eval = { path = "../partiql-eval", version = "0.10.*" }

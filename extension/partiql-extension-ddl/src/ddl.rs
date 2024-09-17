@@ -1,4 +1,3 @@
-use ion_rs::IonError;
 use miette::Diagnostic;
 use partiql_types::{
     AnyOf, ArrayType, BagType, PartiqlShape, ShapeResultError, Static, StaticType, StructType,
@@ -13,8 +12,6 @@ use thiserror::Error;
 pub enum ShapeEncodingError {
     #[error("UnsupportedEncoding: {0}")]
     UnsupportedEncoding(String),
-    #[error("IonEncodingError: {0}")]
-    IonEncodingError(#[from] IonError),
     #[error("DateTimeEncodingError e: {0}")]
     DateTimeEncodingError(#[from] time::error::Format),
     #[error("Invalid Simulation Configuration e: {0}")]

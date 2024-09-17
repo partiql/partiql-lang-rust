@@ -185,7 +185,7 @@ pub struct AstToLogical<'a> {
 }
 
 /// Attempt to infer an alias for a simple variable reference expression.
-/// For example infer such that  `SELECT a, b.c.d.e ...` <=> `SELECT a as a, b.c.d.e as e`  
+/// For example infer such that  `SELECT a, b.c.d.e ...` <=> `SELECT a as a, b.c.d.e as e`
 fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
     let sensitive = |value: &str| {
         Some(SymbolPrimitive {
@@ -1985,7 +1985,7 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
         }
     }
 
-    let reader = ion_rs::ReaderBuilder::new()
+    let reader = ion_rs_old::ReaderBuilder::new()
         .build(contents)
         .map_err(|e| lit_err(contents, e))?;
     let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))

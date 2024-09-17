@@ -1,6 +1,6 @@
 use delegate::delegate;
 
-use ion_rs::{IonError, IonType, IonWriter};
+use ion_rs_old::{IonError, IonType, IonWriter};
 use ordered_float::OrderedFloat;
 use partiql_value::{Bag, DateTime, List, Tuple, Value};
 use rust_decimal::Decimal;
@@ -218,7 +218,7 @@ where
     fn encode_decimal(&mut self, val: &Decimal) -> IonEncodeResult {
         let scale = i64::from(val.scale());
         let mantissa = val.mantissa();
-        let dec = ion_rs::Decimal::new(mantissa, -scale);
+        let dec = ion_rs_old::Decimal::new(mantissa, -scale);
         Ok(self.writer.write_decimal(&dec)?)
     }
 
@@ -233,7 +233,7 @@ where
     fn encode_datetime(&mut self, val: &DateTime) -> IonEncodeResult {
         match val {
             DateTime::Timestamp(ts) => {
-                let ts = ion_rs::Timestamp::with_ymd(
+                let ts = ion_rs_old::Timestamp::with_ymd(
                     ts.year() as u32,
                     ts.month() as u32,
                     u32::from(ts.day()),
@@ -249,7 +249,7 @@ where
                 Ok(self.writer.write_timestamp(&ts)?)
             }
             DateTime::TimestampWithTz(ts) => {
-                let ts = ion_rs::Timestamp::with_ymd(
+                let ts = ion_rs_old::Timestamp::with_ymd(
                     ts.year() as u32,
                     ts.month() as u32,
                     u32::from(ts.day()),
@@ -334,7 +334,7 @@ where
         self.inner
             .writer
             .set_annotations(std::iter::once(DATE_ANNOT));
-        let ts = ion_rs::Timestamp::with_ymd(
+        let ts = ion_rs_old::Timestamp::with_ymd(
             date.year() as u32,
             date.month() as u32,
             u32::from(date.day()),

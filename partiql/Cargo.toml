@@ -32,12 +32,12 @@ partiql-logical = { path = "../partiql-logical" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
 
-insta = "1.38.0"
+insta = "1.40.0"
 
 
 thiserror = "1.0"
 
-itertools = "0.12"
+itertools = "0.13"
 criterion = "0.5"
 rand = "0.8"
 

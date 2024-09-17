@@ -21,9 +21,9 @@ bench = false
 
 [dependencies]
 partiql-common = { path = "../partiql-common", version = "0.10.*" }
-indexmap = "2.2"
-rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
-serde = { version = "1.*", features = ["derive"], optional = true }
+indexmap = "2.5"
+rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"], optional = true }
 pretty = "0.12"
 thiserror = "1.0"
 

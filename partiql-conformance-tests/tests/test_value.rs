@@ -17,7 +17,7 @@ impl From<&str> for TestValue {
 }
 
 fn parse_test_value_str(contents: &str) -> Value {
-    let reader = ion_rs::ReaderBuilder::new()
+    let reader = ion_rs_old::ReaderBuilder::new()
         .build(contents)
         .expect("reading contents");
     let mut iter = IonDecoderBuilder::new(

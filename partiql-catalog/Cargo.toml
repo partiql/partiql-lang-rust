@@ -9,10 +9,10 @@ readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
-  "**/.travis.yml",
-  "**/.appveyor.yml",
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
 ]
 version.workspace = true
 edition.workspace = true
@@ -27,9 +27,9 @@ partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
 partiql-types = { path = "../partiql-types", version = "0.10.*" }
 
 thiserror = "1.0"
-ordered-float = "3.*"
-itertools = "0.10.*"
-unicase = "2.6"
+ordered-float = "4"
+itertools = "0.13"
+unicase = "2.7"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5"
