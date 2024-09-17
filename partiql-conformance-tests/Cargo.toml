@@ -28,7 +28,7 @@ required-features = ["report_tool"]
 bench = false
 
 [build-dependencies]
-miette = { version = "5.*", features = ["fancy"] }
+miette = { version = "7", features = ["fancy"] }
 partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.10.*" }
 
 [dependencies]
@@ -44,15 +44,15 @@ partiql-extension-ion = { path = "../extension/partiql-extension-ion", version =
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 
-regex = "1.7"
+regex = "1.10"
 once_cell = "1"
 
-rust_decimal = "1.27"
+rust_decimal = "1.36"
 
 thiserror = "1.0"
 
-serde = { version = "1.*", features = ["derive"], optional = true }
-serde_json = { version = "1.*", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [features]
 default = ["base"]

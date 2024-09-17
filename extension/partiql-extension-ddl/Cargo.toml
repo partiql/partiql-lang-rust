@@ -7,7 +7,7 @@ repository.workspace = true
 license = "Apache-2.0"
 readme = "../../README.md"
 keywords = ["sql", "ddl", "definition-language", "compilers", "interpreters"]
-categories = ["database", "compilers",]
+categories = ["database", "compilers", ]
 exclude = [
     "**/.git/**",
     "**/.github/**",
@@ -24,13 +24,13 @@ bench = false
 partiql-types = { path = "../../partiql-types", version = "0.10.*" }
 
 thiserror = "1.0"
-miette = { version = "7.2", features = ["fancy"] }
+miette = { version = "7", features = ["fancy"] }
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 
-indexmap = "2.2"
+indexmap = "2.5"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5"
 
 [features]
 default = []

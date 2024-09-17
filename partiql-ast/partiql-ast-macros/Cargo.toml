@@ -23,7 +23,7 @@ bench = false
 
 [dependencies]
 quote = "1.0"
-syn = {version="2.0", default-features = true, features=["full"]}
-proc-macro2 = "1.0.*"
+syn = { version = "2.0", default-features = true, features = ["full"] }
+proc-macro2 = "1"
 darling = "0.20"
-Inflector = "0.11.*"
+Inflector = "0.11"
