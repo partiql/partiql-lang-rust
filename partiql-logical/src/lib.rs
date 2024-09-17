@@ -702,6 +702,8 @@ pub enum CallName {
     CollSum(SetQuantifier),
     CollAny(SetQuantifier),
     CollEvery(SetQuantifier),
+    TupleUnion,
+    TupleMerge,
     ByName(String),
 }
 

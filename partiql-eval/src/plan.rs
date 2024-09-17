@@ -20,9 +20,10 @@ use crate::eval::evaluable::{
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
     EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
-    EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
-    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
-    EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
+    EvalFnPosition, EvalFnSubstring, EvalFnTupleMerge, EvalFnTupleUnion, EvalIsTypeExpr,
+    EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary,
+    EvalOpUnary, EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr,
+    EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::Catalog;
@@ -711,6 +712,12 @@ impl<'c> EvaluatorPlanner<'c> {
                         "coll_every",
                         EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
                     ),
+                    CallName::TupleUnion => {
+                        ("tupleunion", EvalFnTupleUnion {}.bind::<{ STRICT }>(args))
+                    }
+                    CallName::TupleMerge => {
+                        ("tuplemerge", EvalFnTupleMerge {}.bind::<{ STRICT }>(args))
+                    }
                     CallName::ByName(name) => match self.catalog.get_function(name) {
                         None => {
                             self.errors.push(PlanningError::IllegalState(format!(

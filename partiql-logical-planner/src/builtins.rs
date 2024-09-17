@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
+use partiql_common::FN_VAR_ARG_MAX;
 use unicase::UniCase;
 
 fn function_call_def_char_len() -> CallDef {
@@ -725,6 +726,42 @@ fn function_call_def_coll_every() -> CallDef {
     }
 }
 
+fn vararg_fn_overloads<F>(f: F) -> Vec<CallSpec>
+where
+    F: Clone + 'static + Fn(Vec<ValueExpr>) -> logical::ValueExpr + Send + Sync,
+{
+    (1..=FN_VAR_ARG_MAX)
+        .map(|n| CallSpec {
+            input: std::iter::repeat(CallSpecArg::Positional).take(n).collect(),
+            output: Box::new(f.clone()),
+        })
+        .collect()
+}
+
+fn function_call_def_tupleunion() -> CallDef {
+    CallDef {
+        names: vec!["tupleunion", "tuple_union"],
+        overloads: vararg_fn_overloads(|args| {
+            logical::ValueExpr::Call(logical::CallExpr {
+                name: logical::CallName::TupleUnion,
+                arguments: args,
+            })
+        }),
+    }
+}
+
+fn function_call_def_tuplemerge() -> CallDef {
+    CallDef {
+        names: vec!["tuplemerge", "tuple_merge"],
+        overloads: vararg_fn_overloads(|args| {
+            logical::ValueExpr::Call(logical::CallExpr {
+                name: logical::CallName::TupleMerge,
+                arguments: args,
+            })
+        }),
+    }
+}
+
 pub(crate) static FN_SYM_TAB: Lazy<FnSymTab> = Lazy::new(function_call_def);
 
 /// Function symbol table
@@ -770,6 +807,8 @@ pub fn function_call_def() -> FnSymTab {
         function_call_def_coll_sum(),
         function_call_def_coll_any(),
         function_call_def_coll_every(),
+        function_call_def_tupleunion(),
+        function_call_def_tuplemerge(),
     ] {
         assert!(!def.names.is_empty());
         let primary = def.names[0];

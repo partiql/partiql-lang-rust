@@ -1,17 +1,14 @@
 use crate::eval::eval_expr_wrapper::{
-    BinaryValueExpr, EvalExprWrapper, ExecuteEvalExpr, QuaternaryValueExpr, TernaryValueExpr,
-    UnaryValueExpr,
+    BinaryValueExpr, QuaternaryValueExpr, TernaryValueExpr, UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
-use crate::eval::EvalContext;
 use itertools::Itertools;
 
 use partiql_types::{type_int, type_string};
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 
-use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -57,28 +54,6 @@ impl BindEvalExpr for EvalStringFn {
             EvalStringFn::OctetLength => create::<{ STRICT }, _, _>(args, |s| s.len()),
             EvalStringFn::BitLength => create::<{ STRICT }, _, _>(args, |s| (s.len() * 8)),
         }
-    }
-}
-
-impl<F, R> ExecuteEvalExpr<1> for EvalExprWrapper<EvalStringFn, F>
-where
-    F: Fn(&Box<String>) -> R,
-    R: Into<Value>,
-{
-    #[inline]
-    fn evaluate<'a, 'c>(
-        &'a self,
-        args: [Cow<'a, Value>; 1],
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
-    where
-        'c: 'a,
-    {
-        let [value] = args;
-        Cow::Owned(match value.borrow() {
-            Value::String(s) => ((self.f)(s)).into(),
-            _ => Missing,
-        })
     }
 }
 
