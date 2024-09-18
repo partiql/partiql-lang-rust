@@ -740,7 +740,7 @@ where
 
 fn function_call_def_tupleunion() -> CallDef {
     CallDef {
-        names: vec!["tupleunion", "tuple_union"],
+        names: vec!["tupleunion"],
         overloads: vararg_fn_overloads(|args| {
             logical::ValueExpr::Call(logical::CallExpr {
                 name: logical::CallName::TupleUnion,
@@ -752,7 +752,7 @@ fn function_call_def_tupleunion() -> CallDef {
 
 fn function_call_def_tuplemerge() -> CallDef {
     CallDef {
-        names: vec!["tuplemerge", "tuple_merge"],
+        names: vec!["tuplemerge"],
         overloads: vararg_fn_overloads(|args| {
             logical::ValueExpr::Call(logical::CallExpr {
                 name: logical::CallName::TupleMerge,
