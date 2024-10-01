@@ -1,4 +1,8 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CatalogId(u64);
 
 impl From<u64> for CatalogId {
@@ -8,6 +12,7 @@ impl From<u64> for CatalogId {
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EntryId(u64);
 
 impl From<u64> for EntryId {
@@ -17,6 +22,7 @@ impl From<u64> for EntryId {
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectId {
     catalog_id: CatalogId,
     entry_id: EntryId,
