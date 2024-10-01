@@ -723,7 +723,7 @@ impl<'c> EvaluatorPlanner<'c> {
                                 (name, Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>))
                             }
                             Some(function) => match function.entry() {
-                                FunctionEntryFunction::Scalar(scalar_fn) => {
+                                FunctionEntryFunction::Scalar(_) => {
                                     todo!("Scalar functions in catalog by name")
                                 }
                                 FunctionEntryFunction::Table(tbl_fn) => (

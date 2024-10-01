@@ -1,7 +1,7 @@
 use crate::eval::eval_expr_wrapper::{
-    evaluate_args, ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr,
-    DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull,
-    TernaryValueExpr, UnaryValueExpr,
+    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr, DefaultArgChecker,
+    ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull, TernaryValueExpr,
+    UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};

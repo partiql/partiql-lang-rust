@@ -28,13 +28,13 @@ use std::collections::{HashMap, HashSet};
 use crate::builtins::{FnSymTab, FN_SYM_TAB};
 use itertools::Itertools;
 use partiql_ast_passes::name_resolver;
-use partiql_catalog::call_defs::{CallArgument, CallDef, ScalarFnCallDef};
+use partiql_catalog::call_defs::{CallArgument, CallDef};
 
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
-use partiql_catalog::catalog::{Catalog, FunctionEntry, FunctionEntryFunction};
+use partiql_catalog::catalog::Catalog;
 use partiql_common::node::NodeId;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;

@@ -1,6 +1,4 @@
-use partiql_catalog::call_defs::{
-    CallArgument, CallLookupError, CallSpecArg, ScalarFnCallSpec, ScalarFnCallSpecs,
-};
+use partiql_catalog::call_defs::{CallArgument, CallLookupError, CallSpecArg, ScalarFnCallSpecs};
 use partiql_catalog::catalog::{FunctionEntry, FunctionEntryFunction};
 use partiql_common::catalog::ObjectId;
 use partiql_logical::{CallExpr, CallName, ValueExpr};
@@ -15,7 +13,7 @@ impl<'a> Function for FunctionEntry<'a> {
         let oid = self.id();
         match self.entry() {
             FunctionEntryFunction::Table(tbl) => {
-                tbl.call_def().lookup(&args, &name).map_err(Into::into)
+                tbl.call_def().lookup(args, name).map_err(Into::into)
             }
             FunctionEntryFunction::Scalar(scfn) => {
                 ScalarFnResolver { oid, scfn }.resolve(name, args)

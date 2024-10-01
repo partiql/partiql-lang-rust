@@ -1,4 +1,4 @@
-use crate::call_defs::{ScalarFnCallSpec, ScalarFnCallSpecs};
+use crate::call_defs::ScalarFnCallSpecs;
 use crate::scalar_fn::ScalarFunction;
 use crate::table_fn::TableFunction;
 use partiql_common::catalog::{CatalogId, EntryId, ObjectId};

@@ -64,12 +64,11 @@ impl ScalarFunction {
     }
 
     pub fn call_def(&self) -> &ScalarFnCallDef {
-        &self.info.call_def()
+        self.info.call_def()
     }
 
     pub fn into_call_def(self) -> ScalarFnCallDef {
-        let def = self.info.into_call_def();
-        def
+        self.info.into_call_def()
     }
 }
 

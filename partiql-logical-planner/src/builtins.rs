@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
-use partiql_common::FN_VAR_ARG_MAX;
 use unicase::UniCase;
 
 fn function_call_def_char_len() -> CallDef {

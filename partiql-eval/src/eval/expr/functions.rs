@@ -1,27 +1,17 @@
-use crate::eval::eval_expr_wrapper::{
-    evaluate_args, ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr,
-    DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull,
-    TernaryValueExpr, UnaryValueExpr,
-};
+use crate::eval::eval_expr_wrapper::{evaluate_args, DefaultArgChecker, PropagateMissing};
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
-use partiql_types::{
-    type_bool, type_dynamic, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
-    Static, StructType,
-};
-use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
+use partiql_types::{PartiqlShapeBuilder, StructType};
+use partiql_value::{Tuple, Value};
 
-use std::borrow::{Borrow, Cow};
-use std::fmt::{Debug, Formatter};
-
-use std::marker::PhantomData;
+use std::borrow::Cow;
+use std::fmt::Debug;
 
 use crate::error::EvaluationError;
 use partiql_catalog::call_defs::ScalarFnCallSpec;
-use partiql_catalog::scalar_fn::{ScalarFnExpr, ScalarFnExprResult, ScalarFunction};
+use partiql_catalog::scalar_fn::ScalarFnExpr;
 use std::ops::ControlFlow;
 
 impl BindEvalExpr for ScalarFnCallSpec {

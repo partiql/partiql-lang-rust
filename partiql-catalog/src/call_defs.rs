@@ -1,11 +1,10 @@
 use partiql_logical as logical;
-use partiql_logical::{CallExpr, CallName, ValueExpr};
+use partiql_logical::ValueExpr;
 
 use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 
 use crate::scalar_fn::ScalarFnExpr;
-use partiql_value::Value;
 use unicase::UniCase;
 
 /// An error that can happen during call lookup
