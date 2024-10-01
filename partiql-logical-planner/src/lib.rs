@@ -11,6 +11,7 @@ use partiql_parser::Parsed;
 use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 
 mod builtins;
+mod functions;
 mod lower;
 mod typer;
 

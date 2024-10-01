@@ -8,9 +8,11 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::{EvalErr, PlanErr};
 use partiql_eval::eval::{BasicContext, EvalPlan, EvalResult, Evaluated};
 use partiql_eval::plan::EvaluationMode;
+use partiql_extension_value_functions::PartiqlValueFnExtension;
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
 use partiql_value::{DateTime, Value};
+use std::error::Error;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,6 +25,8 @@ enum TestError<'a> {
     Plan(PlanErr),
     #[error("Evaluation error: {0:?}")]
     Eval(EvalErr),
+    #[error("Other: {0:?}")]
+    Other(Box<dyn Error>),
 }
 
 impl<'a> From<ParserError<'a>> for TestError<'a> {
@@ -46,6 +50,12 @@ impl From<PlanErr> for TestError<'_> {
 impl From<EvalErr> for TestError<'_> {
     fn from(err: EvalErr) -> Self {
         TestError::Eval(err)
+    }
+}
+
+impl From<Box<dyn Error>> for TestError<'_> {
+    fn from(err: Box<dyn Error>) -> Self {
+        TestError::Other(err)
     }
 }
 
@@ -89,7 +99,9 @@ fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
 #[track_caller]
 #[inline]
 fn eval(statement: &str, mode: EvaluationMode) -> Result<Evaluated, TestError<'_>> {
-    let catalog = PartiqlCatalog::default();
+    let mut catalog = PartiqlCatalog::default();
+    let ext = PartiqlValueFnExtension::default();
+    ext.load(&mut catalog)?;
 
     let parsed = parse(statement)?;
     let lowered = lower(&catalog, &parsed)?;
@@ -114,8 +126,8 @@ fn tupleunion() {
 }
 
 #[test]
-fn tuplemerge() {
-    let query = "tuplemerge({ 'bob': 1, 'sally': 'error' }, { 'sally': 1 }, { 'sally': 2 }, { 'sally': 3 }, { 'sally': 4 })";
+fn tupleconcat() {
+    let query = "tupleconcat({ 'bob': 1, 'sally': 'error' }, { 'sally': 1 }, { 'sally': 2 }, { 'sally': 3 }, { 'sally': 4 })";
 
     let res = eval(query, EvaluationMode::Permissive);
     assert_matches!(res, Ok(_));

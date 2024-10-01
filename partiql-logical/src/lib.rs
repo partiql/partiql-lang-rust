@@ -56,6 +56,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
 use partiql_common::catalog::ObjectId;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -703,9 +704,8 @@ pub enum CallName {
     CollSum(SetQuantifier),
     CollAny(SetQuantifier),
     CollEvery(SetQuantifier),
-    TupleUnion,
-    TupleMerge,
     ByName(String),
+    ById(ObjectId, usize),
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.

@@ -9,10 +9,10 @@ readme = "../README.md"
 keywords = ["sql", "parser", "query", "compilers", "interpreters"]
 categories = ["database", "compilers", "parser-implementations"]
 exclude = [
-  "**/.git/**",
-  "**/.github/**",
-  "**/.travis.yml",
-  "**/.appveyor.yml",
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
 ]
 version.workspace = true
 edition.workspace = true
@@ -31,6 +31,7 @@ partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
+partiql-extension-value-functions = { path = "../extension/partiql-extension-value-functions" }
 
 insta = "1.40.0"
 

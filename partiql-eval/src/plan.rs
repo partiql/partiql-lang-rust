@@ -20,10 +20,9 @@ use crate::eval::evaluable::{
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
     EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
-    EvalFnPosition, EvalFnSubstring, EvalFnTupleMerge, EvalFnTupleUnion, EvalIsTypeExpr,
-    EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary,
-    EvalOpUnary, EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr,
-    EvalVarRef,
+    EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
+    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
+    EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
@@ -712,33 +711,52 @@ impl<'c> EvaluatorPlanner<'c> {
                         "coll_every",
                         EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
                     ),
-                    CallName::TupleUnion => {
-                        ("tupleunion", EvalFnTupleUnion {}.bind::<{ STRICT }>(args))
-                    }
-                    CallName::TupleMerge => {
-                        ("tuplemerge", EvalFnTupleMerge {}.bind::<{ STRICT }>(args))
-                    }
-                    CallName::ByName(name) => match self.catalog.get_function(name) {
-                        None => {
-                            self.errors.push(PlanningError::IllegalState(format!(
-                                "Function to exist in catalog {name}",
-                            )));
+                    CallName::ByName(name) => {
+                        //
+                        let name = name.as_str();
+                        match self.catalog.get_function(name) {
+                            None => {
+                                self.errors.push(PlanningError::IllegalState(format!(
+                                    "Function to exist in catalog {name}",
+                                )));
 
-                            (
-                                name.as_str(),
-                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>),
-                            )
+                                (name, Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>))
+                            }
+                            Some(function) => match function.entry() {
+                                FunctionEntryFunction::Scalar(scalar_fn) => {
+                                    todo!("Scalar functions in catalog by name")
+                                }
+                                FunctionEntryFunction::Table(tbl_fn) => (
+                                    name,
+                                    Ok(Box::new(EvalFnBaseTableExpr {
+                                        args,
+                                        expr: tbl_fn.plan_eval(),
+                                    }) as Box<dyn EvalExpr>),
+                                ),
+                                FunctionEntryFunction::Aggregate() => {
+                                    todo!("Aggregate functions in catalog by name")
+                                }
+                            },
                         }
-                        Some(function) => {
-                            let eval = function.plan_eval();
-
-                            (
-                                name.as_str(),
-                                Ok(Box::new(EvalFnBaseTableExpr { args, expr: eval })
-                                    as Box<dyn EvalExpr>),
-                            )
+                    }
+                    CallName::ById(oid, overload_idx) => {
+                        let name = "todo"; // TODO
+                        let func = self.catalog.get_function_by_id(*oid);
+                        let func = func.unwrap(); // TODO
+                        match func.entry() {
+                            FunctionEntryFunction::Table(_) => {
+                                todo!("table functions in catalog by id")
+                            }
+                            FunctionEntryFunction::Scalar(scfn) => {
+                                let overload = scfn.get(*overload_idx);
+                                let overload = overload.unwrap(); // TODO
+                                (name, overload.bind::<{ STRICT }>(args))
+                            }
+                            FunctionEntryFunction::Aggregate() => {
+                                todo!("Aggregate functions in catalog by id")
+                            }
                         }
-                    },
+                    }
                 }
             }
         };
@@ -750,7 +768,7 @@ impl<'c> EvaluatorPlanner<'c> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_catalog::PartiqlCatalog;
+    use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_logical::CallExpr;
     use partiql_logical::ExprQuery;
     use partiql_value::Value;

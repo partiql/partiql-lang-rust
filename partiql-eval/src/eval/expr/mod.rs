@@ -14,7 +14,9 @@ mod path;
 pub(crate) use path::*;
 mod pattern_match;
 pub(crate) use pattern_match::*;
+mod functions;
 mod operators;
+
 pub(crate) use operators::*;
 
 use crate::eval::EvalContext;

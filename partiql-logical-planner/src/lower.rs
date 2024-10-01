@@ -32,6 +32,7 @@ use partiql_catalog::call_defs::{CallArgument, CallDef, ScalarFnCallDef};
 
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
+use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::{Catalog, FunctionEntry, FunctionEntryFunction};
 use partiql_common::node::NodeId;
@@ -1117,8 +1118,7 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
         let args = self.exit_call();
         let name = call.func_name.value.to_lowercase();
 
-        let call_def_to_vexpr =
-            |call_def: &CallDef| call_def.lookup(&args, &name).map_err(Into::into);
+        let call_def_to_vexpr = |call_def: &CallDef| call_def.lookup(&args, &name);
 
         let call_expr = self
             .fnsym_tab
@@ -1127,8 +1127,9 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
             .or_else(|| {
                 self.catalog
                     .get_function(&name)
-                    .map(|e| call_def_to_vexpr(e.call_def()))
+                    .map(|e| e.resolve(&name, &args))
             })
+            .map(|res| res.map_err(Into::into))
             .unwrap_or_else(|| Err(AstTransformError::UnsupportedFunction(name.clone())));
 
         let expr = match call_expr {

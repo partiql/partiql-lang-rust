@@ -1,0 +1,65 @@
+use crate::eval::eval_expr_wrapper::{
+    evaluate_args, ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr,
+    DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull,
+    TernaryValueExpr, UnaryValueExpr,
+};
+
+use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
+use crate::eval::EvalContext;
+
+use partiql_types::{
+    type_bool, type_dynamic, type_numeric, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
+    Static, StructType,
+};
+use partiql_value::Value::{Boolean, Missing, Null};
+use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
+
+use std::borrow::{Borrow, Cow};
+use std::fmt::{Debug, Formatter};
+
+use std::marker::PhantomData;
+
+use crate::error::EvaluationError;
+use partiql_catalog::call_defs::ScalarFnCallSpec;
+use partiql_catalog::scalar_fn::{ScalarFnExpr, ScalarFnExprResult, ScalarFunction};
+use std::ops::ControlFlow;
+
+impl BindEvalExpr for ScalarFnCallSpec {
+    fn bind<const STRICT: bool>(
+        &self,
+        args: Vec<Box<dyn EvalExpr>>,
+    ) -> Result<Box<dyn EvalExpr>, BindError> {
+        let plan = self.output.clone();
+        Ok(Box::new(EvalExprFnScalar::<{ STRICT }> { plan, args }))
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct EvalExprFnScalar<const STRICT: bool> {
+    plan: Box<dyn ScalarFnExpr>,
+    args: Vec<Box<dyn EvalExpr>>,
+}
+
+impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
+    fn evaluate<'a, 'c>(
+        &'a self,
+        bindings: &'a Tuple,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'a, Value>
+    where
+        'c: 'a,
+    {
+        type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
+        let typ = PartiqlShapeBuilder::init_or_get().new_struct(StructType::new_any());
+        match evaluate_args::<{ STRICT }, Check<STRICT>, _>(&self.args, |_| &typ, bindings, ctx) {
+            ControlFlow::Break(v) => Cow::Owned(v),
+            ControlFlow::Continue(args) => match self.plan.evaluate(&args, ctx.as_session()) {
+                Ok(v) => v,
+                Err(e) => {
+                    ctx.add_error(EvaluationError::ExtensionResultError(e));
+                    Cow::Owned(Value::Missing)
+                }
+            },
+        }
+    }
+}
