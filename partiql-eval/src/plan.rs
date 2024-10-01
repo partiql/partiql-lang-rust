@@ -1,8 +1,8 @@
 use itertools::{Either, Itertools};
+use partiql_catalog::call_defs::ScalarFnCallSpec;
+use partiql_logical as logical;
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
-
-use partiql_logical as logical;
 
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
@@ -717,7 +717,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         match self.catalog.get_function(name) {
                             None => {
                                 self.errors.push(PlanningError::IllegalState(format!(
-                                    "Function to exist in catalog {name}",
+                                    "Function call spec {name} does not exist in catalog",
                                 )));
 
                                 (name, Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>))
@@ -739,23 +739,38 @@ impl<'c> EvaluatorPlanner<'c> {
                             },
                         }
                     }
-                    CallName::ById(oid, overload_idx) => {
-                        let name = "todo"; // TODO
+                    CallName::ById(name, oid, overload_idx) => {
                         let func = self.catalog.get_function_by_id(*oid);
-                        let func = func.unwrap(); // TODO
-                        match func.entry() {
-                            FunctionEntryFunction::Table(_) => {
-                                todo!("table functions in catalog by id")
+                        let plan = match func {
+                            Some(func) => match func.entry() {
+                                FunctionEntryFunction::Table(_) => {
+                                    todo!("table functions in catalog by id")
+                                }
+                                FunctionEntryFunction::Scalar(scfn) => {
+                                    match scfn.get(*overload_idx) {
+                                        None => {
+                                            self.errors.push(PlanningError::IllegalState(format!(
+                                                "Function call spec {name} overload #{overload_idx} does not exist in catalog",
+                                            )));
+
+                                            Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
+                                        }
+                                        Some(overload) => overload.bind::<{ STRICT }>(args),
+                                    }
+                                }
+                                FunctionEntryFunction::Aggregate() => {
+                                    todo!("Aggregate functions in catalog by id")
+                                }
+                            },
+                            None => {
+                                self.errors.push(PlanningError::IllegalState(format!(
+                                    "Function call spec {name} does not exist in catalog",
+                                )));
+
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
                             }
-                            FunctionEntryFunction::Scalar(scfn) => {
-                                let overload = scfn.get(*overload_idx);
-                                let overload = overload.unwrap(); // TODO
-                                (name, overload.bind::<{ STRICT }>(args))
-                            }
-                            FunctionEntryFunction::Aggregate() => {
-                                todo!("Aggregate functions in catalog by id")
-                            }
-                        }
+                        };
+                        (name.as_str(), plan)
                     }
                 }
             }

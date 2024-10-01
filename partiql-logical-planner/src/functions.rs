@@ -53,7 +53,7 @@ impl<'a> Function for ScalarFnResolver<'a> {
 
             // the current overload matches the argument arity and types
             return Ok(ValueExpr::Call(CallExpr {
-                name: CallName::ById(*oid, idx),
+                name: CallName::ById(name.to_string(), *oid, idx),
                 arguments: actuals.into_iter().cloned().collect(),
             }));
         }
