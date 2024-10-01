@@ -1,9 +1,11 @@
 use partiql_logical as logical;
-use partiql_logical::ValueExpr;
+use partiql_logical::{CallExpr, CallName, ValueExpr};
 
 use std::fmt::{Debug, Formatter};
 use thiserror::Error;
 
+use crate::scalar_fn::ScalarFnExpr;
+use partiql_value::Value;
 use unicase::UniCase;
 
 /// An error that can happen during call lookup
@@ -15,13 +17,6 @@ pub enum CallLookupError {
     InvalidNumberOfArguments(String),
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum CallArgument {
-    Positional(ValueExpr),
-    Named(String, ValueExpr),
-    Star,
-}
-
 #[derive(Debug)]
 pub struct CallDef {
     pub names: Vec<&'static str>,
@@ -29,6 +24,7 @@ pub struct CallDef {
 }
 
 impl CallDef {
+    // Used when lowering AST -> plan
     pub fn lookup(&self, args: &[CallArgument], name: &str) -> Result<ValueExpr, CallLookupError> {
         'overload: for overload in &self.overloads {
             let formals = &overload.input;
@@ -53,6 +49,13 @@ impl CallDef {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum CallArgument {
+    Positional(ValueExpr),
+    Named(String, ValueExpr),
+    Star,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum CallSpecArg {
     Positional,
@@ -75,8 +78,6 @@ impl CallSpecArg {
     }
 }
 
-impl CallSpecArg {}
-
 pub struct CallSpec {
     pub input: Vec<CallSpecArg>,
     pub output: Box<dyn Fn(Vec<ValueExpr>) -> logical::ValueExpr + Send + Sync>,
@@ -85,5 +86,25 @@ pub struct CallSpec {
 impl Debug for CallSpec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "CallSpec [{:?}]", &self.input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ScalarFnCallDef {
+    pub names: Vec<&'static str>,
+    pub overloads: ScalarFnCallSpecs,
+}
+
+pub type ScalarFnCallSpecs = Vec<ScalarFnCallSpec>;
+
+#[derive(Clone)]
+pub struct ScalarFnCallSpec {
+    pub input: Vec<CallSpecArg>,
+    pub output: Box<dyn ScalarFnExpr>,
+}
+
+impl Debug for ScalarFnCallSpec {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ScalarFnCallSpec [{:?}]", &self.input)
     }
 }

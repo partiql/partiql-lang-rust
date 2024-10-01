@@ -1,7 +1,7 @@
 use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
-use partiql_catalog::Catalog;
+use partiql_catalog::catalog::Catalog;
 use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
     type_array, type_bag, type_bool, type_decimal, type_dynamic, type_int, type_string,
@@ -603,7 +603,7 @@ mod tests {
     use super::*;
     use crate::{logical, LogicalPlanner};
     use partiql_ast_passes::error::AstTransformationError;
-    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_parser::{Parsed, Parser};
     use partiql_types::{
         struct_fields, type_bag, type_int_with_const_id, type_string_with_const_id,

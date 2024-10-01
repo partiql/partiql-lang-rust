@@ -55,6 +55,7 @@ use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
+use partiql_common::catalog::ObjectId;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

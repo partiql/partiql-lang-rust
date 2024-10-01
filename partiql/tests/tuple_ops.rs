@@ -1,7 +1,8 @@
 use assert_matches::assert_matches;
 use partiql_ast_passes::error::AstTransformationError;
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 use partiql_catalog::context::SystemContext;
-use partiql_catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::extension::Extension;
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::{EvalErr, PlanErr};

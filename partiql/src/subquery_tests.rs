@@ -3,8 +3,8 @@
 
 #[cfg(test)]
 mod tests {
+    use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
     use partiql_catalog::context::SystemContext;
-    use partiql_catalog::{Catalog, PartiqlCatalog};
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::error::EvalErr;
     use partiql_eval::eval::BasicContext;

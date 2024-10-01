@@ -12,8 +12,8 @@ mod tests {
 
     use crate::env::basic::MapBindings;
     use crate::plan;
+    use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_catalog::context::SystemContext;
-    use partiql_catalog::PartiqlCatalog;
     use rust_decimal_macros::dec;
 
     use partiql_logical as logical;

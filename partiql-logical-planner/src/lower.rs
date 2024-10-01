@@ -28,12 +28,12 @@ use std::collections::{HashMap, HashSet};
 use crate::builtins::{FnSymTab, FN_SYM_TAB};
 use itertools::Itertools;
 use partiql_ast_passes::name_resolver;
-use partiql_catalog::call_defs::{CallArgument, CallDef};
+use partiql_catalog::call_defs::{CallArgument, CallDef, ScalarFnCallDef};
 
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use partiql_ast_passes::name_resolver::NameRef;
-use partiql_catalog::Catalog;
+use partiql_catalog::catalog::{Catalog, FunctionEntry, FunctionEntryFunction};
 use partiql_common::node::NodeId;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
@@ -2004,7 +2004,7 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
 mod tests {
     use super::*;
     use crate::LogicalPlanner;
-    use partiql_catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_logical::BindingsOp::Project;
     use partiql_logical::ValueExpr;
     use partiql_types::type_dynamic;

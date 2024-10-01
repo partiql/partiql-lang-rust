@@ -7,10 +7,11 @@ use std::error::Error;
 use thiserror::Error;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 use partiql_catalog::context::{SessionContext, SystemContext};
-use partiql_catalog::{
-    BaseTableExpr, BaseTableExprResult, BaseTableExprResultError, BaseTableFunctionInfo, Catalog,
-    Extension, PartiqlCatalog, TableFunction,
+use partiql_catalog::extension::{Extension, ExtensionResultError};
+use partiql_catalog::table_fn::{
+    BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo, TableFunction,
 };
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
@@ -23,7 +24,7 @@ use partiql_logical as logical;
 #[derive(Debug)]
 pub struct UserCtxTestExtension {}
 
-impl partiql_catalog::Extension for UserCtxTestExtension {
+impl partiql_catalog::extension::Extension for UserCtxTestExtension {
     fn name(&self) -> String {
         "test_extension".into()
     }
@@ -93,12 +94,12 @@ impl BaseTableExpr for EvalTestCtxTable {
                 Value::String(name) => generated_data(name.to_string(), ctx),
                 _ => {
                     let error = UserCtxError::Unknown;
-                    Err(Box::new(error) as BaseTableExprResultError)
+                    Err(Box::new(error) as ExtensionResultError)
                 }
             }
         } else {
             let error = UserCtxError::Unknown;
-            Err(Box::new(error) as BaseTableExprResultError)
+            Err(Box::new(error) as ExtensionResultError)
         }
     }
 }
@@ -109,7 +110,7 @@ struct TestDataGen<'a> {
 }
 
 impl<'a> Iterator for TestDataGen<'a> {
-    type Item = Result<Value, BaseTableExprResultError>;
+    type Item = Result<Value, ExtensionResultError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(cv) = self.ctx.user_context(&self.name) {

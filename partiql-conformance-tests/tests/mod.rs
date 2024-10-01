@@ -1,5 +1,4 @@
 use partiql_ast_passes::error::AstTransformationError;
-use partiql_catalog::{Catalog, PartiqlCatalog};
 use partiql_eval as eval;
 
 use partiql_eval::error::{EvalErr, PlanErr};
@@ -8,6 +7,7 @@ use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
 use partiql_value::DateTime;
 
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 use partiql_catalog::context::SystemContext;
 use thiserror::Error;
 

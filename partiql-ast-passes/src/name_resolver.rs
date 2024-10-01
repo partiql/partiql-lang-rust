@@ -4,7 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
 use partiql_ast::ast::{GroupByExpr, GroupKey};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
-use partiql_catalog::Catalog;
+use partiql_catalog::catalog::Catalog;
 use partiql_common::node::NodeId;
 use std::sync::atomic::{AtomicU32, Ordering};
 

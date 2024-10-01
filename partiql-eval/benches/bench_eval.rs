@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use partiql_catalog::catalog::PartiqlCatalog;
 use partiql_catalog::context::SystemContext;
-use partiql_catalog::PartiqlCatalog;
 
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{BasicContext, EvalPlan};

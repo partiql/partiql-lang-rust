@@ -26,7 +26,7 @@ use crate::eval::expr::{
     EvalVarRef,
 };
 use crate::eval::EvalPlan;
-use partiql_catalog::Catalog;
+use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
 use partiql_value::Value::Null;
 
 #[macro_export]

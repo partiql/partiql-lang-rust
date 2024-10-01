@@ -1,7 +1,7 @@
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
 use itertools::Itertools;
-use partiql_catalog::BaseTableExpr;
+use partiql_catalog::table_fn::BaseTableExpr;
 
 use partiql_value::Value::Missing;
 use partiql_value::{Bag, Tuple, Value};

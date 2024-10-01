@@ -5,3 +5,5 @@ pub static FN_VAR_ARG_MAX: usize = 10;
 pub mod metadata;
 pub mod node;
 pub mod syntax;
+
+pub mod catalog;

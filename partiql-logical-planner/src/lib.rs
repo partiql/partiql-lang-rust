@@ -8,7 +8,7 @@ use partiql_ast_passes::name_resolver::NameResolver;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
-use partiql_catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 
 mod builtins;
 mod lower;
@@ -41,8 +41,8 @@ impl<'c> LogicalPlanner<'c> {
 mod tests {
     use assert_matches::assert_matches;
     use partiql_ast_passes::error::AstTransformationError;
+    use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_catalog::context::SystemContext;
-    use partiql_catalog::PartiqlCatalog;
 
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::eval::BasicContext;

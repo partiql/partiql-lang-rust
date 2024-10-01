@@ -2,9 +2,8 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 use partiql_catalog::context::SystemContext;
-use partiql_catalog::{Catalog, PartiqlCatalog};
-
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{BasicContext, EvalPlan};
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
