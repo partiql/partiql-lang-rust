@@ -3,10 +3,10 @@
 
 use ion_rs_old::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
-use partiql_catalog::TableFunction;
-use partiql_catalog::{
-    BaseTableExpr, BaseTableExprResult, BaseTableExprResultError, BaseTableExprResultValueIter,
-    BaseTableFunctionInfo, Catalog,
+use partiql_catalog::catalog::Catalog;
+use partiql_catalog::table_fn::{
+    BaseTableExpr, BaseTableExprResult, BaseTableExprResultValueIter, BaseTableFunctionInfo,
+    TableFunction,
 };
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
@@ -15,6 +15,7 @@ use partiql_value::Value;
 use std::borrow::Cow;
 
 use partiql_catalog::context::SessionContext;
+use partiql_catalog::extension::ExtensionResultError;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fs::File;
@@ -51,7 +52,7 @@ impl From<std::io::Error> for IonExtensionError {
 #[derive(Debug)]
 pub struct IonExtension {}
 
-impl partiql_catalog::Extension for IonExtension {
+impl partiql_catalog::extension::Extension for IonExtension {
     fn name(&self) -> String {
         "ion".into()
     }
@@ -114,12 +115,12 @@ impl BaseTableExpr for EvalFnReadIon {
                     let error = IonExtensionError::FunctionError(
                         "expected string path argument".to_string(),
                     );
-                    Err(Box::new(error) as BaseTableExprResultError)
+                    Err(Box::new(error) as ExtensionResultError)
                 }
             }
         } else {
             let error = IonExtensionError::FunctionError("expected path argument".to_string());
-            Err(Box::new(error) as BaseTableExprResultError)
+            Err(Box::new(error) as ExtensionResultError)
         }
     }
 }
@@ -151,7 +152,7 @@ fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> BaseTableExprResult<
 }
 
 fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<'a> {
-    let err_map = |e| Box::new(e) as BaseTableExprResultError;
+    let err_map = |e| Box::new(e) as ExtensionResultError;
     let reader = ion_rs_old::ReaderBuilder::new().build(input).unwrap();
     let decoder =
         IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion)).build(reader);
@@ -163,8 +164,9 @@ fn parse_ion_buff<'a, I: 'a + ToIonDataSource>(input: I) -> BaseTableExprResult<
 mod tests {
     use super::*;
 
+    use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
     use partiql_catalog::context::SystemContext;
-    use partiql_catalog::{Catalog, Extension, PartiqlCatalog};
+    use partiql_catalog::extension::Extension;
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::eval::BasicContext;
     use partiql_eval::plan::EvaluationMode;

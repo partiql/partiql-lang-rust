@@ -1,8 +1,7 @@
 use itertools::{Either, Itertools};
+use partiql_logical as logical;
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
-
-use partiql_logical as logical;
 
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
@@ -25,7 +24,7 @@ use crate::eval::expr::{
     EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
 };
 use crate::eval::EvalPlan;
-use partiql_catalog::Catalog;
+use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
 use partiql_value::Value::Null;
 
 #[macro_export]
@@ -711,27 +710,65 @@ impl<'c> EvaluatorPlanner<'c> {
                         "coll_every",
                         EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
                     ),
-                    CallName::ByName(name) => match self.catalog.get_function(name) {
-                        None => {
-                            self.errors.push(PlanningError::IllegalState(format!(
-                                "Function to exist in catalog {name}",
-                            )));
+                    CallName::ByName(name) => {
+                        let plan = match self.catalog.get_function(name) {
+                            None => {
+                                self.errors.push(PlanningError::IllegalState(format!(
+                                    "Function call spec {name} does not exist in catalog",
+                                )));
 
-                            (
-                                name.as_str(),
-                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>),
-                            )
-                        }
-                        Some(function) => {
-                            let eval = function.plan_eval();
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
+                            }
+                            Some(function) => match function.entry() {
+                                FunctionEntryFunction::Scalar(_) => {
+                                    todo!("Scalar functions in catalog by name")
+                                }
+                                FunctionEntryFunction::Table(tbl_fn) => {
+                                    Ok(Box::new(EvalFnBaseTableExpr {
+                                        args,
+                                        expr: tbl_fn.plan_eval(),
+                                    }) as Box<dyn EvalExpr>)
+                                }
+                                FunctionEntryFunction::Aggregate() => {
+                                    todo!("Aggregate functions in catalog by name")
+                                }
+                            },
+                        };
+                        (name.as_str(), plan)
+                    }
+                    CallName::ById(name, oid, overload_idx) => {
+                        let func = self.catalog.get_function_by_id(*oid);
+                        let plan = match func {
+                            Some(func) => match func.entry() {
+                                FunctionEntryFunction::Table(_) => {
+                                    todo!("table functions in catalog by id")
+                                }
+                                FunctionEntryFunction::Scalar(scfn) => {
+                                    match scfn.get(*overload_idx) {
+                                        None => {
+                                            self.errors.push(PlanningError::IllegalState(format!(
+                                                "Function call spec {name} overload #{overload_idx} does not exist in catalog",
+                                            )));
 
-                            (
-                                name.as_str(),
-                                Ok(Box::new(EvalFnBaseTableExpr { args, expr: eval })
-                                    as Box<dyn EvalExpr>),
-                            )
-                        }
-                    },
+                                            Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
+                                        }
+                                        Some(overload) => overload.bind::<{ STRICT }>(args),
+                                    }
+                                }
+                                FunctionEntryFunction::Aggregate() => {
+                                    todo!("Aggregate functions in catalog by id")
+                                }
+                            },
+                            None => {
+                                self.errors.push(PlanningError::IllegalState(format!(
+                                    "Function call spec {name} does not exist in catalog",
+                                )));
+
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
+                            }
+                        };
+                        (name.as_str(), plan)
+                    }
                 }
             }
         };
@@ -743,7 +780,7 @@ impl<'c> EvaluatorPlanner<'c> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use partiql_catalog::PartiqlCatalog;
+    use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_logical::CallExpr;
     use partiql_logical::ExprQuery;
     use partiql_value::Value;

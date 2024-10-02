@@ -15,6 +15,9 @@ ignore = [
     # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
     # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
     "RUSTSEC-2020-0071",
+    # Advisory: https://rustsec.org/advisories/RUSTSEC-2024-0375
+    # `atty` is unmaintained, but we still use a version of criterion that brings it in
+    "RUSTSEC-2024-0375"
 ]
 
 
@@ -103,7 +106,7 @@ deny = [
     { name = "time", version = "<0.2.23", wrappers = ["chrono"] },
     # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
     # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
-    { name = "chrono", version = "<0.4.20" }
+    { name = "chrono", version = "<0.4.20" },
 ]
 
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - partiql-ast: fixed pretty-printing of `PIVOT`
 - partiql-ast: improved pretty-printing of `CASE` and various clauses
+- *BREAKING* partiql-catalog: refactored structure of crate; module paths have changes
 
 ### Added
 - Added `partiql-common`.
@@ -16,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* Added thread-safe `PartiqlShapeBuilder` and automatic `NodeId` generation for the `StaticType`.
 - Added a static thread safe `shape_builder` function that provides a convenient way for using `PartiqlShapeBuilder` for creating new shapes.
 - Added `partiql_common::meta::PartiqlMetadata`
+- Added ability for crate importers to add scalar *U*ser *D*efined *F*unctions (UDFs) to the catalog
+- Added `extension/partiql-extension-value-functions` crate demonstrating use of scalar UDFs
+- Added `TUPLEUNION` and `TUPLECONCAT` functions in the `extension/partiql-extension-value-functions` crate
 
 ### Removed
 - *BREAKING* Removed `partiql-source-map`.

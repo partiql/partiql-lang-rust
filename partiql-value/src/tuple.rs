@@ -58,8 +58,8 @@ impl Tuple {
         other
             .pairs()
             .chain(self.pairs())
-            .map(|(a, v)| (a, v.clone()))
             .unique_by(|(a, _)| *a)
+            .map(|(a, v)| (a, v.clone()))
             .collect()
     }
 
@@ -187,6 +187,18 @@ where
             vals.push(v.into());
         }
         Tuple { attrs, vals }
+    }
+}
+
+impl<S, T> Extend<(S, T)> for Tuple
+where
+    S: AsRef<str>,
+    T: Into<Value>,
+{
+    fn extend<I: IntoIterator<Item = (S, T)>>(&mut self, iter: I) {
+        for (k, v) in iter {
+            self.insert(k.as_ref(), v.into());
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::eval::evaluable::Evaluable;
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
-use partiql_catalog::BaseTableExprResultError;
+use partiql_catalog::extension::ExtensionResultError;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use thiserror::Error;
@@ -45,8 +45,8 @@ pub enum EvaluationError {
     NotYetImplemented(String),
 
     /// Error originating in an extension
-    #[error("Base Table Expression Error")]
-    ExtensionResultError(#[from] BaseTableExprResultError),
+    #[error("Extension Result Expression Error")]
+    ExtensionResultError(#[from] ExtensionResultError),
 }
 
 /// Used when an error occurs during the logical to eval plan conversion. Allows the conversion

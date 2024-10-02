@@ -258,7 +258,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
         &'a self,
         bindings: &'a Tuple,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> ControlFlow<Value, [Cow<'_, Value>; N]>
+    ) -> ControlFlow<Value, [Cow<'a, Value>; N]>
     where
         'c: 'a,
     {
@@ -273,57 +273,86 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
             ControlFlow::Break(Missing)
         };
 
-        let mut result = Vec::with_capacity(N);
-
-        let mut propagate = None;
-        for i in 0..N {
-            let typ = &self.types[i];
-            let arg = self.args[i].evaluate(bindings, ctx);
-
-            match ArgC::arg_check(typ, arg) {
-                ArgCheckControlFlow::Continue(v) => {
-                    if propagate.is_none() {
-                        result.push(v);
-                    }
-                }
-                ArgCheckControlFlow::Propagate(v) => {
-                    propagate = match propagate {
-                        None => Some(v),
-                        Some(prev) => match (prev, v) {
-                            (Null, Missing) => Missing,
-                            (Missing, _) => Missing,
-                            (Null, _) => Null,
-                            (_, new) => new,
-                        }
-                        .into(),
-                    };
-                }
-                ArgCheckControlFlow::ShortCircuit(v) => return ControlFlow::Break(v),
-                ArgCheckControlFlow::ErrorOrShortCircuit(v) => {
-                    if STRICT {
-                        let signature = self.types.iter().map(|typ| format!("{}", typ)).join(",");
-                        let before = (0..i).map(|_| "_");
-                        let arg = "MISSING"; // TODO display actual argument?
-                        let after = (i + 1..N).map(|_| "_");
-                        let arg_pattern = before.chain(std::iter::once(arg)).chain(after).join(",");
-                        let msg = format!("expected `({signature})`, found `({arg_pattern})`");
-                        ctx.add_error(EvaluationError::IllegalState(msg));
-                    }
-                    return ControlFlow::Break(v);
-                }
-            }
-        }
-
-        if let Some(v) = propagate {
-            // If `propagate` is a `Some`, then argument type checking failed, propagate the value
-            ControlFlow::Break(v)
-        } else {
-            // If `propagate` is `None`, then try to convert the `result` vec into an array of `N`
-            match result.try_into() {
+        match evaluate_args::<{ STRICT }, ArgC, _>(&self.args, |n| &self.types[n], bindings, ctx) {
+            ControlFlow::Continue(result) => match result.try_into() {
                 Ok(a) => ControlFlow::Continue(a),
                 Err(args) => err_arg_count_mismatch(args),
+            },
+            ControlFlow::Break(v) => ControlFlow::Break(v),
+        }
+    }
+}
+
+pub(crate) fn evaluate_args<
+    'a,
+    'c,
+    't,
+    const STRICT: bool,
+    ArgC: ArgChecker,
+    F: Fn(usize) -> &'t PartiqlShape,
+>(
+    args: &'a [Box<dyn EvalExpr>],
+    types: F,
+    bindings: &'a Tuple,
+    ctx: &'c dyn EvalContext<'c>,
+) -> ControlFlow<Value, Vec<Cow<'a, Value>>>
+where
+    'c: 'a,
+{
+    let mut result = Vec::with_capacity(args.len());
+
+    let mut propagate = None;
+
+    for (idx, arg) in args.iter().enumerate() {
+        let typ = types(idx);
+        let arg = arg.evaluate(bindings, ctx);
+
+        match ArgC::arg_check(typ, arg) {
+            ArgCheckControlFlow::Continue(v) => {
+                if propagate.is_none() {
+                    result.push(v);
+                }
+            }
+            ArgCheckControlFlow::Propagate(v) => {
+                propagate = match propagate {
+                    None => Some(v),
+                    Some(prev) => match (prev, v) {
+                        (Null, Missing) => Missing,
+                        (Missing, _) => Missing,
+                        (Null, _) => Null,
+                        (_, new) => new,
+                    }
+                    .into(),
+                };
+            }
+            ArgCheckControlFlow::ShortCircuit(v) => return ControlFlow::Break(v),
+            ArgCheckControlFlow::ErrorOrShortCircuit(v) => {
+                if STRICT {
+                    let arg_end = args.len();
+                    let arg_count = 0..arg_end;
+
+                    let signature = (arg_count)
+                        .map(types)
+                        .map(|typ| format!("{}", typ))
+                        .join(",");
+                    let before = (0..idx).map(|_| "_");
+                    let arg = "MISSING"; // TODO display actual argument?
+                    let after = (idx + 1..arg_end).map(|_| "_");
+                    let arg_pattern = before.chain(std::iter::once(arg)).chain(after).join(",");
+                    let msg = format!("expected `({signature})`, found `({arg_pattern})`");
+                    ctx.add_error(EvaluationError::IllegalState(msg));
+                }
+                return ControlFlow::Break(v);
             }
         }
+    }
+
+    if let Some(v) = propagate {
+        // If `propagate` is a `Some`, then argument type checking failed, propagate the value
+        ControlFlow::Break(v)
+    } else {
+        // If `propagate` is `None`, then return result
+        ControlFlow::Continue(result)
     }
 }
 

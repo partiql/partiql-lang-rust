@@ -29,6 +29,7 @@ members = [
     "extension/partiql-extension-ddl",
     "extension/partiql-extension-ion",
     "extension/partiql-extension-ion-functions",
+    "extension/partiql-extension-value-functions",
     "extension/partiql-extension-visualize",
 ]
 

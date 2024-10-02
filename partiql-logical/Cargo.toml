@@ -22,6 +22,7 @@ bench = false
 
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.10.*" }
+partiql-common = { path = "../partiql-common", version = "0.10.*" }
 ordered-float = "4"
 itertools = "0.13"
 unicase = "2.7"

@@ -1,0 +1,33 @@
+[package]
+name = "partiql-extension-value-functions"
+description = "PartiQL Value function extensions"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["sql", "query", "compilers", "interpreters"]
+categories = ["database", "compilers"]
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+
+[dependencies]
+partiql-value = { path = "../../partiql-value", version = "0.10.*" }
+partiql-catalog = { path = "../../partiql-catalog", version = "0.10.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.10.*" }
+
+ordered-float = "3.*"
+unicase = "2.6"
+time = { version = "0.3", features = ["macros"] }
+
+[features]
+default = []

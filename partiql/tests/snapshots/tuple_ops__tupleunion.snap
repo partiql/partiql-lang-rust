@@ -1,0 +1,5 @@
+---
+source: partiql/tests/tuple_ops.rs
+expression: tuple
+---
+{ 'bob': 1, 'sally': 'error', 'sally': 1, 'sally': 2, 'sally': 3, 'sally': 4 }

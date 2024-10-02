@@ -21,8 +21,8 @@ edition.workspace = true
 bench = false
 
 [dependencies]
+partiql-common = { path = "../partiql-common", version = "0.10.*" }
 partiql-value = { path = "../partiql-value", version = "0.10.*" }
-partiql-parser = { path = "../partiql-parser", version = "0.10.*" }
 partiql-logical = { path = "../partiql-logical", version = "0.10.*" }
 partiql-types = { path = "../partiql-types", version = "0.10.*" }
 
@@ -31,5 +31,4 @@ ordered-float = "4"
 itertools = "0.13"
 unicase = "2.7"
 
-[dev-dependencies]
-criterion = "0.5"
+dyn-clone = "1"

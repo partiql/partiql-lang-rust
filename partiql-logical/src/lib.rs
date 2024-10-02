@@ -55,6 +55,8 @@ use partiql_value::{BindingsName, Value};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
+use partiql_common::catalog::ObjectId;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -703,6 +705,7 @@ pub enum CallName {
     CollAny(SetQuantifier),
     CollEvery(SetQuantifier),
     ByName(String),
+    ById(String, ObjectId, usize),
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.
