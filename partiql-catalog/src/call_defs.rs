@@ -98,6 +98,7 @@ pub type ScalarFnCallSpecs = Vec<ScalarFnCallSpec>;
 
 #[derive(Clone)]
 pub struct ScalarFnCallSpec {
+    // TODO:  Include Scalar Function attributes (e.g., isNullCall and isMissingCall, etc.): https://github.com/partiql/partiql-lang-rust/issues/499
     pub input: Vec<CallSpecArg>,
     pub output: Box<dyn ScalarFnExpr>,
 }
