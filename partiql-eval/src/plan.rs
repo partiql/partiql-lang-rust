@@ -1,5 +1,4 @@
 use itertools::{Either, Itertools};
-use partiql_catalog::call_defs::ScalarFnCallSpec;
 use partiql_logical as logical;
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
@@ -712,32 +711,30 @@ impl<'c> EvaluatorPlanner<'c> {
                         EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
                     ),
                     CallName::ByName(name) => {
-                        //
-                        let name = name.as_str();
-                        match self.catalog.get_function(name) {
+                        let plan = match self.catalog.get_function(name) {
                             None => {
                                 self.errors.push(PlanningError::IllegalState(format!(
                                     "Function call spec {name} does not exist in catalog",
                                 )));
 
-                                (name, Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>))
+                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
                             }
                             Some(function) => match function.entry() {
                                 FunctionEntryFunction::Scalar(_) => {
                                     todo!("Scalar functions in catalog by name")
                                 }
-                                FunctionEntryFunction::Table(tbl_fn) => (
-                                    name,
+                                FunctionEntryFunction::Table(tbl_fn) => {
                                     Ok(Box::new(EvalFnBaseTableExpr {
                                         args,
                                         expr: tbl_fn.plan_eval(),
-                                    }) as Box<dyn EvalExpr>),
-                                ),
+                                    }) as Box<dyn EvalExpr>)
+                                }
                                 FunctionEntryFunction::Aggregate() => {
                                     todo!("Aggregate functions in catalog by name")
                                 }
                             },
-                        }
+                        };
+                        (name.as_str(), plan)
                     }
                     CallName::ById(name, oid, overload_idx) => {
                         let func = self.catalog.get_function_by_id(*oid);

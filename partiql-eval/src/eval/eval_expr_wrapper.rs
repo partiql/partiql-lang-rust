@@ -258,7 +258,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
         &'a self,
         bindings: &'a Tuple,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> ControlFlow<Value, [Cow<'_, Value>; N]>
+    ) -> ControlFlow<Value, [Cow<'a, Value>; N]>
     where
         'c: 'a,
     {
