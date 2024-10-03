@@ -21,7 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-value = { path = "../../partiql-value", version = "0.10.*" }
+partiql-value = { path = "../../partiql-value", version = "0.11.*" }
 ordered-float = "4"
 itertools = "0.13"
 unicase = "2.7"

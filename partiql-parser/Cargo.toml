@@ -25,8 +25,8 @@ bench = false
 lalrpop = "0.21"
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.10.*" }
-partiql-common = { path = "../partiql-common", version = "0.10.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.11.*" }
+partiql-common = { path = "../partiql-common", version = "0.11.*" }
 
 thiserror = "1.0"
 
