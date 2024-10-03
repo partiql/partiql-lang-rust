@@ -21,7 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-types = { path = "../../partiql-types", version = "0.10.*" }
+partiql-types = { path = "../../partiql-types", version = "0.11.*" }
 
 thiserror = "1.0"
 miette = { version = "7", features = ["fancy"] }

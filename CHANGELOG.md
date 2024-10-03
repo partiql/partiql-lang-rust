@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [Unreleased]
 ### Changed
-- partiql-ast: fixed pretty-printing of `PIVOT`
-- partiql-ast: improved pretty-printing of `CASE` and various clauses
+
+### Added
+
+### Removed
+
+## [0.11.0]
+### Changed
 - *BREAKING* partiql-catalog: refactored structure of crate; module paths have changes
 
 ### Added
@@ -25,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* Removed `partiql-source-map`.
 - *BREAKING* Removed `const` PartiQL types under `partiql-types` in favor of `PartiqlShapeBuilder`.
 - *BREAKING* Removed `StaticType`'s `new`, `new_non_nullable`, and `as_non-nullable` APIs in favor of `PartiqlShapeBuilder`.
+
+
+## [0.10.1]
+### Changed
+- partiql-ast: fixed pretty-printing of `PIVOT`
+- partiql-ast: improved pretty-printing of `CASE` and various clauses
+
+### Added
+
+### Fixed
 
 ## [0.10.0]
 ### Changed
@@ -292,7 +308,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.11.0
+[0.10.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.1
 [0.10.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.0
 [0.9.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.9.0
 [0.8.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.8.0
