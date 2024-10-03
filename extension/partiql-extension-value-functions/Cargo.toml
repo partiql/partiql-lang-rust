@@ -25,7 +25,7 @@ partiql-value = { path = "../../partiql-value", version = "0.10.*" }
 partiql-catalog = { path = "../../partiql-catalog", version = "0.10.*" }
 partiql-logical = { path = "../../partiql-logical", version = "0.10.*" }
 
-ordered-float = "3.*"
+ordered-float = "4"
 unicase = "2.6"
 time = { version = "0.3", features = ["macros"] }
 
