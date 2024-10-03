@@ -9,15 +9,6 @@
 version = 2
 
 ignore = [
-    # Advisory: https://rustsec.org/advisories/RUSTSEC-2021-0145
-    # atty potential misaligned pointer; used by some pretty-printing deps (criterion, miette, lalrpop)
-    "RUSTSEC-2021-0145",
-    # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
-    # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
-    "RUSTSEC-2020-0071",
-    # Advisory: https://rustsec.org/advisories/RUSTSEC-2024-0375
-    # `atty` is unmaintained, but we still use a version of criterion that brings it in
-    "RUSTSEC-2024-0375"
 ]
 
 
@@ -100,10 +91,7 @@ allow = [
 deny = [
     # Use `once_cell` instead
     #   `OnceCell`s API is under consideration for inclusion in `std`: https://github.com/rust-lang/rust/issues/74465
-    { name = "lazy_static", wrappers = ["Inflector", "criterion", "insta", "console", "logos-codegen"] },
-    # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
-    # `time` < 0.2.23 has a potential (though unlikely) potential segfault
-    { name = "time", version = "<0.2.23", wrappers = ["chrono"] },
+    { name = "lazy_static", wrappers = ["Inflector", "insta", "console", "logos-codegen"] },
     # Advisory: https://rustsec.org/advisories/RUSTSEC-2020-0071
     # `chrono` uses an old version of `time`, but `chrono` >= 4.2 doesn't use the code path with the issue
     { name = "chrono", version = "<0.4.20" },
