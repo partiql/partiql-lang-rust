@@ -21,6 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
+partiql-common = { path = "../partiql-common", version = "0.11.*" }
 ordered-float = "4"
 itertools = "0.13"
 unicase = "2.7"
@@ -28,6 +29,7 @@ rust_decimal = { version = "1.36.0", default-features = false, features = ["std"
 rust_decimal_macros = "1.36"
 
 time = { version = "0.3", features = ["macros"] }
+pretty = "0.12"
 
 serde = { version = "1", features = ["derive"], optional = true }
 
