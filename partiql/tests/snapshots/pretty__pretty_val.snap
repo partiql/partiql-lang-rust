@@ -10,7 +10,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -26,7 +26,7 @@ expression: doc
     MISSING
   ],
   'xyzzy': << { 'n': 1 }, { 'n': 2 }, { 'n': 3 }, { 'n': 4 }, { 'n': 5 }, { 'n': 6 }, { 'n': 7 }, { 'n': 8 }, { 'n': 9 }, { 'n': 10 } >>,
-  'waldo': [ 1, 2, ''skip a few'', 99, 100 ]
+  'waldo': [ 1, 2, 'skip a few', 99, 100 ]
 }
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -35,7 +35,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -62,7 +62,7 @@ expression: doc
     { 'n': 9 },
     { 'n': 10 }
   >>,
-  'waldo': [ 1, 2, ''skip a few'', 99, 100 ]
+  'waldo': [ 1, 2, 'skip a few', 99, 100 ]
 }
 
 --------------------------------------------------------------------------------
@@ -71,7 +71,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -98,7 +98,7 @@ expression: doc
     { 'n': 9 },
     { 'n': 10 }
   >>,
-  'waldo': [ 1, 2, ''skip a few'', 99, 100 ]
+  'waldo': [ 1, 2, 'skip a few', 99, 100 ]
 }
 
 ----------------------------------------
@@ -107,7 +107,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -137,7 +137,7 @@ expression: doc
   'waldo': [
     1,
     2,
-    ''skip a few'',
+    'skip a few',
     99,
     100
   ]
@@ -149,7 +149,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -179,7 +179,7 @@ expression: doc
   'waldo': [
     1,
     2,
-    ''skip a few'',
+    'skip a few',
     99,
     100
   ]
@@ -191,7 +191,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -221,7 +221,7 @@ expression: doc
   'waldo': [
     1,
     2,
-    ''skip a few'',
+    'skip a few',
     99,
     100
   ]
@@ -233,7 +233,7 @@ expression: doc
   '-foo': false,
   'bar': 42,
   'baz': 3.14,
-  'qux': ''string'',
+  'qux': 'string',
   'thud': NULL,
   'plugh': [
     1,
@@ -283,7 +283,7 @@ expression: doc
   'waldo': [
     1,
     2,
-    ''skip a few'',
+    'skip a few',
     99,
     100
   ]

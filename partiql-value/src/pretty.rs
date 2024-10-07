@@ -21,7 +21,7 @@ impl PrettyDoc for Value {
             Value::Integer(inner) => arena.text(inner.to_string()),
             Value::Real(inner) => arena.text(inner.0.to_string()),
             Value::Decimal(inner) => inner.pretty_doc(arena),
-            Value::String(inner) => pretty_string(inner, arena),
+            Value::String(inner) => inner.pretty_doc(arena),
             Value::Blob(inner) => pretty_string(inner, arena),
             Value::DateTime(inner) => inner.pretty_doc(arena),
             Value::List(inner) => inner.pretty_doc(arena),
