@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use partiql_ast::ast::{AstNode, TopLevelQuery};
-use partiql_ast::pretty::ToPretty;
+use partiql_common::pretty::ToPretty;
 use partiql_parser::ParserResult;
 
 #[track_caller]

@@ -1,61 +1,10 @@
 use crate::ast::*;
-use pretty::{Arena, DocAllocator, DocBuilder, Pretty};
-use std::io;
-use std::io::Write;
-use std::string::FromUtf8Error;
-use thiserror::Error;
-
-const MINOR_NEST_INDENT: isize = 2;
-const SUBQUERY_INDENT: isize = 6;
-
-pub(crate) trait PrettyDoc {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone;
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum ToPrettyError {
-    #[error("IO error: `{0}`")]
-    IoError(#[from] std::io::Error),
-
-    #[error("FromUtf8Error: `{0}`")]
-    FromUtf8Error(#[from] FromUtf8Error),
-}
-
-type ToPrettyResult<T> = Result<T, ToPrettyError>;
-
-pub trait ToPretty {
-    /// Pretty-prints to a `String`.
-    fn to_pretty_string(&self, width: usize) -> ToPrettyResult<String> {
-        let mut out = Vec::new();
-        self.to_pretty(width, &mut out)?;
-        Ok(String::from_utf8(out)?)
-    }
-
-    /// Pretty-prints to a `std::io::Write` object.
-    fn to_pretty<W>(&self, width: usize, out: &mut W) -> ToPrettyResult<()>
-    where
-        W: ?Sized + io::Write;
-}
-
-impl<T> ToPretty for AstNode<T>
-where
-    T: PrettyDoc,
-{
-    fn to_pretty<W>(&self, width: usize, out: &mut W) -> ToPrettyResult<()>
-    where
-        W: ?Sized + Write,
-    {
-        let arena = Arena::new();
-        let DocBuilder(_, doc) = self.node.pretty_doc::<_, ()>(&arena);
-        Ok(doc.render(width, out)?)
-    }
-}
-
+use partiql_common::pretty::{
+    pretty_list, pretty_parenthesized_doc, pretty_prefixed_doc, pretty_seperated,
+    pretty_seperated_doc, pretty_seq, pretty_seq_doc, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
+    PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST,
+};
+use pretty::{DocAllocator, DocBuilder, Pretty};
 impl<T> PrettyDoc for AstNode<T>
 where
     T: PrettyDoc,
@@ -68,45 +17,6 @@ where
         A: Clone,
     {
         self.node.pretty_doc(arena)
-    }
-}
-
-impl<T> PrettyDoc for Box<T>
-where
-    T: PrettyDoc,
-{
-    #[inline]
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        self.as_ref().pretty_doc(arena)
-    }
-}
-
-impl PrettyDoc for str {
-    #[inline]
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        arena.concat(["'", self, "'"])
-    }
-}
-
-impl PrettyDoc for rust_decimal::Decimal {
-    #[inline]
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        arena.text(self.to_string())
     }
 }
 
@@ -160,8 +70,8 @@ impl PrettyDoc for QuerySet {
             QuerySet::BagOp(op) => op.pretty_doc(arena),
             QuerySet::Select(sel) => sel.pretty_doc(arena),
             QuerySet::Expr(e) => e.pretty_doc(arena),
-            QuerySet::Values(v) => pretty_annotated_doc("VALUES", pretty_list(v, 0, arena), arena),
-            QuerySet::Table(t) => pretty_annotated_expr("TABLE", t, 0, arena),
+            QuerySet::Values(v) => pretty_prefixed_doc("VALUES", pretty_list(v, 0, arena), arena),
+            QuerySet::Table(t) => pretty_prefixed_expr("TABLE", t, 0, arena),
         }
     }
 }
@@ -188,8 +98,8 @@ impl PrettyDoc for BagOpExpr {
             Some(SetQuantifier::Distinct) => op.append(" DISTINCT"),
         };
 
-        let lhs = pretty_parenthesized_expr(&self.lhs, MINOR_NEST_INDENT, arena);
-        let rhs = pretty_parenthesized_expr(&self.rhs, MINOR_NEST_INDENT, arena);
+        let lhs = pretty_parenthesized_expr(&self.lhs, PRETTY_INDENT_MINOR_NEST, arena);
+        let rhs = pretty_parenthesized_expr(&self.rhs, PRETTY_INDENT_MINOR_NEST, arena);
 
         arena.intersperse([lhs, op, rhs], arena.hardline()).group()
     }
@@ -294,9 +204,11 @@ impl PrettyDoc for ProjectionKind {
     {
         match self {
             ProjectionKind::ProjectStar => arena.text("SELECT *"),
-            ProjectionKind::ProjectList(l) => {
-                pretty_annotated_doc("SELECT", pretty_list(l, MINOR_NEST_INDENT, arena), arena)
-            }
+            ProjectionKind::ProjectList(l) => pretty_prefixed_doc(
+                "SELECT",
+                pretty_list(l, PRETTY_INDENT_MINOR_NEST, arena),
+                arena,
+            ),
             ProjectionKind::ProjectPivot(ProjectPivot { key, value }) => {
                 let parts = [
                     value.pretty_doc(arena),
@@ -304,10 +216,10 @@ impl PrettyDoc for ProjectionKind {
                     key.pretty_doc(arena),
                 ];
                 let decl = arena.intersperse(parts, arena.space()).group();
-                pretty_annotated_doc("PIVOT", decl, arena)
+                pretty_prefixed_doc("PIVOT", decl, arena)
             }
             ProjectionKind::ProjectValue(ctor) => {
-                pretty_annotated_expr("SELECT VALUE", ctor, MINOR_NEST_INDENT, arena)
+                pretty_prefixed_expr("SELECT VALUE", ctor, PRETTY_INDENT_MINOR_NEST, arena)
             }
         }
         .group()
@@ -349,9 +261,9 @@ impl PrettyDoc for Exclusion {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_annotated_doc(
+        pretty_prefixed_doc(
             "EXCLUDE",
-            pretty_list(&self.items, MINOR_NEST_INDENT, arena),
+            pretty_list(&self.items, PRETTY_INDENT_MINOR_NEST, arena),
             arena,
         )
     }
@@ -411,7 +323,7 @@ impl PrettyDoc for Expr {
                 let inner = inner.pretty_doc(arena).group();
                 arena
                     .text("(")
-                    .append(inner.nest(SUBQUERY_INDENT))
+                    .append(inner.nest(PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST))
                     .append(arena.text(")"))
             }
             Expr::Error => {
@@ -574,8 +486,8 @@ impl PrettyDoc for BinOp {
             BinOpKind::Mod => (0, "%"),
             BinOpKind::Mul => (0, "*"),
             BinOpKind::Sub => (0, "-"),
-            BinOpKind::And => (MINOR_NEST_INDENT, "AND"),
-            BinOpKind::Or => (MINOR_NEST_INDENT, "OR"),
+            BinOpKind::And => (PRETTY_INDENT_MINOR_NEST, "AND"),
+            BinOpKind::Or => (PRETTY_INDENT_MINOR_NEST, "OR"),
             BinOpKind::Concat => (0, "||"),
             BinOpKind::Eq => (0, "="),
             BinOpKind::Gt => (0, ">"),
@@ -721,7 +633,15 @@ impl PrettyDoc for SimpleCase {
 
         let search = expr.pretty_doc(arena);
         let branches = case_branches(arena, cases, default);
-        pretty_seq_doc(branches, "CASE", Some(search), "END", " ", arena)
+        pretty_seq_doc(
+            branches,
+            "CASE",
+            Some(search),
+            "END",
+            " ",
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
+        )
     }
 }
 
@@ -735,36 +655,16 @@ impl PrettyDoc for SearchedCase {
         let SearchedCase { cases, default } = self;
 
         let branches = case_branches(arena, cases, default);
-        pretty_seq_doc(branches, "CASE", None, "END", " ", arena)
-    }
-}
-
-fn case_branches<'b, D, A>(
-    arena: &'b D,
-    cases: &'b [ExprPair],
-    default: &'b Option<Box<Expr>>,
-) -> impl Iterator<Item = DocBuilder<'b, D, A>>
-where
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone + 'b,
-{
-    cases
-        .iter()
-        .map(|ExprPair { first, second }| {
-            let kw_when = arena.text("WHEN");
-            let test = first.pretty_doc(arena);
-            let kw_then = arena.text("THEN");
-            let then = second.pretty_doc(arena);
-            arena
-                .intersperse([kw_when, test, kw_then, then], arena.space())
-                .group()
-        })
-        .chain(
-            default
-                .iter()
-                .map(|d| arena.text("ELSE ").append(d.pretty_doc(arena)).group()),
+        pretty_seq_doc(
+            branches,
+            "CASE",
+            None,
+            "END",
+            " ",
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
         )
+    }
 }
 
 impl PrettyDoc for Struct {
@@ -778,7 +678,7 @@ impl PrettyDoc for Struct {
             let x: &'b StructExprPair = std::mem::transmute(p);
             x
         });
-        pretty_seq(wrapped, "{", "}", ",", arena)
+        pretty_seq(wrapped, "{", "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -806,7 +706,14 @@ impl PrettyDoc for Bag {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_seq(&self.values, "<<", ">>", ",", arena)
+        pretty_seq(
+            &self.values,
+            "<<",
+            ">>",
+            ",",
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
+        )
     }
 }
 
@@ -817,7 +724,7 @@ impl PrettyDoc for List {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_seq(&self.values, "[", "]", ",", arena)
+        pretty_seq(&self.values, "[", "]", ",", PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -842,7 +749,7 @@ impl PrettyDoc for Call {
         let name = self.func_name.pretty_doc(arena);
         let list = pretty_list(&self.args, 0, arena);
         name.append(arena.text("("))
-            .append(list.nest(MINOR_NEST_INDENT))
+            .append(list.nest(PRETTY_INDENT_MINOR_NEST))
             .append(arena.text(")"))
     }
 }
@@ -857,7 +764,7 @@ impl PrettyDoc for CallAgg {
         let name = self.func_name.pretty_doc(arena);
         let list = pretty_list(&self.args, 0, arena);
         name.append(arena.text("("))
-            .append(list.nest(MINOR_NEST_INDENT))
+            .append(list.nest(PRETTY_INDENT_MINOR_NEST))
             .append(arena.text(")"))
     }
 }
@@ -919,7 +826,7 @@ impl PrettyDoc for FromClause {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_annotated_expr("FROM", &self.source, MINOR_NEST_INDENT, arena)
+        pretty_prefixed_expr("FROM", &self.source, PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -963,7 +870,7 @@ impl PrettyDoc for FromLet {
 
         let clause = match kind {
             FromLetKind::Scan => expr,
-            FromLetKind::Unpivot => pretty_annotated_doc("UNPIVOT", expr, arena),
+            FromLetKind::Unpivot => pretty_prefixed_doc("UNPIVOT", expr, arena),
         };
 
         if aliases.is_empty() {
@@ -1015,12 +922,12 @@ impl PrettyDoc for Join {
                         .softline()
                         .append(arena.text("ON"))
                         .append(arena.softline())
-                        .append(on.pretty_doc(arena).nest(MINOR_NEST_INDENT));
+                        .append(on.pretty_doc(arena).nest(PRETTY_INDENT_MINOR_NEST));
                     join.append(pred)
                 }
                 JoinSpec::Using(using) => {
                     let join = pretty_seperated(kw_join, arms, 0, arena);
-                    let using = pretty_list(using, MINOR_NEST_INDENT, arena);
+                    let using = pretty_list(using, PRETTY_INDENT_MINOR_NEST, arena);
                     let pred = arena
                         .softline()
                         .append(arena.text("USING"))
@@ -1052,7 +959,7 @@ impl PrettyDoc for WhereClause {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_annotated_expr("WHERE", &self.expr, MINOR_NEST_INDENT, arena)
+        pretty_prefixed_expr("WHERE", &self.expr, PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -1077,9 +984,11 @@ impl PrettyDoc for GroupByExpr {
 
         if !keys.is_empty() {
             doc = doc.append(arena.space()).append(arena.text("BY")).group();
-            doc = doc
-                .append(arena.softline())
-                .append(pretty_list(keys, MINOR_NEST_INDENT, arena));
+            doc = doc.append(arena.softline()).append(pretty_list(
+                keys,
+                PRETTY_INDENT_MINOR_NEST,
+                arena,
+            ));
         }
 
         match group_as_alias {
@@ -1112,7 +1021,7 @@ impl PrettyDoc for HavingClause {
         D::Doc: Clone,
         A: Clone,
     {
-        pretty_annotated_expr("HAVING", &self.expr, MINOR_NEST_INDENT, arena)
+        pretty_prefixed_expr("HAVING", &self.expr, PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -1126,9 +1035,9 @@ impl PrettyDoc for OrderByExpr {
         if self.sort_specs.is_empty() {
             arena.text("ORDER BY PRESERVE")
         } else {
-            pretty_annotated_doc(
+            pretty_prefixed_doc(
                 "ORDER BY",
-                pretty_list(&self.sort_specs, MINOR_NEST_INDENT, arena),
+                pretty_list(&self.sort_specs, PRETTY_INDENT_MINOR_NEST, arena),
                 arena,
             )
         }
@@ -1200,12 +1109,12 @@ impl PrettyDoc for LimitOffsetClause {
         let limit = self
             .limit
             .as_ref()
-            .map(|l| pretty_annotated_expr("LIMIT", l, MINOR_NEST_INDENT, arena));
+            .map(|l| pretty_prefixed_expr("LIMIT", l, PRETTY_INDENT_MINOR_NEST, arena));
 
         let offset = self
             .offset
             .as_ref()
-            .map(|o| pretty_annotated_expr("OFFSET", o, MINOR_NEST_INDENT, arena));
+            .map(|o| pretty_prefixed_expr("OFFSET", o, PRETTY_INDENT_MINOR_NEST, arena));
 
         match (limit, offset) {
             (None, None) => unreachable!(),
@@ -1216,7 +1125,35 @@ impl PrettyDoc for LimitOffsetClause {
     }
 }
 
-fn pretty_annotated_expr<'b, P, D, A>(
+fn case_branches<'b, D, A>(
+    arena: &'b D,
+    cases: &'b [ExprPair],
+    default: &'b Option<Box<Expr>>,
+) -> impl Iterator<Item = DocBuilder<'b, D, A>>
+where
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone + 'b,
+{
+    cases
+        .iter()
+        .map(|ExprPair { first, second }| {
+            let kw_when = arena.text("WHEN");
+            let test = first.pretty_doc(arena);
+            let kw_then = arena.text("THEN");
+            let then = second.pretty_doc(arena);
+            arena
+                .intersperse([kw_when, test, kw_then, then], arena.space())
+                .group()
+        })
+        .chain(
+            default
+                .iter()
+                .map(|d| arena.text("ELSE ").append(d.pretty_doc(arena)).group()),
+        )
+}
+
+fn pretty_prefixed_expr<'b, P, D, A>(
     annot: &'static str,
     expr: &'b P,
     nest: isize,
@@ -1228,21 +1165,7 @@ where
     D::Doc: Clone,
     A: Clone,
 {
-    pretty_annotated_doc(annot, expr.pretty_doc(arena).nest(nest), arena)
-}
-
-fn pretty_annotated_doc<'b, E, D, A>(
-    annot: &'static str,
-    doc: E,
-    arena: &'b D,
-) -> DocBuilder<'b, D, A>
-where
-    E: Pretty<'b, D, A>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    arena.text(annot).append(arena.space()).append(doc).group()
+    pretty_prefixed_doc(annot, expr.pretty_doc(arena).nest(nest), arena)
 }
 
 fn pretty_parenthesized_expr<'b, P, D, A>(
@@ -1257,114 +1180,6 @@ where
     A: Clone,
 {
     pretty_parenthesized_doc(expr.pretty_doc(arena).nest(nest), arena)
-}
-fn pretty_parenthesized_doc<'b, E, D, A>(doc: E, arena: &'b D) -> DocBuilder<'b, D, A>
-where
-    E: Pretty<'b, D, A>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    arena.text("(").append(doc).append(arena.text(")")).group()
-}
-
-fn pretty_seq_doc<'i, 'b, I, E, D, A>(
-    seq: I,
-    start: &'static str,
-    qualifier: Option<E>,
-    end: &'static str,
-    sep: &'static str,
-    arena: &'b D,
-) -> DocBuilder<'b, D, A>
-where
-    E: Pretty<'b, D, A>,
-    I: IntoIterator<Item = E>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let start = arena.text(start);
-    let end = arena.text(end);
-    let sep = arena.text(sep).append(arena.line());
-    let start = if let Some(qual) = qualifier {
-        start.append(arena.space()).append(qual)
-    } else {
-        start
-    };
-    let body = arena
-        .line()
-        .append(arena.intersperse(seq, sep))
-        .append(arena.line())
-        .group();
-    start
-        .append(body.nest(MINOR_NEST_INDENT))
-        .append(end)
-        .group()
-}
-
-fn pretty_seq<'i, 'b, I, P, D, A>(
-    list: I,
-    start: &'static str,
-    end: &'static str,
-    sep: &'static str,
-    arena: &'b D,
-) -> DocBuilder<'b, D, A>
-where
-    I: IntoIterator<Item = &'b P>,
-    P: PrettyDoc + 'b,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let seq = list.into_iter().map(|l| l.pretty_doc(arena));
-    pretty_seq_doc(seq, start, None, end, sep, arena)
-}
-
-fn pretty_list<'b, I, P, D, A>(list: I, nest: isize, arena: &'b D) -> DocBuilder<'b, D, A>
-where
-    I: IntoIterator<Item = &'b P>,
-    P: PrettyDoc + 'b,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let sep = arena.text(",").append(arena.softline());
-    pretty_seperated(sep, list, nest, arena)
-}
-
-fn pretty_seperated<'b, I, E, P, D, A>(
-    sep: E,
-    list: I,
-    nest: isize,
-    arena: &'b D,
-) -> DocBuilder<'b, D, A>
-where
-    I: IntoIterator<Item = &'b P>,
-    E: Pretty<'b, D, A>,
-    P: PrettyDoc + 'b,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let list = list.into_iter().map(|l| l.pretty_doc(arena));
-    pretty_seperated_doc(sep, list, nest, arena)
-}
-
-fn pretty_seperated_doc<'b, I, E, D, A>(
-    sep: E,
-    list: I,
-    nest: isize,
-    arena: &'b D,
-) -> DocBuilder<'b, D, A>
-where
-    I: IntoIterator<Item = DocBuilder<'b, D, A>>,
-    E: Pretty<'b, D, A>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    let sep = sep.pretty(arena);
-    arena.intersperse(list, sep).nest(nest).group()
 }
 
 fn pretty_alias_helper<'b, D, A>(

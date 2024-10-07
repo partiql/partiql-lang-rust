@@ -34,6 +34,7 @@ partiql-conformance-test-generator = { path = "../partiql-conformance-test-gener
 [dependencies]
 partiql-parser = { path = "../partiql-parser", version = "0.11.*" }
 partiql-catalog = { path = "../partiql-catalog", version = "0.11.*" }
+partiql-common = { path = "../partiql-common", version = "0.11.*" }
 partiql-ast = { path = "../partiql-ast", version = "0.11.*" }
 partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.11.*" }
 partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.11.*" }

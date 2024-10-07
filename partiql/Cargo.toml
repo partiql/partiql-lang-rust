@@ -26,6 +26,7 @@ bench = false
 partiql-parser = { path = "../partiql-parser" }
 partiql-ast = { path = "../partiql-ast" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
+partiql-common = { path = "../partiql-common" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
