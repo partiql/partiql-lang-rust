@@ -119,9 +119,10 @@ impl<'input> From<LalrpopError<'input>> for ParseError<'input, BytePosition> {
             }
 
             // TODO do something with UnrecognizedEof.expected
-            lalrpop_util::ParseError::UnrecognizedEof { expected: _, .. } => {
-                ParseError::UnexpectedEndOfInput
-            }
+            lalrpop_util::ParseError::UnrecognizedEof {
+                location,
+                expected: _,
+            } => ParseError::UnexpectedEndOfInput(location.into()),
 
             lalrpop_util::ParseError::ExtraToken {
                 token: (start, token, end),
@@ -769,7 +770,10 @@ mod tests {
             assert!(res.is_err());
             let err_data = res.unwrap_err();
             assert_eq!(1, err_data.errors.len());
-            assert_eq!(err_data.errors[0], ParseError::UnexpectedEndOfInput);
+            assert_eq!(
+                err_data.errors[0],
+                ParseError::UnexpectedEndOfInput(BytePosition::from(6))
+            );
         }
 
         #[test]

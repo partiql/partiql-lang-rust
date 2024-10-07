@@ -50,7 +50,7 @@ where
 
     /// There were not enough tokens to complete a parse
     #[error("Unexpected end of input")]
-    UnexpectedEndOfInput,
+    UnexpectedEndOfInput(Loc),
 
     /// An otherwise un-categorized error occurred
     #[error("Unknown parse error at `{}`", _0)]
@@ -83,14 +83,14 @@ where
     Loc: Display,
 {
     /// Maps an `ParserError<Loc>` to `ParserError<Loc2>` by applying a function to each variant
-    pub fn map_loc<F, Loc2>(self, tx: F) -> ParseError<'input, Loc2>
+    pub fn map_loc<F, Loc2>(self, mut tx: F) -> ParseError<'input, Loc2>
     where
         Loc2: Display,
         F: FnMut(Loc) -> Loc2,
     {
         match self {
             ParseError::SyntaxError(l) => ParseError::SyntaxError(l.map_loc(tx)),
-            ParseError::UnexpectedEndOfInput => ParseError::UnexpectedEndOfInput,
+            ParseError::UnexpectedEndOfInput(l) => ParseError::UnexpectedEndOfInput((tx)(l)),
             ParseError::UnexpectedToken(l) => ParseError::UnexpectedToken(l.map_loc(tx)),
             ParseError::LexicalError(l) => ParseError::LexicalError(l.map_loc(tx)),
             ParseError::IllegalState(s) => ParseError::IllegalState(s),
