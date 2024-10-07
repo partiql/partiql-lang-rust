@@ -28,13 +28,10 @@ rust_decimal = { version = "1.36.0", default-features = false, features = ["std"
 rust_decimal_macros = "1.36"
 
 time = { version = "0.3", features = ["macros"] }
-once_cell = "1"
-regex = "1.10"
 
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
-criterion = "0.5"
 
 [features]
 default = []

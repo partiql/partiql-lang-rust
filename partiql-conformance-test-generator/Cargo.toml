@@ -21,7 +21,6 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-walkdir = "2.5"
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 codegen = "0.2"
 Inflector = "0.11"

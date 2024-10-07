@@ -31,8 +31,6 @@ partiql-common = { path = "../partiql-common", version = "0.11.*" }
 thiserror = "1.0"
 
 num-traits = "0.2"
-num-bigint = "0.4"
-bigdecimal = "0.4"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 
 bitflags = "2"

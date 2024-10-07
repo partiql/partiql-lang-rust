@@ -22,9 +22,7 @@ bench = false
 
 [dependencies]
 partiql-common = { path = "../partiql-common", version = "0.11.*" }
-ordered-float = "4"
 itertools = "0.13"
-unicase = "2.7"
 
 miette = { version = "7", features = ["fancy"] }
 thiserror = "1"
@@ -34,4 +32,3 @@ indexmap = "2.5"
 derivative = "2.2"
 
 [dev-dependencies]
-criterion = "0.5"

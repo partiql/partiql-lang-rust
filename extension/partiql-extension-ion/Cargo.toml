@@ -36,7 +36,6 @@ thiserror = "1.0"
 delegate = "0.13"
 
 [dev-dependencies]
-criterion = "0.5"
 
 [features]
 default = []

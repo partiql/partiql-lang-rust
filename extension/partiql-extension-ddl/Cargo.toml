@@ -30,7 +30,6 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 indexmap = "2.5"
 
 [dev-dependencies]
-criterion = "0.5"
 
 [features]
 default = []
