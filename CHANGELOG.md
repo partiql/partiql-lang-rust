@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING* partiql-parser: Added a source location to `ParseError::UnexpectedEndOfInput`
+- partiql-eval: Fixed behavior of comparison and `BETWEEN` operations w.r.t. type mismatches
 
 ### Added
 - partiql-value: Pretty-printing of `Value` via `ToPretty` trait
