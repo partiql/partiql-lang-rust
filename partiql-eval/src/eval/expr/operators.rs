@@ -307,6 +307,34 @@ impl BindEvalExpr for EvalOpBinary {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct BetweenArgChecker<const STRICT: bool, OnMissing: ArgShortCircuit> {
+    check: PhantomData<DefaultArgChecker<STRICT, OnMissing>>,
+}
+
+impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
+    for BetweenArgChecker<STRICT, OnMissing>
+{
+    #[inline]
+    fn arg_check<'a>(
+        typ: &PartiqlShape,
+        arg: Cow<'a, Value>,
+    ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
+        DefaultArgChecker::<{ STRICT }, OnMissing>::arg_check(typ, arg)
+    }
+
+    fn validate_args(args: &[Cow<'_, Value>]) -> Result<(), Value> {
+        if args.len() == 3
+            && args[0].is_comparable_to(&args[1])
+            && args[0].is_comparable_to(&args[2])
+        {
+            Ok(())
+        } else {
+            Err(OnMissing::propagate())
+        }
+    }
+}
+
 /// Represents an evaluation `PartiQL` `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EvalBetweenExpr {}
@@ -317,11 +345,13 @@ impl BindEvalExpr for EvalBetweenExpr {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
-        TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
-            types,
-            args,
-            |value, from, to| value.gteq(from).and(&value.lteq(to)),
-        )
+        TernaryValueExpr::create_checked::<
+            { STRICT },
+            BetweenArgChecker<{ STRICT }, PropagateMissing<true>>,
+            _,
+        >(types, args, |value, from, to| {
+            value.gteq(from).and(&value.lteq(to))
+        })
     }
 }
 
