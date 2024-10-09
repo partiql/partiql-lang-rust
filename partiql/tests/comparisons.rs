@@ -3,7 +3,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use partiql_eval::eval::Evaluated;
 use partiql_eval::plan::EvaluationMode;
-use partiql_value::{Comparable, DateTime, Value};
+use partiql_value::{Comparable, Value};
 
 mod common;
 

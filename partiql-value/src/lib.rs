@@ -27,7 +27,7 @@ pub use list::*;
 pub use pretty::*;
 pub use tuple::*;
 
-use partiql_common::pretty::{PrettyDoc, ToPretty, ToPrettyResult};
+use partiql_common::pretty::ToPretty;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
