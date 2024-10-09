@@ -1,10 +1,8 @@
 use crate::{Bag, DateTime, List, Tuple, Value};
 use partiql_common::pretty::{
-    pretty_prefixed_doc, pretty_seq, pretty_surrounded, PrettyDoc, ToPretty, ToPrettyResult,
-    PRETTY_INDENT_MINOR_NEST,
+    pretty_prefixed_doc, pretty_seq, pretty_surrounded, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
 };
-use pretty::{Arena, DocAllocator, DocBuilder, Pretty};
-use std::io::Write;
+use pretty::{DocAllocator, DocBuilder};
 
 impl PrettyDoc for Value {
     #[inline]

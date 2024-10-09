@@ -4,7 +4,7 @@ use partiql_common::pretty::{
     pretty_seperated_doc, pretty_seq, pretty_seq_doc, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
     PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST,
 };
-use pretty::{DocAllocator, DocBuilder, Pretty};
+use pretty::{DocAllocator, DocBuilder};
 impl<T> PrettyDoc for AstNode<T>
 where
     T: PrettyDoc,

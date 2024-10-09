@@ -2,7 +2,6 @@ use itertools::Itertools;
 use partiql_ast::ast::{AstNode, TopLevelQuery};
 use partiql_common::pretty::ToPretty;
 use partiql_parser::ParserResult;
-use partiql_value::Value::Decimal;
 use partiql_value::{bag, list, tuple, DateTime, Value};
 use rust_decimal::prelude::FromPrimitive;
 use time::macros::{date, datetime, offset, time};
