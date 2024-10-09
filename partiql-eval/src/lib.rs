@@ -741,6 +741,9 @@ mod tests {
         // left part of AND evaluates to false
         eval_between_op(Value::from(1), Value::from(2), Null, Value::from(false));
         eval_between_op(Value::from(1), Value::from(2), Missing, Value::from(false));
+        // right part of AND evaluates to false
+        eval_between_op(Value::from(2), Null, Value::from(1), Value::from(false));
+        eval_between_op(Value::from(2), Missing, Value::from(1), Value::from(false));
     }
 
     #[test]

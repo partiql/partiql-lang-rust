@@ -1,6 +1,7 @@
 use crate::eval::eval_expr_wrapper::{
     ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr, DefaultArgChecker,
-    ExecuteEvalExpr, PropagateMissing, PropagateNull, TernaryValueExpr, UnaryValueExpr,
+    ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull, TernaryValueExpr,
+    UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -307,19 +308,17 @@ impl BindEvalExpr for EvalOpBinary {
 }
 
 #[derive(Debug)]
-pub(crate) struct BetweenArgChecker<const STRICT: bool, OnMissing: ArgShortCircuit> {
-    check: PhantomData<DefaultArgChecker<STRICT, OnMissing>>,
+pub(crate) struct BetweenArgChecker<const STRICT: bool> {
+    check: PhantomData<NullArgChecker>,
 }
 
-impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
-    for BetweenArgChecker<STRICT, OnMissing>
-{
+impl<const STRICT: bool> ArgChecker for BetweenArgChecker<STRICT> {
     #[inline]
     fn arg_check<'a>(
         typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
-        DefaultArgChecker::<{ STRICT }, OnMissing>::arg_check(typ, arg)
+        NullArgChecker::arg_check(typ, arg)
     }
 
     fn validate_args(args: &[Cow<'_, Value>]) -> Result<(), Value> {
@@ -329,7 +328,7 @@ impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
         {
             Ok(())
         } else {
-            Err(OnMissing::propagate())
+            Err(Value::Missing)
         }
     }
 }
@@ -344,13 +343,11 @@ impl BindEvalExpr for EvalBetweenExpr {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
-        TernaryValueExpr::create_checked::<
-            { STRICT },
-            BetweenArgChecker<{ STRICT }, PropagateMissing<true>>,
-            _,
-        >(types, args, |value, from, to| {
-            value.gteq(from).and(&value.lteq(to))
-        })
+        TernaryValueExpr::create_checked::<{ STRICT }, BetweenArgChecker<{ STRICT }>, _>(
+            types,
+            args,
+            |value, from, to| value.gteq(from).and(&value.lteq(to)),
+        )
     }
 }
 
