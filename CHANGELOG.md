@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-parser: Added a source location to `ParseError::UnexpectedEndOfInput`
 
 ### Added
+- partiql-value: Pretty-printing of `Value` via `ToPretty` trait
 
 ### Removed
 

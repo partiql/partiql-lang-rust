@@ -1,7 +1,10 @@
 use itertools::Itertools;
 use partiql_ast::ast::{AstNode, TopLevelQuery};
-use partiql_ast::pretty::ToPretty;
+use partiql_common::pretty::ToPretty;
 use partiql_parser::ParserResult;
+use partiql_value::{bag, list, tuple, DateTime, Value};
+use rust_decimal::prelude::FromPrimitive;
+use time::macros::{date, datetime, offset, time};
 
 #[track_caller]
 #[inline]
@@ -49,6 +52,100 @@ fn pretty_print_roundtrip_test(statement_ast: &AstNode<TopLevelQuery>) {
     let pretty2 = reparsed.unwrap().ast.to_pretty_string(40).unwrap();
 
     assert_eq!(pretty, pretty2);
+}
+
+#[track_caller]
+#[inline]
+fn pretty_print_value_test(name: &str, value: &Value) {
+    pretty_print_value_output_test(name, value);
+    pretty_print_value_roundtrip_test(value);
+}
+
+#[track_caller]
+fn pretty_print_value_output_test(name: &str, value: &Value) {
+    let doc = [180, 120, 80, 40, 30, 20, 10]
+        .into_iter()
+        .map(|w| {
+            let header = format!("{:-<w$}", "");
+            let ast = format!("{}\n", value.to_pretty_string(w).unwrap());
+            format!("{header}\n{ast}")
+        })
+        .join("\n");
+
+    let w = 200;
+    let header = format!("{:=<w$}", "");
+    let doc = format!("{header}\n\n{doc}");
+
+    insta::assert_snapshot!(name, doc)
+}
+
+#[track_caller]
+fn pretty_print_value_roundtrip_test(value: &Value) {
+    let pretty = value.to_pretty_string(40).unwrap();
+
+    let reparsed = parse(pretty.as_str());
+    assert!(reparsed.is_ok());
+
+    let pretty2 = reparsed.unwrap().ast.to_pretty_string(40).unwrap();
+
+    assert_eq!(pretty, pretty2);
+}
+
+#[test]
+fn pretty_val() {
+    let dec = Value::Decimal(Box::new(
+        rust_decimal::Decimal::from_f64(2.998e8).expect("deciaml"),
+    ));
+    let dt_d = Value::DateTime(Box::new(DateTime::Date(date!(2020 - 01 - 01))));
+    let dt_t = Value::DateTime(Box::new(DateTime::Time(time!(1:02:03.004_005_006))));
+    let dt_ttz = Value::DateTime(Box::new(DateTime::TimeWithTz(
+        time!(1:02:03.004_005_006),
+        offset!(UTC),
+    )));
+    let dt_ts = Value::DateTime(Box::new(DateTime::Timestamp(datetime!(2020-01-01 0:00 ))));
+    let dt_tstz = Value::DateTime(Box::new(DateTime::TimestampWithTz(
+        datetime!(2020-01-01 0:00 UTC),
+    )));
+    let blob = Value::Blob(Box::new("abcdef".as_bytes().into()));
+    let l_val = list!(
+        1,
+        2,
+        999.876,
+        dec,
+        dt_d,
+        dt_t,
+        dt_ttz,
+        dt_ts,
+        dt_tstz,
+        blob,
+        Value::Missing
+    );
+    let short_l_val = list!(1, 2, "skip a few", 99, 100);
+    let b_val = bag!(
+        tuple!(("n", 1)),
+        tuple!(("n", 2)),
+        tuple!(("n", 3)),
+        tuple!(("n", 4)),
+        tuple!(("n", 5)),
+        tuple!(("n", 6)),
+        tuple!(("n", 7)),
+        tuple!(("n", 8)),
+        tuple!(("n", 9)),
+        tuple!(("n", 10))
+    );
+    let t_val = tuple!(
+        ("foo", true),
+        ("-foo", false),
+        ("bar", 42),
+        ("baz", 3.14),
+        ("qux", "string"),
+        ("thud", Value::Null),
+        ("plugh", l_val),
+        ("xyzzy", b_val),
+        ("waldo", short_l_val)
+    )
+    .into();
+    pretty_print_value_test("pretty_val", &t_val);
 }
 
 #[test]

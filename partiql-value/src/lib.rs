@@ -18,11 +18,13 @@ use rust_decimal::{Decimal as RustDecimal, Decimal};
 mod bag;
 mod datetime;
 mod list;
+mod pretty;
 mod tuple;
 
 pub use bag::*;
 pub use datetime::*;
 pub use list::*;
+pub use pretty::*;
 pub use tuple::*;
 
 #[cfg(feature = "serde")]

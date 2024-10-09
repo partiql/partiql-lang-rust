@@ -26,6 +26,7 @@ bench = false
 partiql-parser = { path = "../partiql-parser" }
 partiql-ast = { path = "../partiql-ast" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
+partiql-common = { path = "../partiql-common" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-value = { path = "../partiql-value" }
 partiql-logical = { path = "../partiql-logical" }
@@ -39,6 +40,9 @@ insta = "1.40.0"
 thiserror = "1.0"
 
 itertools = "0.13"
+rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
+time = { version = "0.3", features = ["macros"] }
+
 criterion = "0.5"
 rand = "0.8"
 
