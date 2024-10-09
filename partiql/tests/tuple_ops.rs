@@ -1,4 +1,4 @@
-use crate::common::{compile, eval_query_with_catalog, evaluate, lower, parse, TestError};
+use crate::common::{eval_query_with_catalog, TestError};
 use assert_matches::assert_matches;
 use partiql_catalog::catalog::PartiqlCatalog;
 use partiql_catalog::extension::Extension;

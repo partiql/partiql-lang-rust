@@ -16,7 +16,6 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::{EvalErr, EvaluationError};
 use partiql_eval::eval::{BasicContext, Evaluated};
 use partiql_eval::plan::EvaluationMode;
-use partiql_parser::{Parsed, ParserResult};
 use partiql_value::{bag, tuple, DateTime, Value};
 
 use crate::common::{lower, parse, TestError};

@@ -95,9 +95,9 @@ pub fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult 
 
 #[track_caller]
 #[inline]
-pub fn eval_query_with_catalog<'a, 'b>(
+pub fn eval_query_with_catalog<'a>(
     statement: &'a str,
-    catalog: &'b dyn Catalog,
+    catalog: &dyn Catalog,
     mode: EvaluationMode,
 ) -> Result<Evaluated, TestError<'a>> {
     let parsed = parse(statement)?;

@@ -1,20 +1,13 @@
-use crate::common::{
-    compile, eval_query, eval_query_with_catalog, evaluate, lower, parse, TestError,
-};
+use crate::common::{eval_query, TestError};
 use assert_matches::assert_matches;
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
-use partiql_catalog::extension::Extension;
-use partiql_eval::eval::Evaluated;
 use partiql_eval::plan::EvaluationMode;
-use partiql_extension_value_functions::PartiqlValueFnExtension;
 use partiql_value::Value;
-use std::os::macos::raw::stat;
 
 mod common;
 
 #[track_caller]
 #[inline]
-pub fn eval<'a>(statement: &'a str) {
+pub fn eval(statement: &str) {
     dbg!(&statement);
     let res = eval_query(statement, EvaluationMode::Permissive);
     assert_matches!(res, Ok(_));
@@ -29,7 +22,7 @@ pub fn eval<'a>(statement: &'a str) {
 
 #[track_caller]
 #[inline]
-pub fn eval_op<'a>(op: &'a str) {
+pub fn eval_op(op: &str) {
     eval(&format!("1 {op} 'foo'"))
 }
 
