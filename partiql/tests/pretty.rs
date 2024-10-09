@@ -1,3 +1,4 @@
+use crate::common::parse;
 use itertools::Itertools;
 use partiql_ast::ast::{AstNode, TopLevelQuery};
 use partiql_common::pretty::ToPretty;
@@ -6,16 +7,12 @@ use partiql_value::{bag, list, tuple, DateTime, Value};
 use rust_decimal::prelude::FromPrimitive;
 use time::macros::{date, datetime, offset, time};
 
-#[track_caller]
-#[inline]
-fn parse(statement: &str) -> ParserResult<'_> {
-    partiql_parser::Parser::default().parse(statement)
-}
+mod common;
 
 #[track_caller]
 #[inline]
 fn pretty_print_test(name: &str, statement: &str) {
-    let res = parse(statement);
+    let res = common::parse(statement);
     assert!(res.is_ok());
     let res = res.unwrap();
 

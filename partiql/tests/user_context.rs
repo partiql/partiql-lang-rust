@@ -19,8 +19,10 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_parser::{Parsed, ParserResult};
 use partiql_value::{bag, tuple, DateTime, Value};
 
+use crate::common::{lower, parse, TestError};
 use partiql_logical as logical;
 
+mod common;
 #[derive(Debug)]
 pub struct UserCtxTestExtension {}
 
@@ -143,22 +145,6 @@ pub struct Counter {
 
 #[track_caller]
 #[inline]
-pub(crate) fn parse(statement: &str) -> ParserResult {
-    partiql_parser::Parser::default().parse(statement)
-}
-
-#[track_caller]
-#[inline]
-pub(crate) fn lower(
-    catalog: &dyn Catalog,
-    parsed: &Parsed<'_>,
-) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
-    let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
-    planner.lower(parsed).expect("lower")
-}
-
-#[track_caller]
-#[inline]
 pub(crate) fn evaluate(
     catalog: &dyn Catalog,
     logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
@@ -183,8 +169,9 @@ pub(crate) fn evaluate(
         Value::Missing
     }
 }
+
 #[test]
-fn test_context() {
+fn test_context() -> Result<(), TestError<'static>> {
     let expected: Value = bag![
         tuple![("foo", 1), ("bar", "id_1")],
         tuple![("foo", 0), ("bar", "id_2")],
@@ -201,7 +188,7 @@ fn test_context() {
     ext.load(&mut catalog).expect("extension load to succeed");
 
     let parsed = parse(query);
-    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
     let bindings = Default::default();
 
     let counter = Counter {
@@ -213,4 +200,6 @@ fn test_context() {
     assert!(out.is_bag());
     assert_eq!(&out, &expected);
     assert_eq!(*counter.data.borrow(), 0);
+
+    Ok(())
 }
