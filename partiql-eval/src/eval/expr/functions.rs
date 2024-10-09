@@ -1,4 +1,6 @@
-use crate::eval::eval_expr_wrapper::{evaluate_args, DefaultArgChecker, PropagateMissing};
+use crate::eval::eval_expr_wrapper::{
+    evaluate_and_validate_args, DefaultArgChecker, PropagateMissing,
+};
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
@@ -41,7 +43,12 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         let typ = PartiqlShapeBuilder::init_or_get().new_struct(StructType::new_any());
-        match evaluate_args::<{ STRICT }, Check<STRICT>, _>(&self.args, |_| &typ, bindings, ctx) {
+        match evaluate_and_validate_args::<{ STRICT }, Check<STRICT>, _>(
+            &self.args,
+            |_| &typ,
+            bindings,
+            ctx,
+        ) {
             ControlFlow::Break(v) => Cow::Owned(v),
             ControlFlow::Continue(args) => match self.plan.evaluate(&args, ctx.as_session()) {
                 Ok(v) => v,
