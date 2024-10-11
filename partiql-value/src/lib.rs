@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 use std::iter::Once;
@@ -65,7 +65,7 @@ impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.to_pretty_string(f.width().unwrap_or(80)) {
             Ok(pretty) => f.write_str(&pretty),
-            Err(err) => f.write_str("<internal value error occurred>"),
+            Err(_) => f.write_str("<internal value error occurred>"),
         }
     }
 }

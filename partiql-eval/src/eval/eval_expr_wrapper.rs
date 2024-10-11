@@ -94,6 +94,12 @@ pub(crate) enum ArgCheckControlFlow<B, C, R = B> {
     Propagate(R),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ArgValidateError {
+    pub(crate) message: String,
+    pub(crate) propagate: Value,
+}
+
 /// A type which performs argument checking during evaluation.
 pub(crate) trait ArgChecker: Debug {
     /// Check an argument against an expected type.
@@ -103,8 +109,8 @@ pub(crate) trait ArgChecker: Debug {
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>>;
 
     /// Validate all arguments.
-    fn validate_args(args: &[Cow<'_, Value>]) -> Result<(), Value> {
-        Ok(())
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
+        Ok(args)
     }
 }
 
@@ -362,17 +368,16 @@ where
         ControlFlow::Break(v)
     } else {
         // If `propagate` is `None`, then return result
-
-        match ArgC::validate_args(&result) {
-            Ok(_) => ControlFlow::Continue(result),
-            Err(value) => {
+        match ArgC::validate_args(result) {
+            Ok(result) => ControlFlow::Continue(result),
+            Err(err) => {
                 if STRICT {
-                    // TODO better error messages
-                    ctx.add_error(EvaluationError::IllegalState(
-                        "Arguments failed validation".to_string(),
-                    ))
+                    ctx.add_error(EvaluationError::IllegalState(format!(
+                        "Arguments failed validation: {}",
+                        err.message
+                    )))
                 }
-                ControlFlow::Break(value)
+                ControlFlow::Break(err.propagate)
             }
         }
     }

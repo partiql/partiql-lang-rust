@@ -1,7 +1,7 @@
 use crate::eval::eval_expr_wrapper::{
-    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr, DefaultArgChecker,
-    ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull, TernaryValueExpr,
-    UnaryValueExpr,
+    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, ArgValidateError, BinaryValueExpr,
+    DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull,
+    TernaryValueExpr, UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -162,11 +162,14 @@ impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
         DefaultArgChecker::<{ STRICT }, OnMissing>::arg_check(typ, arg)
     }
 
-    fn validate_args(args: &[Cow<'_, Value>]) -> Result<(), Value> {
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
         if args.len() == 2 && args[0].is_comparable_to(&args[1]) {
-            Ok(())
+            Ok(args)
         } else {
-            Err(OnMissing::propagate())
+            Err(ArgValidateError {
+                message: "data-type mismatch".to_string(),
+                propagate: OnMissing::propagate(),
+            })
         }
     }
 }
@@ -321,14 +324,17 @@ impl<const STRICT: bool> ArgChecker for BetweenArgChecker<STRICT> {
         NullArgChecker::arg_check(typ, arg)
     }
 
-    fn validate_args(args: &[Cow<'_, Value>]) -> Result<(), Value> {
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
         if args.len() == 3
             && args[0].is_comparable_to(&args[1])
             && args[0].is_comparable_to(&args[2])
         {
-            Ok(())
+            Ok(args)
         } else {
-            Err(Value::Missing)
+            Err(ArgValidateError {
+                message: "data-type mismatch".to_string(),
+                propagate: Value::Missing,
+            })
         }
     }
 }
