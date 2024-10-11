@@ -394,7 +394,7 @@ impl PrettyDoc for Lit {
             Lit::FloatLit(inner) => arena.text(inner.to_string()),
             Lit::DoubleLit(inner) => arena.text(inner.to_string()),
             Lit::BoolLit(inner) => arena.text(inner.to_string()),
-            Lit::IonStringLit(inner) => inner.pretty_doc(arena),
+            Lit::EmbeddedDocLit(inner) => inner.pretty_doc(arena), // TODO better pretty for embedded doc
             Lit::CharStringLit(inner) => inner.pretty_doc(arena),
             Lit::NationalCharStringLit(inner) => inner.pretty_doc(arena),
             Lit::BitStringLit(inner) => inner.pretty_doc(arena),
