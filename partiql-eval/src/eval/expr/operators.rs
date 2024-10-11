@@ -1,7 +1,7 @@
 use crate::eval::eval_expr_wrapper::{
-    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, BinaryValueExpr, DefaultArgChecker,
-    ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull, TernaryValueExpr,
-    UnaryValueExpr,
+    ArgCheckControlFlow, ArgChecker, ArgShortCircuit, ArgValidateError, BinaryValueExpr,
+    DefaultArgChecker, ExecuteEvalExpr, NullArgChecker, PropagateMissing, PropagateNull,
+    TernaryValueExpr, UnaryValueExpr,
 };
 
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
@@ -12,7 +12,7 @@ use partiql_types::{
     Static, StructType,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
+use partiql_value::{BinaryAnd, Comparable, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Formatter};
@@ -146,6 +146,34 @@ impl<const TARGET: bool, OnMissing: ArgShortCircuit> ArgChecker
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct ComparisonArgChecker<const STRICT: bool, OnMissing: ArgShortCircuit> {
+    check: PhantomData<DefaultArgChecker<STRICT, OnMissing>>,
+}
+
+impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
+    for ComparisonArgChecker<STRICT, OnMissing>
+{
+    #[inline]
+    fn arg_check<'a>(
+        typ: &PartiqlShape,
+        arg: Cow<'a, Value>,
+    ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
+        DefaultArgChecker::<{ STRICT }, OnMissing>::arg_check(typ, arg)
+    }
+
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
+        if args.len() == 2 && args[0].is_comparable_to(&args[1]) {
+            Ok(args)
+        } else {
+            Err(ArgValidateError {
+                message: "data-type mismatch".to_string(),
+                propagate: OnMissing::propagate(),
+            })
+        }
+    }
+}
+
 impl BindEvalExpr for EvalOpBinary {
     #[inline]
     fn bind<const STRICT: bool>(
@@ -157,6 +185,7 @@ impl BindEvalExpr for EvalOpBinary {
         type InCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateNull<false>>;
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         type EqCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<false>>;
+        type CompCheck<const STRICT: bool> = ComparisonArgChecker<STRICT, PropagateMissing<true>>;
         type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
 
         macro_rules! create {
@@ -174,6 +203,12 @@ impl BindEvalExpr for EvalOpBinary {
         macro_rules! equality {
             ($f:expr) => {
                 create!(EqCheck<STRICT>, [type_dynamic!(), type_dynamic!()], $f)
+            };
+        }
+
+        macro_rules! comparison {
+            ($f:expr) => {
+                create!(CompCheck<STRICT>, [type_dynamic!(), type_dynamic!()], $f)
             };
         }
 
@@ -195,10 +230,10 @@ impl BindEvalExpr for EvalOpBinary {
                 let wrap = EqualityValue::<false, Value>;
                 NullableEq::neq(&wrap(lhs), &wrap(rhs))
             }),
-            EvalOpBinary::Gt => equality!(NullableOrd::gt),
-            EvalOpBinary::Gteq => equality!(NullableOrd::gteq),
-            EvalOpBinary::Lt => equality!(NullableOrd::lt),
-            EvalOpBinary::Lteq => equality!(NullableOrd::lteq),
+            EvalOpBinary::Gt => comparison!(NullableOrd::gt),
+            EvalOpBinary::Gteq => comparison!(NullableOrd::gteq),
+            EvalOpBinary::Lt => comparison!(NullableOrd::lt),
+            EvalOpBinary::Lteq => comparison!(NullableOrd::lteq),
             EvalOpBinary::Add => math!(|lhs, rhs| lhs + rhs),
             EvalOpBinary::Sub => math!(|lhs, rhs| lhs - rhs),
             EvalOpBinary::Mul => math!(|lhs, rhs| lhs * rhs),
@@ -275,6 +310,35 @@ impl BindEvalExpr for EvalOpBinary {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct BetweenArgChecker<const STRICT: bool> {
+    check: PhantomData<NullArgChecker>,
+}
+
+impl<const STRICT: bool> ArgChecker for BetweenArgChecker<STRICT> {
+    #[inline]
+    fn arg_check<'a>(
+        typ: &PartiqlShape,
+        arg: Cow<'a, Value>,
+    ) -> ArgCheckControlFlow<Value, Cow<'a, Value>> {
+        NullArgChecker::arg_check(typ, arg)
+    }
+
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
+        if args.len() == 3
+            && args[0].is_comparable_to(&args[1])
+            && args[0].is_comparable_to(&args[2])
+        {
+            Ok(args)
+        } else {
+            Err(ArgValidateError {
+                message: "data-type mismatch".to_string(),
+                propagate: Value::Missing,
+            })
+        }
+    }
+}
+
 /// Represents an evaluation `PartiQL` `BETWEEN` operator, e.g. `x BETWEEN 10 AND 20`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EvalBetweenExpr {}
@@ -285,7 +349,7 @@ impl BindEvalExpr for EvalBetweenExpr {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
-        TernaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
+        TernaryValueExpr::create_checked::<{ STRICT }, BetweenArgChecker<{ STRICT }>, _>(
             types,
             args,
             |value, from, to| value.gteq(from).and(&value.lteq(to)),

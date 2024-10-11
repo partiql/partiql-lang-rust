@@ -16,11 +16,12 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::{EvalErr, EvaluationError};
 use partiql_eval::eval::{BasicContext, Evaluated};
 use partiql_eval::plan::EvaluationMode;
-use partiql_parser::{Parsed, ParserResult};
 use partiql_value::{bag, tuple, DateTime, Value};
 
+use crate::common::{lower, parse, TestError};
 use partiql_logical as logical;
 
+mod common;
 #[derive(Debug)]
 pub struct UserCtxTestExtension {}
 
@@ -115,21 +116,6 @@ impl Iterator for TestDataGen {
         Some(Err(Box::new(UserCtxError::Runtime)))
     }
 }
-#[track_caller]
-#[inline]
-pub(crate) fn parse(statement: &str) -> ParserResult {
-    partiql_parser::Parser::default().parse(statement)
-}
-
-#[track_caller]
-#[inline]
-pub(crate) fn lower(
-    catalog: &dyn Catalog,
-    parsed: &Parsed<'_>,
-) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
-    let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
-    planner.lower(parsed).expect("lower")
-}
 
 #[track_caller]
 #[inline]
@@ -156,7 +142,7 @@ pub(crate) fn evaluate(
 }
 
 #[test]
-fn test_context_bad_args_permissive() {
+fn test_context_bad_args_permissive() -> Result<(), TestError<'static>> {
     let query = "SELECT foo, bar from test_user_context(9) as data";
 
     let mut catalog = PartiqlCatalog::default();
@@ -164,7 +150,7 @@ fn test_context_bad_args_permissive() {
     ext.load(&mut catalog).expect("extension load to succeed");
 
     let parsed = parse(query);
-    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
     let bindings = Default::default();
 
     let ctx: [(String, &dyn Any); 0] = [];
@@ -178,9 +164,11 @@ fn test_context_bad_args_permissive() {
 
     assert!(out.is_ok());
     assert_eq!(out.unwrap().result, bag!(tuple!()).into());
+
+    Ok(())
 }
 #[test]
-fn test_context_bad_args_strict() {
+fn test_context_bad_args_strict() -> Result<(), TestError<'static>> {
     use assert_matches::assert_matches;
     let query = "SELECT foo, bar from test_user_context(9) as data";
 
@@ -189,7 +177,7 @@ fn test_context_bad_args_strict() {
     ext.load(&mut catalog).expect("extension load to succeed");
 
     let parsed = parse(query);
-    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
     let bindings = Default::default();
 
     let ctx: [(String, &dyn Any); 0] = [];
@@ -202,10 +190,12 @@ fn test_context_bad_args_strict() {
     assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
         assert_eq!(err.to_string(), "bad arguments")
     });
+
+    Ok(())
 }
 
 #[test]
-fn test_context_runtime_permissive() {
+fn test_context_runtime_permissive() -> Result<(), TestError<'static>> {
     let query = "SELECT foo, bar from test_user_context('counter') as data";
 
     let mut catalog = PartiqlCatalog::default();
@@ -213,7 +203,7 @@ fn test_context_runtime_permissive() {
     ext.load(&mut catalog).expect("extension load to succeed");
 
     let parsed = parse(query);
-    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
     let bindings = Default::default();
 
     let ctx: [(String, &dyn Any); 0] = [];
@@ -227,10 +217,11 @@ fn test_context_runtime_permissive() {
 
     assert!(out.is_ok());
     assert_eq!(out.unwrap().result, bag!(tuple!()).into());
+    Ok(())
 }
 
 #[test]
-fn test_context_runtime_strict() {
+fn test_context_runtime_strict() -> Result<(), TestError<'static>> {
     use assert_matches::assert_matches;
     let query = "SELECT foo, bar from test_user_context('counter') as data";
 
@@ -239,7 +230,7 @@ fn test_context_runtime_strict() {
     ext.load(&mut catalog).expect("extension load to succeed");
 
     let parsed = parse(query);
-    let lowered = lower(&catalog, &parsed.expect("parse"));
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
     let bindings = Default::default();
 
     let ctx: [(String, &dyn Any); 0] = [];
@@ -252,4 +243,6 @@ fn test_context_runtime_strict() {
     assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
         assert_eq!(err.to_string(), "runtime error")
     });
+
+    Ok(())
 }

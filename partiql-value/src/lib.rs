@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 
 use std::borrow::Cow;
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 use std::iter::Once;
@@ -27,6 +27,7 @@ pub use list::*;
 pub use pretty::*;
 pub use tuple::*;
 
+use partiql_common::pretty::ToPretty;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +59,15 @@ pub enum Value {
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
     // TODO: add other supported PartiQL values -- sexp
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.to_pretty_string(f.width().unwrap_or(80)) {
+            Ok(pretty) => f.write_str(&pretty),
+            Err(_) => f.write_str("<internal value error occurred>"),
+        }
+    }
 }
 
 impl ops::Add for &Value {

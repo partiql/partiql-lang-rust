@@ -94,6 +94,12 @@ pub(crate) enum ArgCheckControlFlow<B, C, R = B> {
     Propagate(R),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ArgValidateError {
+    pub(crate) message: String,
+    pub(crate) propagate: Value,
+}
+
 /// A type which performs argument checking during evaluation.
 pub(crate) trait ArgChecker: Debug {
     /// Check an argument against an expected type.
@@ -101,6 +107,11 @@ pub(crate) trait ArgChecker: Debug {
         typ: &PartiqlShape,
         arg: Cow<'a, Value>,
     ) -> ArgCheckControlFlow<Value, Cow<'a, Value>>;
+
+    /// Validate all arguments.
+    fn validate_args(args: Vec<Cow<'_, Value>>) -> Result<Vec<Cow<'_, Value>>, ArgValidateError> {
+        Ok(args)
+    }
 }
 
 /// How to handle argument mismatch and `MISSING` propagation
@@ -273,7 +284,12 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
             ControlFlow::Break(Missing)
         };
 
-        match evaluate_args::<{ STRICT }, ArgC, _>(&self.args, |n| &self.types[n], bindings, ctx) {
+        match evaluate_and_validate_args::<{ STRICT }, ArgC, _>(
+            &self.args,
+            |n| &self.types[n],
+            bindings,
+            ctx,
+        ) {
             ControlFlow::Continue(result) => match result.try_into() {
                 Ok(a) => ControlFlow::Continue(a),
                 Err(args) => err_arg_count_mismatch(args),
@@ -283,7 +299,7 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
     }
 }
 
-pub(crate) fn evaluate_args<
+pub(crate) fn evaluate_and_validate_args<
     'a,
     'c,
     't,
@@ -352,7 +368,18 @@ where
         ControlFlow::Break(v)
     } else {
         // If `propagate` is `None`, then return result
-        ControlFlow::Continue(result)
+        match ArgC::validate_args(result) {
+            Ok(result) => ControlFlow::Continue(result),
+            Err(err) => {
+                if STRICT {
+                    ctx.add_error(EvaluationError::IllegalState(format!(
+                        "Arguments failed validation: {}",
+                        err.message
+                    )))
+                }
+                ControlFlow::Break(err.propagate)
+            }
+        }
     }
 }
 
