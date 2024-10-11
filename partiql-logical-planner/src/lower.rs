@@ -1933,7 +1933,7 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
         Lit::FloatLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
         Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
         Lit::BoolLit(b) => Value::Boolean(*b),
-        Lit::IonStringLit(s) => parse_embedded_ion_str(s)?,
+        Lit::EmbeddedDocLit(s) => parse_embedded_ion_str(s)?,
         Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::BitStringLit(_) => {
@@ -1978,6 +1978,7 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
     Ok(val)
 }
 
+// TODO
 fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
     fn lit_err(literal: &str, err: impl std::error::Error) -> AstTransformError {
         AstTransformError::Literal {
