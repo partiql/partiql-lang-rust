@@ -211,7 +211,9 @@ mod tests {
         #[test]
         fn ion() {
             parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo"]` "#);
-            parse!(r#" `[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]` "#);
+            parse!(
+                r#" ```[{'a':1, 'b':1}, {'a':2}, "foo", 'a`b', "a`b", '''`s''', {{"a`b"}}]``` "#
+            );
             parse!(
                 r#" `{'a':1, // comment ' "
                       'b':1} ` "#
@@ -798,7 +800,7 @@ mod tests {
             assert_eq!(
                 err_data.errors[1],
                 ParseError::LexicalError(Located {
-                    inner: LexError::UnterminatedIonLiteral,
+                    inner: LexError::UnterminatedDocLiteral,
                     location: Location {
                         start: BytePosition::from(1),
                         end: BytePosition::from(4),
