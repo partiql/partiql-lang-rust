@@ -46,7 +46,7 @@ time = { version = "0.3", features = ["macros"] }
 criterion = "0.5"
 rand = "0.8"
 
-assert_matches = "1.5"
+assert_matches = "1"
 
 [[bench]]
 name = "bench_eval_multi_like"

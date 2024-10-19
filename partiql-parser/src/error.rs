@@ -23,8 +23,8 @@ pub enum LexError<'input> {
     #[error("Lexing error: invalid input `{}`", .0)]
     InvalidInput(Cow<'input, str>),
     /// Embedded Ion value is not properly terminated.
-    #[error("Lexing error: unterminated ion literal")]
-    UnterminatedIonLiteral,
+    #[error("Lexing error: unterminated embedded document literal")]
+    UnterminatedDocLiteral,
     /// Comment is not properly terminated.
     #[error("Lexing error: unterminated comment")]
     UnterminatedComment,
