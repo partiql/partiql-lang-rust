@@ -3,14 +3,14 @@ use partiql_common::syntax::location::{ByteOffset, BytePosition, ToLocated};
 use crate::error::{LexError, ParseError};
 
 mod comment;
-mod embedded_ion;
+mod embedded_doc;
 mod partiql;
 
 pub use comment::*;
-pub use embedded_ion::*;
+pub use embedded_doc::*;
 pub use partiql::*;
 
-/// A 3-tuple of (start, `Tok`, end) denoting a token and it start and end offsets.
+/// A 3-tuple of (start, `Tok`, end) denoting a token and its start and end offsets.
 pub type Spanned<Tok, Loc> = (Loc, Tok, Loc);
 /// A [`Result`] of a [`Spanned`] token.
 pub(crate) type SpannedResult<Tok, Loc, Broke> = Result<Spanned<Tok, Loc>, Spanned<Broke, Loc>>;
@@ -72,6 +72,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use partiql_common::syntax::line_offset_tracker::{LineOffsetError, LineOffsetTracker};
     use partiql_common::syntax::location::{
         CharOffset, LineAndCharPosition, LineAndColumn, LineOffset, Located, Location,
@@ -126,7 +127,7 @@ mod tests {
         let ion_value = r"    `{'input':1,  'b':1}`--comment ";
 
         let mut offset_tracker = LineOffsetTracker::default();
-        let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
+        let ion_lexer = EmbeddedDocLexer::new(ion_value.trim(), &mut offset_tracker);
         assert_eq!(ion_lexer.into_iter().count(), 1);
         assert_eq!(offset_tracker.num_lines(), 1);
 
@@ -134,9 +135,7 @@ mod tests {
         let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
 
         let tok = lexer.next().unwrap().unwrap();
-        assert!(
-            matches!(tok, (ByteOffset(5), Token::Ion(ion_str), ByteOffset(24)) if ion_str == "{'input':1,  'b':1}")
-        );
+        assert_matches!(tok, (ByteOffset(4), Token::EmbeddedDoc(ion_str), ByteOffset(25)) if ion_str == "{'input':1,  'b':1}");
         let tok = lexer.next().unwrap().unwrap();
         assert!(
             matches!(tok, (ByteOffset(25), Token::CommentLine(cmt_str), ByteOffset(35)) if cmt_str == "--comment ")
@@ -145,25 +144,45 @@ mod tests {
 
     #[test]
     fn ion() {
-        let ion_value = r#" `{'input' // comment ' "
+        let embedded_ion_doc = r#" `{'input' // comment ' "
                        :1, /* 
                                comment 
                               */
                       'b':1}` "#;
-
         let mut offset_tracker = LineOffsetTracker::default();
-        let ion_lexer = EmbeddedIonLexer::new(ion_value.trim(), &mut offset_tracker);
-        assert_eq!(ion_lexer.into_iter().count(), 1);
-        assert_eq!(offset_tracker.num_lines(), 5);
+        let mut lexer = PartiqlLexer::new(embedded_ion_doc, &mut offset_tracker);
 
+        let next_tok = lexer.next();
+        let tok = next_tok.unwrap().unwrap();
+        assert_matches!(tok, (ByteOffset(1), Token::EmbeddedDoc(ion_str), ByteOffset(159)) if ion_str == embedded_ion_doc.trim().trim_matches('`'));
+        assert_eq!(offset_tracker.num_lines(), 5);
+    }
+
+    #[test]
+    fn ion_5_backticks() {
+        let embedded_ion_doc = r#" `````{'input' // comment ' "
+                       :1, /*
+                               comment
+                              */
+                      'b':1}````` "#;
         let mut offset_tracker = LineOffsetTracker::default();
-        let mut lexer = PartiqlLexer::new(ion_value, &mut offset_tracker);
+        let mut lexer = PartiqlLexer::new(embedded_ion_doc, &mut offset_tracker);
 
-        let tok = lexer.next().unwrap().unwrap();
-        assert!(
-            matches!(tok, (ByteOffset(2), Token::Ion(ion_str), ByteOffset(158)) if ion_str == ion_value.trim().trim_matches('`'))
-        );
+        let next_tok = lexer.next();
+        let tok = next_tok.unwrap().unwrap();
+        assert_matches!(tok, (ByteOffset(1), Token::EmbeddedDoc(ion_str), ByteOffset(165)) if ion_str == embedded_ion_doc.trim().trim_matches('`'));
         assert_eq!(offset_tracker.num_lines(), 5);
+    }
+
+    #[test]
+    fn empty_doc() {
+        let embedded_empty_doc = r#" `````` "#;
+        let mut offset_tracker = LineOffsetTracker::default();
+        let mut lexer = PartiqlLexer::new(embedded_empty_doc, &mut offset_tracker);
+
+        let next_tok = lexer.next();
+        let tok = next_tok.unwrap().unwrap();
+        assert_matches!(tok, (ByteOffset(1), Token::EmbeddedDoc(empty_str), ByteOffset(7)) if empty_str.is_empty());
     }
 
     #[test]
@@ -188,14 +207,14 @@ mod tests {
         let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = nonnested_lex.collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
-        assert!(matches!(
+        assert_matches!(
             error,
             (
                 ByteOffset(187),
                 LexError::UnterminatedComment,
                 ByteOffset(189)
             )
-        ));
+        );
         assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
     }
 
@@ -320,16 +339,16 @@ mod tests {
         lexer.count();
 
         let last = offset_tracker.at(query, ByteOffset(query.len() as u32).into());
-        assert!(matches!(
+        assert_matches!(
             last,
             Ok(LineAndCharPosition {
                 line: LineOffset(4),
                 char: CharOffset(10)
             })
-        ));
+        );
 
         let overflow = offset_tracker.at(query, ByteOffset(1 + query.len() as u32).into());
-        assert!(matches!(overflow, Err(LineOffsetError::EndOfInput)));
+        assert_matches!(overflow, Err(LineOffsetError::EndOfInput));
     }
 
     #[test]
@@ -433,11 +452,11 @@ mod tests {
             error.to_string(),
             r"Lexing error: invalid input `#` at `(b7..b8)`"
         );
-        assert!(matches!(error,
+        assert_matches!(error,
             ParseError::LexicalError(Located {
                 inner: LexError::InvalidInput(s),
                 location: Location{start: BytePosition(ByteOffset(7)), end: BytePosition(ByteOffset(8))}
-            }) if s == "#"));
+            }) if s == "#");
         assert_eq!(offset_tracker.num_lines(), 1);
         assert_eq!(
             LineAndColumn::from(offset_tracker.at(query, 7.into()).unwrap()),
@@ -446,31 +465,12 @@ mod tests {
     }
 
     #[test]
-    fn err_unterminated_ion() {
+    fn unterminated_ion() {
         let query = r#" ` "fooo` "#;
         let mut offset_tracker = LineOffsetTracker::default();
         let toks: Result<Vec<_>, _> = PartiqlLexer::new(query, &mut offset_tracker).collect();
-        assert!(toks.is_err());
-        let error = toks.unwrap_err();
-
-        assert!(matches!(
-            error,
-            ParseError::LexicalError(Located {
-                inner: LexError::UnterminatedIonLiteral,
-                location: Location {
-                    start: BytePosition(ByteOffset(1)),
-                    end: BytePosition(ByteOffset(10))
-                }
-            })
-        ));
-        assert_eq!(
-            error.to_string(),
-            "Lexing error: unterminated ion literal at `(b1..b10)`"
-        );
-        assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(1)).unwrap()),
-            LineAndColumn::new(1, 2).unwrap()
-        );
+        // ion is not eagerly parsed, so unterminated ion does not cause a lex/parse error
+        assert!(toks.is_ok());
     }
 
     #[test]
@@ -480,7 +480,7 @@ mod tests {
         let toks: Result<Vec<_>, _> = PartiqlLexer::new(query, &mut offset_tracker).collect();
         assert!(toks.is_err());
         let error = toks.unwrap_err();
-        assert!(matches!(
+        assert_matches!(
             error,
             ParseError::LexicalError(Located {
                 inner: LexError::UnterminatedComment,
@@ -489,7 +489,7 @@ mod tests {
                     end: BytePosition(ByteOffset(11))
                 }
             })
-        ));
+        );
         assert_eq!(
             error.to_string(),
             "Lexing error: unterminated comment at `(b1..b11)`"
@@ -501,21 +501,12 @@ mod tests {
     }
 
     #[test]
-    fn err_unterminated_ion_comment() {
+    fn unterminated_ion_comment() {
         let query = r" `/*12345678`";
         let mut offset_tracker = LineOffsetTracker::default();
-        let ion_lexer = EmbeddedIonLexer::new(query, &mut offset_tracker);
+        let ion_lexer = EmbeddedDocLexer::new(query, &mut offset_tracker);
         let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = ion_lexer.collect();
-        assert!(toks.is_err());
-        let error = toks.unwrap_err();
-        assert!(matches!(
-            error,
-            (ByteOffset(2), LexError::UnterminatedComment, ByteOffset(13))
-        ));
-        assert_eq!(error.1.to_string(), "Lexing error: unterminated comment");
-        assert_eq!(
-            LineAndColumn::from(offset_tracker.at(query, BytePosition::from(2)).unwrap()),
-            LineAndColumn::new(1, 3).unwrap()
-        );
+        // ion is not eagerly parsed, so unterminated ion does not cause a lex/parse error
+        assert!(toks.is_ok());
     }
 }
