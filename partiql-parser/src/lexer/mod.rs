@@ -10,7 +10,7 @@ pub use comment::*;
 pub use embedded_doc::*;
 pub use partiql::*;
 
-/// A 3-tuple of (start, `Tok`, end) denoting a token and it's start and end offsets.
+/// A 3-tuple of (start, `Tok`, end) denoting a token and its start and end offsets.
 pub type Spanned<Tok, Loc> = (Loc, Tok, Loc);
 /// A [`Result`] of a [`Spanned`] token.
 pub(crate) type SpannedResult<Tok, Loc, Broke> = Result<Spanned<Tok, Loc>, Spanned<Broke, Loc>>;
@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn err_unterminated_ion() {
+    fn unterminated_ion() {
         let query = r#" ` "fooo` "#;
         let mut offset_tracker = LineOffsetTracker::default();
         let toks: Result<Vec<_>, _> = PartiqlLexer::new(query, &mut offset_tracker).collect();
@@ -501,11 +501,12 @@ mod tests {
     }
 
     #[test]
-    fn err_unterminated_ion_comment() {
+    fn unterminated_ion_comment() {
         let query = r" `/*12345678`";
         let mut offset_tracker = LineOffsetTracker::default();
         let ion_lexer = EmbeddedDocLexer::new(query, &mut offset_tracker);
         let toks: Result<Vec<_>, Spanned<LexError<'_>, ByteOffset>> = ion_lexer.collect();
+        // ion is not eagerly parsed, so unterminated ion does not cause a lex/parse error
         assert!(toks.is_ok());
     }
 }
