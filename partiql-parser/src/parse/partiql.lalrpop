@@ -1197,7 +1197,7 @@ ExcludePathStep: ast::ExcludePathStep = {
 Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
-    <LiteralIon>,
+    <LiteralEmbeddedDoc>,
     <TypedLiteral>,
 }
 
@@ -1250,10 +1250,12 @@ LiteralNumber: ast::Lit = {
 	         })
     },
 }
+
 #[inline]
-LiteralIon: ast::Lit = {
-    <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
+LiteralEmbeddedDoc: ast::Lit = {
+    <ion:"EmbeddedDoc"> => ast::Lit::EmbeddedDocLit(ion.to_owned()),
 }
+
 
 #[inline]
 TypeKeywordStr: &'static str = {
@@ -1425,7 +1427,7 @@ extern {
         "Real" => lexer::Token::Real(<&'input str>),
         "ExpReal" => lexer::Token::ExpReal(<&'input str>),
         "String" => lexer::Token::String(<&'input str>),
-        "Ion" => lexer::Token::Ion(<&'input str>),
+        "EmbeddedDoc" => lexer::Token::EmbeddedDoc(<&'input str>),
 
         // Keywords
         "ALL" => lexer::Token::All,
