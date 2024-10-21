@@ -444,7 +444,7 @@ pub enum Lit {
     #[visit(skip)]
     BoolLit(bool),
     #[visit(skip)]
-    EmbeddedDocLit(String),
+    EmbeddedDocLit(String, Type),
     #[visit(skip)]
     CharStringLit(String),
     #[visit(skip)]

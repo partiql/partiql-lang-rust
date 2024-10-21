@@ -1301,7 +1301,15 @@ LiteralNumber: ast::Lit = {
 
 #[inline]
 LiteralEmbeddedDoc: ast::Lit = {
-    <ion:"EmbeddedDoc"> => ast::Lit::EmbeddedDocLit(ion.to_owned()),
+    <ion:"EmbeddedDoc"> => {
+        let ion_typ = ast::Type::CustomType(ast::CustomType {
+            parts: vec![ast::CustomTypePart::Name(ast::SymbolPrimitive {
+                value: "Ion".to_string(),
+                case: ast::CaseSensitivity::CaseInsensitive,
+            })],
+        });
+        ast::Lit::EmbeddedDocLit(ion.to_owned(), ion_typ)
+    }
 }
 
 
