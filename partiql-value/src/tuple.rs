@@ -9,7 +9,8 @@ use std::vec;
 
 use unicase::UniCase;
 
-use crate::{BindingsName, EqualityValue, NullSortedValue, NullableEq, Value};
+use crate::sort::NullSortedValue;
+use crate::{BindingsName, EqualityValue, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
