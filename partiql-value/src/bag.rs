@@ -8,7 +8,8 @@ use std::hash::{Hash, Hasher};
 
 use std::{slice, vec};
 
-use crate::{EqualityValue, List, NullSortedValue, NullableEq, Value};
+use crate::sort::NullSortedValue;
+use crate::{EqualityValue, List, NullableEq, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
