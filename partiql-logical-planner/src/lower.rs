@@ -1933,7 +1933,7 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
         Lit::FloatLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
         Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
         Lit::BoolLit(b) => Value::Boolean(*b),
-        Lit::EmbeddedDocLit(s) => parse_embedded_ion_str(s)?,
+        Lit::EmbeddedDocLit(s, _typ) => parse_embedded_ion_str(s)?,
         Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::BitStringLit(_) => {
