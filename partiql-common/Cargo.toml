@@ -27,6 +27,10 @@ rust_decimal = { version = "1.36", default-features = false, features = ["std"] 
 smallvec = { version = "1" }
 thiserror = "1"
 
+dyn-clone = "1"
+dyn-hash = "0.2"
+typetag = "0.2"
+
 [features]
 default = []
 serde = [

@@ -23,6 +23,9 @@ impl From<Value> for Lit {
             Value::List(list) => (*list).into(),
             Value::Bag(bag) => (*bag).into(),
             Value::Tuple(tuple) => (*tuple).into(),
+            Value::EmbeddedDoc(_) => {
+                todo!("Value to Lit: EmbeddedDoc")
+            }
         }
     }
 }

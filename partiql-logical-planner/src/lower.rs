@@ -35,6 +35,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::Catalog;
+use partiql_common::embedded_document::{DynEmbeddedDocumentTypeFactory, LazyEmbeddedDocument};
 use partiql_common::node::NodeId;
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;

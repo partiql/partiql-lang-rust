@@ -1,11 +1,48 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod common;
 pub mod decode;
 pub mod encode;
 
 pub use common::Encoding;
+
+pub mod embedded {
+    use partiql_common::embedded_document::{EmbeddedDocument, EmbeddedDocumentType};
+    use std::fmt::{Debug, Formatter};
+    use std::hash::Hasher;
+
+    #[cfg(feature = "serde")]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Default, Copy, Clone)]
+    pub struct EmbeddedIonType {}
+    impl EmbeddedDocumentType for EmbeddedIonType {
+        type Doc = EmbeddedIon;
+
+        fn construct(&self, bytes: &[u8]) -> Self::Doc {
+            EmbeddedIon::Unparsed(bytes.into())
+        }
+    }
+
+    #[derive(Hash, Clone)]
+    #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+    pub enum EmbeddedIon {
+        Unparsed(Vec<u8>),
+    }
+
+    impl Debug for EmbeddedIon {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            todo!()
+        }
+    }
+
+    #[cfg_attr(feature = "serde", typetag::serde)]
+    impl EmbeddedDocument for EmbeddedIon {}
+}
 
 #[cfg(test)]
 mod tests {

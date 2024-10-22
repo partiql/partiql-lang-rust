@@ -132,6 +132,9 @@ where
             Value::List(l) => self.encode_list(l.as_ref()),
             Value::Bag(b) => self.encode_bag(b.as_ref()),
             Value::Tuple(t) => self.encode_tuple(t.as_ref()),
+            Value::EmbeddedDoc(_) => {
+                todo!("ion encode embedded doc")
+            }
         }
     }
 
