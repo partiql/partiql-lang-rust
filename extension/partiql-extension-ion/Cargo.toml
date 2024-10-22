@@ -22,6 +22,10 @@ bench = false
 
 [dependencies]
 partiql-value = { path = "../../partiql-value", version = "0.11.*" }
+partiql-common = { path = "../../partiql-common", version = "0.11.*" }
+
+serde = { version = "1", features = ["derive"], optional = true }
+
 ordered-float = "4"
 itertools = "0.13"
 unicase = "2.7"
@@ -35,7 +39,14 @@ regex = "1.10"
 thiserror = "1.0"
 delegate = "0.13"
 
+typetag = "0.2"
+
 [dev-dependencies]
 
 [features]
 default = []
+serde = [
+    "dep:serde",
+    "partiql-value/serde",
+    "partiql-common/serde"
+]

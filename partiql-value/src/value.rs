@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use rust_decimal::Decimal as RustDecimal;
 
+use crate::embedded_doc::EmbeddedDoc;
 use crate::{Bag, BindingIntoIter, BindingIter, DateTime, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
@@ -36,6 +37,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+    EmbeddedDoc(Box<EmbeddedDoc>),
     // TODO: add other supported PartiQL values -- sexp
 }
 
@@ -232,6 +234,7 @@ impl Debug for Value {
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
+            Value::EmbeddedDoc(doc) => doc.fmt(f),
         }
     }
 }
@@ -247,6 +250,9 @@ impl PartialOrd for Value {
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
+            (Value::EmbeddedDoc(_), _) => todo!("EmbeddedDoc Ord"),
+            (_, Value::EmbeddedDoc(_)) => todo!("EmbeddedDoc Ord"),
+
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
 

@@ -21,7 +21,7 @@ use partiql_logical::{
 };
 use std::borrow::Cow;
 
-use partiql_value::{BindingsName, Value};
+use partiql_value::{BindingsName, EmbeddedDoc, Value};
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,8 +35,10 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::Catalog;
+use partiql_common::embedded_document::{DynEmbeddedDocumentTypeFactory, LazyEmbeddedDocument};
 use partiql_common::node::NodeId;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
+use partiql_extension_ion::embedded::EmbeddedIonType;
 use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
@@ -1933,7 +1935,14 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
         Lit::FloatLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
         Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
         Lit::BoolLit(b) => Value::Boolean(*b),
-        Lit::EmbeddedDocLit(s, _typ) => parse_embedded_ion_str(s)?,
+        Lit::EmbeddedDocLit(s, _typ) => {
+            let new_stuff = true;
+            if !new_stuff {
+                parse_embedded_ion_str(s)?
+            } else {
+                lazy_doc(s)?
+            }
+        }
         Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
         Lit::BitStringLit(_) => {
@@ -2000,6 +2009,12 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
             error: "Contains no value".into(),
         })?
         .map_err(|e| lit_err(contents, e))
+}
+
+fn lazy_doc(contents: &str) -> Result<Value, AstTransformError> {
+    let ion_typ = EmbeddedIonType::default().to_dyn_type_tag();
+    let ion_doc = LazyEmbeddedDocument::new(contents, ion_typ);
+    Ok(Value::EmbeddedDoc(Box::new(EmbeddedDoc::Lazy(ion_doc))))
 }
 
 #[cfg(test)]
