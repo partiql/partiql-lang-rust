@@ -16,10 +16,11 @@ fn escape_str(s: &str) -> String {
     match s.chars().next() {
         None => "_".to_string(),
         Some(c) => {
+            let snake_case = s.to_lowercase().to_snake_case();
             if c.is_numeric() {
-                format!("_{}", s.to_snake_case())
+                format!("_{}", snake_case)
             } else {
-                s.to_snake_case()
+                snake_case
             }
         }
     }
@@ -84,6 +85,14 @@ mod test {
         assert_eq!(
             "a B c  1 2 3 e f G !?#$%*!(".escape_module_name(),
             "r#a_b_c_1_2_3_e_f_g"
+        );
+    }
+
+    #[test]
+    fn snake_case_uppercase_names() {
+        assert_eq!(
+            "Example 7 — NULL and MISSING Coercion - 1".escape_path(),
+            "example_7_null_and_missing_coercion_1"
         );
     }
 }
