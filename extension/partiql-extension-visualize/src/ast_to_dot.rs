@@ -185,7 +185,7 @@ fn lit_to_str(ast: &ast::Lit) -> String {
         Lit::FloatLit(l) => l.to_string(),
         Lit::DoubleLit(l) => l.to_string(),
         Lit::BoolLit(l) => (if *l { "TRUE" } else { "FALSE" }).to_string(),
-        Lit::EmbeddedDocLit(l) => format!("`{}`", l),
+        Lit::EmbeddedDocLit(l, typ) => format!("`{}`::{}", l, type_to_str(typ)),
         Lit::CharStringLit(l) => format!("'{}'", l),
         Lit::NationalCharStringLit(l) => format!("'{}'", l),
         Lit::BitStringLit(l) => format!("b'{}'", l),
