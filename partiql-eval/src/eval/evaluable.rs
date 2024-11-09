@@ -15,6 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
+use partiql_value::datum::Datum;
 use std::rc::Rc;
 
 #[macro_export]
@@ -110,17 +111,16 @@ impl Evaluable for EvalScan {
             Value::Tuple(t) => bag![*t],
             _ => bag![tuple![]],
         };
-
         let mut value = bag![];
         bindings.iter().for_each(|binding| {
             let binding_tuple = binding.as_tuple_ref();
             let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
-            let ordered = &v.is_ordered();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
+                let ordered = v.is_ordered();
                 for t in v {
                     let mut out = Tuple::from([(self.as_key.as_str(), t)]);
-                    let at_id = if *ordered {
+                    let at_id = if ordered {
                         at_index_counter.into()
                     } else {
                         Missing

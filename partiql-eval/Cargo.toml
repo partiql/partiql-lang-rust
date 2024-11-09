@@ -21,6 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
+partiql-common = { path = "../partiql-common", version = "0.11.*" }
 partiql-logical = { path = "../partiql-logical", version = "0.11.*" }
 partiql-value = { path = "../partiql-value", version = "0.11.*" }
 partiql-catalog = { path = "../partiql-catalog", version = "0.11.*" }

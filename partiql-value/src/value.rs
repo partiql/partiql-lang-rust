@@ -15,6 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
+use crate::datum::Datum;
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -61,35 +62,10 @@ impl Value {
     }
 
     #[inline]
-    #[must_use]
-    pub fn is_sequence(&self) -> bool {
-        self.is_bag() || self.is_list()
-    }
-
-    #[inline]
     /// Returns true if and only if Value is an integer, real, or decimal
     #[must_use]
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
-    }
-    #[inline]
-    /// Returns true if and only if Value is null or missing
-    #[must_use]
-    pub fn is_absent(&self) -> bool {
-        matches!(self, Value::Missing | Value::Null)
-    }
-
-    #[inline]
-    /// Returns true if Value is neither null nor missing
-    #[must_use]
-    pub fn is_present(&self) -> bool {
-        !self.is_absent()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_ordered(&self) -> bool {
-        self.is_list()
     }
 
     #[inline]
@@ -206,6 +182,44 @@ impl Value {
             Some(self.iter())
         } else {
             None
+        }
+    }
+}
+
+impl Datum for Value {
+    #[inline]
+    fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        matches!(self, Value::Missing)
+    }
+
+    #[inline]
+    fn is_absent(&self) -> bool {
+        matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_sequence(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::Bag(_) => true,
+            Value::EmbeddedDoc(doc) => doc.is_sequence(),
+            _ => false,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_ordered(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::EmbeddedDoc(doc) => doc.is_ordered(),
+            _ => false,
         }
     }
 }

@@ -8,5 +8,3 @@ pub mod pretty;
 pub mod syntax;
 
 pub mod catalog;
-
-pub mod embedded_document;
