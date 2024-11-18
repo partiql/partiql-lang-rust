@@ -699,6 +699,38 @@ impl PrettyDoc for StructExprPair {
     }
 }
 
+impl PrettyDoc for StructLit {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let wrapped = self.fields.iter().map(|p| unsafe {
+            let x: &'b StructLitField = std::mem::transmute(p);
+            x
+        });
+        pretty_seq(wrapped, "{", "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
+    }
+}
+
+pub struct StructLitField(pub LitField);
+
+impl PrettyDoc for StructLitField {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let k = self.0.first.pretty_doc(arena);
+        let v = self.0.second.pretty_doc(arena);
+        let sep = arena.text(": ");
+
+        k.append(sep).group().append(v).group()
+    }
+}
+
 impl PrettyDoc for Bag {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
@@ -718,6 +750,35 @@ impl PrettyDoc for Bag {
 }
 
 impl PrettyDoc for List {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        pretty_seq(&self.values, "[", "]", ",", PRETTY_INDENT_MINOR_NEST, arena)
+    }
+}
+
+impl PrettyDoc for BagLit {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        pretty_seq(
+            &self.values,
+            "<<",
+            ">>",
+            ",",
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
+        )
+    }
+}
+
+impl PrettyDoc for ListLit {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,

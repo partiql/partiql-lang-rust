@@ -1893,30 +1893,14 @@ impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
 }
 
 fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
-    fn expect_lit(v: &Expr) -> Result<Value, AstTransformError> {
-        match v {
-            Expr::Lit(l) => lit_to_value(&l.node),
-            _ => Err(AstTransformError::IllegalState(
-                "non literal in literal aggregate".to_string(),
-            )),
-        }
-    }
-
-    fn tuple_pair(pair: &ast::ExprPair) -> Option<Result<(String, Value), AstTransformError>> {
-        let key = match expect_lit(pair.first.as_ref()) {
-            Ok(Value::String(s)) => s.as_ref().clone(),
-            Ok(_) => {
-                return Some(Err(AstTransformError::IllegalState(
-                    "non string literal in literal struct key".to_string(),
-                )))
-            }
-            Err(e) => return Some(Err(e)),
-        };
-
-        match expect_lit(pair.second.as_ref()) {
-            Ok(Value::Missing) => None,
-            Ok(val) => Some(Ok((key, val))),
-            Err(e) => Some(Err(e)),
+    fn tuple_pair(field: &ast::LitField) -> Option<Result<(String, Value), AstTransformError>> {
+        let key = field.first.clone();
+        match &field.second.node {
+            Lit::Missing => None,
+            value => match lit_to_value(value) {
+                Ok(value) => Some(Ok((key, value))),
+                Err(e) => Some(Err(e)),
+            },
         }
     }
 
@@ -1947,21 +1931,13 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
             ))
         }
         Lit::BagLit(b) => {
-            let bag: Result<partiql_value::Bag, _> = b
-                .node
-                .values
-                .iter()
-                .map(|l| expect_lit(l.as_ref()))
-                .collect();
+            let bag: Result<partiql_value::Bag, _> =
+                b.node.values.iter().map(lit_to_value).collect();
             Value::from(bag?)
         }
         Lit::ListLit(l) => {
-            let l: Result<partiql_value::List, _> = l
-                .node
-                .values
-                .iter()
-                .map(|l| expect_lit(l.as_ref()))
-                .collect();
+            let l: Result<partiql_value::List, _> =
+                l.node.values.iter().map(lit_to_value).collect();
             Value::from(l?)
         }
         Lit::StructLit(s) => {
@@ -2006,6 +1982,7 @@ fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
 mod tests {
     use super::*;
     use crate::LogicalPlanner;
+    use assert_matches::assert_matches;
     use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_logical::BindingsOp::Project;
     use partiql_logical::ValueExpr;
@@ -2023,13 +2000,13 @@ mod tests {
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
-        assert_eq!(
+        assert_matches!(
             lowering_errs.first(),
-            Some(&AstTransformError::UnsupportedFunction("foo".to_string()))
+            Some(AstTransformError::UnsupportedFunction(fnc)) if fnc == "foo"
         );
-        assert_eq!(
+        assert_matches!(
             lowering_errs.get(1),
-            Some(&AstTransformError::UnsupportedFunction("bar".to_string()))
+            Some(AstTransformError::UnsupportedFunction(fnc)) if fnc == "bar"
         );
     }
 
@@ -2045,17 +2022,13 @@ mod tests {
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
-        assert_eq!(
+        assert_matches!(
             lowering_errs.first(),
-            Some(&AstTransformError::InvalidNumberOfArguments(
-                "abs".to_string()
-            ))
+            Some(AstTransformError::InvalidNumberOfArguments(fnc)) if fnc == "abs"
         );
-        assert_eq!(
+        assert_matches!(
             lowering_errs.get(1),
-            Some(&AstTransformError::InvalidNumberOfArguments(
-                "mod".to_string()
-            ))
+            Some(AstTransformError::InvalidNumberOfArguments(fnc)) if fnc == "mod"
         );
     }
 
