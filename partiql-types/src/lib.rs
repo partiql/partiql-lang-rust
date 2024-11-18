@@ -1,7 +1,7 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
-use derivative::Derivative;
+use educe::Educe;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use miette::Diagnostic;
@@ -584,11 +584,11 @@ impl PartiqlShapeBuilder {
     }
 }
 
-#[derive(Derivative, Eq, Debug, Clone)]
-#[derivative(PartialEq, Hash)]
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct AnyOf {
-    #[derivative(Hash(hash_with = "indexset_hash"))]
+    #[educe(Hash(method(indexset_hash)))]
     types: IndexSet<PartiqlShape>,
 }
 
@@ -743,11 +743,11 @@ impl Display for Static {
 
 pub const TYPE_DYNAMIC: PartiqlShape = PartiqlShape::Dynamic;
 
-#[derive(Derivative, Eq, Debug, Clone)]
-#[derivative(PartialEq, Hash)]
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct StructType {
-    #[derivative(Hash(hash_with = "indexset_hash"))]
+    #[educe(Hash(method(indexset_hash)))]
     constraints: IndexSet<StructConstraint>,
 }
 
@@ -827,15 +827,15 @@ impl Display for StructType {
     }
 }
 
-#[derive(Derivative, Eq, Debug, Clone)]
-#[derivative(PartialEq, Hash)]
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
 #[allow(dead_code)]
 #[non_exhaustive]
 pub enum StructConstraint {
     Open(bool),
     Ordered(bool),
     DuplicateAttrs(bool),
-    Fields(#[derivative(Hash(hash_with = "indexset_hash"))] IndexSet<StructField>),
+    Fields(#[educe(Hash(method(indexset_hash)))] IndexSet<StructField>),
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -901,8 +901,8 @@ impl From<(&str, PartiqlShape, bool)> for StructField {
     }
 }
 
-#[derive(Derivative, Eq, Debug, Clone)]
-#[derivative(PartialEq, Hash)]
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct BagType {
     element_type: Box<PartiqlShape>,
@@ -938,8 +938,8 @@ impl Display for BagType {
     }
 }
 
-#[derive(Derivative, Eq, Debug, Clone)]
-#[derivative(PartialEq, Hash)]
+#[derive(Educe, Eq, Debug, Clone)]
+#[educe(PartialEq, Hash)]
 #[allow(dead_code)]
 pub struct ArrayType {
     element_type: Box<PartiqlShape>,

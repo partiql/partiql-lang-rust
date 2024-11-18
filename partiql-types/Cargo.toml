@@ -29,6 +29,6 @@ thiserror = "1"
 
 indexmap = "2.5"
 
-derivative = "2.2"
+educe = "0.6"
 
 [dev-dependencies]
