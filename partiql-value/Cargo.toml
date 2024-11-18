@@ -28,17 +28,18 @@ itertools = "0.13"
 unicase = "2.7"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.36"
+thiserror = "1.0"
 
 time = { version = "0.3", features = ["macros"] }
 pretty = "0.12"
 
 serde = { version = "1", features = ["derive"], optional = true }
+typetag = { version = "0.2", optional = true }
 
 
 
 dyn-clone = "1"
 dyn-hash = "0.2"
-typetag = "0.2"
 
 [dev-dependencies]
 
@@ -46,6 +47,7 @@ typetag = "0.2"
 default = []
 serde = [
     "dep:serde",
+    "dep:typetag",
     "time/serde",
     "rust_decimal/serde-with-str",
     "rust_decimal/serde",

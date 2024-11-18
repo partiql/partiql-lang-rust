@@ -1,8 +1,9 @@
 use itertools::{Either, Itertools};
+use ordered_float::OrderedFloat;
 use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
-    LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
+    Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
     SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
 use petgraph::prelude::StableGraph;
@@ -24,8 +25,7 @@ use crate::eval::expr::{
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
-use partiql_value::Value;
-use partiql_value::Value::Null;
+use partiql_value::{Bag, List, Tuple, Value};
 
 #[macro_export]
 macro_rules! correct_num_args_or_err {
@@ -515,7 +515,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "simple case default",
-                        EvalLitExpr { lit: Null }.bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr { lit: Value::Null }.bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def),
                 };
@@ -540,7 +540,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "searched case default",
-                        EvalLitExpr { lit: Null }.bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr { lit: Value::Null }.bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def.as_ref()),
                 };

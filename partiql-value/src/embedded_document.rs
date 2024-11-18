@@ -3,10 +3,10 @@ use dyn_hash::DynHash;
 use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
 use std::error::Error;
 
-use crate::datum::Datum;
+use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef, DatumCattt};
 use crate::{Value, ValueIntoIterator, ValueIter};
 use pretty::{DocAllocator, DocBuilder};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 pub type EmbeddedDocError = Box<dyn Error>;
@@ -21,8 +21,9 @@ pub type EmbeddedDocValueIter<'a> =
 
 pub type DynEmbeddedTypeTag = Box<dyn DynEmbeddedDocumentType>;
 
-pub trait DynEmbeddedDocumentType: DynClone {
-    fn construct(&self, bytes: &[u8]) -> Box<dyn EmbeddedDocument>;
+pub trait DynEmbeddedDocumentType: Debug + DynClone {
+    fn construct(&self, bytes: Vec<u8>) -> EmbeddedDocResult<Box<dyn EmbeddedDocument>>;
+    fn name(&self) -> &'static str;
 }
 
 dyn_clone::clone_trait_object!(DynEmbeddedDocumentType);
@@ -34,16 +35,23 @@ pub trait DynEmbeddedDocumentTypeFactory {
 // typed
 
 pub type EmbeddedTypeTag<D> = Box<dyn EmbeddedDocumentType<Doc = D>>;
-pub trait EmbeddedDocumentType: Clone {
+pub trait EmbeddedDocumentType: Debug + Clone {
     type Doc: EmbeddedDocument + 'static;
 
-    fn construct(&self, bytes: &[u8]) -> Self::Doc;
+    fn construct(&self, bytes: Vec<u8>) -> EmbeddedDocResult<Self::Doc>;
+    fn name(&self) -> &'static str;
 }
 
 pub type DynEmbeddedDocument = Box<dyn EmbeddedDocument>;
 #[cfg_attr(feature = "serde", typetag::serde)]
-pub trait EmbeddedDocument: Debug + DynHash + DynClone + Datum {
+pub trait EmbeddedDocument: Display + Debug + DynHash + DynClone + Datum<Value>
+/*+ for<'a> DatumCattt<'a>*/
+{
     fn into_dyn_iter(self: Box<Self>) -> EmbeddedDocResult<EmbeddedDocValueIntoIterator>;
+
+    fn category<'a>(&'a self) -> DatumCategoryRef<'a>;
+
+    fn into_category(self: Box<Self>) -> DatumCategoryOwned;
 }
 
 dyn_hash::hash_trait_object!(EmbeddedDocument);
@@ -65,8 +73,13 @@ where
     T: EmbeddedDocumentType<Doc = D>,
     D: EmbeddedDocument + 'static,
 {
-    fn construct(&self, bytes: &[u8]) -> Box<dyn EmbeddedDocument> {
-        Box::new(EmbeddedDocumentType::construct(self, bytes))
+    fn construct(&self, bytes: Vec<u8>) -> EmbeddedDocResult<Box<dyn EmbeddedDocument>> {
+        EmbeddedDocumentType::construct(self, bytes)
+            .map(|d| Box::new(d) as Box<dyn EmbeddedDocument>)
+    }
+
+    fn name(&self) -> &'static str {
+        EmbeddedDocumentType::name(self)
     }
 }
 

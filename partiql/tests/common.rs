@@ -101,7 +101,9 @@ pub fn eval_query_with_catalog<'a>(
     mode: EvaluationMode,
 ) -> Result<Evaluated, TestError<'a>> {
     let parsed = parse(statement)?;
+    dbg!(&parsed);
     let lowered = lower(catalog, &parsed)?;
+    dbg!(&lowered);
     let bindings = Default::default();
     let plan = compile(mode, catalog, lowered)?;
     Ok(evaluate(plan, bindings)?)

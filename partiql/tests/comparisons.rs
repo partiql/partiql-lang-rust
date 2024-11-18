@@ -33,10 +33,20 @@ pub fn eval_fail(statement: &str) {
 #[inline]
 pub fn eval_success(statement: &str) {
     let (permissive, strict) = eval_modes(statement);
-
+    dbg!(&permissive);
     assert_matches!(permissive, Ok(_));
     assert_matches!(strict, Ok(_));
     assert_eq!(permissive.unwrap().result, strict.unwrap().result);
+}
+
+#[test]
+fn test1() {
+    eval_success("[{'a': 1},{'b': 2}]")
+}
+
+#[test]
+fn test11() {
+    eval_success("[{'a': 1+1},{'b': 2}]")
 }
 
 #[track_caller]

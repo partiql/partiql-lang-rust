@@ -28,20 +28,19 @@ fn ion_simple() {
     // << {x: `1`}, {x: `hi::2`}>>
 
     let res = eval(query, EvaluationMode::Permissive);
-    dbg!(&res);
     assert_matches!(res, Ok(_));
     let result = res.unwrap().result;
-    println!("{}", result.to_pretty_string(80).unwrap());
 
-    insta::assert_debug_snapshot!(result);
+    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
 }
 
 #[test]
 fn ion_iter() {
     let contents = "[1,2,3,4]";
     let ion_typ = EmbeddedIonType::default().to_dyn_type_tag();
-    let doc = ion_typ.construct(contents.as_bytes());
-    let value = Value::EmbeddedDoc(Box::new(EmbeddedDoc::new(doc)));
+    let value = Value::EmbeddedDoc(Box::new(
+        EmbeddedDoc::new(contents, ion_typ).expect("doc ctor"),
+    ));
 
     let items: Vec<_> = value.into_iter().collect();
     dbg!(&items);

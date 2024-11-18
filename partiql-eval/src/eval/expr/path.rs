@@ -4,9 +4,13 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_value::Value::Missing;
-use partiql_value::{BindingsName, Tuple, Value};
+use partiql_value::{BindingsName, List, Tuple, Value};
 
 use partiql_catalog::context::Bindings;
+use partiql_value::datum::{
+    DatumCategoryOwned, DatumCategoryRef, DatumCattt, OwnedSequenceView, OwnedTupleView,
+    RefSequenceView, RefTupleView,
+};
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 
@@ -85,6 +89,19 @@ impl EvalPathComponent {
         bindings: &'a Tuple,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Option<&'a Value> {
+        let category = value.category();
+        match (self, category) {
+            (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get(k),
+            (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get(*idx),
+            (EvalPathComponent::KeyExpr(ke), DatumCategoryRef::Tuple(tuple)) => {
+                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get(&key))
+            }
+            (EvalPathComponent::IndexExpr(ie), DatumCategoryRef::Sequence(seq)) => {
+                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get(i))
+            }
+            _ => None,
+        }
+        /*
         match (self, value) {
             (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.get(k),
             (EvalPathComponent::Index(idx), Value::List(list)) => list.get(*idx),
@@ -96,6 +113,7 @@ impl EvalPathComponent {
             }
             _ => None,
         }
+         */
     }
 
     #[inline]
@@ -105,14 +123,17 @@ impl EvalPathComponent {
         bindings: &Tuple,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Option<Value> {
-        match (self, value) {
-            (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.take_val(k),
-            (EvalPathComponent::Index(idx), Value::List(list)) => list.take_val(*idx),
-            (EvalPathComponent::KeyExpr(ke), Value::Tuple(tuple)) => {
+        let category = value.into_category();
+        match (self, category) {
+            (EvalPathComponent::Key(k), DatumCategoryOwned::Tuple(tuple)) => tuple.take_val(k),
+            (EvalPathComponent::Index(idx), DatumCategoryOwned::Sequence(seq)) => {
+                seq.take_val(*idx)
+            }
+            (EvalPathComponent::KeyExpr(ke), DatumCategoryOwned::Tuple(tuple)) => {
                 as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.take_val(&key))
             }
-            (EvalPathComponent::IndexExpr(ie), Value::List(list)) => {
-                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| list.take_val(i))
+            (EvalPathComponent::IndexExpr(ie), DatumCategoryOwned::Sequence(seq)) => {
+                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.take_val(i))
             }
             _ => None,
         }

@@ -35,6 +35,13 @@ pub trait EvalExpr: Debug {
     ) -> Cow<'a, Value>
     where
         'c: 'a;
+
+    fn evaluate_owned<'a, 'c>(&'a self, bindings: Tuple, ctx: &'c dyn EvalContext<'c>) -> Value
+    where
+        'c: 'a,
+    {
+        self.evaluate(&bindings, ctx).into_owned()
+    }
 }
 
 #[derive(Error, Debug, Clone, PartialEq)]
