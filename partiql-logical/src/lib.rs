@@ -12,6 +12,11 @@
 //! Plan graph nodes are called _operators_ and edges are called _flows_ re-instating the fact that
 //! the plan captures data flows for a given `PartiQL` statement.
 //!
+
+mod util;
+
+use ordered_float::OrderedFloat;
+use partiql_common::catalog::ObjectId;
 /// # Examples
 /// ```
 /// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr, VarRefType};
@@ -38,7 +43,7 @@
 ///     expr: ValueExpr::BinaryExpr(
 ///         BinaryOp::Mul,
 ///         Box::new(va),
-///         Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+///         Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
 ///     ),
 /// }));
 ///
@@ -52,10 +57,9 @@
 /// assert_eq!(2, p.flows().len());
 /// ```
 use partiql_value::{BindingsName, Value};
+use rust_decimal::Decimal as RustDecimal;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
-
-use partiql_common::catalog::ObjectId;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -423,7 +427,7 @@ pub struct ExprQuery {
 pub enum ValueExpr {
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
-    Lit(Box<Value>),
+    Lit(Box<Lit>),
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
     VarRef(BindingsName<'static>, VarRefType),
@@ -439,6 +443,26 @@ pub enum ValueExpr {
     NullIfExpr(NullIfExpr),
     CoalesceExpr(CoalesceExpr),
     Call(CallExpr),
+}
+
+/// Represents a `PartiQL` literal value.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Lit {
+    Null,
+    Missing,
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Decimal(RustDecimal),
+    Double(OrderedFloat<f64>),
+    Bool(bool),
+    String(String),
+    BoxDocument(Vec<u8>, String),
+    Struct(Vec<(String, Lit)>),
+    Bag(Vec<Lit>),
+    List(Vec<Lit>),
 }
 
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?

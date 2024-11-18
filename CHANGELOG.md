@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING* partiql-parser: Added a source location to `ParseError::UnexpectedEndOfInput`
+- *BREAKING* partiql-ast: Changed the modelling of parsed literals.
+- *BREAKING* partiql-logical: Changed the modelling of logical plan literals.
 - partiql-eval: Fixed behavior of comparison and `BETWEEN` operations w.r.t. type mismatches
 
 ### Added
