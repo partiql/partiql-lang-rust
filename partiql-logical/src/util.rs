@@ -14,10 +14,10 @@ impl From<Value> for Lit {
             Value::Real(f) => Lit::Double(f),
             Value::Decimal(d) => Lit::Decimal(*d),
             Value::String(s) => Lit::String(*s),
-            Value::Blob(bytes) => {
+            Value::Blob(_bytes) => {
                 todo!("Value to Lit: Blob")
             }
-            Value::DateTime(dt) => {
+            Value::DateTime(_dt) => {
                 todo!("Value to Lit: DateTime")
             }
             Value::List(list) => (*list).into(),
@@ -58,7 +58,7 @@ impl From<Lit> for Value {
             Lit::Double(f) => Value::Real(f),
             Lit::Bool(b) => Value::Boolean(b),
             Lit::String(s) => Value::String(s.into()),
-            Lit::BoxDocument(contents, typ) => {
+            Lit::BoxDocument(contents, _typ) => {
                 parse_embedded_ion_str(&String::from_utf8_lossy(contents.as_slice()))
                     .expect("TODO ion parsing error")
             }
@@ -71,14 +71,10 @@ impl From<Lit> for Value {
     }
 }
 
-/// Represents an AST transform Error
+/// Represents a Literal Value Error
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum LiteralError {
-    /// Indicates that there is an internal error that was not due to user input or API violation.
-    #[error("Illegal State: {0}")]
-    IllegalState(String),
-
     /// Indicates that there was an error interpreting a literal value.
     #[error("Error with literal: {literal}: {error}")]
     Literal { literal: String, error: String },
