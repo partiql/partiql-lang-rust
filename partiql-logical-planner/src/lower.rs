@@ -21,7 +21,7 @@ use partiql_logical::{
 };
 use std::borrow::Cow;
 
-use partiql_value::{BindingsName, Value};
+use partiql_value::BindingsName;
 
 use std::collections::{HashMap, HashSet};
 

@@ -11,7 +11,7 @@ impl From<Value> for Lit {
             Value::Missing => Lit::Missing,
             Value::Boolean(b) => Lit::Bool(b),
             Value::Integer(n) => Lit::Int64(n),
-            Value::Real(f) => Lit::Double(f.into()),
+            Value::Real(f) => Lit::Double(f),
             Value::Decimal(d) => Lit::Decimal(*d),
             Value::String(s) => Lit::String(*s),
             Value::Blob(bytes) => {
@@ -53,18 +53,18 @@ impl From<Lit> for Value {
             Lit::Int8(n) => Value::Integer(n.into()),
             Lit::Int16(n) => Value::Integer(n.into()),
             Lit::Int32(n) => Value::Integer(n.into()),
-            Lit::Int64(n) => Value::Integer(n.into()),
+            Lit::Int64(n) => Value::Integer(n),
             Lit::Decimal(d) => Value::Decimal(d.into()),
-            Lit::Double(f) => Value::Real(f.into()),
+            Lit::Double(f) => Value::Real(f),
             Lit::Bool(b) => Value::Boolean(b),
             Lit::String(s) => Value::String(s.into()),
             Lit::BoxDocument(contents, typ) => {
                 parse_embedded_ion_str(&String::from_utf8_lossy(contents.as_slice()))
                     .expect("TODO ion parsing error")
             }
-            Lit::Struct(strct) => Value::from(Tuple::from(Tuple::from_iter(
+            Lit::Struct(strct) => Value::from(Tuple::from_iter(
                 strct.into_iter().map(|(k, v)| (k, Value::from(v))),
-            ))),
+            )),
             Lit::Bag(bag) => Value::from(Bag::from_iter(bag.into_iter().map(Value::from))),
             Lit::List(list) => Value::from(List::from_iter(list.into_iter().map(Value::from))),
         }

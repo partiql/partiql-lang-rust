@@ -3,7 +3,7 @@ use partiql_ast::ast;
 use crate::parse::parser_state::ParserState;
 use crate::ParseError;
 use bitflags::bitflags;
-use partiql_ast::ast::{AstNode, Expr, Lit, LitField};
+use partiql_ast::ast::{Expr, Lit};
 use partiql_common::node::NodeIdGenerator;
 use partiql_common::syntax::location::{ByteOffset, BytePosition};
 

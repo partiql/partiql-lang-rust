@@ -1,9 +1,8 @@
 use itertools::{Either, Itertools};
-use ordered_float::OrderedFloat;
 use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
-    Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
+    LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
     SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
 use petgraph::prelude::StableGraph;
@@ -25,8 +24,8 @@ use crate::eval::expr::{
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
+use partiql_value::Value;
 use partiql_value::Value::Null;
-use partiql_value::{Bag, List, Tuple, Value};
 
 #[macro_export]
 macro_rules! correct_num_args_or_err {
@@ -787,7 +786,6 @@ mod tests {
     use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_logical::CallExpr;
     use partiql_logical::ExprQuery;
-    use partiql_value::Value;
 
     #[test]
     fn test_logical_to_eval_plan_bad_num_arguments() {

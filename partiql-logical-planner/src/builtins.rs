@@ -2,7 +2,6 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use partiql_logical as logical;
 use partiql_logical::{SetQuantifier, ValueExpr};
-use partiql_value::Value;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
@@ -241,7 +240,7 @@ fn function_call_def_trim() -> CallDef {
                 output: Box::new(|mut args| {
                     args.insert(
                         0,
-                        ValueExpr::Lit(Box::new(logical::Lit::String(" ".to_string().into()))),
+                        ValueExpr::Lit(Box::new(logical::Lit::String(" ".to_string()))),
                     );
 
                     logical::ValueExpr::Call(logical::CallExpr {
@@ -255,7 +254,7 @@ fn function_call_def_trim() -> CallDef {
                 output: Box::new(|mut args| {
                     args.insert(
                         0,
-                        ValueExpr::Lit(Box::new(logical::Lit::String(" ".to_string().into()))),
+                        ValueExpr::Lit(Box::new(logical::Lit::String(" ".to_string()))),
                     );
                     logical::ValueExpr::Call(logical::CallExpr {
                         name: logical::CallName::BTrim,

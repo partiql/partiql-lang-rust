@@ -56,7 +56,7 @@ use partiql_common::catalog::ObjectId;
 /// assert_eq!(3, p.operators().len());
 /// assert_eq!(2, p.flows().len());
 /// ```
-use partiql_value::{BindingsName, Value};
+use partiql_value::BindingsName;
 use rust_decimal::Decimal as RustDecimal;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};

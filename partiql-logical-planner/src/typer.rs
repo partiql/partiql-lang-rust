@@ -8,7 +8,7 @@ use partiql_types::{
     type_string, type_struct, type_undefined, ArrayType, BagType, PartiqlShape,
     PartiqlShapeBuilder, ShapeResultError, Static, StructConstraint, StructField, StructType,
 };
-use partiql_value::{BindingsName, Value};
+use partiql_value::BindingsName;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
