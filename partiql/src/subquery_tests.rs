@@ -40,11 +40,16 @@ mod tests {
     fn locals_in_subqueries() {
         //  `SELECT VALUE _1 from (SELECT VALUE foo from <<{'a': 'b'}>> AS foo) AS _1;`
         let mut sub_query = LogicalPlan::new();
+
+        let data = Box::new(partiql_logical::Lit::Bag(vec![
+            partiql_logical::Lit::Struct(vec![(
+                "a".to_string(),
+                partiql_logical::Lit::String("b".to_string()),
+            )]),
+        ]));
         let scan_op_id =
             sub_query.add_operator(partiql_logical::BindingsOp::Scan(partiql_logical::Scan {
-                expr: partiql_logical::ValueExpr::Lit(Box::new(Value::Bag(Box::new(Bag::from(
-                    vec![tuple![("a", "b")].into()],
-                ))))),
+                expr: partiql_logical::ValueExpr::Lit(data),
                 as_key: "foo".into(),
                 at_key: None,
             }));

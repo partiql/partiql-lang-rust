@@ -2,13 +2,13 @@ use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::catalog::Catalog;
-use partiql_logical::{BindingsOp, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
+use partiql_logical::{BindingsOp, Lit, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    type_array, type_bag, type_bool, type_decimal, type_dynamic, type_int, type_string,
-    type_struct, type_undefined, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
-    ShapeResultError, Static, StructConstraint, StructField, StructType,
+    type_array, type_bag, type_bool, type_decimal, type_dynamic, type_float64, type_int,
+    type_string, type_struct, type_undefined, ArrayType, BagType, PartiqlShape,
+    PartiqlShapeBuilder, ShapeResultError, Static, StructConstraint, StructField, StructType,
 };
-use partiql_value::{BindingsName, Value};
+use partiql_value::BindingsName;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
@@ -333,15 +333,17 @@ impl<'c> PlanTyper<'c> {
             }
             ValueExpr::Lit(v) => {
                 let ty = match **v {
-                    Value::Null => type_undefined!(),
-                    Value::Missing => type_undefined!(),
-                    Value::Integer(_) => type_int!(),
-                    Value::Decimal(_) => type_decimal!(),
-                    Value::Boolean(_) => type_bool!(),
-                    Value::String(_) => type_string!(),
-                    Value::Tuple(_) => type_struct!(),
-                    Value::List(_) => type_array!(),
-                    Value::Bag(_) => type_bag!(),
+                    Lit::Null | Lit::Missing => type_undefined!(),
+                    Lit::Int8(_) | Lit::Int16(_) | Lit::Int32(_) | Lit::Int64(_) => {
+                        type_int!()
+                    }
+                    Lit::Decimal(_) => type_decimal!(),
+                    Lit::Double(_) => type_float64!(),
+                    Lit::Bool(_) => type_bool!(),
+                    Lit::String(_) => type_string!(),
+                    Lit::Struct(_) => type_struct!(),
+                    Lit::Bag(_) => type_bag!(),
+                    Lit::List(_) => type_array!(),
                     _ => {
                         self.errors.push(TypingError::NotYetImplemented(
                             "Unsupported Literal".to_string(),

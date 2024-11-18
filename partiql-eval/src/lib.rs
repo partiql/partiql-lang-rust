@@ -162,7 +162,12 @@ mod tests {
     // TODO: once eval conformance tests added and/or modified evaluation API (to support other values
     //  in evaluator output), change or delete tests using this function
     #[track_caller]
-    fn eval_bin_op(op: BinaryOp, lhs: Value, rhs: Value, expected_first_elem: Value) {
+    fn eval_bin_op<I: Into<logical::Lit>>(
+        op: BinaryOp,
+        lhs: Value,
+        rhs_lit: I,
+        expected_first_elem: Value,
+    ) {
         let mut plan = LogicalPlan::new();
         let scan = plan.add_operator(BindingsOp::Scan(logical::Scan {
             expr: ValueExpr::VarRef(
@@ -187,7 +192,7 @@ mod tests {
                             "lhs".to_string().into(),
                         ))],
                     )),
-                    Box::new(ValueExpr::Lit(Box::new(rhs))),
+                    Box::new(ValueExpr::Lit(Box::new(rhs_lit.into()))),
                 ),
             )]),
         }));
@@ -643,13 +648,13 @@ mod tests {
     #[test]
     fn and_or_null() {
         #[track_caller]
-        fn eval_to_null(op: BinaryOp, lhs: Value, rhs: Value) {
+        fn eval_to_null<I: Into<logical::Lit>>(op: BinaryOp, lhs: I, rhs: I) {
             let mut plan = LogicalPlan::new();
             let expq = plan.add_operator(BindingsOp::ExprQuery(ExprQuery {
                 expr: ValueExpr::BinaryExpr(
                     op,
-                    Box::new(ValueExpr::Lit(Box::new(lhs))),
-                    Box::new(ValueExpr::Lit(Box::new(rhs))),
+                    Box::new(ValueExpr::Lit(Box::new(lhs.into()))),
+                    Box::new(ValueExpr::Lit(Box::new(rhs.into()))),
                 ),
             }));
 
@@ -697,8 +702,8 @@ mod tests {
                                 "value".to_string().into(),
                             ))],
                         )),
-                        from: Box::new(ValueExpr::Lit(Box::new(from))),
-                        to: Box::new(ValueExpr::Lit(Box::new(to))),
+                        from: Box::new(ValueExpr::Lit(Box::new(from.into()))),
+                        to: Box::new(ValueExpr::Lit(Box::new(to.into()))),
                     }),
                 )]),
             }));
@@ -908,7 +913,7 @@ mod tests {
             kind: JoinKind::Left,
             left: Box::new(from_lhs),
             right: Box::new(from_rhs),
-            on: Some(ValueExpr::Lit(Box::new(Value::from(true)))),
+            on: Some(ValueExpr::Lit(Box::new(Value::from(true).into()))),
         }));
 
         let sink = lg.add_operator(BindingsOp::Sink);
@@ -936,17 +941,21 @@ mod tests {
             expr: Box::new(path_var("n", "a")),
             cases: vec![
                 (
-                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
-                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(1).into()))),
+                    Box::new(ValueExpr::Lit(Box::new(
+                        Value::from("one".to_string()).into(),
+                    ))),
                 ),
                 (
-                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
-                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
+                    Box::new(ValueExpr::Lit(Box::new(
+                        Value::from("two".to_string()).into(),
+                    ))),
                 ),
             ],
-            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
-                "other".to_string(),
-            ))))),
+            default: Some(Box::new(ValueExpr::Lit(Box::new(
+                Value::from("other".to_string()).into(),
+            )))),
         }
     }
 
@@ -957,22 +966,26 @@ mod tests {
                     Box::new(ValueExpr::BinaryExpr(
                         BinaryOp::Eq,
                         Box::new(path_var("n", "a")),
-                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(1)))),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(1).into()))),
                     )),
-                    Box::new(ValueExpr::Lit(Box::new(Value::from("one".to_string())))),
+                    Box::new(ValueExpr::Lit(Box::new(
+                        Value::from("one".to_string()).into(),
+                    ))),
                 ),
                 (
                     Box::new(ValueExpr::BinaryExpr(
                         BinaryOp::Eq,
                         Box::new(path_var("n", "a")),
-                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                        Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
                     )),
-                    Box::new(ValueExpr::Lit(Box::new(Value::from("two".to_string())))),
+                    Box::new(ValueExpr::Lit(Box::new(
+                        Value::from("two".to_string()).into(),
+                    ))),
                 ),
             ],
-            default: Some(Box::new(ValueExpr::Lit(Box::new(Value::from(
-                "other".to_string(),
-            ))))),
+            default: Some(Box::new(ValueExpr::Lit(Box::new(
+                Value::from("other".to_string()).into(),
+            )))),
         }
     }
 
@@ -1236,7 +1249,7 @@ mod tests {
                             "lhs".to_string().into(),
                         ))],
                     )),
-                    rhs: Box::new(ValueExpr::Lit(Box::new(rhs))),
+                    rhs: Box::new(ValueExpr::Lit(Box::new(rhs.into()))),
                 }),
             )]),
         }));
@@ -1387,7 +1400,7 @@ mod tests {
             println!("{:?}", &out);
             assert_eq!(out, expected);
         }
-        let list = ValueExpr::Lit(Box::new(Value::List(Box::new(list![1, 2, 3]))));
+        let list = ValueExpr::Lit(Box::new(Value::List(Box::new(list![1, 2, 3])).into()));
 
         // `[1,2,3][0]` -> `1`
         let index = ValueExpr::Path(Box::new(list.clone()), vec![PathComponent::Index(0)]);
@@ -1406,7 +1419,7 @@ mod tests {
         test(index, Value::Integer(3));
 
         // `{'a':10}[''||'a']` -> `10`
-        let tuple = ValueExpr::Lit(Box::new(Value::Tuple(Box::new(tuple![("a", 10)]))));
+        let tuple = ValueExpr::Lit(Box::new(Value::Tuple(Box::new(tuple![("a", 10)])).into()));
         let index_expr = ValueExpr::BinaryExpr(
             BinaryOp::Concat,
             Box::new(ValueExpr::Lit(Box::new("".into()))),
@@ -1499,7 +1512,7 @@ mod tests {
             expr: ValueExpr::BinaryExpr(
                 BinaryOp::Mul,
                 Box::new(va),
-                Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
             ),
         }));
 
@@ -1578,7 +1591,7 @@ mod tests {
         tuple_expr.values.push(ValueExpr::BinaryExpr(
             BinaryOp::Mul,
             Box::new(va),
-            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
         ));
 
         let project = lg.add_operator(ProjectValue(logical::ProjectValue {
@@ -1740,7 +1753,7 @@ mod tests {
         list_expr.elements.push(ValueExpr::BinaryExpr(
             BinaryOp::Mul,
             Box::new(va),
-            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+            Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
         ));
 
         let select_value = lg.add_operator(ProjectValue(logical::ProjectValue {
@@ -1966,7 +1979,7 @@ mod tests {
                         "balance".to_string().into(),
                     ))],
                 )),
-                Box::new(ValueExpr::Lit(Box::new(Value::Integer(0)))),
+                Box::new(ValueExpr::Lit(Box::new(Value::Integer(0).into()))),
             ),
         }));
 
@@ -2096,7 +2109,7 @@ mod tests {
                 ValueExpr::BinaryExpr(
                     BinaryOp::Mul,
                     Box::new(va),
-                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
                 ),
             )]),
         }));
@@ -2170,7 +2183,7 @@ mod tests {
                 ValueExpr::BinaryExpr(
                     BinaryOp::Mul,
                     Box::new(va),
-                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2)))),
+                    Box::new(ValueExpr::Lit(Box::new(Value::Integer(2).into()))),
                 ),
             )]),
         }));

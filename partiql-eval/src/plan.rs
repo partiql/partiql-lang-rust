@@ -1,13 +1,12 @@
 use itertools::{Either, Itertools};
 use partiql_logical as logical;
-use petgraph::prelude::StableGraph;
-use std::collections::HashMap;
-
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
     LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
     SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
+use petgraph::prelude::StableGraph;
+use std::collections::HashMap;
 
 use crate::error::{ErrorNode, PlanErr, PlanningError};
 use crate::eval;
@@ -25,6 +24,7 @@ use crate::eval::expr::{
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
+use partiql_value::Value;
 use partiql_value::Value::Null;
 
 #[macro_export]
@@ -392,7 +392,10 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
-                EvalLitExpr { lit: *lit.clone() }.bind::<{ STRICT }>(vec![]),
+                EvalLitExpr {
+                    lit: Value::from(lit.as_ref().clone()),
+                }
+                .bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::Path(expr, components) => (
                 "path",
@@ -565,7 +568,7 @@ impl<'c> EvaluatorPlanner<'c> {
                             n.lhs.clone(),
                             n.rhs.clone(),
                         )),
-                        Box::new(ValueExpr::Lit(Box::new(Null))),
+                        Box::new(ValueExpr::Lit(Box::new(logical::Lit::Null))),
                     )],
                     default: Some(n.lhs.clone()),
                 });
@@ -783,7 +786,6 @@ mod tests {
     use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_logical::CallExpr;
     use partiql_logical::ExprQuery;
-    use partiql_value::Value;
 
     #[test]
     fn test_logical_to_eval_plan_bad_num_arguments() {
@@ -794,7 +796,7 @@ mod tests {
         // report the error.
         let mut logical = LogicalPlan::new();
         fn lit_int(i: usize) -> ValueExpr {
-            ValueExpr::Lit(Box::new(Value::from(i)))
+            ValueExpr::Lit(Box::new(logical::Lit::Int64(i as i64)))
         }
 
         let expq = logical.add_operator(BindingsOp::ExprQuery(ExprQuery {
