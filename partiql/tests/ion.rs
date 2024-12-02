@@ -35,6 +35,18 @@ fn ion_simple() {
 }
 
 #[test]
+fn ion_paths() {
+    let query = "select x[1].foo from `([{foo:1}, {foo: 2}] ({foo: hi::1} {foo: world::2}))` as x";
+    // << {x: `2`}, {x: `world::2`}>>
+
+    let res = eval(query, EvaluationMode::Permissive);
+    assert_matches!(res, Ok(_));
+    let result = res.unwrap().result;
+
+    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
+}
+
+#[test]
 fn ion_iter() {
     let contents = "[1,2,3,4]";
     let ion_typ = EmbeddedIonType::default().to_dyn_type_tag();

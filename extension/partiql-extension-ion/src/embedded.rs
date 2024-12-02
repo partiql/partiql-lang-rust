@@ -1,8 +1,8 @@
 use core::fmt;
 use delegate::delegate;
 use ion_rs::{
-    AnyEncoding, Element, ElementReader, IonDataSource, IonInput, IonResult, IonSlice, IonType,
-    OwnedSequenceIterator, Reader, Sequence,
+    AnyEncoding, ConversionOperationError, Element, ElementReader, IonInput, IonResult, IonSlice,
+    IonType, OwnedSequenceIterator, Reader, Sequence,
 };
 use ion_rs_old::{IonError, IonReader};
 use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
@@ -22,7 +22,7 @@ use std::collections::VecDeque;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::iter::Peekable;
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 use std::rc::Rc;
 use std::slice;
 use std::slice::Iter;
@@ -221,7 +221,7 @@ impl EmbeddedIon {
                 }
 
                 match elt.try_into_sequence() {
-                    Err(elt) => EmbeddedValue::Value(elt),
+                    Err(err) => EmbeddedValue::Value(err.original_value()),
                     Ok(seq) => EmbeddedValue::Sequence(seq.into_iter()),
                 }
             }
@@ -236,11 +236,11 @@ impl EmbeddedIon {
             EmbeddedDocType::Unexamined(_) => unreachable!("handled by `force`"),
             EmbeddedDocType::Forced(EmbeddedValue::Stream()) => EmbeddedIterType::Stream(),
             EmbeddedDocType::Forced(EmbeddedValue::Value(elt)) => match elt.try_into_sequence() {
-                Err(elt) => {
+                Err(err) => {
                     // TODO [EMBDOC]
                     // We could error? But generally PartiQL coerces to a singleton collection...
                     //Err(BoxedIonError::NotASequence { elt }),
-                    EmbeddedIterType::Sequence(Sequence::new([elt]).into_iter())
+                    EmbeddedIterType::Sequence(Sequence::new([err.original_value()]).into_iter())
                 }
                 Ok(seq) => EmbeddedIterType::Sequence(seq.into_iter()),
             },
