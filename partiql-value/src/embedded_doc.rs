@@ -1,23 +1,18 @@
-use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef, DatumCattt, DatumLowerResult};
+use crate::datum::{Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef};
 use crate::embedded_document::{
     DynEmbeddedDocument, DynEmbeddedTypeTag, EmbeddedDocError, EmbeddedDocResult,
     EmbeddedDocValueIntoIterator, EmbeddedDocValueIter, EmbeddedDocument,
 };
-use crate::{embedded_doc, Value, ValueIntoIterator, ValueIter};
+use crate::Value;
 use delegate::delegate;
-use partiql_common::pretty::{
-    pretty_prefixed_doc, pretty_surrounded, pretty_surrounded_doc, PrettyDoc,
-};
+use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
 use pretty::{DocAllocator, DocBuilder};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cell::{Ref, RefCell, RefMut};
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use std::{slice, vec};
 
 use thiserror::Error;
 
@@ -58,7 +53,7 @@ impl EmbeddedDoc {
     }
 }
 
-impl<'a> DatumCattt<'a> for EmbeddedDoc {
+impl<'a> DatumCategory<'a> for EmbeddedDoc {
     fn category(&'a self) -> DatumCategoryRef<'a> {
         match self {
             EmbeddedDoc::Raw(_) => {
@@ -115,13 +110,13 @@ impl RawEmbeddedDoc {
 }
 
 pub struct EmbeddedDocIter<'a>(EmbeddedDocValueIter<'a>);
-impl<'a> Debug for EmbeddedDocIter<'a> {
+impl Debug for EmbeddedDocIter<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }
 
-impl<'a> Clone for EmbeddedDocIter<'a> {
+impl Clone for EmbeddedDocIter<'_> {
     fn clone(&self) -> Self {
         todo!()
     }
@@ -169,10 +164,6 @@ impl Datum<Value> for EmbeddedDoc {
             //fn into_iter(self) -> ValueIntoIterator;
         }
     }
-
-    fn lower(self) -> DatumLowerResult<Value> {
-        todo!("lower")
-    }
 }
 
 impl Datum<Value> for Rc<dyn Error> {
@@ -197,10 +188,6 @@ impl Datum<Value> for Rc<dyn Error> {
     }
 
     fn is_ordered(&self) -> bool {
-        todo!()
-    }
-
-    fn lower(self) -> DatumLowerResult<Value> {
         todo!()
     }
 }

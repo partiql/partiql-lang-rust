@@ -1150,19 +1150,14 @@ impl Debug for EvalSelect {
 impl Evaluable for EvalSelect {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
-        dbg!(&input_value);
 
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|v| {
-            dbg!(&v);
             let v_as_tuple = v.coerce_into_tuple();
-            dbg!(&v_as_tuple);
 
             let tuple_pairs = self.exprs.iter().filter_map(|(alias, expr)| {
-                dbg!(&expr);
                 let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
-                dbg!(&evaluated_val);
                 match evaluated_val.as_ref() {
                     Missing => None,
                     _ => Some((alias.as_str(), evaluated_val.into_owned())),

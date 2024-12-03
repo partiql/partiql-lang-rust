@@ -1,6 +1,6 @@
 use crate::Lit;
+use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
-use partiql_extension_ion::embedded::EmbeddedIonType;
 use partiql_extension_ion::Encoding;
 use partiql_value::embedded_document::DynEmbeddedDocumentTypeFactory;
 use partiql_value::{Bag, EmbeddedDoc, List, Tuple, Value};
@@ -64,7 +64,7 @@ impl From<Lit> for Value {
             Lit::Bool(b) => Value::Boolean(b),
             Lit::String(s) => Value::String(s.into()),
             Lit::BoxDocument(contents, _typ) => {
-                let ion_typ = EmbeddedIonType::default().to_dyn_type_tag();
+                let ion_typ = BoxedIonType::default().to_dyn_type_tag();
                 Value::EmbeddedDoc(Box::new(
                     EmbeddedDoc::new(contents, ion_typ).expect("TODO ion parsing error"),
                 ))

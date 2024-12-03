@@ -5,7 +5,7 @@ use partiql_catalog::extension::Extension;
 use partiql_common::pretty::ToPretty;
 use partiql_eval::eval::Evaluated;
 use partiql_eval::plan::EvaluationMode;
-use partiql_extension_ion::embedded::EmbeddedIonType;
+use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_extension_value_functions::PartiqlValueFnExtension;
 use partiql_value::embedded_document::DynEmbeddedDocumentTypeFactory;
 use partiql_value::{EmbeddedDoc, Value};
@@ -37,7 +37,7 @@ fn ion_simple() {
 #[test]
 fn ion_paths() {
     let query = "select x[1].foo from `([{foo:1}, {foo: 2}] ({foo: hi::1} {foo: world::2}))` as x";
-    // << {x: `2`}, {x: `world::2`}>>
+    // << {x: `{foo: 2}`}, {x: `{foo: world::2}`}>>
 
     let res = eval(query, EvaluationMode::Permissive);
     assert_matches!(res, Ok(_));
@@ -49,7 +49,7 @@ fn ion_paths() {
 #[test]
 fn ion_iter() {
     let contents = "[1,2,3,4]";
-    let ion_typ = EmbeddedIonType::default().to_dyn_type_tag();
+    let ion_typ = BoxedIonType::default().to_dyn_type_tag();
     let value = Value::EmbeddedDoc(Box::new(
         EmbeddedDoc::new(contents, ion_typ).expect("doc ctor"),
     ));

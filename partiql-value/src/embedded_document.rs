@@ -1,13 +1,12 @@
 use dyn_clone::DynClone;
 use dyn_hash::DynHash;
-use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
+use partiql_common::pretty::PrettyDoc;
 use std::error::Error;
 
-use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef, DatumCattt};
-use crate::{Value, ValueIntoIterator, ValueIter};
+use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef};
+use crate::Value;
 use pretty::{DocAllocator, DocBuilder};
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
+use std::fmt::{Debug, Display};
 
 pub type EmbeddedDocError = Box<dyn Error>;
 
@@ -49,7 +48,7 @@ pub trait EmbeddedDocument: Display + Debug + DynHash + DynClone + Datum<Value>
 {
     fn into_dyn_iter(self: Box<Self>) -> EmbeddedDocResult<EmbeddedDocValueIntoIterator>;
 
-    fn category<'a>(&'a self) -> DatumCategoryRef<'a>;
+    fn category(&self) -> DatumCategoryRef<'_>;
 
     fn into_category(self: Box<Self>) -> DatumCategoryOwned;
 }

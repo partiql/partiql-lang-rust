@@ -1,6 +1,5 @@
 use partiql_catalog::call_defs::CallLookupError;
 use std::error::Error;
-use std::rc::Rc;
 use thiserror::Error;
 
 /// Contains the errors that occur during AST transformations

@@ -15,7 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
-use crate::datum::{Datum, DatumLowerResult};
+use crate::datum::{Datum, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -186,6 +186,8 @@ impl Value {
     }
 }
 
+impl DatumValue<Value> for Value {}
+
 impl Datum<Value> for Value {
     #[inline]
     fn is_null(&self) -> bool {
@@ -221,10 +223,6 @@ impl Datum<Value> for Value {
             Value::EmbeddedDoc(doc) => doc.is_ordered(),
             _ => false,
         }
-    }
-
-    fn lower(self) -> DatumLowerResult<Value> {
-        Ok(self)
     }
 }
 
