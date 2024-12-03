@@ -18,10 +18,10 @@ use std::ops::ControlFlow;
 
 impl BindEvalExpr for ScalarFnCallSpec {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        let plan = self.output.clone();
+        let plan = self.output;
         Ok(Box::new(EvalExprFnScalar::<{ STRICT }> { plan, args }))
     }
 }

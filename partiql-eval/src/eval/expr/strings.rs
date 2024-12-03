@@ -28,7 +28,7 @@ pub(crate) enum EvalStringFn {
 impl BindEvalExpr for EvalStringFn {
     #[inline]
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         #[inline]
@@ -69,7 +69,7 @@ pub(crate) enum EvalTrimFn {
 
 impl BindEvalExpr for EvalTrimFn {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let create = |f: for<'a> fn(&'a str, &'a str) -> &'a str| {
@@ -107,7 +107,7 @@ pub(crate) struct EvalFnPosition {}
 
 impl BindEvalExpr for EvalFnPosition {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         BinaryValueExpr::create_typed::<STRICT, _>(
@@ -129,7 +129,7 @@ pub(crate) struct EvalFnSubstring {}
 
 impl BindEvalExpr for EvalFnSubstring {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         match args.len() {
@@ -179,7 +179,7 @@ pub(crate) struct EvalFnOverlay {}
 
 impl BindEvalExpr for EvalFnOverlay {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         fn overlay(value: &str, replacement: &str, offset: i64, length: usize) -> Value {

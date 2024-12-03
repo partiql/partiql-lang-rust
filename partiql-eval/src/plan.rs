@@ -755,7 +755,7 @@ impl<'c> EvaluatorPlanner<'c> {
 
                                             Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
                                         }
-                                        Some(overload) => overload.bind::<{ STRICT }>(args),
+                                        Some(overload) => overload.clone().bind::<{ STRICT }>(args),
                                     }
                                 }
                                 FunctionEntryFunction::Aggregate() => {

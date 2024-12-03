@@ -35,7 +35,7 @@ impl Debug for EvalLitExpr {
 
 impl BindEvalExpr for EvalLitExpr {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         Ok(Box::new(self.clone()))
@@ -77,7 +77,7 @@ pub(crate) enum EvalOpUnary {
 
 impl BindEvalExpr for EvalOpUnary {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let any_num = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
@@ -177,7 +177,7 @@ impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
 impl BindEvalExpr for EvalOpBinary {
     #[inline]
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         type AndCheck = BoolShortCircuitArgChecker<false, PropagateNull<false>>;
@@ -345,7 +345,7 @@ pub(crate) struct EvalBetweenExpr {}
 
 impl BindEvalExpr for EvalBetweenExpr {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [type_dynamic!(), type_dynamic!(), type_dynamic!()];
@@ -363,7 +363,7 @@ pub(crate) struct EvalFnExists {}
 
 impl BindEvalExpr for EvalFnExists {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         UnaryValueExpr::create_with_any::<{ STRICT }, _>(args, |v| {
@@ -383,7 +383,7 @@ pub(crate) struct EvalFnAbs {}
 
 impl BindEvalExpr for EvalFnAbs {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let nums = PartiqlShapeBuilder::init_or_get().any_of(type_numeric!());
@@ -404,7 +404,7 @@ pub(crate) struct EvalFnCardinality {}
 
 impl BindEvalExpr for EvalFnCardinality {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let shape_builder = PartiqlShapeBuilder::init_or_get();
