@@ -170,7 +170,7 @@ pub struct BasicContext<'a> {
     pub errors: RefCell<Vec<EvaluationError>>,
 }
 
-impl<'a> BasicContext<'a> {
+impl BasicContext<'_> {
     #[must_use]
     pub fn new(bindings: MapBindings<Value>, sys: SystemContext) -> Self {
         BasicContext {
@@ -228,7 +228,7 @@ impl<'a, 'c> NestedContext<'a, 'c> {
     }
 }
 
-impl<'a, 'c> SessionContext<'a> for NestedContext<'a, 'c> {
+impl<'a> SessionContext<'a> for NestedContext<'a, '_> {
     fn bindings(&self) -> &dyn Bindings<Value> {
         &self.bindings
     }
@@ -241,7 +241,7 @@ impl<'a, 'c> SessionContext<'a> for NestedContext<'a, 'c> {
     }
 }
 
-impl<'a, 'c> EvalContext<'a> for NestedContext<'a, 'c> {
+impl<'a> EvalContext<'a> for NestedContext<'a, '_> {
     fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
         self
     }

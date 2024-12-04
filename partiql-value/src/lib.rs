@@ -419,7 +419,7 @@ pub trait NullableOrd {
 #[derive(Eq, PartialEq)]
 pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
 
-impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, Value> {
+impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Value> {
     type Output = Value;
 
     fn eq(&self, rhs: &Self) -> Self::Output {
@@ -905,7 +905,7 @@ where
     }
 }
 
-impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Value> {
+impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap_list = NullSortedValue::<{ NULLS_FIRST }, List>;
         let wrap_tuple = NullSortedValue::<{ NULLS_FIRST }, Tuple>;

@@ -196,7 +196,7 @@ impl PartialOrd for Bag {
     }
 }
 
-impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Bag> {
+impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Bag> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap = NullSortedValue::<{ NULLS_FIRST }, List>;
 

@@ -212,7 +212,7 @@ impl<'c> NameResolver<'c> {
     }
 }
 
-impl<'ast, 'c> Visitor<'ast> for NameResolver<'c> {
+impl<'ast> Visitor<'ast> for NameResolver<'_> {
     fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_path_to_root.push(id);
         if let Some(children) = self.id_child_stack.last_mut() {

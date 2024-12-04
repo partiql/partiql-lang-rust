@@ -609,7 +609,7 @@ impl<'a> AstToLogical<'a> {
 // so there is nothing done between the `enter_<x>` and `exit_<x>` calls.
 // By convention, processing for them is done in the `enter_<x>` calls here.
 //
-impl<'a, 'ast> Visitor<'ast> for AstToLogical<'a> {
+impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn enter_ast_node(&mut self, id: NodeId) -> Traverse {
         self.id_stack.push(id);
         Traverse::Continue

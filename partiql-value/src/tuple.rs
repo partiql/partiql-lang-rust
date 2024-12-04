@@ -267,7 +267,7 @@ impl Debug for Tuple {
     }
 }
 
-impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Tuple> {
+impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Tuple> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap = NullSortedValue::<{ NULLS_FIRST }, Value>;
 

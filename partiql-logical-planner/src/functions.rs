@@ -8,7 +8,7 @@ pub(crate) trait Function {
     fn resolve(&self, name: &str, args: &[CallArgument]) -> Result<ValueExpr, CallLookupError>;
 }
 
-impl<'a> Function for FunctionEntry<'a> {
+impl Function for FunctionEntry<'_> {
     fn resolve(&self, name: &str, args: &[CallArgument]) -> Result<ValueExpr, CallLookupError> {
         let oid = self.id();
         match self.entry() {
@@ -30,7 +30,7 @@ struct ScalarFnResolver<'a> {
     pub scfn: &'a ScalarFnCallSpecs,
 }
 
-impl<'a> Function for ScalarFnResolver<'a> {
+impl Function for ScalarFnResolver<'_> {
     fn resolve(&self, name: &str, args: &[CallArgument]) -> Result<ValueExpr, CallLookupError> {
         let oid = self.oid;
         let overloads = self.scfn;

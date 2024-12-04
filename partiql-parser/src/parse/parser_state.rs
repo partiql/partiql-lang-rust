@@ -32,7 +32,7 @@ pub(crate) struct ParserState<'input, Id: NodeIdGenerator> {
     aggregates_pat: &'static Regex,
 }
 
-impl<'input> Default for ParserState<'input, AutoNodeIdGenerator> {
+impl Default for ParserState<'_, AutoNodeIdGenerator> {
     fn default() -> Self {
         ParserState::with_id_gen(AutoNodeIdGenerator::default())
     }
@@ -44,7 +44,7 @@ const KNOWN_AGGREGATES: &str =
     "(?i:^count$)|(?i:^avg$)|(?i:^min$)|(?i:^max$)|(?i:^sum$)|(?i:^any$)|(?i:^some$)|(?i:^every$)";
 static KNOWN_AGGREGATE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(KNOWN_AGGREGATES).unwrap());
 
-impl<'input, I> ParserState<'input, I>
+impl<I> ParserState<'_, I>
 where
     I: NodeIdGenerator,
 {
@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<'input, IdGen: NodeIdGenerator> ParserState<'input, IdGen> {
+impl<IdGen: NodeIdGenerator> ParserState<'_, IdGen> {
     /// Create a new [`AstNode`] from the inner data which it is to hold and a source location.
     pub fn create_node<T, IntoLoc>(&mut self, node: T, location: IntoLoc) -> AstNode<T>
     where

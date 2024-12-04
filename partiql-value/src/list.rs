@@ -193,7 +193,7 @@ impl PartialOrd for List {
     }
 }
 
-impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, List> {
+impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, List> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap = NullSortedValue::<{ NULLS_FIRST }, _>;
 
