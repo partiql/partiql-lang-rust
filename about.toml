@@ -21,5 +21,6 @@ accepted = [
     "ISC",
     "Zlib",
     "ICU",
-    "Unicode-DFS-2016"
+    "Unicode-DFS-2016",
+    "Unicode-3.0"
 ]
