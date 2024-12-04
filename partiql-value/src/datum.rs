@@ -54,7 +54,7 @@ pub trait DatumValue<D>: Clone + Datum<D>
 where
     D: Datum<D>,
 {
-    fn lower(self) -> DatumLowerResult<D>;
+    fn into_lower(self) -> DatumLowerResult<D>;
 }
 
 pub trait DatumCategory<'a> {
@@ -136,6 +136,9 @@ impl<'a> DatumCategory<'a> for Value {
 
 pub trait TupleDatum {
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub trait RefTupleView<'a, DV: DatumValue<DV>>: TupleDatum {
@@ -190,6 +193,9 @@ impl OwnedTupleView<Value> for DatumTupleOwned {
 pub trait SequenceDatum {
     fn is_ordered(&self) -> bool;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum {
@@ -223,7 +229,7 @@ impl<'a> RefSequenceView<'a, Value> for DatumSeqRef<'a> {
     fn get_val(&self, k: i64) -> Option<Cow<'a, Value>> {
         match self {
             DatumSeqRef::List(l) => List::get(l, k).map(Cow::Borrowed),
-            DatumSeqRef::Bag(b) => {
+            DatumSeqRef::Bag(_) => {
                 todo!("TODO [EMBDOC]: Bag::get")
             }
             DatumSeqRef::Dynamic(boxed) => boxed.get_val(k),
@@ -249,7 +255,7 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
     fn take_val(self, k: i64) -> Option<Value> {
         match self {
             DatumSeqOwned::List(l) => l.take_val(k),
-            DatumSeqOwned::Bag(b) => todo!("TODO [EMBDOC]: Bag::get"),
+            DatumSeqOwned::Bag(_) => todo!("TODO [EMBDOC]: Bag::get"),
             DatumSeqOwned::Dynamic(boxed) => boxed.take_val_boxed(k),
         }
     }

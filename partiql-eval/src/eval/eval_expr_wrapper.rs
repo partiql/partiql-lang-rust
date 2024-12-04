@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{type_dynamic, PartiqlShape, Static, StaticCategory, StaticType, TYPE_DYNAMIC};
+use partiql_types::{type_dynamic, PartiqlShape, Static, StaticCategory, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -14,7 +14,7 @@ use std::hash::Hash;
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{Datum, DatumCategory, DatumCategoryRef, DatumValueRef};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, DatumValueRef};
 use std::ops::ControlFlow;
 
 trait TypeSatisfier {
@@ -28,21 +28,26 @@ impl TypeSatisfier for Static {
             (_, DatumCategoryRef::Null) => true,
             (_, DatumCategoryRef::Missing) => true,
             (StaticCategory::Scalar(ty), DatumCategoryRef::Scalar(scalar)) => match scalar {
-                DatumValueRef::Value(scalar) => match (ty, scalar) {
-                    (
-                        Static::Int | Static::Int8 | Static::Int16 | Static::Int32 | Static::Int64,
-                        Value::Integer(_),
-                    ) => true,
-                    (Static::Bool, Value::Boolean(_)) => true,
-                    (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_)) => true,
-                    (Static::Float32 | Static::Float64, Value::Real(_)) => true,
-                    (
-                        Static::String | Static::StringFixed(_) | Static::StringVarying(_),
-                        Value::String(_),
-                    ) => true,
-                    (Static::DateTime, Value::DateTime(_)) => true,
-                    _ => false,
-                },
+                DatumValueRef::Value(scalar) => {
+                    matches!(
+                        (ty, scalar),
+                        (
+                            Static::Int
+                                | Static::Int8
+                                | Static::Int16
+                                | Static::Int32
+                                | Static::Int64,
+                            Value::Integer(_),
+                        ) | (Static::Bool, Value::Boolean(_))
+                            | (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_))
+                            | (Static::Float32 | Static::Float64, Value::Real(_))
+                            | (
+                                Static::String | Static::StringFixed(_) | Static::StringVarying(_),
+                                Value::String(_),
+                            )
+                            | (Static::DateTime, Value::DateTime(_))
+                    )
+                }
             },
             (StaticCategory::Sequence(shape), DatumCategoryRef::Sequence(seq)) => {
                 //shape.all_satisfies(seq)

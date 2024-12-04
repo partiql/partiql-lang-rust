@@ -27,12 +27,22 @@ use std::ops::ControlFlow;
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
 #[derive(Clone)]
 pub(crate) struct EvalLitExpr {
-    pub(crate) lit: Value,
+    pub(crate) val: Value,
+}
+
+impl EvalLitExpr {
+    pub(crate) fn new(val: Value) -> Self {
+        Self { val }
+    }
+
+    fn lower(&self) -> DatumLowerResult<EvalLitExpr> {
+        self.val.clone().into_lower().map(Self::new)
+    }
 }
 
 impl Debug for EvalLitExpr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.lit.fmt(f)
+        self.val.fmt(f)
     }
 }
 
@@ -41,7 +51,7 @@ impl BindEvalExpr for EvalLitExpr {
         self,
         _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        Ok(Box::new(self.clone()))
+        Ok(Box::new(self.lower()?))
     }
 }
 
@@ -54,7 +64,7 @@ impl EvalExpr for EvalLitExpr {
     where
         'c: 'a,
     {
-        Cow::Borrowed(&self.lit)
+        Cow::Borrowed(&self.val)
     }
 }
 

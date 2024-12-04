@@ -57,7 +57,7 @@ dyn_hash::hash_trait_object!(EmbeddedDocument);
 dyn_clone::clone_trait_object!(EmbeddedDocument);
 
 impl PrettyDoc for DynEmbeddedDocument {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,

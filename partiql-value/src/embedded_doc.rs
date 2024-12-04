@@ -3,7 +3,7 @@ use crate::datum::{
 };
 use crate::embedded_document::{
     DynEmbeddedDocument, DynEmbeddedTypeTag, EmbeddedDocError, EmbeddedDocResult,
-    EmbeddedDocValueIntoIterator, EmbeddedDocValueIter, EmbeddedDocument,
+    EmbeddedDocValueIntoIterator, EmbeddedDocValueIter,
 };
 use crate::Value;
 use delegate::delegate;
@@ -56,7 +56,7 @@ impl EmbeddedDoc {
 }
 
 impl DatumValue<EmbeddedDoc> for EmbeddedDoc {
-    fn lower(self) -> DatumLowerResult<EmbeddedDoc> {
+    fn into_lower(self) -> DatumLowerResult<EmbeddedDoc> {
         Ok(EmbeddedDoc::Boxed(self.force_into()?))
     }
 }
@@ -119,7 +119,7 @@ impl RawEmbeddedDoc {
 
 pub struct EmbeddedDocIter<'a>(EmbeddedDocValueIter<'a>);
 impl Debug for EmbeddedDocIter<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }
@@ -201,13 +201,13 @@ impl Datum<Value> for Rc<dyn Error> {
 }
 
 impl Hash for EmbeddedDoc {
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
         todo!()
     }
 }
 
 impl PartialEq<Self> for EmbeddedDoc {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         todo!()
     }
 }
@@ -216,7 +216,7 @@ impl Eq for EmbeddedDoc {}
 
 #[cfg(feature = "serde")]
 impl Serialize for EmbeddedDoc {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -226,7 +226,7 @@ impl Serialize for EmbeddedDoc {
 
 #[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for EmbeddedDoc {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -244,7 +244,7 @@ impl PrettyDoc for EmbeddedDoc {
         // TODO [EMBDOC] write out type tag?
         // TODO [EMBDOC] handle backticks more generally.
         let doc = match self {
-            EmbeddedDoc::Raw(RawEmbeddedDoc { contents, type_tag }) => {
+            EmbeddedDoc::Raw(RawEmbeddedDoc { contents, .. }) => {
                 String::from_utf8_lossy(contents).into_owned()
             }
             EmbeddedDoc::Boxed(doc) => format!("{}", doc),

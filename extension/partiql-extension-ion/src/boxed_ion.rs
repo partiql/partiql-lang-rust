@@ -5,8 +5,8 @@ use ion_rs::{
 use ion_rs_old::IonReader;
 use partiql_value::datum::{
     Datum, DatumCategoryOwned, DatumCategoryRef, DatumSeqOwned, DatumSeqRef, DatumTupleOwned,
-    DatumTupleRef, OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum,
-    TupleDatum,
+    DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView, OwnedTupleView,
+    RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
 use partiql_value::embedded_document::{
     EmbeddedDocResult, EmbeddedDocValueIntoIterator, EmbeddedDocument, EmbeddedDocumentType,
@@ -134,7 +134,7 @@ impl EmbeddedDocument for BoxedIon {
                 IonType::SExp => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                 IonType::Null => DatumCategoryRef::Null,
                 IonType::Struct => DatumCategoryRef::Tuple(DatumTupleRef::Dynamic(self)),
-                _ => DatumCategoryRef::Scalar(todo!()),
+                _ => DatumCategoryRef::Scalar(DatumValueRef::Value(todo!())),
             },
         }
     }
@@ -150,7 +150,7 @@ impl EmbeddedDocument for BoxedIon {
                 IonType::SExp => DatumCategoryOwned::Sequence(DatumSeqOwned::Dynamic(self)),
                 IonType::Null => DatumCategoryOwned::Null,
                 IonType::Struct => DatumCategoryOwned::Tuple(DatumTupleOwned::Dynamic(self)),
-                _ => DatumCategoryOwned::Scalar(todo!()),
+                _ => DatumCategoryOwned::Scalar(DatumValueOwned::Value(self.into_value())),
             },
         }
     }
@@ -166,7 +166,7 @@ impl SequenceDatum for BoxedIon {
             BoxedIonValue::Stream() => {
                 todo!()
             }
-            BoxedIonValue::Sequence(seq) => seq.size_hint().0, // TODO
+            BoxedIonValue::Sequence(seq) => seq.len(),
             BoxedIonValue::Value(elt) => match elt.expect_sequence() {
                 Ok(seq) => seq.len(), // TODO
                 Err(e) => todo!(),
@@ -182,9 +182,8 @@ impl<'a> RefSequenceView<'a, Value> for BoxedIon {
                 todo!()
             }
             BoxedIonValue::Sequence(seq) => seq
-                .clone() // TODO remove clone by holding vecdeque directly?
-                .nth(k as usize)
-                .map(|elt| Cow::Owned(self.child_value(elt))),
+                .get(k as usize)
+                .map(|elt| Cow::Owned(self.child_value(elt.clone()))), // TODO remove clone
             BoxedIonValue::Value(elt) => match elt.expect_sequence() {
                 Ok(seq) => seq
                     .iter()
@@ -203,9 +202,10 @@ impl OwnedSequenceView<Value> for BoxedIon {
             BoxedIonValue::Stream() => {
                 todo!()
             }
-            BoxedIonValue::Sequence(mut seq) => {
-                seq.nth(k as usize).map(|elt| Self::new_value(elt, ctx))
-            }
+            BoxedIonValue::Sequence(seq) => seq
+                .into_iter()
+                .nth(k as usize)
+                .map(|elt| Self::new_value(elt, ctx)),
             BoxedIonValue::Value(elt) => match elt.try_into_sequence() {
                 Ok(seq) => seq
                     .into_iter()
@@ -379,7 +379,7 @@ impl BoxedIon {
 
                 match elt.try_into_sequence() {
                     Err(err) => BoxedIonValue::Value(err.original_value()),
-                    Ok(seq) => BoxedIonValue::Sequence(seq.into_iter()),
+                    Ok(seq) => BoxedIonValue::Sequence(seq),
                 }
             }
         }
@@ -418,7 +418,7 @@ enum BoxedIonStreamType {
 enum BoxedIonValue {
     Stream(),
     Value(Element),
-    Sequence(OwnedSequenceIterator),
+    Sequence(Sequence),
 }
 
 impl From<Element> for BoxedIonValue {
@@ -427,8 +427,8 @@ impl From<Element> for BoxedIonValue {
     }
 }
 
-impl From<OwnedSequenceIterator> for BoxedIonValue {
-    fn from(value: OwnedSequenceIterator) -> Self {
+impl From<Sequence> for BoxedIonValue {
+    fn from(value: Sequence) -> Self {
         BoxedIonValue::Sequence(value)
     }
 }
@@ -441,9 +441,7 @@ impl Clone for BoxedIonValue {
                 todo!("stream not cloneable? ")
             }
             BoxedIonValue::Value(val) => BoxedIonValue::Value(val.clone()),
-            BoxedIonValue::Sequence(seq) => {
-                todo!("clone for Seq")
-            }
+            BoxedIonValue::Sequence(seq) => BoxedIonValue::Sequence(seq.clone()),
         }
     }
 }
@@ -456,9 +454,7 @@ impl Display for BoxedIonValue {
                 todo!("stream not displayable? ")
             }
             BoxedIonValue::Value(val) => std::fmt::Display::fmt(val, f),
-            BoxedIonValue::Sequence(seq) => {
-                todo!("display for Seq")
-            }
+            BoxedIonValue::Sequence(seq) => std::fmt::Debug::fmt(&seq, f),
         }
     }
 }

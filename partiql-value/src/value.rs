@@ -187,9 +187,9 @@ impl Value {
 }
 
 impl DatumValue<Value> for Value {
-    fn lower(self) -> DatumLowerResult<Value> {
+    fn into_lower(self) -> DatumLowerResult<Value> {
         match self {
-            Value::EmbeddedDoc(doc) => Ok(Value::EmbeddedDoc(Box::new(doc.lower()?))),
+            Value::EmbeddedDoc(doc) => Ok(Value::EmbeddedDoc(Box::new(doc.into_lower()?))),
             _ => Ok(self),
         }
     }

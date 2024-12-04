@@ -360,6 +360,9 @@ impl<'c> EvaluatorPlanner<'c> {
                     }
                     BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
                     BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
+                    BindError::LiteralValue(err) => {
+                        PlanningError::IllegalState(format!("Literal error: {}", err))
+                    }
                 };
 
                 self.err(err)
@@ -391,10 +394,7 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
-                EvalLitExpr {
-                    lit: Value::from(lit.as_ref().clone()),
-                }
-                .bind::<{ STRICT }>(vec![]),
+                EvalLitExpr::new(Value::from(lit.as_ref().clone())).bind::<{ STRICT }>(vec![]),
             ),
             ValueExpr::Path(expr, components) => (
                 "path",
@@ -514,7 +514,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "simple case default",
-                        EvalLitExpr { lit: Value::Null }.bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr::new(Value::Null).bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def),
                 };
@@ -539,7 +539,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     // If no `ELSE` clause is specified, use implicit `ELSE NULL` (see section 6.9, pg 142 of SQL-92 spec)
                     None => self.unwrap_bind(
                         "searched case default",
-                        EvalLitExpr { lit: Value::Null }.bind::<{ STRICT }>(vec![]),
+                        EvalLitExpr::new(Value::Null).bind::<{ STRICT }>(vec![]),
                     ),
                     Some(def) => self.plan_value::<{ STRICT }>(def.as_ref()),
                 };
