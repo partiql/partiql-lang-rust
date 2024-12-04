@@ -91,13 +91,13 @@ impl EvalPathComponent {
     ) -> Option<Cow<'a, Value>> {
         let category = value.category();
         match (self, category) {
-            (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get(k),
-            (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get(*idx),
+            (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get_val(k),
+            (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get_val(*idx),
             (EvalPathComponent::KeyExpr(ke), DatumCategoryRef::Tuple(tuple)) => {
-                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get(&key))
+                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get_val(&key))
             }
             (EvalPathComponent::IndexExpr(ie), DatumCategoryRef::Sequence(seq)) => {
-                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get(i))
+                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get_val(i))
             }
             _ => None,
         }

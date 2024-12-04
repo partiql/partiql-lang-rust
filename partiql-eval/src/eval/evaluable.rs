@@ -1233,7 +1233,6 @@ impl EvalExprQuery {
 impl Evaluable for EvalExprQuery {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = self.input.take().unwrap_or(Value::Null).coerce_into_tuple();
-
         self.expr.evaluate(&input_value, ctx).into_owned()
     }
 

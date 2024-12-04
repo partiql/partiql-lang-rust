@@ -4,8 +4,9 @@ use ion_rs::{
 };
 use ion_rs_old::IonReader;
 use partiql_value::datum::{
-    BoxedOwnedSequenceView, Datum, DatumCategoryOwned, DatumCategoryRef, DatumSeqOwned,
-    DatumSeqRef, DatumTupleOwned, DatumTupleRef, OwnedTupleView, RefSequenceView, RefTupleView,
+    Datum, DatumCategoryOwned, DatumCategoryRef, DatumSeqOwned, DatumSeqRef, DatumTupleOwned,
+    DatumTupleRef, OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum,
+    TupleDatum,
 };
 use partiql_value::embedded_document::{
     EmbeddedDocResult, EmbeddedDocValueIntoIterator, EmbeddedDocument, EmbeddedDocumentType,
@@ -133,7 +134,7 @@ impl EmbeddedDocument for BoxedIon {
                 IonType::SExp => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                 IonType::Null => DatumCategoryRef::Null,
                 IonType::Struct => DatumCategoryRef::Tuple(DatumTupleRef::Dynamic(self)),
-                _ => DatumCategoryRef::Value(todo!()),
+                _ => DatumCategoryRef::Scalar(todo!()),
             },
         }
     }
@@ -149,17 +150,33 @@ impl EmbeddedDocument for BoxedIon {
                 IonType::SExp => DatumCategoryOwned::Sequence(DatumSeqOwned::Dynamic(self)),
                 IonType::Null => DatumCategoryOwned::Null,
                 IonType::Struct => DatumCategoryOwned::Tuple(DatumTupleOwned::Dynamic(self)),
-                _ => DatumCategoryOwned::Value(todo!()),
+                _ => DatumCategoryOwned::Scalar(todo!()),
             },
         }
     }
 }
-impl<'a> RefSequenceView<'a, Value> for BoxedIon {
+
+impl SequenceDatum for BoxedIon {
     fn is_ordered(&self) -> bool {
         true
     }
 
-    fn get(&self, k: i64) -> Option<Cow<'a, Value>> {
+    fn len(&self) -> usize {
+        match &self.doc {
+            BoxedIonValue::Stream() => {
+                todo!()
+            }
+            BoxedIonValue::Sequence(seq) => seq.size_hint().0, // TODO
+            BoxedIonValue::Value(elt) => match elt.expect_sequence() {
+                Ok(seq) => seq.len(), // TODO
+                Err(e) => todo!(),
+            },
+        }
+    }
+}
+
+impl<'a> RefSequenceView<'a, Value> for BoxedIon {
+    fn get_val(&self, k: i64) -> Option<Cow<'a, Value>> {
         match &self.doc {
             BoxedIonValue::Stream() => {
                 todo!()
@@ -179,13 +196,9 @@ impl<'a> RefSequenceView<'a, Value> for BoxedIon {
     }
 }
 
-impl BoxedOwnedSequenceView<Value> for BoxedIon {
-    fn is_ordered(&self) -> bool {
-        true
-    }
-
-    fn take_val(self: Box<Self>, k: i64) -> Option<Value> {
-        let Self { doc, ctx } = *self;
+impl OwnedSequenceView<Value> for BoxedIon {
+    fn take_val(self, k: i64) -> Option<Value> {
+        let Self { doc, ctx } = self;
         match doc {
             BoxedIonValue::Stream() => {
                 todo!()
@@ -202,10 +215,31 @@ impl BoxedOwnedSequenceView<Value> for BoxedIon {
             },
         }
     }
+
+    fn take_val_boxed(self: Box<Self>, k: i64) -> Option<Value> {
+        OwnedSequenceView::take_val(*self, k)
+    }
+}
+
+impl TupleDatum for BoxedIon {
+    fn len(&self) -> usize {
+        match &self.doc {
+            BoxedIonValue::Stream() => {
+                todo!()
+            }
+            BoxedIonValue::Sequence(seq) => {
+                todo!()
+            }
+            BoxedIonValue::Value(elt) => match elt.expect_struct() {
+                Ok(strct) => strct.len(),
+                Err(e) => todo!(),
+            },
+        }
+    }
 }
 
 impl<'a> RefTupleView<'a, Value> for BoxedIon {
-    fn get(&self, target_key: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+    fn get_val(&self, target_key: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
         let matcher = target_key.matcher();
         let Self { doc, ctx } = self;
         match doc {

@@ -19,6 +19,9 @@ use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
+use partiql_value::datum::{
+    DatumCategory, DatumCategoryRef, DatumLowerResult, DatumValue, SequenceDatum, TupleDatum,
+};
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
@@ -414,10 +417,9 @@ impl BindEvalExpr for EvalFnCardinality {
             shape_builder.new_static(Static::Struct(StructType::new_any())),
         ]);
 
-        UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
-            Value::List(l) => Value::from(l.len()),
-            Value::Bag(b) => Value::from(b.len()),
-            Value::Tuple(t) => Value::from(t.len()),
+        UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v.category() {
+            DatumCategoryRef::Tuple(tuple) => Value::from(tuple.len()),
+            DatumCategoryRef::Sequence(seq) => Value::from(seq.len()),
             _ => Missing,
         })
     }

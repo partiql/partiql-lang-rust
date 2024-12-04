@@ -1,4 +1,6 @@
-use crate::datum::{Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef};
+use crate::datum::{
+    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLowerResult, DatumValue,
+};
 use crate::embedded_document::{
     DynEmbeddedDocument, DynEmbeddedTypeTag, EmbeddedDocError, EmbeddedDocResult,
     EmbeddedDocValueIntoIterator, EmbeddedDocValueIter, EmbeddedDocument,
@@ -50,6 +52,12 @@ impl EmbeddedDoc {
             }
             EmbeddedDoc::Boxed(doc) => Ok(doc),
         }
+    }
+}
+
+impl DatumValue<EmbeddedDoc> for EmbeddedDoc {
+    fn lower(self) -> DatumLowerResult<EmbeddedDoc> {
+        Ok(EmbeddedDoc::Boxed(self.force_into()?))
     }
 }
 
@@ -152,7 +160,7 @@ impl Iterator for EmbeddedDocIntoIterator {
     }
 }
 
-impl Datum<Value> for EmbeddedDoc {
+impl Datum<EmbeddedDoc> for EmbeddedDoc {
     delegate! {
         to self.force().expect("handle errors for datum") {
             fn is_null(&self) -> bool;

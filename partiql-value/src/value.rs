@@ -15,7 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
-use crate::datum::{Datum, DatumValue};
+use crate::datum::{Datum, DatumLowerResult, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -186,7 +186,14 @@ impl Value {
     }
 }
 
-impl DatumValue<Value> for Value {}
+impl DatumValue<Value> for Value {
+    fn lower(self) -> DatumLowerResult<Value> {
+        match self {
+            Value::EmbeddedDoc(doc) => Ok(Value::EmbeddedDoc(Box::new(doc.lower()?))),
+            _ => Ok(self),
+        }
+    }
+}
 
 impl Datum<Value> for Value {
     #[inline]
