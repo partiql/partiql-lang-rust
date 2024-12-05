@@ -444,7 +444,7 @@ pub enum Lit {
     #[visit(skip)]
     BoolLit(bool),
     #[visit(skip)]
-    IonStringLit(String),
+    EmbeddedDocLit(String),
     #[visit(skip)]
     CharStringLit(String),
     #[visit(skip)]
@@ -454,14 +454,39 @@ pub enum Lit {
     #[visit(skip)]
     HexStringLit(String),
     #[visit(skip)]
-    StructLit(AstNode<Struct>),
+    StructLit(AstNode<StructLit>),
     #[visit(skip)]
-    BagLit(AstNode<Bag>),
+    BagLit(AstNode<BagLit>),
     #[visit(skip)]
-    ListLit(AstNode<List>),
+    ListLit(AstNode<ListLit>),
     /// E.g. `TIME WITH TIME ZONE` in `SELECT TIME WITH TIME ZONE '12:00' FROM ...`
     #[visit(skip)]
     TypedLit(String, Type),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct LitField {
+    pub first: String,
+    pub second: AstNode<Lit>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct StructLit {
+    pub fields: Vec<LitField>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BagLit {
+    pub values: Vec<Lit>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ListLit {
+    pub values: Vec<Lit>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq, Eq)]

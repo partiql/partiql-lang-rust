@@ -21,7 +21,7 @@ use partiql_logical::{
 };
 use std::borrow::Cow;
 
-use partiql_value::{BindingsName, Value};
+use partiql_value::BindingsName;
 
 use std::collections::{HashMap, HashSet};
 
@@ -36,8 +36,6 @@ use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::Catalog;
 use partiql_common::node::NodeId;
-use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
-use partiql_extension_ion::Encoding;
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -541,8 +539,8 @@ impl<'a> AstToLogical<'a> {
     }
 
     #[inline]
-    fn push_value(&mut self, val: Value) {
-        self.push_vexpr(ValueExpr::Lit(Box::new(val)));
+    fn push_lit(&mut self, lit: logical::Lit) {
+        self.push_vexpr(ValueExpr::Lit(Box::new(lit)));
     }
 
     #[inline]
@@ -832,7 +830,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         {
             let exprs = HashMap::from([(
                 "$__gk".to_string(),
-                ValueExpr::Lit(Box::new(Value::from(true))),
+                ValueExpr::Lit(Box::new(logical::Lit::Bool(true))),
             )]);
             let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
                 strategy: logical::GroupingStrategy::GroupFull,
@@ -889,7 +887,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                     let alias = iter.next().unwrap();
                     let alias = match alias {
                         ValueExpr::Lit(lit) => match *lit {
-                            Value::String(s) => (*s).clone(),
+                            logical::Lit::String(s) => s.clone(),
                             _ => {
                                 // Report error but allow visitor to continue
                                 self.errors.push(AstTransformError::IllegalState(
@@ -951,7 +949,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             name_resolver::Symbol::Known(sym) => sym.value.clone(),
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
-        self.push_value(as_key.into());
+        self.push_lit(logical::Lit::String(as_key));
         Traverse::Continue
     }
 
@@ -969,8 +967,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         if _bin_op.kind == BinOpKind::Is {
             let is_type = match rhs {
                 ValueExpr::Lit(lit) => match lit.as_ref() {
-                    Value::Null => logical::Type::NullType,
-                    Value::Missing => logical::Type::MissingType,
+                    logical::Lit::Null => logical::Type::NullType,
+                    logical::Lit::Missing => logical::Type::MissingType,
                     _ => {
                         not_yet_implemented_fault!(
                             self,
@@ -1079,7 +1077,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let escape_ve = if env.len() == 3 {
             env.pop().unwrap()
         } else {
-            ValueExpr::Lit(Box::new(Value::String(Box::default())))
+            ValueExpr::Lit(Box::new(logical::Lit::String(String::default())))
         };
         let pattern_ve = env.pop().unwrap();
         let value = Box::new(env.pop().unwrap());
@@ -1087,10 +1085,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let pattern = match (&pattern_ve, &escape_ve) {
             (ValueExpr::Lit(pattern_lit), ValueExpr::Lit(escape_lit)) => {
                 match (pattern_lit.as_ref(), escape_lit.as_ref()) {
-                    (Value::String(pattern), Value::String(escape)) => Pattern::Like(LikeMatch {
-                        pattern: pattern.to_string(),
-                        escape: escape.to_string(),
-                    }),
+                    (logical::Lit::String(pattern), logical::Lit::String(escape)) => {
+                        Pattern::Like(LikeMatch {
+                            pattern: pattern.to_string(),
+                            escape: escape.to_string(),
+                        })
+                    }
                     _ => Pattern::LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch {
                         pattern: Box::new(pattern_ve),
                         escape: Box::new(escape_ve),
@@ -1136,7 +1136,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             Ok(expr) => expr,
             Err(err) => {
                 self.errors.push(err);
-                ValueExpr::Lit(Box::new(Value::Missing)) // dummy expression to allow lowering to continue
+                ValueExpr::Lit(Box::new(logical::Lit::Missing)) // dummy expression to allow lowering to continue
             }
         };
         self.push_vexpr(expr);
@@ -1178,15 +1178,15 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     // Values & Value Constructors
 
     fn enter_lit(&mut self, lit: &'ast Lit) -> Traverse {
-        let val = match lit_to_value(lit) {
+        let val = match lit_to_lit(lit) {
             Ok(v) => v,
             Err(e) => {
                 // Report error but allow visitor to continue
                 self.errors.push(e);
-                Value::Missing
+                logical::Lit::Missing
             }
         };
-        self.push_value(val);
+        self.push_lit(val);
         Traverse::Continue
     }
 
@@ -1281,7 +1281,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             },
             CallArgument::Star => (
                 logical::SetQuantifier::All,
-                ValueExpr::Lit(Box::new(Value::Integer(1))),
+                ValueExpr::Lit(Box::new(logical::Lit::Int8(1))),
             ),
         };
 
@@ -1417,9 +1417,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 let path = env.pop().unwrap();
                 match path {
                     ValueExpr::Lit(val) => match *val {
-                        Value::Integer(idx) => logical::PathComponent::Index(idx),
-                        Value::String(k) => logical::PathComponent::Key(
-                            BindingsName::CaseInsensitive(Cow::Owned(*k)),
+                        logical::Lit::Int8(idx) => logical::PathComponent::Index(idx.into()),
+                        logical::Lit::Int16(idx) => logical::PathComponent::Index(idx.into()),
+                        logical::Lit::Int32(idx) => logical::PathComponent::Index(idx.into()),
+                        logical::Lit::Int64(idx) => logical::PathComponent::Index(idx),
+                        logical::Lit::String(k) => logical::PathComponent::Key(
+                            BindingsName::CaseInsensitive(Cow::Owned(k)),
                         ),
                         expr => logical::PathComponent::IndexExpr(Box::new(ValueExpr::Lit(
                             Box::new(expr),
@@ -1678,7 +1681,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             let alias = iter.next().unwrap();
             let alias = match alias {
                 ValueExpr::Lit(lit) => match *lit {
-                    Value::String(s) => (*s).clone(),
+                    logical::Lit::String(s) => s.clone(),
                     _ => {
                         // Report error but allow visitor to continue
                         self.errors.push(AstTransformError::IllegalState(
@@ -1727,7 +1730,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             name_resolver::Symbol::Known(sym) => sym.value.clone(),
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
         };
-        self.push_value(as_key.into());
+        self.push_lit(logical::Lit::String(as_key));
         Traverse::Continue
     }
 
@@ -1892,50 +1895,38 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 }
 
-fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
-    fn expect_lit(v: &Expr) -> Result<Value, AstTransformError> {
-        match v {
-            Expr::Lit(l) => lit_to_value(&l.node),
-            _ => Err(AstTransformError::IllegalState(
-                "non literal in literal aggregate".to_string(),
-            )),
-        }
-    }
-
-    fn tuple_pair(pair: &ast::ExprPair) -> Option<Result<(String, Value), AstTransformError>> {
-        let key = match expect_lit(pair.first.as_ref()) {
-            Ok(Value::String(s)) => s.as_ref().clone(),
-            Ok(_) => {
-                return Some(Err(AstTransformError::IllegalState(
-                    "non string literal in literal struct key".to_string(),
-                )))
-            }
-            Err(e) => return Some(Err(e)),
-        };
-
-        match expect_lit(pair.second.as_ref()) {
-            Ok(Value::Missing) => None,
-            Ok(val) => Some(Ok((key, val))),
-            Err(e) => Some(Err(e)),
+fn lit_to_lit(lit: &Lit) -> Result<logical::Lit, AstTransformError> {
+    fn tuple_pair(
+        field: &ast::LitField,
+    ) -> Option<Result<(String, logical::Lit), AstTransformError>> {
+        let key = field.first.clone();
+        match &field.second.node {
+            Lit::Missing => None,
+            value => match lit_to_lit(value) {
+                Ok(value) => Some(Ok((key, value))),
+                Err(e) => Some(Err(e)),
+            },
         }
     }
 
     let val = match lit {
-        Lit::Null => Value::Null,
-        Lit::Missing => Value::Missing,
-        Lit::Int8Lit(n) => Value::Integer(i64::from(*n)),
-        Lit::Int16Lit(n) => Value::Integer(i64::from(*n)),
-        Lit::Int32Lit(n) => Value::Integer(i64::from(*n)),
-        Lit::Int64Lit(n) => Value::Integer(*n),
-        Lit::DecimalLit(d) => Value::Decimal(Box::new(*d)),
-        Lit::NumericLit(n) => Value::Decimal(Box::new(*n)),
-        Lit::RealLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
-        Lit::FloatLit(f) => Value::Real(OrderedFloat::from(f64::from(*f))),
-        Lit::DoubleLit(f) => Value::Real(OrderedFloat::from(*f)),
-        Lit::BoolLit(b) => Value::Boolean(*b),
-        Lit::IonStringLit(s) => parse_embedded_ion_str(s)?,
-        Lit::CharStringLit(s) => Value::String(Box::new(s.clone())),
-        Lit::NationalCharStringLit(s) => Value::String(Box::new(s.clone())),
+        Lit::Null => logical::Lit::Null,
+        Lit::Missing => logical::Lit::Missing,
+        Lit::Int8Lit(n) => logical::Lit::Int8(*n),
+        Lit::Int16Lit(n) => logical::Lit::Int16(*n),
+        Lit::Int32Lit(n) => logical::Lit::Int32(*n),
+        Lit::Int64Lit(n) => logical::Lit::Int64(*n),
+        Lit::DecimalLit(d) => logical::Lit::Decimal(*d),
+        Lit::NumericLit(n) => logical::Lit::Decimal(*n),
+        Lit::RealLit(f) => logical::Lit::Double(OrderedFloat::from(*f as f64)),
+        Lit::FloatLit(f) => logical::Lit::Double(OrderedFloat::from(*f as f64)),
+        Lit::DoubleLit(f) => logical::Lit::Double(OrderedFloat::from(*f)),
+        Lit::BoolLit(b) => logical::Lit::Bool(*b),
+        Lit::EmbeddedDocLit(s) => {
+            logical::Lit::BoxDocument(s.clone().into_bytes(), "Ion".to_string())
+        }
+        Lit::CharStringLit(s) => logical::Lit::String(s.clone()),
+        Lit::NationalCharStringLit(s) => logical::Lit::String(s.clone()),
         Lit::BitStringLit(_) => {
             return Err(AstTransformError::NotYetImplemented(
                 "Lit::BitStringLit".to_string(),
@@ -1947,27 +1938,16 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
             ))
         }
         Lit::BagLit(b) => {
-            let bag: Result<partiql_value::Bag, _> = b
-                .node
-                .values
-                .iter()
-                .map(|l| expect_lit(l.as_ref()))
-                .collect();
-            Value::from(bag?)
+            let bag: Result<_, _> = b.node.values.iter().map(lit_to_lit).collect();
+            logical::Lit::Bag(bag?)
         }
         Lit::ListLit(l) => {
-            let l: Result<partiql_value::List, _> = l
-                .node
-                .values
-                .iter()
-                .map(|l| expect_lit(l.as_ref()))
-                .collect();
-            Value::from(l?)
+            let l: Result<_, _> = l.node.values.iter().map(lit_to_lit).collect();
+            logical::Lit::List(l?)
         }
         Lit::StructLit(s) => {
-            let tuple: Result<partiql_value::Tuple, _> =
-                s.node.fields.iter().filter_map(tuple_pair).collect();
-            Value::from(tuple?)
+            let tuple: Result<_, _> = s.node.fields.iter().filter_map(tuple_pair).collect();
+            logical::Lit::Struct(tuple?)
         }
         Lit::TypedLit(_, _) => {
             return Err(AstTransformError::NotYetImplemented(
@@ -1978,33 +1958,11 @@ fn lit_to_value(lit: &Lit) -> Result<Value, AstTransformError> {
     Ok(val)
 }
 
-fn parse_embedded_ion_str(contents: &str) -> Result<Value, AstTransformError> {
-    fn lit_err(literal: &str, err: impl std::error::Error) -> AstTransformError {
-        AstTransformError::Literal {
-            literal: literal.into(),
-            error: err.to_string(),
-        }
-    }
-
-    let reader = ion_rs_old::ReaderBuilder::new()
-        .build(contents)
-        .map_err(|e| lit_err(contents, e))?;
-    let mut iter = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
-        .build(reader)
-        .map_err(|e| lit_err(contents, e))?;
-
-    iter.next()
-        .ok_or_else(|| AstTransformError::Literal {
-            literal: contents.into(),
-            error: "Contains no value".into(),
-        })?
-        .map_err(|e| lit_err(contents, e))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::LogicalPlanner;
+    use assert_matches::assert_matches;
     use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_logical::BindingsOp::Project;
     use partiql_logical::ValueExpr;
@@ -2022,13 +1980,13 @@ mod tests {
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
-        assert_eq!(
+        assert_matches!(
             lowering_errs.first(),
-            Some(&AstTransformError::UnsupportedFunction("foo".to_string()))
+            Some(AstTransformError::UnsupportedFunction(fnc)) if fnc == "foo"
         );
-        assert_eq!(
+        assert_matches!(
             lowering_errs.get(1),
-            Some(&AstTransformError::UnsupportedFunction("bar".to_string()))
+            Some(AstTransformError::UnsupportedFunction(fnc)) if fnc == "bar"
         );
     }
 
@@ -2044,17 +2002,13 @@ mod tests {
         assert!(logical.is_err());
         let lowering_errs = logical.expect_err("Expect errs").errors;
         assert_eq!(lowering_errs.len(), 2);
-        assert_eq!(
+        assert_matches!(
             lowering_errs.first(),
-            Some(&AstTransformError::InvalidNumberOfArguments(
-                "abs".to_string()
-            ))
+            Some(AstTransformError::InvalidNumberOfArguments(fnc)) if fnc == "abs"
         );
-        assert_eq!(
+        assert_matches!(
             lowering_errs.get(1),
-            Some(&AstTransformError::InvalidNumberOfArguments(
-                "mod".to_string()
-            ))
+            Some(AstTransformError::InvalidNumberOfArguments(fnc)) if fnc == "mod"
         );
     }
 

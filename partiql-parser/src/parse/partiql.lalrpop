@@ -9,7 +9,17 @@ use partiql_ast::ast;
 
 use partiql_common::syntax::location::{ByteOffset, BytePosition, Location, ToLocated};
 
-use crate::parse::parse_util::{strip_expr, strip_query, strip_query_set, CallSite, Attrs, Synth};
+use crate::parse::parse_util::{
+    strip_expr,
+    strip_query,
+    strip_query_set,
+    struct_to_lit,
+    bag_to_lit,
+    list_to_lit,
+    CallSite,
+    Attrs,
+    Synth
+};
 use crate::parse::parser_state::ParserState;
 use partiql_common::node::NodeIdGenerator;
 
@@ -568,8 +578,7 @@ ExprQuery: Box<ast::Expr> = {
 
 ExprQuerySynth: Synth<Box<ast::Expr>> = {
     <e:ExprPrecedence15> => {
-        let Synth{data, attrs} = e;
-        Synth::new(Box::new(data), attrs)
+        e.map_data(|e| Box::new(e))
     }
 }
 
@@ -865,13 +874,39 @@ ExprPrecedence01: Synth<ast::Expr> = {
 
 ExprTerm: Synth<ast::Expr> = {
     <s:SubQuery> => Synth::empty(s),
-    <lo:@L> <lit:Literal> <hi:@R> => Synth::new(ast::Expr::Lit( state.node(lit, lo..hi) ), Attrs::LIT),
+    <lo:@L> <lit:Literal> <hi:@R> => Synth::lit(ast::Expr::Lit( state.node(lit, lo..hi) )),
     <v:VarRefExpr> => Synth::empty(v),
     <lo:@L> <c:ExprTermCollection> <hi:@R> => {
         if c.attrs.contains(Attrs::LIT) {
             match c.data {
-                ast::Expr::List(l) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::ListLit(l), lo..hi) ), Attrs::LIT),
-                ast::Expr::Bag(b) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::BagLit(b), lo..hi) ), Attrs::LIT),
+                ast::Expr::List(l) => {
+                    match list_to_lit(l.node) {
+                        Ok(list_lit) => {
+                            let list_lit = state.node(list_lit, lo..hi);
+                            let lit = state.node(ast::Lit::ListLit(list_lit), lo..hi);
+                            Synth::lit(ast::Expr::Lit( lit ))
+                        },
+                        Err(e) => {
+                            let err = lpop::ErrorRecovery{error: e.into(), dropped_tokens: Default::default()};
+                            state.errors.push(err);
+                            Synth::empty(ast::Expr::Error)
+                        }
+                    }
+                },
+                ast::Expr::Bag(b) => {
+                    match bag_to_lit(b.node) {
+                        Ok(bag_lit) => {
+                            let bag_lit = state.node(bag_lit, lo..hi);
+                            let lit = state.node(ast::Lit::BagLit(bag_lit), lo..hi);
+                            Synth::lit(ast::Expr::Lit( lit ))
+                        },
+                        Err(e) => {
+                            let err = lpop::ErrorRecovery{error: e.into(), dropped_tokens: Default::default()};
+                            state.errors.push(err);
+                            Synth::empty(ast::Expr::Error)
+                        }
+                    }
+                },
                 _ => unreachable!(),
             }
         } else {
@@ -881,7 +916,20 @@ ExprTerm: Synth<ast::Expr> = {
     <lo:@L> <t:ExprTermTuple> <hi:@R> => {
         if t.attrs.contains(Attrs::LIT) {
             match t.data {
-                ast::Expr::Struct(s) => Synth::new(ast::Expr::Lit( state.node(ast::Lit::StructLit(s), lo..hi) ), Attrs::LIT),
+                ast::Expr::Struct(s) => {
+                    match struct_to_lit(s.node) {
+                        Ok(struct_lit) => {
+                            let struct_lit = state.node(struct_lit, lo..hi);
+                            let lit = state.node(ast::Lit::StructLit(struct_lit), lo..hi);
+                            Synth::lit(ast::Expr::Lit( lit ))
+                        },
+                        Err(e) => {
+                            let err = lpop::ErrorRecovery{error: e.into(), dropped_tokens: Default::default()};
+                            state.errors.push(err);
+                            Synth::empty(ast::Expr::Error)
+                        }
+                    }
+                },
                 _ => unreachable!(),
             }
         } else {
@@ -1197,7 +1245,7 @@ ExcludePathStep: ast::ExcludePathStep = {
 Literal: ast::Lit = {
     <LiteralAbsent>,
     <LiteralScalar>,
-    <LiteralIon>,
+    <LiteralEmbeddedDoc>,
     <TypedLiteral>,
 }
 
@@ -1250,10 +1298,12 @@ LiteralNumber: ast::Lit = {
 	         })
     },
 }
+
 #[inline]
-LiteralIon: ast::Lit = {
-    <ion:"Ion"> => ast::Lit::IonStringLit(ion.to_owned()),
+LiteralEmbeddedDoc: ast::Lit = {
+    <ion:"EmbeddedDoc"> => ast::Lit::EmbeddedDocLit(ion.to_owned()),
 }
+
 
 #[inline]
 TypeKeywordStr: &'static str = {
@@ -1425,7 +1475,7 @@ extern {
         "Real" => lexer::Token::Real(<&'input str>),
         "ExpReal" => lexer::Token::ExpReal(<&'input str>),
         "String" => lexer::Token::String(<&'input str>),
-        "Ion" => lexer::Token::Ion(<&'input str>),
+        "EmbeddedDoc" => lexer::Token::EmbeddedDoc(<&'input str>),
 
         // Keywords
         "ALL" => lexer::Token::All,

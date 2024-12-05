@@ -1,5 +1,5 @@
 use crate::error::LexError;
-use crate::lexer::{CommentLexer, EmbeddedIonLexer, InternalLexResult, LexResult};
+use crate::lexer::{CommentLexer, EmbeddedDocLexer, InternalLexResult, LexResult};
 use logos::{Logos, Span};
 use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
 use partiql_common::syntax::location::ByteOffset;
@@ -35,6 +35,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         Err((start.into(), err_ctor(region.into()), end.into()))
     }
 
+    #[inline(always)]
     pub fn slice(&self) -> &'input str {
         self.lexer.slice()
     }
@@ -59,7 +60,8 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
                         continue 'next_tok;
                     }
 
-                    Token::EmbeddedIonQuote => self.parse_embedded_ion(),
+                    Token::EmbeddedDocQuote => self.parse_embedded_doc(),
+                    Token::EmptyEmbeddedDocQuote => self.parse_empty_embedded_doc(),
 
                     Token::CommentBlockStart => self.parse_block_comment(),
 
@@ -92,26 +94,34 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
         })
     }
 
-    /// Uses [`EmbeddedIonLexer`] to parse an embedded ion value
-    fn parse_embedded_ion(&mut self) -> Option<InternalLexResult<'input>> {
+    /// Uses [`EmbeddedDocLexer`] to parse an embedded doc value
+    fn parse_embedded_doc(&mut self) -> Option<InternalLexResult<'input>> {
         let embed = self.lexer.span();
         let remaining = &self.lexer.source()[embed.start..];
-        let mut ion_tracker = LineOffsetTracker::default();
-        let mut ion_lexer = EmbeddedIonLexer::new(remaining, &mut ion_tracker);
-        ion_lexer.next().map(|res| match res {
-            Ok((s, ion, e)) => {
+        let mut doc_tracker = LineOffsetTracker::default();
+        let mut doc_lexer = EmbeddedDocLexer::new(remaining, &mut doc_tracker);
+        doc_lexer.next().map(|res| match res {
+            Ok((s, doc, e)) => {
                 let val_len = e - s;
-                let val_start = embed.end.into(); // embed end is 1 past the starting '`'
-                let val_end = val_start + val_len - 2; // sub 2 to remove surrounding '`'
-                self.tracker.append(&ion_tracker, embed.start.into());
+                let val_start = embed.start.into(); // embed end is 1 past the starting '/*'
+                let val_end = val_start + val_len;
+                self.tracker.append(&doc_tracker, embed.start.into());
                 self.lexer.bump(val_len.to_usize() - embed.len());
-                Ok((val_start, Token::Ion(ion), val_end))
+                Ok((val_start, Token::EmbeddedDoc(doc), val_end))
             }
             Err((s, err, e)) => {
                 let offset: ByteOffset = embed.start.into();
                 Err((s + offset, err, e + offset))
             }
         })
+    }
+
+    #[inline]
+    fn parse_empty_embedded_doc(&mut self) -> Option<InternalLexResult<'input>> {
+        let embed = self.lexer.span();
+        let mid = embed.start + ((embed.end - embed.start) / 2);
+        let doc = &self.lexer.source()[mid..mid];
+        Some(self.wrap(Token::EmbeddedDoc(doc)))
     }
 }
 
@@ -241,9 +251,13 @@ pub enum Token<'input> {
         |lex| lex.slice().trim_matches('\''))]
     String(&'input str),
 
-    #[token("`")]
-    EmbeddedIonQuote,
-    Ion(&'input str),
+    // An embed open/close tag is a (greedily-captured) odd-number of backticks
+    #[regex(r"`(``)*")]
+    EmbeddedDocQuote,
+    // An empty embedded doc is a (greedily-captured) even-number of backticks
+    #[regex(r"(``)+")]
+    EmptyEmbeddedDocQuote,
+    EmbeddedDoc(&'input str),
 
     // Keywords
     #[regex("(?i:All)")]
@@ -492,8 +506,9 @@ impl fmt::Display for Token<'_> {
             Token::ExpReal(txt) => write!(f, "<{txt}:REAL>"),
             Token::Real(txt) => write!(f, "<{txt}:REAL>"),
             Token::String(txt) => write!(f, "<{txt}:STRING>"),
-            Token::EmbeddedIonQuote => write!(f, "<ION>"),
-            Token::Ion(txt) => write!(f, "<{txt}:ION>"),
+            Token::EmbeddedDocQuote => write!(f, "<DOC>"),
+            Token::EmbeddedDoc(txt) => write!(f, "<```{txt}```:DOC>"),
+            Token::EmptyEmbeddedDocQuote => write!(f, "<``:DOC>"),
 
             Token::All
             | Token::Asc

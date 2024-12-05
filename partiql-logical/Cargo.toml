@@ -23,9 +23,15 @@ bench = false
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.11.*" }
 partiql-common = { path = "../partiql-common", version = "0.11.*" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.11.*" }
+
+ion-rs_old = { version = "0.18", package = "ion-rs" }
 ordered-float = "4"
 itertools = "0.13"
+rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
+rust_decimal_macros = "1.36"
 unicase = "2.7"
+thiserror = "1"
 
 serde = { version = "1", features = ["derive"], optional = true }
 

@@ -1,9 +1,11 @@
 use partiql_ast::ast;
 
 use crate::parse::parser_state::ParserState;
+use crate::ParseError;
 use bitflags::bitflags;
+use partiql_ast::ast::{Expr, Lit};
 use partiql_common::node::NodeIdGenerator;
-use partiql_common::syntax::location::ByteOffset;
+use partiql_common::syntax::location::{ByteOffset, BytePosition};
 
 bitflags! {
     /// Set of AST node attributes to use as synthesized attributes.
@@ -33,13 +35,24 @@ pub(crate) struct Synth<T> {
 
 impl<T> Synth<T> {
     #[inline]
-    pub fn new(data: T, attrs: Attrs) -> Self {
+    fn new(data: T, attrs: Attrs) -> Self {
         Synth { data, attrs }
     }
 
     #[inline]
     pub fn empty(data: T) -> Self {
         Self::new(data, Attrs::empty())
+    }
+
+    #[inline]
+    pub fn lit(data: T) -> Self {
+        Self::new(data, Attrs::LIT)
+    }
+
+    pub fn map_data<U>(self, f: impl FnOnce(T) -> U) -> Synth<U> {
+        let Self { data, attrs } = self;
+        let data = f(data);
+        Synth::new(data, attrs)
     }
 }
 
@@ -168,5 +181,63 @@ pub(crate) fn strip_expr(q: ast::AstNode<ast::Query>) -> Box<ast::Expr> {
         e
     } else {
         Box::new(ast::Expr::Query(q))
+    }
+}
+
+#[inline]
+#[track_caller]
+fn illegal_literal<'a, T>() -> Result<T, crate::error::ParseError<'a, BytePosition>> {
+    Err(ParseError::IllegalState("Expected literal".to_string()))
+}
+
+pub(crate) type LitFlattenResult<'a, T> = Result<T, ParseError<'a>>;
+#[inline]
+pub(crate) fn struct_to_lit<'a>(strct: ast::Struct) -> LitFlattenResult<'a, ast::StructLit> {
+    strct
+        .fields
+        .into_iter()
+        .map(exprpair_to_lit)
+        .collect::<LitFlattenResult<'_, Vec<_>>>()
+        .map(|fields| ast::StructLit { fields })
+}
+
+#[inline]
+pub(crate) fn bag_to_lit<'a>(bag: ast::Bag) -> LitFlattenResult<'a, ast::BagLit> {
+    bag.values
+        .into_iter()
+        .map(|v| expr_to_lit(*v).map(|n| n.node))
+        .collect::<LitFlattenResult<'_, Vec<_>>>()
+        .map(|values| ast::BagLit { values })
+}
+
+#[inline]
+pub(crate) fn list_to_lit<'a>(list: ast::List) -> LitFlattenResult<'a, ast::ListLit> {
+    list.values
+        .into_iter()
+        .map(|v| expr_to_lit(*v).map(|n| n.node))
+        .collect::<LitFlattenResult<'_, Vec<_>>>()
+        .map(|values| ast::ListLit { values })
+}
+
+#[inline]
+pub(crate) fn exprpair_to_lit<'a>(pair: ast::ExprPair) -> LitFlattenResult<'a, ast::LitField> {
+    let ast::ExprPair { first, second } = pair;
+    let (first, second) = (expr_to_litstr(*first)?, expr_to_lit(*second)?);
+    Ok(ast::LitField { first, second })
+}
+
+#[inline]
+pub(crate) fn expr_to_litstr<'a>(expr: ast::Expr) -> LitFlattenResult<'a, String> {
+    match expr_to_lit(expr)?.node {
+        Lit::CharStringLit(s) | Lit::NationalCharStringLit(s) => Ok(s),
+        _ => illegal_literal(),
+    }
+}
+
+#[inline]
+pub(crate) fn expr_to_lit<'a>(expr: ast::Expr) -> LitFlattenResult<'a, ast::AstNode<ast::Lit>> {
+    match expr {
+        Expr::Lit(lit) => Ok(lit),
+        _ => illegal_literal(),
     }
 }
