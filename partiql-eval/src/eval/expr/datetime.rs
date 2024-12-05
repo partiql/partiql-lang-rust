@@ -32,7 +32,7 @@ pub(crate) enum EvalExtractFn {
 
 impl BindEvalExpr for EvalExtractFn {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         #[inline]

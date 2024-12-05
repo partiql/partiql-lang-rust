@@ -178,7 +178,7 @@ pub(crate) enum EvalVarRef {
 
 impl BindEvalExpr for EvalVarRef {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         _: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         Ok(match self {

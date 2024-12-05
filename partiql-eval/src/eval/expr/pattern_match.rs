@@ -43,7 +43,7 @@ impl EvalLikeMatch {
 
 impl BindEvalExpr for EvalLikeMatch {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let pattern = self.pattern.clone();
@@ -63,7 +63,7 @@ pub(crate) struct EvalLikeNonStringNonLiteralMatch {}
 
 impl BindEvalExpr for EvalLikeNonStringNonLiteralMatch {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         let types = [type_string!(), type_string!(), type_string!()];

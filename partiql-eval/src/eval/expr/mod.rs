@@ -60,7 +60,7 @@ pub enum BindError {
 /// A trait for binding an expression to its arguments into an `EvalExpr`
 pub trait BindEvalExpr: Debug {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError>;
 }

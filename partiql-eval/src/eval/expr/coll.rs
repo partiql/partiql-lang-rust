@@ -36,7 +36,7 @@ pub(crate) enum EvalCollFn {
 
 impl BindEvalExpr for EvalCollFn {
     fn bind<const STRICT: bool>(
-        &self,
+        self,
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         fn create<const STRICT: bool, F>(
@@ -70,7 +70,7 @@ impl BindEvalExpr for EvalCollFn {
             PartiqlShapeBuilder::init_or_get().new_static(Static::Bag(BagType::new_any())),
         ])];
 
-        match *self {
+        match self {
             EvalCollFn::Count(setq) => {
                 create::<{ STRICT }, _>(any_elems, args, move |it| it.coll_count(setq))
             }
