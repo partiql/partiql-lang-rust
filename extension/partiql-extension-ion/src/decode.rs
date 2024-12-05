@@ -122,7 +122,7 @@ pub struct IonValueIter<'a> {
     inner: Box<dyn Iterator<Item = IonDecodeResult> + 'a>,
 }
 
-impl<'a> Iterator for IonValueIter<'a> {
+impl Iterator for IonValueIter<'_> {
     type Item = IonDecodeResult;
 
     #[inline]

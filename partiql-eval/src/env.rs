@@ -115,7 +115,7 @@ pub mod basic {
         }
     }
 
-    impl<'a, T> Bindings<T> for NestedBindings<'a, T>
+    impl<T> Bindings<T> for NestedBindings<'_, T>
     where
         T: Debug,
     {

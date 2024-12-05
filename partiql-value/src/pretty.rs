@@ -101,7 +101,7 @@ impl PrettyDoc for Tuple {
 
 pub struct StructValuePair<'a>((&'a String, &'a Value));
 
-impl<'a> PrettyDoc for StructValuePair<'a> {
+impl PrettyDoc for StructValuePair<'_> {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,

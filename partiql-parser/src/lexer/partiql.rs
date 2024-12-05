@@ -115,7 +115,7 @@ impl<'input, 'tracker> PartiqlLexer<'input, 'tracker> {
     }
 }
 
-impl<'input, 'tracker> Iterator for PartiqlLexer<'input, 'tracker> {
+impl<'input> Iterator for PartiqlLexer<'input, '_> {
     type Item = LexResult<'input>;
 
     #[inline(always)]
@@ -382,7 +382,7 @@ pub enum Token<'input> {
     Zone,
 }
 
-impl<'input> Token<'input> {
+impl Token<'_> {
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
@@ -449,7 +449,7 @@ impl<'input> Token<'input> {
     }
 }
 
-impl<'input> fmt::Display for Token<'input> {
+impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Token::Newline => write!(f, "\\n"),

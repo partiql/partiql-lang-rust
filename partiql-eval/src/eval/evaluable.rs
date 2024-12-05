@@ -494,7 +494,7 @@ impl AggregateFunction for Max {
     }
 
     fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
-        Ok(state.unwrap_or_else(|| Null))
+        Ok(state.unwrap_or(Null))
     }
 }
 
@@ -515,7 +515,7 @@ impl AggregateFunction for Min {
     }
 
     fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
-        Ok(state.unwrap_or_else(|| Null))
+        Ok(state.unwrap_or(Null))
     }
 }
 
@@ -532,7 +532,7 @@ impl AggregateFunction for Sum {
     }
 
     fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
-        Ok(state.unwrap_or_else(|| Null))
+        Ok(state.unwrap_or(Null))
     }
 }
 
@@ -559,7 +559,7 @@ impl AggregateFunction for Any {
     }
 
     fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
-        Ok(state.unwrap_or_else(|| Null))
+        Ok(state.unwrap_or(Null))
     }
 }
 
@@ -586,7 +586,7 @@ impl AggregateFunction for Every {
     }
 
     fn finalize(&self, state: Option<Value>) -> Result<Value, EvaluationError> {
-        Ok(state.unwrap_or_else(|| Null))
+        Ok(state.unwrap_or(Null))
     }
 }
 
@@ -1278,7 +1278,7 @@ pub(crate) struct EvalSink {
 
 impl Evaluable for EvalSink {
     fn evaluate<'a, 'c>(&mut self, _ctx: &'c dyn EvalContext<'c>) -> Value {
-        self.input.take().unwrap_or_else(|| Missing)
+        self.input.take().unwrap_or(Missing)
     }
 
     fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {

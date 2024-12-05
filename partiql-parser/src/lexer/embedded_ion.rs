@@ -125,7 +125,7 @@ impl<'input, 'tracker> EmbeddedIonLexer<'input, 'tracker> {
     }
 }
 
-impl<'input, 'tracker> Iterator for EmbeddedIonLexer<'input, 'tracker> {
+impl<'input> Iterator for EmbeddedIonLexer<'input, '_> {
     type Item = EmbeddedIonStringResult<'input>;
 
     #[inline(always)]

@@ -122,7 +122,7 @@ impl<'input, 'tracker> CommentLexer<'input, 'tracker> {
     }
 }
 
-impl<'input, 'tracker> Iterator for CommentLexer<'input, 'tracker> {
+impl<'input> Iterator for CommentLexer<'input, '_> {
     type Item = CommentStringResult<'input>;
 
     #[inline(always)]

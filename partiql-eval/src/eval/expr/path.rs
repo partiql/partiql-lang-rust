@@ -138,7 +138,7 @@ impl EvalExpr for EvalPath {
                 .try_fold(owned, |v, path| path.take_val(v, bindings, ctx))
                 .map(Cow::Owned),
         }
-        .unwrap_or_else(|| Cow::Owned(Value::Missing))
+        .unwrap_or(Cow::Owned(Value::Missing))
     }
 }
 
@@ -165,7 +165,7 @@ impl EvalExpr for EvalDynamicLookup {
             }
         });
 
-        lookups.next().unwrap_or_else(|| Cow::Owned(Value::Missing))
+        lookups.next().unwrap_or(Cow::Owned(Value::Missing))
     }
 }
 

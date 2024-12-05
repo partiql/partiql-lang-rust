@@ -48,7 +48,7 @@ allow = [
 # If you change this list, please also change `about.toml`
 #    see https://github.com/EmbarkStudios/cargo-about/issues/201
 exceptions = [
-    { allow = ["Unicode-DFS-2016"], name = "unicode-ident" },
+    { allow = ["Unicode-DFS-2016", "Unicode-3.0"], name = "unicode-ident" },
 ]
 
 # The confidence threshold for detecting a license from license text.

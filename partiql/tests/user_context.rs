@@ -110,7 +110,7 @@ struct TestDataGen<'a> {
     name: String,
 }
 
-impl<'a> Iterator for TestDataGen<'a> {
+impl Iterator for TestDataGen<'_> {
     type Item = Result<Value, ExtensionResultError>;
 
     fn next(&mut self) -> Option<Self::Item> {
