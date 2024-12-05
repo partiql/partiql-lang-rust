@@ -394,7 +394,7 @@ impl PrettyDoc for Lit {
             Lit::FloatLit(inner) => arena.text(inner.to_string()),
             Lit::DoubleLit(inner) => arena.text(inner.to_string()),
             Lit::BoolLit(inner) => arena.text(inner.to_string()),
-            Lit::EmbeddedDocLit(inner) => inner.pretty_doc(arena), // TODO better pretty for embedded doc: https://github.com/partiql/partiql-lang-rust/issues/508
+            Lit::EmbeddedDocLit(inner, _typ) => inner.pretty_doc(arena), // TODO better pretty for embedded doc: https://github.com/partiql/partiql-lang-rust/issues/508
             Lit::CharStringLit(inner) => inner.pretty_doc(arena),
             Lit::NationalCharStringLit(inner) => inner.pretty_doc(arena),
             Lit::BitStringLit(inner) => inner.pretty_doc(arena),
@@ -420,9 +420,32 @@ impl PrettyDoc for Type {
     {
         match self {
             Type::CustomType(cty) => cty.pretty_doc(arena),
-            _ => {
-                todo!("Non-custom type type")
-            }
+            Type::NullType => arena.text("NULL"),
+            Type::BooleanType => arena.text("BOOL"),
+            Type::Integer2Type => arena.text("INT2"),
+            Type::Integer4Type => arena.text("INT4"),
+            Type::Integer8Type => arena.text("INT8"),
+            Type::DecimalType => arena.text("DECIMAL"),
+            Type::NumericType => arena.text("NUMERIC"),
+            Type::RealType => arena.text("REAL"),
+            Type::DoublePrecisionType => arena.text("DOUBLE PRECISION"),
+            Type::TimestampType => arena.text("TIMESTAMP"),
+            Type::CharacterType => arena.text("CHAR"),
+            Type::CharacterVaryingType => arena.text("VARCHAR"),
+            Type::MissingType => arena.text("MISSING"),
+            Type::StringType => arena.text("STRING"),
+            Type::SymbolType => arena.text("SYMBOL"),
+            Type::BlobType => arena.text("BLOB"),
+            Type::ClobType => arena.text("CLOB"),
+            Type::DateType => arena.text("DATE"),
+            Type::TimeType => arena.text("TIME"),
+            Type::ZonedTimestampType => arena.text("TIMESTAMPTZ"),
+            Type::StructType => arena.text("STRUCT"),
+            Type::TupleType => arena.text("TUPLE"),
+            Type::ListType => arena.text("LIST"),
+            Type::SexpType => arena.text("SEXP"),
+            Type::BagType => arena.text("BAG"),
+            Type::AnyType => arena.text("ANY"),
         }
     }
 }
