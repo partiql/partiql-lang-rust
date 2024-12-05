@@ -16,7 +16,7 @@ where
     }
 }
 
-impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Value> {
+impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap_list = NullSortedValue::<{ NULLS_FIRST }, List>;
         let wrap_tuple = NullSortedValue::<{ NULLS_FIRST }, Tuple>;

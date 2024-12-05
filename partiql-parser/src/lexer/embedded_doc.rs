@@ -102,7 +102,7 @@ impl<'input, 'tracker> EmbeddedDocLexer<'input, 'tracker> {
     }
 }
 
-impl<'input, 'tracker> Iterator for EmbeddedDocLexer<'input, 'tracker> {
+impl<'input> Iterator for EmbeddedDocLexer<'input, '_> {
     type Item = EmbeddedDocStringResult<'input>;
 
     #[inline(always)]

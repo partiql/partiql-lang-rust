@@ -40,7 +40,7 @@ pub trait NullableEq {
 #[derive(Eq, PartialEq)]
 pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
 
-impl<'a, const GROUP_NULLS: bool> NullableEq for EqualityValue<'a, GROUP_NULLS, Value> {
+impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Value> {
     type Output = Value;
 
     fn eq(&self, rhs: &Self) -> Self::Output {
