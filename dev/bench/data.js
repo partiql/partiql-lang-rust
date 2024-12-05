@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1733425836119,
+  "lastUpdate": 1733436453939,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -29177,6 +29177,252 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-fexpr",
             "value": 28541,
             "range": "± 1102",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "josh@pschorr.dev",
+            "name": "Josh Pschorr",
+            "username": "jpschorr"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a07bdfcc17726a8bde658bf95ed96da2a93fc9fc",
+          "message": "Refactor Value & Enable Lazy Ion literals. (#523)\n\n* Change Lexing/Parsing of embedded docs to not eagerly validate (#507)\r\n\r\nThis changes the lexer and parser to pass through strings enclosed in backticks un-parsed. (At current, these documents are parsed during lowering).\r\n\r\nSince embedded documents may themselves contain backticks, beginning and ending delimiters consist of an arbitrary odd numbers of backticks (e.g., `` ` ``, `` ``` ``, `` ````` `` etc.) that must be paired (e.g., `` `$ion_data_here::[]` ``, `` ```$ion_data_here::[ $string_with_embedded_backtick:\"`\" ]``` ``, etc.).\r\n\r\nAs opening and closing delimiters are required to be odd in count of backticks, a contiguous string of backticks that is even is interpreted as an empty document.\r\n\r\n* Behavior-preserving refactor of `Value` into a module. (#509)\r\n\r\n* Behavior-preserving refactor of Value into a module. (#510)\r\n\r\n* Change modeling of Literals in the AST remove ambiguity (#517)\r\n\r\nChange parsing and AST-modeling of literals to not share AST structures with non-scalar expressions.\r\n\r\n* Change modeling of boxed ion literals to be lazy until evaluator. (#519)\r\n\r\nChanges the logical plan to have a distinct `Lit` type to hold literals instead of embedded `Value`\r\n\r\n* Refactor lifetimes for new rust warnings",
+          "timestamp": "2024-12-05T13:55:25-08:00",
+          "tree_id": "7d0f41e7c315654ae4d22c25fd22e5845e2ad7cf",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/a07bdfcc17726a8bde658bf95ed96da2a93fc9fc"
+        },
+        "date": 1733436452869,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 765417,
+            "range": "± 9720",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 857628,
+            "range": "± 2290",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 823325,
+            "range": "± 14147",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 849976,
+            "range": "± 1321",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 825972,
+            "range": "± 45164",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 852656,
+            "range": "± 2511",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 830428,
+            "range": "± 5999",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 860720,
+            "range": "± 30809",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 826283,
+            "range": "± 12568",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 856047,
+            "range": "± 5027",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 995733,
+            "range": "± 12537",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1221238,
+            "range": "± 30151",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 1843394,
+            "range": "± 7066",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1202863,
+            "range": "± 32389",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1478093,
+            "range": "± 36300",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2072542,
+            "range": "± 9664",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 6165,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 51563,
+            "range": "± 204",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 98311,
+            "range": "± 355",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4246,
+            "range": "± 34",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 30444,
+            "range": "± 118",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 63588,
+            "range": "± 140",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 70683,
+            "range": "± 180",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1101877,
+            "range": "± 15617",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2204988,
+            "range": "± 16988",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 11996073,
+            "range": "± 261515",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 76529036,
+            "range": "± 455327",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 146551997,
+            "range": "± 516782",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9914,
+            "range": "± 122",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2486,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 460,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 57,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 961,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2621,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 7912,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 20359,
+            "range": "± 197",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 27825,
+            "range": "± 93",
             "unit": "ns/iter"
           }
         ]
