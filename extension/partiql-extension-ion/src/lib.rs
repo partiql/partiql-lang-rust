@@ -1,8 +1,14 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod common;
 pub mod decode;
+//pub mod embedded;
+
+pub mod boxed_ion;
 pub mod encode;
 
 pub use common::Encoding;
