@@ -14,6 +14,7 @@ mod iter;
 mod logic;
 mod math;
 
+use crate::datum::{Datum, DatumLowerResult, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -40,56 +41,6 @@ pub enum Value {
 }
 
 impl Value {
-    #[inline]
-    #[must_use]
-    pub fn is_tuple(&self) -> bool {
-        matches!(self, Value::Tuple(_))
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_list(&self) -> bool {
-        matches!(self, Value::List(_))
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_bag(&self) -> bool {
-        matches!(self, Value::Bag(_))
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_sequence(&self) -> bool {
-        self.is_bag() || self.is_list()
-    }
-
-    #[inline]
-    /// Returns true if and only if Value is an integer, real, or decimal
-    #[must_use]
-    pub fn is_number(&self) -> bool {
-        matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
-    }
-    #[inline]
-    /// Returns true if and only if Value is null or missing
-    #[must_use]
-    pub fn is_absent(&self) -> bool {
-        matches!(self, Value::Missing | Value::Null)
-    }
-
-    #[inline]
-    /// Returns true if Value is neither null nor missing
-    #[must_use]
-    pub fn is_present(&self) -> bool {
-        !self.is_absent()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_ordered(&self) -> bool {
-        self.is_list()
-    }
-
     #[inline]
     #[must_use]
     pub fn coerce_into_tuple(self) -> Tuple {
@@ -205,6 +156,46 @@ impl Value {
         } else {
             None
         }
+    }
+}
+
+impl DatumValue<Value> for Value {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        Ok(self)
+    }
+}
+
+impl Datum<Value> for Value {
+    #[inline]
+    fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        matches!(self, Value::Missing)
+    }
+
+    #[inline]
+    fn is_absent(&self) -> bool {
+        matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
+    fn is_number(&self) -> bool {
+        matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_sequence(&self) -> bool {
+        matches!(self, Value::List(_) | Value::Bag(_))
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_ordered(&self) -> bool {
+        matches!(self, Value::List(_))
     }
 }
 
