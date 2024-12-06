@@ -19,17 +19,30 @@ use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
+use partiql_value::datum::{
+    DatumCategory, DatumCategoryRef, DatumLowerResult, DatumValue, SequenceDatum, TupleDatum,
+};
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
 #[derive(Clone)]
 pub(crate) struct EvalLitExpr {
-    pub(crate) lit: Value,
+    pub(crate) val: Value,
+}
+
+impl EvalLitExpr {
+    pub(crate) fn new(val: Value) -> Self {
+        Self { val }
+    }
+
+    fn lower(&self) -> DatumLowerResult<EvalLitExpr> {
+        self.val.clone().into_lower().map(Self::new)
+    }
 }
 
 impl Debug for EvalLitExpr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.lit.fmt(f)
+        self.val.fmt(f)
     }
 }
 
@@ -38,7 +51,7 @@ impl BindEvalExpr for EvalLitExpr {
         self,
         _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        Ok(Box::new(self.clone()))
+        Ok(Box::new(self.lower()?))
     }
 }
 
@@ -51,7 +64,7 @@ impl EvalExpr for EvalLitExpr {
     where
         'c: 'a,
     {
-        Cow::Borrowed(&self.lit)
+        Cow::Borrowed(&self.val)
     }
 }
 
@@ -367,10 +380,9 @@ impl BindEvalExpr for EvalFnExists {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         UnaryValueExpr::create_with_any::<{ STRICT }, _>(args, |v| {
-            Value::from(match v {
-                Value::Bag(b) => !b.is_empty(),
-                Value::List(l) => !l.is_empty(),
-                Value::Tuple(t) => !t.is_empty(),
+            Value::from(match v.category() {
+                DatumCategoryRef::Tuple(tuple) => !tuple.is_empty(),
+                DatumCategoryRef::Sequence(seq) => !seq.is_empty(),
                 _ => false,
             })
         })
@@ -414,10 +426,9 @@ impl BindEvalExpr for EvalFnCardinality {
             shape_builder.new_static(Static::Struct(StructType::new_any())),
         ]);
 
-        UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v {
-            Value::List(l) => Value::from(l.len()),
-            Value::Bag(b) => Value::from(b.len()),
-            Value::Tuple(t) => Value::from(t.len()),
+        UnaryValueExpr::create_typed::<{ STRICT }, _>([collections], args, |v| match v.category() {
+            DatumCategoryRef::Tuple(tuple) => Value::from(tuple.len()),
+            DatumCategoryRef::Sequence(seq) => Value::from(seq.len()),
             _ => Missing,
         })
     }
