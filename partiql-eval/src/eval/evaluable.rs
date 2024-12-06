@@ -111,17 +111,16 @@ impl Evaluable for EvalScan {
             Value::Tuple(t) => bag![*t],
             _ => bag![tuple![]],
         };
-
         let mut value = bag![];
         bindings.iter().for_each(|binding| {
             let binding_tuple = binding.as_tuple_ref();
             let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
-            let ordered = &v.is_ordered();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
+                let ordered = v.is_ordered();
                 for t in v {
                     let mut out = Tuple::from([(self.as_key.as_str(), t)]);
-                    let at_id = if *ordered {
+                    let at_id = if ordered {
                         at_index_counter.into()
                     } else {
                         Missing
@@ -1234,7 +1233,6 @@ impl EvalExprQuery {
 impl Evaluable for EvalExprQuery {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = self.input.take().unwrap_or(Value::Null).coerce_into_tuple();
-
         self.expr.evaluate(&input_value, ctx).into_owned()
     }
 
