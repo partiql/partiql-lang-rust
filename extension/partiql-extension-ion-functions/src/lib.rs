@@ -171,6 +171,7 @@ mod tests {
     use partiql_eval::eval::BasicContext;
     use partiql_eval::plan::EvaluationMode;
     use partiql_parser::{Parsed, ParserResult};
+    use partiql_value::datum::Datum;
     use partiql_value::{bag, tuple, DateTime, Value};
 
     #[track_caller]
@@ -229,7 +230,7 @@ mod tests {
             .unwrap_or_default();
         let out = evaluate(&catalog, lowered, bindings);
 
-        assert!(out.is_bag());
+        assert!(out.is_sequence());
         assert_eq!(&out, expected);
     }
 

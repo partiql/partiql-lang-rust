@@ -15,6 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
+use partiql_value::datum::Datum;
 use std::rc::Rc;
 
 #[macro_export]
