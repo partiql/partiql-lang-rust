@@ -223,9 +223,7 @@ impl<'a> RefSequenceView<'a, Value> for DatumSeqRef<'a> {
     fn get_val(&self, k: i64) -> Option<Cow<'a, Value>> {
         match self {
             DatumSeqRef::List(l) => List::get(l, k).map(Cow::Borrowed),
-            DatumSeqRef::Bag(_) => {
-                todo!("TODO RefSequenceView: Bag::get")
-            }
+            DatumSeqRef::Bag(_) => None,
         }
     }
 }
@@ -247,7 +245,7 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
     fn take_val(self, k: i64) -> Option<Value> {
         match self {
             DatumSeqOwned::List(l) => l.take_val(k),
-            DatumSeqOwned::Bag(_) => todo!("TODO OwnedSequenceView: Bag::get"),
+            DatumSeqOwned::Bag(_) => None,
         }
     }
 
