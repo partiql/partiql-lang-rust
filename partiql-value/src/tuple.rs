@@ -7,8 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::iter::{zip, Zip};
 use std::vec;
 
-use unicase::UniCase;
-
 use crate::sort::NullSortedValue;
 use crate::{BindingsName, EqualityValue, NullableEq, Value};
 #[cfg(feature = "serde")]
@@ -79,15 +77,8 @@ impl Tuple {
 
     #[inline(always)]
     fn find_value(&self, attr: &BindingsName<'_>) -> Option<usize> {
-        match attr {
-            BindingsName::CaseSensitive(s) => {
-                self.attrs.iter().position(|a| a.as_str() == s.as_ref())
-            }
-            BindingsName::CaseInsensitive(s) => {
-                let target = UniCase::new(&s);
-                self.attrs.iter().position(|a| target == UniCase::new(a))
-            }
-        }
+        let matcher = attr.matcher();
+        self.attrs.iter().position(|a| matcher.matches(a))
     }
 
     #[inline]

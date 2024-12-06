@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{type_dynamic, PartiqlShape, Static, TYPE_DYNAMIC};
+use partiql_types::{type_dynamic, PartiqlShape, Static, StaticCategory, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -14,44 +14,62 @@ use std::hash::Hash;
 
 use std::marker::PhantomData;
 
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, DatumValueRef};
 use std::ops::ControlFlow;
 
-// TODO replace with type system's subsumption once it is in place
-#[inline]
-pub(crate) fn subsumes(typ: &PartiqlShape, value: &Value) -> bool {
-    match (typ, value) {
-        (_, Value::Null) => true,
-        (_, Value::Missing) => true,
-        (PartiqlShape::Dynamic, _) => true,
-        (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| subsumes(typ, val)),
-        (PartiqlShape::Static(s), val) => match (s.ty(), val) {
-            (
-                Static::Int | Static::Int8 | Static::Int16 | Static::Int32 | Static::Int64,
-                Value::Integer(_),
-            ) => true,
-            (Static::Bool, Value::Boolean(_)) => true,
-            (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_)) => true,
-            (Static::Float32 | Static::Float64, Value::Real(_)) => true,
-            (
-                Static::String | Static::StringFixed(_) | Static::StringVarying(_),
-                Value::String(_),
-            ) => true,
-            (Static::Struct(_), Value::Tuple(_)) => true,
-            (Static::Bag(b_type), Value::Bag(b_values)) => {
-                let bag_element_type = b_type.element_type();
-                let mut b_values = b_values.iter();
-                b_values.all(|b_value| subsumes(bag_element_type, b_value))
-            }
-            (Static::DateTime, Value::DateTime(_)) => true,
+trait TypeSatisfier {
+    fn satisfies(&self, value: &Value) -> bool;
+}
 
-            (Static::Array(a_type), Value::List(l_values)) => {
-                let array_element_type = a_type.element_type();
-                let mut l_values = l_values.iter();
-                l_values.all(|l_value| subsumes(array_element_type, l_value))
+impl TypeSatisfier for Static {
+    fn satisfies(&self, value: &Value) -> bool {
+        match (self.category(), value.category()) {
+            (_, DatumCategoryRef::Null) => true,
+            (_, DatumCategoryRef::Missing) => true,
+            (StaticCategory::Scalar(ty), DatumCategoryRef::Scalar(scalar)) => match scalar {
+                DatumValueRef::Value(scalar) => {
+                    matches!(
+                        (ty, scalar),
+                        (
+                            Static::Int
+                                | Static::Int8
+                                | Static::Int16
+                                | Static::Int32
+                                | Static::Int64,
+                            Value::Integer(_),
+                        ) | (Static::Bool, Value::Boolean(_))
+                            | (Static::Decimal | Static::DecimalP(_, _), Value::Decimal(_))
+                            | (Static::Float32 | Static::Float64, Value::Real(_))
+                            | (
+                                Static::String | Static::StringFixed(_) | Static::StringVarying(_),
+                                Value::String(_),
+                            )
+                            | (Static::DateTime, Value::DateTime(_))
+                    )
+                }
+            },
+            (StaticCategory::Sequence(shape), DatumCategoryRef::Sequence(seq)) => match shape {
+                PartiqlShape::Dynamic | PartiqlShape::Undefined => true,
+                shape => seq.into_iter().all(|v| shape.satisfies(v)),
+            },
+            (StaticCategory::Tuple(), DatumCategoryRef::Tuple(_)) => {
+                true // TODO when Static typing knows how to type a tuple
             }
             _ => false,
-        },
-        _ => false,
+        }
+    }
+}
+
+impl TypeSatisfier for PartiqlShape {
+    fn satisfies(&self, value: &Value) -> bool {
+        match (self, value) {
+            (_, Value::Null) => true,
+            (_, Value::Missing) => true,
+            (PartiqlShape::Dynamic, _) => true,
+            (PartiqlShape::AnyOf(anyof), val) => anyof.types().any(|typ| typ.satisfies(val)),
+            (PartiqlShape::Static(s), val) => s.ty().satisfies(val),
+            _ => false,
+        }
     }
 }
 
@@ -187,7 +205,7 @@ impl<const STRICT: bool, OnMissing: ArgShortCircuit> ArgChecker
             Missing => ArgCheckControlFlow::Propagate(OnMissing::propagate()),
             Null => ArgCheckControlFlow::Propagate(Null),
             val => {
-                if subsumes(typ, val) {
+                if typ.satisfies(val) {
                     ArgCheckControlFlow::Continue(arg)
                 } else {
                     err()
@@ -322,7 +340,6 @@ where
     for (idx, arg) in args.iter().enumerate() {
         let typ = types(idx);
         let arg = arg.evaluate(bindings, ctx);
-
         match ArgC::arg_check(typ, arg) {
             ArgCheckControlFlow::Continue(v) => {
                 if propagate.is_none() {
