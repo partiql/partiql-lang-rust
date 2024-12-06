@@ -1,4 +1,6 @@
-use crate::{Bag, BindingsName, List, Tuple, Value};
+use crate::{
+    Bag, BagIntoIterator, BagIter, BindingsName, List, ListIntoIterator, ListIter, Tuple, Value,
+};
 use std::borrow::Cow;
 use std::error::Error;
 
@@ -194,11 +196,13 @@ pub trait SequenceDatum {
     }
 }
 
-pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum {
+pub trait RefSequenceView<'a, DV: DatumValue<DV> + 'a>:
+    SequenceDatum + IntoIterator<Item = &'a DV>
+{
     fn get_val(&self, k: i64) -> Option<Cow<'a, DV>>;
 }
 
-pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum {
+pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum + IntoIterator<Item = D> {
     fn take_val(self, k: i64) -> Option<D>;
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<D>;
 }
@@ -251,5 +255,61 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
 
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<Value> {
         self.take_val(k)
+    }
+}
+
+impl<'a> IntoIterator for DatumSeqRef<'a> {
+    type Item = &'a Value;
+    type IntoIter = DatumSeqRefIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            DatumSeqRef::List(l) => DatumSeqRefIterator::List(l.into_iter()),
+            DatumSeqRef::Bag(b) => DatumSeqRefIterator::Bag(b.into_iter()),
+        }
+    }
+}
+
+pub enum DatumSeqRefIterator<'a> {
+    List(ListIter<'a>),
+    Bag(BagIter<'a>),
+}
+
+impl<'a> Iterator for DatumSeqRefIterator<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DatumSeqRefIterator::List(l) => l.next(),
+            DatumSeqRefIterator::Bag(b) => b.next(),
+        }
+    }
+}
+
+impl IntoIterator for DatumSeqOwned {
+    type Item = Value;
+    type IntoIter = DatumSeqOwnedIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            DatumSeqOwned::List(l) => DatumSeqOwnedIterator::List(l.into_iter()),
+            DatumSeqOwned::Bag(b) => DatumSeqOwnedIterator::Bag(b.into_iter()),
+        }
+    }
+}
+
+pub enum DatumSeqOwnedIterator {
+    List(ListIntoIterator),
+    Bag(BagIntoIterator),
+}
+
+impl Iterator for DatumSeqOwnedIterator {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DatumSeqOwnedIterator::List(l) => l.next(),
+            DatumSeqOwnedIterator::Bag(b) => b.next(),
+        }
     }
 }
