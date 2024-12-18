@@ -23,7 +23,6 @@ bench = false
 [dependencies]
 partiql-value = { path = "../partiql-value", version = "0.11.*" }
 partiql-common = { path = "../partiql-common", version = "0.11.*" }
-partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.11.*" }
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 ordered-float = "4"

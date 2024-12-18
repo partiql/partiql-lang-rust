@@ -1,0 +1,10 @@
+---
+source: partiql/tests/ion.rs
+expression: "result.to_pretty_string(25).expect(\"pretty\")"
+---
+<<
+  { 'foo': `2`::ion },
+  {
+    'foo': `world::2`::ion
+  }
+>>

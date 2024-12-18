@@ -3,6 +3,7 @@
 
 mod bag;
 mod bindings;
+pub mod boxed_variant;
 pub mod comparison;
 mod datetime;
 pub mod datum;
@@ -12,6 +13,7 @@ mod sort;
 mod tuple;
 mod util;
 mod value;
+mod variant;
 
 pub use bag::*;
 pub use bindings::*;
@@ -22,6 +24,7 @@ pub use pretty::*;
 pub use sort::*;
 pub use tuple::*;
 pub use value::*;
+pub use variant::*;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -88,7 +91,7 @@ mod tests {
 
     #[test]
     fn iterators() {
-        let bag: Bag = [1, 10, 3, 4].iter().collect();
+        let bag: Bag = [1, 10, 3, 4].into_iter().collect();
         assert_eq!(bag.len(), 4);
         let max = bag
             .iter()
@@ -96,7 +99,7 @@ mod tests {
         assert_eq!(max, Value::Integer(10));
         let _bref = Value::from(bag).as_bag_ref();
 
-        let list: List = [1, 2, 3, -4].iter().collect();
+        let list: List = [1, 2, 3, -4].into_iter().collect();
         assert_eq!(list.len(), 4);
         let max = list
             .iter()
