@@ -21,6 +21,8 @@ impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
         let wrap_list = NullSortedValue::<'_, { NULLS_FIRST }, List>;
         let wrap_tuple = NullSortedValue::<'_, { NULLS_FIRST }, Tuple>;
         let wrap_bag = NullSortedValue::<'_, { NULLS_FIRST }, Bag>;
+        let wrap_value = NullSortedValue::<'_, { NULLS_FIRST }, Value>;
+        let wrap_var = NullSortedValue::<'_, { NULLS_FIRST }, Variant>;
         let null_cond = |order: Ordering| {
             if NULLS_FIRST {
                 order

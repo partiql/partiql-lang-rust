@@ -33,6 +33,8 @@ partiql-logical = { path = "../partiql-logical" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
 partiql-extension-value-functions = { path = "../extension/partiql-extension-value-functions" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+
 
 insta = "1.40.0"
 
