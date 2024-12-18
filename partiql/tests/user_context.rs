@@ -2,8 +2,8 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use assert_matches::assert_matches;
 use std::error::Error;
+
 use thiserror::Error;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
@@ -20,7 +20,6 @@ use partiql_value::{bag, tuple, DateTime, Value};
 
 use crate::common::{lower, parse, TestError};
 use partiql_logical as logical;
-use partiql_value::datum::{DatumCategory, DatumCategoryRef, SequenceDatum};
 
 mod common;
 #[derive(Debug)]
@@ -196,9 +195,8 @@ fn test_context() -> Result<(), TestError<'static>> {
     };
     let ctx: [(String, &dyn Any); 1] = [("counter".to_string(), &counter)];
     let out = evaluate(&catalog, lowered, bindings, &ctx);
-    let out_cat = out.category();
 
-    assert_matches!(out_cat, DatumCategoryRef::Sequence(seq) if !seq.is_ordered());
+    assert!(out.is_bag());
     assert_eq!(&out, &expected);
     assert_eq!(*counter.data.borrow(), 0);
 

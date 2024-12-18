@@ -341,6 +341,7 @@ impl<'c> PlanTyper<'c> {
                     Lit::Double(_) => type_float64!(),
                     Lit::Bool(_) => type_bool!(),
                     Lit::String(_) => type_string!(),
+                    Lit::BoxDocument(_, _) => type_dynamic!(), // TODO
                     Lit::Struct(_) => type_struct!(),
                     Lit::Bag(_) => type_bag!(),
                     Lit::List(_) => type_array!(),
