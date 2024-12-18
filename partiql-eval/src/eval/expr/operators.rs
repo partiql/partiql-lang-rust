@@ -19,9 +19,7 @@ use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{
-    DatumCategory, DatumCategoryRef, DatumLowerResult, DatumValue, SequenceDatum, TupleDatum,
-};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, SequenceDatum, TupleDatum};
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
@@ -33,10 +31,6 @@ pub(crate) struct EvalLitExpr {
 impl EvalLitExpr {
     pub(crate) fn new(val: Value) -> Self {
         Self { val }
-    }
-
-    fn lower(&self) -> DatumLowerResult<EvalLitExpr> {
-        self.val.clone().into_lower().map(Self::new)
     }
 }
 
@@ -51,7 +45,7 @@ impl BindEvalExpr for EvalLitExpr {
         self,
         _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        Ok(Box::new(self.lower()?))
+        Ok(Box::new(self))
     }
 }
 
