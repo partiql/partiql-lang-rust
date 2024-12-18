@@ -34,10 +34,6 @@ impl EvalLitExpr {
     pub(crate) fn new(val: Value) -> Self {
         Self { val }
     }
-
-    fn lower(&self) -> DatumLowerResult<EvalLitExpr> {
-        self.val.clone().into_lower().map(Self::new)
-    }
 }
 
 impl Debug for EvalLitExpr {
@@ -51,7 +47,7 @@ impl BindEvalExpr for EvalLitExpr {
         self,
         _args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
-        Ok(Box::new(self.lower()?))
+        Ok(Box::new(self))
     }
 }
 

@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use rust_decimal::Decimal as RustDecimal;
 
+use crate::variant::Variant;
 use crate::{Bag, BindingIntoIter, BindingIter, DateTime, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
@@ -37,10 +38,36 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+    Variant(Box<Variant>),
     // TODO: add other supported PartiQL values -- sexp
 }
 
 impl Value {
+    #[inline]
+    #[must_use]
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, Value::Tuple(_))
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_list(&self) -> bool {
+        matches!(self, Value::List(_))
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_bag(&self) -> bool {
+        matches!(self, Value::Bag(_))
+    }
+
+    #[inline]
+    /// Returns true if and only if Value is an integer, real, or decimal
+    #[must_use]
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
+    }
+
     #[inline]
     #[must_use]
     pub fn coerce_into_tuple(self) -> Tuple {
@@ -161,7 +188,10 @@ impl Value {
 
 impl DatumValue<Value> for Value {
     fn into_lower(self) -> DatumLowerResult<Value> {
-        Ok(self)
+        match self {
+            Value::Variant(doc) => Ok(Value::Variant(Box::new(doc.into_lower()?))),
+            _ => Ok(self),
+        }
     }
 }
 
@@ -182,20 +212,24 @@ impl Datum<Value> for Value {
     }
 
     #[inline]
-    fn is_number(&self) -> bool {
-        matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
-    }
-
-    #[inline]
     #[must_use]
     fn is_sequence(&self) -> bool {
-        matches!(self, Value::List(_) | Value::Bag(_))
+        match self {
+            Value::List(_) => true,
+            Value::Bag(_) => true,
+            Value::Variant(doc) => doc.is_sequence(),
+            _ => false,
+        }
     }
 
     #[inline]
     #[must_use]
     fn is_ordered(&self) -> bool {
-        matches!(self, Value::List(_))
+        match self {
+            Value::List(_) => true,
+            Value::Variant(doc) => doc.is_ordered(),
+            _ => false,
+        }
     }
 }
 
@@ -223,6 +257,7 @@ impl Debug for Value {
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
+            Value::Variant(doc) => doc.fmt(f),
         }
     }
 }
@@ -238,6 +273,9 @@ impl PartialOrd for Value {
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
+            (Value::Variant(_), _) => todo!("Variant Ord"),
+            (_, Value::Variant(_)) => todo!("Variant Ord"),
+
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
 
@@ -346,17 +384,6 @@ impl Ord for Value {
     }
 }
 
-impl<T> From<&T> for Value
-where
-    T: Copy,
-    Value: From<T>,
-{
-    #[inline]
-    fn from(t: &T) -> Self {
-        Value::from(*t)
-    }
-}
-
 impl From<bool> for Value {
     #[inline]
     fn from(b: bool) -> Self {
@@ -452,7 +479,14 @@ impl From<u128> for Value {
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
-        Value::Real(OrderedFloat(f))
+        Value::from(OrderedFloat(f))
+    }
+}
+
+impl From<OrderedFloat<f64>> for Value {
+    #[inline]
+    fn from(f: OrderedFloat<f64>) -> Self {
+        Value::Real(f)
     }
 }
 
@@ -488,5 +522,12 @@ impl From<Bag> for Value {
     #[inline]
     fn from(v: Bag) -> Self {
         Value::Bag(Box::new(v))
+    }
+}
+
+impl From<Variant> for Value {
+    #[inline]
+    fn from(v: Variant) -> Self {
+        Value::Variant(Box::new(v))
     }
 }
