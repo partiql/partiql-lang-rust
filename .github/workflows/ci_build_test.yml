@@ -141,7 +141,7 @@ jobs:
       # Download conformance report from target branch to create comparison report. If target branch has no conformance
       # report, pull down target branch and rebuild conformance report.
       - name: Download conformance report from target branch
-        uses: dawidd6/action-download-artifact@v2
+        uses: dawidd6/action-download-artifact@v6
         id: download-report
         continue-on-error: true
         with:
