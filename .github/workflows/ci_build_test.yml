@@ -108,7 +108,7 @@ jobs:
       - run: cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
       # Upload conformance report for comparison with future runs
       - name: Upload conformance report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: ${{ env.CONFORMANCE_REPORT_NAME }}
       # Cache the `cargo build` and conformance report for `conformance-report-comparison` job (pull_request event only)
@@ -141,12 +141,9 @@ jobs:
       # Download conformance report from target branch to create comparison report. If target branch has no conformance
       # report, pull down target branch and rebuild conformance report.
       - name: Download conformance report from target branch
-        uses: dawidd6/action-download-artifact@v2
+        uses: actions/download-artifact@v4
         id: download-report
         continue-on-error: true
-        with:
-          workflow: ci_build_test.yml
-          commit: ${{ github.event.pull_request.base.sha }}
       # (If download of target branch report fails) Run the conformance tests (i.e. `cargo test`) and save to a JSON file.
       - name: (If download of target branch conformance report fails) Checkout target branch
         uses: actions/checkout@v3
