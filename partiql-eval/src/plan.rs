@@ -398,7 +398,7 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
-                match self.plan_lit(lit.as_ref()) {
+                match plan_lit(lit.as_ref()) {
                     Ok(lit) => EvalLitExpr::new(lit).bind::<{ STRICT }>(vec![]),
                     Err(e) => Ok(self.err(e) as Box<dyn EvalExpr>),
                 },
@@ -781,43 +781,43 @@ impl<'c> EvaluatorPlanner<'c> {
 
         self.unwrap_bind(name, bind)
     }
+}
 
-    fn plan_lit(&self, lit: &Lit) -> Result<Value, PlanningError> {
-        let lit_to_val = |lit| self.plan_lit(lit);
-        Ok(match lit {
-            Lit::Null => Value::Null,
-            Lit::Missing => Value::Missing,
-            Lit::Int8(n) => Value::from(*n),
-            Lit::Int16(n) => Value::from(*n),
-            Lit::Int32(n) => Value::from(*n),
-            Lit::Int64(n) => Value::from(*n),
-            Lit::Decimal(d) => Value::from(*d),
-            Lit::Double(f) => Value::from(*f),
-            Lit::Bool(b) => Value::from(*b),
-            Lit::String(s) => Value::from(s.as_ref()),
-            Lit::BoxDocument(contents, _typ) => {
-                let ion_typ = BoxedIonType::default().to_dyn_type_tag();
-                let variant = Variant::new(contents.clone(), ion_typ)
-                    .map_err(|e| PlanningError::IllegalState(e.to_string()));
-                Value::from(variant?)
-            }
-            Lit::Struct(strct) => strct
-                .iter()
-                .map(|(k, v)| lit_to_val(v).map(move |v| (k, v)))
-                .collect::<Result<Tuple, _>>()?
-                .into(),
-            Lit::Bag(bag) => bag
-                .iter()
-                .map(lit_to_val)
-                .collect::<Result<Bag, _>>()?
-                .into(),
-            Lit::List(list) => list
-                .iter()
-                .map(lit_to_val)
-                .collect::<Result<List, _>>()?
-                .into(),
-        })
-    }
+fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {
+    let lit_to_val = |lit| plan_lit(lit);
+    Ok(match lit {
+        Lit::Null => Value::Null,
+        Lit::Missing => Value::Missing,
+        Lit::Int8(n) => Value::from(*n),
+        Lit::Int16(n) => Value::from(*n),
+        Lit::Int32(n) => Value::from(*n),
+        Lit::Int64(n) => Value::from(*n),
+        Lit::Decimal(d) => Value::from(*d),
+        Lit::Double(f) => Value::from(*f),
+        Lit::Bool(b) => Value::from(*b),
+        Lit::String(s) => Value::from(s.as_ref()),
+        Lit::BoxDocument(contents, _typ) => {
+            let ion_typ = BoxedIonType::default().to_dyn_type_tag();
+            let variant = Variant::new(contents.clone(), ion_typ)
+                .map_err(|e| PlanningError::IllegalState(e.to_string()));
+            Value::from(variant?)
+        }
+        Lit::Struct(strct) => strct
+            .iter()
+            .map(|(k, v)| lit_to_val(v).map(move |v| (k, v)))
+            .collect::<Result<Tuple, _>>()?
+            .into(),
+        Lit::Bag(bag) => bag
+            .iter()
+            .map(lit_to_val)
+            .collect::<Result<Bag, _>>()?
+            .into(),
+        Lit::List(list) => list
+            .iter()
+            .map(lit_to_val)
+            .collect::<Result<List, _>>()?
+            .into(),
+    })
 }
 
 #[cfg(test)]

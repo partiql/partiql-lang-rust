@@ -22,6 +22,7 @@ bench = false
 
 [dependencies]
 partiql-common = { path = "../partiql-common", version = "0.11.*" }
+partiql-types = { path = "../partiql-types", version = "0.11.*" }
 delegate = "0.13"
 ordered-float = "4"
 itertools = "0.13"
