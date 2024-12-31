@@ -20,16 +20,8 @@ impl<'a> Iterator for ValueIter<'a> {
         match self {
             ValueIter::List(list) => list.next(),
             ValueIter::Bag(bag) => bag.next(),
-            ValueIter::Embedded(doc) => {
+            ValueIter::Embedded(_) => {
                 todo!()
-                // TODO [EMBDOC] don't just unwrap errors to MISSING; report in strict mode?
-                /*
-                doc.next().map(|res| {
-                    &res.map(|doc| Value::EmbeddedDoc(doc))
-                        .unwrap_or(Value::Missing)
-                })
-
-                 */
             }
             ValueIter::Single(v) => v.take(),
         }
@@ -40,9 +32,8 @@ impl<'a> Iterator for ValueIter<'a> {
         match self {
             ValueIter::List(list) => list.size_hint(),
             ValueIter::Bag(bag) => bag.size_hint(),
-            ValueIter::Embedded(doc) => {
+            ValueIter::Embedded(_) => {
                 todo!()
-                //doc.size_hint(),
             }
             ValueIter::Single(_) => (1, Some(1)),
         }

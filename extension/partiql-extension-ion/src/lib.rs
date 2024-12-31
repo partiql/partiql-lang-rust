@@ -8,6 +8,7 @@ pub mod boxed_ion;
 mod common;
 pub mod decode;
 pub mod encode;
+mod util;
 
 pub use common::Encoding;
 

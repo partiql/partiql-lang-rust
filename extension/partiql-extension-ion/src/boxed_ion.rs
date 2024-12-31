@@ -1,17 +1,17 @@
+use crate::util::{PartiqlValueTarget, ToPartiqlValue};
 use ion_rs::{
     AnyEncoding, Element, ElementReader, IonResult, IonType, OwnedSequenceIterator, Reader,
     Sequence,
 };
-use ion_rs_old::IonReader;
 use partiql_value::boxed_variant::{
     BoxedVariant, BoxedVariantResult, BoxedVariantType, BoxedVariantValueIntoIterator,
 };
 use partiql_value::datum::{
-    Datum, DatumCategoryOwned, DatumCategoryRef, DatumSeqOwned, DatumSeqRef, DatumTupleOwned,
-    DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView, OwnedTupleView,
-    RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
+    Datum, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult, DatumSeqOwned,
+    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView,
+    OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::{BindingsName, Value, Variant};
+use partiql_value::{Bag, BindingsName, List, Tuple, Value, Variant};
 use peekmore::{PeekMore, PeekMoreIterator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -109,7 +109,7 @@ impl<'de> Deserialize<'de> for BoxedIon {
 }
 
 impl Hash for BoxedIon {
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, _: &mut H) {
         todo!("BoxedIon.hash")
     }
 }
@@ -126,15 +126,13 @@ impl BoxedVariant for BoxedIon {
     fn category(&self) -> DatumCategoryRef<'_> {
         match &self.doc {
             BoxedIonValue::Stream() => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
-            BoxedIonValue::Sequence(seq) => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
+            BoxedIonValue::Sequence(_) => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
             BoxedIonValue::Value(elt) => match elt.ion_type() {
                 IonType::List => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                 IonType::SExp => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                 IonType::Null => DatumCategoryRef::Null,
                 IonType::Struct => DatumCategoryRef::Tuple(DatumTupleRef::Dynamic(self)),
-                _ => DatumCategoryRef::Scalar(DatumValueRef::Value(todo!(
-                    "Boxed Ion DatumCategoryRef::Scalar"
-                ))),
+                _ => DatumCategoryRef::Scalar(DatumValueRef::Lower(self)),
             },
         }
     }
@@ -142,7 +140,7 @@ impl BoxedVariant for BoxedIon {
     fn into_category(self: Box<Self>) -> DatumCategoryOwned {
         match &self.doc {
             BoxedIonValue::Stream() => DatumCategoryOwned::Sequence(DatumSeqOwned::Dynamic(self)),
-            BoxedIonValue::Sequence(seq) => {
+            BoxedIonValue::Sequence(_) => {
                 DatumCategoryOwned::Sequence(DatumSeqOwned::Dynamic(self))
             }
             BoxedIonValue::Value(elt) => match elt.ion_type() {
@@ -153,6 +151,44 @@ impl BoxedVariant for BoxedIon {
                 _ => DatumCategoryOwned::Scalar(DatumValueOwned::Value(self.into_value())),
             },
         }
+    }
+}
+
+impl DatumLower<Value> for BoxedIon {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        let Self { ctx, doc } = self;
+        match doc {
+            BoxedIonValue::Stream() => todo!("into_lower stream"),
+            BoxedIonValue::Sequence(_) => todo!("into_lower seq"),
+            BoxedIonValue::Value(elt) => {
+                let pval = elt.into_partiql_value()?;
+                Ok(match pval {
+                    PartiqlValueTarget::Atom(val) => val,
+                    PartiqlValueTarget::List(l) => {
+                        let vals = l.into_iter().map(|elt| Self::new_value(elt, ctx.clone()));
+                        List::from_iter(vals).into()
+                    }
+                    PartiqlValueTarget::Bag(b) => {
+                        let vals = b.into_iter().map(|elt| Self::new_value(elt, ctx.clone()));
+                        Bag::from_iter(vals).into()
+                    }
+                    PartiqlValueTarget::Struct(s) => {
+                        let vals = s
+                            .into_iter()
+                            .map(|(key, elt)| (key, Self::new_value(elt, ctx.clone())));
+                        Tuple::from_iter(vals).into()
+                    }
+                })
+            }
+        }
+    }
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        self.into_lower()
+    }
+
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        self.clone().into_lower().map(Cow::Owned)
     }
 }
 
@@ -169,7 +205,7 @@ impl SequenceDatum for BoxedIon {
             BoxedIonValue::Sequence(seq) => seq.len(),
             BoxedIonValue::Value(elt) => match elt.expect_sequence() {
                 Ok(seq) => seq.len(), // TODO
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
@@ -189,7 +225,7 @@ impl<'a> RefSequenceView<'a, Value> for BoxedIon {
                     .iter()
                     .nth(k as usize)
                     .map(|elt| Cow::Owned(self.child_value(elt.clone()))), // TODO remove clone
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
@@ -211,13 +247,17 @@ impl OwnedSequenceView<Value> for BoxedIon {
                     .into_iter()
                     .nth(k as usize)
                     .map(|elt| Self::new_value(elt, ctx)),
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
 
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<Value> {
         OwnedSequenceView::take_val(*self, k)
+    }
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
+        todo!()
     }
 }
 
@@ -227,12 +267,12 @@ impl TupleDatum for BoxedIon {
             BoxedIonValue::Stream() => {
                 todo!()
             }
-            BoxedIonValue::Sequence(seq) => {
+            BoxedIonValue::Sequence(_) => {
                 todo!()
             }
             BoxedIonValue::Value(elt) => match elt.expect_struct() {
                 Ok(strct) => strct.len(),
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
@@ -246,7 +286,7 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
             BoxedIonValue::Stream() => {
                 todo!()
             }
-            BoxedIonValue::Sequence(seq) => {
+            BoxedIonValue::Sequence(_) => {
                 todo!()
             }
             BoxedIonValue::Value(elt) => match elt.expect_struct() {
@@ -260,7 +300,7 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
                     }
                     None
                 }
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
@@ -278,7 +318,7 @@ impl OwnedTupleView<Value> for BoxedIon {
             BoxedIonValue::Stream() => {
                 todo!()
             }
-            BoxedIonValue::Sequence(seq) => {
+            BoxedIonValue::Sequence(_) => {
                 todo!()
             }
             BoxedIonValue::Value(elt) => match elt.try_into_struct() {
@@ -292,7 +332,7 @@ impl OwnedTupleView<Value> for BoxedIon {
                     }
                     None
                 }
-                Err(e) => todo!(),
+                Err(_) => todo!(),
             },
         }
     }
