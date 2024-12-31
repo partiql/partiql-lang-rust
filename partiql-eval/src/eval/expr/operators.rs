@@ -19,9 +19,7 @@ use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{
-    DatumCategory, DatumCategoryRef, DatumLowerResult, DatumValue, SequenceDatum, TupleDatum,
-};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, SequenceDatum, TupleDatum};
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.

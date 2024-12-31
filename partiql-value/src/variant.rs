@@ -3,7 +3,8 @@ use crate::boxed_variant::{
     BoxedVariantValueIter, DynBoxedVariant, DynBoxedVariantTypeTag,
 };
 use crate::datum::{
-    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLowerResult, DatumValue,
+    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult,
+    DatumValue,
 };
 use crate::Value;
 use delegate::delegate;
@@ -11,10 +12,9 @@ use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
 use pretty::{DocAllocator, DocBuilder};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::error::Error;
+use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 
 use thiserror::Error;
 
@@ -49,10 +49,19 @@ impl From<DynBoxedVariant> for Variant {
     }
 }
 
-impl DatumValue<Variant> for Variant {
-    fn into_lower(self) -> DatumLowerResult<Variant> {
-        // TODO lower
-        Ok(self)
+impl DatumValue<Value> for Variant {}
+
+impl DatumLower<Value> for Variant {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        self.variant.into_lower_boxed()
+    }
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        self.into_lower()
+    }
+
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        self.variant.lower()
     }
 }
 
@@ -141,7 +150,7 @@ impl Iterator for VariantIntoIterator {
     }
 }
 
-impl Datum<Variant> for Variant {
+impl Datum<Value> for Variant {
     delegate! {
         to self.variant {
             fn is_null(&self) -> bool;
@@ -150,7 +159,6 @@ impl Datum<Variant> for Variant {
             fn is_present(&self) -> bool;
             fn is_sequence(&self) -> bool;
             fn is_ordered(&self) -> bool;
-            //fn into_iter(self) -> ValueIntoIterator;
         }
     }
 }
