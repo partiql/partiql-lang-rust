@@ -1,3 +1,4 @@
+use crate::util::{PartiqlValueTarget, ToPartiqlValue};
 use ion_rs::{
     AnyEncoding, Element, ElementReader, IonResult, IonType, OwnedSequenceIterator, Reader,
     Sequence,
@@ -7,11 +8,11 @@ use partiql_value::boxed_variant::{
     BoxedVariant, BoxedVariantResult, BoxedVariantType, BoxedVariantValueIntoIterator,
 };
 use partiql_value::datum::{
-    Datum, DatumCategoryOwned, DatumCategoryRef, DatumSeqOwned, DatumSeqRef, DatumTupleOwned,
-    DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView, OwnedTupleView,
-    RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
+    Datum, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult, DatumSeqOwned,
+    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView,
+    OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::{BindingsName, Value, Variant};
+use partiql_value::{Bag, BindingsName, List, Tuple, Value, Variant};
 use peekmore::{PeekMore, PeekMoreIterator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -132,9 +133,7 @@ impl BoxedVariant for BoxedIon {
                 IonType::SExp => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                 IonType::Null => DatumCategoryRef::Null,
                 IonType::Struct => DatumCategoryRef::Tuple(DatumTupleRef::Dynamic(self)),
-                _ => DatumCategoryRef::Scalar(DatumValueRef::Value(todo!(
-                    "Boxed Ion DatumCategoryRef::Scalar"
-                ))),
+                _ => DatumCategoryRef::Scalar(DatumValueRef::Lower(self)),
             },
         }
     }
@@ -153,6 +152,44 @@ impl BoxedVariant for BoxedIon {
                 _ => DatumCategoryOwned::Scalar(DatumValueOwned::Value(self.into_value())),
             },
         }
+    }
+}
+
+impl DatumLower<Value> for BoxedIon {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        let Self { ctx, doc } = self;
+        match doc {
+            BoxedIonValue::Stream() => todo!("into_lower stream"),
+            BoxedIonValue::Sequence(seq) => todo!("into_lower seq"),
+            BoxedIonValue::Value(elt) => {
+                let pval = elt.into_partiql_value()?;
+                Ok(match pval {
+                    PartiqlValueTarget::Atom(val) => val,
+                    PartiqlValueTarget::List(l) => {
+                        let vals = l.into_iter().map(|elt| Self::new_value(elt, ctx.clone()));
+                        List::from_iter(vals).into()
+                    }
+                    PartiqlValueTarget::Bag(b) => {
+                        let vals = b.into_iter().map(|elt| Self::new_value(elt, ctx.clone()));
+                        Bag::from_iter(vals).into()
+                    }
+                    PartiqlValueTarget::Struct(s) => {
+                        let vals = s
+                            .into_iter()
+                            .map(|(key, elt)| (key, Self::new_value(elt, ctx.clone())));
+                        Tuple::from_iter(vals).into()
+                    }
+                })
+            }
+        }
+    }
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        self.into_lower()
+    }
+
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        self.clone().into_lower().map(Cow::Owned)
     }
 }
 
@@ -218,6 +255,10 @@ impl OwnedSequenceView<Value> for BoxedIon {
 
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<Value> {
         OwnedSequenceView::take_val(*self, k)
+    }
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
+        todo!()
     }
 }
 

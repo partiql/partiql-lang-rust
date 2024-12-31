@@ -3,7 +3,7 @@ use dyn_hash::DynHash;
 use partiql_common::pretty::PrettyDoc;
 use std::error::Error;
 
-use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef};
+use crate::datum::{Datum, DatumCategoryOwned, DatumCategoryRef, DatumLower};
 use crate::Value;
 use pretty::{DocAllocator, DocBuilder};
 use std::fmt::{Debug, Display};
@@ -43,7 +43,9 @@ pub trait BoxedVariantType: Debug + Clone {
 
 pub type DynBoxedVariant = Box<dyn BoxedVariant>;
 #[cfg_attr(feature = "serde", typetag::serde)]
-pub trait BoxedVariant: Display + Debug + DynHash + DynClone + Datum<Value> {
+pub trait BoxedVariant:
+    Display + Debug + DynHash + DynClone + Datum<Value> + DatumLower<Value>
+{
     fn into_dyn_iter(self: Box<Self>) -> BoxedVariantResult<BoxedVariantValueIntoIterator>;
 
     fn category(&self) -> DatumCategoryRef<'_>;

@@ -3,8 +3,11 @@ use crate::{
 };
 use std::borrow::Cow;
 use std::error::Error;
-use std::fmt::Debug;
 
+use std::fmt::Debug;
+use std::vec;
+
+// TODO [EMBDOC] pub type DatumIterator = dyn Iterator<Item = Value>;
 pub type DatumLowerError = Box<dyn Error>;
 pub type DatumLowerResult<T> = Result<T, DatumLowerError>;
 
@@ -47,11 +50,23 @@ where
     fn is_ordered(&self) -> bool;
 }
 
+/*
 pub trait DatumValue<D>: Clone + Datum<D>
 where
     D: Datum<D>,
 {
     fn into_lower(self) -> DatumLowerResult<D>;
+}
+
+ */
+
+pub trait DatumValue<D: Datum<D>>: Datum<D> + Clone + Debug {}
+
+pub trait DatumLower<D: DatumValue<D>>: Debug {
+    fn into_lower(self) -> DatumLowerResult<D>;
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<D>;
+    fn lower(&self) -> DatumLowerResult<Cow<'_, D>>;
 }
 
 pub trait DatumCategory<'a> {
@@ -93,6 +108,7 @@ pub enum DatumSeqRef<'a> {
 #[derive(Debug)]
 pub enum DatumValueRef<'a> {
     Value(&'a Value),
+    Lower(&'a dyn DatumLower<Value>),
 }
 
 #[derive(Debug)]
@@ -210,6 +226,8 @@ pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum + Debug {
 pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum + Debug {
     fn take_val(self, k: i64) -> Option<D>;
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<D>;
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = D>>;
 }
 
 impl SequenceDatum for DatumSeqRef<'_> {
@@ -268,6 +286,10 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<Value> {
         self.take_val(k)
     }
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
+        todo!()
+    }
 }
 
 impl<'a> IntoIterator for DatumSeqRef<'a> {
@@ -288,6 +310,7 @@ impl<'a> IntoIterator for DatumSeqRef<'a> {
 pub enum DatumSeqRefIterator<'a> {
     List(ListIter<'a>),
     Bag(BagIter<'a>),
+    Dynamic(Box<dyn Iterator<Item = &'a Value> + 'a>),
 }
 
 impl<'a> Iterator for DatumSeqRefIterator<'a> {
@@ -297,6 +320,7 @@ impl<'a> Iterator for DatumSeqRefIterator<'a> {
         match self {
             DatumSeqRefIterator::List(l) => l.next(),
             DatumSeqRefIterator::Bag(b) => b.next(),
+            DatumSeqRefIterator::Dynamic(d) => d.next(),
         }
     }
 }
@@ -319,6 +343,7 @@ impl IntoIterator for DatumSeqOwned {
 pub enum DatumSeqOwnedIterator {
     List(ListIntoIterator),
     Bag(BagIntoIterator),
+    Dynamic(Box<dyn Iterator<Item = Value>>),
 }
 
 impl Iterator for DatumSeqOwnedIterator {
@@ -328,6 +353,24 @@ impl Iterator for DatumSeqOwnedIterator {
         match self {
             DatumSeqOwnedIterator::List(l) => l.next(),
             DatumSeqOwnedIterator::Bag(b) => b.next(),
+            DatumSeqOwnedIterator::Dynamic(d) => d.next(),
         }
+    }
+}
+
+// TODO remove
+pub struct DynIntoIterator(vec::IntoIter<Value>);
+
+impl Iterator for DynIntoIterator {
+    type Item = Value;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
