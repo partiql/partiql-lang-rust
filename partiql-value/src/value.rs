@@ -15,7 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
-use crate::datum::{Datum, DatumLowerResult, DatumValue};
+use crate::datum::{Datum, DatumLower, DatumLowerResult, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -186,11 +186,24 @@ impl Value {
     }
 }
 
-impl DatumValue<Value> for Value {
+impl DatumValue<Value> for Value {}
+
+impl DatumLower<Value> for Value {
     fn into_lower(self) -> DatumLowerResult<Value> {
         match self {
-            Value::Variant(doc) => Ok(Value::Variant(Box::new(doc.into_lower()?))),
+            Value::Variant(variant) => variant.into_lower(),
             _ => Ok(self),
+        }
+    }
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        self.into_lower()
+    }
+
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        match self {
+            Value::Variant(variant) => variant.lower(),
+            _ => Ok(Cow::Borrowed(self)),
         }
     }
 }
@@ -217,7 +230,7 @@ impl Datum<Value> for Value {
         match self {
             Value::List(_) => true,
             Value::Bag(_) => true,
-            Value::Variant(doc) => doc.is_sequence(),
+            Value::Variant(variant) => variant.is_sequence(),
             _ => false,
         }
     }
@@ -227,7 +240,7 @@ impl Datum<Value> for Value {
     fn is_ordered(&self) -> bool {
         match self {
             Value::List(_) => true,
-            Value::Variant(doc) => doc.is_ordered(),
+            Value::Variant(variant) => variant.is_ordered(),
             _ => false,
         }
     }
@@ -257,7 +270,7 @@ impl Debug for Value {
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
-            Value::Variant(doc) => doc.fmt(f),
+            Value::Variant(variant) => variant.fmt(f),
         }
     }
 }
@@ -405,6 +418,13 @@ impl From<&str> for Value {
     }
 }
 
+impl From<i128> for Value {
+    #[inline]
+    fn from(n: i128) -> Self {
+        Value::from(RustDecimal::from(n))
+    }
+}
+
 impl From<i64> for Value {
     #[inline]
     fn from(n: i64) -> Self {
@@ -436,8 +456,11 @@ impl From<i8> for Value {
 impl From<usize> for Value {
     #[inline]
     fn from(n: usize) -> Self {
-        // TODO overflow to bigint/decimal
-        Value::Integer(n as i64)
+        if n > i64::MAX as usize {
+            Value::from(RustDecimal::from(n))
+        } else {
+            Value::Integer(n as i64)
+        }
     }
 }
 
@@ -472,7 +495,7 @@ impl From<u64> for Value {
 impl From<u128> for Value {
     #[inline]
     fn from(n: u128) -> Self {
-        (n as usize).into()
+        Value::from(RustDecimal::from(n))
     }
 }
 

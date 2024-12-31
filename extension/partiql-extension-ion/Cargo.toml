@@ -23,6 +23,7 @@ bench = false
 [dependencies]
 partiql-value = { path = "../../partiql-value", version = "0.11.*" }
 partiql-common = { path = "../../partiql-common", version = "0.11.*" }
+partiql-types = { path = "../../partiql-types", version = "0.11.*" }
 
 serde = { version = "1", features = ["derive"], optional = true }
 typetag = { version = "0.2", optional = true }
