@@ -98,7 +98,7 @@ impl ToPartiqlValue<Element> for ion_rs::Str {
 
 impl ToPartiqlValue<Element> for ion_rs::Bytes {
     fn into_partiql_value(self) -> DatumLowerResult<PartiqlValueTarget<Element>> {
-        Ok(Value::Blob(Box::new(self.into_bytes())).into())
+        Ok(Value::Blob(Box::new(self.into())).into())
     }
 }
 
