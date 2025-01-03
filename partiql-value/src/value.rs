@@ -265,7 +265,13 @@ impl Debug for Value {
             Value::Real(r) => write!(f, "{}", r.0),
             Value::Decimal(d) => write!(f, "{d}"),
             Value::String(s) => write!(f, "'{s}'"),
-            Value::Blob(s) => write!(f, "'{s:?}'"),
+            Value::Blob(blob) => {
+                write!(f, "x'")?;
+                for byte in blob.as_ref() {
+                    f.write_str(&format!("{:02x}", byte))?;
+                }
+                write!(f, "'")
+            }
             Value::DateTime(t) => t.fmt(f),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
@@ -285,10 +291,8 @@ impl PartialOrd for Value {
 /// TODO: more tests for Ord on Value
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
+        // **NOTE** The Order of these match arms defines the proper comparisons; Do not reorder
         match (self, other) {
-            (Value::Variant(_), _) => todo!("Variant Ord"),
-            (_, Value::Variant(_)) => todo!("Variant Ord"),
-
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
 
@@ -393,6 +397,10 @@ impl Ord for Value {
             (_, Value::Tuple(_)) => Ordering::Greater,
 
             (Value::Bag(l), Value::Bag(r)) => l.cmp(r),
+            (Value::Bag(_), _) => Ordering::Less,
+            (_, Value::Bag(_)) => Ordering::Greater,
+
+            (Value::Variant(l), Value::Variant(r)) => l.cmp(r),
         }
     }
 }
