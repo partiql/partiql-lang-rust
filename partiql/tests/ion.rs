@@ -56,3 +56,14 @@ fn ion_iter() {
     dbg!(&items);
     assert_eq!(items.len(), 4);
 }
+
+#[test]
+fn ion_cmp() {
+    let query = "`foo` < `bar` OR `1.2` > `1`";
+
+    let res = eval(query, EvaluationMode::Permissive);
+    assert_matches!(res, Ok(_));
+    let result = res.unwrap().result;
+
+    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
+}

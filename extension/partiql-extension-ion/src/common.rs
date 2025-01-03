@@ -10,6 +10,8 @@ pub enum Encoding {
     PartiqlEncodedAsIon,
 }
 
+pub(crate) const BOXED_ION_ANNOT: &str = "$ion";
+
 pub(crate) const BAG_ANNOT: &str = "$bag";
 pub(crate) const TIME_ANNOT: &str = "$time";
 pub(crate) const DATE_ANNOT: &str = "$date";

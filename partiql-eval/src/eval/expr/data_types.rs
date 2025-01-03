@@ -3,12 +3,13 @@ use crate::error::EvaluationError;
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
 
-use partiql_value::Value::{Missing, Null};
+use partiql_value::Value::Missing;
 use partiql_value::{Bag, List, Tuple, Value};
 use std::borrow::Cow;
 use std::fmt::Debug;
 
 use partiql_logical::Type;
+use partiql_value::datum::{DatumCategory, DatumCategoryRef};
 use std::ops::Not;
 
 /// Represents an evaluation operator for Tuple expressions such as `{t1.a: t1.b * 2}` in
@@ -119,10 +120,11 @@ impl EvalExpr for EvalIsTypeExpr {
         'c: 'a,
     {
         let expr = self.expr.evaluate(bindings, ctx);
-        let expr = expr.as_ref();
-        let result = match self.is_type {
-            Type::NullType => matches!(expr, Missing | Null),
-            Type::MissingType => matches!(expr, Missing),
+        let result = match (&self.is_type, expr.category()) {
+            (Type::NullType, DatumCategoryRef::Null | DatumCategoryRef::Missing) => true,
+            (Type::MissingType, DatumCategoryRef::Missing) => true,
+            (Type::NullType, _) => false,
+            (Type::MissingType, _) => false,
             _ => {
                 ctx.add_error(EvaluationError::NotYetImplemented(
                     "`IS` for other types".to_string(),

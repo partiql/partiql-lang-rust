@@ -1,4 +1,5 @@
-use crate::{Bag, List, Tuple, Value};
+use crate::datum::DatumLower;
+use crate::{Bag, List, Tuple, Value, Variant};
 use std::cmp::Ordering;
 
 /// A wrapper on [`T`] that specifies if a null or missing value should be ordered before
@@ -50,6 +51,17 @@ impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
             }
 
             (Value::Bag(l), Value::Bag(r)) => wrap_bag(l.as_ref()).cmp(&wrap_bag(r.as_ref())),
+
+            (Value::Variant(l), Value::Variant(r)) => wrap_var(l).cmp(&wrap_var(r)),
+            (Value::Variant(var), _) => {
+                let l_val = var.lower().expect("variant lower");
+                wrap_value(l_val.as_ref()).cmp(other)
+            }
+            (_, Value::Variant(var)) => {
+                let r_val = var.lower().expect("variant lower");
+                self.cmp(&wrap_value(r_val.as_ref()))
+            }
+
             (l, r) => l.cmp(r),
         }
     }

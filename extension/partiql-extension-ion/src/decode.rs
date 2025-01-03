@@ -1,20 +1,20 @@
 use delegate::delegate;
 use ion_rs_old::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
 use once_cell::sync::Lazy;
-use partiql_value::{Bag, DateTime, List, Tuple, Value};
+use partiql_value::{Bag, DateTime, List, Tuple, Value, Variant};
 use regex::RegexSet;
 use rust_decimal::prelude::ToPrimitive;
 
+use crate::boxed_ion::BoxedIonType;
+use crate::common::{
+    Encoding, BAG_ANNOT, BOXED_ION_ANNOT, DATE_ANNOT, MISSING_ANNOT, RE_SET_TIME_PARTS, TIME_ANNOT,
+    TIME_PARTS_HOUR, TIME_PARTS_MINUTE, TIME_PARTS_SECOND, TIME_PARTS_TZ_HOUR,
+    TIME_PARTS_TZ_MINUTE,
+};
 use std::num::NonZeroU8;
 use std::str::FromStr;
-
 use thiserror::Error;
 use time::Duration;
-
-use crate::common::{
-    Encoding, BAG_ANNOT, DATE_ANNOT, MISSING_ANNOT, RE_SET_TIME_PARTS, TIME_ANNOT, TIME_PARTS_HOUR,
-    TIME_PARTS_MINUTE, TIME_PARTS_SECOND, TIME_PARTS_TZ_HOUR, TIME_PARTS_TZ_MINUTE,
-};
 
 /// Errors in ion decoding.
 ///
@@ -161,6 +161,28 @@ where
         }
     }
 }
+#[inline]
+fn dispatch_decode_value<R, D>(decoder: &D, reader: &mut R, typ: IonType) -> IonDecodeResult
+where
+    R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    D: IonValueDecoder<R> + ?Sized,
+{
+    match typ {
+        IonType::Null => decoder.decode_null(reader),
+        IonType::Bool => decoder.decode_bool(reader),
+        IonType::Int => decoder.decode_int(reader),
+        IonType::Float => decoder.decode_float(reader),
+        IonType::Decimal => decoder.decode_decimal(reader),
+        IonType::Timestamp => decoder.decode_timestamp(reader),
+        IonType::Symbol => decoder.decode_symbol(reader),
+        IonType::String => decoder.decode_string(reader),
+        IonType::Clob => decoder.decode_clob(reader),
+        IonType::Blob => decoder.decode_blob(reader),
+        IonType::List => decoder.decode_list(reader),
+        IonType::SExp => decoder.decode_sexp(reader),
+        IonType::Struct => decoder.decode_struct(reader),
+    }
+}
 
 trait IonValueDecoder<R>
 where
@@ -168,21 +190,7 @@ where
 {
     #[inline]
     fn decode_value(&self, reader: &mut R, typ: IonType) -> IonDecodeResult {
-        match typ {
-            IonType::Null => self.decode_null(reader),
-            IonType::Bool => self.decode_bool(reader),
-            IonType::Int => self.decode_int(reader),
-            IonType::Float => self.decode_float(reader),
-            IonType::Decimal => self.decode_decimal(reader),
-            IonType::Timestamp => self.decode_timestamp(reader),
-            IonType::Symbol => self.decode_symbol(reader),
-            IonType::String => self.decode_string(reader),
-            IonType::Clob => self.decode_clob(reader),
-            IonType::Blob => self.decode_blob(reader),
-            IonType::List => self.decode_list(reader),
-            IonType::SExp => self.decode_sexp(reader),
-            IonType::Struct => self.decode_struct(reader),
-        }
+        dispatch_decode_value(self, reader, typ)
     }
 
     fn decode_null(&self, reader: &mut R) -> IonDecodeResult;
@@ -498,15 +506,38 @@ impl PartiqlEncodedIonValueDecoder {
         );
         Ok(datetime.into())
     }
+
+    fn decode_boxed<R>(&self, reader: &mut R) -> IonDecodeResult
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let mut loader = ion_elt::ElementLoader::for_reader(reader);
+        let elt = loader.materialize_current()?.unwrap();
+        let ion_ctor = Box::new(BoxedIonType {});
+        let contents = elt.to_string();
+        Ok(Value::from(
+            Variant::new(contents, ion_ctor).expect("variant"),
+        ))
+    }
 }
 
 impl<R> IonValueDecoder<R> for PartiqlEncodedIonValueDecoder
 where
     R: IonReader<Item = StreamItem, Symbol = Symbol>,
 {
+    fn decode_value(&self, reader: &mut R, typ: IonType) -> IonDecodeResult {
+        if has_annotation(reader, BOXED_ION_ANNOT) {
+            self.decode_boxed(reader)
+        } else {
+            dispatch_decode_value(self, reader, typ)
+        }
+    }
+
     #[inline]
     fn decode_null(&self, reader: &mut R) -> IonDecodeResult {
-        if has_annotation(reader, MISSING_ANNOT) {
+        if has_annotation(reader, BOXED_ION_ANNOT) {
+            self.decode_boxed(reader)
+        } else if has_annotation(reader, MISSING_ANNOT) {
             Ok(Value::Missing)
         } else {
             Ok(Value::Null)
@@ -553,6 +584,109 @@ where
             fn decode_clob(&self, reader: &mut R) -> IonDecodeResult;
             fn decode_blob(&self, reader: &mut R) -> IonDecodeResult;
             fn decode_sexp(&self, reader: &mut R) -> IonDecodeResult;
+        }
+    }
+}
+
+// Code in this module is copied from ion-rs v0.18, in order to make use of `materialize_current`,
+// which is not exposed there.
+mod ion_elt {
+    use ion_rs_old::element::{Element, Sequence, Struct, Value};
+    use ion_rs_old::{IonReader, IonResult, StreamItem, Symbol};
+
+    /// Helper type; wraps an [ElementReader] and recursively materializes the next value in the
+    /// reader's input, reporting any errors that might occur along the way.
+    pub(crate) struct ElementLoader<'a, R: ?Sized> {
+        reader: &'a mut R,
+    }
+
+    impl<'a, R: IonReader<Item = StreamItem, Symbol = Symbol> + ?Sized> ElementLoader<'a, R> {
+        pub(crate) fn for_reader(reader: &'a mut R) -> ElementLoader<'a, R> {
+            ElementLoader { reader }
+        }
+
+        /// Advances the reader to the next value in the stream and uses [Self::materialize_current]
+        /// to materialize it.
+        pub(crate) fn materialize_next(&mut self) -> IonResult<Option<Element>> {
+            // Advance the reader to the next value
+            let _ = self.reader.next()?;
+            self.materialize_current()
+        }
+
+        /// Recursively materialize the reader's current Ion value and returns it as `Ok(Some(value))`.
+        /// If there are no more values at this level, returns `Ok(None)`.
+        /// If an error occurs while materializing the value, returns an `Err`.
+        /// Calling this method advances the reader and consumes the current value.
+        pub(crate) fn materialize_current(&mut self) -> IonResult<Option<Element>> {
+            // Collect this item's annotations into a Vec. We have to do this before materializing the
+            // value itself because materializing a collection requires advancing the reader further.
+            let mut annotations = Vec::new();
+            // Current API limitations require `self.reader.annotations()` to heap allocate its
+            // iterator even if there aren't annotations. `self.reader.has_annotations()` is trivial
+            // and allows us to skip the heap allocation in the common case.
+            if self.reader.has_annotations() {
+                for annotation in self.reader.annotations() {
+                    annotations.push(annotation?);
+                }
+            }
+
+            let value = match self.reader.current() {
+                // No more values at this level of the stream
+                StreamItem::Nothing => return Ok(None),
+                // This is a typed null
+                StreamItem::Null(ion_type) => Value::Null(ion_type),
+                // This is a non-null value
+                StreamItem::Value(ion_type) => {
+                    use ion_rs_old::IonType::*;
+                    match ion_type {
+                        Null => unreachable!("non-null value had IonType::Null"),
+                        Bool => Value::Bool(self.reader.read_bool()?),
+                        Int => Value::Int(self.reader.read_int()?),
+                        Float => Value::Float(self.reader.read_f64()?),
+                        Decimal => Value::Decimal(self.reader.read_decimal()?),
+                        Timestamp => Value::Timestamp(self.reader.read_timestamp()?),
+                        Symbol => Value::Symbol(self.reader.read_symbol()?),
+                        String => Value::String(self.reader.read_string()?),
+                        Clob => Value::Clob(self.reader.read_clob()?.into()),
+                        Blob => Value::Blob(self.reader.read_blob()?.into()),
+                        // It's a collection; recursively materialize all of this value's children
+                        List => Value::List(self.materialize_sequence()?),
+                        SExp => Value::SExp(self.materialize_sequence()?),
+                        Struct => Value::Struct(self.materialize_struct()?),
+                    }
+                }
+            };
+            Ok(Some(Element::from(value)))
+        }
+
+        /// Steps into the current sequence and materializes each of its children to construct
+        /// an [`Vec<Element>`]. When all of the the children have been materialized, steps out.
+        /// The reader MUST be positioned over a list or s-expression when this is called.
+        fn materialize_sequence(&mut self) -> IonResult<Sequence> {
+            let mut child_elements = Vec::new();
+            self.reader.step_in()?;
+            while let Some(element) = self.materialize_next()? {
+                child_elements.push(element);
+            }
+            self.reader.step_out()?;
+            Ok(child_elements.into())
+        }
+
+        /// Steps into the current struct and materializes each of its fields to construct
+        /// an [`Struct`]. When all of the the fields have been materialized, steps out.
+        /// The reader MUST be positioned over a struct when this is called.
+        fn materialize_struct(&mut self) -> IonResult<Struct> {
+            let mut child_elements = Vec::new();
+            self.reader.step_in()?;
+            while let StreamItem::Value(_) | StreamItem::Null(_) = self.reader.next()? {
+                let field_name = self.reader.field_name()?;
+                let value = self
+                    .materialize_current()?
+                    .expect("materialize_current() returned None for user data");
+                child_elements.push((field_name, value));
+            }
+            self.reader.step_out()?;
+            Ok(Struct::from_iter(child_elements))
         }
     }
 }
