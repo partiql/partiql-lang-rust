@@ -141,9 +141,12 @@ jobs:
       # Download conformance report from target branch to create comparison report. If target branch has no conformance
       # report, pull down target branch and rebuild conformance report.
       - name: Download conformance report from target branch
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         id: download-report
         continue-on-error: true
+        with:
+          workflow: ci_build_test.yml
+          commit: ${{ github.event.pull_request.base.sha }}
       # (If download of target branch report fails) Run the conformance tests (i.e. `cargo test`) and save to a JSON file.
       - name: (If download of target branch conformance report fails) Checkout target branch
         uses: actions/checkout@v3
