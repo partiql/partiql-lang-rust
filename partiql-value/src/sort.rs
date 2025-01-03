@@ -1,4 +1,6 @@
-use crate::{Bag, List, Tuple, Value};
+use crate::datum::{DatumCategory, DatumLower};
+use crate::{Bag, List, Tuple, Value, Variant};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 /// A wrapper on [`T`] that specifies if a null or missing value should be ordered before
@@ -16,11 +18,15 @@ where
     }
 }
 
-impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
+impl<'a, const NULLS_FIRST: bool> Ord for NullSortedValue<'a, NULLS_FIRST, Value> {
     fn cmp(&self, other: &Self) -> Ordering {
         let wrap_list = NullSortedValue::<{ NULLS_FIRST }, List>;
         let wrap_tuple = NullSortedValue::<{ NULLS_FIRST }, Tuple>;
         let wrap_bag = NullSortedValue::<{ NULLS_FIRST }, Bag>;
+        let unwrap_var = |v: &'a Box<Variant>| -> Cow<'a, Value> {
+            //todo!("wrap variant")
+            v.lower().expect("lower")
+        };
         let null_cond = |order: Ordering| {
             if NULLS_FIRST {
                 order
@@ -30,6 +36,10 @@ impl<const NULLS_FIRST: bool> Ord for NullSortedValue<'_, NULLS_FIRST, Value> {
         };
 
         match (self.0, other.0) {
+            (Value::Variant(l), Value::Variant(r)) => unwrap_var(l).cmp(&unwrap_var(r)),
+            (Value::Variant(l), r) => unwrap_var(l).as_ref().cmp(r),
+            (l, Value::Variant(r)) => l.cmp(&unwrap_var(r)),
+
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
 
