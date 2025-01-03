@@ -16,6 +16,7 @@ impl Comparable for Value {
             | (Value::Boolean(_), Value::Boolean(_))
             | (Value::String(_), Value::String(_))
             | (Value::Blob(_), Value::Blob(_))
+            | (Value::DateTime(_), Value::DateTime(_))
             | (Value::List(_), Value::List(_))
             | (Value::Bag(_), Value::Bag(_))
             | (Value::Tuple(_), Value::Tuple(_))
@@ -24,6 +25,9 @@ impl Comparable for Value {
                 Value::Integer(_) | Value::Real(_) | Value::Decimal(_),
                 Value::Integer(_) | Value::Real(_) | Value::Decimal(_),
             )=> true,
+            (Value::Variant(lhs), Value::Variant(rhs)) => {
+                lhs.is_comparable_to(rhs)
+            }
             (_, _) => false,
         }
     }

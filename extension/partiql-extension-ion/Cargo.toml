@@ -34,7 +34,7 @@ unicase = "2.7"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.36"
 ion-rs_old = { version = "0.18", package = "ion-rs" }
-ion-rs = { version = "1.0.0-rc.10", features = ["experimental"], git = "https://github.com/amazon-ion/ion-rust", branch = "feat-decon-owned-elt" }
+ion-rs = { version = "1.0.0-rc.10", features = ["experimental"], git = "https://github.com/amazon-ion/ion-rust" }
 
 time = { version = "0.3", features = ["macros"] }
 once_cell = "1"

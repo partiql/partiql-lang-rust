@@ -4,6 +4,7 @@ use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 
 #[allow(dead_code)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct TestValue {
     pub value: Value,
 }
