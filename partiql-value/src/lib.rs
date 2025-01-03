@@ -20,7 +20,6 @@ pub use bindings::*;
 pub use comparison::*;
 pub use datetime::*;
 pub use list::*;
-pub use pretty::*;
 pub use sort::*;
 pub use tuple::*;
 pub use value::*;
