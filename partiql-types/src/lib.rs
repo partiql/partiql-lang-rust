@@ -696,6 +696,12 @@ pub enum Static {
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
+pub enum StaticCategory<'a> {
+    Tuple(),
+    Sequence(&'a PartiqlShape),
+    Scalar(&'a Static),
+}
+
 impl Static {
     pub fn is_scalar(&self) -> bool {
         !matches!(self, Static::Struct(_) | Static::Bag(_) | Static::Array(_))
@@ -707,6 +713,15 @@ impl Static {
 
     pub fn is_struct(&self) -> bool {
         matches!(self, Static::Struct(_))
+    }
+
+    pub fn category(&self) -> StaticCategory<'_> {
+        match self {
+            Static::Struct(_) => StaticCategory::Tuple(),
+            Static::Bag(b) => StaticCategory::Sequence(b.element_type()),
+            Static::Array(b) => StaticCategory::Sequence(b.element_type()),
+            _ => StaticCategory::Scalar(self),
+        }
     }
 }
 

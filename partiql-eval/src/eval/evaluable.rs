@@ -15,6 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
+use partiql_value::datum::{Datum, DatumLower, DatumLowerResult};
 use std::rc::Rc;
 
 #[macro_export]
@@ -110,17 +111,16 @@ impl Evaluable for EvalScan {
             Value::Tuple(t) => bag![*t],
             _ => bag![tuple![]],
         };
-
         let mut value = bag![];
         bindings.iter().for_each(|binding| {
             let binding_tuple = binding.as_tuple_ref();
             let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
-            let ordered = &v.is_ordered();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
+                let ordered = v.is_ordered();
                 for t in v {
                     let mut out = Tuple::from([(self.as_key.as_str(), t)]);
-                    let at_id = if *ordered {
+                    let at_id = if ordered {
                         at_index_counter.into()
                     } else {
                         Missing
@@ -1008,7 +1008,10 @@ impl Evaluable for EvalOrderBy {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
-        let mut values = input_value.into_iter().collect_vec();
+        let mut values: DatumLowerResult<Vec<_>> =
+            input_value.into_iter().map(|v| v.into_lower()).collect();
+        // TODO handle lowering error
+        let mut values = values.expect("lower");
         values.sort_by(|l, r| self.compare(l, r, ctx));
         Value::from(List::from(values))
     }
@@ -1233,7 +1236,6 @@ impl EvalExprQuery {
 impl Evaluable for EvalExprQuery {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = self.input.take().unwrap_or(Value::Null).coerce_into_tuple();
-
         self.expr.evaluate(&input_value, ctx).into_owned()
     }
 

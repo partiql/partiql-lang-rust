@@ -56,11 +56,11 @@ use partiql_common::catalog::ObjectId;
 /// assert_eq!(3, p.operators().len());
 /// assert_eq!(2, p.flows().len());
 /// ```
-use partiql_value::BindingsName;
 use rust_decimal::Decimal as RustDecimal;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
+use partiql_value::BindingsName;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -464,7 +464,6 @@ pub enum Lit {
     Bag(Vec<Lit>),
     List(Vec<Lit>),
 }
-
 // TODO we should replace this enum with some identifier that can be looked up in a symtab/funcregistry?
 /// Represents logical plan's unary operators.
 #[derive(Debug, Clone, Eq, PartialEq)]
