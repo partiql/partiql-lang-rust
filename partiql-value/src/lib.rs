@@ -448,14 +448,14 @@ mod tests {
         //  tests
 
         fn nullable_eq(lhs: Value, rhs: Value) -> Value {
-            let wrap = EqualityValue::<false, Value>;
+            let wrap = EqualityValue::<false, false, Value>;
             let lhs = wrap(&lhs);
             let rhs = wrap(&rhs);
             NullableEq::eq(&lhs, &rhs)
         }
 
         fn nullable_neq(lhs: Value, rhs: Value) -> Value {
-            let wrap = EqualityValue::<false, Value>;
+            let wrap = EqualityValue::<false, false, Value>;
             let lhs = wrap(&lhs);
             let rhs = wrap(&rhs);
             NullableEq::neq(&lhs, &rhs)

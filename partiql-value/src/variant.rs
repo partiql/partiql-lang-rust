@@ -7,7 +7,7 @@ use crate::datum::{
     DatumValue,
 };
 
-use crate::{Comparable, NullSortedValue, Value};
+use crate::{Comparable, EqualityValue, NullSortedValue, NullableEq, Value};
 use delegate::delegate;
 use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc, ToPretty};
 use pretty::{DocAllocator, DocBuilder};
@@ -201,6 +201,21 @@ impl PartialEq<Self> for Variant {
 }
 
 impl Eq for Variant {}
+
+impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, NULLS_EQUAL, NAN_EQUAL, Variant>
+{
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> Value {
+        let l = &self.0.variant;
+        let r = &other.0.variant;
+        let lty = l.type_tag();
+        let rty = r.type_tag();
+
+        let res = lty == rty && lty.value_eq_param(l, r, NULLS_EQUAL, NAN_EQUAL);
+        Value::Boolean(res)
+    }
+}
 
 #[cfg(feature = "serde")]
 impl Serialize for Variant {

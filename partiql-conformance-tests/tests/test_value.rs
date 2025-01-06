@@ -1,19 +1,39 @@
-use partiql_value::Value;
+use partiql_eval::eval::Evaluated;
+use partiql_value::{EqualityValue, NullableEq, Value};
 
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 
 #[allow(dead_code)]
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Ord, PartialOrd)]
 pub(crate) struct TestValue {
     pub value: Value,
 }
 
+impl Eq for TestValue {}
+
+impl PartialEq for TestValue {
+    fn eq(&self, other: &Self) -> bool {
+        let wrap_value = EqualityValue::<'_, true, true, Value>;
+        NullableEq::eq(&wrap_value(&self.value), &wrap_value(&other.value)) == Value::Boolean(true)
+    }
+}
+
+impl From<Value> for TestValue {
+    fn from(value: Value) -> Self {
+        TestValue { value }
+    }
+}
+
+impl From<Evaluated> for TestValue {
+    fn from(value: Evaluated) -> Self {
+        value.result.into()
+    }
+}
+
 impl From<&str> for TestValue {
     fn from(contents: &str) -> Self {
-        TestValue {
-            value: parse_test_value_str(contents),
-        }
+        parse_test_value_str(contents).into()
     }
 }
 

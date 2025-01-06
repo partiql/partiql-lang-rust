@@ -213,19 +213,29 @@ impl Iterator for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        if self.vals.len() != other.vals.len() {
-            return false;
+        let wrap = EqualityValue::<true, false, _>;
+        NullableEq::eq(&wrap(self), &wrap(other)) == Value::Boolean(true)
+    }
+}
+
+impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, NULLS_EQUAL, NAN_EQUAL, Tuple>
+{
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> Value {
+        if self.0.vals.len() != other.0.vals.len() {
+            return Value::Boolean(false);
         }
-        for ((ls, lv), (rs, rv)) in self.pairs().sorted().zip(other.pairs().sorted()) {
+        for ((ls, lv), (rs, rv)) in self.0.pairs().sorted().zip(other.0.pairs().sorted()) {
             if ls != rs {
-                return false;
+                return Value::Boolean(false);
             }
-            let wrap = EqualityValue::<true, Value>;
+            let wrap = EqualityValue::<{ NULLS_EQUAL }, { NAN_EQUAL }, Value>;
             if NullableEq::eq(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
-                return false;
+                return Value::Boolean(false);
             }
         }
-        true
+        Value::Boolean(true)
     }
 }
 

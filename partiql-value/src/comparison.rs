@@ -1,5 +1,5 @@
-use crate::util;
-use crate::Value;
+use crate::{util, Bag, List, Tuple};
+use crate::{Value, Variant};
 
 pub trait Comparable {
     fn is_comparable_to(&self, rhs: &Self) -> bool;
@@ -35,19 +35,30 @@ impl Comparable for Value {
 
 // `Value` `eq` and `neq` with Missing and Null propagation
 pub trait NullableEq {
-    type Output;
-    fn eq(&self, rhs: &Self) -> Self::Output;
-    fn neq(&self, rhs: &Self) -> Self::Output;
+    fn eq(&self, rhs: &Self) -> Value;
+
+    fn neq(&self, rhs: &Self) -> Value {
+        let eq_result = NullableEq::eq(self, rhs);
+        match eq_result {
+            Value::Boolean(_) | Value::Null => !eq_result,
+            _ => Value::Missing,
+        }
+    }
 }
 
 /// A wrapper on [`T`] that specifies if missing and null values should be equal.
-#[derive(Eq, PartialEq)]
-pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
+#[derive(Eq, PartialEq, Debug)]
+pub struct EqualityValue<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool, T>(pub &'a T);
 
-impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Value> {
-    type Output = Value;
-
-    fn eq(&self, rhs: &Self) -> Self::Output {
+impl<const GROUP_NULLS: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, GROUP_NULLS, NAN_EQUAL, Value>
+{
+    #[inline(always)]
+    fn eq(&self, rhs: &Self) -> Value {
+        let wrap_list = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, List>;
+        let wrap_bag = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Bag>;
+        let wrap_tuple = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Tuple>;
+        let wrap_var = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Variant>;
         if GROUP_NULLS {
             if let (Value::Missing | Value::Null, Value::Missing | Value::Null) = (self.0, rhs.0) {
                 return Value::Boolean(true);
@@ -77,15 +88,17 @@ impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Valu
             (Value::Decimal(_), Value::Real(_)) => {
                 Value::from(self.0 == &util::coerce_int_or_real_to_decimal(rhs.0))
             }
+            (Value::Real(l), Value::Real(r)) => {
+                if NAN_EQUAL && l.is_nan() && r.is_nan() {
+                    return Value::Boolean(true);
+                }
+                Value::from(l == r)
+            }
+            (Value::List(l), Value::List(r)) => NullableEq::eq(&wrap_list(l), &wrap_list(r)),
+            (Value::Bag(l), Value::Bag(r)) => NullableEq::eq(&wrap_bag(l), &wrap_bag(r)),
+            (Value::Tuple(l), Value::Tuple(r)) => NullableEq::eq(&wrap_tuple(l), &wrap_tuple(r)),
+            (Value::Variant(l), Value::Variant(r)) => NullableEq::eq(&wrap_var(l), &wrap_var(r)),
             (_, _) => Value::from(self.0 == rhs.0),
-        }
-    }
-
-    fn neq(&self, rhs: &Self) -> Self::Output {
-        let eq_result = NullableEq::eq(self, rhs);
-        match eq_result {
-            Value::Boolean(_) | Value::Null => !eq_result,
-            _ => Value::Missing,
         }
     }
 }
