@@ -1,7 +1,7 @@
 use crate::util::{PartiqlValueTarget, ToPartiqlValue};
 use ion_rs::{
     AnyEncoding, Element, ElementReader, IonResult, IonType, OwnedSequenceIterator, Reader,
-    Sequence,
+    Sequence, Struct,
 };
 use partiql_value::boxed_variant::{
     BoxedVariant, BoxedVariantResult, BoxedVariantType, BoxedVariantTypeTag,
@@ -12,14 +12,13 @@ use partiql_value::datum::{
     DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView,
     OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::{Bag, BindingsName, List, Tuple, Value, Variant};
+use partiql_value::{Bag, BindingsName, List, NullableEq, Tuple, Value, Variant};
 use peekmore::{PeekMore, PeekMoreIterator};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::DerefMut;
@@ -40,16 +39,33 @@ impl BoxedVariantType for BoxedIonType {
     }
 
     fn value_eq(&self, l: &DynBoxedVariant, r: &DynBoxedVariant) -> bool {
-        let (l, r) = get_values(l, r);
-
-        l.eq(r)
+        wrap_eq::<true, false>(l, r) == Value::Boolean(true)
     }
 
-    fn value_cmp(&self, l: &DynBoxedVariant, r: &DynBoxedVariant) -> Ordering {
-        let (l, r) = get_values(l, r);
-
-        l.cmp(r)
+    fn value_eq_param(
+        &self,
+        l: &DynBoxedVariant,
+        r: &DynBoxedVariant,
+        nulls_eq: bool,
+        nans_eq: bool,
+    ) -> bool {
+        let res = match (nulls_eq, nans_eq) {
+            (true, true) => wrap_eq::<true, true>(l, r),
+            (true, false) => wrap_eq::<true, false>(l, r),
+            (false, true) => wrap_eq::<false, true>(l, r),
+            (false, false) => wrap_eq::<false, false>(l, r),
+        };
+        res == Value::Boolean(true)
     }
+}
+
+fn wrap_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>(
+    l: &DynBoxedVariant,
+    r: &DynBoxedVariant,
+) -> Value {
+    let (l, r) = get_values(l, r);
+    let wrap = IonEqualityValue::<'_, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
+    NullableEq::eq(&wrap(l), &wrap(r))
 }
 
 #[inline]
@@ -139,8 +155,8 @@ impl<'de> Deserialize<'de> for BoxedIon {
 }
 
 impl Hash for BoxedIon {
-    fn hash<H: Hasher>(&self, _: &mut H) {
-        todo!("BoxedIon.hash")
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.doc.hash(state);
     }
 }
 
@@ -206,23 +222,22 @@ impl BoxedVariant for BoxedIon {
     }
 }
 
-impl PartialEq<Self> for BoxedIon {
-    fn eq(&self, other: &Self) -> bool {
-        self.doc.eq(&other.doc)
-    }
-}
+/// A wrapper on [`T`] that specifies if missing and null values should be equal.
+#[derive(Eq, PartialEq)]
+pub struct IonEqualityValue<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool, T>(pub &'a T);
 
-impl Eq for BoxedIon {}
-
-impl PartialOrd for BoxedIon {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for IonEqualityValue<'a, NULLS_EQUAL, NAN_EQUAL, BoxedIon>
+{
+    fn eq(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
+        wrap(&self.0.doc).eq(&wrap(&rhs.0.doc))
     }
-}
-impl Ord for BoxedIon {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // TODO lowering just to compare is costly... Either find a better way, or lift this out of the extension
-        self.lower().unwrap().cmp(&other.lower().unwrap())
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 
@@ -531,6 +546,142 @@ enum BoxedIonValue {
     Sequence(Sequence),
 }
 
+impl Hash for BoxedIonValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            BoxedIonValue::Stream() => {
+                todo!("stream not hashable? ")
+            }
+            BoxedIonValue::Value(val) => {
+                let sha = ion_rs::ion_hash::sha256(val).expect("ion hash");
+                state.write(&sha);
+            }
+            BoxedIonValue::Sequence(_) => todo!("ion seq hash"),
+        }
+    }
+}
+
+impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for IonEqualityValue<'a, NULLS_EQUAL, NAN_EQUAL, BoxedIonValue>
+{
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> Value {
+        let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Element>;
+        let wrap_seq = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Sequence>;
+        match (self.0, other.0) {
+            (BoxedIonValue::Value(l), BoxedIonValue::Value(r)) => {
+                NullableEq::eq(&wrap(l), &wrap(r))
+            }
+            (BoxedIonValue::Sequence(l), BoxedIonValue::Sequence(r)) => {
+                NullableEq::eq(&wrap_seq(l), &wrap_seq(r))
+            }
+            _ => Value::Boolean(false),
+        }
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
+    }
+}
+
+impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for IonEqualityValue<'a, NULLS_EQUAL, NAN_EQUAL, Element>
+{
+    fn eq(&self, other: &Self) -> Value {
+        let wrap_seq = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Sequence>;
+        let wrap_struct = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Struct>;
+        let (l, r) = (self.0, other.0);
+        let (lty, rty) = (l.ion_type(), r.ion_type());
+
+        let result = if l.is_null() && r.is_null() {
+            NULLS_EQUAL
+        } else {
+            match (lty, rty) {
+                (IonType::Float, IonType::Float) => {
+                    let (l, r) = (l.as_float().unwrap(), r.as_float().unwrap());
+                    if l.is_nan() && r.is_nan() {
+                        NAN_EQUAL
+                    } else {
+                        l == r
+                    }
+                }
+
+                (IonType::List, IonType::List) => {
+                    let (ls, rs) = (l.as_list().unwrap(), r.as_list().unwrap());
+                    l.annotations().eq(r.annotations())
+                        && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
+                }
+                (IonType::SExp, IonType::SExp) => {
+                    let (ls, rs) = (l.as_sexp().unwrap(), r.as_sexp().unwrap());
+                    l.annotations().eq(r.annotations())
+                        && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
+                }
+
+                (IonType::Struct, IonType::Struct) => {
+                    let (ls, rs) = (l.as_struct().unwrap(), r.as_struct().unwrap());
+                    l.annotations().eq(r.annotations())
+                        && NullableEq::eq(&wrap_struct(ls), &wrap_struct(rs))
+                            == Value::Boolean(true)
+                }
+
+                _ => l == r,
+            }
+        };
+
+        Value::Boolean(result)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
+    }
+}
+
+impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for IonEqualityValue<'a, NULLS_EQUAL, NAN_EQUAL, Sequence>
+{
+    fn eq(&self, other: &Self) -> Value {
+        let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
+        let (l, r) = (self.0, other.0);
+        let l = l.iter().map(wrap);
+        let r = r.iter().map(wrap);
+        let res = l.zip(r).all(|(l, r)| l == r);
+        Value::Boolean(res)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
+    }
+}
+
+impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for IonEqualityValue<'a, NULLS_EQUAL, NAN_EQUAL, Struct>
+{
+    fn eq(&self, other: &Self) -> Value {
+        let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
+        let (l, r) = (self.0, other.0);
+        let l = l.iter().map(|(s, elt)| (s, wrap(elt)));
+        let r = r.iter().map(|(s, elt)| (s, wrap(elt)));
+        let res = l.zip(r).all(|((ls, lelt), (rs, relt))| {
+            ls == rs && NullableEq::eq(&lelt, &relt) == Value::Boolean(true)
+        });
+        Value::Boolean(res)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
+    }
+}
+
+/*
+
 impl PartialEq<Self> for BoxedIonValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -542,6 +693,8 @@ impl PartialEq<Self> for BoxedIonValue {
 }
 
 impl Eq for BoxedIonValue {}
+
+ */
 
 impl From<Element> for BoxedIonValue {
     fn from(value: Element) -> Self {
