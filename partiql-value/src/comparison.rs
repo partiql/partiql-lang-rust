@@ -1,5 +1,5 @@
-use crate::Value;
 use crate::{util, Bag, List, Tuple};
+use crate::{Value, Variant};
 
 pub trait Comparable {
     fn is_comparable_to(&self, rhs: &Self) -> bool;
@@ -72,6 +72,7 @@ impl<const GROUP_NULLS: bool, const NAN_EQUAL: bool> NullableEq
         let wrap_list = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, List>;
         let wrap_bag = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Bag>;
         let wrap_tuple = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Tuple>;
+        let wrap_var = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Variant>;
         if GROUP_NULLS {
             if let (Value::Missing | Value::Null, Value::Missing | Value::Null) = (self.0, rhs.0) {
                 return Value::Boolean(true);
@@ -110,6 +111,7 @@ impl<const GROUP_NULLS: bool, const NAN_EQUAL: bool> NullableEq
             (Value::List(l), Value::List(r)) => NullableEq::eq(&wrap_list(l), &wrap_list(r)),
             (Value::Bag(l), Value::Bag(r)) => NullableEq::eq(&wrap_bag(l), &wrap_bag(r)),
             (Value::Tuple(l), Value::Tuple(r)) => NullableEq::eq(&wrap_tuple(l), &wrap_tuple(r)),
+            (Value::Variant(l), Value::Variant(r)) => NullableEq::eq(&wrap_var(l), &wrap_var(r)),
             (_, _) => Value::from(self.0 == rhs.0),
         }
     }

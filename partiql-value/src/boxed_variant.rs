@@ -2,6 +2,7 @@ use dyn_clone::DynClone;
 use dyn_hash::DynHash;
 use partiql_common::pretty::PrettyDoc;
 use std::any::Any;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::error::Error;
 
@@ -28,7 +29,14 @@ pub trait BoxedVariantType: Debug + DynClone {
     fn name(&self) -> &'static str;
 
     fn value_eq(&self, l: &DynBoxedVariant, r: &DynBoxedVariant) -> bool;
-    fn value_cmp(&self, l: &DynBoxedVariant, r: &DynBoxedVariant) -> Ordering;
+
+    fn value_eq_param(
+        &self,
+        l: &DynBoxedVariant,
+        r: &DynBoxedVariant,
+        nulls_eq: bool,
+        nans_eq: bool,
+    ) -> bool;
 }
 
 dyn_clone::clone_trait_object!(BoxedVariantType);
@@ -90,9 +98,12 @@ impl PartialOrd for DynBoxedVariant {
 }
 impl Ord for DynBoxedVariant {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.type_tag()
-            .cmp(&other.type_tag())
-            .then_with(|| self.type_tag().value_cmp(self, other))
+        let missing = |_| Cow::Owned(Value::Missing);
+        self.type_tag().cmp(&other.type_tag()).then_with(|| {
+            self.lower()
+                .unwrap_or_else(missing)
+                .cmp(&other.lower().unwrap_or_else(missing))
+        })
     }
 }
 
