@@ -44,6 +44,20 @@ pub trait NullableEq {
             _ => Value::Missing,
         }
     }
+
+    /// `PartiQL's `eqg` is used to compare the internals of Lists, Bags, and Tuples.
+    ///
+    /// > The eqg, unlike the =, returns true when a NULL is compared to a NULL or a MISSING
+    /// > to a MISSING
+    fn eqg(&self, rhs: &Self) -> Value;
+
+    fn neqg(&self, rhs: &Self) -> Value {
+        let eqg_result = NullableEq::eqg(self, rhs);
+        match eqg_result {
+            Value::Boolean(_) | Value::Null => !eqg_result,
+            _ => Value::Missing,
+        }
+    }
 }
 
 /// A wrapper on [`T`] that specifies if missing and null values should be equal.
@@ -100,6 +114,12 @@ impl<const GROUP_NULLS: bool, const NAN_EQUAL: bool> NullableEq
             (Value::Variant(l), Value::Variant(r)) => NullableEq::eq(&wrap_var(l), &wrap_var(r)),
             (_, _) => Value::from(self.0 == rhs.0),
         }
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 

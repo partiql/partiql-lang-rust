@@ -215,6 +215,12 @@ impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
         let res = lty == rty && lty.value_eq_param(l, r, NULLS_EQUAL, NAN_EQUAL);
         Value::Boolean(res)
     }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
+    }
 }
 
 #[cfg(feature = "serde")]

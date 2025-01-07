@@ -231,11 +231,17 @@ impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
                 return Value::Boolean(false);
             }
             let wrap = EqualityValue::<{ NULLS_EQUAL }, { NAN_EQUAL }, Value>;
-            if NullableEq::eq(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
+            if NullableEq::eqg(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
                 return Value::Boolean(false);
             }
         }
         Value::Boolean(true)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 
