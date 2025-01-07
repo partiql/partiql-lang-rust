@@ -231,9 +231,8 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
 {
     fn eq(&self, rhs: &Self) -> Value {
         let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
-        wrap(&self.0.doc).eq(&wrap(&rhs.0.doc))
+        NullableEq::eq(&wrap(&self.0.doc), &wrap(&rhs.0.doc))
     }
-
     #[inline(always)]
     fn eqg(&self, rhs: &Self) -> Value {
         let wrap = IonEqualityValue::<'_, true, { NAN_EQUAL }, _>;
@@ -648,7 +647,7 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
         let (l, r) = (self.0, other.0);
         let l = l.iter().map(wrap);
         let r = r.iter().map(wrap);
-        let res = l.zip(r).all(|(l, r)| l == r);
+        let res = l.zip(r).all(|(l, r)| l.eqg(&r) == Value::Boolean(true));
         Value::Boolean(res)
     }
 
@@ -667,9 +666,9 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
         let (l, r) = (self.0, other.0);
         let l = l.iter().map(|(s, elt)| (s, wrap(elt)));
         let r = r.iter().map(|(s, elt)| (s, wrap(elt)));
-        let res = l.zip(r).all(|((ls, lelt), (rs, relt))| {
-            ls == rs && NullableEq::eq(&lelt, &relt) == Value::Boolean(true)
-        });
+        let res = l
+            .zip(r)
+            .all(|((ls, lelt), (rs, relt))| ls == rs && lelt.eqg(&relt) == Value::Boolean(true));
         Value::Boolean(res)
     }
 
