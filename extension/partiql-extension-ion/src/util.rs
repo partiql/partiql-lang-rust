@@ -8,6 +8,7 @@ use std::str::FromStr;
 pub enum PartiqlValueTarget<T> {
     Atom(Value),
     List(Vec<T>),
+    #[allow(dead_code)]
     Bag(Vec<T>),
     Struct(Vec<(String, T)>),
 }

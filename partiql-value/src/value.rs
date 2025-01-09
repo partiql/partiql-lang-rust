@@ -39,7 +39,6 @@ pub enum Value {
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
     Variant(Box<Variant>),
-    // TODO: add other supported PartiQL values -- sexp
 }
 
 impl Value {
