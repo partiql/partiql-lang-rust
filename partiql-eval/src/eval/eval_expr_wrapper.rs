@@ -59,7 +59,7 @@ impl TypeSatisfier for Static {
             },
             (StaticCategory::Sequence(shape), DatumCategoryRef::Sequence(seq)) => match shape {
                 PartiqlShape::Dynamic | PartiqlShape::Undefined => true,
-                shape => seq.into_iter().all(|v| shape.satisfies(v)),
+                shape => seq.into_iter().all(|v| shape.satisfies(&v)),
             },
             (StaticCategory::Tuple(), DatumCategoryRef::Tuple(_)) => {
                 true // TODO when Static typing knows how to type a tuple

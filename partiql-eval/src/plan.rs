@@ -796,7 +796,7 @@ fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {
         Lit::Double(f) => Value::from(*f),
         Lit::Bool(b) => Value::from(*b),
         Lit::String(s) => Value::from(s.as_ref()),
-        Lit::BoxDocument(contents, _typ) => {
+        Lit::Variant(contents, _typ) => {
             let ion_typ = BoxedIonType::default().to_dyn_type_tag();
             let variant = Variant::new(contents.clone(), ion_typ)
                 .map_err(|e| PlanningError::IllegalState(e.to_string()));

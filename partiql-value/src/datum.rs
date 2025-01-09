@@ -5,9 +5,7 @@ use std::borrow::Cow;
 use std::error::Error;
 
 use std::fmt::Debug;
-use std::vec;
 
-// TODO [EMBDOC] pub type DatumIterator = dyn Iterator<Item = Value>;
 pub type DatumLowerError = Box<dyn Error>;
 pub type DatumLowerResult<T> = Result<T, DatumLowerError>;
 
@@ -221,12 +219,12 @@ pub trait SequenceDatum {
 
 pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum + Debug {
     fn get_val(&self, k: i64) -> Option<Cow<'a, DV>>;
+    fn into_iter(self) -> Box<dyn Iterator<Item = Cow<'a, DV>> + 'a>;
 }
 
 pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum + Debug {
     fn take_val(self, k: i64) -> Option<D>;
     fn take_val_boxed(self: Box<Self>, k: i64) -> Option<D>;
-
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = D>>;
 }
 
@@ -252,10 +250,16 @@ impl<'a> RefSequenceView<'a, Value> for DatumSeqRef<'a> {
     fn get_val(&self, k: i64) -> Option<Cow<'a, Value>> {
         match self {
             DatumSeqRef::List(l) => List::get(l, k).map(Cow::Borrowed),
-            DatumSeqRef::Bag(_) => {
-                todo!("TODO [EMBDOC]: Bag::get")
-            }
+            DatumSeqRef::Bag(_) => None,
             DatumSeqRef::Dynamic(boxed) => boxed.get_val(k),
+        }
+    }
+
+    fn into_iter(self) -> Box<dyn Iterator<Item = Cow<'a, Value>> + 'a> {
+        match self {
+            DatumSeqRef::List(l) => Box::new(l.iter().map(Cow::Borrowed)),
+            DatumSeqRef::Bag(b) => Box::new(b.iter().map(Cow::Borrowed)),
+            DatumSeqRef::Dynamic(boxed) => boxed.into_iter(),
         }
     }
 }
@@ -270,7 +274,11 @@ impl SequenceDatum for DatumSeqOwned {
     }
 
     fn len(&self) -> usize {
-        todo!()
+        match self {
+            DatumSeqOwned::List(l) => l.len(),
+            DatumSeqOwned::Bag(b) => b.len(),
+            DatumSeqOwned::Dynamic(boxed) => boxed.len(),
+        }
     }
 }
 
@@ -278,7 +286,7 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
     fn take_val(self, k: i64) -> Option<Value> {
         match self {
             DatumSeqOwned::List(l) => l.take_val(k),
-            DatumSeqOwned::Bag(_) => todo!("TODO [EMBDOC]: Bag::get"),
+            DatumSeqOwned::Bag(_) => None,
             DatumSeqOwned::Dynamic(boxed) => boxed.take_val_boxed(k),
         }
     }
@@ -288,21 +296,23 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
     }
 
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
-        todo!()
+        match *self {
+            DatumSeqOwned::List(l) => Box::new(l.into_iter()),
+            DatumSeqOwned::Bag(b) => Box::new(b.into_iter()),
+            DatumSeqOwned::Dynamic(boxed) => boxed.into_iter_boxed(),
+        }
     }
 }
 
 impl<'a> IntoIterator for DatumSeqRef<'a> {
-    type Item = &'a Value;
+    type Item = Cow<'a, Value>;
     type IntoIter = DatumSeqRefIterator<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
             DatumSeqRef::List(l) => DatumSeqRefIterator::List(l.into_iter()),
             DatumSeqRef::Bag(b) => DatumSeqRefIterator::Bag(b.into_iter()),
-            DatumSeqRef::Dynamic(_) => {
-                todo!()
-            }
+            DatumSeqRef::Dynamic(d) => DatumSeqRefIterator::Dynamic(d.into_iter()),
         }
     }
 }
@@ -310,16 +320,26 @@ impl<'a> IntoIterator for DatumSeqRef<'a> {
 pub enum DatumSeqRefIterator<'a> {
     List(ListIter<'a>),
     Bag(BagIter<'a>),
-    Dynamic(Box<dyn Iterator<Item = &'a Value> + 'a>),
+    Dynamic(Box<dyn Iterator<Item = Cow<'a, Value>>>),
+}
+
+impl<'a> IntoIterator for &'a dyn RefSequenceView<'a, Value> {
+    type Item = Cow<'a, Value>;
+    type IntoIter = Box<dyn Iterator<Item = Cow<'a, Value>>>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        todo!("into_iter for &'a dyn RefSequenceView<'a, Value>")
+    }
 }
 
 impl<'a> Iterator for DatumSeqRefIterator<'a> {
-    type Item = &'a Value;
+    type Item = Cow<'a, Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            DatumSeqRefIterator::List(l) => l.next(),
-            DatumSeqRefIterator::Bag(b) => b.next(),
+            DatumSeqRefIterator::List(l) => l.next().map(Cow::Borrowed),
+            DatumSeqRefIterator::Bag(b) => b.next().map(Cow::Borrowed),
             DatumSeqRefIterator::Dynamic(d) => d.next(),
         }
     }
@@ -333,9 +353,7 @@ impl IntoIterator for DatumSeqOwned {
         match self {
             DatumSeqOwned::List(l) => DatumSeqOwnedIterator::List(l.into_iter()),
             DatumSeqOwned::Bag(b) => DatumSeqOwnedIterator::Bag(b.into_iter()),
-            DatumSeqOwned::Dynamic(_) => {
-                todo!()
-            }
+            DatumSeqOwned::Dynamic(d) => DatumSeqOwnedIterator::Dynamic(d.into_iter_boxed()),
         }
     }
 }
@@ -355,22 +373,5 @@ impl Iterator for DatumSeqOwnedIterator {
             DatumSeqOwnedIterator::Bag(b) => b.next(),
             DatumSeqOwnedIterator::Dynamic(d) => d.next(),
         }
-    }
-}
-
-// TODO remove
-pub struct DynIntoIterator(vec::IntoIter<Value>);
-
-impl Iterator for DynIntoIterator {
-    type Item = Value;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
     }
 }
