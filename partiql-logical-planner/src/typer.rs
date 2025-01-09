@@ -346,16 +346,10 @@ impl<'c> PlanTyper<'c> {
                     Lit::Double(_) => type_float64!(self.bld),
                     Lit::Bool(_) => type_bool!(self.bld),
                     Lit::String(_) => type_string!(self.bld),
-                    Lit::BoxDocument(_, _) => type_dynamic!(self.bld), // TODO
+                    Lit::Variant(_, _) => type_dynamic!(self.bld), // TODO
                     Lit::Struct(_) => type_struct!(self.bld),
                     Lit::Bag(_) => type_bag!(self.bld),
                     Lit::List(_) => type_array!(self.bld),
-                    _ => {
-                        self.errors.push(TypingError::NotYetImplemented(
-                            "Unsupported Literal".to_string(),
-                        ));
-                        self.bld.new_undefined()
-                    }
                 };
 
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
