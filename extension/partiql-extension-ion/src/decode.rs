@@ -354,9 +354,7 @@ fn has_annotation(
     reader: &impl IonReader<Item = StreamItem, Symbol = Symbol>,
     annot: &str,
 ) -> bool {
-    reader
-        .annotations()
-        .any(|a| a.map_or(false, |a| a == annot))
+    reader.annotations().any(|a| a.is_ok_and(|a| a == annot))
 }
 
 static TIME_PARTS_PATTERN_SET: Lazy<RegexSet> =
