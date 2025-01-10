@@ -21,6 +21,7 @@ pub(crate) use operators::*;
 
 use crate::eval::EvalContext;
 
+use partiql_value::datum::DatumLowerError;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -35,9 +36,16 @@ pub trait EvalExpr: Debug {
     ) -> Cow<'a, Value>
     where
         'c: 'a;
+
+    fn evaluate_owned<'a, 'c>(&'a self, bindings: Tuple, ctx: &'c dyn EvalContext<'c>) -> Value
+    where
+        'c: 'a,
+    {
+        self.evaluate(&bindings, ctx).into_owned()
+    }
 }
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 /// An error in binding an expression for evaluation
 pub enum BindError {
@@ -51,6 +59,9 @@ pub enum BindError {
     /// Feature has not yet been implemented.
     #[error("Not yet implemented: {0}")]
     NotYetImplemented(String),
+
+    #[error("Error lowering literal value: {0}")]
+    LiteralValue(#[from] DatumLowerError),
 
     /// Any other error.
     #[error("Bind error: unknown error")]

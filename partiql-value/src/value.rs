@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use rust_decimal::Decimal as RustDecimal;
 
+use crate::embedded_doc::EmbeddedDoc;
 use crate::{Bag, BindingIntoIter, BindingIter, DateTime, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
@@ -14,6 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
+use crate::datum::{Datum, DatumLowerResult, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -36,6 +38,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+    EmbeddedDoc(Box<EmbeddedDoc>),
     // TODO: add other supported PartiQL values -- sexp
 }
 
@@ -59,35 +62,10 @@ impl Value {
     }
 
     #[inline]
-    #[must_use]
-    pub fn is_sequence(&self) -> bool {
-        self.is_bag() || self.is_list()
-    }
-
-    #[inline]
     /// Returns true if and only if Value is an integer, real, or decimal
     #[must_use]
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
-    }
-    #[inline]
-    /// Returns true if and only if Value is null or missing
-    #[must_use]
-    pub fn is_absent(&self) -> bool {
-        matches!(self, Value::Missing | Value::Null)
-    }
-
-    #[inline]
-    /// Returns true if Value is neither null nor missing
-    #[must_use]
-    pub fn is_present(&self) -> bool {
-        !self.is_absent()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_ordered(&self) -> bool {
-        self.is_list()
     }
 
     #[inline]
@@ -208,6 +186,53 @@ impl Value {
     }
 }
 
+impl DatumValue<Value> for Value {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        match self {
+            Value::EmbeddedDoc(doc) => Ok(Value::EmbeddedDoc(Box::new(doc.into_lower()?))),
+            _ => Ok(self),
+        }
+    }
+}
+
+impl Datum<Value> for Value {
+    #[inline]
+    fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        matches!(self, Value::Missing)
+    }
+
+    #[inline]
+    fn is_absent(&self) -> bool {
+        matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_sequence(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::Bag(_) => true,
+            Value::EmbeddedDoc(doc) => doc.is_sequence(),
+            _ => false,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_ordered(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::EmbeddedDoc(doc) => doc.is_ordered(),
+            _ => false,
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.to_pretty_string(f.width().unwrap_or(80)) {
@@ -232,6 +257,7 @@ impl Debug for Value {
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
+            Value::EmbeddedDoc(doc) => doc.fmt(f),
         }
     }
 }
@@ -247,6 +273,9 @@ impl PartialOrd for Value {
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
+            (Value::EmbeddedDoc(_), _) => todo!("EmbeddedDoc Ord"),
+            (_, Value::EmbeddedDoc(_)) => todo!("EmbeddedDoc Ord"),
+
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
 
