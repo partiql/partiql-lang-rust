@@ -1,4 +1,5 @@
 use inflector::Inflector;
+use itertools::Itertools;
 use quote::__private::TokenStream;
 
 pub trait Escaper {
@@ -13,10 +14,20 @@ pub trait Escaper {
 }
 
 fn escape_str(s: &str) -> String {
+    let snake_case: String = s
+        .split(|c: char| c.is_ascii_punctuation() || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .filter(|s| {
+            !s.chars()
+                .all(|c| c.is_ascii_punctuation() || c.is_whitespace())
+        })
+        .map(|s| s.to_snake_case())
+        .filter(|s| !s.is_empty())
+        .join("_");
+
     match s.chars().next() {
         None => "_".to_string(),
         Some(c) => {
-            let snake_case = s.to_lowercase().to_snake_case();
             if c.is_numeric() {
                 format!("_{}", snake_case)
             } else {
@@ -94,5 +105,18 @@ mod test {
             "Example 7 — NULL and MISSING Coercion - 1".escape_path(),
             "example_7_null_and_missing_coercion_1"
         );
+    }
+
+    #[test]
+    fn snake_case_uppercase_names_without_spaces() {
+        assert_eq!(
+            "cast to int invalid target type{value:\"`(1 2)`\",target:\"SEXP\"}".escape_path(),
+            "cast_to_int_invalid_target_type_value_1_2_target_sexp"
+        );
+    }
+
+    #[test]
+    fn snake_case_camelcased() {
+        assert_eq!("rangeOverSexp".escape_path(), "range_over_sexp");
     }
 }

@@ -27,3 +27,4 @@ Inflector = "0.11"
 miette = { version = "7", features = ["fancy"] }
 thiserror = "1.0"
 quote = "1"
+itertools = "0.14"
