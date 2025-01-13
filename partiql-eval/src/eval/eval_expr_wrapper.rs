@@ -4,7 +4,7 @@ use crate::eval::expr::{BindError, EvalExpr};
 use crate::eval::EvalContext;
 use itertools::Itertools;
 
-use partiql_types::{type_dynamic, PartiqlShape, Static, TYPE_DYNAMIC};
+use partiql_types::{PartiqlShape, Static, TYPE_DYNAMIC};
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{Tuple, Value};
 
@@ -469,7 +469,7 @@ impl UnaryValueExpr {
     where
         F: 'static + Fn(&Value) -> Value,
     {
-        Self::create_typed::<STRICT, F>([type_dynamic!(); 1], args, f)
+        Self::create_typed::<STRICT, F>([PartiqlShape::Dynamic; 1], args, f)
     }
 
     #[allow(dead_code)]

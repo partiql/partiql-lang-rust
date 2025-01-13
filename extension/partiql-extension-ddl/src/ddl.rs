@@ -228,38 +228,37 @@ mod tests {
     use indexmap::IndexSet;
     use partiql_types::{
         struct_fields, type_array, type_bag, type_float64, type_int8, type_string, type_struct,
-        PartiqlShapeBuilder, StructConstraint,
+        PartiqlShapeBuilder, ShapeBuilderExtensions, StructConstraint,
     };
 
     #[test]
     fn ddl_test() {
+        let mut bld = PartiqlShapeBuilder::default();
         let nested_attrs = struct_fields![
             (
                 "a",
-                PartiqlShapeBuilder::init_or_get().any_of(vec![
-                    PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(5, 4)),
-                    PartiqlShapeBuilder::init_or_get().new_static(Static::Int8),
-                ])
+                [
+                    bld.new_static(Static::DecimalP(5, 4)),
+                    bld.new_static(Static::Int8),
+                ]
+                .into_any_of(&mut bld)
             ),
-            ("b", type_array![type_string![]]),
-            ("c", type_float64!()),
+            ("b", type_string![bld].into_array(&mut bld)),
+            ("c", type_float64!(bld)),
         ];
-        let details = type_struct![IndexSet::from([nested_attrs])];
+        let details = type_struct![bld, IndexSet::from([nested_attrs])];
 
         let fields = struct_fields![
-            ("employee_id", type_int8![]),
-            ("full_name", type_string![]),
-            (
-                "salary",
-                PartiqlShapeBuilder::init_or_get().new_static(Static::DecimalP(8, 2))
-            ),
+            ("employee_id", type_int8![bld]),
+            ("full_name", type_string![bld]),
+            ("salary", bld.new_static(Static::DecimalP(8, 2))),
             ("details", details),
-            ("dependents", type_array![type_string![]])
+            ("dependents", type_array![bld, type_string![bld]])
         ];
-        let ty = type_bag![type_struct![IndexSet::from([
-            fields,
-            StructConstraint::Open(false)
-        ])]];
+        let ty = type_bag![
+            bld,
+            type_struct![bld, IndexSet::from([fields, StructConstraint::Open(false)])]
+        ];
 
         let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": type_array<VARCHAR>,"c": DOUBLE>,"dependents" type_array<VARCHAR>"#;
         let expected_pretty = r#""employee_id" TINYINT,

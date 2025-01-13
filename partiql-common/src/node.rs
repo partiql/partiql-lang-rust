@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use std::sync::{Arc, RwLock};
+use std::hash::Hash;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -10,39 +10,30 @@ pub type NodeMap<T> = IndexMap<NodeId, T>;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeId(pub u32);
 
+#[derive(Debug)]
 /// Auto-incrementing [`NodeIdGenerator`]
 pub struct AutoNodeIdGenerator {
-    next_id: Arc<RwLock<NodeId>>,
+    next_id: NodeId,
 }
 
 impl Default for AutoNodeIdGenerator {
     fn default() -> Self {
-        AutoNodeIdGenerator {
-            next_id: Arc::new(RwLock::from(NodeId(1))),
-        }
+        AutoNodeIdGenerator { next_id: NodeId(1) }
     }
 }
 
 /// A provider of 'fresh' [`NodeId`]s.
 pub trait NodeIdGenerator {
-    fn id(&self) -> Arc<RwLock<NodeId>>;
-
     /// Provides a 'fresh' [`NodeId`].
-    fn next_id(&self) -> NodeId;
+    fn next_id(&mut self) -> NodeId;
 }
 
 impl NodeIdGenerator for AutoNodeIdGenerator {
-    fn id(&self) -> Arc<RwLock<NodeId>> {
-        let id = self.next_id();
-        let mut w = self.next_id.write().expect("NodId write lock");
-        *w = id;
-        Arc::clone(&self.next_id)
-    }
-
     #[inline]
-    fn next_id(&self) -> NodeId {
-        let id = &self.next_id.read().expect("NodId read lock");
-        NodeId(id.0 + 1)
+    fn next_id(&mut self) -> NodeId {
+        let mut next = NodeId(&self.next_id.0 + 1);
+        std::mem::swap(&mut self.next_id, &mut next);
+        next
     }
 }
 
@@ -51,11 +42,25 @@ impl NodeIdGenerator for AutoNodeIdGenerator {
 pub struct NullIdGenerator {}
 
 impl NodeIdGenerator for NullIdGenerator {
-    fn id(&self) -> Arc<RwLock<NodeId>> {
-        Arc::new(RwLock::from(self.next_id()))
-    }
-
-    fn next_id(&self) -> NodeId {
+    fn next_id(&mut self) -> NodeId {
         NodeId(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::node::{AutoNodeIdGenerator, NodeIdGenerator};
+
+    #[test]
+    fn unique_ids() {
+        let mut gen = AutoNodeIdGenerator::default();
+
+        let ids: Vec<_> = std::iter::repeat_with(|| gen.next_id()).take(15).collect();
+        dbg!(&ids);
+        for i in 0..ids.len() {
+            for j in i + 1..ids.len() {
+                assert_ne!(ids[i], ids[j]);
+            }
+        }
     }
 }
