@@ -1,6 +1,6 @@
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 
-use partiql_types::{type_datetime, DummyShapeBuilder};
+use partiql_types::{type_datetime, PartiqlNoIdShapeBuilder};
 use partiql_value::Value::Missing;
 use partiql_value::{DateTime, Value};
 
@@ -42,7 +42,7 @@ impl BindEvalExpr for EvalExtractFn {
             Decimal::from_i128_with_scale(total, NANOSECOND_SCALE).into()
         }
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
 
         let create = |f: fn(&DateTime) -> Value| {
             UnaryValueExpr::create_typed::<{ STRICT }, _>(

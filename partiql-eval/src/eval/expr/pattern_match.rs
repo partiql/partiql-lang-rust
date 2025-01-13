@@ -2,7 +2,7 @@ use crate::error::PlanningError;
 
 use crate::eval::eval_expr_wrapper::{TernaryValueExpr, UnaryValueExpr};
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
-use partiql_types::{type_string, DummyShapeBuilder};
+use partiql_types::{type_string, PartiqlNoIdShapeBuilder};
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 use regex::{Regex, RegexBuilder};
@@ -47,7 +47,7 @@ impl BindEvalExpr for EvalLikeMatch {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let pattern = self.pattern.clone();
         UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!(bld)], args, move |value| {
             match value {
@@ -69,7 +69,7 @@ impl BindEvalExpr for EvalLikeNonStringNonLiteralMatch {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let types = [type_string!(bld), type_string!(bld), type_string!(bld)];
         TernaryValueExpr::create_typed::<{ STRICT }, _>(
             types,

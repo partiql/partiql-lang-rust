@@ -5,7 +5,7 @@ use crate::eval::eval_expr_wrapper::{
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use itertools::Itertools;
 
-use partiql_types::{type_int, type_string, DummyShapeBuilder};
+use partiql_types::{type_int, type_string, PartiqlNoIdShapeBuilder};
 use partiql_value::Value;
 use partiql_value::Value::Missing;
 
@@ -41,7 +41,7 @@ impl BindEvalExpr for EvalStringFn {
             R: Into<Value> + 'static,
         {
             // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-            let mut bld = DummyShapeBuilder::default();
+            let mut bld = PartiqlNoIdShapeBuilder::default();
             UnaryValueExpr::create_typed::<{ STRICT }, _>([type_string!(bld)], args, move |value| {
                 match value {
                     Value::String(value) => (f(value)).into(),
@@ -75,7 +75,7 @@ impl BindEvalExpr for EvalTrimFn {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let create = |f: for<'a> fn(&'a str, &'a str) -> &'a str| {
             BinaryValueExpr::create_typed::<{ STRICT }, _>(
                 [type_string!(bld), type_string!(bld)],
@@ -115,7 +115,7 @@ impl BindEvalExpr for EvalFnPosition {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         BinaryValueExpr::create_typed::<STRICT, _>(
             [type_string!(bld), type_string!(bld)],
             args,
@@ -139,7 +139,7 @@ impl BindEvalExpr for EvalFnSubstring {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         match args.len() {
             2 => BinaryValueExpr::create_typed::<STRICT, _>(
                 [type_string!(bld), type_int!(bld)],
@@ -191,7 +191,7 @@ impl BindEvalExpr for EvalFnOverlay {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         fn overlay(value: &str, replacement: &str, offset: i64, length: usize) -> Value {
             let mut value = value.to_string();
             let start = std::cmp::max(offset - 1, 0) as usize;

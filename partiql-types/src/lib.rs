@@ -379,7 +379,7 @@ pub struct ShapeBuilder<Id: NodeIdGenerator> {
 }
 
 pub type PartiqlShapeBuilder = ShapeBuilder<AutoNodeIdGenerator>;
-pub type DummyShapeBuilder = ShapeBuilder<NullIdGenerator>;
+pub type PartiqlNoIdShapeBuilder = ShapeBuilder<NullIdGenerator>;
 
 impl<Id: NodeIdGenerator + Default> ShapeBuilder<Id> {
     /// A thread-safe method for creating PartiQL shapes with guaranteed uniqueness over
@@ -391,9 +391,9 @@ impl<Id: NodeIdGenerator + Default> ShapeBuilder<Id> {
     }
 
     #[track_caller]
-    pub fn dummy_singleton() -> &'static DummyShapeBuilder {
-        static SHAPE_BUILDER: OnceLock<DummyShapeBuilder> = OnceLock::new();
-        SHAPE_BUILDER.get_or_init(DummyShapeBuilder::default)
+    pub fn dummy_singleton() -> &'static PartiqlNoIdShapeBuilder {
+        static SHAPE_BUILDER: OnceLock<PartiqlNoIdShapeBuilder> = OnceLock::new();
+        SHAPE_BUILDER.get_or_init(PartiqlNoIdShapeBuilder::default)
     }
 }
 
@@ -1029,14 +1029,14 @@ impl Display for ArrayType {
 #[cfg(test)]
 mod tests {
     use crate::{
-        DummyShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeBuilderExtensions, Static,
+        PartiqlNoIdShapeBuilder, PartiqlShape, PartiqlShapeBuilder, ShapeBuilderExtensions, Static,
         StructConstraint, StructField, StructType,
     };
     use indexmap::IndexSet;
 
     #[test]
     fn union() {
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
 
         let expect_int = bld.new_static(Static::Int);
         assert_eq!(

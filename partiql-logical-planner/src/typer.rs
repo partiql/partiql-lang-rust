@@ -612,11 +612,13 @@ mod tests {
     use partiql_ast_passes::error::AstTransformationError;
     use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
     use partiql_parser::{Parsed, Parser};
-    use partiql_types::{struct_fields, DummyShapeBuilder, ShapeBuilderExtensions, StructType};
+    use partiql_types::{
+        struct_fields, PartiqlNoIdShapeBuilder, ShapeBuilderExtensions, StructType,
+    };
 
     #[test]
     fn simple_sfw() {
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         // Closed schema with `Strict` typing mode.
         assert_query_typing(
             TypingMode::Strict,
@@ -749,7 +751,7 @@ mod tests {
 
     #[test]
     fn simple_sfw_with_alias() {
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         // Open Schema with `Strict` typing mode and `age` in nested attribute.
         let details_fields = struct_fields![("age", type_int!(bld))];
         let details = type_struct![bld, IndexSet::from([details_fields])];
@@ -797,7 +799,7 @@ mod tests {
 
     #[test]
     fn simple_sfw_err() {
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         // Closed Schema with `Strict` typing mode and `age` non-existent projection.
         let err1 = r#"No Typing Information for SymbolPrimitive { value: "age", case: CaseInsensitive } in closed Schema Static(StaticType { id: NodeId(0), ty: Struct(StructType { constraints: {Fields({StructField { optional: false, name: "id", ty: Static(StaticType { id: NodeId(0), ty: Int, nullable: true }) }, StructField { optional: false, name: "name", ty: Static(StaticType { id: NodeId(0), ty: String, nullable: true }) }}), Open(false)} }), nullable: true })"#;
 
@@ -866,7 +868,7 @@ mod tests {
     fn create_customer_schema(
         is_open: bool,
         fields: IndexSet<StructField>,
-        bld: &mut DummyShapeBuilder,
+        bld: &mut PartiqlNoIdShapeBuilder,
     ) -> PartiqlShape {
         let constraints = StructType::new(IndexSet::from([
             StructConstraint::Fields(fields),

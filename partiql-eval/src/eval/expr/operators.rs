@@ -8,7 +8,8 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::{
-    type_bool, type_dynamic, type_numeric, DummyShapeBuilder, PartiqlShape, ShapeBuilderExtensions,
+    type_bool, type_dynamic, type_numeric, PartiqlNoIdShapeBuilder, PartiqlShape,
+    ShapeBuilderExtensions,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
 use partiql_value::{BinaryAnd, Comparable, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
@@ -80,7 +81,7 @@ impl BindEvalExpr for EvalOpUnary {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let any_num = type_numeric!(&mut bld);
 
         let unop = |types, f: fn(&Value) -> Value| {
@@ -190,7 +191,7 @@ impl BindEvalExpr for EvalOpBinary {
         type MathCheck<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
 
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
 
         macro_rules! create {
             ($check: ty, $types: expr, $f:expr) => {
@@ -398,7 +399,7 @@ impl BindEvalExpr for EvalFnAbs {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let nums = type_numeric!(&mut bld);
         UnaryValueExpr::create_typed::<{ STRICT }, _>([nums], args, |v| {
             match NullableOrd::lt(v, &Value::from(0)) {
@@ -421,7 +422,7 @@ impl BindEvalExpr for EvalFnCardinality {
         args: Vec<Box<dyn EvalExpr>>,
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let collections = [
             bld.new_array_of_dyn(),
             bld.new_bag_of_dyn(),

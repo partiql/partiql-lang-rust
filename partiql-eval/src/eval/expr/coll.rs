@@ -5,7 +5,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use itertools::{Itertools, Unique};
 
 use partiql_types::{
-    type_numeric, DummyShapeBuilder, PartiqlShape, ShapeBuilderExtensions, Static,
+    type_numeric, PartiqlNoIdShapeBuilder, PartiqlShape, ShapeBuilderExtensions, Static,
 };
 use partiql_value::Value::{Missing, Null};
 use partiql_value::{BinaryAnd, BinaryOr, Value, ValueIter};
@@ -53,7 +53,7 @@ impl BindEvalExpr for EvalCollFn {
         }
 
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
 
         let boolean_elems = [
             bld.new_array_of_static(Static::Bool),

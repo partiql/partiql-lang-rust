@@ -5,7 +5,7 @@ use crate::eval::eval_expr_wrapper::{
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
-use partiql_types::{DummyShapeBuilder, PartiqlShapeBuilder, StructType};
+use partiql_types::PartiqlNoIdShapeBuilder;
 use partiql_value::{Tuple, Value};
 
 use std::borrow::Cow;
@@ -43,7 +43,7 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = DummyShapeBuilder::default();
+        let mut bld = PartiqlNoIdShapeBuilder::default();
         let typ = bld.new_struct_of_dyn();
         match evaluate_and_validate_args::<{ STRICT }, Check<STRICT>, _>(
             &self.args,

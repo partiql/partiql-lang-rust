@@ -40,7 +40,7 @@ pub type AstNodeBuilderWithNullId = AstNodeBuilder<NullIdGenerator>;
 mod tests {
     use super::AstNodeBuilderWithAutoId;
     use crate::ast;
-    use crate::pretty::*;
+
     use crate::visit::{Traverse, Visit, Visitor};
     use partiql_common::node::NodeId;
     use partiql_common::pretty::ToPretty;
