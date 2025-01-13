@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 use rust_decimal::Decimal as RustDecimal;
 
+use crate::variant::Variant;
 use crate::{Bag, BindingIntoIter, BindingIter, DateTime, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
@@ -14,6 +15,7 @@ mod iter;
 mod logic;
 mod math;
 
+use crate::datum::{Datum, DatumLower, DatumLowerResult, DatumValue};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -36,7 +38,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
-    // TODO: add other supported PartiQL values -- sexp
+    Variant(Box<Variant>),
 }
 
 impl Value {
@@ -59,35 +61,10 @@ impl Value {
     }
 
     #[inline]
-    #[must_use]
-    pub fn is_sequence(&self) -> bool {
-        self.is_bag() || self.is_list()
-    }
-
-    #[inline]
     /// Returns true if and only if Value is an integer, real, or decimal
     #[must_use]
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Integer(_) | Value::Real(_) | Value::Decimal(_))
-    }
-    #[inline]
-    /// Returns true if and only if Value is null or missing
-    #[must_use]
-    pub fn is_absent(&self) -> bool {
-        matches!(self, Value::Missing | Value::Null)
-    }
-
-    #[inline]
-    /// Returns true if Value is neither null nor missing
-    #[must_use]
-    pub fn is_present(&self) -> bool {
-        !self.is_absent()
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn is_ordered(&self) -> bool {
-        self.is_list()
     }
 
     #[inline]
@@ -208,6 +185,66 @@ impl Value {
     }
 }
 
+impl DatumValue<Value> for Value {}
+
+impl DatumLower<Value> for Value {
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        match self {
+            Value::Variant(variant) => variant.into_lower(),
+            _ => Ok(self),
+        }
+    }
+
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        self.into_lower()
+    }
+
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        match self {
+            Value::Variant(variant) => variant.lower(),
+            _ => Ok(Cow::Borrowed(self)),
+        }
+    }
+}
+
+impl Datum<Value> for Value {
+    #[inline]
+    fn is_null(&self) -> bool {
+        matches!(self, Value::Null)
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        matches!(self, Value::Missing)
+    }
+
+    #[inline]
+    fn is_absent(&self) -> bool {
+        matches!(self, Value::Missing | Value::Null)
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_sequence(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::Bag(_) => true,
+            Value::Variant(variant) => variant.is_sequence(),
+            _ => false,
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    fn is_ordered(&self) -> bool {
+        match self {
+            Value::List(_) => true,
+            Value::Variant(variant) => variant.is_ordered(),
+            _ => false,
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.to_pretty_string(f.width().unwrap_or(80)) {
@@ -227,11 +264,18 @@ impl Debug for Value {
             Value::Real(r) => write!(f, "{}", r.0),
             Value::Decimal(d) => write!(f, "{d}"),
             Value::String(s) => write!(f, "'{s}'"),
-            Value::Blob(s) => write!(f, "'{s:?}'"),
+            Value::Blob(blob) => {
+                write!(f, "x'")?;
+                for byte in blob.as_ref() {
+                    f.write_str(&format!("{:02x}", byte))?;
+                }
+                write!(f, "'")
+            }
             Value::DateTime(t) => t.fmt(f),
             Value::List(l) => l.fmt(f),
             Value::Bag(b) => b.fmt(f),
             Value::Tuple(t) => t.fmt(f),
+            Value::Variant(variant) => variant.fmt(f),
         }
     }
 }
@@ -246,6 +290,7 @@ impl PartialOrd for Value {
 /// TODO: more tests for Ord on Value
 impl Ord for Value {
     fn cmp(&self, other: &Self) -> Ordering {
+        // **NOTE** The Order of these match arms defines the proper comparisons; Do not reorder
         match (self, other) {
             (Value::Null, Value::Null) => Ordering::Equal,
             (Value::Missing, Value::Null) => Ordering::Equal,
@@ -351,18 +396,11 @@ impl Ord for Value {
             (_, Value::Tuple(_)) => Ordering::Greater,
 
             (Value::Bag(l), Value::Bag(r)) => l.cmp(r),
-        }
-    }
-}
+            (Value::Bag(_), _) => Ordering::Less,
+            (_, Value::Bag(_)) => Ordering::Greater,
 
-impl<T> From<&T> for Value
-where
-    T: Copy,
-    Value: From<T>,
-{
-    #[inline]
-    fn from(t: &T) -> Self {
-        Value::from(*t)
+            (Value::Variant(l), Value::Variant(r)) => l.cmp(r),
+        }
     }
 }
 
@@ -384,6 +422,13 @@ impl From<&str> for Value {
     #[inline]
     fn from(s: &str) -> Self {
         Value::String(Box::new(s.to_string()))
+    }
+}
+
+impl From<i128> for Value {
+    #[inline]
+    fn from(n: i128) -> Self {
+        Value::from(RustDecimal::from(n))
     }
 }
 
@@ -418,8 +463,11 @@ impl From<i8> for Value {
 impl From<usize> for Value {
     #[inline]
     fn from(n: usize) -> Self {
-        // TODO overflow to bigint/decimal
-        Value::Integer(n as i64)
+        if n > i64::MAX as usize {
+            Value::from(RustDecimal::from(n))
+        } else {
+            Value::Integer(n as i64)
+        }
     }
 }
 
@@ -454,14 +502,21 @@ impl From<u64> for Value {
 impl From<u128> for Value {
     #[inline]
     fn from(n: u128) -> Self {
-        (n as usize).into()
+        Value::from(RustDecimal::from(n))
     }
 }
 
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
-        Value::Real(OrderedFloat(f))
+        Value::from(OrderedFloat(f))
+    }
+}
+
+impl From<OrderedFloat<f64>> for Value {
+    #[inline]
+    fn from(f: OrderedFloat<f64>) -> Self {
+        Value::Real(f)
     }
 }
 
@@ -497,5 +552,12 @@ impl From<Bag> for Value {
     #[inline]
     fn from(v: Bag) -> Self {
         Value::Bag(Box::new(v))
+    }
+}
+
+impl From<Variant> for Value {
+    #[inline]
+    fn from(v: Variant) -> Self {
+        Value::Variant(Box::new(v))
     }
 }

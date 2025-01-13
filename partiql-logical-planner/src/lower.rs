@@ -36,6 +36,7 @@ use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::Catalog;
 use partiql_common::node::NodeId;
+
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1922,8 +1923,9 @@ fn lit_to_lit(lit: &Lit) -> Result<logical::Lit, AstTransformError> {
         Lit::FloatLit(f) => logical::Lit::Double(OrderedFloat::from(*f as f64)),
         Lit::DoubleLit(f) => logical::Lit::Double(OrderedFloat::from(*f)),
         Lit::BoolLit(b) => logical::Lit::Bool(*b),
-        Lit::EmbeddedDocLit(s, _) => {
-            logical::Lit::BoxDocument(s.clone().into_bytes(), "Ion".to_string())
+        Lit::EmbeddedDocLit(s, _typ) => {
+            // TODO fix type for boxed variants
+            logical::Lit::Variant(s.clone().into_bytes(), "Ion".to_string())
         }
         Lit::CharStringLit(s) => logical::Lit::String(s.clone()),
         Lit::NationalCharStringLit(s) => logical::Lit::String(s.clone()),

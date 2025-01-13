@@ -175,16 +175,32 @@ impl Debug for List {
 
 impl PartialEq for List {
     fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
-            return false;
+        let wrap = EqualityValue::<true, false, _>;
+        NullableEq::eq(&wrap(self), &wrap(other)) == Value::Boolean(true)
+    }
+}
+
+impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, NULLS_EQUAL, NAN_EQUAL, List>
+{
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> Value {
+        if self.0.len() != other.0.len() {
+            return Value::Boolean(false);
         }
         for (v1, v2) in self.0.iter().zip(other.0.iter()) {
-            let wrap = EqualityValue::<true, Value>;
-            if NullableEq::eq(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
-                return false;
+            let wrap = EqualityValue::<{ NULLS_EQUAL }, { NAN_EQUAL }, Value>;
+            if NullableEq::eqg(&wrap(v1), &wrap(v2)) != Value::Boolean(true) {
+                return Value::Boolean(false);
             }
         }
-        true
+        Value::Boolean(true)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 

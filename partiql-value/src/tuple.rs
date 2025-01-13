@@ -7,8 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::iter::{zip, Zip};
 use std::vec;
 
-use unicase::UniCase;
-
 use crate::sort::NullSortedValue;
 use crate::{BindingsName, EqualityValue, NullableEq, Value};
 #[cfg(feature = "serde")]
@@ -79,15 +77,8 @@ impl Tuple {
 
     #[inline(always)]
     fn find_value(&self, attr: &BindingsName<'_>) -> Option<usize> {
-        match attr {
-            BindingsName::CaseSensitive(s) => {
-                self.attrs.iter().position(|a| a.as_str() == s.as_ref())
-            }
-            BindingsName::CaseInsensitive(s) => {
-                let target = UniCase::new(&s);
-                self.attrs.iter().position(|a| target == UniCase::new(a))
-            }
-        }
+        let matcher = attr.matcher();
+        self.attrs.iter().position(|a| matcher.matches(a))
     }
 
     #[inline]
@@ -222,19 +213,35 @@ impl Iterator for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        if self.vals.len() != other.vals.len() {
-            return false;
+        let wrap = EqualityValue::<true, false, _>;
+        NullableEq::eq(&wrap(self), &wrap(other)) == Value::Boolean(true)
+    }
+}
+
+impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, NULLS_EQUAL, NAN_EQUAL, Tuple>
+{
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> Value {
+        if self.0.vals.len() != other.0.vals.len() {
+            return Value::Boolean(false);
         }
-        for ((ls, lv), (rs, rv)) in self.pairs().sorted().zip(other.pairs().sorted()) {
+        for ((ls, lv), (rs, rv)) in self.0.pairs().sorted().zip(other.0.pairs().sorted()) {
             if ls != rs {
-                return false;
+                return Value::Boolean(false);
             }
-            let wrap = EqualityValue::<true, Value>;
-            if NullableEq::eq(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
-                return false;
+            let wrap = EqualityValue::<{ NULLS_EQUAL }, { NAN_EQUAL }, Value>;
+            if NullableEq::eqg(&wrap(lv), &wrap(rv)) != Value::Boolean(true) {
+                return Value::Boolean(false);
             }
         }
-        true
+        Value::Boolean(true)
+    }
+
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 
