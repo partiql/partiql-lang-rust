@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn iterators() {
-        let bag: Bag = [1, 10, 3, 4].iter().collect();
+        let bag: Bag = [1, 10, 3, 4].into_iter().collect();
         assert_eq!(bag.len(), 4);
         let max = bag
             .iter()
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(max, Value::Integer(10));
         let _bref = Value::from(bag).as_bag_ref();
 
-        let list: List = [1, 2, 3, -4].iter().collect();
+        let list: List = [1, 2, 3, -4].into_iter().collect();
         assert_eq!(list.len(), 4);
         let max = list
             .iter()
@@ -445,14 +445,14 @@ mod tests {
         //  tests
 
         fn nullable_eq(lhs: Value, rhs: Value) -> Value {
-            let wrap = EqualityValue::<false, Value>;
+            let wrap = EqualityValue::<false, false, Value>;
             let lhs = wrap(&lhs);
             let rhs = wrap(&rhs);
             NullableEq::eq(&lhs, &rhs)
         }
 
         fn nullable_neq(lhs: Value, rhs: Value) -> Value {
-            let wrap = EqualityValue::<false, Value>;
+            let wrap = EqualityValue::<false, false, Value>;
             let lhs = wrap(&lhs);
             let rhs = wrap(&rhs);
             NullableEq::neq(&lhs, &rhs)
