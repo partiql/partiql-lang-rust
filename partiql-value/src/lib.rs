@@ -5,6 +5,7 @@ mod bag;
 mod bindings;
 pub mod comparison;
 mod datetime;
+pub mod datum;
 mod list;
 mod pretty;
 mod sort;

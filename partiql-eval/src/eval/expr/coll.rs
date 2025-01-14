@@ -14,6 +14,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 
 use crate::eval::eval_expr_wrapper::UnaryValueExpr;
+use partiql_value::datum::Datum;
 use std::ops::ControlFlow;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

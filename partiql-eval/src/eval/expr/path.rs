@@ -7,6 +7,10 @@ use partiql_value::Value::Missing;
 use partiql_value::{BindingsName, Tuple, Value};
 
 use partiql_catalog::context::Bindings;
+use partiql_value::datum::{
+    DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedSequenceView, OwnedTupleView,
+    RefSequenceView, RefTupleView,
+};
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 
@@ -84,38 +88,43 @@ impl EvalPathComponent {
         value: &'a Value,
         bindings: &'a Tuple,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Option<&'a Value> {
-        match (self, value) {
-            (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.get(k),
-            (EvalPathComponent::Index(idx), Value::List(list)) => list.get(*idx),
-            (EvalPathComponent::KeyExpr(ke), Value::Tuple(tuple)) => {
-                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get(&key))
+    ) -> Option<Cow<'a, Value>> {
+        let category = value.category();
+        match (self, category) {
+            (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get_val(k),
+            (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get_val(*idx),
+            (EvalPathComponent::KeyExpr(ke), DatumCategoryRef::Tuple(tuple)) => {
+                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get_val(&key))
             }
-            (EvalPathComponent::IndexExpr(ie), Value::List(list)) => {
-                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| list.get(i))
+            (EvalPathComponent::IndexExpr(ie), DatumCategoryRef::Sequence(seq)) => {
+                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get_val(i))
             }
             _ => None,
         }
     }
 
     #[inline]
-    fn take_val<'c>(
+    fn take_val<'a, 'c>(
         &self,
         value: Value,
         bindings: &Tuple,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Option<Value> {
-        match (self, value) {
-            (EvalPathComponent::Key(k), Value::Tuple(tuple)) => tuple.take_val(k),
-            (EvalPathComponent::Index(idx), Value::List(list)) => list.take_val(*idx),
-            (EvalPathComponent::KeyExpr(ke), Value::Tuple(tuple)) => {
+    ) -> Option<Cow<'a, Value>> {
+        let category = value.into_category();
+        match (self, category) {
+            (EvalPathComponent::Key(k), DatumCategoryOwned::Tuple(tuple)) => tuple.take_val(k),
+            (EvalPathComponent::Index(idx), DatumCategoryOwned::Sequence(seq)) => {
+                seq.take_val(*idx)
+            }
+            (EvalPathComponent::KeyExpr(ke), DatumCategoryOwned::Tuple(tuple)) => {
                 as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.take_val(&key))
             }
-            (EvalPathComponent::IndexExpr(ie), Value::List(list)) => {
-                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| list.take_val(i))
+            (EvalPathComponent::IndexExpr(ie), DatumCategoryOwned::Sequence(seq)) => {
+                as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.take_val(i))
             }
             _ => None,
         }
+        .map(Cow::Owned)
     }
 }
 
@@ -128,17 +137,15 @@ impl EvalExpr for EvalPath {
     where
         'c: 'a,
     {
-        let value = self.expr.evaluate(bindings, ctx);
+        let evaluated = self.expr.evaluate(bindings, ctx);
         let mut path_componenents = self.components.iter();
-        match value {
-            Cow::Borrowed(borrowed) => path_componenents
-                .try_fold(borrowed, |v, path| path.get_val(v, bindings, ctx))
-                .map(Cow::Borrowed),
-            Cow::Owned(owned) => path_componenents
-                .try_fold(owned, |v, path| path.take_val(v, bindings, ctx))
-                .map(Cow::Owned),
-        }
-        .unwrap_or(Cow::Owned(Value::Missing))
+
+        path_componenents
+            .try_fold(evaluated, |value, path| match value {
+                Cow::Borrowed(borrowed) => path.get_val(borrowed, bindings, ctx),
+                Cow::Owned(owned) => path.take_val(owned, bindings, ctx),
+            })
+            .unwrap_or(Cow::Owned(Value::Missing))
     }
 }
 
