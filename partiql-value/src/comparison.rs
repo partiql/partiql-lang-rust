@@ -57,7 +57,7 @@ pub trait NullableEq {
     }
 }
 
-/// A wrapper on [`T`] that specifies if missing and null values should be equal.
+/// A wrapper on [`T`] that specifies equality outcome for missing and null, and `NaN` values.
 #[derive(Eq, PartialEq, Debug)]
 pub struct EqualityValue<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool, T>(pub &'a T);
 
