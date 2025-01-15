@@ -12,7 +12,9 @@ fn main() -> miette::Result<()> {
         .arg("fmt")
         .arg("--")
         .spawn()
-        .expect("cargo fmt of tests/ failed");
+        .expect("cargo fmt of tests/ failed")
+        .wait()
+        .expect("cargo fmt of tests/ failed to exit");
 
     Ok(())
 }

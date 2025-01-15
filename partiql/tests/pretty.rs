@@ -129,6 +129,8 @@ fn pretty_val() {
         tuple!(("n", 9)),
         tuple!(("n", 10))
     );
+
+    #[allow(clippy::approx_constant)]
     let t_val = tuple!(
         ("foo", true),
         ("-foo", false),

@@ -59,6 +59,7 @@ pub fn eval_op(op: &str) {
 fn op_values() -> [Value; 4] {
     [
         Value::Integer(1),
+        #[allow(clippy::approx_constant)]
         Value::Real(3.14.into()),
         Value::Boolean(true),
         Value::String("foo".to_string().into()),

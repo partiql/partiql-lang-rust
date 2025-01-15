@@ -25,6 +25,9 @@ use unicase::UniCase;
 use crate::eval::evaluable::{EvalType, Evaluable};
 use crate::plan::EvaluationMode;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub(crate) mod eval_expr_wrapper;
 pub mod evaluable;
 pub mod expr;

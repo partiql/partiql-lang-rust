@@ -38,8 +38,20 @@ regex-syntax = "0.8"
 rustc-hash = "2"
 delegate = "0.13"
 
+serde = { version = "1", features = ["derive"], optional = true }
+
 [dev-dependencies]
 criterion = "0.5"
+
+
+[features]
+default = []
+serde = [
+    "dep:serde",
+    "rust_decimal/serde-with-str",
+    "partiql-logical/serde",
+    "partiql-value/serde",
+]
 
 [[bench]]
 name = "bench_eval"
