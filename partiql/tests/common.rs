@@ -56,12 +56,14 @@ impl From<Box<dyn Error>> for TestError<'_> {
     }
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn parse(statement: &str) -> ParserResult<'_> {
     partiql_parser::Parser::default().parse(statement)
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn lower(
@@ -72,6 +74,7 @@ pub fn lower(
     planner.lower(parsed)
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn compile(
@@ -83,6 +86,7 @@ pub fn compile(
     planner.compile(&logical)
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
@@ -93,6 +97,7 @@ pub fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult 
     plan.execute_mut(&ctx)
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn eval_query_with_catalog<'a>(
@@ -107,6 +112,7 @@ pub fn eval_query_with_catalog<'a>(
     Ok(evaluate(plan, bindings)?)
 }
 
+#[allow(dead_code)]
 #[track_caller]
 #[inline]
 pub fn eval_query(statement: &str, mode: EvaluationMode) -> Result<Evaluated, TestError<'_>> {

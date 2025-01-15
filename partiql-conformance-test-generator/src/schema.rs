@@ -69,6 +69,8 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub enum Assertion {
         SyntaxSuccess(SyntaxSuccessAssertion),
         SyntaxFail(SyntaxFailAssertion),
@@ -138,21 +140,29 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub struct SyntaxSuccessAssertion {
         pub result: String,
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub struct SyntaxFailAssertion {
         pub result: String,
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub struct StaticAnalysisFailAssertion {
         pub result: String,
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub struct EvaluationSuccessAssertion {
         pub result: String,
         pub output: Element,
@@ -160,6 +170,8 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
+    // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
+    #[allow(dead_code)]
     pub struct EvaluationFailAssertion {
         pub result: String,
         pub eval_mode: EvaluationModeList,

@@ -23,9 +23,6 @@ pub use sort::*;
 pub use tuple::*;
 pub use value::*;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 #[cfg(test)]
 mod tests {
     use super::*;
