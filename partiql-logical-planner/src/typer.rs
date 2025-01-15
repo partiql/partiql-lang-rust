@@ -4,9 +4,9 @@ use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
 use partiql_catalog::catalog::Catalog;
 use partiql_logical::{BindingsOp, Lit, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
-    type_array, type_bag, type_bool, type_decimal, type_float64, type_int, type_string,
-    type_struct, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder, ShapeResultError, Static,
-    StructConstraint, StructField, StructType,
+    type_array, type_bag, type_bool, type_decimal, type_dynamic, type_float64, type_int,
+    type_string, type_struct, ArrayType, BagType, PartiqlShape, PartiqlShapeBuilder,
+    ShapeResultError, Static, StructConstraint, StructField, StructType,
 };
 use partiql_value::BindingsName;
 use petgraph::algo::toposort;
@@ -346,15 +346,10 @@ impl<'c> PlanTyper<'c> {
                     Lit::Double(_) => type_float64!(self.bld),
                     Lit::Bool(_) => type_bool!(self.bld),
                     Lit::String(_) => type_string!(self.bld),
+                    Lit::Variant(_, _) => type_dynamic!(self.bld), // TODO
                     Lit::Struct(_) => type_struct!(self.bld),
                     Lit::Bag(_) => type_bag!(self.bld),
                     Lit::List(_) => type_array!(self.bld),
-                    _ => {
-                        self.errors.push(TypingError::NotYetImplemented(
-                            "Unsupported Literal".to_string(),
-                        ));
-                        self.bld.new_undefined()
-                    }
                 };
 
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);

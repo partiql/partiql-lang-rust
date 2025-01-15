@@ -14,7 +14,7 @@ use std::hash::Hash;
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{DatumCategory, DatumCategoryRef, DatumValueRef};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, DatumLower, DatumValueRef};
 use std::ops::ControlFlow;
 
 /// A Trait that represents the ability to match an expected 'type' judgement against a provided value.
@@ -50,10 +50,16 @@ impl TypeSatisfier for Static {
                             | (Static::DateTime, Value::DateTime(_))
                     )
                 }
+                DatumValueRef::Lower(lower) => {
+                    // TODO this basically clones just to throw the value away after type-check; fix that
+                    let lowered = lower.lower();
+                    let lowered = lowered.expect("lower");
+                    self.satisfies(&lowered)
+                }
             },
             (StaticCategory::Sequence(shape), DatumCategoryRef::Sequence(seq)) => match shape {
                 PartiqlShape::Dynamic | PartiqlShape::Undefined => true,
-                shape => seq.into_iter().all(|v| shape.satisfies(v)),
+                shape => seq.into_iter().all(|v| shape.satisfies(&v)),
             },
             (StaticCategory::Tuple(), DatumCategoryRef::Tuple(_)) => {
                 true // TODO when Static typing knows how to type a tuple
@@ -344,6 +350,11 @@ where
     for (idx, arg) in args.iter().enumerate() {
         let typ = types(idx);
         let arg = arg.evaluate(bindings, ctx);
+        let arg = match arg {
+            Cow::Borrowed(arg) => arg.lower(),
+            Cow::Owned(arg) => arg.into_lower().map(Cow::Owned),
+        }
+        .expect("lowering failed"); // TODO proper error messaging for lowering
         match ArgC::arg_check(typ, arg) {
             ArgCheckControlFlow::Continue(v) => {
                 if propagate.is_none() {

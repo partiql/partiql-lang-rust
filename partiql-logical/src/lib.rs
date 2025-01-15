@@ -459,7 +459,7 @@ pub enum Lit {
     Double(OrderedFloat<f64>),
     Bool(bool),
     String(String),
-    BoxDocument(Vec<u8>, String), // (bytes, type-name as string) TODO replace with strongly typed box name.
+    Variant(Vec<u8>, String), // (bytes, type-name as string) TODO replace with strongly typed box name.
     Struct(Vec<(String, Lit)>),
     Bag(Vec<Lit>),
     List(Vec<Lit>),

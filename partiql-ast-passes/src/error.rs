@@ -1,14 +1,15 @@
 use partiql_catalog::call_defs::CallLookupError;
+use std::error::Error;
 use thiserror::Error;
 
 /// Contains the errors that occur during AST transformations
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub struct AstTransformationError {
     pub errors: Vec<AstTransformError>,
 }
 
 /// Represents an AST transform Error
-#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum AstTransformError {
     /// Indicates that AST lowering has not yet been implemented for this feature.
@@ -42,6 +43,16 @@ pub enum AstTransformError {
     /// Indicates that a `HAVING` clause was provided without a `GROUP BY`
     #[error("HAVING clause provided without GROUP BY")]
     HavingWithoutGroupBy,
+
+    /// Some other error; likely from a plugin
+    #[error(transparent)]
+    Other(Box<dyn Error>),
+}
+
+impl From<Box<dyn Error>> for AstTransformError {
+    fn from(value: Box<dyn Error>) -> Self {
+        Self::Other(value)
+    }
 }
 
 impl From<CallLookupError> for AstTransformError {
