@@ -378,6 +378,13 @@ impl From<&str> for Value {
     }
 }
 
+impl From<i128> for Value {
+    #[inline]
+    fn from(n: i128) -> Self {
+        Value::from(RustDecimal::from(n))
+    }
+}
+
 impl From<i64> for Value {
     #[inline]
     fn from(n: i64) -> Self {
@@ -409,8 +416,11 @@ impl From<i8> for Value {
 impl From<usize> for Value {
     #[inline]
     fn from(n: usize) -> Self {
-        // TODO overflow to bigint/decimal
-        Value::Integer(n as i64)
+        if n > i64::MAX as usize {
+            Value::from(RustDecimal::from(n))
+        } else {
+            Value::Integer(n as i64)
+        }
     }
 }
 
@@ -445,14 +455,21 @@ impl From<u64> for Value {
 impl From<u128> for Value {
     #[inline]
     fn from(n: u128) -> Self {
-        (n as usize).into()
+        Value::from(RustDecimal::from(n))
     }
 }
 
 impl From<f64> for Value {
     #[inline]
     fn from(f: f64) -> Self {
-        Value::Real(OrderedFloat(f))
+        Value::from(OrderedFloat(f))
+    }
+}
+
+impl From<OrderedFloat<f64>> for Value {
+    #[inline]
+    fn from(f: OrderedFloat<f64>) -> Self {
+        Value::Real(f)
     }
 }
 

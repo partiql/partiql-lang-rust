@@ -210,7 +210,9 @@ pub(crate) fn pass_eval(
     expected: &TestValue,
 ) {
     match eval(statement, mode, env) {
-        Ok(v) => assert_eq!(v.result, expected.value),
+        Ok(v) => {
+            assert_eq!(&TestValue::from(v), expected)
+        },
         Err(TestError::Parse(_)) => {
             panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error")
         }

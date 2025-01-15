@@ -249,11 +249,11 @@ impl BindEvalExpr for EvalOpBinary {
             EvalOpBinary::And => logical!(AndCheck, partiql_value::BinaryAnd::and),
             EvalOpBinary::Or => logical!(OrCheck, partiql_value::BinaryOr::or),
             EvalOpBinary::Eq => equality!(|lhs, rhs| {
-                let wrap = EqualityValue::<false, Value>;
+                let wrap = EqualityValue::<false, false, Value>;
                 NullableEq::eq(&wrap(lhs), &wrap(rhs))
             }),
             EvalOpBinary::Neq => equality!(|lhs, rhs| {
-                let wrap = EqualityValue::<false, Value>;
+                let wrap = EqualityValue::<false, false, Value>;
                 NullableEq::neq(&wrap(lhs), &wrap(rhs))
             }),
             EvalOpBinary::Gt => comparison!(NullableOrd::gt),

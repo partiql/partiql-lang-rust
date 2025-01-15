@@ -1,5 +1,5 @@
-use crate::util;
 use crate::Value;
+use crate::{util, Bag, List, Tuple};
 
 pub trait Comparable {
     fn is_comparable_to(&self, rhs: &Self) -> bool;
@@ -16,6 +16,7 @@ impl Comparable for Value {
             | (Value::Boolean(_), Value::Boolean(_))
             | (Value::String(_), Value::String(_))
             | (Value::Blob(_), Value::Blob(_))
+            | (Value::DateTime(_), Value::DateTime(_))
             | (Value::List(_), Value::List(_))
             | (Value::Bag(_), Value::Bag(_))
             | (Value::Tuple(_), Value::Tuple(_))
@@ -31,19 +32,43 @@ impl Comparable for Value {
 
 // `Value` `eq` and `neq` with Missing and Null propagation
 pub trait NullableEq {
-    type Output;
-    fn eq(&self, rhs: &Self) -> Self::Output;
-    fn neq(&self, rhs: &Self) -> Self::Output;
+    fn eq(&self, rhs: &Self) -> Value;
+
+    fn neq(&self, rhs: &Self) -> Value {
+        let eq_result = NullableEq::eq(self, rhs);
+        match eq_result {
+            Value::Boolean(_) | Value::Null => !eq_result,
+            _ => Value::Missing,
+        }
+    }
+
+    /// `PartiQL's `eqg` is used to compare the internals of Lists, Bags, and Tuples.
+    ///
+    /// > The eqg, unlike the =, returns true when a NULL is compared to a NULL or a MISSING
+    /// > to a MISSING
+    fn eqg(&self, rhs: &Self) -> Value;
+
+    fn neqg(&self, rhs: &Self) -> Value {
+        let eqg_result = NullableEq::eqg(self, rhs);
+        match eqg_result {
+            Value::Boolean(_) | Value::Null => !eqg_result,
+            _ => Value::Missing,
+        }
+    }
 }
 
-/// A wrapper on [`T`] that specifies if missing and null values should be equal.
-#[derive(Eq, PartialEq)]
-pub struct EqualityValue<'a, const NULLS_EQUAL: bool, T>(pub &'a T);
+/// A wrapper on [`T`] that specifies equality outcome for missing and null, and `NaN` values.
+#[derive(Eq, PartialEq, Debug)]
+pub struct EqualityValue<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool, T>(pub &'a T);
 
-impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Value> {
-    type Output = Value;
-
-    fn eq(&self, rhs: &Self) -> Self::Output {
+impl<const GROUP_NULLS: bool, const NAN_EQUAL: bool> NullableEq
+    for EqualityValue<'_, GROUP_NULLS, NAN_EQUAL, Value>
+{
+    #[inline(always)]
+    fn eq(&self, rhs: &Self) -> Value {
+        let wrap_list = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, List>;
+        let wrap_bag = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Bag>;
+        let wrap_tuple = EqualityValue::<'_, { GROUP_NULLS }, { NAN_EQUAL }, Tuple>;
         if GROUP_NULLS {
             if let (Value::Missing | Value::Null, Value::Missing | Value::Null) = (self.0, rhs.0) {
                 return Value::Boolean(true);
@@ -73,16 +98,23 @@ impl<const GROUP_NULLS: bool> NullableEq for EqualityValue<'_, GROUP_NULLS, Valu
             (Value::Decimal(_), Value::Real(_)) => {
                 Value::from(self.0 == &util::coerce_int_or_real_to_decimal(rhs.0))
             }
+            (Value::Real(l), Value::Real(r)) => {
+                if NAN_EQUAL && l.is_nan() && r.is_nan() {
+                    return Value::Boolean(true);
+                }
+                Value::from(l == r)
+            }
+            (Value::List(l), Value::List(r)) => NullableEq::eq(&wrap_list(l), &wrap_list(r)),
+            (Value::Bag(l), Value::Bag(r)) => NullableEq::eq(&wrap_bag(l), &wrap_bag(r)),
+            (Value::Tuple(l), Value::Tuple(r)) => NullableEq::eq(&wrap_tuple(l), &wrap_tuple(r)),
             (_, _) => Value::from(self.0 == rhs.0),
         }
     }
 
-    fn neq(&self, rhs: &Self) -> Self::Output {
-        let eq_result = NullableEq::eq(self, rhs);
-        match eq_result {
-            Value::Boolean(_) | Value::Null => !eq_result,
-            _ => Value::Missing,
-        }
+    #[inline(always)]
+    fn eqg(&self, rhs: &Self) -> Value {
+        let wrap = EqualityValue::<'_, true, { NAN_EQUAL }, _>;
+        NullableEq::eq(&wrap(self.0), &wrap(rhs.0))
     }
 }
 
