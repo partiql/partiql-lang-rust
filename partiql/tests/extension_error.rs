@@ -1,8 +1,6 @@
 use std::any::Any;
 use std::borrow::Cow;
 
-use std::error::Error;
-
 use thiserror::Error;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
@@ -30,12 +28,12 @@ impl partiql_catalog::extension::Extension for UserCtxTestExtension {
         "test_extension".into()
     }
 
-    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>> {
+    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), ExtensionResultError> {
         match catalog
             .add_table_function(TableFunction::new(Box::new(TestUserContextFunction::new())))
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e) as Box<dyn Error>),
+            Err(e) => Err(ExtensionResultError::LoadError(e.into())),
         }
     }
 }
@@ -97,23 +95,26 @@ impl BaseTableExpr for EvalTestCtxTable {
                 Value::String(_name) => Ok(Box::new(TestDataGen {})),
                 _ => {
                     let error = UserCtxError::BadArgs;
-                    Err(Box::new(error) as ExtensionResultError)
+                    Err(ExtensionResultError::LoadError(error.into()))
                 }
             }
         } else {
             let error = UserCtxError::BadArgs;
-            Err(Box::new(error) as ExtensionResultError)
+            Err(ExtensionResultError::LoadError(error.into()))
         }
     }
 }
 
+#[derive(Debug)]
 struct TestDataGen {}
 
 impl Iterator for TestDataGen {
     type Item = Result<Value, ExtensionResultError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(Err(Box::new(UserCtxError::Runtime)))
+        Some(Err(ExtensionResultError::ReadError(Box::new(
+            UserCtxError::Runtime,
+        ))))
     }
 }
 
@@ -188,7 +189,7 @@ fn test_context_bad_args_strict() -> Result<(), TestError<'static>> {
     assert_eq!(err.errors.len(), 1);
     let err = &err.errors[0];
     assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
-        assert_eq!(err.to_string(), "bad arguments")
+        assert_eq!(err.to_string(), "Scan error: `bad arguments`")
     });
 
     Ok(())
@@ -241,7 +242,7 @@ fn test_context_runtime_strict() -> Result<(), TestError<'static>> {
     assert_eq!(err.errors.len(), 1);
     let err = &err.errors[0];
     assert_matches!(err, EvaluationError::ExtensionResultError(err) => {
-        assert_eq!(err.to_string(), "runtime error")
+        assert_eq!(err.to_string(), "Scan error: `runtime error`")
     });
 
     Ok(())

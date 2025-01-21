@@ -3,6 +3,10 @@ source: partiql/tests/ion.rs
 expression: "result.to_pretty_string(25).expect(\"pretty\")"
 ---
 <<
-  { 'x': `1` },
-  { 'x': `hi::2` }
+  {
+    'data': `annot1::(1 hi::2)`
+  },
+  {
+    'data': `annot2::{data: 3}`
+  }
 >>

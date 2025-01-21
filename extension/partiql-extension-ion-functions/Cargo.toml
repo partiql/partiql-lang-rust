@@ -39,6 +39,7 @@ thiserror = "1.0"
 delegate = "0.13"
 zstd = "0.13"
 flate2 = "1.0"
+insta = "1"
 
 [dev-dependencies]
 partiql-parser = { path = "../../partiql-parser", version = "0.11.*" }

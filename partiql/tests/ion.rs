@@ -35,6 +35,30 @@ fn ion_simple() {
 }
 
 #[test]
+fn ion_in_struct() {
+    let query =
+        "select x.data from <<{'data': `annot1::(1 hi::2)`}, {'data': `annot2::{data: 3}`}>> as x";
+
+    let res = eval(query, EvaluationMode::Permissive);
+    assert_matches!(res, Ok(_));
+    let result = res.unwrap().result;
+
+    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
+}
+
+#[test]
+fn ion_structs() {
+    let query =
+        "select x.data from <<`{data: annot1::(1 hi::2)}`, `{data: annot2::{data: 3}}`>> as x";
+
+    let res = eval(query, EvaluationMode::Permissive);
+    assert_matches!(res, Ok(_));
+    let result = res.unwrap().result;
+
+    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
+}
+
+#[test]
 fn ion_paths() {
     let query = "select x[1].foo from `([{foo:1}, {foo: 2}] ({foo: hi::1} {foo: world::2}))` as x";
     // << {x: `{foo: 2}`}, {x: `{foo: world::2}`}>>
