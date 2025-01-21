@@ -2,8 +2,6 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use std::error::Error;
-
 use thiserror::Error;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
@@ -30,12 +28,12 @@ impl partiql_catalog::extension::Extension for UserCtxTestExtension {
         "test_extension".into()
     }
 
-    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>> {
+    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), ExtensionResultError> {
         match catalog
             .add_table_function(TableFunction::new(Box::new(TestUserContextFunction::new())))
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e) as Box<dyn Error>),
+            Err(e) => Err(ExtensionResultError::LoadError(e.into())),
         }
     }
 }
@@ -95,12 +93,12 @@ impl BaseTableExpr for EvalTestCtxTable {
                 Value::String(name) => generated_data(name.to_string(), ctx),
                 _ => {
                     let error = UserCtxError::Unknown;
-                    Err(Box::new(error) as ExtensionResultError)
+                    Err(ExtensionResultError::DataError(error.into()))
                 }
             }
         } else {
             let error = UserCtxError::Unknown;
-            Err(Box::new(error) as ExtensionResultError)
+            Err(ExtensionResultError::DataError(error.into()))
         }
     }
 }

@@ -1,0 +1,11 @@
+---
+source: extension/partiql-extension-ion-functions/tests/scan.rs
+expression: out
+---
+<<
+  { 'ion_data': `1` },
+  { 'ion_data': `"foo"` },
+  { 'ion_data': `["a", 1, null]` },
+  { 'ion_data': `{a: 1, b: {{}}}` },
+  { 'ion_data': `(sym::var 1 2 3)` }
+>>

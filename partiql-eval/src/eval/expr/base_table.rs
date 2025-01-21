@@ -6,6 +6,7 @@ use partiql_catalog::table_fn::BaseTableExpr;
 use partiql_value::Value::Missing;
 use partiql_value::{Bag, Tuple, Value};
 
+use partiql_catalog::extension::ExtensionResultError;
 use std::borrow::Cow;
 use std::fmt::Debug;
 
@@ -34,16 +35,32 @@ impl EvalExpr for EvalFnBaseTableExpr {
         let results = self.expr.evaluate(&args, ctx.as_session());
         let result = match results {
             Ok(it) => {
-                let bag: Result<Bag, _> = it.collect();
+                let bag: Result<Bag, _> = it
+                    .map(|r| {
+                        match r {
+                            Ok(v) => Ok(v),
+                            Err(err) => match err {
+                                err @ ExtensionResultError::DataError(_) => {
+                                    ctx.add_error(err.into());
+                                    // This is an error for this data item; coerce it to `Missing` and continue
+                                    Ok(Missing)
+                                }
+                                err => Err(err),
+                            },
+                        }
+                    })
+                    .collect();
                 match bag {
-                    Ok(b) => Value::from(b),
+                    Ok(bag) => Value::from(bag),
                     Err(err) => {
+                        // Error on read and/or stream; Treat whole stream as `Missing`
                         ctx.add_error(err.into());
                         Missing
                     }
                 }
             }
             Err(err) => {
+                // Error on read and/or stream; Treat whole stream as `Missing`
                 ctx.add_error(err.into());
                 Missing
             }

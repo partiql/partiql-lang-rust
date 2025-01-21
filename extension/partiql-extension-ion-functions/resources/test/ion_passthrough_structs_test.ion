@@ -1,0 +1,5 @@
+{data: 1}
+{data: "foo"}
+{data: ["a", 1, null]}
+{data: {a: 1, b: {{}}, }}
+{data: (sym::var 1 2 3)}

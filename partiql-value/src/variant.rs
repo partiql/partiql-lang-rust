@@ -12,7 +12,7 @@ use delegate::delegate;
 use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
 use pretty::{DocAllocator, DocBuilder};
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -217,11 +217,12 @@ impl PrettyDoc for Variant {
         A: Clone,
     {
         let doc = self.variant.pretty_doc(arena);
-        let ty = self.variant.type_tag().name();
 
         pretty_surrounded_doc(doc, "`", "`", arena)
-            .append(arena.text("::"))
-            .append(arena.text(ty))
+        // TODO eventually support suffixing quoted documents with `::<type>`
+        //let ty = self.variant.type_tag().name();
+        //.append(arena.text("::"))
+        //.append(arena.text(ty))
     }
 }
 

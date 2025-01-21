@@ -1,7 +1,7 @@
 use crate::util::{PartiqlValueTarget, ToPartiqlValue};
 use ion_rs::{
-    AnyEncoding, Element, ElementReader, IonResult, IonType, OwnedSequenceIterator, Reader,
-    Sequence, Struct,
+    AnyEncoding, Element, ElementReader, IonError, IonResult, IonType, OwnedSequenceIterator,
+    Reader, Sequence, Struct,
 };
 use partiql_value::boxed_variant::{
     BoxedVariant, BoxedVariantResult, BoxedVariantType, BoxedVariantTypeTag,
@@ -22,6 +22,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::io::{BufReader, Cursor, Read};
 use std::ops::DerefMut;
 use std::rc::Rc;
 use thiserror::Error;
@@ -30,7 +31,7 @@ use thiserror::Error;
 pub struct BoxedIonType {}
 impl BoxedVariantType for BoxedIonType {
     fn construct(&self, bytes: Vec<u8>) -> BoxedVariantResult<DynBoxedVariant> {
-        BoxedIon::parse(bytes, BoxedIonStreamType::SingleTLV)
+        self.construct_bytes(bytes)
             .map_err(Into::into)
             .map(|b| Box::new(b) as DynBoxedVariant)
     }
@@ -57,6 +58,25 @@ impl BoxedVariantType for BoxedIonType {
             (false, false) => wrap_eq::<false, false>(l, r),
         };
         res == Value::Boolean(true)
+    }
+}
+
+impl BoxedIonType {
+    pub fn construct_str(&self, data: &str) -> BoxedIonResult<BoxedIon> {
+        self.construct_bytes(data.into())
+    }
+
+    pub fn construct_bytes(&self, bytes: Vec<u8>) -> BoxedIonResult<BoxedIon> {
+        let cursor = Box::new(Cursor::new(bytes));
+        BoxedIon::parse(cursor, BoxedIonStreamType::SingleTLV)
+    }
+
+    pub fn construct_buffered<I: Read + 'static>(
+        &self,
+        input: BufReader<I>,
+    ) -> BoxedIonResult<BoxedIon> {
+        let buff = Box::new(input);
+        BoxedIon::parse(buff, BoxedIonStreamType::Stream)
     }
 }
 
@@ -91,12 +111,16 @@ fn get_values<'a, 'b>(
 #[derive(Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum BoxedIonError {
-    /// Ion Writer error.
+    /// Ion Read error.
+    #[error("Error reading Ion `{0}`")]
+    IonReadError(#[from] IonError),
+
+    /// Expected a sequence error.
     #[error("Expected a sequence, but was `{elt}`")]
     NotASequence { elt: Box<Element> },
 }
 
-pub type Result<T> = std::result::Result<T, BoxedIonError>;
+pub type BoxedIonResult<T> = std::result::Result<T, BoxedIonError>;
 
 pub struct ElementIterator<R: ElementReader> {
     reader: R,
@@ -111,18 +135,18 @@ impl<R: ElementReader> Iterator for ElementIterator<R> {
 }
 
 struct IonContext {
-    reader: PeekMoreIterator<ElementIterator<Reader<AnyEncoding, Vec<u8>>>>,
+    reader: PeekMoreIterator<ElementIterator<Reader<AnyEncoding, Box<dyn Read>>>>,
 }
 
 impl IonContext {
-    pub fn new(data: Vec<u8>) -> IonResult<Self> {
+    fn new_ctx(data: Box<dyn Read>) -> IonResult<Self> {
         let reader = Reader::new(AnyEncoding, data)?;
         let reader = ElementIterator { reader }.peekmore();
         Ok(Self { reader })
     }
 
-    pub fn new_ptr(data: Vec<u8>) -> IonResult<IonContextPtr> {
-        Ok(Rc::new(RefCell::new(Self::new(data)?)))
+    pub fn new_ptr(data: Box<dyn Read>) -> IonResult<IonContextPtr> {
+        Ok(Rc::new(RefCell::new(Self::new_ctx(Box::new(data))?)))
     }
 }
 
@@ -440,7 +464,7 @@ impl Display for BoxedIon {
 }
 
 impl BoxedIon {
-    fn into_value(self) -> Value {
+    pub fn into_value(self) -> Value {
         Value::from(Variant::from(self))
     }
 
@@ -465,28 +489,31 @@ impl BoxedIon {
         self.child(child).into_value()
     }
 
-    pub(crate) fn parse(data: Vec<u8>, expected: BoxedIonStreamType) -> IonResult<Self> {
+    pub(crate) fn parse(data: Box<dyn Read>, expected: BoxedIonStreamType) -> BoxedIonResult<Self> {
         let mut ctx = IonContext::new_ptr(data)?;
         let doc = Self::init_doc(&mut ctx, expected);
         Ok(Self::new(doc?, ctx))
     }
 
     #[allow(dead_code)]
-    pub(crate) fn parse_unknown(data: Vec<u8>) -> IonResult<Self> {
+    pub(crate) fn parse_unknown(data: Box<dyn Read>) -> BoxedIonResult<Self> {
         Self::parse(data, BoxedIonStreamType::Unknown)
     }
 
     #[allow(dead_code)]
-    pub(crate) fn parse_tlv(data: Vec<u8>) -> IonResult<Self> {
+    pub(crate) fn parse_tlv(data: Box<dyn Read>) -> BoxedIonResult<Self> {
         Self::parse(data, BoxedIonStreamType::SingleTLV)
     }
 
     #[allow(dead_code)]
-    pub(crate) fn parse_stream(data: Vec<u8>) -> IonResult<Self> {
+    pub(crate) fn parse_stream(data: Box<dyn Read>) -> BoxedIonResult<Self> {
         Self::parse(data, BoxedIonStreamType::Stream)
     }
 
-    fn init_doc(ctx: &mut IonContextPtr, expected: BoxedIonStreamType) -> IonResult<BoxedIonValue> {
+    fn init_doc(
+        ctx: &mut IonContextPtr,
+        expected: BoxedIonStreamType,
+    ) -> BoxedIonResult<BoxedIonValue> {
         let reader = &mut ctx.borrow_mut().reader;
         let expected = match expected {
             BoxedIonStreamType::Unknown => {
@@ -513,7 +540,7 @@ impl BoxedIon {
         })
     }
 
-    fn try_into_iter(self) -> Result<BoxedIonIterator> {
+    pub fn try_into_iter(self) -> BoxedIonResult<BoxedIonIterator> {
         let BoxedIon { ctx, doc } = self;
 
         let inner = match doc {
@@ -754,7 +781,7 @@ enum BoxedIonIterType {
     Sequence(OwnedSequenceIterator),
 }
 
-struct BoxedIonIterator {
+pub struct BoxedIonIterator {
     ctx: IonContextPtr,
     inner: RefCell<BoxedIonIterType>,
 }
@@ -788,7 +815,8 @@ mod tests {
     fn dump(data: Vec<u8>, expected_stream_type: BoxedIonStreamType) {
         println!("\n===========\n");
 
-        let doc = BoxedIon::parse(data, expected_stream_type).expect("boxed ion create");
+        let doc = BoxedIon::parse(Box::new(Cursor::new(data)), expected_stream_type)
+            .expect("boxed ion create");
 
         flatten_dump(doc);
     }

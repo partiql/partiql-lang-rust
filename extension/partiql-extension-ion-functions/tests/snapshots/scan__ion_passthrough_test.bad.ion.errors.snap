@@ -1,0 +1,26 @@
+---
+source: extension/partiql-extension-ion-functions/tests/scan.rs
+expression: errs
+---
+[
+    ExtensionResultError(
+        ReadError(
+            IonReadError(
+                Decoding(
+                    DecodingError {
+                        description: "failed to parse a struct: Decoding(DecodingError { description: \"failed to parse an s-expression: Decoding(DecodingError { description: \\\"invalid Ion syntax encountered\\\\n        offset=95\\\\n        buffer head=<}>\\\\n        buffer tail=<}>\\\\n        buffer len=1\\\\n        \\\", position: Some(Position { byte_offset: 95, byte_length: Some(1), line_column: None }) })\\n        offset=80\\n        buffer head=<(sym::var 1 2 3}>\\n        buffer tail=<(sym::var 1 2 3}>\\n        buffer len=16\\n        \", position: Some(Position { byte_offset: 80, byte_length: Some(16), line_column: None }) })\n        offset=73\n        buffer head=<{data: (sym::var 1 2 3}>\n        buffer tail=<{data: (sym::var 1 2 3}>\n        buffer len=23\n        ",
+                        position: Some(
+                            Position {
+                                byte_offset: 73,
+                                byte_length: Some(
+                                    23,
+                                ),
+                                line_column: None,
+                            },
+                        ),
+                    },
+                ),
+            ),
+        ),
+    ),
+]

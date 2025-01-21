@@ -4,13 +4,13 @@
 use partiql_catalog::call_defs::ScalarFnCallDef;
 use partiql_catalog::catalog::Catalog;
 use partiql_catalog::context::SessionContext;
+use partiql_catalog::extension::ExtensionResultError;
 use partiql_catalog::scalar_fn::{
     vararg_scalar_fn_overloads, ScalarFnExpr, ScalarFnExprResult, ScalarFunction,
     SimpleScalarFunctionInfo,
 };
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
-use std::error::Error;
 
 #[derive(Debug, Default)]
 pub struct PartiqlValueFnExtension {}
@@ -20,11 +20,11 @@ impl partiql_catalog::extension::Extension for PartiqlValueFnExtension {
         "value-functions".into()
     }
 
-    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), Box<dyn Error>> {
+    fn load(&self, catalog: &mut dyn Catalog) -> Result<(), ExtensionResultError> {
         for scfn in [function_catalog_tupleunion, function_catalog_tupleconcat] {
             match catalog.add_scalar_function(scfn()) {
                 Ok(_) => continue,
-                Err(e) => return Err(Box::new(e) as Box<dyn Error>),
+                Err(e) => return Err(ExtensionResultError::LoadError(e.into())),
             }
         }
         Ok(())
