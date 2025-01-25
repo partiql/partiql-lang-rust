@@ -135,16 +135,13 @@ impl PartiqlBasicDdlEncoder {
 
     fn write_type_bag(&self, type_bag: &BagType) -> ShapeDdlEncodeResult<String> {
         Ok(format!(
-            "type_bag<{}>",
+            "BAG<{}>",
             self.write_shape(type_bag.element_type())?
         ))
     }
 
     fn write_type_array(&self, arr: &ArrayType) -> ShapeDdlEncodeResult<String> {
-        Ok(format!(
-            "type_array<{}>",
-            self.write_shape(arr.element_type())?
-        ))
+        Ok(format!("ARRAY<{}>", self.write_shape(arr.element_type())?))
     }
 
     fn write_struct(&self, strct: &StructType) -> ShapeDdlEncodeResult<String> {
@@ -260,12 +257,12 @@ mod tests {
             type_struct![bld, IndexSet::from([fields, StructConstraint::Open(false)])]
         ];
 
-        let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": type_array<VARCHAR>,"c": DOUBLE>,"dependents" type_array<VARCHAR>"#;
+        let expected_compact = r#""employee_id" TINYINT,"full_name" VARCHAR,"salary" DECIMAL(8, 2),"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,"dependents" ARRAY<VARCHAR>"#;
         let expected_pretty = r#""employee_id" TINYINT,
 "full_name" VARCHAR,
 "salary" DECIMAL(8, 2),
-"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": type_array<VARCHAR>,"c": DOUBLE>,
-"dependents" type_array<VARCHAR>"#;
+"details" STRUCT<"a": UNION<DECIMAL(5, 4),TINYINT>,"b": ARRAY<VARCHAR>,"c": DOUBLE>,
+"dependents" ARRAY<VARCHAR>"#;
 
         let ddl_compact = PartiqlBasicDdlEncoder::new(DdlFormat::Compact);
         assert_eq!(ddl_compact.ddl(&ty).expect("write shape"), expected_compact);
