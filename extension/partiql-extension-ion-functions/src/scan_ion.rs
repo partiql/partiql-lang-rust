@@ -111,7 +111,7 @@ fn parse_ion_scan<'a>(mut reader: impl 'a + Read + Seek + 'static) -> IonTableEx
 }
 
 fn parse_ion_buff<'a, I: 'a + Read + 'static>(input: BufReader<I>) -> IonTableExprResult<'a> {
-    let iter = BoxedIonType {}.construct_buffered(input)?.try_into_iter()?;
+    let iter = BoxedIonType {}.stream_from_read(input)?.try_into_iter()?;
     let iter = iter.map(|value| match value {
         Ok(v) => Ok(v.into_value()),
         Err(e) => Err(match e {

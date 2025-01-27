@@ -1,5 +1,6 @@
 use crate::{
-    Bag, BagIntoIterator, BagIter, BindingsName, List, ListIntoIterator, ListIter, Tuple, Value,
+    Bag, BagIntoIterator, BagIter, BindingsName, List, ListIntoIterator, ListIter, PairsIntoIter,
+    Tuple, Value,
 };
 use std::borrow::Cow;
 use std::error::Error;
@@ -13,19 +14,13 @@ pub trait Datum<D>
 where
     D: Datum<D>,
 {
-    #[inline]
     /// Returns true if and only if Value is to be interpreted as `NULL`
     #[must_use]
-    fn is_null(&self) -> bool {
-        false
-    }
+    fn is_null(&self) -> bool;
 
-    #[inline]
     /// Returns true if and only if Value is to be interpreted as `MISSING`
     #[must_use]
-    fn is_missing(&self) -> bool {
-        false
-    }
+    fn is_missing(&self) -> bool;
 
     #[inline]
     /// Returns true if and only if Value is null or missing
@@ -47,16 +42,6 @@ where
     #[must_use]
     fn is_ordered(&self) -> bool;
 }
-
-/*
-pub trait DatumValue<D>: Clone + Datum<D>
-where
-    D: Datum<D>,
-{
-    fn into_lower(self) -> DatumLowerResult<D>;
-}
-
- */
 
 pub trait DatumValue<D: Datum<D>>: Datum<D> + Clone + Debug {}
 
@@ -106,7 +91,7 @@ pub enum DatumSeqRef<'a> {
 #[derive(Debug)]
 pub enum DatumValueRef<'a> {
     Value(&'a Value),
-    Lower(&'a dyn DatumLower<Value>),
+    Dynamic(&'a dyn DatumLower<Value>),
 }
 
 #[derive(Debug)]
@@ -164,9 +149,36 @@ pub trait RefTupleView<'a, DV: DatumValue<DV>>: TupleDatum + Debug {
     fn get_val(&self, k: &BindingsName<'_>) -> Option<Cow<'a, DV>>;
 }
 
+pub struct OwnedFieldView<D: Datum<D>> {
+    pub name: String,
+    pub value: D,
+}
+
 pub trait OwnedTupleView<D: Datum<D>>: TupleDatum + Debug {
     fn take_val(self, k: &BindingsName<'_>) -> Option<D>;
     fn take_val_boxed(self: Box<Self>, k: &BindingsName<'_>) -> Option<D>;
+    fn into_iter(self) -> Box<dyn Iterator<Item = OwnedFieldView<D>>>;
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = OwnedFieldView<D>>>;
+}
+
+pub trait SequenceDatum {
+    fn is_ordered(&self) -> bool;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum + Debug {
+    fn get_val(&self, k: i64) -> Option<Cow<'a, DV>>;
+    fn into_iter(self) -> Box<dyn Iterator<Item = Cow<'a, DV>> + 'a>;
+}
+
+pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum + Debug {
+    fn take_val(self, k: i64) -> Option<D>;
+    fn take_val_boxed(self: Box<Self>, k: i64) -> Option<D>;
+    fn into_iter(self) -> Box<dyn Iterator<Item = D>>;
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = D>>;
 }
 
 impl TupleDatum for DatumTupleRef<'_> {
@@ -207,25 +219,21 @@ impl OwnedTupleView<Value> for DatumTupleOwned {
     fn take_val_boxed(self: Box<Self>, k: &BindingsName<'_>) -> Option<Value> {
         (*self).take_val(k)
     }
-}
 
-pub trait SequenceDatum {
-    fn is_ordered(&self) -> bool;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn into_iter(self) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
+        match self {
+            DatumTupleOwned::Tuple(tuple) => Box::new(
+                tuple
+                    .into_iter()
+                    .map(|(name, value)| OwnedFieldView { name, value }),
+            ),
+            DatumTupleOwned::Dynamic(dynamic) => dynamic.into_iter_boxed(),
+        }
     }
-}
 
-pub trait RefSequenceView<'a, DV: DatumValue<DV>>: SequenceDatum + Debug {
-    fn get_val(&self, k: i64) -> Option<Cow<'a, DV>>;
-    fn into_iter(self) -> Box<dyn Iterator<Item = Cow<'a, DV>> + 'a>;
-}
-
-pub trait OwnedSequenceView<D: Datum<D>>: SequenceDatum + Debug {
-    fn take_val(self, k: i64) -> Option<D>;
-    fn take_val_boxed(self: Box<Self>, k: i64) -> Option<D>;
-    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = D>>;
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
+        OwnedTupleView::into_iter(*self)
+    }
 }
 
 impl SequenceDatum for DatumSeqRef<'_> {
@@ -295,12 +303,16 @@ impl OwnedSequenceView<Value> for DatumSeqOwned {
         self.take_val(k)
     }
 
-    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
-        match *self {
+    fn into_iter(self) -> Box<dyn Iterator<Item = Value>> {
+        match self {
             DatumSeqOwned::List(l) => Box::new(l.into_iter()),
             DatumSeqOwned::Bag(b) => Box::new(b.into_iter()),
             DatumSeqOwned::Dynamic(boxed) => boxed.into_iter_boxed(),
         }
+    }
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
+        OwnedSequenceView::into_iter(*self)
     }
 }
 
@@ -341,6 +353,38 @@ impl<'a> Iterator for DatumSeqRefIterator<'a> {
             DatumSeqRefIterator::List(l) => l.next().map(Cow::Borrowed),
             DatumSeqRefIterator::Bag(b) => b.next().map(Cow::Borrowed),
             DatumSeqRefIterator::Dynamic(d) => d.next(),
+        }
+    }
+}
+
+impl IntoIterator for DatumTupleOwned {
+    type Item = OwnedFieldView<Value>;
+    type IntoIter = DatumTupleOwnedIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            DatumTupleOwned::Tuple(tuple) => DatumTupleOwnedIterator::Tuple(tuple.into_pairs()),
+            DatumTupleOwned::Dynamic(dynamic) => {
+                DatumTupleOwnedIterator::Dynamic(dynamic.into_iter_boxed())
+            }
+        }
+    }
+}
+
+pub enum DatumTupleOwnedIterator {
+    Tuple(PairsIntoIter),
+    Dynamic(Box<dyn Iterator<Item = OwnedFieldView<Value>>>),
+}
+
+impl Iterator for DatumTupleOwnedIterator {
+    type Item = OwnedFieldView<Value>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DatumTupleOwnedIterator::Tuple(t) => {
+                t.next().map(|(name, value)| OwnedFieldView { name, value })
+            }
+            DatumTupleOwnedIterator::Dynamic(d) => d.next(),
         }
     }
 }

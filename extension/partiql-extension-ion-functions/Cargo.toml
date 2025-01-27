@@ -39,13 +39,14 @@ thiserror = "1.0"
 delegate = "0.13"
 zstd = "0.13"
 flate2 = "1.0"
-insta = "1"
 
 [dev-dependencies]
 partiql-parser = { path = "../../partiql-parser", version = "0.11.*" }
 partiql-logical = { path = "../../partiql-logical", version = "0.11.*" }
 partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.11.*" }
 partiql-eval = { path = "../../partiql-eval", version = "0.11.*" }
+
+insta = "1"
 
 [features]
 default = []

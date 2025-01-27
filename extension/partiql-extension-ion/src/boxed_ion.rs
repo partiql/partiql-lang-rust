@@ -9,8 +9,8 @@ use partiql_value::boxed_variant::{
 };
 use partiql_value::datum::{
     Datum, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult, DatumSeqOwned,
-    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedSequenceView,
-    OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
+    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedFieldView,
+    OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
 use partiql_value::{Bag, BindingsName, List, NullableEq, Tuple, Value, Variant};
 use peekmore::{PeekMore, PeekMoreIterator};
@@ -31,7 +31,7 @@ use thiserror::Error;
 pub struct BoxedIonType {}
 impl BoxedVariantType for BoxedIonType {
     fn construct(&self, bytes: Vec<u8>) -> BoxedVariantResult<DynBoxedVariant> {
-        self.construct_bytes(bytes)
+        self.value_from_bytes(bytes)
             .map_err(Into::into)
             .map(|b| Box::new(b) as DynBoxedVariant)
     }
@@ -62,16 +62,24 @@ impl BoxedVariantType for BoxedIonType {
 }
 
 impl BoxedIonType {
-    pub fn construct_str(&self, data: &str) -> BoxedIonResult<BoxedIon> {
-        self.construct_bytes(data.into())
+    pub fn value_from_read<I: Read + 'static>(
+        &self,
+        mut input: BufReader<I>,
+    ) -> BoxedIonResult<BoxedIon> {
+        let mut output = Default::default();
+        input.read_to_end(&mut output).expect("read");
+        self.value_from_bytes(output)
+    }
+    pub fn value_from_str(&self, data: &str) -> BoxedIonResult<BoxedIon> {
+        self.value_from_bytes(data.into())
     }
 
-    pub fn construct_bytes(&self, bytes: Vec<u8>) -> BoxedIonResult<BoxedIon> {
+    pub fn value_from_bytes(&self, bytes: Vec<u8>) -> BoxedIonResult<BoxedIon> {
         let cursor = Box::new(Cursor::new(bytes));
         BoxedIon::parse(cursor, BoxedIonStreamType::SingleTLV)
     }
 
-    pub fn construct_buffered<I: Read + 'static>(
+    pub fn stream_from_read<I: Read + 'static>(
         &self,
         input: BufReader<I>,
     ) -> BoxedIonResult<BoxedIon> {
@@ -216,7 +224,7 @@ impl BoxedVariant for BoxedIon {
                         IonType::SExp => DatumCategoryRef::Sequence(DatumSeqRef::Dynamic(self)),
                         IonType::Null => DatumCategoryRef::Null,
                         IonType::Struct => DatumCategoryRef::Tuple(DatumTupleRef::Dynamic(self)),
-                        _ => DatumCategoryRef::Scalar(DatumValueRef::Lower(self)),
+                        _ => DatumCategoryRef::Scalar(DatumValueRef::Dynamic(self)),
                     }
                 }
             }
@@ -370,6 +378,10 @@ impl OwnedSequenceView<Value> for BoxedIon {
         OwnedSequenceView::take_val(*self, k)
     }
 
+    fn into_iter(self) -> Box<dyn Iterator<Item = Value>> {
+        OwnedSequenceView::into_iter_boxed(Box::new(self))
+    }
+
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
         Box::new(
             self.into_dyn_iter()
@@ -448,6 +460,26 @@ impl OwnedTupleView<Value> for BoxedIon {
 
     fn take_val_boxed(self: Box<Self>, target_key: &BindingsName<'_>) -> Option<Value> {
         OwnedTupleView::take_val(*self, target_key)
+    }
+
+    fn into_iter(self) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
+        OwnedTupleView::into_iter_boxed(Box::new(self))
+    }
+
+    fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
+        let Self { doc, ctx } = *self;
+        match doc {
+            BoxedIonValue::Value(elt) => match elt.try_into_struct() {
+                Ok(strct) => Box::new(strct.into_iter().map(move |(name, value)| {
+                    let name = name.to_string();
+                    let value = Self::new_value(value, ctx.clone());
+                    OwnedFieldView { name, value }
+                })),
+                Err(_) => Box::new(std::iter::empty()),
+            },
+
+            _ => Box::new(std::iter::empty()),
+        }
     }
 }
 
@@ -627,12 +659,10 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
         let wrap_seq = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Sequence>;
         let wrap_struct = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, Struct>;
         let (l, r) = (self.0, other.0);
-        let (lty, rty) = (l.ion_type(), r.ion_type());
 
-        let result = if l.is_null() && r.is_null() {
-            NULLS_EQUAL
-        } else {
-            match (lty, rty) {
+        let result = match (l.is_null(), r.is_null()) {
+            (true, true) => NULLS_EQUAL,
+            (false, false) => match (l.ion_type(), r.ion_type()) {
                 (IonType::Float, IonType::Float) => {
                     let (l, r) = (l.as_float().unwrap(), r.as_float().unwrap());
                     if l.is_nan() && r.is_nan() {
@@ -661,7 +691,8 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
                 }
 
                 _ => l == r,
-            }
+            },
+            _ => false,
         };
 
         Value::Boolean(result)
@@ -680,9 +711,13 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
     fn eq(&self, other: &Self) -> Value {
         let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
         let (l, r) = (self.0, other.0);
-        let l = l.iter().map(wrap);
-        let r = r.iter().map(wrap);
-        let res = l.zip(r).all(|(l, r)| l.eqg(&r) == Value::Boolean(true));
+        let res: bool = if l.len() == r.len() {
+            let l = l.iter().map(wrap);
+            let r = r.iter().map(wrap);
+            l.zip(r).all(|(l, r)| l.eqg(&r) == Value::Boolean(true))
+        } else {
+            false
+        };
         Value::Boolean(res)
     }
 
@@ -698,12 +733,16 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
 {
     fn eq(&self, other: &Self) -> Value {
         let wrap = IonEqualityValue::<'a, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
+
         let (l, r) = (self.0, other.0);
-        let l = l.iter().map(|(s, elt)| (s, wrap(elt)));
-        let r = r.iter().map(|(s, elt)| (s, wrap(elt)));
-        let res = l
-            .zip(r)
-            .all(|((ls, lelt), (rs, relt))| ls == rs && lelt.eqg(&relt) == Value::Boolean(true));
+        let res: bool = if l.len() == r.len() {
+            let l = l.iter().map(|(s, elt)| (s, wrap(elt)));
+            let r = r.iter().map(|(s, elt)| (s, wrap(elt)));
+            l.zip(r)
+                .all(|((ls, lelt), (rs, relt))| ls == rs && lelt.eqg(&relt) == Value::Boolean(true))
+        } else {
+            false
+        };
         Value::Boolean(res)
     }
 
@@ -757,6 +796,10 @@ impl Datum<Value> for BoxedIon {
             BoxedIonValue::Stream() => false,
             BoxedIonValue::Sequence(_) => false,
         }
+    }
+
+    fn is_missing(&self) -> bool {
+        false
     }
 
     fn is_sequence(&self) -> bool {

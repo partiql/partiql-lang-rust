@@ -50,7 +50,7 @@ impl TypeSatisfier for Static {
                             | (Static::DateTime, Value::DateTime(_))
                     )
                 }
-                DatumValueRef::Lower(lower) => {
+                DatumValueRef::Dynamic(lower) => {
                     // TODO this basically clones just to throw the value away after type-check; fix that
                     let lowered = lower.lower();
                     let lowered = lowered.expect("lower");
