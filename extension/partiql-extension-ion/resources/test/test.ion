@@ -1,0 +1,220 @@
+///////
+// These values taken from https://amazon-ion.github.io/ion-docs/docs/spec.html
+//////
+
+
+null
+
+nan
+-inf
++inf
+
+null.null       // Identical to unadorned null
+null.bool
+null.int
+null.float
+null.decimal
+null.timestamp
+null.string
+null.symbol
+null.blob
+null.clob
+null.struct
+null.list
+null.sexp
+
+
+
+null        // The type is null
+'null'      // The type is symbol
+null.list   // The type is list
+'null.int'  // The type is symbol
+
+
+null.bool
+true
+false
+
+
+null.int   // A null int value
+0          // Zero.  Surprise!
+-0         //   ...the same value with a minus sign
+123        // A normal int
+-123       // Another negative int
+0xBeef     // An int denoted in hexadecimal
+0b0101     // An int denoted in binary
+1_2_3      // An int with underscores
+0xFA_CE    // An int denoted in hexadecimal with underscores
+0b10_10_10 // An int denoted in binary with underscores
+
+_1         // A symbol (ints cannot start with underscores)
+
+
+null.decimal      // A null decimal value
+null.float        // A null float value
+
+0.123             // Type is decimal
+-0.12e4           // Type is float
+-0.12d4           // Type is decimal
+
+0E0               // Zero as float
+0D0               // Zero as decimal
+0.                //   ...the same decimal value with different notation
+-0e0              // Negative zero float   (distinct from positive zero)
+-0d0              // Negative zero decimal (distinct from positive zero)
+-0.               //   ...the same decimal value with different notation
+-0d-1             // Decimal maintains precision: -0. != -0.0
+
+123_456.789_012   // Decimal with underscores
+
+
+null.timestamp                   // A null timestamp value
+
+2007-02-23T12:14Z                // Seconds are optional, but local offset is not
+2007-02-23T12:14:33.079-08:00    // A timestamp with millisecond precision and PST local time
+2007-02-23T20:14:33.079Z         // The same instant in UTC ("zero" or "zulu")
+2007-02-23T20:14:33.079+00:00    // The same instant, with explicit local offset
+2007-02-23T20:14:33.079-00:00    // The same instant, with unknown local offset
+
+2007-01-01T00:00-00:00           // Happy New Year in UTC, unknown local offset
+2007-01-01                       // The same instant, with days precision, unknown local offset
+2007-01-01T                      //    The same value, different syntax.
+2007-01T                         // The same instant, with months precision, unknown local offset
+2007T                            // The same instant, with years precision, unknown local offset
+
+2007-02-23                       // A day, unknown local offset
+2007-02-23T00:00Z                // The same instant, but more precise and in UTC
+2007-02-23T00:00+00:00           // An equivalent format for the same value
+2007-02-23T00:00:00-00:00        // The same instant, with seconds precision
+
+2007                             // Not a timestamp, but an int
+
+2000T                            // January 1st 2000, year precision, unknown local offset
+2000-01-01T00:00:00Z             // January 1st 2000, second precision, UTC
+2000-01-01T00:00:00.000Z         // January 1st 2000, millisecond precision, UTC
+2000-01-01T00:00:00.000-00:00    // January 1st 2000, millisecond precision, negative zero local offset
+
+
+null.string            // A null string value
+""                     // An empty string value
+" my string "          // A normal string
+"\""                   // Contains one double-quote character
+"\uABCD"               // Contains one unicode character
+
+xml::"<e a='v'>c</e>"  // String with type annotation 'xml'
+
+
+
+
+( '''hello '''     // Sexp with one element
+  '''world!'''  )
+
+("hello world!")   // The exact same sexp value
+
+// This Ion value is a string containing three newlines. The serialized
+// form's first newline is escaped into nothingness.
+'''\
+The first line of the string.
+This is the second line of the string,
+and this is the third line.
+'''
+
+
+null.symbol  // A null symbol value
+'myVar2'     // A symbol
+myVar2       // The same symbol
+myvar2       // A different symbol
+'hi ho'      // Symbol requiring quotes
+'\'ahoy\''   // A symbol with embedded quotes
+''           // The empty symbol
+
+
+
+
+( 'x' '+' 'y' )  // S-expression with three symbols
+( x + y )        // The same three symbols
+(x+y)            // The same three symbols
+(a==b&&c==d)     // S-expression with seven symbols
+
+
+
+
+// A null blob value
+null.blob
+
+// A valid blob value with zero padding characters.
+{{
+  +AB/
+}}
+
+// A valid blob value with one required padding character.
+{{ VG8gaW5maW5pdHkuLi4gYW5kIGJleW9uZCE= }}
+
+// A valid blob value with two required padding characters.
+{{ dHdvIHBhZGRpbmcgY2hhcmFjdGVycw== }}
+
+
+
+
+null.clob  // A null clob value
+
+{{ "This is a CLOB of text." }}
+
+shift_jis ::
+{{
+  '''Another clob with user-defined encoding, '''
+  '''this time on multiple lines.'''
+}}
+
+
+
+
+null.struct                         // A null struct value
+{ }                                 // An empty struct value
+{ first : "Tom" , last: "Riddle" }  // Structure with two fields
+{"first":"Tom","last":"Riddle"}     // The same value with confusing style
+{center:{x:1.0, y:12.5}, radius:3}  // Nested struct
+{ x:1, }                            // Trailing comma is legal in Ion (unlike JSON)
+{ "":42 }                           // A struct value containing a field with an empty name
+{ x:1, x:null.int }                 // WARNING: repeated name 'x' leads to undefined behavior
+
+
+
+{ field_name: annotation:: value }     // Okay
+
+
+
+
+
+null.list         // A null list value
+[]                // An empty list value
+[1, 2, 3]         // List of three ints
+[ 1 , two ]       // List of an int and a symbol
+[a , [b]]         // Nested list
+[ 1.2, ]          // Trailing comma is legal in Ion (unlike JSON)
+
+
+null.sexp         // A null S-expression value
+()                // An empty expression value
+(cons 1 2)        // S-expression of three values
+([hello][there])  // S-expression containing two lists
+
+(a+-b)  ( 'a' '+-' 'b' )    // Equivalent; three symbols
+(a.b;)  ( 'a' '.' 'b' ';')  // Equivalent; four symbols
+
+
+(a/* word */b)       // An S-expression with two symbols and a comment
+(a '/*' word '*/' b) // An S-expression with five symbols
+
+
+
+
+
+int32::12                                // Suggests 32 bits as end-user type
+degrees::'celsius'::100                  // You can have multiple annotaions on a value
+'my.custom.type' :: { x : 12 , y : -1 }  // Gives a struct a user-defined type
+
+{ field: some_annotation::value }        // Field's name must precede annotations of its value
+
+
+

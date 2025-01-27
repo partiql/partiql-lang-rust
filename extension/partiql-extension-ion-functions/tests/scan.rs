@@ -103,7 +103,7 @@ fn ion_read_select_distinct(file: &str) {
 macro_rules! ion {
     ($x:expr) => {
         partiql_extension_ion::boxed_ion::BoxedIonType {}
-            .construct_str($x)
+            .value_from_str($x)
             .expect("boxed ion construct")
             .into_value()
     };

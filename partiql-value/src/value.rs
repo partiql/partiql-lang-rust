@@ -210,17 +210,20 @@ impl DatumLower<Value> for Value {
 impl Datum<Value> for Value {
     #[inline]
     fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
+        match self {
+            Value::Null => true,
+            Value::Variant(variant) => variant.is_null(),
+            _ => false,
+        }
     }
 
     #[inline]
     fn is_missing(&self) -> bool {
-        matches!(self, Value::Missing)
-    }
-
-    #[inline]
-    fn is_absent(&self) -> bool {
-        matches!(self, Value::Missing | Value::Null)
+        match self {
+            Value::Missing => true,
+            Value::Variant(variant) => variant.is_missing(),
+            _ => false,
+        }
     }
 
     #[inline]
