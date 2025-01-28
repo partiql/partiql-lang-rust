@@ -69,6 +69,7 @@ fn read() -> Value {
 }
 
 fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
+    use partiql_value::datum::RefTupleView;
     let mut result = if indent > 0 {
         format!("{:indent$}↳ {prefix}{value}\n", "")
     } else {
@@ -121,7 +122,7 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
         }
         DatumCategoryOwned::Sequence(seq) => {
             result += &seq.dump_seq_stats(indent + 2);
-            for (idx, child) in IntoIterator::into_iter(seq).enumerate() {
+            for (idx, child) in seq.into_iter().enumerate() {
                 result += &flatten_dump_owned("", child.clone(), indent + 2);
 
                 let taken_value = match value2.clone().into_category() {
@@ -140,7 +141,8 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
 fn dump_owned(ion: Value) -> String {
     let cat = ion.into_category();
     match cat {
-        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq)
+        DatumCategoryOwned::Sequence(seq) => seq
+            .into_iter()
             .map(|v| flatten_dump_owned("", v, 0))
             .collect(),
         _ => panic!("expected top level sequence"),
@@ -206,7 +208,7 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
 
             match value.clone().into_category() {
                 DatumCategoryOwned::Sequence(seq_owned) => {
-                    for (idx, child) in IntoIterator::into_iter(seq_owned).enumerate() {
+                    for (idx, child) in seq_owned.into_iter().enumerate() {
                         let get_value = seq.get_val(idx as i64).expect("get_val");
                         assert_eq!(&child, get_value.as_ref());
                         result += &flatten_dump_ref("", child, indent + 2);
@@ -224,7 +226,8 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
 fn dump_ref(ion: Value) -> String {
     let cat = ion.into_category();
     match cat {
-        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq)
+        DatumCategoryOwned::Sequence(seq) => seq
+            .into_iter()
             .map(|v| crate::flatten_dump_ref("", v, 0))
             .collect(),
         _ => panic!("expected top level sequence"),
@@ -238,7 +241,7 @@ fn all_types_ref() {
 
 fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
     let l: Vec<_> = match read().into_category() {
-        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq).collect(),
+        DatumCategoryOwned::Sequence(seq) => seq.into_iter().collect(),
         _ => panic!("expected top level sequence"),
     };
     let r = l.clone();

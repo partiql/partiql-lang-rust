@@ -26,6 +26,7 @@ trait TypeSatisfier {
 /// Type subsumbtion for  [`Static`]
 impl TypeSatisfier for Static {
     fn satisfies(&self, value: &Value) -> bool {
+        use partiql_value::datum::RefSequenceView;
         match (self.category(), value.category()) {
             (_, DatumCategoryRef::Null) => true,
             (_, DatumCategoryRef::Missing) => true,

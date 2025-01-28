@@ -378,10 +378,6 @@ impl OwnedSequenceView<Value> for BoxedIon {
         OwnedSequenceView::take_val(*self, k)
     }
 
-    fn into_iter(self) -> Box<dyn Iterator<Item = Value>> {
-        OwnedSequenceView::into_iter_boxed(Box::new(self))
-    }
-
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = Value>> {
         Box::new(
             self.into_dyn_iter()
@@ -460,10 +456,6 @@ impl OwnedTupleView<Value> for BoxedIon {
 
     fn take_val_boxed(self: Box<Self>, target_key: &BindingsName<'_>) -> Option<Value> {
         OwnedTupleView::take_val(*self, target_key)
-    }
-
-    fn into_iter(self) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
-        OwnedTupleView::into_iter_boxed(Box::new(self))
     }
 
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
