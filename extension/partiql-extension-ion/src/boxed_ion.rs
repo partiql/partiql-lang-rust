@@ -471,7 +471,7 @@ impl OwnedTupleView<Value> for BoxedIon {
         match doc {
             BoxedIonValue::Value(elt) => match elt.try_into_struct() {
                 Ok(strct) => Box::new(strct.into_iter().map(move |(name, value)| {
-                    let name = name.to_string();
+                    let name = name.text().unwrap_or("").to_string();
                     let value = Self::new_value(value, ctx.clone());
                     OwnedFieldView { name, value }
                 })),

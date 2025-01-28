@@ -1,11 +1,13 @@
 use itertools::Itertools;
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_value::datum::{
-    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedFieldView, SequenceDatum,
-    TupleDatum,
+    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedFieldView, OwnedSequenceView,
+    OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::{EqualityValue, NullableEq, Value};
+use partiql_value::{BindingsName, EqualityValue, NullableEq, Value};
+use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
+use std::ops::Not;
 
 trait DumpDatumStats {
     fn dump_datum_stats(&self, indent: usize) -> String;
@@ -74,6 +76,7 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
     };
     result += &value.dump_datum_stats(indent + 2);
 
+    let value2 = value.clone();
     match value.into_category() {
         DatumCategoryOwned::Null => {
             result += &format!("{:indent$}↳ NULL\n", "", indent = indent + 2)
@@ -83,14 +86,49 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
         }
         DatumCategoryOwned::Tuple(tuple) => {
             result += &tuple.dump_tuple_stats(indent + 2);
+
+            let mut found: HashMap<String, [Vec<_>; 2]> = HashMap::default();
             for OwnedFieldView { name, value } in tuple {
+                let entry = found.entry(name.clone()).or_default();
+
+                entry[0].push(value.clone());
                 result += &flatten_dump_owned(&format!("{name}: "), value, indent + 2);
+
+                let taken_value = match value2.clone().into_category() {
+                    DatumCategoryOwned::Tuple(tuple) => tuple
+                        .take_val(&BindingsName::CaseSensitive(name.clone().into()))
+                        .expect("value"),
+                    _ => unreachable!(),
+                };
+                entry[1].push(taken_value);
+            }
+
+            // assert that all 'taken' values (e.g. those reached via `.key` pathing) are also
+            // found via iteration of fields. Note that iteration of fields may find more values
+            // in the case that a key is duplicated in the struct/tuple
+            for (_, [iterated, taken]) in found {
+                if iterated.len() == 1 {
+                    // no duplicate keys
+                    assert_eq!(iterated[0], taken[0]);
+                } else {
+                    // the tuple had duplicated keys, iteration order is not specified
+                    // assert that 'taken' values are a subset of iterated values
+                    for v in taken {
+                        assert!(iterated.contains(&v));
+                    }
+                }
             }
         }
         DatumCategoryOwned::Sequence(seq) => {
             result += &seq.dump_seq_stats(indent + 2);
-            for child in seq {
-                result += &flatten_dump_owned("", child, indent + 2);
+            for (idx, child) in IntoIterator::into_iter(seq).enumerate() {
+                result += &flatten_dump_owned("", child.clone(), indent + 2);
+
+                let taken_value = match value2.clone().into_category() {
+                    DatumCategoryOwned::Sequence(seq) => seq.take_val(idx as i64).expect("value"),
+                    _ => unreachable!(),
+                };
+                assert_eq!(child, taken_value);
             }
         }
         DatumCategoryOwned::Scalar(_) => {
@@ -102,8 +140,7 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
 fn dump_owned(ion: Value) -> String {
     let cat = ion.into_category();
     match cat {
-        DatumCategoryOwned::Sequence(seq) => seq
-            .into_iter()
+        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq)
             .map(|v| flatten_dump_owned("", v, 0))
             .collect(),
         _ => panic!("expected top level sequence"),
@@ -130,10 +167,35 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
         }
         DatumCategoryRef::Tuple(tuple) => {
             result += &tuple.dump_tuple_stats(indent + 2);
-            match value.into_category() {
-                DatumCategoryOwned::Tuple(tuple) => {
-                    for OwnedFieldView { name, value } in tuple {
+            match value.clone().into_category() {
+                DatumCategoryOwned::Tuple(tuple_owned) => {
+                    let mut found: HashMap<String, (Vec<_>, Vec<_>)> = HashMap::default();
+                    for OwnedFieldView { name, value } in tuple_owned {
+                        let entry = found.entry(name.clone()).or_default();
+
+                        entry.0.push(value.clone());
                         result += &flatten_dump_ref(&format!("{name}: "), value, indent + 2);
+
+                        let get_val = tuple
+                            .get_val(&BindingsName::CaseSensitive(name.clone().into()))
+                            .expect("value");
+                        entry.1.push(get_val);
+                    }
+
+                    // assert that all 'taken' values (e.g. those reached via `.key` pathing) are also
+                    // found via iteration of fields. Note that iteration of fields may find more values
+                    // in the case that a key is duplicated in the struct/tuple
+                    for (_, (iterated, taken)) in found {
+                        if iterated.len() == 1 {
+                            // no duplicate keys
+                            assert_eq!(&iterated[0], taken[0].as_ref());
+                        } else {
+                            // the tuple had duplicated keys, iteration order is not specified
+                            // assert that 'taken' values are a subset of iterated values
+                            for v in taken {
+                                assert!(iterated.contains(&v));
+                            }
+                        }
                     }
                 }
                 _ => unreachable!(),
@@ -141,9 +203,12 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
         }
         DatumCategoryRef::Sequence(seq) => {
             result += &seq.dump_seq_stats(indent + 2);
-            match value.into_category() {
-                DatumCategoryOwned::Sequence(seq) => {
-                    for child in seq {
+
+            match value.clone().into_category() {
+                DatumCategoryOwned::Sequence(seq_owned) => {
+                    for (idx, child) in IntoIterator::into_iter(seq_owned).enumerate() {
+                        let get_value = seq.get_val(idx as i64).expect("get_val");
+                        assert_eq!(&child, get_value.as_ref());
                         result += &flatten_dump_ref("", child, indent + 2);
                     }
                 }
@@ -159,8 +224,7 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
 fn dump_ref(ion: Value) -> String {
     let cat = ion.into_category();
     match cat {
-        DatumCategoryOwned::Sequence(seq) => seq
-            .into_iter()
+        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq)
             .map(|v| crate::flatten_dump_ref("", v, 0))
             .collect(),
         _ => panic!("expected top level sequence"),
@@ -174,7 +238,7 @@ fn all_types_ref() {
 
 fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
     let l: Vec<_> = match read().into_category() {
-        DatumCategoryOwned::Sequence(seq) => seq.into_iter().collect(),
+        DatumCategoryOwned::Sequence(seq) => IntoIterator::into_iter(seq).collect(),
         _ => panic!("expected top level sequence"),
     };
     let r = l.clone();
@@ -183,9 +247,22 @@ fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
     let cartesian = l.into_iter().cartesian_product(r);
     for (left, right) in cartesian {
         let leq = EqualityValue::<'_, NULLS_EQUAL, NAN_EQUAL, _>(&left);
-
         let req = EqualityValue::<'_, NULLS_EQUAL, NAN_EQUAL, _>(&right);
+
+        // eq
         let eq_res = NullableEq::eq(&leq, &req);
+        let neq_res = NullableEq::neq(&leq, &req);
+        assert_eq!(eq_res, neq_res.not());
+
+        //eqg
+        let eqg_res = NullableEq::eqg(&leq, &req);
+        let neqg_res = NullableEq::neqg(&leq, &req);
+        assert_eq!(eqg_res, neqg_res.not());
+
+        // eqg always allows NULL=NULL
+        if NULLS_EQUAL {
+            assert_eq!(eq_res, eqg_res);
+        }
 
         // Only print when equal
         if eq_res == Value::Boolean(true) {
