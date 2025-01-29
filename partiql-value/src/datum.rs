@@ -1,6 +1,5 @@
 use crate::{
-    Bag, BagIntoIterator, BagIter, BindingsName, List, ListIntoIterator, ListIter, PairsIntoIter,
-    Tuple, Value,
+    Bag, BagIntoIterator, BindingsName, List, ListIntoIterator, PairsIntoIter, Tuple, Value,
 };
 use std::borrow::Cow;
 use std::error::Error;

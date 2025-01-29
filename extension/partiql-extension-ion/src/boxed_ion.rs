@@ -1,7 +1,7 @@
 use crate::util::{PartiqlValueTarget, ToPartiqlValue};
 use ion_rs::{
-    AnyEncoding, Element, ElementReader, IonError, IonResult, IonType, OwnedSequenceIterator,
-    Reader, Sequence, Struct,
+    AnyEncoding, Element, ElementReader, IonData, IonError, IonResult, IonType,
+    OwnedSequenceIterator, Reader, Sequence, Struct,
 };
 use partiql_value::boxed_variant::{
     BoxedVariant, BoxedVariantResult, BoxedVariantType, BoxedVariantTypeTag,
@@ -84,7 +84,7 @@ impl BoxedIonType {
         input: BufReader<I>,
     ) -> BoxedIonResult<BoxedIon> {
         let buff = Box::new(input);
-        BoxedIon::parse(buff, BoxedIonStreamType::Stream)
+        BoxedIon::parse_unknown(buff)
     }
 }
 
@@ -682,7 +682,8 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
                             == Value::Boolean(true)
                 }
 
-                _ => l == r,
+                // Use `IonData` wrapping to opt-in to Ion-value equality semantics
+                _ => IonData::from(l) == IonData::from(r),
             },
             _ => false,
         };

@@ -1,3 +1,5 @@
+use ion_rs::Element;
+use ion_rs::{IonData, WriteAsIon};
 use itertools::Itertools;
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_value::datum::{
@@ -59,8 +61,34 @@ impl<S: SequenceDatum> DumpSeqStats for S {
     }
 }
 
-fn read() -> Value {
-    let data = include_bytes!("../resources/test/test.ion");
+enum IonDataFormat {
+    StreamText,
+    StreamBinary,
+    SingleTlvText,
+    SingleTlvBinary,
+}
+
+fn read(fmt: IonDataFormat) -> Value {
+    let data: Vec<u8> = include_bytes!("../resources/test/test.ion").into();
+    let data = match fmt {
+        IonDataFormat::StreamText => data,
+        IonDataFormat::StreamBinary => Element::read_all(data.as_slice())
+            .expect("read all")
+            .encode_as(ion_rs::v1_0::Binary)
+            .expect("encode"),
+        IonDataFormat::SingleTlvText => {
+            let seq = Element::read_all(data.as_slice()).expect("read all");
+            let list: Element = ion_rs::Value::List(seq).into();
+
+            list.encode_as(ion_rs::v1_0::Text).expect("encode").into()
+        }
+        IonDataFormat::SingleTlvBinary => {
+            let seq = Element::read_all(data.as_slice()).expect("read all");
+            let list: Element = ion_rs::Value::List(seq).into();
+
+            list.encode_as(ion_rs::v1_0::Binary).expect("encode")
+        }
+    };
     let buf = BufReader::new(Cursor::new(data));
     let ion = BoxedIonType {}
         .stream_from_read(buf)
@@ -69,7 +97,6 @@ fn read() -> Value {
 }
 
 fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
-    use partiql_value::datum::RefTupleView;
     let mut result = if indent > 0 {
         format!("{:indent$}↳ {prefix}{value}\n", "")
     } else {
@@ -151,7 +178,7 @@ fn dump_owned(ion: Value) -> String {
 
 #[test]
 fn all_types_owned() {
-    insta::assert_snapshot!(dump_owned(read()));
+    insta::assert_snapshot!(dump_owned(read(IonDataFormat::StreamText)));
 }
 
 fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
@@ -236,11 +263,11 @@ fn dump_ref(ion: Value) -> String {
 
 #[test]
 fn all_types_ref() {
-    insta::assert_snapshot!(dump_ref(read()));
+    insta::assert_snapshot!(dump_ref(read(IonDataFormat::StreamText)));
 }
 
-fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
-    let l: Vec<_> = match read().into_category() {
+fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>(fmt: IonDataFormat) -> String {
+    let l: Vec<_> = match read(fmt).into_category() {
         DatumCategoryOwned::Sequence(seq) => seq.into_iter().collect(),
         _ => panic!("expected top level sequence"),
     };
@@ -278,17 +305,45 @@ fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
 
 #[test]
 fn all_types_eq_nulls_eq_nans_eq() {
-    insta::assert_snapshot!(dump_eq::<true, true>());
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!("nulls_eq_nans_eq", dump_eq::<true, true>(fmt));
+    }
 }
 #[test]
 fn all_types_eq_nulls_eq_nans_neq() {
-    insta::assert_snapshot!(dump_eq::<true, false>());
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!("nulls_eq_nans_neq", dump_eq::<true, false>(fmt));
+    }
 }
 #[test]
 fn all_types_eq_nulls_neq_nans_eq() {
-    insta::assert_snapshot!(dump_eq::<false, true>());
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!("nulls_neq_nans_eq", dump_eq::<false, true>(fmt));
+    }
 }
 #[test]
 fn all_types_eq_nulls_neq_nans_neq() {
-    insta::assert_snapshot!(dump_eq::<false, false>());
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!("nulls_neq_nans_neq", dump_eq::<false, false>(fmt));
+    }
 }
