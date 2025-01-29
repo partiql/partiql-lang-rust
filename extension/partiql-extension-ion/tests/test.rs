@@ -1,8 +1,9 @@
+use ion_rs::Element;
 use itertools::Itertools;
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_value::datum::{
-    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedFieldView, OwnedSequenceView,
-    OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
+    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, OwnedFieldView,
+    OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
 use partiql_value::{BindingsName, EqualityValue, NullableEq, Value};
 use std::collections::HashMap;
@@ -59,8 +60,35 @@ impl<S: SequenceDatum> DumpSeqStats for S {
     }
 }
 
-fn read() -> Value {
-    let data = include_bytes!("../resources/test/test.ion");
+#[derive(Debug)]
+enum IonDataFormat {
+    StreamText,
+    StreamBinary,
+    SingleTlvText,
+    SingleTlvBinary,
+}
+
+fn read(fmt: IonDataFormat) -> Value {
+    let data: Vec<u8> = include_bytes!("../resources/test/test.ion").into();
+    let data = match fmt {
+        IonDataFormat::StreamText => data,
+        IonDataFormat::StreamBinary => Element::read_all(data.as_slice())
+            .expect("read all")
+            .encode_as(ion_rs::v1_0::Binary)
+            .expect("encode"),
+        IonDataFormat::SingleTlvText => {
+            let seq = Element::read_all(data.as_slice()).expect("read all");
+            let list: Element = ion_rs::Value::List(seq).into();
+
+            list.encode_as(ion_rs::v1_0::Text).expect("encode").into()
+        }
+        IonDataFormat::SingleTlvBinary => {
+            let seq = Element::read_all(data.as_slice()).expect("read all");
+            let list: Element = ion_rs::Value::List(seq).into();
+
+            list.encode_as(ion_rs::v1_0::Binary).expect("encode")
+        }
+    };
     let buf = BufReader::new(Cursor::new(data));
     let ion = BoxedIonType {}
         .stream_from_read(buf)
@@ -74,17 +102,21 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
     } else {
         format!("{prefix}{value}\n")
     };
-    result += &value.dump_datum_stats(indent + 2);
+
+    let value_datum_stats = value.dump_datum_stats(indent + 2);
 
     let value2 = value.clone();
     match value.into_category() {
         DatumCategoryOwned::Null => {
+            result += &value_datum_stats;
             result += &format!("{:indent$}↳ NULL\n", "", indent = indent + 2)
         }
         DatumCategoryOwned::Missing => {
+            result += &value_datum_stats;
             result += &format!("{:indent$}↳ MISSING\n", "", indent = indent + 2)
         }
         DatumCategoryOwned::Tuple(tuple) => {
+            result += &value_datum_stats;
             result += &tuple.dump_tuple_stats(indent + 2);
 
             let mut found: HashMap<String, [Vec<_>; 2]> = HashMap::default();
@@ -120,6 +152,7 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
             }
         }
         DatumCategoryOwned::Sequence(seq) => {
+            result += &value_datum_stats;
             result += &seq.dump_seq_stats(indent + 2);
             for (idx, child) in seq.into_iter().enumerate() {
                 result += &flatten_dump_owned("", child.clone(), indent + 2);
@@ -131,8 +164,12 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
                 assert_eq!(child, taken_value);
             }
         }
-        DatumCategoryOwned::Scalar(_) => {
-            // N/A
+        DatumCategoryOwned::Scalar(v) => {
+            let datum_owned_value_stats = v.dump_datum_stats(indent + 2);
+            assert_eq!(value_datum_stats, datum_owned_value_stats);
+            let datum_lowered_value_stats = v.lower().unwrap().dump_datum_stats(indent + 2);
+            assert_eq!(datum_lowered_value_stats, datum_owned_value_stats);
+            result += &datum_owned_value_stats;
         }
     }
     result
@@ -150,7 +187,7 @@ fn dump_owned(ion: Value) -> String {
 
 #[test]
 fn all_types_owned() {
-    insta::assert_snapshot!(dump_owned(read()));
+    insta::assert_snapshot!(dump_owned(read(IonDataFormat::StreamText)));
 }
 
 fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
@@ -159,14 +196,19 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
     } else {
         format!("{prefix}{value}\n")
     };
-    result += &value.dump_datum_stats(indent + 2);
+    let value_datum_stats = value.dump_datum_stats(indent + 2);
 
     match value.category() {
-        DatumCategoryRef::Null => result += &format!("{:indent$}↳ NULL\n", "", indent = indent + 2),
+        DatumCategoryRef::Null => {
+            result += &value_datum_stats;
+            result += &format!("{:indent$}↳ NULL\n", "", indent = indent + 2)
+        }
         DatumCategoryRef::Missing => {
+            result += &value_datum_stats;
             result += &format!("{:indent$}↳ MISSING\n", "", indent = indent + 2)
         }
         DatumCategoryRef::Tuple(tuple) => {
+            result += &value_datum_stats;
             result += &tuple.dump_tuple_stats(indent + 2);
             match value.clone().into_category() {
                 DatumCategoryOwned::Tuple(tuple_owned) => {
@@ -203,6 +245,7 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
             }
         }
         DatumCategoryRef::Sequence(seq) => {
+            result += &value_datum_stats;
             result += &seq.dump_seq_stats(indent + 2);
 
             match value.clone().into_category() {
@@ -216,8 +259,16 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
                 _ => unreachable!(),
             }
         }
-        DatumCategoryRef::Scalar(_) => {
-            // N/A
+        DatumCategoryRef::Scalar(v) => {
+            let lowered = match value.clone().into_category() {
+                DatumCategoryOwned::Scalar(v) => v.into_lower(),
+                _ => unreachable!(),
+            };
+            let datum_owned_value_stats = v.dump_datum_stats(indent + 2);
+            assert_eq!(value_datum_stats, datum_owned_value_stats);
+            let datum_lowered_value_stats = lowered.unwrap().dump_datum_stats(indent + 2);
+            assert_eq!(datum_lowered_value_stats, datum_owned_value_stats);
+            result += &datum_owned_value_stats;
         }
     }
     result
@@ -235,11 +286,11 @@ fn dump_ref(ion: Value) -> String {
 
 #[test]
 fn all_types_ref() {
-    insta::assert_snapshot!(dump_ref(read()));
+    insta::assert_snapshot!(dump_ref(read(IonDataFormat::StreamText)));
 }
 
-fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
-    let l: Vec<_> = match read().into_category() {
+fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>(fmt: IonDataFormat) -> String {
+    let l: Vec<_> = match read(fmt).into_category() {
         DatumCategoryOwned::Sequence(seq) => seq.into_iter().collect(),
         _ => panic!("expected top level sequence"),
     };
@@ -277,17 +328,65 @@ fn dump_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>() -> String {
 
 #[test]
 fn all_types_eq_nulls_eq_nans_eq() {
-    insta::assert_snapshot!(dump_eq::<true, true>());
+    // There are some slight unexpected behavior in this equality
+    // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!(
+            format!("nulls_eq_nans_eq_{fmt:?}"),
+            dump_eq::<true, true>(fmt)
+        );
+    }
 }
 #[test]
 fn all_types_eq_nulls_eq_nans_neq() {
-    insta::assert_snapshot!(dump_eq::<true, false>());
+    // There are some slight unexpected behavior in this equality
+    // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!(
+            format!("nulls_eq_nans_neq_{fmt:?}"),
+            dump_eq::<true, false>(fmt)
+        );
+    }
 }
 #[test]
 fn all_types_eq_nulls_neq_nans_eq() {
-    insta::assert_snapshot!(dump_eq::<false, true>());
+    // There are some slight unexpected behavior in this equality
+    // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!(
+            format!("nulls_neq_nans_eq_{fmt:?}"),
+            dump_eq::<false, true>(fmt)
+        );
+    }
 }
 #[test]
 fn all_types_eq_nulls_neq_nans_neq() {
-    insta::assert_snapshot!(dump_eq::<false, false>());
+    // There are some slight unexpected behavior in this equality
+    // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+    for fmt in [
+        IonDataFormat::StreamText,
+        IonDataFormat::StreamBinary,
+        IonDataFormat::SingleTlvText,
+        IonDataFormat::SingleTlvBinary,
+    ] {
+        insta::assert_snapshot!(
+            format!("nulls_neq_nans_neq_{fmt:?}"),
+            dump_eq::<false, false>(fmt)
+        );
+    }
 }

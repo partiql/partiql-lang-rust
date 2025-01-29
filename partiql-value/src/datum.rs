@@ -44,7 +44,7 @@ where
 
 pub trait DatumValue<D: Datum<D>>: Datum<D> + Clone + Debug {}
 
-pub trait DatumLower<D: DatumValue<D>>: Debug {
+pub trait DatumLower<D: DatumValue<D>>: Datum<D> + Debug {
     fn into_lower(self) -> DatumLowerResult<D>;
 
     fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<D>;
@@ -351,6 +351,93 @@ impl Iterator for DatumSeqOwnedIterator {
             DatumSeqOwnedIterator::List(l) => l.next(),
             DatumSeqOwnedIterator::Bag(b) => b.next(),
             DatumSeqOwnedIterator::Dynamic(d) => d.next(),
+        }
+    }
+}
+
+impl Datum<Value> for DatumValueRef<'_> {
+    #[inline]
+    fn is_null(&self) -> bool {
+        match self {
+            DatumValueRef::Value(v) => v.is_null(),
+            DatumValueRef::Dynamic(d) => d.is_null(),
+        }
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        match self {
+            DatumValueRef::Value(v) => v.is_missing(),
+            DatumValueRef::Dynamic(d) => d.is_missing(),
+        }
+    }
+
+    #[inline]
+    fn is_sequence(&self) -> bool {
+        match self {
+            DatumValueRef::Value(v) => v.is_sequence(),
+            DatumValueRef::Dynamic(d) => d.is_sequence(),
+        }
+    }
+
+    #[inline]
+    fn is_ordered(&self) -> bool {
+        match self {
+            DatumValueRef::Value(v) => v.is_ordered(),
+            DatumValueRef::Dynamic(d) => d.is_ordered(),
+        }
+    }
+}
+
+impl Datum<Value> for DatumValueOwned {
+    #[inline]
+    fn is_null(&self) -> bool {
+        match self {
+            DatumValueOwned::Value(v) => v.is_null(),
+        }
+    }
+
+    #[inline]
+    fn is_missing(&self) -> bool {
+        match self {
+            DatumValueOwned::Value(v) => v.is_missing(),
+        }
+    }
+
+    #[inline]
+    fn is_sequence(&self) -> bool {
+        match self {
+            DatumValueOwned::Value(v) => v.is_sequence(),
+        }
+    }
+
+    #[inline]
+    fn is_ordered(&self) -> bool {
+        match self {
+            DatumValueOwned::Value(v) => v.is_ordered(),
+        }
+    }
+}
+
+impl DatumLower<Value> for DatumValueOwned {
+    #[inline]
+    fn into_lower(self) -> DatumLowerResult<Value> {
+        match self {
+            DatumValueOwned::Value(v) => v.into_lower(),
+        }
+    }
+
+    #[inline]
+    fn into_lower_boxed(self: Box<Self>) -> DatumLowerResult<Value> {
+        match *self {
+            DatumValueOwned::Value(v) => v.into_lower(),
+        }
+    }
+
+    #[inline]
+    fn lower(&self) -> DatumLowerResult<Cow<'_, Value>> {
+        match self {
+            DatumValueOwned::Value(v) => v.lower(),
         }
     }
 }

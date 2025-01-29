@@ -1,6 +1,6 @@
 ---
 source: extension/partiql-extension-ion/tests/test.rs
-expression: "dump_eq::<true, false>()"
+expression: "dump_eq::<true, false>(fmt)"
 ---
 `null` = `null` → true
 `null` = `null` → true

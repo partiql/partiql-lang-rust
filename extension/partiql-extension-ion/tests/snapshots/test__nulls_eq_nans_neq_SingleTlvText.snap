@@ -1,6 +1,6 @@
 ---
 source: extension/partiql-extension-ion/tests/test.rs
-expression: "dump_eq::<true, true>()"
+expression: "dump_eq::<true, false>(fmt)"
 ---
 `null` = `null` → true
 `null` = `null` → true
@@ -30,7 +30,6 @@ expression: "dump_eq::<true, true>()"
 `null` = `null.struct` → true
 `null` = `null.list` → true
 `null` = `null.sexp` → true
-`nan` = `nan` → true
 `-inf` = `-inf` → true
 `+inf` = `+inf` → true
 `null` = `null` → true

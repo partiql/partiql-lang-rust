@@ -518,7 +518,8 @@ impl PartiqlEncodedIonValueDecoder {
         let ion_ctor = Box::new(BoxedIonType {});
         let contents = elt.to_string();
         Ok(Value::from(
-            Variant::new(contents, ion_ctor).expect("variant"),
+            Variant::new(contents, ion_ctor)
+                .map_err(|e| IonDecodeError::StreamError(e.to_string()))?,
         ))
     }
 }
