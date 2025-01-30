@@ -92,24 +92,24 @@ fn wrap_eq<const NULLS_EQUAL: bool, const NAN_EQUAL: bool>(
     l: &DynBoxedVariant,
     r: &DynBoxedVariant,
 ) -> Value {
-    let (l, r) = get_values(l, r);
+    let (l, r) = dynvar_pair_to_boxed_ion(l, r);
     let wrap = IonEqualityValue::<'_, { NULLS_EQUAL }, { NAN_EQUAL }, _>;
     NullableEq::eq(&wrap(l), &wrap(r))
 }
 
 #[inline]
-fn get_value(l: &DynBoxedVariant) -> &BoxedIon {
+pub(crate) fn dynvar_to_boxed_ion(l: &DynBoxedVariant) -> &BoxedIon {
     l.as_any().downcast_ref::<BoxedIon>().expect("IonValue")
 }
 
 #[inline]
-fn get_values<'a, 'b>(
+fn dynvar_pair_to_boxed_ion<'a, 'b>(
     l: &'a DynBoxedVariant,
     r: &'b DynBoxedVariant,
 ) -> (&'a BoxedIon, &'b BoxedIon) {
     debug_assert_eq!(*l.type_tag(), *r.type_tag());
 
-    (get_value(l), get_value(r))
+    (dynvar_to_boxed_ion(l), dynvar_to_boxed_ion(r))
 }
 
 /// Errors in boxed Ion.
@@ -407,25 +407,17 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
     fn get_val(&self, target_key: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
         let matcher = target_key.matcher();
         let Self { doc, ctx } = self;
-        match doc {
-            BoxedIonValue::Stream() => {
-                todo!("RefTupleView::get_val for BoxedIonValue::Stream")
-            }
-            BoxedIonValue::Sequence(_seq) => None,
-            BoxedIonValue::Value(elt) => match elt.expect_struct() {
-                Ok(strct) => {
-                    for (k, elt) in strct {
-                        if let Some(k) = k.text() {
-                            if matcher.matches(k) {
-                                return Some(Cow::Owned(Self::new_value(elt.clone(), ctx.clone())));
-                            }
-                        }
+
+        if let BoxedIonValue::Value(elt) = doc {
+            if let Ok(strct) = elt.expect_struct() {
+                for (k, elt) in strct {
+                    if k.text().is_some_and(|k| matcher.matches(k)) {
+                        return Some(Cow::Owned(Self::new_value(elt.clone(), ctx.clone())));
                     }
-                    None
                 }
-                Err(_) => None,
-            },
+            }
         }
+        None
     }
 }
 
@@ -433,25 +425,17 @@ impl OwnedTupleView<Value> for BoxedIon {
     fn take_val(self, target_key: &BindingsName<'_>) -> Option<Value> {
         let matcher = target_key.matcher();
         let Self { doc, ctx } = self;
-        match doc {
-            BoxedIonValue::Stream() => {
-                todo!("OwnedTupleView::take_val for BoxedIonValue::Stream")
-            }
-            BoxedIonValue::Sequence(_) => None,
-            BoxedIonValue::Value(elt) => match elt.try_into_struct() {
-                Ok(strct) => {
-                    for (k, elt) in strct {
-                        if let Some(k) = k.text() {
-                            if matcher.matches(k) {
-                                return Some(Self::new_value(elt, ctx));
-                            }
-                        }
+
+        if let BoxedIonValue::Value(elt) = doc {
+            if let Ok(strct) = elt.try_into_struct() {
+                for (k, elt) in strct {
+                    if k.text().is_some_and(|k| matcher.matches(k)) {
+                        return Some(Self::new_value(elt, ctx));
                     }
-                    None
                 }
-                Err(_) => None,
-            },
+            }
         }
+        None
     }
 
     fn take_val_boxed(self: Box<Self>, target_key: &BindingsName<'_>) -> Option<Value> {
@@ -460,18 +444,16 @@ impl OwnedTupleView<Value> for BoxedIon {
 
     fn into_iter_boxed(self: Box<Self>) -> Box<dyn Iterator<Item = OwnedFieldView<Value>>> {
         let Self { doc, ctx } = *self;
-        match doc {
-            BoxedIonValue::Value(elt) => match elt.try_into_struct() {
-                Ok(strct) => Box::new(strct.into_iter().map(move |(name, value)| {
+        if let BoxedIonValue::Value(elt) = doc {
+            if let Ok(strct) = elt.try_into_struct() {
+                return Box::new(strct.into_iter().map(move |(name, value)| {
                     let name = name.text().unwrap_or("").to_string();
                     let value = Self::new_value(value, ctx.clone());
                     OwnedFieldView { name, value }
-                })),
-                Err(_) => Box::new(std::iter::empty()),
-            },
-
-            _ => Box::new(std::iter::empty()),
+                }));
+            }
         }
+        Box::new(std::iter::empty())
     }
 }
 
@@ -682,8 +664,9 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
                             == Value::Boolean(true)
                 }
 
-                // Use `IonData` wrapping to opt-in to Ion-value equality semantics
-                _ => IonData::from(l) == IonData::from(r),
+                // There are some slight unexpected behavior in this equality
+                // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+                _ => l == r,
             },
             _ => false,
         };
@@ -749,12 +732,6 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
 impl From<Element> for BoxedIonValue {
     fn from(value: Element) -> Self {
         BoxedIonValue::Value(value)
-    }
-}
-
-impl From<Sequence> for BoxedIonValue {
-    fn from(value: Sequence) -> Self {
-        BoxedIonValue::Sequence(value)
     }
 }
 
@@ -837,6 +814,9 @@ impl Iterator for BoxedIonIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use partiql_value::datum::DatumCategory;
+    use partiql_value::{Comparable, EqualityValue};
+    use std::cmp::Ordering;
 
     fn flatten_dump(doc: BoxedIon) {
         if doc.is_sequence() {
@@ -867,5 +847,168 @@ mod tests {
         dump(one_elt, BoxedIonStreamType::Unknown);
         dump(stream.clone(), BoxedIonStreamType::Stream);
         dump(stream, BoxedIonStreamType::Unknown);
+    }
+
+    #[test]
+    fn equality() {
+        let ty = BoxedIonType {};
+
+        let one_elt: Vec<u8> =
+            "[0, {a: 1, b:2, c: [], d: foo::(SYMBOL 3 2 1 {})}, [1,2,3,4,nan], null, (null nan)]"
+                .into();
+        let stream: Vec<u8> =
+            "0 {a: 1, b:2, c: [], d: foo::(SYMBOL 3 2 1 {})} [1,2,3,4,nan] null.int (null nan)"
+                .into();
+
+        let one_elt = BoxedIon::parse_tlv(Box::new(Cursor::new(one_elt))).expect("elt");
+        let stream = BoxedIon::parse_stream(Box::new(Cursor::new(stream))).expect("stream");
+
+        let one_elt = Box::new(one_elt).into_dyn_iter().expect("elt");
+        let stream = Box::new(stream).into_dyn_iter().expect("stream");
+        for (x, y) in one_elt.zip(stream) {
+            let (x, y) = (x.unwrap(), y.unwrap());
+
+            let contains_null = contains_null(x.clone().into_lower_boxed().unwrap());
+            let contains_nan = contains_nan(x.clone().into_lower_boxed().unwrap());
+
+            let eq = ty.value_eq(&x, &y);
+
+            let eqff = ty.value_eq_param(&x, &y, false, false);
+            let eqtf = ty.value_eq_param(&x, &y, true, false);
+            let eqft = ty.value_eq_param(&x, &y, false, true);
+            let eqtt = ty.value_eq_param(&x, &y, true, true);
+
+            assert_eq!(eq, eqtf);
+
+            match (contains_null, contains_nan) {
+                (false, false) => {
+                    assert!(eqff);
+                    assert!(eqtf);
+                    assert!(eqft);
+                    assert!(eqtt);
+                }
+                (true, false) => {
+                    assert!(!eqff);
+                    assert!(eqtf);
+                    assert!(!eqft);
+                    assert!(eqtt);
+                }
+                (false, true) => {
+                    assert!(!eqff);
+                    assert!(!eqtf);
+                    assert!(eqft);
+                    assert!(eqtt);
+                }
+                (true, true) => {
+                    assert!(!eqff);
+                    assert!(!eqtf);
+
+                    // Note that although `eqft` says NULL_EQUAL is false, PartiQL's eqg ensures embedded
+                    // NULLs are compared as equal
+                    assert!(eqft);
+                    assert!(eqtt);
+                }
+            }
+        }
+    }
+
+    fn contains_null(doc: Value) -> bool {
+        match doc.into_category() {
+            DatumCategoryOwned::Null => true,
+            DatumCategoryOwned::Tuple(t) => t
+                .into_iter()
+                .any(|OwnedFieldView { value, .. }| contains_null(value)),
+            DatumCategoryOwned::Sequence(seq) => seq.into_iter().any(contains_null),
+            DatumCategoryOwned::Scalar(s) => s.is_null(),
+            _ => false,
+        }
+    }
+
+    fn contains_nan(doc: Value) -> bool {
+        match doc.into_category() {
+            DatumCategoryOwned::Tuple(t) => t
+                .into_iter()
+                .any(|OwnedFieldView { value, .. }| contains_nan(value)),
+            DatumCategoryOwned::Sequence(seq) => seq.into_iter().any(contains_nan),
+            DatumCategoryOwned::Scalar(s) => {
+                let value = s.into_lower().unwrap();
+                match value {
+                    Value::Real(f) => f.is_nan(),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn eqg() {
+        let one_elt: Vec<u8> =
+            "[0, {a: 1, b:2, c: [], d: foo::(SYMBOL 3 2 1 {})}, [1,2,3,4], (a b c)]".into();
+        let stream: Vec<u8> =
+            "0 {a: 1, b:2, c: [], d: foo::(SYMBOL 3 2 1 {})} [1,2,3,4] (a b c)".into();
+
+        let one_elt = BoxedIon::parse_tlv(Box::new(Cursor::new(one_elt))).expect("elt");
+        let stream = BoxedIon::parse_stream(Box::new(Cursor::new(stream))).expect("stream");
+
+        let one_elt = one_elt.try_into_iter().expect("elt");
+        let stream = stream.try_into_iter().expect("stream");
+        for (x, y) in one_elt.zip(stream) {
+            let (x, y) = (x.unwrap(), y.unwrap());
+
+            let wrap = IonEqualityValue::<'_, true, true, BoxedIon>;
+            let wrap_val = IonEqualityValue::<'_, true, true, BoxedIonValue>;
+            let wrap_elt = IonEqualityValue::<'_, true, true, Element>;
+            let wrap_seq = IonEqualityValue::<'_, true, true, Sequence>;
+            let wrap_struct = IonEqualityValue::<'_, true, true, Struct>;
+
+            let (wx, wy) = (wrap(&x), wrap(&y));
+            assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+            let (wx, wy) = (wrap_val(&x.doc), wrap_val(&y.doc));
+            assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+
+            match (x.clone().doc, y.clone().doc) {
+                (BoxedIonValue::Value(vx), BoxedIonValue::Value(vy)) => {
+                    let (wx, wy) = (wrap_elt(&vx), wrap_elt(&vy));
+                    assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+
+                    match (vx.value(), vy.value()) {
+                        (ion_rs::Value::List(lx), ion_rs::Value::List(ly)) => {
+                            let (wx, wy) = (wrap_seq(lx), wrap_seq(ly));
+                            assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+                        }
+                        (ion_rs::Value::SExp(lx), ion_rs::Value::SExp(ly)) => {
+                            let (wx, wy) = (wrap_seq(lx), wrap_seq(ly));
+                            assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+                        }
+                        (ion_rs::Value::Struct(sx), ion_rs::Value::Struct(sy)) => {
+                            let (wx, wy) = (wrap_struct(sx), wrap_struct(sy));
+                            assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+                        }
+                        _ => (),
+                    }
+                }
+                (BoxedIonValue::Sequence(sx), BoxedIonValue::Sequence(sy)) => {
+                    let (wx, wy) = (wrap_seq(&sx), wrap_seq(&sy));
+                    assert_eq!(wx.eqg(&wy), Value::Boolean(true));
+                }
+                _ => unreachable!(),
+            }
+
+            let (xv, yv) = (
+                Value::Variant(Box::new(x.into())),
+                Value::Variant(Box::new(y.into())),
+            );
+            match (xv, yv) {
+                (Value::Variant(xv), Value::Variant(yv)) => {
+                    assert_eq!(xv.partial_cmp(&yv), Some(Ordering::Equal));
+                    assert!(xv.is_comparable_to(&yv));
+                    let wrap = EqualityValue::<'_, true, false, _>;
+                    let (xv, yv) = (wrap(&*xv), wrap(&*yv));
+                    assert_eq!(NullableEq::eqg(&xv, &yv), Value::Boolean(true));
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
