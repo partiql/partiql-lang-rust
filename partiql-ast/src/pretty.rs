@@ -697,28 +697,14 @@ impl PrettyDoc for Struct {
         D::Doc: Clone,
         A: Clone,
     {
-        let wrapped = self.fields.iter().map(|p| unsafe {
-            let x: &'b StructExprPair = std::mem::transmute(p);
-            x
+        let fields = self.fields.iter().map(|expr_pair| {
+            let k = expr_pair.first.pretty_doc(arena);
+            let v = expr_pair.second.pretty_doc(arena);
+            let sep = arena.text(": ");
+
+            k.append(sep).group().append(v).group()
         });
-        pretty_seq(wrapped, "{", "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
-    }
-}
-
-pub struct StructExprPair(pub ExprPair);
-
-impl PrettyDoc for StructExprPair {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        let k = self.0.first.pretty_doc(arena);
-        let v = self.0.second.pretty_doc(arena);
-        let sep = arena.text(": ");
-
-        k.append(sep).group().append(v).group()
+        pretty_seq_doc(fields, "{", None, "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
@@ -729,28 +715,14 @@ impl PrettyDoc for StructLit {
         D::Doc: Clone,
         A: Clone,
     {
-        let wrapped = self.fields.iter().map(|p| unsafe {
-            let x: &'b StructLitField = std::mem::transmute(p);
-            x
+        let fields = self.fields.iter().map(|expr_pair| {
+            let k = expr_pair.first.pretty_doc(arena);
+            let v = expr_pair.second.pretty_doc(arena);
+            let sep = arena.text(": ");
+
+            k.append(sep).group().append(v).group()
         });
-        pretty_seq(wrapped, "{", "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
-    }
-}
-
-pub struct StructLitField(pub LitField);
-
-impl PrettyDoc for StructLitField {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        let k = self.0.first.pretty_doc(arena);
-        let v = self.0.second.pretty_doc(arena);
-        let sep = arena.text(": ");
-
-        k.append(sep).group().append(v).group()
+        pretty_seq_doc(fields, "{", None, "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 

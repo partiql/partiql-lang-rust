@@ -1,6 +1,7 @@
 use crate::{Bag, DateTime, List, Tuple, Value};
 use partiql_common::pretty::{
-    pretty_prefixed_doc, pretty_seq, pretty_surrounded, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
+    pretty_prefixed_doc, pretty_seq, pretty_seq_doc, pretty_surrounded, PrettyDoc,
+    PRETTY_INDENT_MINOR_NEST,
 };
 use pretty::{DocAllocator, DocBuilder};
 
@@ -84,36 +85,20 @@ impl PrettyDoc for Bag {
 }
 
 impl PrettyDoc for Tuple {
-    #[inline]
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
         A: Clone,
     {
-        let wrapped = self.pairs().map(|p| unsafe {
-            let x: &'b StructValuePair<'b> = std::mem::transmute(&p);
-            x
+        let seq = self.pairs().map(|(k, v)| {
+            let k = k.pretty_doc(arena);
+            let v = v.pretty_doc(arena);
+            let sep = arena.text(": ");
+
+            k.append(sep).group().append(v).group()
         });
-        pretty_seq(wrapped, "{", "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
-    }
-}
-
-pub struct StructValuePair<'a>((&'a String, &'a Value));
-
-impl PrettyDoc for StructValuePair<'_> {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        let (k, v) = self.0;
-        let k = k.pretty_doc(arena);
-        let v = v.pretty_doc(arena);
-        let sep = arena.text(": ");
-
-        k.append(sep).group().append(v).group()
+        pretty_seq_doc(seq, "{", None, "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
     }
 }
 
