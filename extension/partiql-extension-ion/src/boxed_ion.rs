@@ -565,6 +565,31 @@ impl BoxedIon {
 
         Ok(BoxedIonIterator { ctx, inner })
     }
+
+    pub(crate) fn try_into_element(&self) -> BoxedIonResult<Element> {
+        let elt = if let BoxedIonValue::Value(elt) = &self.doc {
+            elt.clone()
+        } else if let BoxedIonValue::Sequence(seq) = &self.doc {
+            Element::from(ion_rs::Value::List(seq.clone()))
+        } else {
+            todo!()
+            /*
+            let mut elts = Vec::new();
+            for ion in self.try_into_iter()? {
+                elts.push(ion?.try_into_element()?);
+            }
+            Element::from(ion_rs::Value::List(elts.into()))
+
+             */
+        };
+        Ok(elt)
+    }
+
+    // TODO remove this double-encoding once encode/decode are upgraded
+    // to latest ion-rs
+    pub(crate) fn try_into_element_encoded(&self) -> BoxedIonResult<Vec<u8>> {
+        Ok(self.try_into_element()?.encode_as(ion_rs::v1_0::Binary)?)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1003,8 +1028,8 @@ mod tests {
                 (Value::Variant(xv), Value::Variant(yv)) => {
                     assert_eq!(xv.partial_cmp(&yv), Some(Ordering::Equal));
                     assert!(xv.is_comparable_to(&yv));
-                    let wrap = EqualityValue::<'_, true, false, _>;
-                    let (xv, yv) = (wrap(&*xv), wrap(&*yv));
+                    let wrap = EqualityValue::<'_, true, false, Variant>;
+                    let (xv, yv) = (wrap(&xv), wrap(&yv));
                     assert_eq!(NullableEq::eqg(&xv, &yv), Value::Boolean(true));
                 }
                 _ => unreachable!(),

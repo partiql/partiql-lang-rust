@@ -511,8 +511,15 @@ impl PartiqlEncodedIonValueDecoder {
     where
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
+        let annot: Vec<_> = reader
+            .annotations()
+            .skip(1) // skip the `$ion` boxing annotation
+            .filter_map(|s| s.ok().and_then(|s| s.text().map(|s| s.to_string())))
+            .collect();
         let mut loader = ion_elt::ElementLoader::for_reader(reader);
         let elt = loader.materialize_current()?.unwrap();
+        let elt = elt.with_annotations(annot);
+
         let ion_ctor = Box::new(BoxedIonType {});
         let contents = elt.to_string();
         Ok(Value::from(
@@ -592,7 +599,7 @@ where
 // Code in this module is copied from ion-rs v0.18, in order to make use of `materialize_current`,
 // which is not exposed there.
 mod ion_elt {
-    use ion_rs_old::element::{Element, Sequence, Struct, Value};
+    use ion_rs_old::element::{Element, IntoAnnotatedElement, Sequence, Struct, Value};
     use ion_rs_old::{IonReader, IonResult, StreamItem, Symbol};
 
     /// Helper type; wraps an [ElementReader] and recursively materializes the next value in the
@@ -657,7 +664,7 @@ mod ion_elt {
                     }
                 }
             };
-            Ok(Some(Element::from(value)))
+            Ok(Some(value.with_annotations(annotations)))
         }
 
         /// Steps into the current sequence and materializes each of its children to construct

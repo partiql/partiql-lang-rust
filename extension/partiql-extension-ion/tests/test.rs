@@ -1,11 +1,17 @@
 use ion_rs::Element;
+use ion_rs_old::element::writer::TextKind;
 use itertools::Itertools;
+use partiql_common::pretty::ToPretty;
 use partiql_extension_ion::boxed_ion::BoxedIonType;
+
+use partiql_extension_ion::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
+use partiql_extension_ion::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
+use partiql_extension_ion::Encoding;
 use partiql_value::datum::{
     Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, OwnedFieldView,
     OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::{BindingsName, EqualityValue, NullableEq, Value};
+use partiql_value::{Bag, BindingsName, EqualityValue, NullableEq, Value};
 use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 use std::ops::Not;
@@ -389,4 +395,44 @@ fn all_types_eq_nulls_neq_nans_neq() {
             dump_eq::<false, false>(fmt)
         );
     }
+}
+
+fn decode_ion_text(contents: &str, encoding: Encoding) -> IonDecodeResult {
+    let reader = ion_rs_old::ReaderBuilder::new().build(contents)?;
+    let mut iter =
+        IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(encoding)).build(reader)?;
+
+    let val = iter.next();
+
+    val.unwrap()
+}
+
+fn encode_ion_text(value: &Value, encoding: Encoding) -> Result<String, IonEncodeError> {
+    let mut buff = vec![];
+    let mut writer = ion_rs_old::TextWriterBuilder::new(TextKind::Compact)
+        .build(&mut buff)
+        .expect("writer");
+    let mut encoder = IonEncoderBuilder::new(IonEncoderConfig::default().with_mode(encoding))
+        .build(&mut writer)?;
+
+    encoder.write_value(value)?;
+
+    drop(encoder);
+    drop(writer);
+
+    Ok(String::from_utf8(buff).expect("string"))
+}
+
+#[test]
+fn rountrip() {
+    let data = read(IonDataFormat::StreamText);
+    let bag: Bag = data.into_iter().collect();
+    let val = Value::from(bag);
+
+    let encoded = encode_ion_text(&val, Encoding::PartiqlEncodedAsIon).unwrap();
+    let round_tripped = decode_ion_text(&encoded, Encoding::PartiqlEncodedAsIon).unwrap();
+
+    let original = val.to_pretty_string(80).unwrap();
+    let round_tripped = round_tripped.to_pretty_string(80).unwrap();
+    assert_eq!(original, round_tripped);
 }
