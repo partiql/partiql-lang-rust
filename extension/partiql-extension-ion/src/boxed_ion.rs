@@ -566,6 +566,31 @@ impl BoxedIon {
 
         Ok(BoxedIonIterator { ctx, inner })
     }
+
+    pub(crate) fn try_into_element(&self) -> BoxedIonResult<Element> {
+        let elt = if let BoxedIonValue::Value(elt) = &self.doc {
+            elt.clone()
+        } else if let BoxedIonValue::Sequence(seq) = &self.doc {
+            Element::from(ion_rs::Value::List(seq.clone()))
+        } else {
+            todo!()
+            /*
+            let mut elts = Vec::new();
+            for ion in self.try_into_iter()? {
+                elts.push(ion?.try_into_element()?);
+            }
+            Element::from(ion_rs::Value::List(elts.into()))
+
+             */
+        };
+        Ok(elt)
+    }
+
+    // TODO remove this double-encoding once encode/decode are upgraded
+    // to latest ion-rs
+    pub(crate) fn try_into_element_encoded(&self) -> BoxedIonResult<Vec<u8>> {
+        Ok(self.try_into_element()?.encode_as(ion_rs::v1_0::Binary)?)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -636,41 +661,43 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
         let (l, r) = (self.0, other.0);
         let (lty, rty) = (l.ion_type(), r.ion_type());
 
-        let result = if l.is_null() && r.is_null() {
-            NULLS_EQUAL && l.annotations().eq(r.annotations())
-        } else {
-            match (lty, rty) {
-                (IonType::Float, IonType::Float) => {
-                    let (lf, rf) = (l.as_float().unwrap(), r.as_float().unwrap());
-                    if lf.is_nan() && rf.is_nan() {
-                        NAN_EQUAL && l.annotations().eq(r.annotations())
-                    } else {
-                        lf == rf
+        let result = match (l.is_null(), r.is_null()) {
+            (true, true) => NULLS_EQUAL && l.annotations().eq(r.annotations()),
+            (false, false) => {
+                match (lty, rty) {
+                    (IonType::Float, IonType::Float) => {
+                        let (lf, rf) = (l.as_float().unwrap(), r.as_float().unwrap());
+                        if lf.is_nan() && rf.is_nan() {
+                            NAN_EQUAL && l.annotations().eq(r.annotations())
+                        } else {
+                            lf == rf
+                        }
                     }
-                }
 
-                (IonType::List, IonType::List) => {
-                    let (ls, rs) = (l.as_list().unwrap(), r.as_list().unwrap());
-                    l.annotations().eq(r.annotations())
-                        && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
-                }
-                (IonType::SExp, IonType::SExp) => {
-                    let (ls, rs) = (l.as_sexp().unwrap(), r.as_sexp().unwrap());
-                    l.annotations().eq(r.annotations())
-                        && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
-                }
+                    (IonType::List, IonType::List) => {
+                        let (ls, rs) = (l.as_list().unwrap(), r.as_list().unwrap());
+                        l.annotations().eq(r.annotations())
+                            && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
+                    }
+                    (IonType::SExp, IonType::SExp) => {
+                        let (ls, rs) = (l.as_sexp().unwrap(), r.as_sexp().unwrap());
+                        l.annotations().eq(r.annotations())
+                            && NullableEq::eq(&wrap_seq(ls), &wrap_seq(rs)) == Value::Boolean(true)
+                    }
 
-                (IonType::Struct, IonType::Struct) => {
-                    let (ls, rs) = (l.as_struct().unwrap(), r.as_struct().unwrap());
-                    l.annotations().eq(r.annotations())
-                        && NullableEq::eq(&wrap_struct(ls), &wrap_struct(rs))
-                            == Value::Boolean(true)
-                }
+                    (IonType::Struct, IonType::Struct) => {
+                        let (ls, rs) = (l.as_struct().unwrap(), r.as_struct().unwrap());
+                        l.annotations().eq(r.annotations())
+                            && NullableEq::eq(&wrap_struct(ls), &wrap_struct(rs))
+                                == Value::Boolean(true)
+                    }
 
-                // There are some slight unexpected behavior in this equality
-                // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
-                _ => l == r,
+                    // There are some slight unexpected behavior in this equality
+                    // Check https://github.com/amazon-ion/ion-rust/issues/903 for fixes
+                    _ => l == r,
+                }
             }
+            _ => false,
         };
 
         Value::Boolean(result)
@@ -744,12 +771,6 @@ impl<'a, const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
 impl From<Element> for BoxedIonValue {
     fn from(value: Element) -> Self {
         BoxedIonValue::Value(value)
-    }
-}
-
-impl From<Sequence> for BoxedIonValue {
-    fn from(value: Sequence) -> Self {
-        BoxedIonValue::Sequence(value)
     }
 }
 
@@ -835,7 +856,6 @@ mod tests {
     use partiql_value::datum::DatumCategory;
     use partiql_value::{Comparable, EqualityValue};
     use std::cmp::Ordering;
-    use NullableEq;
 
     fn flatten_dump(doc: BoxedIon) {
         if doc.is_sequence() {
@@ -1022,8 +1042,8 @@ mod tests {
                 (Value::Variant(xv), Value::Variant(yv)) => {
                     assert_eq!(xv.partial_cmp(&yv), Some(Ordering::Equal));
                     assert!(xv.is_comparable_to(&yv));
-                    let wrap = EqualityValue::<'_, true, false, _>;
-                    let (xv, yv) = (wrap(xv.as_ref()), wrap(yv.as_ref()));
+                    let wrap = EqualityValue::<'_, true, false, Variant>;
+                    let (xv, yv) = (wrap(&xv), wrap(&yv));
                     assert_eq!(NullableEq::eqg(&xv, &yv), Value::Boolean(true));
                 }
                 _ => unreachable!(),

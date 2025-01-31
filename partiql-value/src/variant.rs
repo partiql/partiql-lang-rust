@@ -35,6 +35,14 @@ impl Variant {
         let variant = Unparsed::new(contents, type_tag)?.parse()?;
         Ok(Self { variant })
     }
+
+    pub fn type_tag(&self) -> BoxedVariantTypeTag {
+        self.variant.type_tag()
+    }
+
+    pub fn dyn_variant(&self) -> &DynBoxedVariant {
+        &self.variant
+    }
 }
 
 impl<T> From<T> for Variant

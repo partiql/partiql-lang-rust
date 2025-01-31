@@ -1,13 +1,16 @@
 use delegate::delegate;
 
+use ion_rs_old::element::reader::ElementReader;
+use ion_rs_old::element::writer::ElementWriter;
 use ion_rs_old::{IonError, IonType, IonWriter};
 use ordered_float::OrderedFloat;
-use partiql_value::{Bag, DateTime, List, Tuple, Value};
+use partiql_value::{Bag, DateTime, List, Tuple, Value, Variant};
 use rust_decimal::Decimal;
 
+use crate::boxed_ion::{dynvar_to_boxed_ion, BoxedIonType};
 use crate::common::{
-    BAG_ANNOT, DATE_ANNOT, MISSING_ANNOT, TIME_ANNOT, TIME_PART_HOUR_KEY, TIME_PART_MINUTE_KEY,
-    TIME_PART_SECOND_KEY, TIME_PART_TZ_HOUR_KEY, TIME_PART_TZ_MINUTE_KEY,
+    BAG_ANNOT, BOXED_ION_ANNOT, DATE_ANNOT, MISSING_ANNOT, TIME_ANNOT, TIME_PART_HOUR_KEY,
+    TIME_PART_MINUTE_KEY, TIME_PART_SECOND_KEY, TIME_PART_TZ_HOUR_KEY, TIME_PART_TZ_MINUTE_KEY,
 };
 use crate::Encoding;
 use thiserror::Error;
@@ -132,9 +135,7 @@ where
             Value::List(l) => self.encode_list(l.as_ref()),
             Value::Bag(b) => self.encode_bag(b.as_ref()),
             Value::Tuple(t) => self.encode_tuple(t.as_ref()),
-            Value::Variant(_) => {
-                todo!("ion encode embedded doc")
-            }
+            Value::Variant(v) => self.encode_variant(v),
         }
     }
 
@@ -150,6 +151,7 @@ where
     fn encode_list(&mut self, val: &List) -> IonEncodeResult;
     fn encode_bag(&mut self, val: &Bag) -> IonEncodeResult;
     fn encode_tuple(&mut self, val: &Tuple) -> IonEncodeResult;
+    fn encode_variant(&mut self, val: &Variant) -> IonEncodeResult;
 }
 
 impl<'a, W, I> ValueEncoder<W, I> for SimpleIonValueEncoder<'a, W, I>
@@ -284,6 +286,10 @@ where
     fn encode_tuple(&mut self, val: &Tuple) -> IonEncodeResult {
         encode_tuple(self, val)
     }
+
+    fn encode_variant(&mut self, _: &Variant) -> IonEncodeResult {
+        Err(IonEncodeError::UnsupportedType("variant"))
+    }
 }
 
 #[inline]
@@ -412,6 +418,33 @@ where
 
     fn encode_tuple(&mut self, val: &Tuple) -> IonEncodeResult {
         encode_tuple(self, val)
+    }
+
+    fn encode_variant(&mut self, var: &Variant) -> IonEncodeResult {
+        let ion_ctor = Box::new(BoxedIonType {});
+        let var_type = var.type_tag();
+        if var_type != ion_ctor {
+            Err(IonEncodeError::UnsupportedType("non-ion variants"))
+        } else {
+            let var = var.dyn_variant();
+            let ion = dynvar_to_boxed_ion(var);
+
+            let box_annot = std::iter::once(BOXED_ION_ANNOT);
+            // TODO remove this double-encoding once encode/decode are upgraded
+            let element = ion.try_into_element_encoded().expect("ion elt");
+            let mut reader = ion_rs_old::ReaderBuilder::new().build(element)?;
+
+            let element = reader.read_one_element()?;
+            let elt_annot: Vec<String> = element
+                .annotations()
+                .into_iter()
+                .filter_map(|s| s.text().map(|s| s.to_string()))
+                .collect();
+            let annot = box_annot.chain(elt_annot.iter().map(String::as_str));
+            let element = element.with_annotations(annot);
+            self.inner.writer.write_element(&element)?;
+            Ok(())
+        }
     }
 
     delegate! {
