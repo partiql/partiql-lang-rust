@@ -1,0 +1,12 @@
+---
+source: partiql/tests/ion.rs
+expression: "result.to_pretty_string(25).expect(\"pretty\")"
+---
+[
+  { 'x': `1`::ion },
+  { 'x': 2 },
+  { 'x': `3`::ion },
+  { 'x': 4 },
+  { 'x': `5`::ion },
+  { 'x': 6 }
+]

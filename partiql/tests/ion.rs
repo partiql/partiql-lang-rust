@@ -59,11 +59,22 @@ fn ion_iter() {
 
 #[test]
 fn ion_cmp() {
-    let query = "`foo` < `bar` OR `1.2` > `1`";
+    let queries = [
+        ["struct", "{ 'ion_lt_pql': `1` < 2, 'pql_lt_ion': 1 < `2`}"],
+        [
+            "ORDER BY",
+            "SELECT x from <<`1`, 2, `3`, 4, `5`, 3+`3`>> as x ORDER BY x",
+        ],
+        ["ORed", "`foo` < `bar` OR `1.2` > `1`"],
+    ];
+    for [name, query] in queries {
+        let res = eval(query, EvaluationMode::Permissive);
+        assert_matches!(res, Ok(_));
+        let result = res.unwrap().result;
 
-    let res = eval(query, EvaluationMode::Permissive);
-    assert_matches!(res, Ok(_));
-    let result = res.unwrap().result;
-
-    insta::assert_snapshot!(result.to_pretty_string(25).expect("pretty"));
+        insta::assert_snapshot!(
+            format!("ion_cmp_{name}"),
+            result.to_pretty_string(25).expect("pretty")
+        );
+    }
 }

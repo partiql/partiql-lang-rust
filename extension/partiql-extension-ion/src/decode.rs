@@ -512,7 +512,9 @@ impl PartiqlEncodedIonValueDecoder {
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
         let mut loader = ion_elt::ElementLoader::for_reader(reader);
-        let elt = loader.materialize_current()?.unwrap();
+        let elt = loader
+            .materialize_current()?
+            .ok_or_else(|| IonDecodeError::StreamError("No current value found".into()))?;
         let ion_ctor = Box::new(BoxedIonType {});
         let contents = elt.to_string();
         Ok(Value::from(
@@ -660,7 +662,7 @@ mod ion_elt {
         }
 
         /// Steps into the current sequence and materializes each of its children to construct
-        /// an [`Vec<Element>`]. When all of the the children have been materialized, steps out.
+        /// an [`Vec<Element>`]. When all of the children have been materialized, steps out.
         /// The reader MUST be positioned over a list or s-expression when this is called.
         fn materialize_sequence(&mut self) -> IonResult<Sequence> {
             let mut child_elements = Vec::new();
@@ -673,7 +675,7 @@ mod ion_elt {
         }
 
         /// Steps into the current struct and materializes each of its fields to construct
-        /// an [`Struct`]. When all of the the fields have been materialized, steps out.
+        /// an [`Struct`]. When all of the fields have been materialized, steps out.
         /// The reader MUST be positioned over a struct when this is called.
         fn materialize_struct(&mut self) -> IonResult<Struct> {
             let mut child_elements = Vec::new();
