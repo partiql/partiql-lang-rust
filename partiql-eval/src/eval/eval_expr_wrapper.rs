@@ -50,7 +50,7 @@ impl TypeSatisfier for Static {
                             | (Static::DateTime, Value::DateTime(_))
                     )
                 }
-                DatumValueRef::Lower(lower) => {
+                DatumValueRef::Lower(_) => {
                     unreachable!("Value must be 'lower'ed before trying to satisfy")
                 }
             },

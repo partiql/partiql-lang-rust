@@ -1,0 +1,8 @@
+---
+source: partiql/tests/ion.rs
+expression: "result.to_pretty_string(25).expect(\"pretty\")"
+---
+{
+  'ion_lt_pql': true,
+  'pql_lt_ion': true
+}

@@ -15,7 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
-use partiql_value::datum::Datum;
+use partiql_value::datum::{Datum, DatumLower, DatumLowerResult};
 use std::rc::Rc;
 
 #[macro_export]
@@ -1008,7 +1008,10 @@ impl Evaluable for EvalOrderBy {
     fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
         let input_value = take_input!(self.input.take(), ctx);
 
-        let mut values = input_value.into_iter().collect_vec();
+        let values: DatumLowerResult<Vec<_>> =
+            input_value.into_iter().map(|v| v.into_lower()).collect();
+        // TODO handle lowering error
+        let mut values = values.expect("lower");
         values.sort_by(|l, r| self.compare(l, r, ctx));
         Value::from(List::from(values))
     }
