@@ -3,6 +3,7 @@
 
 mod bag;
 mod bindings;
+pub mod boxed_variant;
 pub mod comparison;
 mod datetime;
 pub mod datum;
@@ -12,6 +13,7 @@ mod sort;
 mod tuple;
 mod util;
 mod value;
+mod variant;
 
 pub use bag::*;
 pub use bindings::*;
@@ -22,6 +24,7 @@ pub use pretty::*;
 pub use sort::*;
 pub use tuple::*;
 pub use value::*;
+pub use variant::*;
 
 #[cfg(test)]
 mod tests {

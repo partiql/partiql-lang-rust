@@ -26,6 +26,7 @@ impl PrettyDoc for Value {
             Value::List(inner) => inner.pretty_doc(arena),
             Value::Bag(inner) => inner.pretty_doc(arena),
             Value::Tuple(inner) => inner.pretty_doc(arena),
+            Value::Variant(inner) => inner.pretty_doc(arena),
         }
     }
 }

@@ -2,7 +2,7 @@ use itertools::{Either, Itertools};
 use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
-    LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
+    Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
     SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
 };
 use petgraph::prelude::StableGraph;
@@ -24,7 +24,9 @@ use crate::eval::expr::{
 };
 use crate::eval::EvalPlan;
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
-use partiql_value::Value;
+use partiql_extension_ion::boxed_ion::BoxedIonType;
+use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
+use partiql_value::{Bag, List, Tuple, Value, Variant};
 
 #[macro_export]
 macro_rules! correct_num_args_or_err {
@@ -57,6 +59,24 @@ pub struct EvaluatorPlanner<'c> {
     mode: EvaluationMode,
     catalog: &'c dyn Catalog,
     errors: Vec<PlanningError>,
+}
+
+impl From<(&str, BindError)> for PlanningError {
+    fn from((name, err): (&str, BindError)) -> Self {
+        match err {
+            BindError::ArgNumMismatch { .. } => {
+                PlanningError::IllegalState(format!("Wrong number of arguments for {name}"))
+            }
+            BindError::Unknown => {
+                PlanningError::IllegalState(format!("Unknown error binding {name}"))
+            }
+            BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
+            BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
+            BindError::LiteralValue(err) => {
+                PlanningError::IllegalState(format!("Literal error: {}", err))
+            }
+        }
+    }
 }
 
 impl From<&logical::SetQuantifier> for eval::evaluable::SetQuantifier {
@@ -350,23 +370,7 @@ impl<'c> EvaluatorPlanner<'c> {
     ) -> Box<dyn EvalExpr> {
         match op {
             Ok(op) => op,
-            Err(err) => {
-                let err = match err {
-                    BindError::ArgNumMismatch { .. } => {
-                        PlanningError::IllegalState(format!("Wrong number of arguments for {name}"))
-                    }
-                    BindError::Unknown => {
-                        PlanningError::IllegalState(format!("Unknown error binding {name}"))
-                    }
-                    BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
-                    BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
-                    BindError::LiteralValue(err) => {
-                        PlanningError::IllegalState(format!("Literal error: {}", err))
-                    }
-                };
-
-                self.err(err)
-            }
+            Err(err) => self.err((name, err).into()),
         }
     }
 
@@ -394,7 +398,10 @@ impl<'c> EvaluatorPlanner<'c> {
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
-                EvalLitExpr::new(Value::from(lit.as_ref().clone())).bind::<{ STRICT }>(vec![]),
+                match plan_lit(lit.as_ref()) {
+                    Ok(lit) => EvalLitExpr::new(lit).bind::<{ STRICT }>(vec![]),
+                    Err(e) => Ok(self.err(e) as Box<dyn EvalExpr>),
+                },
             ),
             ValueExpr::Path(expr, components) => (
                 "path",
@@ -472,10 +479,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     Pattern::Like(logical::LikeMatch { pattern, escape }) => {
                         match EvalLikeMatch::create(pattern, escape) {
                             Ok(like) => like.bind::<{ STRICT }>(plan_args(&[value])),
-                            Err(err) => {
-                                self.errors.push(err);
-                                Ok(Box::new(ErrorNode::new()) as Box<dyn EvalExpr>)
-                            }
+                            Err(err) => Ok(self.err(err) as Box<dyn EvalExpr>),
                         }
                     }
                     Pattern::LikeNonStringNonLiteral(logical::LikeNonStringNonLiteralMatch {
@@ -777,6 +781,43 @@ impl<'c> EvaluatorPlanner<'c> {
 
         self.unwrap_bind(name, bind)
     }
+}
+
+fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {
+    let lit_to_val = |lit| plan_lit(lit);
+    Ok(match lit {
+        Lit::Null => Value::Null,
+        Lit::Missing => Value::Missing,
+        Lit::Int8(n) => Value::from(*n),
+        Lit::Int16(n) => Value::from(*n),
+        Lit::Int32(n) => Value::from(*n),
+        Lit::Int64(n) => Value::from(*n),
+        Lit::Decimal(d) => Value::from(*d),
+        Lit::Double(f) => Value::from(*f),
+        Lit::Bool(b) => Value::from(*b),
+        Lit::String(s) => Value::from(s.as_ref()),
+        Lit::BoxDocument(contents, _typ) => {
+            let ion_typ = BoxedIonType::default().to_dyn_type_tag();
+            let variant = Variant::new(contents.clone(), ion_typ)
+                .map_err(|e| PlanningError::IllegalState(e.to_string()));
+            Value::from(variant?)
+        }
+        Lit::Struct(strct) => strct
+            .iter()
+            .map(|(k, v)| lit_to_val(v).map(move |v| (k, v)))
+            .collect::<Result<Tuple, _>>()?
+            .into(),
+        Lit::Bag(bag) => bag
+            .iter()
+            .map(lit_to_val)
+            .collect::<Result<Bag, _>>()?
+            .into(),
+        Lit::List(list) => list
+            .iter()
+            .map(lit_to_val)
+            .collect::<Result<List, _>>()?
+            .into(),
+    })
 }
 
 #[cfg(test)]
