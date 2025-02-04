@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use thiserror::Error;
 
+mod buffer;
 mod read_ion;
 mod scan_ion;
 
@@ -30,7 +31,7 @@ pub enum IonExtensionError {
     #[error("Ion Stream Error: `{}`", .0)]
     IonStreamError(IonDecodeError),
 
-    /// Ion Stream Error
+    /// Ion Read Error
     #[error("Ion Read Error: `{}`", .0)]
     IonReadError(Box<dyn Error>),
 

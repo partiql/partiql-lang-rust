@@ -1,3 +1,4 @@
+use crate::buffer::{infer_buffer_type, BufferType};
 use crate::{IonExtensionError, IonTableExprResult, IonTableExprResultValueIter};
 use ion_rs_old::data_source::ToIonDataSource;
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
@@ -10,7 +11,6 @@ use partiql_logical as logical;
 use partiql_value::Value;
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -18,6 +18,7 @@ pub(crate) struct ReadIonFunction {
     call_def: CallDef,
 }
 
+/// `read_ion` reads ion data eagerly and converts it to PartiQL Values at read time.
 impl ReadIonFunction {
     pub fn new() -> Self {
         ReadIonFunction {
@@ -79,25 +80,10 @@ fn parse_ion_file<'a>(path: &str) -> IonTableExprResult<'a> {
     let path = PathBuf::from(path).canonicalize()?;
     let file = File::open(path)?;
 
-    parse_ion_read(file)
-}
-
-fn parse_ion_read<'a>(mut reader: impl 'a + Read + Seek) -> IonTableExprResult<'a> {
-    let mut header: [u8; 4] = [0; 4];
-    reader.read_exact(&mut header).expect("file header");
-    reader.seek(SeekFrom::Start(0)).expect("file seek");
-
-    if header.starts_with(&[0x1f, 0x8b]) {
-        let decoder = flate2::read::GzDecoder::new(reader);
-        let buffered = BufReader::new(decoder);
-        parse_ion_buff(buffered)
-    } else if header.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
-        let decoder = zstd::Decoder::new(reader).expect("zstd reader creation");
-        let buffered = BufReader::new(decoder);
-        parse_ion_buff(buffered)
-    } else {
-        let buffered = BufReader::new(reader);
-        parse_ion_buff(buffered)
+    match infer_buffer_type(file) {
+        BufferType::Gzip(gzip) => parse_ion_buff(gzip),
+        BufferType::Zstd(zstd) => parse_ion_buff(zstd),
+        BufferType::Unknown(buff) => parse_ion_buff(buff),
     }
 }
 

@@ -185,5 +185,6 @@ fn custom_ion_passthrough_structs_text() {
 
 #[test]
 fn custom_ion_passthrough_bad_text() {
+    // This test is expected to result in an error due to an unclosed SExp
     ion_scan_range_over("ion_passthrough_test.bad.ion", "ion_data.data");
 }
