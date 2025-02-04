@@ -14,7 +14,8 @@ use std::fmt::{Debug, Display};
 pub type BoxedVariantError = Box<dyn Error>;
 
 pub type BoxedVariantResult<T> = Result<T, BoxedVariantError>;
-pub type BoxedVariantValueIntoIterator = Box<dyn Iterator<Item = DynBoxedVariant>>;
+pub type BoxedVariantValueIntoIterator =
+    Box<dyn Iterator<Item = BoxedVariantResult<DynBoxedVariant>>>;
 
 pub type BoxedVariantValueIter<'a> =
     Box<dyn 'a + Iterator<Item = BoxedVariantResult<&'a DynBoxedVariant>>>;

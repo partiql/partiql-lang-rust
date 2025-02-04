@@ -1,0 +1,5 @@
+---
+source: extension/partiql-extension-ion-functions/tests/scan.rs
+expression: errs
+---
+[]

@@ -39,6 +39,10 @@ opt-level = 3
 [profile.release.build-override]
 opt-level = 3
 
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
+
 [profile.bench]
 debug = true
 lto = true

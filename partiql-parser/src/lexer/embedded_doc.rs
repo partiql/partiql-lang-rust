@@ -13,7 +13,10 @@ use partiql_common::syntax::location::ByteOffset;
 /// - The returned `ByteOffset` span *does* include the backticks
 type EmbeddedDocStringResult<'input> = SpannedResult<&'input str, ByteOffset, LexError<'input>>;
 
-/// Tokens used to parse Doc literals embedded in backticks (\`)
+/// Tokens used to parse Doc literals embedded in backticks (\`).
+///
+/// Embedded values are prefixed and suffixed with a matching odd number of backticks (e.g.,
+/// `foo`, ```foo```, `````foo`````, etc.) in order to allow embedded backticks.
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r#"[^/*'"`\r\n\u0085\u2028\u2029]+"#)] // skip things that aren't newlines or backticks
 enum EmbeddedDocToken {
@@ -28,9 +31,10 @@ enum EmbeddedDocToken {
     Embed,
 }
 
-/// A Lexer for Doc literals embedded in backticks (\`) that returns the parsed [`EmbeddedDocString`]
+/// A Lexer for Doc literals embedded in backticks (\`) that returns the parsed [`EmbeddedDocStringResult`]
 ///
-/// Parses just enough Doc to make sure not to include a backtick that is inside a string or comment.
+/// Embedded values are prefixed and suffixed with a matching odd number of backticks (e.g.,
+/// `foo`, ```foo```, `````foo`````, etc.) in order to allow embedded backticks.
 pub struct EmbeddedDocLexer<'input, 'tracker> {
     /// Wrap a logos-generated lexer
     lexer: logos::Lexer<'input, EmbeddedDocToken>,

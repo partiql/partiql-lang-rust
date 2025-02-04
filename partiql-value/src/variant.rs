@@ -9,19 +9,20 @@ use crate::datum::{
 
 use crate::{Comparable, EqualityValue, NullSortedValue, NullableEq, Value};
 use delegate::delegate;
-use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc, ToPretty};
+use partiql_common::pretty::{pretty_surrounded_doc, PrettyDoc};
 use pretty::{DocAllocator, DocBuilder};
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use thiserror::Error;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Variant {
     variant: DynBoxedVariant,
 }
@@ -33,12 +34,6 @@ impl Variant {
     ) -> BoxedVariantResult<Self> {
         let variant = Unparsed::new(contents, type_tag)?.parse()?;
         Ok(Self { variant })
-    }
-}
-
-impl std::fmt::Debug for Variant {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.to_pretty_string(80).expect("pretty"))
     }
 }
 
@@ -120,25 +115,15 @@ impl Unparsed {
     }
 }
 
+#[allow(dead_code)]
 pub struct VariantIter<'a>(BoxedVariantValueIter<'a>);
-impl Debug for VariantIter<'_> {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl Clone for VariantIter<'_> {
-    fn clone(&self) -> Self {
-        todo!()
-    }
-}
 
 impl IntoIterator for Variant {
-    type Item = Variant;
+    type Item = BoxedVariantResult<Variant>;
     type IntoIter = VariantIntoIterator;
 
     fn into_iter(self) -> VariantIntoIterator {
-        let iter = self.variant.into_dyn_iter().expect("TODO [EMBDOC]");
+        let iter = self.variant.into_dyn_iter().expect("into_dyn_iter");
         VariantIntoIterator(iter)
     }
 }
@@ -146,11 +131,11 @@ impl IntoIterator for Variant {
 pub struct VariantIntoIterator(BoxedVariantValueIntoIterator);
 
 impl Iterator for VariantIntoIterator {
-    type Item = Variant;
+    type Item = BoxedVariantResult<Variant>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(Variant::from)
+        self.0.next().map(|res| res.map(Variant::from))
     }
 
     #[inline]
@@ -169,12 +154,6 @@ impl Datum<Value> for Variant {
             fn is_sequence(&self) -> bool;
             fn is_ordered(&self) -> bool;
         }
-    }
-}
-
-impl Hash for Variant {
-    fn hash<H: Hasher>(&self, _state: &mut H) {
-        todo!()
     }
 }
 
@@ -202,6 +181,13 @@ impl PartialEq<Self> for Variant {
 
 impl Eq for Variant {}
 
+impl Hash for Variant {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.variant.type_tag().name().hash(state);
+        self.variant.hash(state);
+    }
+}
+
 impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
     for EqualityValue<'_, NULLS_EQUAL, NAN_EQUAL, Variant>
 {
@@ -223,26 +209,6 @@ impl<const NULLS_EQUAL: bool, const NAN_EQUAL: bool> NullableEq
     }
 }
 
-#[cfg(feature = "serde")]
-impl Serialize for Variant {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        todo!()
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for Variant {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        todo!()
-    }
-}
-
 impl PrettyDoc for Variant {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
@@ -250,14 +216,13 @@ impl PrettyDoc for Variant {
         D::Doc: Clone,
         A: Clone,
     {
-        // TODO [EMBDOC] write out type tag?
-        // TODO [EMBDOC] handle backticks more generally.
         let doc = self.variant.pretty_doc(arena);
-        let ty = self.variant.type_tag().name();
 
         pretty_surrounded_doc(doc, "`", "`", arena)
-            .append(arena.text("::"))
-            .append(arena.text(ty))
+        // TODO eventually support suffixing quoted documents with `::<type>`
+        //let ty = self.variant.type_tag().name();
+        //.append(arena.text("::"))
+        //.append(arena.text(ty))
     }
 }
 

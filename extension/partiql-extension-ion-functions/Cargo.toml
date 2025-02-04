@@ -31,7 +31,7 @@ itertools = "0.13"
 unicase = "2.7"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 ion-rs_old = { version = "0.18", package = "ion-rs" }
-ion-rs = { version = "1.0.0-rc.10", features = ["experimental"] }
+ion-rs = { version = "1.0.0-rc.11", features = ["experimental"] }
 time = { version = "0.3", features = ["macros"] }
 once_cell = "1"
 regex = "1.10"
@@ -39,6 +39,7 @@ thiserror = "1.0"
 delegate = "0.13"
 zstd = "0.13"
 flate2 = "1.0"
+insta = "1"
 
 [dev-dependencies]
 partiql-parser = { path = "../../partiql-parser", version = "0.11.*" }

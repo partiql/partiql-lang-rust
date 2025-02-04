@@ -1,6 +1,7 @@
 use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 use partiql_catalog::context::SystemContext;
+use partiql_catalog::extension::ExtensionResultError;
 use partiql_eval as eval;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::error::{EvalErr, PlanErr};
@@ -22,6 +23,8 @@ pub enum TestError<'a> {
     Plan(PlanErr),
     #[error("Evaluation error: {0:?}")]
     Eval(EvalErr),
+    #[error("Extension error: {0:?}")]
+    Extension(ExtensionResultError),
     #[error("Other: {0:?}")]
     Other(Box<dyn Error>),
 }
@@ -53,6 +56,12 @@ impl From<EvalErr> for TestError<'_> {
 impl From<Box<dyn Error>> for TestError<'_> {
     fn from(err: Box<dyn Error>) -> Self {
         TestError::Other(err)
+    }
+}
+
+impl From<ExtensionResultError> for TestError<'_> {
+    fn from(err: ExtensionResultError) -> Self {
+        TestError::Extension(err)
     }
 }
 

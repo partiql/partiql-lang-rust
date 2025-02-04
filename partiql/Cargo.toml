@@ -36,7 +36,7 @@ partiql-extension-value-functions = { path = "../extension/partiql-extension-val
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 
 
-insta = "1.40.0"
+insta = "1"
 
 
 thiserror = "1.0"
