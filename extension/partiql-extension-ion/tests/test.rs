@@ -7,14 +7,19 @@ use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_extension_ion::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
 use partiql_extension_ion::Encoding;
+use partiql_value::boxed_variant::BoxedVariantType;
 use partiql_value::datum::{
     Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, OwnedFieldView,
     OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
+use partiql_value::Value::Variant;
 use partiql_value::{Bag, BindingsName, EqualityValue, NullableEq, Value};
 use std::collections::HashMap;
-use std::io::{BufReader, Cursor};
+use std::fs::File;
+use std::io::{BufReader, Cursor, Read};
 use std::ops::Not;
+use std::path::PathBuf;
+use walkdir::WalkDir;
 
 trait DumpDatumStats {
     fn dump_datum_stats(&self, indent: usize) -> String;
@@ -435,4 +440,43 @@ fn roundtrip() {
     let original = val.to_pretty_string(80).unwrap();
     let round_tripped = round_tripped.to_pretty_string(80).unwrap();
     assert_eq!(original, round_tripped);
+}
+
+#[test]
+fn verify_ion_tests() {
+    let mut result = String::new();
+
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("resources/ion-tests/iontestdata/good");
+    let root = path.display().to_string();
+    for entry in WalkDir::new(path).sort_by_file_name() {
+        let entry = entry.unwrap();
+        if entry.file_type().is_file() {
+            let epath = entry.path().display().to_string();
+            let epath = epath.strip_prefix(&root).unwrap().replace("\\", "/");
+            result += "\n=====================\n";
+            result += epath.as_str();
+            result += "\n---------------------\n";
+
+            let mut data = Vec::new();
+            File::open(entry.path())
+                .unwrap()
+                .read_to_end(&mut data)
+                .unwrap();
+            let ion_type = Box::new(BoxedIonType {});
+            let boxed = partiql_value::Variant::new(data, ion_type);
+
+            let boxed = match boxed {
+                Ok(boxed) => boxed.to_pretty_string(80).unwrap(),
+                Err(e) => {
+                    format!("Err: `{e}`")
+                }
+            };
+
+            result += &boxed;
+            result += "\n=====================\n";
+        }
+    }
+
+    insta::assert_snapshot!(result);
 }

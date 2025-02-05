@@ -538,11 +538,14 @@ impl BoxedIon {
             }
             BoxedIonStreamType::Stream => BoxedIonValue::Stream(),
             BoxedIonStreamType::SingleTLV => {
-                let elt = reader.next().expect("ion value")?;
-                if reader.peek().is_some() {
-                    // TODO error on stream instead of TLV?
+                if let Some(elt) = reader.next() {
+                    if reader.peek().is_some() {
+                        // TODO error on stream instead of TLV?
+                    }
+                    BoxedIonValue::Value(elt?)
+                } else {
+                    BoxedIonValue::Sequence(Vec::new().into())
                 }
-                BoxedIonValue::Value(elt)
             }
         })
     }
