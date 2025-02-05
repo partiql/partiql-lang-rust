@@ -188,3 +188,4 @@ expression: "dump_eq::<false, true>(fmt)"
 `degrees::celsius::100` = `degrees::celsius::100` → true
 `'my.custom.type'::{x: 12, y: -1}` = `'my.custom.type'::{x: 12, y: -1}` → true
 `{field: some_annotation::value}` = `{field: some_annotation::value}` → true
+`''::1` = `''::1` → true

@@ -216,5 +216,6 @@ degrees::'celsius'::100                  // You can have multiple annotaions on 
 
 { field: some_annotation::value }        // Field's name must precede annotations of its value
 
-
+bool :: null.int                         // A very misleading annotation on the integer null
+'' :: 1                                  // An empty annotation
 

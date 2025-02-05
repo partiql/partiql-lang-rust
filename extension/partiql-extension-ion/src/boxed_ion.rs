@@ -573,15 +573,7 @@ impl BoxedIon {
         } else if let BoxedIonValue::Sequence(seq) = &self.doc {
             Element::from(ion_rs::Value::List(seq.clone()))
         } else {
-            todo!()
-            /*
-            let mut elts = Vec::new();
-            for ion in self.try_into_iter()? {
-                elts.push(ion?.try_into_element()?);
-            }
-            Element::from(ion_rs::Value::List(elts.into()))
-
-             */
+            todo!("try_into_element for &BoxedIon")
         };
         Ok(elt)
     }

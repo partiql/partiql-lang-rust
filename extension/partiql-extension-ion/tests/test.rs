@@ -424,7 +424,7 @@ fn encode_ion_text(value: &Value, encoding: Encoding) -> Result<String, IonEncod
 }
 
 #[test]
-fn rountrip() {
+fn roundtrip() {
     let data = read(IonDataFormat::StreamText);
     let bag: Bag = data.into_iter().collect();
     let val = Value::from(bag);

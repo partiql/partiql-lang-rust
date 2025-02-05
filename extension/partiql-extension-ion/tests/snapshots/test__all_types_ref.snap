@@ -1,6 +1,6 @@
 ---
 source: extension/partiql-extension-ion/tests/test.rs
-expression: dump_ref(read())
+expression: "dump_ref(read(IonDataFormat::StreamText))"
 ---
 `null`
   「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
@@ -455,3 +455,8 @@ expression: dump_ref(read())
   「len:1, is_empty:false」
   ↳ field: `some_annotation::value`
     「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`bool::null.int`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`''::1`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
