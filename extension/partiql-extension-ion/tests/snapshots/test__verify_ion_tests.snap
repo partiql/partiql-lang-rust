@@ -1,0 +1,1764 @@
+---
+source: extension/partiql-extension-ion/tests/test.rs
+expression: result
+---
+=====================
+/UnicodeNullInFieldName.ion
+---------------------
+`{'f\0o': bar}`
+=====================
+
+=====================
+/allNulls.ion
+---------------------
+`[null, null, null.bool, null.int, null.float, null.decimal, null.timestamp, null.string, null.symbol, null.blob, null.clob, null.struct, null.list, null.sexp]`
+=====================
+
+=====================
+/annotationQuotedFalse.ion
+---------------------
+`'false'::23`
+=====================
+
+=====================
+/annotationQuotedNan.ion
+---------------------
+`'nan'::23`
+=====================
+
+=====================
+/annotationQuotedNegInf.ion
+---------------------
+`'-inf'::23`
+=====================
+
+=====================
+/annotationQuotedNull.ion
+---------------------
+`'null'::23`
+=====================
+
+=====================
+/annotationQuotedNullInt.ion
+---------------------
+`'null.int'::23`
+=====================
+
+=====================
+/annotationQuotedOperator.ion
+---------------------
+`'@'::23`
+=====================
+
+=====================
+/annotationQuotedPosInf.ion
+---------------------
+`'+inf'::23`
+=====================
+
+=====================
+/annotationQuotedTrue.ion
+---------------------
+`'true'::23`
+=====================
+
+=====================
+/blank.ion
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/blobs.ion
+---------------------
+`{{YSBiIGMgZCBlIGYgZyBoIGkgaiBrIGwgbSBuIG8gcCBxIHIgcyB0IHUgdiB3IHggeSB6}}`
+=====================
+
+=====================
+/booleans.ion
+---------------------
+`true`
+=====================
+
+=====================
+/clobWithDel.10n
+---------------------
+`{{"\x7f"}}`
+=====================
+
+=====================
+/clobWithDel.ion
+---------------------
+`{{"\x7f"}}`
+=====================
+
+=====================
+/clobWithNonAsciiCharacter.10n
+---------------------
+`{{"\x80"}}`
+=====================
+
+=====================
+/clobWithNullCharacter.10n
+---------------------
+`{{"\0"}}`
+=====================
+
+=====================
+/clobs.ion
+---------------------
+`{{"a b c d e f g h i j k l m n o p q r s t u v w x y z"}}`
+=====================
+
+=====================
+/clobsWithQuotes.ion
+---------------------
+`{{"'''"}}`
+=====================
+
+=====================
+/clobsWithWhitespace.ion
+---------------------
+`{{"\t"}}`
+=====================
+
+=====================
+/commentMultiLineThenEof.ion
+---------------------
+`abc`
+=====================
+
+=====================
+/commentSingleLineThenEof.ion
+---------------------
+`abc`
+=====================
+
+=====================
+/decimal64BitBoundary.ion
+---------------------
+`1.8446744073709551615d19`
+=====================
+
+=====================
+/decimalNegativeOneDotTwoEight.ion
+---------------------
+`-1.28`
+=====================
+
+=====================
+/decimalNegativeOneDotZero.10n
+---------------------
+`-1.0`
+=====================
+
+=====================
+/decimalNegativeZeroDot.10n
+---------------------
+`-0.`
+=====================
+
+=====================
+/decimalNegativeZeroDotZero.10n
+---------------------
+`-0.0`
+=====================
+
+=====================
+/decimalOneDotZero.10n
+---------------------
+`1.0`
+=====================
+
+=====================
+/decimalWithTerminatingEof.ion
+---------------------
+`1.23`
+=====================
+
+=====================
+/decimalZeroDot.10n
+---------------------
+`0.`
+=====================
+
+=====================
+/decimal_e_values.ion
+---------------------
+`2.718281828459045`
+=====================
+
+=====================
+/decimal_values.ion
+---------------------
+`123456.0`
+=====================
+
+=====================
+/decimal_zeros.ion
+---------------------
+`0.`
+=====================
+
+=====================
+/decimalsWithUnderscores.ion
+---------------------
+`1234.5678`
+=====================
+
+=====================
+/empty.ion
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/emptyThreeByteNopPad.10n
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/eolCommentCr.ion
+---------------------
+`[]`
+=====================
+
+=====================
+/eolCommentCrLf.ion
+---------------------
+`[]`
+=====================
+
+=====================
+/equivs/annotatedIvms.ion
+---------------------
+`embedded_documents::["$2::$ion_1_0", "$ion_1_0::$ion_1_0"]`
+=====================
+
+=====================
+/equivs/annotatedSymbols.ion
+---------------------
+`(annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value annotation::value)`
+=====================
+
+=====================
+/equivs/bigInts.ion
+---------------------
+`(-9223372036854775808 -9223372036854775808)`
+=====================
+
+=====================
+/equivs/binaryInts.ion
+---------------------
+`(-4 -4 -4)`
+=====================
+
+=====================
+/equivs/blobs.ion
+---------------------
+`({{YSBiIGMgZCBlIGYgZyBoIGkgaiBrIGwgbSBuIG8gcCBxIHIgcyB0IHUgdiB3IHggeSB6}} {{YSBiIGMgZCBlIGYgZyBoIGkgaiBrIGwgbSBuIG8gcCBxIHIgcyB0IHUgdiB3IHggeSB6}} {{YSBiIGMgZCBlIGYgZyBoIGkgaiBrIGwgbSBuIG8gcCBxIHIgcyB0IHUgdiB3IHggeSB6}})`
+=====================
+
+=====================
+/equivs/clobNewlines.ion
+---------------------
+`[{{""}}, {{""}}, {{""}}, {{""}}, {{""}}, {{""}}, {{""}}]`
+=====================
+
+=====================
+/equivs/clobs.ion
+---------------------
+`({{"a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"}} {{"a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z"}})`
+=====================
+
+=====================
+/equivs/decimals.ion
+---------------------
+`(123.777 123.777 123.777)`
+=====================
+
+=====================
+/equivs/decimalsWithUnderscores.ion
+---------------------
+`(1234.5678 1234.5678)`
+=====================
+
+=====================
+/equivs/emptyStrings.ion
+---------------------
+`("" "" "" "" "" "" "" "")`
+=====================
+
+=====================
+/equivs/floats.ion
+---------------------
+`(1.23e9 1.23e9 1.23e9)`
+=====================
+
+=====================
+/equivs/floatsWithUnderscores.ion
+---------------------
+`(1.2345678e126 1.2345678e126 1.2345678e126)`
+=====================
+
+=====================
+/equivs/ints.ion
+---------------------
+`(0 0)`
+=====================
+
+=====================
+/equivs/intsLargeNegative1.10n
+---------------------
+`(-18344837831112429282 -18344837831112429282)`
+=====================
+
+=====================
+/equivs/intsLargeNegative2.10n
+---------------------
+`(-4696278484764781896429 -4696278484764781896429)`
+=====================
+
+=====================
+/equivs/intsLargeNegative3.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `integer size is currently limited to the range of an i128``
+=====================
+
+=====================
+/equivs/intsLargePositive1.10n
+---------------------
+`(18344837831112429282 18344837831112429282)`
+=====================
+
+=====================
+/equivs/intsLargePositive2.10n
+---------------------
+`(4696278484764781896429 4696278484764781896429)`
+=====================
+
+=====================
+/equivs/intsLargePositive3.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `integer size is currently limited to the range of an i128``
+=====================
+
+=====================
+/equivs/intsWithUnderscores.ion
+---------------------
+`(1234 1234 1234 1234 1234 1234 1234)`
+=====================
+
+=====================
+/equivs/keywordPrefixes.ion
+---------------------
+`({falsehood: ""} {falsehood: ""})`
+=====================
+
+=====================
+/equivs/listComments.ion
+---------------------
+`([a, b, c] [a, b, c] [a, b, c] [a, b, c])`
+=====================
+
+=====================
+/equivs/lists.ion
+---------------------
+`([[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]] [[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]])`
+=====================
+
+=====================
+/equivs/listsTrailingComma.ion
+---------------------
+`([a, b, c] [a, b, c])`
+=====================
+
+=====================
+/equivs/localSymbolTableAppend.ion
+---------------------
+`embedded_documents::["s1 s2 s1 s2 s3 s4 s5", "$ion_symbol_table::{    symbols:[\"s1\", \"s2\"]}$10 $11 $ion_symbol_table::{    imports:$ion_symbol_table,    symbols:[\"s3\", \"s4\", \"s5\"]}$10 $11 $12 $13 $14", "$ion_symbol_table::{    symbols:[\"s1\"]}$10 $ion_symbol_table::{    imports:$ion_symbol_table,    symbols:[\"s2\"]}$11 $ion_symbol_table::{    imports:$3,    symbols:[\"s3\", \"s4\"]}$10 $11 $12 $ion_symbol_table::{    symbols:[\"s5\"],    imports:$ion_symbol_table,}$13 $14", "$ion_symbol_table::{    symbols:[\"s1\", \"s2\", \"s3\", \"s4\", \"s5\"]}$10 $11 $ion_symbol_table::{    imports:$ion_symbol_table,    symbols:[]}$10 $11 $12 $13 $14", "$ion_symbol_table::{    imports: [ { name: \"foo\", version: 1, max_id: 10}],    symbols: [\"s1\"]}$20 $ion_symbol_table::{    imports:$ion_symbol_table,    symbols:[\"s2\", null.string, \"s3\", \"s4\", \"s5\"]}$21 $20 $21 $23 $ion_symbol_table::{    symbols:[\"s3\", \"s4\", \"s5\"]}$11 $12", "$ion_symbol_table::{    imports: $ion_symbol_table,    symbols: [\"s1\", \"s2\", \"s3\", \"s4\", \"s5\"]}$10 $11 $10 $11 $12 $13 $14"]`
+=====================
+
+=====================
+/equivs/localSymbolTableNullSlots.ion
+---------------------
+`embedded_documents::["s1 s2 s3", "$ion_symbol_table::{    symbols:[\"s1\", \"s2\", null.string, \"s3\"]}$10 $11 $13", "$ion_symbol_table::{    symbols:[42, \"s1\", \"s2\", \"s3\"]}$11 $12 $13", "$ion_symbol_table::{    symbols:[\"s1\", $3, \"s2\", null, \"s3\", 123.4e5],    imports:[ {name: \"foo\", version: 1, max_id: 10} ]}$20 $22 $24"]`
+=====================
+
+=====================
+/equivs/localSymbolTableWithAnnotations.ion
+---------------------
+`embedded_documents::["\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[\"foo\", \"bar\"]\n    }\n    $10 $11\n    ", "\n    $ion_1_0\n    $ion_symbol_table::annotated::{\n        symbols:[\"foo\", \"bar\"]\n    }\n    $10 $11\n    ", "\n    $ion_1_0\n    $ion_symbol_table::annotated::{\n        symbols:abc::[\"foo\", def::\"bar\"]\n    }\n    $10 $11\n    "]`
+=====================
+
+=====================
+/equivs/localSymbolTables.ion
+---------------------
+`embedded_documents::["\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"foo\", \"bar\", \"baz\", \"qux\" ]\n    }\n    ", "\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"another\", \"local\", \"symbol\", \"table\" ]\n    }\n    ", "\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"blah\", \"bleh\" ]\n    }\n    "]`
+=====================
+
+=====================
+/equivs/localSymbolTablesValuesWithAnnotations.ion
+---------------------
+`embedded_documents::["\n    $ion_symbol_table::{\n        symbols: [\"local\"]\n    }\n    $10::10\n    ", "\n    $ion_symbol_table::{\n        symbols: [\"local\"]\n    }\n    local::10\n    ", "\n    local::10\n    "]`
+=====================
+
+=====================
+/equivs/longStringsWithComments.ion
+---------------------
+`["foobar", "foobar", "foobar", "foobar", "foobar", "foobar", "foobar", "foobar"]`
+=====================
+
+=====================
+/equivs/nonIVMNoOps.ion
+---------------------
+`embedded_documents::["", "\'$ion_1_0\'", "$2", "$ion_symbol_table::{symbols:[\'\'\'$ion_1_0\'\'\']} $10"]`
+=====================
+
+=====================
+/equivs/nopPadEmptyStruct.10n
+---------------------
+`({} {} {})`
+=====================
+
+=====================
+/equivs/nopPadNonEmptyStruct.10n
+---------------------
+`({name: true} {name: true} {name: true})`
+=====================
+
+=====================
+/equivs/nullNulls.ion
+---------------------
+`(null null)`
+=====================
+
+=====================
+/equivs/paddedInts.10n
+---------------------
+`(127 127 127)`
+=====================
+
+=====================
+/equivs/sexpComments.ion
+---------------------
+`((a b c) (a b c) (a b c) (a b c))`
+=====================
+
+=====================
+/equivs/sexps.ion
+---------------------
+`((a b c) (a b c))`
+=====================
+
+=====================
+/equivs/strings.ion
+---------------------
+`("a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z" "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z")`
+=====================
+
+=====================
+/equivs/structComments.ion
+---------------------
+`({a: 1} {a: 1} {a: 1} {a: 1})`
+=====================
+
+=====================
+/equivs/structWhitespace.ion
+---------------------
+`({foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar} {foo: bar})`
+=====================
+
+=====================
+/equivs/structs.ion
+---------------------
+`({a: 1} {a: 1} {a: 1})`
+=====================
+
+=====================
+/equivs/structsFieldsDiffOrder.ion
+---------------------
+`({a: 1, b: 2, c: 3} {a: 1, c: 3, b: 2} {c: 3, b: 2, a: 1})`
+=====================
+
+=====================
+/equivs/structsFieldsRepeatedNames.ion
+---------------------
+`({a: 1, a: 2, a: 3} {a: 1, a: 3, a: 2} {a: 3, a: 2, a: 1})`
+=====================
+
+=====================
+/equivs/structsTrailingComma.ion
+---------------------
+`({a: 1, b: 2} {a: 1, b: 2})`
+=====================
+
+=====================
+/equivs/symbols.ion
+---------------------
+`((null '.' timestamps) (null '.' timestamps))`
+=====================
+
+=====================
+/equivs/systemSymbols.ion
+---------------------
+`($ion $ion)`
+=====================
+
+=====================
+/equivs/systemSymbolsAsAnnotations.ion
+---------------------
+`[$ion::$ion_1_0::$ion_symbol_table::name::version::imports::symbols::max_id::$ion_shared_symbol_table::123, $ion::$ion_1_0::$ion_symbol_table::name::version::imports::symbols::max_id::$ion_shared_symbol_table::123]`
+=====================
+
+=====================
+/equivs/textNewlines.ion
+---------------------
+`["", "", "", "", "", "", ""]`
+=====================
+
+=====================
+/equivs/timestampFractions.10n
+---------------------
+`(0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00)`
+=====================
+
+=====================
+/equivs/timestampFractions.ion
+---------------------
+`(0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00 0001-01-01T00:00:00+00:00)`
+=====================
+
+=====================
+/equivs/timestampSuperfluousOffset.10n
+---------------------
+`(0001T 0001T)`
+=====================
+
+=====================
+/equivs/timestamps.ion
+---------------------
+`(2007-02-23T 2007-02-23T)`
+=====================
+
+=====================
+/equivs/timestampsLargeFractionalPrecision.ion
+---------------------
+`(2007-02-23T12:14:33.13371337133713371337+00:00 2007-02-23T12:14:33.13371337133713371337+00:00)`
+=====================
+
+=====================
+/equivs/utf8/stringU0001D11E.ion
+---------------------
+`("𝄞" "𝄞" "𝄞" "𝄞")`
+=====================
+
+=====================
+/equivs/utf8/stringU0041.ion
+---------------------
+`("A" "A" "A" "A")`
+=====================
+
+=====================
+/equivs/utf8/stringU0120.ion
+---------------------
+`("Ġ" "Ġ" "Ġ")`
+=====================
+
+=====================
+/equivs/utf8/stringU2021.ion
+---------------------
+`("‡" "‡" "‡")`
+=====================
+
+=====================
+/equivs/utf8/stringUtf8.ion
+---------------------
+`("\0" "\0" "\0")`
+=====================
+
+=====================
+/equivs/zeroDecimals.ion
+---------------------
+`(0. 0. 0.)`
+=====================
+
+=====================
+/equivs/zeroFloats.ion
+---------------------
+`(0e0 0e0 0e0)`
+=====================
+
+=====================
+/fieldNameInf.ion
+---------------------
+`{inf: false}`
+=====================
+
+=====================
+/fieldNameQuotedFalse.ion
+---------------------
+`{'false': false}`
+=====================
+
+=====================
+/fieldNameQuotedNan.ion
+---------------------
+`{'nan': false}`
+=====================
+
+=====================
+/fieldNameQuotedNegInf.ion
+---------------------
+`{'-inf': false}`
+=====================
+
+=====================
+/fieldNameQuotedNull.ion
+---------------------
+`{'null': false}`
+=====================
+
+=====================
+/fieldNameQuotedNullInt.ion
+---------------------
+`{'null.int': false}`
+=====================
+
+=====================
+/fieldNameQuotedPosInf.ion
+---------------------
+`{'+inf': false}`
+=====================
+
+=====================
+/fieldNameQuotedTrue.ion
+---------------------
+`{'true': false}`
+=====================
+
+=====================
+/float32.10n
+---------------------
+`0e0`
+=====================
+
+=====================
+/floatDblMax.ion
+---------------------
+`1.7976931348623157e308`
+=====================
+
+=====================
+/floatDblMin.ion
+---------------------
+`2.2250738585072014e-308`
+=====================
+
+=====================
+/floatSpecials.ion
+---------------------
+`[nan, +inf, -inf]`
+=====================
+
+=====================
+/floatWithTerminatingEof.ion
+---------------------
+`1.23e1`
+=====================
+
+=====================
+/float_trapped_zeros.ion
+---------------------
+`1.0000000000000002e0`
+=====================
+
+=====================
+/float_values.ion
+---------------------
+`1.23456e5`
+=====================
+
+=====================
+/float_zeros.ion
+---------------------
+`0e0`
+=====================
+
+=====================
+/floatsWithUnderscores.ion
+---------------------
+`1.2345678e3`
+=====================
+
+=====================
+/hexWithTerminatingEof.ion
+---------------------
+`3`
+=====================
+
+=====================
+/innerVersionIdentifiers.ion
+---------------------
+`($ion_1_0 $ion_2300_34 foo::$ion_1_0 $ion_1_0::$ion_1_0 ($ion_1_0))`
+=====================
+
+=====================
+/intBigSize1201.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `integer size is currently limited to the range of an i128``
+=====================
+
+=====================
+/intBigSize13.10n
+---------------------
+`11336061668709416277435181419700`
+=====================
+
+=====================
+/intBigSize14.10n
+---------------------
+`2773783639172303802999334644566508`
+=====================
+
+=====================
+/intBigSize16.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `could not safely convert value 340272423131748694355562029545669544747 of type 'u128' to Int: TryFromIntError(())``
+=====================
+
+=====================
+/intBigSize256.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `integer size is currently limited to the range of an i128``
+=====================
+
+=====================
+/intBigSize256.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `encountered an int whose value was exceeded the supported range: '18173238162219679736857031944447898744767430095109316084451026048678348094928854458274167288816962557611640075817315237016025726423548207924331642028847993938530524659112028449811515920726159569583847554301932799584192974700038250645135419704389244690214111003505621818033044965879076306690914532152840279256440975668846810694285470204245958782248405612488959069641454132691581386219910938587286910894148564397155066367399697230287047229035630842240888106685623631032505806388903066971508775182055551847210338095961815021030725796281642316166745051164958432783938535334657296749823645911331793861360616240344479015948'``
+=====================
+
+=====================
+/intBigSize512.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `encountered an int whose value was exceeded the supported range: '-0xFE95F4CFF19A8EE2EDBBEE30C7C0ACBB83BFC4C0A58E8B94BB6250AEEAF3DB8F41B0ACDBB94B990C518D96C5EE3C02E276E06E07570A2B6E5DEA9FE4FAC8475A84EFCA8A8432D6D463BF0CEB470B4AD9B3B0C80730492E5EE660BCA86932D933C471F178140C5256AFFE4EF5C0404D74B4B7776E77178B3281E1C5B65AD8866BCBAA6225C4E1C5B9624B19DCC6001AFC3535A3769C8E937B7E3F9073AB0053CC0FFEB34124D5D570749D0181F4D4DEDCED7D28F038247BEFA18CE02A3D1293DA637BB1AB6598BB6617A6A5CE0512C390236DBCA283ADF0291E6903FBD6819D4C5A8216C69E2083DA5B3FEFB0928B208345A39207C8461E38F793036146107559ADF2F40612D25F14D45D7E2780B45E2CF9B5790D91AAAF327AF3323E20242C2632A64725844F1D9E218AAB0D56EE99AE486034D7B3FBFC4DCE8C9CC2A793CE93AFFE81DEE7158DAD7F0623CE692C8ED0975DBEEF9A717A0B63F90AF4FEBC96785A6FF4E06B090A65D33C98932DF39F7C5B807956A19897E0C3463046DF2EB4DF624C7C43BEF48FAB381A857B9F5B6C1BDBD6B3270C107CD3BC1C41FE04E1DDAC69F14119DE961AF773285544F819F3951542F704B501FF0364BF54D14A86E19BEC39394C85A6B256C6233DA801A44F5DB98CCDD8D9BB6788C014216DD57CB64573333CEED5B5C72A4EE296E75B3E32ED69083675A6A8F6B8AC85DEAED88AD0A7'``
+=====================
+
+=====================
+/intBinary.ion
+---------------------
+`240`
+=====================
+
+=====================
+/intLongMaxValuePlusOne.10n
+---------------------
+`9223372036854775808`
+=====================
+
+=====================
+/intLongMinValue.10n
+---------------------
+`-9223372036854775808`
+=====================
+
+=====================
+/intNegZero.ion
+---------------------
+`0`
+=====================
+
+=====================
+/intNegativeOneTwoEight.ion
+---------------------
+`-128`
+=====================
+
+=====================
+/intWithTerminatingEof.ion
+---------------------
+`1247`
+=====================
+
+=====================
+/integer_values.ion
+---------------------
+`0`
+=====================
+
+=====================
+/intsWithUnderscores.ion
+---------------------
+`123`
+=====================
+
+=====================
+/item1.10n
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"iopc"' and version=1``
+=====================
+
+=====================
+/lists.ion
+---------------------
+`[1, 2, 3, 4, 5]`
+=====================
+
+=====================
+/localSymbolTableImportZeroMaxId.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"fred"' and version=1``
+=====================
+
+=====================
+/message2.ion
+---------------------
+`contribution::{submission_id: 99999, customer_id: 1234, sku: "XXX", version: 1, marketplace_ids: [1], offer_listings: [{marketplace_id: 1}], product: {one: [{value: "A"}], two: [{value: "A"}, {value: "B"}], three: [{value: "A"}, {value: "B"}, {value: "C"}]}}`
+=====================
+
+=====================
+/multipleAnnotations.ion
+---------------------
+`annot1::annot2::value`
+=====================
+
+=====================
+/non-equivs/annotatedIvms.ion
+---------------------
+`embedded_documents::["some_annotation::$ion_1_0", "$ion_1_0"]`
+=====================
+
+=====================
+/non-equivs/annotations.ion
+---------------------
+`[a::b::123, b::a::123, 123]`
+=====================
+
+=====================
+/non-equivs/blobs.ion
+---------------------
+`[{{aGVsbG8=}}, {{aGVibG8=}}]`
+=====================
+
+=====================
+/non-equivs/bools.ion
+---------------------
+`[true, false, null.bool]`
+=====================
+
+=====================
+/non-equivs/clobs.ion
+---------------------
+`[{{"hello"}}, {{"Hello"}}]`
+=====================
+
+=====================
+/non-equivs/decimals.ion
+---------------------
+`[123.0, 124.0, 125.0]`
+=====================
+
+=====================
+/non-equivs/documents.ion
+---------------------
+`embedded_documents::["1 2 3", "1 3 2", "2 1 3", "2 3 1", "3 1 2", "3 2 1"]`
+=====================
+
+=====================
+/non-equivs/floats.ion
+---------------------
+`[1.23e3, 1.24e3, 1.25e3]`
+=====================
+
+=====================
+/non-equivs/floatsVsDecimals.ion
+---------------------
+`[0e0, 0.]`
+=====================
+
+=====================
+/non-equivs/ints.ion
+---------------------
+`[123, -123]`
+=====================
+
+=====================
+/non-equivs/lists.ion
+---------------------
+`[[], [[]], [[[]]], [[[[]]]]]`
+=====================
+
+=====================
+/non-equivs/localSymbolTableWithAnnotations.ion
+---------------------
+`embedded_documents::["\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[\"foo\", \"bar\"]\n    }\n    foo bar\n    ", "\n    $ion_1_0\n    annotated::$ion_symbol_table::{\n        symbols:[\"foo\", \"bar\"]\n    }\n    foo bar\n    "]`
+=====================
+
+=====================
+/non-equivs/nonNulls.ion
+---------------------
+`[0, 0.0, 0., 0e0, "", {{}}, {{""}}, [], (), {}, null]`
+=====================
+
+=====================
+/non-equivs/nulls.ion
+---------------------
+`[null, null.bool, null.int, null.float, null.decimal, null.timestamp, null.string, null.symbol, null.blob, null.clob, null.struct, null.list]`
+=====================
+
+=====================
+/non-equivs/sexps.ion
+---------------------
+`[(), (()), ((())), (((())))]`
+=====================
+
+=====================
+/non-equivs/strings.ion
+---------------------
+`["hi", "Hi"]`
+=====================
+
+=====================
+/non-equivs/structs.ion
+---------------------
+`[{a: 1, b: 2}, {b: 2}, {}]`
+=====================
+
+=====================
+/non-equivs/symbolTables.ion
+---------------------
+`embedded_documents::["\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"rock\", \"paper\", \"scissors\" ]\n    }\n    $10\n    $11\n    $12\n    ", "\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"foo\", \"bar\", \"baz\" ]\n    }\n    $10\n    $11\n    $12\n    "]`
+=====================
+
+=====================
+/non-equivs/symbolTablesUnknownText.ion
+---------------------
+`embedded_documents::["\n    $ion_1_0\n    $ion_symbol_table::{\n        symbols:[ \"foo\", \"bar\", \"baz\" ]\n    }\n    $10\n    $11\n    $12\n    ", "\n    $ion_1_0\n    $ion_symbol_table::{\n        imports:[ { name: \"com.amazon.ion.tests\",\n                    version: 1,\n                    max_id: 1 }\n        ],\n        symbols:[ \"foo\", \"bar\", \"baz\" ]\n    }\n    $10\n    $11\n    $12\n    "]`
+=====================
+
+=====================
+/non-equivs/symbols.ion
+---------------------
+`[a, A]`
+=====================
+
+=====================
+/non-equivs/timestamps.ion
+---------------------
+`[2007T, 2008T, 2009T]`
+=====================
+
+=====================
+/nonNulls.ion
+---------------------
+`0`
+=====================
+
+=====================
+/nopPad16Bytes.10n
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/nopPadInsideEmptyStructNonZeroSymbolId.10n
+---------------------
+`{}`
+=====================
+
+=====================
+/nopPadInsideEmptyStructZeroSymbolId.10n
+---------------------
+`{}`
+=====================
+
+=====================
+/nopPadInsideStructWithNopPadThenValueNonZeroSymbolId.10n
+---------------------
+`{name: true}`
+=====================
+
+=====================
+/nopPadInsideStructWithNopPadThenValueZeroSymbolId.10n
+---------------------
+`{name: true}`
+=====================
+
+=====================
+/nopPadInsideStructWithValueThenNopPad.10n
+---------------------
+`{name: true}`
+=====================
+
+=====================
+/nopPadOneByte.10n
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/notVersionMarkers.ion
+---------------------
+`a1::$ion_1_0`
+=====================
+
+=====================
+/null.10n
+---------------------
+`null`
+=====================
+
+=====================
+/nullBlob.10n
+---------------------
+`null.blob`
+=====================
+
+=====================
+/nullBool.10n
+---------------------
+`null.bool`
+=====================
+
+=====================
+/nullClob.10n
+---------------------
+`null.clob`
+=====================
+
+=====================
+/nullDecimal.10n
+---------------------
+`null.decimal`
+=====================
+
+=====================
+/nullFloat.10n
+---------------------
+`null.float`
+=====================
+
+=====================
+/nullInt2.10n
+---------------------
+`null.int`
+=====================
+
+=====================
+/nullInt3.10n
+---------------------
+`null.int`
+=====================
+
+=====================
+/nullList.10n
+---------------------
+`null.list`
+=====================
+
+=====================
+/nullSexp.10n
+---------------------
+`null.sexp`
+=====================
+
+=====================
+/nullString.10n
+---------------------
+`null.string`
+=====================
+
+=====================
+/nullStruct.10n
+---------------------
+`null.struct`
+=====================
+
+=====================
+/nullSymbol.10n
+---------------------
+`null.symbol`
+=====================
+
+=====================
+/nullTimestamp.10n
+---------------------
+`null.timestamp`
+=====================
+
+=====================
+/nulls.ion
+---------------------
+`null`
+=====================
+
+=====================
+/octal000.ion
+---------------------
+`"0\0000"`
+=====================
+
+=====================
+/one.ion
+---------------------
+`1`
+=====================
+
+=====================
+/operators.ion
+---------------------
+`('!' '#' '%' '&' '*' '+' '-' '.' '\/' ';' '<' '=' '>' '\?' '@' '^' '`' '|' '~')`
+=====================
+
+=====================
+/sexpAnnotationQuotedOperator.ion
+---------------------
+`('@'::23)`
+=====================
+
+=====================
+/sexps.ion
+---------------------
+`(this is a sexp list)`
+=====================
+
+=====================
+/strings.ion
+---------------------
+`"a b c d e f g h i j k l m n o p q r s t u v w x y z"`
+=====================
+
+=====================
+/strings2.ion
+---------------------
+`"a b c d e f g h i j k l m n o p q r s t u v w x y z"`
+=====================
+
+=====================
+/stringsWithWhitespace.ion
+---------------------
+`"\t"`
+=====================
+
+=====================
+/strings_cr_nl.ion
+---------------------
+`"short1multi-line string\nwith embedded\nnew line\ncharacters"`
+=====================
+
+=====================
+/strings_nl.ion
+---------------------
+`"short1multi-line string\nwith embedded\nnew line\ncharacters"`
+=====================
+
+=====================
+/structAnnotatedEmpty.10n
+---------------------
+`max_id::{}`
+=====================
+
+=====================
+/structAnnotatedOrdered.10n
+---------------------
+`symbols::max_id::{name: null, version: false, imports: true}`
+=====================
+
+=====================
+/structEmpty.10n
+---------------------
+`{}`
+=====================
+
+=====================
+/structFieldAnnotationsUnquotedThenQuoted.ion
+---------------------
+`{f: a::b::null}`
+=====================
+
+=====================
+/structLen13.10n
+---------------------
+`{name: "123456789AB"}`
+=====================
+
+=====================
+/structLen14.10n
+---------------------
+`{name: "123456789ABC"}`
+=====================
+
+=====================
+/structLen15.10n
+---------------------
+`{name: "123456789ABCD"}`
+=====================
+
+=====================
+/structOrdered.10n
+---------------------
+`{name: null, version: false, imports: true}`
+=====================
+
+=====================
+/structOrderedInList.10n
+---------------------
+`[{name: null, version: false, imports: true}]`
+=====================
+
+=====================
+/structUnordered.10n
+---------------------
+`{name: null, version: false, imports: true}`
+=====================
+
+=====================
+/structs.ion
+---------------------
+`{a: b, c: 42, d: {e: f}, g: 3}`
+=====================
+
+=====================
+/subfieldInt.ion
+---------------------
+`126.`
+=====================
+
+=====================
+/subfieldUInt.ion
+---------------------
+`254`
+=====================
+
+=====================
+/subfieldVarInt.ion
+---------------------
+`0d62`
+=====================
+
+=====================
+/subfieldVarUInt.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"com.amazon.blah.blah.blah"' and version=1``
+=====================
+
+=====================
+/subfieldVarUInt15bit.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"com.amazon.blah.blah.blah"' and version=1``
+=====================
+
+=====================
+/subfieldVarUInt16bit.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"com.amazon.blah.blah.blah"' and version=1``
+=====================
+
+=====================
+/subfieldVarUInt32bit.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `symbol table import failed, could not find table with name='"com.amazon.blah.blah.blah"' and version=1``
+=====================
+
+=====================
+/symbolEmpty.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolEmptyWithCR.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolEmptyWithCRLF.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolEmptyWithLF.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolEmptyWithLFLF.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolExplicitZero.10n
+---------------------
+`$0`
+=====================
+
+=====================
+/symbolImplicitZero.10n
+---------------------
+`$0`
+=====================
+
+=====================
+/symbolWithDel.ion
+---------------------
+`''`
+=====================
+
+=====================
+/symbolWithSpecialWhitespace.ion
+---------------------
+`'\t'`
+=====================
+
+=====================
+/symbolZero.ion
+---------------------
+`$0`
+=====================
+
+=====================
+/symbols.ion
+---------------------
+`'a b c d e f g h i j k l m n o p q r s t u v w x y z'`
+=====================
+
+=====================
+/testfile0.ion
+---------------------
+`contact::{lname: "smith", fname: "john", phonelist: [{ac: 206, prefix: 234, suffix: 2934}, {ac: 444, prefix: 333, suffix: 2222}], age: "6483020949"}`
+=====================
+
+=====================
+/testfile1.ion
+---------------------
+`PurchaseOrder::{name: "widgets", quantity: "6483021036"}`
+=====================
+
+=====================
+/testfile10.ion
+---------------------
+`m::{u: 1, i: -2, f: 3.1e1, d: 4.20, s: "hi", id: hi, id2: by}`
+=====================
+
+=====================
+/testfile11.ion
+---------------------
+`m::{thisisaverylongidentifier_to_keep_the_parser_busy_u: 1, i23456789012: -2, f234567890123: 3.1e1, d2345678901234: 4.20, s23456789012345: "hi", id: hi, id2: by}`
+=====================
+
+=====================
+/testfile12.ion
+---------------------
+`m::{u: {}, i: [-2], i0: [], i2: [[], []], f: 3.1e1, d: 4.20, s: "hi", id: hi, id2: by}`
+=====================
+
+=====================
+/testfile13.ion
+---------------------
+`m::{b1: true, b2: false, i: 0, d: 0.0, e: 0e0}`
+=====================
+
+=====================
+/testfile14.ion
+---------------------
+`m::{f1: 0e0, f2: 1e-4, f3: 1e0, f4: 1e5, f5: 1.23456789012345e14}`
+=====================
+
+=====================
+/testfile15.ion
+---------------------
+`m::{f1: 0e0, f2: 1e-4, f3: 1e0, f4: 1e5, f5: 1.23456789012345e14}`
+=====================
+
+=====================
+/testfile16.ion
+---------------------
+`m::{f1: 0e0, f2: 1e-4, f3: 1e0, f4: 1e5, f5: 1.23456789012345e14}`
+=====================
+
+=====================
+/testfile17.ion
+---------------------
+`42`
+=====================
+
+=====================
+/testfile18.ion
+---------------------
+`42`
+=====================
+
+=====================
+/testfile19.ion
+---------------------
+`testexpr::(this is an expression)`
+=====================
+
+=====================
+/testfile20.ion
+---------------------
+`te2::(aa "ss" bb)`
+=====================
+
+=====================
+/testfile21.ion
+---------------------
+`te3::(this is "a string" an expression with 14.0 nested stuff [some, data] {a: 1, b: 3})`
+=====================
+
+=====================
+/testfile22.ion
+---------------------
+`(null null null.bool null.int null.float null.decimal null.timestamp null.symbol null.string null.list null.struct)`
+=====================
+
+=====================
+/testfile23.ion
+---------------------
+`(true false 0 1 2 12345678 2000000000 4000000000 5000000000 20000000000 0 -1 -2 -12345678 -2000000000 -4000000000 -5000000000 -20000000000 0.0 1.0 2.0 12.345678 2.000000000d9 4.000000000d9 5.000000000d9 20000000000.00 -0.0 -1.0 -2.0 -12.345678 -2.000000000d9 -4.000000000d9 -5.000000000d9 -20000000000.00 0e0 1e0 2e0 1.2345678e1)`
+=====================
+
+=====================
+/testfile24.ion
+---------------------
+`(1.2345678e1 2e9 4e9 5e9 2e10 -0e0 -1e0 -2e0 -1.2345678e1 -2e9 -4e9 -5e9 -2e10)`
+=====================
+
+=====================
+/testfile25.ion
+---------------------
+`(2007-11-20T 2008-12-23T23:00+00:00 2008-12-23T23:00:01.123+07:00 2008-12-23T23:00:02.456-06:00 2008-12-23T23:00:03.789+08:00)`
+=====================
+
+=====================
+/testfile26.ion
+---------------------
+`({{2dDS}})`
+=====================
+
+=====================
+/testfile28.10n
+---------------------
+`(sjis::{{"2007-\0sdf-11-20"}})`
+=====================
+
+=====================
+/testfile28.ion
+---------------------
+`(sjis::{{"2007-\0sdf-11-20"}})`
+=====================
+
+=====================
+/testfile29.ion
+---------------------
+`(ablob::{{2dDSGZ/0az07+sdf+11+230=}})`
+=====================
+
+=====================
+/testfile3.ion
+---------------------
+`Envelope::{Header: {alertcontrol: {priority: 1, expires: "6483021034"}}, Body: {alert: {msg: "The printer is on fire!"}}}`
+=====================
+
+=====================
+/testfile30.ion
+---------------------
+`{st1: v1, st2: v2}`
+=====================
+
+=====================
+/testfile31.ion
+---------------------
+`(2.000000000d9 4.000000000d9 5.000000000d9 20000000000.00 -0.0 -1.0)`
+=====================
+
+=====================
+/testfile33.ion
+---------------------
+`dates::{whenDate: 2007-01-31T, whenDate: 2007-01-31T01:02+00:00, whenDate: 2007-01-31T01:04:05.385+00:00, whenDate: 2007-01-31T01:04:05.385+01:11}`
+=====================
+
+=====================
+/testfile34.ion
+---------------------
+`[{precision: "zip", Latitude: 37.7668, Longitude: -122.3959, Address: "", City: "SAN FRANCISCO", State: "CA", Zip: "94107", Country: "US"}, {precision: "zip", Latitude: 37.371991, Longitude: -122.026020, Address: "", City: "SUNNYVALE", State: "CA", Zip: "94085", Country: "US"}]`
+=====================
+
+=====================
+/testfile35.ion
+---------------------
+`$ion_shared_symbol_table::{name: "test", version: 1, symbols: ["dates", "whenDate"]}`
+=====================
+
+=====================
+/testfile37.ion
+---------------------
+`(2.000000000d9 12.345678 4.000000000d9)`
+=====================
+
+=====================
+/testfile4.ion
+---------------------
+`b::{v: ""}`
+=====================
+
+=====================
+/testfile5.ion
+---------------------
+`b::{v: ""}`
+=====================
+
+=====================
+/testfile6.ion
+---------------------
+`b::{v1: "xv1", v2: "xv2", v3: "xv3", v4: "xv4", v5: "xv5", v6: "xv6", v7: "xv7", v8: "xv8", v9: "xv9"}`
+=====================
+
+=====================
+/testfile7.ion
+---------------------
+`root5678901234::{x: "6483021024", prefix: xs, schema: {attributeFormDefault: "qualified"}}`
+=====================
+
+=====================
+/testfile8.ion
+---------------------
+`root::{x: "6483021025", targetNamespace: "x-schema:ado-schema.xml", xmlns1: {namespace1: "x-schema:ado-schema.xml"}, xmlns2: {prefix: xs, namespace2: "http:\/\/www.w3.org\/2001\/XMLSchema"}, schema: {attributeFormDefault: "qualified", elementFormDefault: "qualified", element: {name: "data"}}}`
+=====================
+
+=====================
+/testfile9.ion
+---------------------
+`b::{}`
+=====================
+
+=====================
+/timestamp/equivTimeline/leapDayRollover.ion
+---------------------
+`(2011-02-28T23:59+03:00 2011-02-28T20:59+00:00)`
+=====================
+
+=====================
+/timestamp/equivTimeline/timestamps.ion
+---------------------
+`(2007T 2007-01T 2007-01-01T 2007-01-01T 2007-01-01T00:00-00:00 2007-01-01T00:00:00-00:00 2007-01-01T00:00:00.0-00:00 2007-01-01T00:00:00.00-00:00 2007-01-01T00:00:00.0000000000-00:00)`
+=====================
+
+=====================
+/timestamp/leapDay.ion
+---------------------
+`2008-02-29T`
+=====================
+
+=====================
+/timestamp/timestamp2011-02-20.10n
+---------------------
+`2011-02-20T`
+=====================
+
+=====================
+/timestamp/timestamp2011-02-20T19_30_59_100-08_00.10n
+---------------------
+`2011-02-20T11:30:59.100-08:00`
+=====================
+
+=====================
+/timestamp/timestamp2011-02.10n
+---------------------
+`2011-02T`
+=====================
+
+=====================
+/timestamp/timestamp2011.10n
+---------------------
+`2011T`
+=====================
+
+=====================
+/timestamp/timestampWithTerminatingEof.ion
+---------------------
+`2009-01-22T00:25+00:00`
+=====================
+
+=====================
+/timestamp/timestamps.ion
+---------------------
+`0001T`
+=====================
+
+=====================
+/typecodes/README.md
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `invalid Ion syntax encountered
+        offset=0
+        buffer head=<# Type Codes
+
+The files in thi...>
+        buffer tail=<... FF FF`  
+> 9 byte positive int>
+        buffer len=4096
+        ``
+=====================
+
+=====================
+/typecodes/T0.10n
+---------------------
+`null`
+=====================
+
+=====================
+/typecodes/T1.10n
+---------------------
+`false`
+=====================
+
+=====================
+/typecodes/T10.10n
+---------------------
+`{{}}`
+=====================
+
+=====================
+/typecodes/T11.10n
+---------------------
+`[]`
+=====================
+
+=====================
+/typecodes/T12.10n
+---------------------
+`()`
+=====================
+
+=====================
+/typecodes/T13.10n
+---------------------
+`{}`
+=====================
+
+=====================
+/typecodes/T14.10n
+---------------------
+`$ion::""`
+=====================
+
+=====================
+/typecodes/T15.10n
+---------------------
+`Sequence<>`
+=====================
+
+=====================
+/typecodes/T2.10n
+---------------------
+`0`
+=====================
+
+=====================
+/typecodes/T3.10n
+---------------------
+`-255`
+=====================
+
+=====================
+/typecodes/T4.10n
+---------------------
+`0e0`
+=====================
+
+=====================
+/typecodes/T5.10n
+---------------------
+`0.`
+=====================
+
+=====================
+/typecodes/T6-large.10n
+---------------------
+`0097-01-01T00:28:01.000000000000000000000000000000000-00:33`
+=====================
+
+=====================
+/typecodes/T6-small.10n
+---------------------
+`0097T`
+=====================
+
+=====================
+/typecodes/T7-large.10n
+---------------------
+`$0`
+=====================
+
+=====================
+/typecodes/T7-small.10n
+---------------------
+`$0`
+=====================
+
+=====================
+/typecodes/T8.10n
+---------------------
+`""`
+=====================
+
+=====================
+/typecodes/T9.10n
+---------------------
+`{{""}}`
+=====================
+
+=====================
+/utf16.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `invalid Ion syntax encountered
+        offset=0
+        buffer head=< { f o o : " b a r " } 
+>
+        buffer tail=< { f o o : " b a r " } 
+>
+        buffer len=24
+        ``
+=====================
+
+=====================
+/utf32.ion
+---------------------
+Err: `Latent Type Error for Boxed Document Error reading Ion `invalid Ion syntax encountered
+        offset=0
+        buffer head=<   {   f   o   o   :   "   b   a...>
+        buffer tail=<...   :   "   b   a   r   "   }   
+>
+        buffer len=48
+        ``
+=====================
+
+=====================
+/valueBetweenNopPads.10n
+---------------------
+`null`
+=====================
+
+=====================
+/valueFollowedByNopPad.10n
+---------------------
+`null`
+=====================
+
+=====================
+/valuePrecededByNopPad.10n
+---------------------
+`null`
+=====================
+
+=====================
+/whitespace.ion
+---------------------
+`1`
+=====================

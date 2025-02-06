@@ -44,6 +44,8 @@ delegate = "0.13"
 peekmore = "1.3"
 
 [dev-dependencies]
+insta = "1"
+walkdir = "2.5"
 
 [features]
 default = []

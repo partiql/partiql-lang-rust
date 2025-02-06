@@ -1,3 +1,6 @@
 [submodule "partiql-conformance-tests/partiql-tests"]
 	path = partiql-conformance-tests/partiql-tests
 	url = https://github.com/partiql/partiql-tests.git
+[submodule "extension/partiql-extension-ion/resources/ion-tests"]
+	path = extension/partiql-extension-ion/resources/ion-tests
+	url = https://github.com/amazon-ion/ion-tests/

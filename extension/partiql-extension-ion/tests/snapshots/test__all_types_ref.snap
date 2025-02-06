@@ -1,0 +1,462 @@
+---
+source: extension/partiql-extension-ion/tests/test.rs
+expression: "dump_ref(read(IonDataFormat::StreamText))"
+---
+`null`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`nan`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-inf`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`+inf`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.bool`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.int`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.float`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.decimal`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.timestamp`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.string`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.symbol`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.blob`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.clob`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.struct`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.list`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.sexp`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`'null'`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.list`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`'null.int'`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.bool`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`true`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`false`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.int`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`0`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`0`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`123`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-123`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`48879`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`5`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`123`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`64206`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`42`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`_1`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.decimal`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`null.float`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`0.123`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-1.2e3`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-12d2`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`0e0`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`0.`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`0.`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-0e0`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-0.`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-0.`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`-0.0`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`123456.789012`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.timestamp`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`2007-02-23T12:14+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T12:14:33.079-08:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T20:14:33.079+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T20:14:33.079+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T20:14:33.079-00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-01-01T00:00-00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-01-01T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-01-01T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-01T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T00:00+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T00:00+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007-02-23T00:00:00-00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2007`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2000T`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2000-01-01T00:00:00+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2000-01-01T00:00:00.000+00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`2000-01-01T00:00:00.000-00:00`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.string`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`""`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`" my string "`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`"\""`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`"ꯍ"`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`xml::"<e a=\'v\'>c<\/e>"`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`("hello world!")`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:1, is_empty:false」
+  ↳ `"hello world!"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`("hello world!")`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:1, is_empty:false」
+  ↳ `"hello world!"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`"The first line of the string.\nThis is the second line of the string,\nand this is the third line.\n"`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.symbol`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`myVar2`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`myVar2`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`myvar2`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`'hi ho'`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`'\'ahoy\''`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`''`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(x '+' y)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `x`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'+'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `y`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(x '+' y)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `x`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'+'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `y`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(x '+' y)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `x`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'+'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `y`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '==' b '&&' c '==' d)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:7, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'=='`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'&&'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `c`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'=='`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `d`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.blob`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`{{+AB/}}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{{VG8gaW5maW5pdHkuLi4gYW5kIGJleW9uZCE=}}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{{dHdvIHBhZGRpbmcgY2hhcmFjdGVycw==}}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.clob`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`{{"This is a CLOB of text."}}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`shift_jis::{{"Another clob with user-defined encoding, this time on multiple lines."}}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.struct`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`{}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:0, is_empty:true」
+`{first: "Tom", last: "Riddle"}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:2, is_empty:false」
+  ↳ first: `"Tom"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ last: `"Riddle"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{first: "Tom", last: "Riddle"}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:2, is_empty:false」
+  ↳ first: `"Tom"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ last: `"Riddle"`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{center: {x: 1.0, y: 12.5}, radius: 3}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:2, is_empty:false」
+  ↳ center: `{x: 1.0, y: 12.5}`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+    「len:2, is_empty:false」
+    ↳ x: `1.0`
+      「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+    ↳ y: `12.5`
+      「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ radius: `3`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{x: 1}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:1, is_empty:false」
+  ↳ x: `1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{'': 42}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:1, is_empty:false」
+  ↳ : `42`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{x: 1, x: null.int}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:2, is_empty:false」
+  ↳ x: `1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ x: `null.int`
+    「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+    ↳ NULL
+`{field_name: annotation::value}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:1, is_empty:false」
+  ↳ field_name: `annotation::value`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.list`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`[]`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:0, is_empty:true」
+`[1, 2, 3]`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `2`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `3`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`[1, two]`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:2, is_empty:false」
+  ↳ `1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `two`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`[a, [b]]`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:2, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `[b]`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+    「is_ordered:true, len:1, is_empty:false」
+    ↳ `b`
+      「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`[1.2]`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:1, is_empty:false」
+  ↳ `1.2`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`null.sexp`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`()`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:0, is_empty:true」
+`(cons 1 2)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `cons`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `2`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`([hello] [there])`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:2, is_empty:false」
+  ↳ `[hello]`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+    「is_ordered:true, len:1, is_empty:false」
+    ↳ `hello`
+      「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `[there]`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+    「is_ordered:true, len:1, is_empty:false」
+    ↳ `there`
+      「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '+-' b)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'+-'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '+-' b)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:3, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'+-'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '.' b ';')`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:4, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'.'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `';'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '.' b ';')`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:4, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'.'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `';'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a b)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:2, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`(a '\/*' word '*\/' b)`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:true, is_ordered:true」
+  「is_ordered:true, len:5, is_empty:false」
+  ↳ `a`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'\/*'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `word`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `'*\/'`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ `b`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`int32::12`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`degrees::celsius::100`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`'my.custom.type'::{x: 12, y: -1}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:2, is_empty:false」
+  ↳ x: `12`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  ↳ y: `-1`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`{field: some_annotation::value}`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+  「len:1, is_empty:false」
+  ↳ field: `some_annotation::value`
+    「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」
+`bool::null.int`
+  「is_null:true, is_missing:false, is_absent:true, is_present:false, is_sequence:false, is_ordered:false」
+  ↳ NULL
+`''::1`
+  「is_null:false, is_missing:false, is_absent:false, is_present:true, is_sequence:false, is_ordered:false」

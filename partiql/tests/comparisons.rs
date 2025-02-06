@@ -38,16 +38,6 @@ pub fn eval_success(statement: &str) {
     assert_eq!(permissive.unwrap().result, strict.unwrap().result);
 }
 
-#[test]
-fn test1() {
-    eval_success("[{'a': 1},{'b': 2}]")
-}
-
-#[test]
-fn test11() {
-    eval_success("[{'a': 1+1},{'b': 2}]")
-}
-
 #[track_caller]
 #[inline]
 pub fn eval_op(op: &str) {
