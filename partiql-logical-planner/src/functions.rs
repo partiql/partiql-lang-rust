@@ -12,9 +12,7 @@ impl Function for FunctionEntry<'_> {
     fn resolve(&self, name: &str, args: &[CallArgument]) -> Result<ValueExpr, CallLookupError> {
         let oid = self.id();
         match self.entry() {
-            FunctionEntryFunction::Table(tbl) => {
-                tbl.call_def().lookup(args, name).map_err(Into::into)
-            }
+            FunctionEntryFunction::Table(tbl) => tbl.call_def().lookup(args, name),
             FunctionEntryFunction::Scalar(scfn) => {
                 ScalarFnResolver { oid, scfn }.resolve(name, args)
             }

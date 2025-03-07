@@ -13,7 +13,6 @@ use crate::common::{
     TIME_PARTS_TZ_HOUR, TIME_PARTS_TZ_MINUTE,
 };
 use std::num::NonZeroU8;
-use std::ptr::read;
 use std::rc::Rc;
 use std::str::FromStr;
 use thiserror::Error;
@@ -647,7 +646,7 @@ impl PartiqlEncodedIonValueDecoder {
         reader.step_out()?;
 
         let id = id.ok_or_else(err)?;
-        let labels = labels.unwrap_or_else(|| Default::default());
+        let labels = labels.unwrap_or_else(Default::default);
         Ok((id, labels, payload))
     }
 
@@ -757,7 +756,7 @@ impl PartiqlEncodedIonValueDecoder {
         reader.step_out()?;
 
         let id = id.ok_or_else(err)?;
-        let labels = labels.unwrap_or_else(|| Default::default());
+        let labels = labels.unwrap_or_else(Default::default);
         let ends = ends.ok_or_else(err)?;
         Ok((id, labels, ends, payload))
     }

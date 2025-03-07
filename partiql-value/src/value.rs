@@ -1,6 +1,6 @@
 use ordered_float::OrderedFloat;
 use std::borrow::Cow;
-use std::fmt::{Debug, Display, Formatter, Pointer};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 use rust_decimal::Decimal as RustDecimal;

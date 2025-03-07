@@ -1,5 +1,4 @@
-use crate::graph::Graph::Simple;
-use crate::{Tuple, Value};
+use crate::Value;
 use lasso::{Key, Rodeo, RodeoReader, Spur};
 use petgraph::{Directed, Undirected};
 #[cfg(feature = "serde")]
@@ -124,7 +123,7 @@ impl SimpleGraph {
         assert_eq!(ids.len(), labels.len());
         assert_eq!(ids.len(), ends.len());
         assert_eq!(ids.len(), values.len());
-        for ((((id, labels), edge_spec), value)) in ids
+        for (((id, labels), edge_spec), value) in ids
             .into_iter()
             .zip(labels.into_iter())
             .zip(ends.into_iter())
@@ -143,10 +142,9 @@ impl SimpleGraph {
             let e = match edge_spec {
                 EdgeSpec::Directed(l, r) => {
                     let mut get_or_insert = |idx: GNodeId| {
-                        directed_contains
+                        *directed_contains
                             .entry(idx)
                             .or_insert_with_key(|idx| directed.add_node(idx.clone()))
-                            .clone()
                     };
                     let lidx = GNodeId(node_ids.get(l).expect("expected node").into_usize());
                     let ridx = GNodeId(node_ids.get(r).expect("expected node").into_usize());
@@ -156,10 +154,9 @@ impl SimpleGraph {
                 }
                 EdgeSpec::Undirected(l, r) => {
                     let mut get_or_insert = |idx: GNodeId| {
-                        undirected_contains
+                        *undirected_contains
                             .entry(idx)
                             .or_insert_with_key(|idx| undirected.add_node(idx.clone()))
-                            .clone()
                     };
                     let lidx = GNodeId(node_ids.get(l).expect("expected node").into_usize());
                     let ridx = GNodeId(node_ids.get(r).expect("expected node").into_usize());
