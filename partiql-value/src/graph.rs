@@ -2,17 +2,36 @@ use crate::Value;
 use lasso::{Key, Rodeo, RodeoReader, Spur};
 use petgraph::{Directed, Undirected};
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Graph {
     Simple(Rc<SimpleGraph>),
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Graph {
+    fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        todo!("Serialize for Graph")
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Graph {
+    fn deserialize<D>(_: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!("Deserialize for Graph")
+    }
 }
 
 impl Hash for Graph {
@@ -40,10 +59,10 @@ impl Ord for Graph {
     }
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct GNodeId(pub usize);
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct GEdgeId(pub usize);
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -55,7 +74,6 @@ pub struct GLabels(pub HashSet<GLabelId>);
 #[derive(Clone, PartialEq, Eq)]
 pub struct GElem(pub Option<Value>, pub GLabels);
 
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SimpleGraph {
     directed: petgraph::stable_graph::StableGraph<GNodeId, GEdgeId, Directed>,
     undirected: petgraph::stable_graph::StableGraph<GNodeId, GEdgeId, Undirected>,
@@ -66,7 +84,43 @@ pub struct SimpleGraph {
 
 impl Debug for SimpleGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("Debutg for SimpleGraph")
+        f.debug_struct("SimpleGraph")
+            .field("nodes", &DebugGElems("node", &self.nodes, &self.labels))
+            .field("edges", &DebugGElems("edge", &self.edges, &self.labels))
+            .field("directed", &self.directed)
+            .field("undirected", &self.undirected)
+            .finish()
+    }
+}
+
+pub struct DebugGElems<'a>(&'a str, &'a Vec<GElem>, &'a RodeoReader);
+pub struct DebugGElem<'a>(usize, &'a str, &'a GElem, &'a RodeoReader);
+
+impl Debug for DebugGElems<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut l = f.debug_list();
+
+        for (id, gelem) in self.1.iter().enumerate() {
+            l.entry(&DebugGElem(id, self.0, gelem, self.2));
+        }
+
+        l.finish()
+    }
+}
+
+impl Debug for DebugGElem<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let DebugGElem(id, name, GElem(value, labels), reader) = self;
+        let labels = labels
+            .0
+            .iter()
+            .map(|id| reader.resolve(&id.0))
+            .collect::<Vec<_>>();
+        f.debug_struct(name)
+            .field("id", id)
+            .field("value", value)
+            .field("labels", &labels)
+            .finish()
     }
 }
 
@@ -75,16 +129,16 @@ pub enum EdgeSpec {
     Undirected(String, String), // node, node
 }
 
+type NodeSpec = (Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>);
+#[allow(clippy::type_complexity)]
+type EdgesSpec = (
+    Vec<String>,
+    Vec<HashSet<String>>,
+    Vec<EdgeSpec>,
+    Vec<Option<Value>>,
+);
 impl SimpleGraph {
-    pub fn from_spec(
-        node_specs: (Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>),
-        edge_specs: (
-            Vec<String>,
-            Vec<HashSet<String>>,
-            Vec<EdgeSpec>,
-            Vec<Option<Value>>,
-        ),
-    ) -> Self {
+    pub fn from_spec(node_specs: NodeSpec, edge_specs: EdgesSpec) -> Self {
         let mut node_ids = Rodeo::default();
         let mut label_ids = Rodeo::default();
         let mut nodes: Vec<GElem> = vec![];
@@ -139,7 +193,7 @@ impl SimpleGraph {
             assert_eq!(edges.len(), eidx);
             edges.push(GElem(value, GLabels(labels)));
 
-            let e = match edge_spec {
+            match edge_spec {
                 EdgeSpec::Directed(l, r) => {
                     let mut get_or_insert = |idx: GNodeId| {
                         *directed_contains
@@ -150,7 +204,7 @@ impl SimpleGraph {
                     let ridx = GNodeId(node_ids.get(r).expect("expected node").into_usize());
                     let l = get_or_insert(lidx);
                     let r = get_or_insert(ridx);
-                    directed.add_edge(l, r, GEdgeId(eidx))
+                    directed.add_edge(l, r, GEdgeId(eidx));
                 }
                 EdgeSpec::Undirected(l, r) => {
                     let mut get_or_insert = |idx: GNodeId| {
@@ -162,9 +216,9 @@ impl SimpleGraph {
                     let ridx = GNodeId(node_ids.get(r).expect("expected node").into_usize());
                     let l = get_or_insert(lidx);
                     let r = get_or_insert(ridx);
-                    undirected.add_edge(l, r, GEdgeId(eidx))
+                    undirected.add_edge(l, r, GEdgeId(eidx));
                 }
-            };
+            }
         }
 
         let labels = label_ids.into_reader();

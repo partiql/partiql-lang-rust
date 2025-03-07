@@ -36,6 +36,9 @@ partiql-extension-value-functions = { path = "../extension/partiql-extension-val
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 
 
+ion-rs_old = { version = "0.18", package = "ion-rs" }
+
+
 insta = "1"
 
 

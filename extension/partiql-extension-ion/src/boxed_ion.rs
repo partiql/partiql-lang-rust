@@ -169,7 +169,7 @@ pub struct BoxedIon {
 
 #[cfg(feature = "serde")]
 impl Serialize for BoxedIon {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -179,7 +179,7 @@ impl Serialize for BoxedIon {
 
 #[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for BoxedIon {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {

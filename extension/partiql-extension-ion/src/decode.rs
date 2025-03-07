@@ -370,6 +370,23 @@ fn has_annotation(
 static TIME_PARTS_PATTERN_SET: Lazy<RegexSet> =
     Lazy::new(|| RegexSet::new(RE_SET_TIME_PARTS).unwrap());
 
+type GNode = (String, HashSet<String>, Option<Value>);
+type GNodes = (Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>);
+#[allow(clippy::type_complexity)]
+type GEdge = (
+    String,
+    HashSet<String>,
+    (String, String, String),
+    Option<Value>,
+);
+#[allow(clippy::type_complexity)]
+type GEdges = (
+    Vec<String>,
+    Vec<HashSet<String>>,
+    Vec<(String, String, String)>,
+    Vec<Option<Value>>,
+);
+
 impl PartiqlEncodedIonValueDecoder {
     fn decode_date<R>(&self, reader: &mut R) -> IonDecodeResult
     where
@@ -570,10 +587,7 @@ impl PartiqlEncodedIonValueDecoder {
         )))))
     }
 
-    fn decode_nodes<R>(
-        &self,
-        reader: &mut R,
-    ) -> Result<(Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>), IonDecodeError>
+    fn decode_nodes<R>(&self, reader: &mut R) -> Result<GNodes, IonDecodeError>
     where
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
@@ -599,10 +613,7 @@ impl PartiqlEncodedIonValueDecoder {
         Ok((ids, labels, payloads))
     }
 
-    fn decode_node<R>(
-        &self,
-        reader: &mut R,
-    ) -> Result<(String, HashSet<String>, Option<Value>), IonDecodeError>
+    fn decode_node<R>(&self, reader: &mut R) -> Result<GNode, IonDecodeError>
     where
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
@@ -625,10 +636,11 @@ impl PartiqlEncodedIonValueDecoder {
                 ("labels", StreamItem::Value(IonType::List)) => {
                     let mut labelset = HashSet::new();
                     reader.step_in()?;
+                    #[allow(irrefutable_let_patterns)]
                     while let item = reader.next()? {
                         match item {
                             StreamItem::Value(IonType::String) => {
-                                labelset.insert(reader.read_string()?.to_string());
+                                labelset.insert(reader.read_string()?.text().to_string());
                             }
                             StreamItem::Nothing => break,
                             _ => return Err(err()),
@@ -650,18 +662,7 @@ impl PartiqlEncodedIonValueDecoder {
         Ok((id, labels, payload))
     }
 
-    fn decode_edges<R>(
-        &self,
-        reader: &mut R,
-    ) -> Result<
-        (
-            Vec<String>,
-            Vec<HashSet<String>>,
-            Vec<(String, String, String)>,
-            Vec<Option<Value>>,
-        ),
-        IonDecodeError,
-    >
+    fn decode_edges<R>(&self, reader: &mut R) -> Result<GEdges, IonDecodeError>
     where
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
@@ -689,18 +690,7 @@ impl PartiqlEncodedIonValueDecoder {
         Ok((ids, labels, ends, payloads))
     }
 
-    fn decode_edge<R>(
-        &self,
-        reader: &mut R,
-    ) -> Result<
-        (
-            String,
-            HashSet<String>,
-            (String, String, String),
-            Option<Value>,
-        ),
-        IonDecodeError,
-    >
+    fn decode_edge<R>(&self, reader: &mut R) -> Result<GEdge, IonDecodeError>
     where
         R: IonReader<Item = StreamItem, Symbol = Symbol>,
     {
@@ -724,10 +714,11 @@ impl PartiqlEncodedIonValueDecoder {
                 ("labels", StreamItem::Value(IonType::List)) => {
                     let mut labelset = HashSet::new();
                     reader.step_in()?;
+                    #[allow(irrefutable_let_patterns)]
                     while let item = reader.next()? {
                         match item {
                             StreamItem::Value(IonType::String) => {
-                                labelset.insert(reader.read_string()?.to_string());
+                                labelset.insert(reader.read_string()?.text().to_string());
                             }
                             StreamItem::Nothing => break,
                             _ => return Err(err()),

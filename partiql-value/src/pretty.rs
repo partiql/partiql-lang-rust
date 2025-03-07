@@ -105,7 +105,7 @@ impl PrettyDoc for Tuple {
 }
 
 impl PrettyDoc for Graph {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
