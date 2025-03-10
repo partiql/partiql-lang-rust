@@ -135,6 +135,7 @@ where
             Value::List(l) => self.encode_list(l.as_ref()),
             Value::Bag(b) => self.encode_bag(b.as_ref()),
             Value::Tuple(t) => self.encode_tuple(t.as_ref()),
+            Value::Graph(_) => todo!("Graph: encode_value"),
             Value::Variant(v) => self.encode_variant(v),
         }
     }

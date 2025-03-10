@@ -16,7 +16,7 @@ pub(crate) const BAG_ANNOT: &str = "$bag";
 pub(crate) const TIME_ANNOT: &str = "$time";
 pub(crate) const DATE_ANNOT: &str = "$date";
 pub(crate) const MISSING_ANNOT: &str = "$missing";
-
+pub(crate) const GRAPH_ANNOT: &str = "$graph";
 pub(crate) const TIME_PART_HOUR_KEY: &str = "hour";
 pub(crate) const TIME_PART_MINUTE_KEY: &str = "minute";
 pub(crate) const TIME_PART_SECOND_KEY: &str = "second";

@@ -7,12 +7,10 @@ use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_extension_ion::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::encode::{IonEncodeError, IonEncoderBuilder, IonEncoderConfig};
 use partiql_extension_ion::Encoding;
-use partiql_value::boxed_variant::BoxedVariantType;
 use partiql_value::datum::{
     Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, OwnedFieldView,
     OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
 };
-use partiql_value::Value::Variant;
 use partiql_value::{Bag, BindingsName, EqualityValue, NullableEq, Value};
 use std::collections::HashMap;
 use std::fs::File;

@@ -1,4 +1,4 @@
-use crate::{Bag, DateTime, List, Tuple, Value};
+use crate::{Bag, DateTime, Graph, List, Tuple, Value};
 use partiql_common::pretty::{
     pretty_prefixed_doc, pretty_seq, pretty_seq_doc, pretty_surrounded, PrettyDoc,
     PRETTY_INDENT_MINOR_NEST,
@@ -25,7 +25,8 @@ impl PrettyDoc for Value {
             Value::DateTime(inner) => inner.pretty_doc(arena),
             Value::List(inner) => inner.pretty_doc(arena),
             Value::Bag(inner) => inner.pretty_doc(arena),
-            Value::Tuple(inner) => inner.pretty_doc(arena),
+            Value::Tuple(inner) => inner.as_ref().pretty_doc(arena),
+            Value::Graph(inner) => inner.pretty_doc(arena),
             Value::Variant(inner) => inner.pretty_doc(arena),
         }
     }
@@ -100,6 +101,17 @@ impl PrettyDoc for Tuple {
             k.append(sep).group().append(v).group()
         });
         pretty_seq_doc(seq, "{", None, "}", ",", PRETTY_INDENT_MINOR_NEST, arena)
+    }
+}
+
+impl PrettyDoc for Graph {
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        todo!("PrettyDoc for Graph")
     }
 }
 

@@ -21,8 +21,9 @@ impl From<Value> for Lit {
             Value::List(list) => (*list).into(),
             Value::Bag(bag) => (*bag).into(),
             Value::Tuple(tuple) => (*tuple).into(),
+            Value::Graph(_) => todo!("Value to Lit: Graph"),
             Value::Variant(_) => {
-                todo!("Value to Lit: EmbeddedDoc")
+                todo!("Value to Lit: Variant")
             }
         }
     }

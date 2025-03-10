@@ -6,7 +6,7 @@ use std::hash::Hash;
 use rust_decimal::Decimal as RustDecimal;
 
 use crate::variant::Variant;
-use crate::{Bag, BindingIntoIter, BindingIter, DateTime, List, Tuple};
+use crate::{Bag, BindingIntoIter, BindingIter, DateTime, Graph, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,7 @@ pub enum Value {
     List(Box<List>),
     Bag(Box<Bag>),
     Tuple(Box<Tuple>),
+    Graph(Box<Graph>),
     Variant(Box<Variant>),
 }
 
@@ -274,11 +275,12 @@ impl Debug for Value {
                 }
                 write!(f, "'")
             }
-            Value::DateTime(t) => t.fmt(f),
-            Value::List(l) => l.fmt(f),
-            Value::Bag(b) => b.fmt(f),
-            Value::Tuple(t) => t.fmt(f),
-            Value::Variant(variant) => variant.fmt(f),
+            Value::DateTime(t) => Debug::fmt(&t, f),
+            Value::List(l) => Debug::fmt(&l, f),
+            Value::Bag(b) => Debug::fmt(&b, f),
+            Value::Tuple(t) => Debug::fmt(&t, f),
+            Value::Graph(g) => Debug::fmt(&g, f),
+            Value::Variant(v) => Debug::fmt(&v, f),
         }
     }
 }
@@ -401,6 +403,11 @@ impl Ord for Value {
             (Value::Bag(l), Value::Bag(r)) => l.cmp(r),
             (Value::Bag(_), _) => Ordering::Less,
             (_, Value::Bag(_)) => Ordering::Greater,
+
+            // TODO need to RFC graph comparison behavior
+            (Value::Graph(l), Value::Graph(r)) => l.cmp(r),
+            (Value::Graph(_), _) => Ordering::Less,
+            (_, Value::Graph(_)) => Ordering::Greater,
 
             (Value::Variant(l), Value::Variant(r)) => l.cmp(r),
         }

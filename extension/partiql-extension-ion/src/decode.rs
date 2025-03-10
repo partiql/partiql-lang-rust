@@ -1,17 +1,19 @@
 use delegate::delegate;
 use ion_rs_old::{Decimal, Int, IonError, IonReader, IonType, StreamItem, Symbol};
 use once_cell::sync::Lazy;
-use partiql_value::{Bag, DateTime, List, Tuple, Value, Variant};
+use partiql_value::{Bag, DateTime, EdgeSpec, Graph, List, SimpleGraph, Tuple, Value, Variant};
 use regex::RegexSet;
 use rust_decimal::prelude::ToPrimitive;
+use std::collections::HashSet;
 
 use crate::boxed_ion::BoxedIonType;
 use crate::common::{
-    Encoding, BAG_ANNOT, BOXED_ION_ANNOT, DATE_ANNOT, MISSING_ANNOT, RE_SET_TIME_PARTS, TIME_ANNOT,
-    TIME_PARTS_HOUR, TIME_PARTS_MINUTE, TIME_PARTS_SECOND, TIME_PARTS_TZ_HOUR,
-    TIME_PARTS_TZ_MINUTE,
+    Encoding, BAG_ANNOT, BOXED_ION_ANNOT, DATE_ANNOT, GRAPH_ANNOT, MISSING_ANNOT,
+    RE_SET_TIME_PARTS, TIME_ANNOT, TIME_PARTS_HOUR, TIME_PARTS_MINUTE, TIME_PARTS_SECOND,
+    TIME_PARTS_TZ_HOUR, TIME_PARTS_TZ_MINUTE,
 };
 use std::num::NonZeroU8;
+use std::rc::Rc;
 use std::str::FromStr;
 use thiserror::Error;
 use time::Duration;
@@ -368,6 +370,23 @@ fn has_annotation(
 static TIME_PARTS_PATTERN_SET: Lazy<RegexSet> =
     Lazy::new(|| RegexSet::new(RE_SET_TIME_PARTS).unwrap());
 
+type GNode = (String, HashSet<String>, Option<Value>);
+type GNodes = (Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>);
+#[allow(clippy::type_complexity)]
+type GEdge = (
+    String,
+    HashSet<String>,
+    (String, String, String),
+    Option<Value>,
+);
+#[allow(clippy::type_complexity)]
+type GEdges = (
+    Vec<String>,
+    Vec<HashSet<String>>,
+    Vec<(String, String, String)>,
+    Vec<Option<Value>>,
+);
+
 impl PartiqlEncodedIonValueDecoder {
     fn decode_date<R>(&self, reader: &mut R) -> IonDecodeResult
     where
@@ -527,6 +546,211 @@ impl PartiqlEncodedIonValueDecoder {
                 .map_err(|e| IonDecodeError::StreamError(e.to_string()))?,
         ))
     }
+
+    fn decode_graph<R>(&self, reader: &mut R) -> IonDecodeResult
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let err = || IonDecodeError::ConversionError("Invalid graph specified".into());
+        let mut nodes = None;
+        let mut edges = None;
+        reader.step_in()?;
+        'kv: loop {
+            match reader.next()? {
+                StreamItem::Value(typ) => match typ {
+                    IonType::List => match reader.field_name()?.text_or_error()? {
+                        "nodes" => nodes = Some(self.decode_nodes(reader)?),
+                        "edges" => edges = Some(self.decode_edges(reader)?),
+                        _ => return Err(err()),
+                    },
+                    _ => return Err(err()),
+                },
+                StreamItem::Null(_) => return Err(err()),
+                StreamItem::Nothing => break 'kv,
+            }
+        }
+        reader.step_out()?;
+
+        let nodes = nodes.ok_or_else(err)?;
+        let (ids, labels, ends, payloads) = edges.ok_or_else(err)?;
+        let edge_specs = ends
+            .into_iter()
+            .map(|(l, dir, r)| match dir.as_str() {
+                "->" => Ok(EdgeSpec::Directed(l, r)),
+                "<-" => Ok(EdgeSpec::Directed(r, l)),
+                "--" => Ok(EdgeSpec::Undirected(l, r)),
+                _ => Err(err()),
+            })
+            .collect::<Result<Vec<EdgeSpec>, _>>()?;
+        Ok(Value::Graph(Box::new(Graph::Simple(Rc::new(
+            SimpleGraph::from_spec(nodes, (ids, labels, edge_specs, payloads)),
+        )))))
+    }
+
+    fn decode_nodes<R>(&self, reader: &mut R) -> Result<GNodes, IonDecodeError>
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let err = || IonDecodeError::ConversionError("Invalid graph specified".into());
+        reader.step_in()?;
+        let mut ids = vec![];
+        let mut labels = vec![];
+        let mut payloads = vec![];
+        'values: loop {
+            let item = reader.next()?;
+            match item {
+                StreamItem::Nothing => break 'values,
+                StreamItem::Value(IonType::Struct) => {
+                    let (id, labelset, payload) = self.decode_node(reader)?;
+                    ids.push(id);
+                    labels.push(labelset);
+                    payloads.push(payload);
+                }
+                _ => return Err(err()),
+            }
+        }
+        reader.step_out()?;
+        Ok((ids, labels, payloads))
+    }
+
+    fn decode_node<R>(&self, reader: &mut R) -> Result<GNode, IonDecodeError>
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let err = || IonDecodeError::ConversionError("Invalid graph specified".into());
+        let mut id = None;
+        let mut labels = None;
+        let mut payload = None;
+        reader.step_in()?;
+        'kv: loop {
+            let item = reader.next()?;
+            if item == StreamItem::Nothing {
+                break 'kv;
+            }
+            let fname = reader.field_name()?;
+            let fname = fname.text_or_error()?;
+            match (fname, item) {
+                ("id", StreamItem::Value(IonType::Symbol)) => {
+                    id = Some(reader.read_symbol()?.text_or_error()?.to_string());
+                }
+                ("labels", StreamItem::Value(IonType::List)) => {
+                    let mut labelset = HashSet::new();
+                    reader.step_in()?;
+                    #[allow(irrefutable_let_patterns)]
+                    while let item = reader.next()? {
+                        match item {
+                            StreamItem::Value(IonType::String) => {
+                                labelset.insert(reader.read_string()?.text().to_string());
+                            }
+                            StreamItem::Nothing => break,
+                            _ => return Err(err()),
+                        }
+                    }
+                    reader.step_out()?;
+                    labels = Some(labelset);
+                }
+                ("payload", StreamItem::Value(typ)) => {
+                    payload = Some(self.decode_value(reader, typ)?);
+                }
+                _ => return Err(err()),
+            }
+        }
+        reader.step_out()?;
+
+        let id = id.ok_or_else(err)?;
+        let labels = labels.unwrap_or_else(Default::default);
+        Ok((id, labels, payload))
+    }
+
+    fn decode_edges<R>(&self, reader: &mut R) -> Result<GEdges, IonDecodeError>
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let err = || IonDecodeError::ConversionError("Invalid graph specified".into());
+        reader.step_in()?;
+        let mut ids = vec![];
+        let mut labels = vec![];
+        let mut ends = vec![];
+        let mut payloads = vec![];
+        'values: loop {
+            let item = reader.next()?;
+            match item {
+                StreamItem::Nothing => break 'values,
+                StreamItem::Value(IonType::Struct) => {
+                    let (id, labelset, end, payload) = self.decode_edge(reader)?;
+                    ids.push(id);
+                    labels.push(labelset);
+                    ends.push(end);
+                    payloads.push(payload);
+                }
+                _ => return Err(err()),
+            }
+        }
+        reader.step_out()?;
+        Ok((ids, labels, ends, payloads))
+    }
+
+    fn decode_edge<R>(&self, reader: &mut R) -> Result<GEdge, IonDecodeError>
+    where
+        R: IonReader<Item = StreamItem, Symbol = Symbol>,
+    {
+        let err = || IonDecodeError::ConversionError("Invalid graph specified".into());
+        let mut id = None;
+        let mut labels = None;
+        let mut ends = None;
+        let mut payload = None;
+        reader.step_in()?;
+        'kv: loop {
+            let item = reader.next()?;
+            if item == StreamItem::Nothing {
+                break 'kv;
+            }
+            let fname = reader.field_name()?;
+            let fname = fname.text_or_error()?;
+            match (fname, item) {
+                ("id", StreamItem::Value(IonType::Symbol)) => {
+                    id = Some(reader.read_symbol()?.text_or_error()?.to_string());
+                }
+                ("labels", StreamItem::Value(IonType::List)) => {
+                    let mut labelset = HashSet::new();
+                    reader.step_in()?;
+                    #[allow(irrefutable_let_patterns)]
+                    while let item = reader.next()? {
+                        match item {
+                            StreamItem::Value(IonType::String) => {
+                                labelset.insert(reader.read_string()?.text().to_string());
+                            }
+                            StreamItem::Nothing => break,
+                            _ => return Err(err()),
+                        }
+                    }
+                    reader.step_out()?;
+                    labels = Some(labelset);
+                }
+                ("ends", StreamItem::Value(IonType::SExp)) => {
+                    reader.step_in()?;
+                    reader.next()?;
+                    let l = reader.read_symbol()?.text_or_error()?.to_string();
+                    reader.next()?;
+                    let dir = reader.read_symbol()?.text_or_error()?.to_string();
+                    reader.next()?;
+                    let r = reader.read_symbol()?.text_or_error()?.to_string();
+                    reader.step_out()?;
+                    ends = Some((l, dir, r));
+                }
+                ("payload", StreamItem::Value(typ)) => {
+                    payload = Some(self.decode_value(reader, typ)?);
+                }
+                _ => return Err(err()),
+            }
+        }
+        reader.step_out()?;
+
+        let id = id.ok_or_else(err)?;
+        let labels = labels.unwrap_or_else(Default::default);
+        let ends = ends.ok_or_else(err)?;
+        Ok((id, labels, ends, payload))
+    }
 }
 
 impl<R> IonValueDecoder<R> for PartiqlEncodedIonValueDecoder
@@ -576,6 +800,8 @@ where
     fn decode_struct(&self, reader: &mut R) -> IonDecodeResult {
         if has_annotation(reader, TIME_ANNOT) {
             self.decode_time(reader)
+        } else if has_annotation(reader, GRAPH_ANNOT) {
+            self.decode_graph(reader)
         } else {
             decode_struct(self, reader)
         }
