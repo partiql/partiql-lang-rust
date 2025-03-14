@@ -26,7 +26,7 @@ partiql-common = { path = "../partiql-common", version = "0.11.*" }
 partiql-types = { path = "../partiql-types", version = "0.11.*" }
 
 fnv = "1"
-indexmap = "2.5"
+indexmap = "2"
 thiserror = "1.0"
 
 [dev-dependencies]

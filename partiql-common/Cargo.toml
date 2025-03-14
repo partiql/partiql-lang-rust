@@ -20,7 +20,7 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-indexmap = "2.5"
+indexmap = "2"
 pretty = "0.12"
 serde = { version = "1", features = ["derive"], optional = true }
 rust_decimal = { version = "1.36", default-features = false, features = ["std"] }

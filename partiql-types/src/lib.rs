@@ -739,10 +739,12 @@ pub enum Static {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
+    // TODO GPML
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
 pub enum StaticCategory<'a> {
+    Graph(),
     Tuple(),
     Sequence(&'a PartiqlShape),
     Scalar(&'a Static),
