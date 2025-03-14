@@ -1,5 +1,5 @@
 use crate::{
-    Bag, BagIntoIterator, BindingsName, List, ListIntoIterator, PairsIntoIter, Tuple, Value,
+    Bag, BagIntoIterator, BindingsName, Graph, List, ListIntoIterator, PairsIntoIter, Tuple, Value,
 };
 use std::borrow::Cow;
 use std::error::Error;
@@ -63,6 +63,7 @@ pub enum DatumCategoryRef<'a> {
     Tuple(DatumTupleRef<'a>),
     Sequence(DatumSeqRef<'a>),
     Scalar(DatumValueRef<'a>),
+    Graph(DatumGraphRef<'a>),
 }
 
 #[derive(Debug)]
@@ -72,6 +73,7 @@ pub enum DatumCategoryOwned {
     Tuple(DatumTupleOwned),
     Sequence(DatumSeqOwned),
     Scalar(DatumValueOwned),
+    Graph(DatumGraphOwned),
 }
 
 #[derive(Debug)]
@@ -94,6 +96,11 @@ pub enum DatumValueRef<'a> {
 }
 
 #[derive(Debug)]
+pub enum DatumGraphRef<'a> {
+    Graph(&'a Graph),
+}
+
+#[derive(Debug)]
 pub enum DatumTupleOwned {
     Tuple(Box<Tuple>),
     Dynamic(Box<dyn OwnedTupleView<Value>>),
@@ -109,6 +116,11 @@ pub enum DatumSeqOwned {
 #[derive(Debug)]
 pub enum DatumValueOwned {
     Value(Value),
+}
+
+#[derive(Debug)]
+pub enum DatumGraphOwned {
+    Graph(Graph),
 }
 
 impl<'a> DatumCategory<'a> for Value {
