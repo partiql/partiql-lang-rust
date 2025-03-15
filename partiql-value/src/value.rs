@@ -565,6 +565,13 @@ impl From<Bag> for Value {
     }
 }
 
+impl From<Graph> for Value {
+    #[inline]
+    fn from(g: Graph) -> Self {
+        Value::Graph(Box::new(g))
+    }
+}
+
 impl From<Variant> for Value {
     #[inline]
     fn from(v: Variant) -> Self {

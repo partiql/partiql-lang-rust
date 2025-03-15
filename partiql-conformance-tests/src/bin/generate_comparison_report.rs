@@ -20,7 +20,7 @@ struct CTSReport {
 /// - number of tests passing in both reports
 /// - number of tests failing in both reports
 /// - number of tests passing in the first report but now fail in the second report (i.e. tests with
-/// regressed behavior)
+///   regressed behavior)
 ///   - also lists out these tests and gives a warning
 /// - number of tests failing in the first report but now pass in the second report
 ///   - also lists out these tests

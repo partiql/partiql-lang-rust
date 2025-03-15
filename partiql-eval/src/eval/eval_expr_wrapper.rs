@@ -62,6 +62,9 @@ impl TypeSatisfier for Static {
             (StaticCategory::Tuple(), DatumCategoryRef::Tuple(_)) => {
                 true // TODO when Static typing knows how to type a tuple
             }
+            (StaticCategory::Graph(), DatumCategoryRef::Graph(_)) => {
+                true // TODO when Static typing knows how to type a graph
+            }
             _ => false,
         }
     }
