@@ -29,7 +29,7 @@ use crate::eval::expr::EvalExpr;
 use crate::eval::graph::plan::PathPatternMatch;
 use crate::eval::graph::simple_graph::engine::SimpleGraphEngine;
 use crate::eval::graph::string_graph::types::StringGraphTypes;
-use crate::eval::graph::GraphEvaluator;
+use graph::evaluator::GraphEvaluator;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

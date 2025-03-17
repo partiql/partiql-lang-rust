@@ -1,14 +1,13 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use crate::eval::graph::types::{GraphElement, GraphTypes};
-use fxhash::FxBuildHasher;
-use indexmap::IndexSet;
+use crate::eval::graph::types::GraphTypes;
 
-type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
-
+/// A plan specification for an edge's direction filtering.
+#[allow(dead_code)] // TODO remove once graph planning is implemented
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy)]
-pub enum DirSpec {
+pub enum DirectionFilter {
     L,   // <-
     U,   //  ~
     R,   //  ->
@@ -18,127 +17,92 @@ pub enum DirSpec {
     LUR, //  -
 }
 
+/// A plan specification for bind names.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct BindSpec<GT: GraphTypes>(pub GT::Binder);
 
+/// A plan specification for label filtering.
 #[derive(Debug, Clone, Default)]
-pub enum LabelSpec<GT: GraphTypes> {
+pub enum LabelFilter<GT: GraphTypes> {
     #[default]
     Always,
     Named(GT::Label),
     Never,
 }
 
+/// A plan specification for value filtering.
 #[derive(Debug, Clone, Copy, Default)]
-pub enum FilterSpec {
+pub enum ValueFilter {
     #[default]
     Always,
 }
 
+/// A plan specification for node label & value filtering.
 #[derive(Debug, Clone)]
-pub struct NodeSpec<GT: GraphTypes> {
-    pub label: LabelSpec<GT>,
-    pub filter: FilterSpec,
+pub struct NodeFilter<GT: GraphTypes> {
+    pub label: LabelFilter<GT>,
+    pub filter: ValueFilter,
 }
 
-pub trait ElemSpecBuilder<GT: GraphTypes> {
-    fn any() -> Self;
-    fn any_labeled(label: GT::Label) -> Self;
-}
-
-impl<GT: GraphTypes> ElemSpecBuilder<GT> for NodeSpec<GT> {
-    fn any() -> Self {
-        Self {
-            label: LabelSpec::Always,
-            filter: FilterSpec::Always,
-        }
-    }
-
-    fn any_labeled(label: GT::Label) -> Self {
-        Self {
-            label: LabelSpec::Named(label),
-            filter: FilterSpec::Always,
-        }
-    }
-}
-
-impl<GT: GraphTypes> ElemSpecBuilder<GT> for EdgeSpec<GT> {
-    fn any() -> Self {
-        Self {
-            label: LabelSpec::Always,
-            filter: FilterSpec::Always,
-        }
-    }
-    fn any_labeled(label: GT::Label) -> Self {
-        Self {
-            label: LabelSpec::Named(label),
-            filter: FilterSpec::Always,
-        }
-    }
-}
-
+/// A plan specification for edge label & value filtering.
 #[derive(Debug, Clone)]
-pub struct EdgeSpec<GT: GraphTypes> {
-    pub label: LabelSpec<GT>,
-    pub filter: FilterSpec,
+pub struct EdgeFilter<GT: GraphTypes> {
+    pub label: LabelFilter<GT>,
+    pub filter: ValueFilter,
 }
 
+/// A plan specification for triple (node, edge, node) matching.
 #[derive(Debug, Clone)]
-pub struct TripleSpec<GT: GraphTypes> {
-    pub lhs: NodeSpec<GT>,
-    pub e: EdgeSpec<GT>,
-    pub rhs: NodeSpec<GT>,
+pub struct TripleFilter<GT: GraphTypes> {
+    pub lhs: NodeFilter<GT>,
+    pub e: EdgeFilter<GT>,
+    pub rhs: NodeFilter<GT>,
 }
 
+/// A plan specification for 'step' (triple + edge direction) matching.
 #[derive(Debug, Clone)]
-pub struct StepSpec<GT: GraphTypes> {
-    pub dir: DirSpec,
-    pub triple: TripleSpec<GT>,
+pub struct StepFilter<GT: GraphTypes> {
+    pub dir: DirectionFilter,
+    pub triple: TripleFilter<GT>,
 }
 
+/// A plan specification for 'path patterns' (i.e., sequences of 'node edge node's) matching.
+#[allow(dead_code)] // TODO remove once graph planning is implemented
+#[derive(Debug, Clone)]
+pub struct PathPatternFilter<GT: GraphTypes> {
+    pub head: NodeFilter<GT>,
+    pub tail: Vec<(DirectionFilter, EdgeFilter<GT>, NodeFilter<GT>)>,
+}
+
+/// A plan specification for node matching.
 #[derive(Debug, Clone)]
 pub struct NodeMatch<GT: GraphTypes> {
     pub binder: BindSpec<GT>,
-    pub spec: NodeSpec<GT>,
+    pub spec: NodeFilter<GT>,
 }
 
+/// A plan specification for edge matching.
+#[allow(dead_code)] // TODO remove once graph planning is implemented
 #[derive(Debug, Clone)]
 pub struct EdgeMatch<GT: GraphTypes> {
     pub binder: BindSpec<GT>,
-    pub spec: EdgeSpec<GT>,
+    pub spec: EdgeFilter<GT>,
 }
 
+/// A plan specification for path (i.e., node, edge, node) matching.
 #[derive(Debug, Clone)]
 pub struct PathMatch<GT: GraphTypes> {
     pub binders: (BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
-    pub spec: StepSpec<GT>,
+    pub spec: StepFilter<GT>,
 }
 
-#[derive(Debug, Clone)]
-pub struct PathBinding<GT: GraphTypes> {
-    pub matcher: PathMatch<GT>,
-    pub bindings: Vec<Triple<GT>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeBinding<GT: GraphTypes> {
-    pub matcher: NodeMatch<GT>,
-    pub binding: Vec<GT::NodeId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Triple<GT: GraphTypes> {
-    pub lhs: GT::NodeId,
-    pub e: GT::EdgeId,
-    pub rhs: GT::NodeId,
-}
-
+/// A plan specification for path patterns (i.e., sequences of [`PathMatch`]s) matching.
+#[allow(dead_code)] // TODO remove once graph planning is implemented
 #[derive(Debug, Clone)]
 pub enum PathPatternMatch<GT: GraphTypes> {
     Node(NodeMatch<GT>),
     Match(PathMatch<GT>),
     Concat(Vec<PathPatternMatch<GT>>),
-    // Alternative(Vec<PathPatternMatch<GT>>), ?
 }
 
 impl<GT: GraphTypes> From<PathMatch<GT>> for PathPatternMatch<GT> {
@@ -153,76 +117,107 @@ impl<GT: GraphTypes> From<NodeMatch<GT>> for PathPatternMatch<GT> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PathPatternSpecs<GT: GraphTypes> {
-    pub head: NodeSpec<GT>,
-    pub tail: Vec<(DirSpec, EdgeSpec<GT>, NodeSpec<GT>)>,
+#[allow(dead_code)] // TODO remove once graph planning is implemented
+pub trait ElementFilterBuilder<GT: GraphTypes> {
+    fn any() -> Self;
+    fn labeled(label: GT::Label) -> Self;
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub struct PathPatternNodes<GT: GraphTypes> {
-    pub head: GT::NodeId,
-    pub tail: Vec<(GT::EdgeId, GT::NodeId)>,
-}
-
-impl<GT: GraphTypes> PathPatternNodes<GT> {
-    pub fn len(&self) -> usize {
-        1 + (self.tail.len() * 2)
+impl<GT: GraphTypes> ElementFilterBuilder<GT> for NodeFilter<GT> {
+    fn any() -> Self {
+        Self {
+            label: LabelFilter::Always,
+            filter: ValueFilter::Always,
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
-        false
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = GraphElement<'_, GT>> {
-        let head = std::iter::once(GraphElement::Node(&self.head));
-        let tail = self
-            .tail
-            .iter()
-            .flat_map(|(e, n)| [GraphElement::Edge(e), GraphElement::Node(n)].into_iter());
-        head.chain(tail)
+    fn labeled(label: GT::Label) -> Self {
+        Self {
+            label: LabelFilter::Named(label),
+            filter: ValueFilter::Always,
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PathPatternBinding<GT: GraphTypes> {
-    pub binders: Vec<BindSpec<GT>>,
-    // pub specs: Vec<PathPatternSpecs<GT>>,
-    pub bindings: FxIndexSet<PathPatternNodes<GT>>,
-}
-
-impl<GT: GraphTypes> From<PathBinding<GT>> for PathPatternBinding<GT> {
-    fn from(path_binding: PathBinding<GT>) -> Self {
-        let PathBinding { bindings, matcher } = path_binding;
-
-        let (l, e, r) = matcher.binders;
-        let binders = vec![l, e, r];
-        let bindings = bindings
-            .into_iter()
-            .map(|triple| PathPatternNodes {
-                head: triple.lhs,
-                tail: vec![(triple.e, triple.rhs)],
-            })
-            .collect();
-
-        PathPatternBinding { binders, bindings }
+impl<GT: GraphTypes> ElementFilterBuilder<GT> for EdgeFilter<GT> {
+    fn any() -> Self {
+        Self {
+            label: LabelFilter::Always,
+            filter: ValueFilter::Always,
+        }
+    }
+    fn labeled(label: GT::Label) -> Self {
+        Self {
+            label: LabelFilter::Named(label),
+            filter: ValueFilter::Always,
+        }
     }
 }
 
-impl<GT: GraphTypes> From<NodeBinding<GT>> for PathPatternBinding<GT> {
-    fn from(node_binding: NodeBinding<GT>) -> Self {
-        let NodeBinding { binding, matcher } = node_binding;
-
-        let binders = vec![matcher.binder];
-
-        let bindings = binding
-            .into_iter()
-            .map(|node| PathPatternNodes {
-                head: node,
-                tail: vec![],
-            })
-            .collect();
-
-        PathPatternBinding { binders, bindings }
+/// A trait for converting between plans parameterized by different [`GraphTypes`]
+pub trait GraphPlanConvert<In: GraphTypes, Out: GraphTypes>: Debug {
+    fn convert_pathpattern_match(&self, matcher: &PathPatternMatch<In>) -> PathPatternMatch<Out> {
+        match matcher {
+            PathPatternMatch::Node(n) => PathPatternMatch::Node(self.convert_node_match(n)),
+            PathPatternMatch::Match(m) => PathPatternMatch::Match(self.convert_path_match(m)),
+            PathPatternMatch::Concat(ms) => PathPatternMatch::Concat(
+                ms.iter()
+                    .map(|m| self.convert_pathpattern_match(m))
+                    .collect(),
+            ),
+        }
     }
+    fn convert_path_match(&self, matcher: &PathMatch<In>) -> PathMatch<Out> {
+        let (x, y, z) = &matcher.binders;
+        let binders = (
+            self.convert_binder(x),
+            self.convert_binder(y),
+            self.convert_binder(z),
+        );
+        PathMatch {
+            binders,
+            spec: self.convert_step_filter(&matcher.spec),
+        }
+    }
+    fn convert_step_filter(&self, step: &StepFilter<In>) -> StepFilter<Out> {
+        StepFilter {
+            dir: step.dir,
+            triple: self.convert_triple_filter(&step.triple),
+        }
+    }
+    fn convert_triple_filter(&self, step: &TripleFilter<In>) -> TripleFilter<Out> {
+        TripleFilter {
+            lhs: self.convert_node_filter(&step.lhs),
+            e: self.convert_edge_filter(&step.e),
+            rhs: self.convert_node_filter(&step.rhs),
+        }
+    }
+    fn convert_node_filter(&self, node: &NodeFilter<In>) -> NodeFilter<Out> {
+        NodeFilter {
+            label: self.convert_label_filter(&node.label),
+            filter: node.filter,
+        }
+    }
+    fn convert_edge_filter(&self, edge: &EdgeFilter<In>) -> EdgeFilter<Out> {
+        EdgeFilter {
+            label: self.convert_label_filter(&edge.label),
+            filter: edge.filter,
+        }
+    }
+    fn convert_node_match(&self, node: &NodeMatch<In>) -> NodeMatch<Out> {
+        NodeMatch {
+            binder: self.convert_binder(&node.binder),
+            spec: self.convert_node_filter(&node.spec),
+        }
+    }
+
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
+    fn convert_edge_match(&self, edge: &EdgeMatch<In>) -> EdgeMatch<Out> {
+        EdgeMatch {
+            binder: self.convert_binder(&edge.binder),
+            spec: self.convert_edge_filter(&edge.spec),
+        }
+    }
+    fn convert_label_filter(&self, node: &LabelFilter<In>) -> LabelFilter<Out>;
+    fn convert_binder(&self, binder: &BindSpec<In>) -> BindSpec<Out>;
 }

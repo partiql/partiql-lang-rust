@@ -2442,8 +2442,8 @@ mod tests {
         use crate::eval::expr::EvalGlobalVarRef;
         use crate::eval::graph::bind_name::FreshBinder;
         use crate::eval::graph::plan::{
-            BindSpec, DirSpec, EdgeSpec, ElemSpecBuilder, NodeMatch, NodeSpec, PathMatch,
-            PathPatternMatch, StepSpec, TripleSpec,
+            BindSpec, DirectionFilter, EdgeFilter, ElementFilterBuilder, NodeFilter, NodeMatch,
+            PathMatch, PathPatternMatch, StepFilter, TripleFilter,
         };
         use crate::eval::graph::string_graph::types::StringGraphTypes;
         use crate::eval::{BasicContext, EvalGraphMatch};
@@ -2504,7 +2504,7 @@ mod tests {
         fn node() {
             // Query: (graph MATCH (x:a))
             let binder = BindSpec("x".to_string());
-            let spec = NodeSpec::any_labeled("a".to_string());
+            let spec = NodeFilter::labeled("a".to_string());
             let matcher = NodeMatch { binder, spec };
 
             test_graph(matcher.into(), "<< { 'x': 1 }, { 'x': 3 } >>")
@@ -2520,12 +2520,12 @@ mod tests {
                 BindSpec("e".to_string()),
                 BindSpec(fresh.node()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any_labeled("foo".to_string()),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::labeled("foo".to_string()),
+                    rhs: NodeFilter::any(),
                 },
             };
 
@@ -2544,12 +2544,12 @@ mod tests {
                 BindSpec(fresh.node()),
                 BindSpec(fresh.node()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any_labeled("foo".to_string()),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("foo".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
                 },
             };
 
@@ -2566,12 +2566,12 @@ mod tests {
                 BindSpec("z".to_string()),
                 BindSpec("y".to_string()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::L,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any_labeled("e".to_string()),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::L,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::labeled("e".to_string()),
+                    rhs: NodeFilter::any(),
                 },
             };
 
@@ -2590,12 +2590,12 @@ mod tests {
                 BindSpec(fresh.edge()),
                 BindSpec(fresh.node()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::R,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::R,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
                 },
             };
 
@@ -2614,12 +2614,12 @@ mod tests {
                 BindSpec("z".to_string()),
                 BindSpec(fresh.node()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::LR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
                 },
             };
 
@@ -2639,12 +2639,12 @@ mod tests {
                 BindSpec("z1".to_string()),
                 BindSpec("y1".to_string()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any_labeled("b".to_string()),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any_labeled("a".to_string()),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("b".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::labeled("a".to_string()),
                 },
             };
             let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
@@ -2654,12 +2654,12 @@ mod tests {
                 BindSpec("z2".to_string()),
                 BindSpec("y2".to_string()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any_labeled("a".to_string()),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any_labeled("b".to_string()),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("a".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::labeled("b".to_string()),
                 },
             };
             let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
@@ -2685,12 +2685,12 @@ mod tests {
                 BindSpec(fresh.edge()),
                 BindSpec("x2".to_string()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
                 },
             };
             let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
@@ -2700,12 +2700,12 @@ mod tests {
                 BindSpec(fresh.edge()),
                 BindSpec("x1".to_string()),
             );
-            let spec = StepSpec {
-                dir: DirSpec::LUR,
-                triple: TripleSpec {
-                    lhs: NodeSpec::any(),
-                    e: EdgeSpec::any(),
-                    rhs: NodeSpec::any(),
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
                 },
             };
             let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };

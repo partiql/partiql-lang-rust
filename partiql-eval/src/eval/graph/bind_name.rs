@@ -1,7 +1,8 @@
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
 
-const PREFIX: char = '\u{FDD0}';
+/// A unicode non-charachter prefixed onto 'anonymous' bind names
+const ANON_PREFIX: char = '\u{FDD0}';
 
 pub trait BindNameExt {
     fn is_anon(&self) -> bool;
@@ -9,12 +10,16 @@ pub trait BindNameExt {
 
 impl<S: AsRef<str>> BindNameExt for S {
     fn is_anon(&self) -> bool {
-        self.as_ref().starts_with(PREFIX)
+        self.as_ref().starts_with(ANON_PREFIX)
     }
 }
 
+/// Creates 'fresh' bind names
 pub struct FreshBinder {
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
     node: AtomicU32,
+
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
     edge: AtomicU32,
 }
 
@@ -28,11 +33,13 @@ impl Default for FreshBinder {
 }
 
 impl FreshBinder {
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
     pub fn node(&self) -> String {
-        format!("{PREFIX}🞎{}", self.node.fetch_add(1, Relaxed))
+        format!("{ANON_PREFIX}🞎{}", self.node.fetch_add(1, Relaxed))
     }
 
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
     pub fn edge(&self) -> String {
-        format!("{PREFIX}⁃{}", self.edge.fetch_add(1, Relaxed))
+        format!("{ANON_PREFIX}⁃{}", self.edge.fetch_add(1, Relaxed))
     }
 }
