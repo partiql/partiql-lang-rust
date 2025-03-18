@@ -2452,6 +2452,14 @@ mod tests {
         use partiql_common::pretty::ToPretty;
         use partiql_value::{BindingsName, DateTime, Value};
 
+        /*
+            A simple 3-node, 3-edge graph which is intended to be able to be exactly matched by:
+           ```(graph MATCH
+                (n1:a WHERE n1 == 1) -[e12:e WHERE e12 == 1.2]-> (n2),
+                (n2:b WHERE n2 == 2) -[e23:d WHERE e23 == 2.3]-> (n3),
+                (n3:a WHERE n3 == 3) ~[e_u:self WHERE e_u == <<>>]~ (n3)
+            )```
+        */
         fn graph() -> Value {
             let graph = r##"
             $graph::{
