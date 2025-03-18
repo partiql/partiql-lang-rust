@@ -23,10 +23,10 @@ macro_rules! take_input {
     ($expr:expr, $ctx:expr) => {
         match $expr {
             None => {
-                $ctx.add_error(EvaluationError::IllegalState(
+                $ctx.add_error($crate::error::EvaluationError::IllegalState(
                     "Error in retrieving input value".to_string(),
                 ));
-                return Missing;
+                return partiql_value::Value::Missing;
             }
             Some(val) => val,
         }

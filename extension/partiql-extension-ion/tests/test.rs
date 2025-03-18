@@ -180,6 +180,9 @@ fn flatten_dump_owned(prefix: &str, value: Value, indent: usize) -> String {
             assert_eq!(datum_lowered_value_stats, datum_owned_value_stats);
             result += &datum_owned_value_stats;
         }
+        _ => {
+            unreachable!("unhandled category")
+        }
     }
     result
 }
@@ -278,6 +281,9 @@ fn flatten_dump_ref(prefix: &str, value: Value, indent: usize) -> String {
             let datum_lowered_value_stats = lowered.unwrap().dump_datum_stats(indent + 2);
             assert_eq!(datum_lowered_value_stats, datum_owned_value_stats);
             result += &datum_owned_value_stats;
+        }
+        _ => {
+            unreachable!("unhandled category")
         }
     }
     result

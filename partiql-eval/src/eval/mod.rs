@@ -11,7 +11,7 @@ use petgraph::dot::Dot;
 use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Outgoing};
 
-use partiql_value::Value;
+use partiql_value::{Graph, Tuple, Value};
 
 use crate::env::basic::{MapBindings, NestedBindings};
 
@@ -25,12 +25,18 @@ use unicase::UniCase;
 use crate::eval::evaluable::{EvalType, Evaluable};
 use crate::plan::EvaluationMode;
 
+use crate::eval::expr::EvalExpr;
+use crate::eval::graph::plan::PathPatternMatch;
+use crate::eval::graph::simple_graph::engine::SimpleGraphEngine;
+use crate::eval::graph::string_graph::types::StringGraphTypes;
+use graph::evaluator::GraphEvaluator;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod eval_expr_wrapper;
 pub mod evaluable;
 pub mod expr;
+pub mod graph;
 
 /// Represents a `PartiQL` evaluation query plan which is a plan that can be evaluated to produce
 /// a result. The plan uses a directed `petgraph::StableGraph`.
@@ -255,5 +261,48 @@ impl<'a> EvalContext<'a> for NestedContext<'a, '_> {
             fn has_errors(&self) -> bool;
             fn errors(&self) -> Vec<EvaluationError>;
         }
+    }
+}
+
+#[allow(dead_code)] // TODO remove once graph planning is implemented
+#[derive(Debug)]
+pub(crate) struct EvalGraphMatch {
+    pub(crate) expr: Box<dyn EvalExpr>,
+    pub(crate) matcher: PathPatternMatch<StringGraphTypes>,
+    pub(crate) input: Option<Value>,
+}
+
+impl EvalGraphMatch {
+    #[allow(dead_code)] // TODO remove once graph planning is implemented
+    pub(crate) fn new(
+        expr: Box<dyn EvalExpr>,
+        matcher: PathPatternMatch<StringGraphTypes>,
+    ) -> Self {
+        EvalGraphMatch {
+            expr,
+            matcher,
+            input: None,
+        }
+    }
+}
+
+impl Evaluable for EvalGraphMatch {
+    fn evaluate<'a, 'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Value {
+        let graph = match self.expr.evaluate(&Tuple::new(), ctx).into_owned() {
+            Value::Graph(g) => *g,
+            _ => todo!("Error; not a graph"),
+        };
+
+        match graph {
+            Graph::Simple(g) => {
+                let engine = SimpleGraphEngine::new(g);
+                let ge = GraphEvaluator::new(engine);
+                ge.eval(&self.matcher)
+            }
+        }
+    }
+
+    fn update_input(&mut self, input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
+        self.input = Some(input);
     }
 }

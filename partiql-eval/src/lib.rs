@@ -5,6 +5,7 @@ pub mod env;
 pub mod error;
 pub mod eval;
 pub mod plan;
+pub mod test_value;
 
 #[cfg(test)]
 mod tests {
@@ -2432,6 +2433,303 @@ mod tests {
 
             let expected = bag![tuple![("x", 1), ("y", "_1")]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
+        }
+    }
+
+    mod graph {
+        use crate::env::basic::MapBindings;
+        use crate::eval::evaluable::Evaluable;
+        use crate::eval::expr::EvalGlobalVarRef;
+        use crate::eval::graph::bind_name::FreshBinder;
+        use crate::eval::graph::plan::{
+            BindSpec, DirectionFilter, EdgeFilter, ElementFilterBuilder, NodeFilter, NodeMatch,
+            PathMatch, PathPatternMatch, StepFilter, TripleFilter,
+        };
+        use crate::eval::graph::string_graph::types::StringGraphTypes;
+        use crate::eval::{BasicContext, EvalGraphMatch};
+        use crate::test_value::TestValue;
+        use partiql_catalog::context::SystemContext;
+        use partiql_common::pretty::ToPretty;
+        use partiql_value::{BindingsName, DateTime, Value};
+
+        /*
+            A simple 3-node, 3-edge graph which is intended to be able to be exactly matched by:
+           ```(graph MATCH
+                (n1:a WHERE n1 == 1) -[e12:e WHERE e12 == 1.2]-> (n2),
+                (n2:b WHERE n2 == 2) -[e23:d WHERE e23 == 2.3]-> (n3),
+                (n3:a WHERE n3 == 3) ~[e_u:self WHERE e_u == <<>>]~ (n3)
+            )```
+        */
+        fn graph() -> Value {
+            let graph = r##"
+            $graph::{
+                nodes: [ {id: n1, labels: ["a"], payload: 1},
+                         {id: n2, labels: ["b"], payload: 2},
+                         {id: n3, labels: ["a"], payload: 3} ],
+                edges: [ {id: e12, labels: ["e"], payload: 1.2, ends: (n1 -> n2) },
+                         {id: e23, labels: ["d"], payload: 2.3, ends: (n2 -> n3) },
+                         {id: e_u, labels: ["self"], payload: $bag::[] , ends: (n3 -- n3) } ]
+            }
+            "##;
+            TestValue::from(graph).value
+        }
+
+        fn bindings() -> MapBindings<Value> {
+            let mut bindings: MapBindings<Value> = MapBindings::default();
+            bindings.insert("g3aba", graph());
+            bindings
+        }
+
+        fn context() -> BasicContext<'static> {
+            let sys = SystemContext {
+                now: DateTime::from_system_now_utc(),
+            };
+            let ctx = BasicContext::new(bindings(), sys);
+            ctx
+        }
+
+        fn graph_reference() -> Box<EvalGlobalVarRef> {
+            Box::new(EvalGlobalVarRef {
+                name: BindingsName::CaseInsensitive("g3aba".to_string().into()),
+            })
+        }
+
+        #[track_caller]
+        fn test_graph(matcher: PathPatternMatch<StringGraphTypes>, expected: &'static str) {
+            let mut eval = EvalGraphMatch::new(graph_reference(), matcher);
+
+            let ctx = context();
+            let res = eval.evaluate(&ctx);
+
+            let expected = crate::test_value::parse_partiql_value_str(expected);
+
+            let pretty = |v: Value| v.to_pretty_string(80).unwrap();
+
+            assert_eq!(pretty(expected), pretty(res));
+        }
+
+        #[test]
+        fn node() {
+            // Query: (graph MATCH (x:a))
+            let binder = BindSpec("x".to_string());
+            let spec = NodeFilter::labeled("a".to_string());
+            let matcher = NodeMatch { binder, spec };
+
+            test_graph(matcher.into(), "<< { 'x': 1 }, { 'x': 3 } >>")
+        }
+
+        #[test]
+        fn no_edge_matches() {
+            let fresh = FreshBinder::default();
+
+            // Query: (graph MATCH () -[e:foo]- ())
+            let binders = (
+                BindSpec(fresh.node()),
+                BindSpec("e".to_string()),
+                BindSpec(fresh.node()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::labeled("foo".to_string()),
+                    rhs: NodeFilter::any(),
+                },
+            };
+
+            let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            test_graph(matcher.into(), "<<  >>")
+        }
+
+        #[test]
+        fn no_node_matches() {
+            let fresh = FreshBinder::default();
+
+            // Query: (graph MATCH (:foo) -[]- ())
+            let binders = (
+                BindSpec(fresh.node()),
+                BindSpec(fresh.node()),
+                BindSpec(fresh.node()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("foo".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
+                },
+            };
+
+            let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            test_graph(matcher.into(), "<<  >>")
+        }
+
+        #[test]
+        fn node_edge_node() {
+            // Query: (graph MATCH (x)<-[z:e]-(y))
+            let binders = (
+                BindSpec("x".to_string()),
+                BindSpec("z".to_string()),
+                BindSpec("y".to_string()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::L,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::labeled("e".to_string()),
+                    rhs: NodeFilter::any(),
+                },
+            };
+
+            let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            test_graph(matcher.into(), "<< {'x': 2, 'z': 1.2, 'y': 1} >>")
+        }
+
+        #[test]
+        fn edge() {
+            let fresh = FreshBinder::default();
+
+            // Query: (graph MATCH -> )
+            let binders = (
+                BindSpec(fresh.node()),
+                BindSpec(fresh.edge()),
+                BindSpec(fresh.node()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::R,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
+                },
+            };
+
+            let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            test_graph(matcher.into(), "<< {  }, {  } >>")
+        }
+
+        #[test]
+        fn edge_outgoing() {
+            let fresh = FreshBinder::default();
+
+            // Query: (graph MATCH <-[z]-> )
+            let binders = (
+                BindSpec(fresh.node()),
+                BindSpec("z".to_string()),
+                BindSpec(fresh.node()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
+                },
+            };
+
+            let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            test_graph(
+                matcher.into(),
+                "<< { 'z': 1.2 }, { 'z': 1.2 }, { 'z': 2.3 }, { 'z': 2.3 } >>",
+            )
+        }
+
+        #[test]
+        fn n_e_n_e_n() {
+            // Query: (graph MATCH (x:b)-[z1]-(y1:a)-[z2]-(y2:b) )
+            let binders = (
+                BindSpec("x".to_string()),
+                BindSpec("z1".to_string()),
+                BindSpec("y1".to_string()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("b".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::labeled("a".to_string()),
+                },
+            };
+            let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            let binders = (
+                BindSpec("y1".to_string()),
+                BindSpec("z2".to_string()),
+                BindSpec("y2".to_string()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::labeled("a".to_string()),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::labeled("b".to_string()),
+                },
+            };
+            let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            let pattern_match = PathPatternMatch::Concat(vec![
+                PathPatternMatch::Match(matcher1),
+                PathPatternMatch::Match(matcher2),
+            ]);
+
+            test_graph(
+                pattern_match,
+                "<< { 'x': 2, 'z1': 1.2, 'y1': 1, 'z2': 1.2, 'y2': 2 }, \
+                             { 'x': 2, 'z1': 2.3, 'y1': 3, 'z2': 2.3, 'y2': 2 } >>",
+            )
+        }
+        #[test]
+        fn cycle() {
+            let fresh = FreshBinder::default();
+
+            // Query: (graph MATCH (x1) - (x2) - (x1))
+            let binders = (
+                BindSpec("x1".to_string()),
+                BindSpec(fresh.edge()),
+                BindSpec("x2".to_string()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
+                },
+            };
+            let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            let binders = (
+                BindSpec("x2".to_string()),
+                BindSpec(fresh.edge()),
+                BindSpec("x1".to_string()),
+            );
+            let spec = StepFilter {
+                dir: DirectionFilter::LUR,
+                triple: TripleFilter {
+                    lhs: NodeFilter::any(),
+                    e: EdgeFilter::any(),
+                    rhs: NodeFilter::any(),
+                },
+            };
+            let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+
+            let pattern_match = PathPatternMatch::Concat(vec![
+                PathPatternMatch::Match(matcher1),
+                PathPatternMatch::Match(matcher2),
+            ]);
+            test_graph(
+                pattern_match,
+                "<< { 'x1': 3, 'x2': 3 }, \
+                             { 'x1': 1, 'x2': 2 }, \
+                             { 'x1': 2, 'x2': 1 }, \
+                             { 'x1': 2, 'x2': 3 }, \
+                             { 'x1': 3, 'x2': 2 } >>",
+            )
         }
     }
 }
