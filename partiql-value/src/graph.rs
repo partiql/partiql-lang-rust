@@ -58,18 +58,23 @@ impl Ord for Graph {
     }
 }
 
+/// The id of a node in the graph.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GNodeId(pub usize);
 
+/// The id of an edge in the graph.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GEdgeId(pub usize);
 
+/// A label; backed by a [`Rodeo`] interner.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GLabelId(pub Spur);
 
+/// A set of labels applied to an element.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GLabels(pub HashSet<GLabelId>);
 
+/// An element's attributes: labels and optional payload.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GElem {
     pub value: Option<Value>,
@@ -82,6 +87,7 @@ impl GElem {
     }
 }
 
+/// A 'simple' graph of nodes and edges in both directed and undirected graphs.
 pub struct SimpleGraph {
     pub nodes: Vec<GElem>,
     pub edges: Vec<GElem>,
@@ -101,8 +107,11 @@ impl Debug for SimpleGraph {
     }
 }
 
-pub struct DebugGElems<'a>(&'a str, &'a Vec<GElem>, &'a RodeoReader);
-pub struct DebugGElem<'a>(usize, &'a str, &'a GElem, &'a RodeoReader);
+/// Wrapper to debug output elements.
+pub(crate) struct DebugGElems<'a>(&'a str, &'a Vec<GElem>, &'a RodeoReader);
+
+/// Wrapper to debug output an element.
+pub(crate) struct DebugGElem<'a>(usize, &'a str, &'a GElem, &'a RodeoReader);
 
 impl Debug for DebugGElems<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -132,12 +141,25 @@ impl Debug for DebugGElem<'_> {
     }
 }
 
+/// Specification for an edge; Direciton and end-points.
 pub enum EdgeSpec {
     Directed(String, String),   // from node, to node
     Undirected(String, String), // node, node
 }
 
+/// Specification for a collection of Nodes;
+/// Comprises parallel arrays for:
+///    - Node names
+///    - Node label sets
+///    - Node values
 type NodeSpec = (Vec<String>, Vec<HashSet<String>>, Vec<Option<Value>>);
+
+/// Specification for a collection of Edges;
+/// Comprises parallel arrays for:
+///    - Edge names
+///    - Edge label sets
+///    - Edge specificaiton (direction and endpoints)
+///    - Edge values
 #[allow(clippy::type_complexity)]
 type EdgesSpec = (
     Vec<String>,
@@ -145,6 +167,7 @@ type EdgesSpec = (
     Vec<EdgeSpec>,
     Vec<Option<Value>>,
 );
+
 impl SimpleGraph {
     pub fn from_spec(node_specs: NodeSpec, edge_specs: EdgesSpec) -> Self {
         let mut node_ids = Rodeo::default();

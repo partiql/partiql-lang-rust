@@ -27,7 +27,7 @@ pub struct Triple<GT: GraphTypes> {
     pub rhs: GT::NodeId,
 }
 
-/// Nodes coresponding to a path pattern
+/// Nodes corresponding to a path pattern
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct PathPatternNodes<GT: GraphTypes> {
     pub head: GT::NodeId,

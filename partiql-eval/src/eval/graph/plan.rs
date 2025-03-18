@@ -35,6 +35,7 @@ pub enum LabelFilter<GT: GraphTypes> {
 pub enum ValueFilter {
     #[default]
     Always,
+    // TODO other variant for, e.g., `WHERE` filters
 }
 
 /// A plan specification for node label & value filtering.

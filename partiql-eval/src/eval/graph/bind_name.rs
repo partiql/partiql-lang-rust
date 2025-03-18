@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
 
-/// A unicode non-charachter prefixed onto 'anonymous' bind names
+/// A unicode non-character prefixed onto 'anonymous' bind names
 const ANON_PREFIX: char = '\u{FDD0}';
 
 pub trait BindNameExt {
