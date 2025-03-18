@@ -165,6 +165,7 @@ impl ToDot<ast::Expr> for AstToDot {
             Expr::CallAgg(c) => self.to_dot(&mut expr_subgraph, c),
             Expr::Query(q) => self.to_dot(&mut expr_subgraph, q),
             Expr::Error => todo!(),
+            Expr::GraphMatch(_) => todo!(),
         }
     }
 }

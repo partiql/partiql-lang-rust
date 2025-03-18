@@ -333,7 +333,16 @@ TableBaseReference: ast::AstNode<ast::FromLet> = {
             at_alias,
             by_alias
         }, lo..hi)
-    }
+    },
+    <lo:@L> <e:GraphMatchExprNoParens> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
+        state.node(ast::FromLet {
+            expr: Box::new(e),
+            kind: ast::FromLetKind::Scan,
+            as_alias,
+            at_alias,
+            by_alias
+        }, lo..hi)
+    },
 }
 
 #[inline]
@@ -742,12 +751,48 @@ ExprPrecedence09: Synth<ast::Expr> = {
            }, lo..hi)
        ))
     },
+    <GraphMatchExpr>,
     <ExprPrecedence08>,
 }
 
 #[inline]
 LikeEscape: Box<ast::Expr> = {
     "ESCAPE" <e:ExprPrecedence07> => Box::new(e.data)
+}
+
+#[inline]
+GraphMatchExpr: Synth<ast::Expr> = {
+    <lo:@L> "(" <l:ExprPrecedence08> "MATCH" <r:GraphMatchList> ")" <hi:@R> => {
+       Synth::empty(ast::Expr::GraphMatch(
+           state.node(ast::GraphMatch {
+               expr: Box::new(l.data),
+               graph_expr: Box::new(r),
+           }, lo..hi)
+       ))
+    }
+}
+
+#[inline]
+GraphMatchExprNoParens: ast::Expr = {
+    <lo:@L> <l:ExprPrecedence08> "MATCH" <r:GraphMatch> <hi:@R> =>
+       ast::Expr::GraphMatch(
+           state.node(ast::GraphMatch {
+               expr: Box::new(l.data),
+               graph_expr: Box::new(r),
+           }, lo..hi)
+       )
+}
+
+GraphMatch: ast::AstNode<ast::GraphMatchExpr> = {
+    <lo:@L> <selector:MatchPatternSelector?> <patterns:MatchPattern> <hi:@R> => {
+        state.node(ast::GraphMatchExpr{selector, patterns: vec![patterns]}, lo..hi)
+    },
+}
+
+GraphMatchList: ast::AstNode<ast::GraphMatchExpr> = {
+    <lo:@L> <selector:MatchPatternSelector?> <patterns:CommaSepStar<MatchPattern>> <hi:@R> => {
+        state.node(ast::GraphMatchExpr{selector, patterns: patterns}, lo..hi)
+    }
 }
 
 ExprPrecedence08: Synth<ast::Expr> = {
@@ -946,6 +991,198 @@ SubQuery: ast::Expr = {
 SubQueryAst: ast::AstNode<ast::Expr> = {
     <lo:@L> <subq:SubQuery> <hi:@R> => state.node(subq, lo..hi),
 }
+
+
+
+// ------------------------------------------------------------------------------ //
+//                                                                                //
+//                               GPML Expression                                  //
+//                                                                                //
+// ------------------------------------------------------------------------------ //
+
+//#[inline]
+MatchPatternSelector: ast::GraphMatchSelector = {
+   "ANY" "SHORTEST" => ast::GraphMatchSelector::AnyShortest,
+   "ALL" "SHORTEST" => ast::GraphMatchSelector::AllShortest,
+   "ANY" <k:"Int"?> => {
+        // TODO handle bad number parse
+        k.map(|n| ast::GraphMatchSelector::AnyK(n.parse().unwrap())).unwrap_or(ast::GraphMatchSelector::Any)
+   },
+   "SHORTEST" <k:"Int"> => {
+        // TODO handle bad number parse
+        ast::GraphMatchSelector::ShortestK(k.parse().unwrap())
+   },
+   "SHORTEST" <k:"Int"> "GROUP" => {
+        // TODO handle bad number parse
+        ast::GraphMatchSelector::ShortestKGroup(k.parse().unwrap())
+   }
+}
+
+MatchPattern: ast::AstNode<ast::GraphMatchPattern> = {
+    <lo:@L> <restrictor:MatchPatternRestrictor?> <variable:MatchPatternPathVariable?> <parts:MatchPatternParts>  <hi:@R> => {
+        state.node(ast::GraphMatchPattern{
+            restrictor,
+            quantifier: None,
+            prefilter: None,
+            variable,
+            parts,
+        }, lo..hi)
+    },
+    <lo:@L> "(" <pattern:MatchPattern> <prefilter:MatchPatternPartPrefilter?> ")" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
+         state.node(ast::GraphMatchPattern{
+             quantifier,
+             prefilter,
+             ..pattern.node
+         }, lo..hi)
+    },
+    <lo:@L> "[" <pattern:MatchPattern> <prefilter:MatchPatternPartPrefilter?> "]" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
+         state.node(ast::GraphMatchPattern{
+             quantifier,
+             prefilter,
+             ..pattern.node
+         }, lo..hi)
+    },
+}
+
+MatchPatternNested: ast::AstNode<ast::GraphMatchPattern> = {
+  <lo:@L> <restrictor:MatchPatternRestrictor?> <variable:MatchPatternPathVariable?> <parts:MatchPatternPartsNested> <hi:@R> => {
+    state.node(ast::GraphMatchPattern{
+        restrictor,
+        quantifier: None,
+        prefilter: None,
+        variable,
+        parts,
+    }, lo..hi)
+ }
+}
+
+//#[inline]
+MatchPatternRestrictor: ast::GraphMatchRestrictor = {
+   "TRAIL" => ast::GraphMatchRestrictor::Trail,
+   "ACYCLIC" => ast::GraphMatchRestrictor::Acyclic,
+   "SIMPLE" => ast::GraphMatchRestrictor::Simple,
+}
+
+//#[inline]
+MatchPatternParts: Vec<ast::GraphMatchPatternPart> = {
+   <n:MatchPatternPartNode> <parts:MatchPatternPartContinue*> => {
+        let node = ast::GraphMatchPatternPart::Node(n);
+        std::iter::once(node).chain(parts.into_iter().flatten()).collect()
+   }
+}
+
+//#[inline]
+MatchPatternPartsNested: Vec<ast::GraphMatchPatternPart> = {
+   <MatchPatternParts>,
+   <MatchPatternPartContinue>,
+   <e:MatchPatternPartEdge> => vec![ast::GraphMatchPatternPart::Edge(e)],
+}
+
+MatchPatternPartContinue: Vec<ast::GraphMatchPatternPart> = {
+   <e:MatchPatternPartEdge> <n:MatchPatternPartNode> => vec![ast::GraphMatchPatternPart::Edge(e),ast::GraphMatchPatternPart::Node(n)],
+   <p:MatchPatternPartParen> <n:MatchPatternPartNode> => vec![ast::GraphMatchPatternPart::Pattern(p),ast::GraphMatchPatternPart::Node(n)],
+}
+
+MatchPatternPartParen: ast::AstNode<ast::GraphMatchPattern> = {
+    <lo:@L> "(" <pattern:MatchPatternNested> <prefilter:MatchPatternPartPrefilter?> ")" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
+           state.node(ast::GraphMatchPattern {
+                prefilter,
+                quantifier,
+                ..pattern.node
+           }, lo..hi)
+   },
+    <lo:@L> "[" <pattern:MatchPatternNested> <prefilter:MatchPatternPartPrefilter?> "]" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
+            state.node(ast::GraphMatchPattern {
+                 prefilter,
+                 quantifier,
+                 ..pattern.node
+            }, lo..hi)
+    },
+}
+
+//#[inline]
+MatchPatternQuantifier: ast::AstNode<ast::GraphMatchQuantifier> = {
+   <lo:@L> "+" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:0, upper:None }, lo..hi),
+   <lo:@L> "*" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:1, upper:None }, lo..hi),
+   <lo:@L> "{" <lower:"Int"> "," <upper:"Int"?> "}" <hi:@R> => {
+ 	     // TODO error on invalid literal
+         state.node(ast::GraphMatchQuantifier{ lower: lower.parse().unwrap(), upper: upper.map(|n| n.parse().unwrap()) }, lo..hi)
+   },
+}
+
+MatchPatternPartNode: ast::AstNode<ast::GraphMatchNode> = {
+   <lo:@L> "(" <variable:MatchPatternPartName?> <label:MatchPatternPartLabel?> <prefilter:MatchPatternPartPrefilter?> ")" <hi:@R> => {
+       state.node(ast::GraphMatchNode {
+            prefilter,
+            variable,
+            label,
+       }, lo..hi)
+   },
+}
+
+MatchPatternPartEdge: ast::AstNode<ast::GraphMatchEdge> = {
+   <lo:@L> <spec:MatchPatternPartEdgeAbbr> <quantifier:MatchPatternQuantifier?> <hi:@R>  => state.node(ast::GraphMatchEdge{ quantifier, ..spec}, lo..hi),
+   <lo:@L> <spec:MatchPatternPartEdgeWSpec> <quantifier:MatchPatternQuantifier?> <hi:@R> => state.node(ast::GraphMatchEdge{ quantifier, ..spec}, lo..hi),
+}
+
+MatchPatternPartEdgeWSpec: ast::GraphMatchEdge = {
+   "-" <spec:MatchPatternPartEdgeSpec> "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Right, ..spec},
+   "~" <spec:MatchPatternPartEdgeSpec> "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Undirected, ..spec},
+   "<" "-" <spec:MatchPatternPartEdgeSpec> "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Left, ..spec},
+   "~" <spec:MatchPatternPartEdgeSpec> "~" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::UndirectedOrRight, ..spec},
+   "<" "~" <spec:MatchPatternPartEdgeSpec> "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirected, ..spec},
+   "<" "-" <spec:MatchPatternPartEdgeSpec> "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrRight, ..spec},
+   "-" <spec:MatchPatternPartEdgeSpec> "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirectedOrRight, ..spec},
+}
+
+MatchPatternPartEdgeSpec: ast::GraphMatchEdge = {
+   "[" <variable:MatchPatternPartName?> <label:MatchPatternPartLabel?> <prefilter:MatchPatternPartPrefilter?> "]" => {
+       ast::GraphMatchEdge {
+            direction: ast::GraphMatchDirection::Undirected,
+            quantifier: None,
+            prefilter,
+            variable,
+            label,
+       }
+    }
+}
+
+MatchPatternPartEdgeAbbr: ast::GraphMatchEdge = {
+   "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Right, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Undirected, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "<" "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Left, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "~" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::UndirectedOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "<" "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirected, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "<" "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+   "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirectedOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
+}
+
+//#[inline]
+MatchPatternPartName: ast::SymbolPrimitive = {
+    <name:"UnquotedIdent"> => {
+        ast::SymbolPrimitive {
+            value: name.to_owned(),
+            case: ast::CaseSensitivity::CaseSensitive
+        }
+    }
+}
+
+//#[inline] // TODO conjunction/disjunction/negation
+MatchPatternPartLabel: Vec<ast::SymbolPrimitive> = {
+    ":" <l:MatchPatternPartName> => vec![l]
+}
+
+//#[inline]
+MatchPatternPartPrefilter: Box<ast::Expr> = {
+    "WHERE" <ExprQuery>
+}
+
+//#[inline]
+MatchPatternPathVariable: ast::SymbolPrimitive = {
+    <MatchPatternPartName> "="
+}
+
+
 
 // ------------------------------------------------------------------------------ //
 //                                                                                //
@@ -1467,6 +1704,7 @@ extern {
         "==" => lexer::Token::EqualEqual,
         "!=" => lexer::Token::BangEqual,
         "<>" => lexer::Token::LessGreater,
+        "~" => lexer::Token::Tilde,
 
         "<" => lexer::Token::LessThan,
         ">" => lexer::Token::GreaterThan,
@@ -1486,9 +1724,11 @@ extern {
         "EmbeddedDoc" => lexer::Token::EmbeddedDoc(<&'input str>),
 
         // Keywords
+        "ACYCLIC" => lexer::Token::Acyclic,
         "ALL" => lexer::Token::All,
         "ASC" => lexer::Token::Asc,
         "AND" => lexer::Token::And,
+        "ANY" => lexer::Token::Any,
         "AS" => lexer::Token::As,
         "AT" => lexer::Token::At,
         "BETWEEN" => lexer::Token::Between,
@@ -1521,6 +1761,7 @@ extern {
         "LEFT" => lexer::Token::Left,
         "LIKE" => lexer::Token::Like,
         "LIMIT" => lexer::Token::Limit,
+        "MATCH" => lexer::Token::Match,
         "MISSING" => lexer::Token::Missing,
         "NATURAL" => lexer::Token::Natural,
         "NOT" => lexer::Token::Not,
@@ -1541,7 +1782,10 @@ extern {
         "TABLE" => lexer::Token::Table,
         "TIME" => lexer::Token::Time,
         "TIMESTAMP" => lexer::Token::Timestamp,
+        "SIMPLE" => lexer::Token::Simple,
+        "SHORTEST" => lexer::Token::Shortest,
         "THEN" => lexer::Token::Then,
+        "TRAIL" => lexer::Token::Trail,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,

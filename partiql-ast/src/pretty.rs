@@ -329,6 +329,9 @@ impl PrettyDoc for Expr {
             Expr::Error => {
                 unreachable!();
             }
+            Expr::GraphMatch(_inner) => {
+                todo!("inner.pretty_doc(arena)")
+            }
         }
         .group()
     }
