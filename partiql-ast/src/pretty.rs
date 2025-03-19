@@ -1142,7 +1142,7 @@ impl PrettyDoc for GraphMatchNode {
         }
         if let Some(r) = &self.prefilter {
             let parts = [spec, arena.text("WHERE"), r.pretty_doc(arena)];
-            spec = arena.intersperse(parts, arena.space()).into();
+            spec = arena.intersperse(parts, arena.space());
         }
         pretty_surrounded_doc(spec, "(", ")", arena)
     }
@@ -1176,7 +1176,7 @@ impl PrettyDoc for GraphMatchEdge {
                 arena.text("WHERE"),
                 r.pretty_doc(arena),
             ];
-            spec = arena.intersperse(parts, arena.space()).into();
+            spec = Some(arena.intersperse(parts, arena.space()));
         }
 
         let mut edge = if let Some(spec) = spec {
