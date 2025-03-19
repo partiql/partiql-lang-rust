@@ -1312,6 +1312,8 @@ FunctionCall: CallSite = {
 #[inline]
 FunctionName: ast::SymbolPrimitive = {
     <SymbolPrimitive>,
+    <lo:@L> <ident:FnNonReservedKeyword> <hi:@R> =>
+        ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive }
 }
 
 #[inline]
@@ -1435,6 +1437,10 @@ VarRef: ast::AstNode<ast::VarRef> = {
         }, lo..hi),
     <lo:@L> <ident:"QuotedAtIdentifier"> <hi:@R> => state.node(ast::VarRef {
             name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseSensitive },
+            qualifier: ast::ScopeQualifier::Unqualified
+        },lo..hi),
+    <lo:@L> <ident:VarNonReservedKeyword> <hi:@R> => state.node(ast::VarRef {
+            name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
             qualifier: ast::ScopeQualifier::Unqualified
         },lo..hi),
 }
@@ -1667,6 +1673,25 @@ ByIdent: ast::SymbolPrimitive = {
 //                                    Lexer                                       //
 //                                                                                //
 // ------------------------------------------------------------------------------ //
+
+#[inline]
+VarNonReservedKeyword: &'static str = {
+    <NonReservedKeyword>
+}
+
+#[inline]
+FnNonReservedKeyword: &'static str = {
+    <NonReservedKeyword>
+}
+
+#[inline]
+NonReservedKeyword: &'static str = {
+    "ACYCLIC" => "ACYCLIC",
+    "ANY" => "ANY",
+    "SIMPLE" => "SIMPLE",
+    "SHORTEST" => "SHORTEST",
+    "TRAIL" => "TRAIL",
+}
 
 // The lexer is external; See [`lexer.rs`] for its definition.
 //
