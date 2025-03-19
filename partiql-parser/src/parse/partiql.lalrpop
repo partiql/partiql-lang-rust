@@ -1102,8 +1102,8 @@ MatchPatternPartParen: ast::AstNode<ast::GraphMatchPattern> = {
 
 //#[inline]
 MatchPatternQuantifier: ast::AstNode<ast::GraphMatchQuantifier> = {
-   <lo:@L> "+" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:0, upper:None }, lo..hi),
-   <lo:@L> "*" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:1, upper:None }, lo..hi),
+   <lo:@L> "*" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:0, upper:None }, lo..hi),
+   <lo:@L> "+" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:1, upper:None }, lo..hi),
    <lo:@L> "{" <lower:"Int"> "," <upper:"Int"?> "}" <hi:@R> => {
  	     // TODO error on invalid literal
          state.node(ast::GraphMatchQuantifier{ lower: lower.parse().unwrap(), upper: upper.map(|n| n.parse().unwrap()) }, lo..hi)

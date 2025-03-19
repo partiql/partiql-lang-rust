@@ -15,8 +15,11 @@ fn pretty_print_test(name: &str, statement: &str) {
     assert!(res.is_ok());
     let res = res.unwrap();
 
-    pretty_print_output_test(name, statement, &res.ast);
+    // First test that the pretty printed version is parseable
     pretty_print_roundtrip_test(&res.ast);
+
+    // Then snapshot the pretty printed version
+    pretty_print_output_test(name, statement, &res.ast);
 }
 
 #[track_caller]
@@ -41,7 +44,6 @@ fn pretty_print_output_test(name: &str, statement: &str, statement_ast: &AstNode
 #[track_caller]
 fn pretty_print_roundtrip_test(statement_ast: &AstNode<TopLevelQuery>) {
     let pretty = statement_ast.to_pretty_string(40).unwrap();
-
     let reparsed = parse(pretty.as_str());
     assert!(reparsed.is_ok());
 
@@ -292,6 +294,201 @@ fn pretty_ands_and_ors() {
                 WHERE ((((test_data.country_code <> 'Distinctio.') AND ((test_data.* < false) AND (NOT (test_data.description LIKE 'Esse solam.') AND NOT (test_data.transaction_id LIKE 'Esset accusata.')))) OR (test_data.test_address <> 'Potest. Sed.')) AND (test_data.* > -28.146858383543243))
                 ",
     );
+}
+
+mod graph {
+    use once_cell::sync::Lazy;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Mutex;
+    static COUNTS: Lazy<Mutex<HashMap<String, AtomicU32>>> =
+        Lazy::new(|| HashMap::default().into());
+
+    macro_rules! parse_test {
+        ($k:literal, $q:expr) => {{
+            let k = $k;
+            let mut counts = match COUNTS.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let count = counts
+                .entry(k.to_string())
+                .or_insert_with(|| AtomicU32::new(1));
+            let next = count.fetch_add(1, Ordering::SeqCst);
+            drop(counts);
+
+            super::pretty_print_test(&format!("graph_{k}_{next}"), $q);
+        }};
+    }
+    #[test]
+    fn edge() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("edge", $q)
+            }};
+        }
+
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) -[e:E]-> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) -> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) ~[e:E]~ (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) ~ (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <-[e:E]- (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <- (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) ~[e:E]~> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) ~> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <~[e:E]~ (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <~ (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <-[e:E]-> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) <-> (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) -[e:E]- (b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A) - (b:B)"#);
+    }
+    #[test]
+    fn quantifiers() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("quantifiers", $q)
+            }};
+        }
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)-[:edge]->*(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)<-[:edge]-+(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)~[:edge]~{5,}(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)-[e:edge]-{2,6}(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)->*(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)<-+(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)~{5,}(b:B)"#);
+        parse!(r#"SELECT a,b FROM g MATCH (a:A)-{2,6}(b:B)"#);
+    }
+    #[test]
+    fn patterns() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("patterns", $q)
+            }};
+        }
+        parse!(
+            r#"SELECT the_a.name AS src, the_b.name AS dest FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE the_y.score > 10"#
+        );
+        parse!(r#"SELECT a,b FROM g MATCH (a)-[:has]->()-[:contains]->(b)"#);
+        parse!(r#"SELECT a,b FROM (g MATCH (a) -[:has]-> (x), (x)-[:contains]->(b))"#);
+    }
+    #[test]
+    fn path_var() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("path_var", $q)
+            }};
+        }
+
+        parse!(r#"SELECT a,b FROM (g MATCH p = (a:A) -[e:E]-> (b:B))"#);
+    }
+    #[test]
+    fn parenthesized() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("parenthesized", $q)
+            }};
+        }
+
+        parse!(r#"SELECT a,b FROM (g MATCH [(a:A)-[e:Edge]->(b:A) WHERE a.owner=b.owner]{2,5})"#);
+        parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)[()-[e:Edge]->()]{1,3}(b:B))"#);
+
+        // brackets
+        parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)[-[e:Edge]->]*(b:B))"#);
+        // parens
+        parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)(-[e:Edge]->)*(b:B))"#);
+    }
+    #[test]
+    fn filters() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("filters", $q)
+            }};
+        }
+
+        parse!(
+            r#"SELECT u as banCandidate FROM g MATCH (p:Post Where p.isFlagged = true) <-[:createdPost]- (u:User WHERE u.isBanned = false AND u.karma < 20) -[:createdComment]->(c:Comment WHERE c.isFlagged = true) WHERE p.title LIKE '%considered harmful%'"#
+        );
+    }
+    #[test]
+    fn restrictors() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("restrictors", $q)
+            }};
+        }
+
+        parse!(
+            r#"SELECT p FROM g MATCH TRAIL p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH SIMPLE p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH ACYCLIC p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+    }
+    #[test]
+    fn selectors() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("selectors", $q)
+            }};
+        }
+
+        parse!(
+            r#"SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH ALL SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH ANY p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH ANY 5 p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH SHORTEST 5 p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+        parse!(
+            r#"SELECT p FROM g MATCH SHORTEST 5 GROUP p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+        );
+    }
+    #[test]
+    fn match_and_join() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("match_and_join", $q)
+            }};
+        }
+
+        parse!(
+            r#"SELECT a,b,c, t1.x as x, t2.y as y FROM (graph MATCH (a) -> (b), (a) -> (c)), table1 as t1, table2 as t2"#
+        );
+    }
+    #[test]
+    fn union() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("union", $q)
+            }};
+        }
+
+        parse!(r#"(MyGraph MATCH (x)) UNION SELECT * FROM tbl1"#);
+        parse!(r#"SELECT * FROM tbl1 UNION (MyGraph MATCH (x))"#);
+    }
+    #[test]
+    fn etc() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("etc", $q)
+            }};
+        }
+
+        parse!("SELECT * FROM g MATCH ALL SHORTEST [ (x)-[e]->*(y) ]");
+        parse!("SELECT * FROM g MATCH ALL SHORTEST [ TRAIL (x)-[e]->*(y) ]");
+    }
 }
 
 #[test]

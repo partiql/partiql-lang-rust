@@ -1,10 +1,11 @@
 use crate::ast::*;
 use partiql_common::pretty::{
-    pretty_list, pretty_parenthesized_doc, pretty_prefixed_doc, pretty_seperated,
-    pretty_seperated_doc, pretty_seq, pretty_seq_doc, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
-    PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST,
+    pretty_bracketed_doc, pretty_list, pretty_parenthesized_doc, pretty_prefixed_doc,
+    pretty_seperated, pretty_seperated_doc, pretty_seq, pretty_seq_doc, pretty_surrounded_doc,
+    PrettyDoc, PRETTY_INDENT_MINOR_NEST, PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST,
 };
 use pretty::{DocAllocator, DocBuilder};
+use std::borrow::Cow;
 impl<T> PrettyDoc for AstNode<T>
 where
     T: PrettyDoc,
@@ -316,9 +317,8 @@ impl PrettyDoc for Expr {
             Expr::Sexp(inner) => inner.pretty_doc(arena),
             Expr::Path(inner) => inner.pretty_doc(arena),
             Expr::Call(inner) => inner.pretty_doc(arena),
-
             Expr::CallAgg(inner) => inner.pretty_doc(arena),
-
+            Expr::GraphMatch(inner) => inner.pretty_doc(arena),
             Expr::Query(inner) => {
                 let inner = inner.pretty_doc(arena).group();
                 arena
@@ -328,9 +328,6 @@ impl PrettyDoc for Expr {
             }
             Expr::Error => {
                 unreachable!();
-            }
-            Expr::GraphMatch(_inner) => {
-                todo!("inner.pretty_doc(arena)")
             }
         }
         .group()
@@ -997,6 +994,238 @@ impl PrettyDoc for Join {
             },
         }
         .group()
+    }
+}
+
+impl PrettyDoc for GraphMatch {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let head = arena.intersperse(
+            [self.expr.pretty_doc(arena), arena.text("MATCH")],
+            arena.space(),
+        );
+        let patterns = self.graph_expr.pretty_doc(arena);
+        let match_expr = arena.intersperse([head, patterns], arena.space());
+
+        let parens_needed = self.graph_expr.node.patterns.len() > 1;
+        if parens_needed {
+            pretty_parenthesized_doc(match_expr, arena)
+        } else {
+            match_expr
+        }
+    }
+}
+
+impl PrettyDoc for GraphMatchExpr {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let selector = self.selector.clone().map(|s| {
+            let parts: Vec<Cow<'_, str>> = match s {
+                GraphMatchSelector::AnyShortest => vec!["ANY".into(), "SHORTEST".into()],
+                GraphMatchSelector::AllShortest => vec!["ALL".into(), "SHORTEST".into()],
+                GraphMatchSelector::Any => vec!["ANY".into()],
+                GraphMatchSelector::AnyK(k) => vec!["ANY".into(), k.to_string().into()],
+                GraphMatchSelector::ShortestK(k) => vec!["SHORTEST".into(), k.to_string().into()],
+                GraphMatchSelector::ShortestKGroup(k) => {
+                    vec!["SHORTEST".into(), k.to_string().into(), "GROUP".into()]
+                }
+            };
+
+            arena.intersperse(parts, arena.space()).group()
+        });
+        let patterns = pretty_list(&self.patterns, PRETTY_INDENT_MINOR_NEST, arena);
+        if let Some(selector) = selector {
+            arena.intersperse([selector, patterns], arena.softline())
+        } else {
+            patterns
+        }
+        .group()
+    }
+}
+
+impl PrettyDoc for GraphMatchPattern {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let pattern = pretty_seperated(
+            arena.nil().append(arena.space()),
+            &self.parts,
+            PRETTY_INDENT_MINOR_NEST,
+            arena,
+        );
+        let mut doc = if let Some(r) = &self.restrictor {
+            match r {
+                GraphMatchRestrictor::Trail => arena.text("TRAIL"),
+                GraphMatchRestrictor::Acyclic => arena.text("ACYCLIC"),
+                GraphMatchRestrictor::Simple => arena.text("SIMPLE"),
+            }
+            .append(arena.space())
+        } else {
+            arena.nil()
+        };
+
+        let pattern = if let Some(v) = &self.variable {
+            arena.intersperse(
+                [arena.text(&v.value), arena.text("="), pattern],
+                arena.space(),
+            )
+        } else {
+            pattern
+        };
+        doc = doc.append(pattern);
+
+        let brackets =
+            self.restrictor.is_some() || self.quantifier.is_some() || self.prefilter.is_some();
+
+        if brackets {
+            let doc = if let Some(filter) = &self.prefilter {
+                arena.intersperse(
+                    [doc, arena.text("WHERE"), filter.pretty_doc(arena)],
+                    arena.space(),
+                )
+            } else {
+                doc
+            };
+            let bracketed = pretty_bracketed_doc(doc, arena);
+            if let Some(postfix) = &self.quantifier {
+                arena.concat([bracketed, postfix.pretty_doc(arena)])
+            } else {
+                bracketed
+            }
+        } else {
+            doc
+        }
+        .group()
+    }
+}
+
+impl PrettyDoc for GraphMatchPatternPart {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            GraphMatchPatternPart::Node(n) => n.pretty_doc(arena),
+            GraphMatchPatternPart::Edge(e) => e.pretty_doc(arena),
+            GraphMatchPatternPart::Pattern(p) => p.pretty_doc(arena),
+        }
+    }
+}
+
+impl PrettyDoc for GraphMatchNode {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let mut spec = arena.nil();
+        if let Some(r) = &self.variable {
+            spec = spec.append(arena.text(&r.value));
+        }
+        if let Some(l) = &self.label {
+            debug_assert_eq!(l.len(), 1); // TODO
+            spec = spec.append(arena.text(":")).append(arena.text(&l[0].value));
+        }
+        if let Some(r) = &self.prefilter {
+            let parts = [spec, arena.text("WHERE"), r.pretty_doc(arena)];
+            spec = arena.intersperse(parts, arena.space()).into();
+        }
+        pretty_surrounded_doc(spec, "(", ")", arena)
+    }
+}
+
+impl PrettyDoc for GraphMatchEdge {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let mut spec = None;
+        if let Some(r) = &self.variable {
+            spec = spec
+                .unwrap_or_else(|| arena.nil())
+                .append(arena.text(&r.value))
+                .into();
+        }
+        if let Some(l) = &self.label {
+            debug_assert_eq!(l.len(), 1); // TODO
+            spec = spec
+                .unwrap_or_else(|| arena.nil())
+                .append(arena.text(":"))
+                .append(arena.text(&l[0].value))
+                .into();
+        }
+        if let Some(r) = &self.prefilter {
+            let parts = [
+                spec.unwrap_or_else(|| arena.nil()),
+                arena.text("WHERE"),
+                r.pretty_doc(arena),
+            ];
+            spec = arena.intersperse(parts, arena.space()).into();
+        }
+
+        let mut edge = if let Some(spec) = spec {
+            let (prefix, suffix) = match self.direction {
+                GraphMatchDirection::Right => ("-[", "]->"),
+                GraphMatchDirection::Left => ("<-[", "]-"),
+                GraphMatchDirection::Undirected => ("~[", "]~"),
+                GraphMatchDirection::UndirectedOrRight => ("~[", "]~>"),
+                GraphMatchDirection::LeftOrUndirected => ("<~[", "]~"),
+                GraphMatchDirection::LeftOrRight => ("<-[", "]->"),
+                GraphMatchDirection::LeftOrUndirectedOrRight => ("-[", "]-"),
+            };
+            pretty_surrounded_doc(spec, prefix, suffix, arena)
+        } else {
+            let edge = match self.direction {
+                GraphMatchDirection::Right => "->",
+                GraphMatchDirection::Left => "<-",
+                GraphMatchDirection::Undirected => "~",
+                GraphMatchDirection::UndirectedOrRight => "~>",
+                GraphMatchDirection::LeftOrUndirected => "<~",
+                GraphMatchDirection::LeftOrRight => "<->",
+                GraphMatchDirection::LeftOrUndirectedOrRight => "-",
+            };
+            arena.text(edge)
+        };
+        if let Some(q) = &self.quantifier {
+            edge = arena.concat([edge, q.pretty_doc(arena)]);
+        }
+        edge.group()
+    }
+}
+
+impl PrettyDoc for GraphMatchQuantifier {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let GraphMatchQuantifier { lower, upper } = &self;
+        match (lower, upper) {
+            (0, None) => arena.text("*"),
+            (1, None) => arena.text("+"),
+            (l, u) => {
+                let l = Cow::Owned(l.to_string());
+                let u = u.map(|u| Cow::Owned(u.to_string())).unwrap_or("".into());
+                pretty_surrounded_doc(arena.concat([l, ",".into(), u]), "{", "}", arena)
+            }
+        }
     }
 }
 
