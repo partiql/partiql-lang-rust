@@ -411,6 +411,18 @@ pub enum Token<'input> {
 }
 
 impl Token<'_> {
+    pub fn is_var_non_reserved(&self) -> bool {
+        matches!(
+            self,
+            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
+        )
+    }
+    pub fn is_fn_non_reserved(&self) -> bool {
+        matches!(
+            self,
+            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
+        )
+    }
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,

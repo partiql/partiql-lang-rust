@@ -131,7 +131,7 @@ mod built_ins {
 
     pub(crate) fn built_in_aggs() -> FnExpr<'static> {
         FnExpr {
-            // TODO: currently needs to be manually kept in-sync with parsers's `KNOWN_AGGREGATES`
+            // TODO: currently needs to be manually kept in-sync with parser's `KNOWN_AGGREGATES`
             fn_names: vec!["count", "avg", "min", "max", "sum", "any", "some", "every"],
             #[rustfmt::skip]
             patterns: vec![
@@ -320,10 +320,15 @@ where
     #[inline]
     fn parse_fn_expr(
         &mut self,
-        (tok, _): BufferedToken<'input>,
+        (tok, tok_txt): BufferedToken<'input>,
         next_idx: usize,
     ) -> (SpannedToken<'input>, Option<SpannedTokenVec<'input>>) {
-        if let (_, Token::UnquotedIdent(id) | Token::QuotedIdent(id), _) = tok {
+        let fn_candidate = match &tok {
+            (_, Token::UnquotedIdent(id) | Token::QuotedIdent(id), _) => Some(*id),
+            (_, tok, _) => tok.is_fn_non_reserved().then_some(tok_txt),
+        };
+
+        if let Some(id) = fn_candidate {
             if let Some(((_, Token::OpenParen, _), _)) = self.parser.peek_n(next_idx) {
                 if let Some(fn_expr) = self.fn_exprs.find(id) {
                     let replacement = match self.rewrite_fn_expr(fn_expr) {
