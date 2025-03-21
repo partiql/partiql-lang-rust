@@ -38,5 +38,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 default = []
 serde = [
     "dep:serde",
-    "ordered-float/serde"
+    "partiql-common/serde",
+    "partiql-value/serde",
+    "ordered-float/serde",
 ]

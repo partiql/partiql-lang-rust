@@ -1,11 +1,11 @@
 use crate::eval::graph::engine::{GraphAccess, GraphEngine, TripleScan};
-use crate::eval::graph::plan::GraphPlanConvert;
-use crate::eval::graph::plan::{
-    BindSpec, EdgeFilter, LabelFilter, NodeFilter, TripleFilter, ValueFilter,
-};
 use crate::eval::graph::result::Triple;
+
+use crate::eval::graph::plan::{
+    BindSpec, EdgeFilter, GraphPlanConvert, LabelFilter, NodeFilter, TripleFilter, ValueFilter,
+};
 use crate::eval::graph::simple_graph::types::SimpleGraphTypes;
-use crate::eval::graph::string_graph::types::StringGraphTypes;
+use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use delegate::delegate;
 use lasso::Rodeo;

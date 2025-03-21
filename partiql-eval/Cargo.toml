@@ -56,9 +56,11 @@ partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.11
 default = []
 serde = [
     "dep:serde",
-    "rust_decimal/serde-with-str",
+    "partiql-common/serde",
     "partiql-logical/serde",
     "partiql-value/serde",
+    "partiql-extension-ion/serde",
+    "rust_decimal/serde-with-str",
 ]
 
 [[bench]]

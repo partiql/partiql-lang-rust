@@ -55,7 +55,7 @@ fn parse_test_value_str(contents: &str) -> Value {
 }
 
 #[cfg(test)]
-pub fn parse_partiql_value_str(contents: &str) -> Value {
+pub(crate) fn parse_partiql_value_str(contents: &str) -> Value {
     use crate::env::basic::MapBindings;
     use crate::eval::BasicContext;
     use crate::plan::{EvaluationMode, EvaluatorPlanner};
