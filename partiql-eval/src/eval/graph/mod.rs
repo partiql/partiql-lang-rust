@@ -4,5 +4,5 @@ pub(crate) mod evaluator;
 pub(crate) mod plan;
 pub(crate) mod result;
 pub(crate) mod simple_graph;
-pub(crate) mod string_graph;
-pub(crate) mod types;
+pub mod string_graph;
+pub mod types;

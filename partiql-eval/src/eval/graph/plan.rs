@@ -1,7 +1,6 @@
+use crate::eval::graph::types::GraphTypes;
 use std::fmt::Debug;
 use std::hash::Hash;
-
-use crate::eval::graph::types::GraphTypes;
 
 /// A plan specification for an edge's direction filtering.
 #[allow(dead_code)] // TODO remove once graph planning is implemented

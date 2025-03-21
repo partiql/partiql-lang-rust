@@ -1,9 +1,10 @@
 use itertools::{Either, Itertools};
 use partiql_logical as logical;
 use partiql_logical::{
-    AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GroupingStrategy, IsTypeExpr, JoinKind,
-    Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr, SearchedCase, SetQuantifier,
-    SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr, VarRefType,
+    AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GraphMatchExpr, GroupingStrategy,
+    IsTypeExpr, JoinKind, Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr,
+    SearchedCase, SetQuantifier, SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr,
+    VarRefType,
 };
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
@@ -18,7 +19,7 @@ use crate::eval::evaluable::{
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
     EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
-    EvalFnPosition, EvalFnSubstring, EvalIsTypeExpr, EvalLikeMatch,
+    EvalFnPosition, EvalFnSubstring, EvalGraphMatch, EvalIsTypeExpr, EvalLikeMatch,
     EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
     EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
 };
@@ -492,6 +493,13 @@ impl<'c> EvaluatorPlanner<'c> {
                 };
 
                 ("pattern expr", expr)
+            }
+            ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }) => {
+                //let pattern = plan_graph_match(pattern);
+                let pattern = todo!();
+
+                let expr = EvalGraphMatch::new(pattern).bind::<{ STRICT }>(plan_args(&[value]));
+                ("graphmatch expr", expr)
             }
             ValueExpr::SubQueryExpr(expr) => (
                 "subquery",
