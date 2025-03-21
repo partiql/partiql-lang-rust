@@ -103,7 +103,7 @@ mod tests {
 
     #[track_caller]
     fn test_graph(matcher: PathPatternMatch<StringGraphTypes>, expected: &'static str) {
-        let mut eval = EvalGraphMatch::new(matcher)
+        let eval = EvalGraphMatch::new(matcher)
             .bind::<false>(vec![graph_reference()])
             .expect("graph match bind");
 

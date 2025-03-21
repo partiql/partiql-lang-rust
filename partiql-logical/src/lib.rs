@@ -609,7 +609,7 @@ pub struct LikeNonStringNonLiteralMatch {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchExpr {
     pub value: Box<ValueExpr>,
-    pub pattern: GraphMatchPattern,
+    pub pattern: PathPatternMatch,
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
