@@ -15,6 +15,9 @@
 
 mod util;
 
+mod graph;
+pub use graph::*;
+
 use ordered_float::OrderedFloat;
 use partiql_common::catalog::ObjectId;
 /// # Examples
@@ -443,6 +446,7 @@ pub enum ValueExpr {
     NullIfExpr(NullIfExpr),
     CoalesceExpr(CoalesceExpr),
     Call(CallExpr),
+    GraphMatch(GraphMatchExpr),
 }
 
 /// Represents a `PartiQL` literal value.
@@ -599,6 +603,17 @@ pub struct LikeNonStringNonLiteralMatch {
     pub pattern: Box<ValueExpr>,
     pub escape: Box<ValueExpr>,
 }
+
+/// Represents a `PartiQL` GPML expression, e.g. `graph MATCH (node1:NodeLabel) -> (node2:OtherLabel)`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchExpr {
+    pub value: Box<ValueExpr>,
+    pub pattern: GraphMatchPattern,
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchPattern {}
 
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
 /// `SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s`

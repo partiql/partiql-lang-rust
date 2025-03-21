@@ -1,5 +1,6 @@
-use crate::eval::graph::types::{BinderTy, EdgeIdTy, GraphLabelTy, GraphTypes, NodeIdTy};
 use lasso::Spur;
+
+use crate::eval::graph::types::GraphTypes;
 use partiql_value::{GEdgeId, GLabelId, GNodeId};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -11,11 +12,3 @@ impl GraphTypes for SimpleGraphTypes {
     type NodeId = GNodeId;
     type EdgeId = GEdgeId;
 }
-
-impl GraphLabelTy for GLabelId {}
-
-impl NodeIdTy for GNodeId {}
-
-impl EdgeIdTy for GEdgeId {}
-
-impl BinderTy for Spur {}

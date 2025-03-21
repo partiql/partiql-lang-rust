@@ -2,7 +2,7 @@ use crate::eval::graph::plan::{
     DirectionFilter, GraphPlanConvert, NodeFilter, StepFilter, TripleFilter,
 };
 use crate::eval::graph::result::Triple;
-use crate::eval::graph::string_graph::types::StringGraphTypes;
+use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use partiql_value::Value;
 

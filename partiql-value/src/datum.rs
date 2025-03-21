@@ -120,7 +120,7 @@ pub enum DatumValueOwned {
 
 #[derive(Debug)]
 pub enum DatumGraphOwned {
-    Graph(Graph),
+    Graph(Box<Graph>),
 }
 
 impl<'a> DatumCategory<'a> for Value {
@@ -132,6 +132,7 @@ impl<'a> DatumCategory<'a> for Value {
             Value::Bag(bag) => DatumCategoryRef::Sequence(DatumSeqRef::Bag(bag)),
             Value::Tuple(tuple) => DatumCategoryRef::Tuple(DatumTupleRef::Tuple(tuple.as_ref())),
             Value::Variant(doc) => doc.category(),
+            Value::Graph(graph) => DatumCategoryRef::Graph(DatumGraphRef::Graph(graph.as_ref())),
             val => DatumCategoryRef::Scalar(DatumValueRef::Value(val)),
         }
     }
@@ -144,6 +145,7 @@ impl<'a> DatumCategory<'a> for Value {
             Value::Bag(bag) => DatumCategoryOwned::Sequence(DatumSeqOwned::Bag(bag)),
             Value::Tuple(tuple) => DatumCategoryOwned::Tuple(DatumTupleOwned::Tuple(tuple)),
             Value::Variant(doc) => doc.into_category(),
+            Value::Graph(graph) => DatumCategoryOwned::Graph(DatumGraphOwned::Graph(graph)),
             val => DatumCategoryOwned::Scalar(DatumValueOwned::Value(val)),
         }
     }

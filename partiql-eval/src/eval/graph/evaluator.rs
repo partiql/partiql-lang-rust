@@ -1,14 +1,16 @@
 use crate::eval::graph::bind_name::BindNameExt;
 use crate::eval::graph::engine::GraphEngine;
-use crate::eval::graph::plan::{BindSpec, NodeMatch, PathMatch, PathPatternMatch};
 use crate::eval::graph::result::{
     GraphElement, NodeBinding, PathBinding, PathPatternBinding, PathPatternNodes,
 };
-use crate::eval::graph::string_graph::types::StringGraphTypes;
-use crate::eval::graph::types::GraphTypes;
+
 use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 use itertools::Itertools;
+
+use crate::eval::graph::plan::{BindSpec, NodeMatch, PathMatch, PathPatternMatch};
+use crate::eval::graph::string_graph::StringGraphTypes;
+use crate::eval::graph::types::GraphTypes;
 use partiql_value::{Bag, Tuple, Value};
 use std::marker::PhantomData;
 
