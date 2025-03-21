@@ -513,6 +513,44 @@ pub trait Visitor<'ast> {
     fn exit_join_spec(&mut self, _join_spec: &'ast ast::JoinSpec) -> Traverse {
         Traverse::Continue
     }
+
+    fn enter_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_graph_match_pattern(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_pattern(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_graph_match_node(&mut self, _graph_pattern: &'ast ast::GraphMatchNode) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_node(&mut self, _graph_pattern: &'ast ast::GraphMatchNode) -> Traverse {
+        Traverse::Continue
+    }
+    fn enter_graph_match_edge(&mut self, _graph_pattern: &'ast ast::GraphMatchEdge) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_edge(&mut self, _graph_pattern: &'ast ast::GraphMatchEdge) -> Traverse {
+        Traverse::Continue
+    }
+
     fn enter_group_by_expr(&mut self, _group_by_expr: &'ast ast::GroupByExpr) -> Traverse {
         Traverse::Continue
     }

@@ -213,6 +213,8 @@ pub enum Token<'input> {
     Caret,
     #[token(".")]
     Period,
+    #[token("~")]
+    Tilde,
     #[token("||")]
     DblPipe,
 
@@ -260,12 +262,16 @@ pub enum Token<'input> {
     EmbeddedDoc(&'input str),
 
     // Keywords
+    #[regex("(?i:Acyclic)")]
+    Acyclic,
     #[regex("(?i:All)")]
     All,
     #[regex("(?i:Asc)")]
     Asc,
     #[regex("(?i:And)")]
     And,
+    #[regex("(?i:Any)")]
+    Any,
     #[regex("(?i:As)")]
     As,
     #[regex("(?i:At)")]
@@ -330,6 +336,8 @@ pub enum Token<'input> {
     Like,
     #[regex("(?i:Limit)")]
     Limit,
+    #[regex("(?i:Match)")]
+    Match,
     #[regex("(?i:Missing)")]
     Missing,
     #[regex("(?i:Natural)")]
@@ -370,8 +378,14 @@ pub enum Token<'input> {
     Time,
     #[regex("(?i:Timestamp)")]
     Timestamp,
+    #[regex("(?i:Simple)")]
+    Simple,
+    #[regex("(?i:Shortest)")]
+    Shortest,
     #[regex("(?i:Then)")]
     Then,
+    #[regex("(?i:Trail)")]
+    Trail,
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -397,12 +411,26 @@ pub enum Token<'input> {
 }
 
 impl Token<'_> {
+    pub fn is_var_non_reserved(&self) -> bool {
+        matches!(
+            self,
+            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
+        )
+    }
+    pub fn is_fn_non_reserved(&self) -> bool {
+        matches!(
+            self,
+            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
+        )
+    }
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            Token::All
+            Token::Acyclic
+                | Token::All
                 | Token::Asc
                 | Token::And
+                | Token::Any
                 | Token::As
                 | Token::At
                 | Token::Between
@@ -431,6 +459,7 @@ impl Token<'_> {
                 | Token::Left
                 | Token::Like
                 | Token::Limit
+                | Token::Match
                 | Token::Missing
                 | Token::Natural
                 | Token::Not
@@ -451,7 +480,10 @@ impl Token<'_> {
                 | Token::Table
                 | Token::Time
                 | Token::Timestamp
+                | Token::Simple
+                | Token::Shortest
                 | Token::Then
+                | Token::Trail
                 | Token::Union
                 | Token::Unpivot
                 | Token::Using
@@ -497,6 +529,7 @@ impl fmt::Display for Token<'_> {
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
+            Token::Tilde => write!(f, "~"),
             Token::DblPipe => write!(f, "||"),
             Token::UnquotedIdent(id) => write!(f, "<{id}:UNQUOTED_IDENT>"),
             Token::QuotedIdent(id) => write!(f, "<{id}:QUOTED_IDENT>"),
@@ -510,9 +543,11 @@ impl fmt::Display for Token<'_> {
             Token::EmbeddedDoc(txt) => write!(f, "<```{txt}```:DOC>"),
             Token::EmptyEmbeddedDocQuote => write!(f, "<``:DOC>"),
 
-            Token::All
+            Token::Acyclic
+            | Token::All
             | Token::Asc
             | Token::And
+            | Token::Any
             | Token::As
             | Token::At
             | Token::Between
@@ -545,6 +580,7 @@ impl fmt::Display for Token<'_> {
             | Token::Left
             | Token::Like
             | Token::Limit
+            | Token::Match
             | Token::Missing
             | Token::Natural
             | Token::Not
@@ -565,7 +601,10 @@ impl fmt::Display for Token<'_> {
             | Token::Table
             | Token::Time
             | Token::Timestamp
+            | Token::Simple
+            | Token::Shortest
             | Token::Then
+            | Token::Trail
             | Token::True
             | Token::Union
             | Token::Unpivot

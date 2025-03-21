@@ -34,6 +34,7 @@ partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-eval = { path = "../partiql-eval" }
 partiql-extension-value-functions = { path = "../extension/partiql-extension-value-functions" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+once_cell = "1"
 
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }

@@ -197,6 +197,28 @@ where
 }
 
 #[inline]
+pub fn pretty_sp_bracketed_doc<'b, E, D, A>(doc: E, arena: &'b D) -> DocBuilder<'b, D, A>
+where
+    E: Pretty<'b, D, A>,
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    pretty_surrounded_doc(doc, "[ ", " ]", arena)
+}
+
+#[inline]
+pub fn pretty_bracketed_doc<'b, E, D, A>(doc: E, arena: &'b D) -> DocBuilder<'b, D, A>
+where
+    E: Pretty<'b, D, A>,
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    pretty_surrounded_doc(doc, "[", "]", arena)
+}
+
+#[inline]
 pub fn pretty_seq_doc<'i, 'b, I, E, D, A>(
     seq: I,
     start: &'static str,

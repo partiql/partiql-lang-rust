@@ -89,7 +89,8 @@ mod tests {
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
-             Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else End";
+             Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else End \
+             Match Any Shortest Trail Acyclic Simple";
         let symbols = symbols.split(' ').chain(primitives.split(' '));
         let keywords = keywords.split(' ');
 
@@ -111,7 +112,7 @@ mod tests {
             "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
             "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TABLE",
             "TIME", "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
-            "CASE", "WHEN", "THEN", "ELSE", "END"
+            "CASE", "WHEN", "THEN", "ELSE", "END", "MATCH", "ANY", "SHORTEST", "TRAIL", "ACYCLIC", "SIMPLE"
         ];
         let displayed = toks
             .into_iter()
@@ -408,8 +409,7 @@ mod tests {
     /// the following test will need to be modified.
     #[test]
     fn select_non_reserved_keywords() -> Result<(), ParseError<'static, BytePosition>> {
-        let query =
-            "SELECT acyclic, BoTh, DOMAIN, SiMpLe, Trail, leading, TRailing, USER\nfrom @\"foo\"";
+        let query = "SELECT BoTh, DOMAIN, leading, TRailing, USER\nfrom @\"foo\"";
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(query, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>()?;
@@ -417,15 +417,9 @@ mod tests {
         assert_eq!(
             vec![
                 Token::Select,
-                Token::UnquotedIdent("acyclic"),
-                Token::Comma,
                 Token::UnquotedIdent("BoTh"),
                 Token::Comma,
                 Token::UnquotedIdent("DOMAIN"),
-                Token::Comma,
-                Token::UnquotedIdent("SiMpLe"),
-                Token::Comma,
-                Token::UnquotedIdent("Trail"),
                 Token::Comma,
                 Token::UnquotedIdent("leading"),
                 Token::Comma,
