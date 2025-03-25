@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+pub mod bind_name;
+
 /// A plan specification for an edge's direction filtering.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -76,9 +78,9 @@ pub struct StepFilter {
 /// A plan specification for 'path patterns' (i.e., sequences of 'node edge node's) matching.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct PathPatternFilter {
-    pub head: NodeFilter,
-    pub tail: Vec<(DirectionFilter, EdgeFilter, NodeFilter)>,
+pub struct PathPattern {
+    pub head: NodeMatch,
+    pub tail: Vec<(DirectionFilter, EdgeMatch, NodeMatch)>,
 }
 
 /// A plan specification for node matching.
