@@ -794,37 +794,37 @@ impl<'c> EvaluatorPlanner<'c> {
 }
 
 fn plan_graph_plan(
-    pattern: &partiql_logical::PathPatternMatch,
+    pattern: &logical::graph::PathPatternMatch,
 ) -> Result<eval::graph::plan::PathPatternMatch<StringGraphTypes>, PlanningError> {
     use eval::graph::plan as physical;
     use partiql_logical as logical;
 
     fn plan_bind_spec(
-        pattern: &logical::BindSpec,
+        pattern: &logical::graph::BindSpec,
     ) -> Result<physical::BindSpec<StringGraphTypes>, PlanningError> {
         Ok(physical::BindSpec(pattern.0.clone()))
     }
 
     fn plan_label_filter(
-        pattern: &logical::LabelFilter,
+        pattern: &logical::graph::LabelFilter,
     ) -> Result<physical::LabelFilter<StringGraphTypes>, PlanningError> {
         Ok(match pattern {
-            logical::LabelFilter::Always => physical::LabelFilter::Always,
-            logical::LabelFilter::Never => physical::LabelFilter::Never,
-            logical::LabelFilter::Named(n) => physical::LabelFilter::Named(n.clone()),
+            logical::graph::LabelFilter::Always => physical::LabelFilter::Always,
+            logical::graph::LabelFilter::Never => physical::LabelFilter::Never,
+            logical::graph::LabelFilter::Named(n) => physical::LabelFilter::Named(n.clone()),
         })
     }
 
     fn plan_value_filter(
-        pattern: &logical::ValueFilter,
+        pattern: &logical::graph::ValueFilter,
     ) -> Result<physical::ValueFilter, PlanningError> {
         Ok(match pattern {
-            logical::ValueFilter::Always => physical::ValueFilter::Always,
+            logical::graph::ValueFilter::Always => physical::ValueFilter::Always,
         })
     }
 
     fn plan_node_filter(
-        pattern: &logical::NodeFilter,
+        pattern: &logical::graph::NodeFilter,
     ) -> Result<physical::NodeFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::NodeFilter {
             label: plan_label_filter(&pattern.label)?,
@@ -833,7 +833,7 @@ fn plan_graph_plan(
     }
 
     fn plan_edge_filter(
-        pattern: &logical::EdgeFilter,
+        pattern: &logical::graph::EdgeFilter,
     ) -> Result<physical::EdgeFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::EdgeFilter {
             label: plan_label_filter(&pattern.label)?,
@@ -842,16 +842,16 @@ fn plan_graph_plan(
     }
 
     fn plan_step_filter(
-        pattern: &logical::StepFilter,
+        pattern: &logical::graph::StepFilter,
     ) -> Result<physical::StepFilter<StringGraphTypes>, PlanningError> {
         let dir = match pattern.dir {
-            logical::DirectionFilter::L => physical::DirectionFilter::L,
-            logical::DirectionFilter::R => physical::DirectionFilter::R,
-            logical::DirectionFilter::U => physical::DirectionFilter::U,
-            logical::DirectionFilter::LU => physical::DirectionFilter::LU,
-            logical::DirectionFilter::UR => physical::DirectionFilter::UR,
-            logical::DirectionFilter::LR => physical::DirectionFilter::LR,
-            logical::DirectionFilter::LUR => physical::DirectionFilter::LUR,
+            logical::graph::DirectionFilter::L => physical::DirectionFilter::L,
+            logical::graph::DirectionFilter::R => physical::DirectionFilter::R,
+            logical::graph::DirectionFilter::U => physical::DirectionFilter::U,
+            logical::graph::DirectionFilter::LU => physical::DirectionFilter::LU,
+            logical::graph::DirectionFilter::UR => physical::DirectionFilter::UR,
+            logical::graph::DirectionFilter::LR => physical::DirectionFilter::LR,
+            logical::graph::DirectionFilter::LUR => physical::DirectionFilter::LUR,
         };
         Ok(physical::StepFilter {
             dir,
@@ -860,7 +860,7 @@ fn plan_graph_plan(
     }
 
     fn plan_triple_filter(
-        pattern: &logical::TripleFilter,
+        pattern: &logical::graph::TripleFilter,
     ) -> Result<physical::TripleFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::TripleFilter {
             lhs: plan_node_filter(&pattern.lhs)?,
@@ -870,7 +870,7 @@ fn plan_graph_plan(
     }
 
     fn plan_node_match(
-        pattern: &logical::NodeMatch,
+        pattern: &logical::graph::NodeMatch,
     ) -> Result<physical::NodeMatch<StringGraphTypes>, PlanningError> {
         Ok(physical::NodeMatch {
             binder: plan_bind_spec(&pattern.binder)?,
@@ -879,7 +879,7 @@ fn plan_graph_plan(
     }
 
     fn plan_path_match(
-        pattern: &logical::PathMatch,
+        pattern: &logical::graph::PathMatch,
     ) -> Result<physical::PathMatch<StringGraphTypes>, PlanningError> {
         let (l, m, r) = &pattern.binders;
         let binders = (plan_bind_spec(l)?, plan_bind_spec(m)?, plan_bind_spec(r)?);
@@ -890,16 +890,16 @@ fn plan_graph_plan(
     }
 
     fn plan_path_pattern_match(
-        pattern: &logical::PathPatternMatch,
+        pattern: &logical::graph::PathPatternMatch,
     ) -> Result<physical::PathPatternMatch<StringGraphTypes>, PlanningError> {
         Ok(match pattern {
-            logical::PathPatternMatch::Node(n) => {
+            logical::graph::PathPatternMatch::Node(n) => {
                 physical::PathPatternMatch::Node(plan_node_match(n)?)
             }
-            logical::PathPatternMatch::Match(m) => {
+            logical::graph::PathPatternMatch::Match(m) => {
                 physical::PathPatternMatch::Match(plan_path_match(m)?)
             }
-            logical::PathPatternMatch::Concat(ms) => {
+            logical::graph::PathPatternMatch::Concat(ms) => {
                 let ms: Result<Vec<_>, _> = ms.iter().map(plan_path_pattern_match).collect();
                 physical::PathPatternMatch::Concat(ms?)
             }
