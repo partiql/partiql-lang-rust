@@ -764,7 +764,9 @@ pub enum Static {
     Bag(BagType),
     Array(ArrayType),
 
-    Graph(/* TODO? */),
+    Graph(
+        /* TODO: https://github.com/partiql/partiql-lang/blob/main/RFCs/0025-graph-data-model.md */
+    ),
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
