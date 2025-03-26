@@ -46,18 +46,66 @@ impl BindEvalExpr for EvalGraphMatch {
 #[cfg(test)]
 mod tests {
     use crate::eval::expr::{BindEvalExpr, EvalGlobalVarRef, EvalGraphMatch};
-    use crate::eval::graph::bind_name::FreshBinder;
     use crate::eval::graph::plan::{
-        BindSpec, DirectionFilter, EdgeFilter, ElementFilterBuilder, NodeFilter, NodeMatch,
-        PathMatch, PathPatternMatch, StepFilter, TripleFilter,
+        BindSpec, DirectionFilter, EdgeFilter, LabelFilter, NodeFilter, NodeMatch, PathMatch,
+        PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
     };
     use crate::eval::graph::string_graph::StringGraphTypes;
+    use crate::eval::graph::types::GraphTypes;
     use crate::eval::{BasicContext, MapBindings};
     use crate::test_value::TestValue;
     use partiql_catalog::context::SystemContext;
     use partiql_common::pretty::ToPretty;
-
+    use partiql_logical::graph::bind_name::FreshBinder;
     use partiql_value::{tuple, BindingsName, DateTime, Value};
+
+    impl<GT: GraphTypes> From<PathMatch<GT>> for PathPatternMatch<GT> {
+        fn from(value: PathMatch<GT>) -> Self {
+            Self::Match(value)
+        }
+    }
+
+    impl<GT: GraphTypes> From<NodeMatch<GT>> for PathPatternMatch<GT> {
+        fn from(value: NodeMatch<GT>) -> Self {
+            Self::Node(value)
+        }
+    }
+
+    pub trait ElementFilterBuilder<GT: GraphTypes> {
+        fn any() -> Self;
+        fn labeled(label: GT::Label) -> Self;
+    }
+
+    impl<GT: GraphTypes> ElementFilterBuilder<GT> for NodeFilter<GT> {
+        fn any() -> Self {
+            Self {
+                label: LabelFilter::Always,
+                filter: ValueFilter::Always,
+            }
+        }
+
+        fn labeled(label: GT::Label) -> Self {
+            Self {
+                label: LabelFilter::Named(label),
+                filter: ValueFilter::Always,
+            }
+        }
+    }
+
+    impl<GT: GraphTypes> ElementFilterBuilder<GT> for EdgeFilter<GT> {
+        fn any() -> Self {
+            Self {
+                label: LabelFilter::Always,
+                filter: ValueFilter::Always,
+            }
+        }
+        fn labeled(label: GT::Label) -> Self {
+            Self {
+                label: LabelFilter::Named(label),
+                filter: ValueFilter::Always,
+            }
+        }
+    }
 
     /*
         A simple 3-node, 3-edge graph which is intended to be able to be exactly matched by:

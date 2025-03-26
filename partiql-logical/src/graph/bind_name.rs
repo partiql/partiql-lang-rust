@@ -15,11 +15,10 @@ impl<S: AsRef<str>> BindNameExt for S {
 }
 
 /// Creates 'fresh' bind names
+#[derive(Debug)]
 pub struct FreshBinder {
-    #[allow(dead_code)] // TODO remove once graph planning is implemented
     node: AtomicU32,
 
-    #[allow(dead_code)] // TODO remove once graph planning is implemented
     edge: AtomicU32,
 }
 
@@ -33,12 +32,10 @@ impl Default for FreshBinder {
 }
 
 impl FreshBinder {
-    #[allow(dead_code)] // TODO remove once graph planning is implemented
     pub fn node(&self) -> String {
         format!("{ANON_PREFIX}🞎{}", self.node.fetch_add(1, Relaxed))
     }
 
-    #[allow(dead_code)] // TODO remove once graph planning is implemented
     pub fn edge(&self) -> String {
         format!("{ANON_PREFIX}⁃{}", self.edge.fetch_add(1, Relaxed))
     }

@@ -1,4 +1,3 @@
-pub(crate) mod bind_name;
 pub(crate) mod engine;
 pub(crate) mod evaluator;
 pub(crate) mod plan;

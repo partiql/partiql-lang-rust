@@ -945,6 +945,7 @@ pub struct GraphMatchEdge {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchPattern {
+    /// an optional restrictor for the entire pattern match
     #[visit(skip)]
     pub restrictor: Option<GraphMatchRestrictor>,
     /// an optional quantifier for the entire pattern match

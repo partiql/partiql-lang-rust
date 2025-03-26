@@ -12,6 +12,7 @@ use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
 
 mod builtins;
 mod functions;
+mod graph;
 mod lower;
 mod typer;
 

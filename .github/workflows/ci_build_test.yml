@@ -103,7 +103,7 @@ jobs:
       # to format and use the output.
       - name: Cargo Test of the conformance tests (can fail) and save to json file
         continue-on-error: true
-        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test" --release -- -Z unstable-options --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test, experimental" --release -- -Z unstable-options --format json > ${{ env.CARGO_TEST_RESULT_NAME }}
       # Create a conformance report from the `cargo test` json file
       - run: cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
       # Upload conformance report for comparison with future runs
