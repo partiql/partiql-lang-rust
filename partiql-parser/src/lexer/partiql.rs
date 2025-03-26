@@ -203,8 +203,6 @@ pub enum Token<'input> {
     Plus,
     #[token("*")]
     Star,
-    #[token("?")]
-    SqlParameter,
     #[token("%")]
     Percent,
     #[token("/")]
@@ -213,10 +211,64 @@ pub enum Token<'input> {
     Caret,
     #[token(".")]
     Period,
-    #[token("~")]
-    Tilde,
     #[token("||")]
     DblPipe,
+    #[token("|")]
+    Pipe,
+    #[token("&")]
+    Ampersand,
+    #[token("!")]
+    Bang,
+    #[token("?")]
+    QuestionMark,
+
+    // Graph Symbols
+    #[token("|+|")]
+    PipePlusPipe,
+    #[token("<-")]
+    LeftArrow,
+    #[token("~")]
+    Tilde,
+    #[token("->")]
+    RightArrow,
+    #[token("<~")]
+    LeftArrowTilde,
+    #[token("~>")]
+    TildeRightArrow,
+    #[token("<-[")]
+    LeftArrowBracket,
+    #[token("]-")]
+    RightBracketMinus,
+    #[token("~[")]
+    TildeLeftBracket,
+    #[token("]~")]
+    RightBracketTilde,
+    #[token("-[")]
+    MinusLeftBracket,
+    #[token("]->")]
+    BracketRightArrow,
+    #[token("<~[")]
+    LeftArrowTildeBracket,
+    #[token("]~>")]
+    BracketTildeRightArrow,
+    #[token("<->")]
+    LeftMinusRight,
+    #[token("<-/")]
+    LeftArrowSlash,
+    #[token("/-")]
+    RightSlashMinus,
+    #[token("~/")]
+    TildeLeftSlash,
+    #[token("/~")]
+    RightSlashTilde,
+    #[token("-/")]
+    MinusLeftSlash,
+    #[token("/->")]
+    SlashRightArrow,
+    #[token("<~/")]
+    LeftArrowTildeSlash,
+    #[token("/~>")]
+    SlashTildeRightArrow,
 
     // unquoted identifiers
     #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice())]
@@ -262,8 +314,6 @@ pub enum Token<'input> {
     EmbeddedDoc(&'input str),
 
     // Keywords
-    #[regex("(?i:Acyclic)")]
-    Acyclic,
     #[regex("(?i:All)")]
     All,
     #[regex("(?i:Asc)")]
@@ -282,6 +332,8 @@ pub enum Token<'input> {
     By,
     #[regex("(?i:Case)")]
     Case,
+    #[regex("(?i:Columns)")]
+    Columns,
     #[regex("(?i:Cross)")]
     Cross,
     #[regex("(?i:Cycle)")]
@@ -292,6 +344,8 @@ pub enum Token<'input> {
     Desc,
     #[regex("(?i:Distinct)")]
     Distinct,
+    #[regex("(?i:Element)")]
+    Element,
     #[regex("(?i:Else)")]
     Else,
     #[regex("(?i:End)")]
@@ -302,6 +356,8 @@ pub enum Token<'input> {
     Except,
     #[regex("(?i:Exclude)")]
     Exclude,
+    #[regex("(?i:Export)")]
+    Export,
     #[regex("(?i:False)")]
     False,
     #[regex("(?i:First)")]
@@ -314,6 +370,8 @@ pub enum Token<'input> {
     From,
     #[regex("(?i:Group)")]
     Group,
+    #[regex("(?i:Groups)")]
+    Groups,
     #[regex("(?i:Having)")]
     Having,
     #[regex("(?i:In)")]
@@ -326,6 +384,8 @@ pub enum Token<'input> {
     Intersect,
     #[regex("(?i:Join)")]
     Join,
+    #[regex("(?i:Keep)")]
+    Keep,
     #[regex("(?i:Last)")]
     Last,
     #[regex("(?i:Lateral)")]
@@ -342,6 +402,8 @@ pub enum Token<'input> {
     Missing,
     #[regex("(?i:Natural)")]
     Natural,
+    #[regex("(?i:No)")]
+    No,
     #[regex("(?i:Not)")]
     Not,
     #[regex("(?i:Null)")]
@@ -352,22 +414,32 @@ pub enum Token<'input> {
     Offset,
     #[regex("(?i:On)")]
     On,
+    #[regex("(?i:One)")]
+    One,
     #[regex("(?i:Or)")]
     Or,
     #[regex("(?i:Order)")]
     Order,
     #[regex("(?i:Outer)")]
     Outer,
+    #[regex("(?i:Path)")]
+    Path,
     #[regex("(?i:Partial)")]
     Partial,
+    #[regex("(?i:Per)")]
+    Per,
     #[regex("(?i:Pivot)")]
     Pivot,
     #[regex("(?i:Preserve)")]
     Preserve,
-    #[regex("(?i:Right)")]
-    Right,
     #[regex("(?i:Recursive)")]
     Recursive,
+    #[regex("(?i:REPEATABLE)")]
+    Repeatable,
+    #[regex("(?i:Right)")]
+    Right,
+    #[regex("(?i:Row)")]
+    Row,
     #[regex("(?i:Select)")]
     Select,
     #[regex("(?i:Search)")]
@@ -380,12 +452,8 @@ pub enum Token<'input> {
     Timestamp,
     #[regex("(?i:Simple)")]
     Simple,
-    #[regex("(?i:Shortest)")]
-    Shortest,
     #[regex("(?i:Then)")]
     Then,
-    #[regex("(?i:Trail)")]
-    Trail,
     #[regex("(?i:True)")]
     True,
     #[regex("(?i:Union)")]
@@ -408,21 +476,151 @@ pub enum Token<'input> {
     Without,
     #[regex("(?i:Zone)")]
     Zone,
+
+    // Graph Keywords; reserved
+    #[regex("(?i:ALL_DIFFERENT)")]
+    AllDifferent,
+    #[regex("(?i:BINDING_COUNT)")]
+    BindingCount,
+    #[regex("(?i:ELEMENT_ID)")]
+    ElementId,
+    #[regex("(?i:ELEMENT_NUMBER)")]
+    ElementNumber,
+    #[regex("(?i:GRAPH)")]
+    Graph,
+    #[regex("(?i:GRAPH_TABLE)")]
+    GraphTable,
+    #[regex("(?i:MATCHNUM)")]
+    MatchNum,
+    #[regex("(?i:PATH_LENGTH)")]
+    PathLength,
+    #[regex("(?i:PATH_NAME)")]
+    PathName,
+    #[regex("(?i:PROPERTY_EXISTS)")]
+    PropertyExists,
+    #[regex("(?i:SAME)")]
+    Same,
+
+    // Graph Keywords; non-reserved
+    #[regex("(?i:ACYCLIC)")]
+    Acyclic,
+    #[regex("(?i:BINDINGS)")]
+    Bindings,
+    #[regex("(?i:BOUND)")]
+    Bound,
+    #[regex("(?i:DESTINATION)")]
+    Destination,
+    #[regex("(?i:DIFFERENT)")]
+    Different,
+    #[regex("(?i:DIRECTED)")]
+    Directed,
+    #[regex("(?i:EDGE)")]
+    Edge,
+    #[regex("(?i:EDGES)")]
+    Edges,
+    #[regex("(?i:ELEMENTS)")]
+    Elements,
+    #[regex("(?i:LABEL)")]
+    Label,
+    #[regex("(?i:LABELED)")]
+    Labeled,
+    #[regex("(?i:NODE)")]
+    Node,
+    #[regex("(?i:PATHS)")]
+    Paths,
+    #[regex("(?i:PROPERTIES)")]
+    Properties,
+    #[regex("(?i:PROPERTY)")]
+    Property,
+    #[regex("(?i:PROPERTY_GRAPH_CATALOG)")]
+    PropertyGraphCatalog,
+    #[regex("(?i:PROPERTY_GRAPH_NAME)")]
+    PropertyGraphName,
+    #[regex("(?i:PROPERTY_GRAPH_SCHEMA)")]
+    PropertyGraphSchema,
+    #[regex("(?i:RELATIONSHIP)")]
+    Relationship,
+    #[regex("(?i:RELATIONSHIPS)")]
+    Relationships,
+    #[regex("(?i:SHORTEST)")]
+    Shortest,
+    #[regex("(?i:SINGLETONS)")]
+    Singletons,
+    #[regex("(?i:STEP)")]
+    Step,
+    #[regex("(?i:TABLES)")]
+    Tables,
+    #[regex("(?i:TRAIL)")]
+    Trail,
+    #[regex("(?i:VERTEX)")]
+    Vertex,
+    #[regex("(?i:WALK)")]
+    Walk,
 }
 
 impl Token<'_> {
+    #[inline]
     pub fn is_var_non_reserved(&self) -> bool {
-        matches!(
-            self,
-            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
-        )
+        matches!(self, Token::Any | Token::Simple) || self.is_graph_non_reserved()
     }
+
+    #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
+        matches!(self, Token::Any | Token::Simple) || self.is_graph_non_reserved()
+    }
+
+    #[inline]
+    pub fn is_graph_reserved(&self) -> bool {
         matches!(
             self,
-            Token::Acyclic | Token::Any | Token::Simple | Token::Shortest | Token::Trail
+            Token::AllDifferent
+                | Token::BindingCount
+                | Token::ElementId
+                | Token::ElementNumber
+                | Token::Graph
+                | Token::GraphTable
+                | Token::MatchNum
+                | Token::PathLength
+                | Token::PathName
+                | Token::PropertyExists
+                | Token::Same
         )
     }
+
+    #[inline]
+    pub fn is_graph_non_reserved(&self) -> bool {
+        matches!(
+            self,
+            Token::Acyclic
+                | Token::Bindings
+                | Token::Bound
+                | Token::Destination
+                | Token::Different
+                | Token::Directed
+                | Token::Edge
+                | Token::Edges
+                | Token::Elements
+                | Token::Label
+                | Token::Labeled
+                | Token::Node
+                | Token::Paths
+                | Token::Properties
+                | Token::Property
+                | Token::PropertyGraphCatalog
+                | Token::PropertyGraphName
+                | Token::PropertyGraphSchema
+                | Token::Relationship
+                | Token::Relationships
+                | Token::Shortest
+                | Token::Singletons
+                | Token::Step
+                | Token::Tables
+                | Token::Trail
+                | Token::Vertex
+                | Token::Walk
+        )
+    }
+
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
@@ -441,6 +639,7 @@ impl Token<'_> {
                 | Token::Date
                 | Token::Desc
                 | Token::Distinct
+                | Token::Element
                 | Token::Escape
                 | Token::Except
                 | Token::First
@@ -448,12 +647,14 @@ impl Token<'_> {
                 | Token::Full
                 | Token::From
                 | Token::Group
+                | Token::Groups
                 | Token::Having
                 | Token::In
                 | Token::Inner
                 | Token::Is
                 | Token::Intersect
                 | Token::Join
+                | Token::Keep
                 | Token::Last
                 | Token::Lateral
                 | Token::Left
@@ -470,11 +671,13 @@ impl Token<'_> {
                 | Token::Or
                 | Token::Order
                 | Token::Outer
+                | Token::Path
                 | Token::Partial
                 | Token::Pivot
                 | Token::Preserve
                 | Token::Right
                 | Token::Recursive
+                | Token::Repeatable
                 | Token::Search
                 | Token::Select
                 | Token::Table
@@ -491,7 +694,8 @@ impl Token<'_> {
                 | Token::Values
                 | Token::Where
                 | Token::With
-        )
+        ) || self.is_graph_reserved()
+            || self.is_graph_non_reserved()
     }
 }
 
@@ -524,13 +728,41 @@ impl fmt::Display for Token<'_> {
             Token::Minus => write!(f, "-"),
             Token::Plus => write!(f, "+"),
             Token::Star => write!(f, "*"),
-            Token::SqlParameter => write!(f, "?"),
             Token::Percent => write!(f, "%"),
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
-            Token::Tilde => write!(f, "~"),
             Token::DblPipe => write!(f, "||"),
+            Token::Pipe => write!(f, "|"),
+            Token::Ampersand => write!(f, "&"),
+            Token::Bang => write!(f, "!"),
+            Token::QuestionMark => write!(f, "?"),
+            // graph symbols
+            Token::PipePlusPipe => write!(f, "|+|"),
+            Token::LeftArrow => write!(f, "<-"),
+            Token::Tilde => write!(f, "~"),
+            Token::RightArrow => write!(f, "->"),
+            Token::LeftArrowTilde => write!(f, "<~"),
+            Token::TildeRightArrow => write!(f, "~>"),
+            Token::LeftArrowBracket => write!(f, "<-["),
+            Token::RightBracketMinus => write!(f, "]-"),
+            Token::TildeLeftBracket => write!(f, "~["),
+            Token::RightBracketTilde => write!(f, "]~"),
+            Token::MinusLeftBracket => write!(f, "-["),
+            Token::BracketRightArrow => write!(f, "]->"),
+            Token::LeftArrowTildeBracket => write!(f, "<~["),
+            Token::BracketTildeRightArrow => write!(f, "]~>"),
+            Token::LeftMinusRight => write!(f, "<->"),
+            Token::LeftArrowSlash => write!(f, "<-/"),
+            Token::RightSlashMinus => write!(f, "/-"),
+            Token::TildeLeftSlash => write!(f, "~/"),
+            Token::RightSlashTilde => write!(f, "/~"),
+            Token::MinusLeftSlash => write!(f, "-/"),
+            Token::SlashRightArrow => write!(f, "/->"),
+            Token::LeftArrowTildeSlash => write!(f, "<~/"),
+            Token::SlashTildeRightArrow => write!(f, "/~>"),
+
+            // other
             Token::UnquotedIdent(id) => write!(f, "<{id}:UNQUOTED_IDENT>"),
             Token::QuotedIdent(id) => write!(f, "<{id}:QUOTED_IDENT>"),
             Token::UnquotedAtIdentifier(id) => write!(f, "<{id}:UNQUOTED_ATIDENT>"),
@@ -542,80 +774,8 @@ impl fmt::Display for Token<'_> {
             Token::EmbeddedDocQuote => write!(f, "<DOC>"),
             Token::EmbeddedDoc(txt) => write!(f, "<```{txt}```:DOC>"),
             Token::EmptyEmbeddedDocQuote => write!(f, "<``:DOC>"),
-
-            Token::Acyclic
-            | Token::All
-            | Token::Asc
-            | Token::And
-            | Token::Any
-            | Token::As
-            | Token::At
-            | Token::Between
-            | Token::By
-            | Token::Case
-            | Token::Cross
-            | Token::Cycle
-            | Token::Date
-            | Token::Desc
-            | Token::Distinct
-            | Token::Else
-            | Token::End
-            | Token::Escape
-            | Token::Except
-            | Token::Exclude
-            | Token::False
-            | Token::First
-            | Token::For
-            | Token::Full
-            | Token::From
-            | Token::Group
-            | Token::Having
-            | Token::In
-            | Token::Inner
-            | Token::Is
-            | Token::Intersect
-            | Token::Join
-            | Token::Last
-            | Token::Lateral
-            | Token::Left
-            | Token::Like
-            | Token::Limit
-            | Token::Match
-            | Token::Missing
-            | Token::Natural
-            | Token::Not
-            | Token::Null
-            | Token::Nulls
-            | Token::Offset
-            | Token::On
-            | Token::Or
-            | Token::Order
-            | Token::Outer
-            | Token::Partial
-            | Token::Pivot
-            | Token::Preserve
-            | Token::Right
-            | Token::Recursive
-            | Token::Search
-            | Token::Select
-            | Token::Table
-            | Token::Time
-            | Token::Timestamp
-            | Token::Simple
-            | Token::Shortest
-            | Token::Then
-            | Token::Trail
-            | Token::True
-            | Token::Union
-            | Token::Unpivot
-            | Token::Using
-            | Token::Value
-            | Token::Values
-            | Token::When
-            | Token::Where
-            | Token::With
-            | Token::Without
-            | Token::Zone => {
+            // keywords
+            _ => {
                 write!(f, "{}", format!("{self:?}").to_uppercase())
             }
         }
