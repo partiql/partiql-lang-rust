@@ -147,6 +147,13 @@ macro_rules! type_struct {
 }
 
 #[macro_export]
+macro_rules! type_graph {
+    ($bld:expr) => {
+        $bld.new_graph()
+    };
+}
+
+#[macro_export]
 macro_rules! struct_fields {
     ($(($x:expr, $y:expr)),+ $(,)?) => (
         $crate::StructConstraint::Fields([$(($x, $y).into()),+].into())
@@ -253,6 +260,18 @@ impl PartiqlShape {
             *self,
             PartiqlShape::Static(StaticType {
                 ty: Static::Array(_),
+                nullable: true,
+                ..
+            })
+        )
+    }
+
+    #[inline]
+    pub fn is_graph(&self) -> bool {
+        matches!(
+            *self,
+            PartiqlShape::Static(StaticType {
+                ty: Static::Graph(),
                 nullable: true,
                 ..
             })
@@ -431,6 +450,11 @@ impl<Id: NodeIdGenerator> ShapeBuilder<Id> {
     #[inline]
     pub fn new_struct(&mut self, s: StructType) -> PartiqlShape {
         self.new_static(Static::Struct(s))
+    }
+
+    #[inline]
+    pub fn new_graph(&mut self) -> PartiqlShape {
+        self.new_static(Static::Graph())
     }
 
     #[inline]
@@ -739,7 +763,10 @@ pub enum Static {
     Struct(StructType),
     Bag(BagType),
     Array(ArrayType),
-    // TODO GPML
+
+    Graph(
+        /* TODO: https://github.com/partiql/partiql-lang/blob/main/RFCs/0025-graph-data-model.md */
+    ),
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
@@ -768,6 +795,7 @@ impl Static {
             Static::Struct(_) => StaticCategory::Tuple(),
             Static::Bag(b) => StaticCategory::Sequence(b.element_type()),
             Static::Array(b) => StaticCategory::Sequence(b.element_type()),
+            Static::Graph() => StaticCategory::Graph(),
             _ => StaticCategory::Scalar(self),
         }
     }
@@ -800,6 +828,7 @@ impl Display for Static {
             Static::Struct(inner) => std::fmt::Display::fmt(inner, f),
             Static::Bag(inner) => std::fmt::Display::fmt(inner, f),
             Static::Array(inner) => std::fmt::Display::fmt(inner, f),
+            Static::Graph() => write!(f, "Graph"),
         }
     }
 }

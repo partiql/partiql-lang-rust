@@ -14,6 +14,9 @@ mod path;
 pub(crate) use path::*;
 mod pattern_match;
 pub(crate) use pattern_match::*;
+
+mod graph_match;
+pub(crate) use graph_match::*;
 mod functions;
 mod operators;
 
