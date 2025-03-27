@@ -203,8 +203,6 @@ pub enum Token<'input> {
     Plus,
     #[token("*")]
     Star,
-    #[token("?")]
-    SqlParameter,
     #[token("%")]
     Percent,
     #[token("/")]
@@ -213,10 +211,64 @@ pub enum Token<'input> {
     Caret,
     #[token(".")]
     Period,
-    #[token("~")]
-    Tilde,
     #[token("||")]
     DblPipe,
+    #[token("|")]
+    Pipe,
+    #[token("&")]
+    Ampersand,
+    #[token("!")]
+    Bang,
+    #[token("?")]
+    QuestionMark,
+
+    // Graph Symbols
+    #[token("|+|")]
+    PipePlusPipe,
+    #[token("<-")]
+    LeftArrow,
+    #[token("~")]
+    Tilde,
+    #[token("->")]
+    RightArrow,
+    #[token("<~")]
+    LeftArrowTilde,
+    #[token("~>")]
+    TildeRightArrow,
+    #[token("<-[")]
+    LeftArrowBracket,
+    #[token("]-")]
+    RightBracketMinus,
+    #[token("~[")]
+    TildeLeftBracket,
+    #[token("]~")]
+    RightBracketTilde,
+    #[token("-[")]
+    MinusLeftBracket,
+    #[token("]->")]
+    BracketRightArrow,
+    #[token("<~[")]
+    LeftArrowTildeBracket,
+    #[token("]~>")]
+    BracketTildeRightArrow,
+    #[token("<->")]
+    LeftMinusRight,
+    #[token("<-/")]
+    LeftArrowSlash,
+    #[token("/-")]
+    RightSlashMinus,
+    #[token("~/")]
+    TildeLeftSlash,
+    #[token("/~")]
+    RightSlashTilde,
+    #[token("-/")]
+    MinusLeftSlash,
+    #[token("/->")]
+    SlashRightArrow,
+    #[token("<~/")]
+    LeftArrowTildeSlash,
+    #[token("/~>")]
+    SlashTildeRightArrow,
 
     // unquoted identifiers
     #[regex("[a-zA-Z_$][a-zA-Z0-9_$]*", |lex| lex.slice())]
@@ -292,6 +344,8 @@ pub enum Token<'input> {
     Desc,
     #[regex("(?i:Distinct)")]
     Distinct,
+    #[regex("(?i:Element)")]
+    Element,
     #[regex("(?i:Else)")]
     Else,
     #[regex("(?i:End)")]
@@ -316,6 +370,8 @@ pub enum Token<'input> {
     From,
     #[regex("(?i:Group)")]
     Group,
+    #[regex("(?i:Groups)")]
+    Groups,
     #[regex("(?i:Having)")]
     Having,
     #[regex("(?i:In)")]
@@ -328,6 +384,8 @@ pub enum Token<'input> {
     Intersect,
     #[regex("(?i:Join)")]
     Join,
+    #[regex("(?i:Keep)")]
+    Keep,
     #[regex("(?i:Last)")]
     Last,
     #[regex("(?i:Lateral)")]
@@ -364,6 +422,8 @@ pub enum Token<'input> {
     Order,
     #[regex("(?i:Outer)")]
     Outer,
+    #[regex("(?i:Path)")]
+    Path,
     #[regex("(?i:Partial)")]
     Partial,
     #[regex("(?i:Per)")]
@@ -374,6 +434,8 @@ pub enum Token<'input> {
     Preserve,
     #[regex("(?i:Recursive)")]
     Recursive,
+    #[regex("(?i:REPEATABLE)")]
+    Repeatable,
     #[regex("(?i:Right)")]
     Right,
     #[regex("(?i:Row)")]
@@ -577,6 +639,7 @@ impl Token<'_> {
                 | Token::Date
                 | Token::Desc
                 | Token::Distinct
+                | Token::Element
                 | Token::Escape
                 | Token::Except
                 | Token::First
@@ -584,12 +647,14 @@ impl Token<'_> {
                 | Token::Full
                 | Token::From
                 | Token::Group
+                | Token::Groups
                 | Token::Having
                 | Token::In
                 | Token::Inner
                 | Token::Is
                 | Token::Intersect
                 | Token::Join
+                | Token::Keep
                 | Token::Last
                 | Token::Lateral
                 | Token::Left
@@ -606,11 +671,13 @@ impl Token<'_> {
                 | Token::Or
                 | Token::Order
                 | Token::Outer
+                | Token::Path
                 | Token::Partial
                 | Token::Pivot
                 | Token::Preserve
                 | Token::Right
                 | Token::Recursive
+                | Token::Repeatable
                 | Token::Search
                 | Token::Select
                 | Token::Table
@@ -661,13 +728,41 @@ impl fmt::Display for Token<'_> {
             Token::Minus => write!(f, "-"),
             Token::Plus => write!(f, "+"),
             Token::Star => write!(f, "*"),
-            Token::SqlParameter => write!(f, "?"),
             Token::Percent => write!(f, "%"),
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),
             Token::Period => write!(f, "."),
-            Token::Tilde => write!(f, "~"),
             Token::DblPipe => write!(f, "||"),
+            Token::Pipe => write!(f, "|"),
+            Token::Ampersand => write!(f, "&"),
+            Token::Bang => write!(f, "!"),
+            Token::QuestionMark => write!(f, "?"),
+            // graph symbols
+            Token::PipePlusPipe => write!(f, "|+|"),
+            Token::LeftArrow => write!(f, "<-"),
+            Token::Tilde => write!(f, "~"),
+            Token::RightArrow => write!(f, "->"),
+            Token::LeftArrowTilde => write!(f, "<~"),
+            Token::TildeRightArrow => write!(f, "~>"),
+            Token::LeftArrowBracket => write!(f, "<-["),
+            Token::RightBracketMinus => write!(f, "]-"),
+            Token::TildeLeftBracket => write!(f, "~["),
+            Token::RightBracketTilde => write!(f, "]~"),
+            Token::MinusLeftBracket => write!(f, "-["),
+            Token::BracketRightArrow => write!(f, "]->"),
+            Token::LeftArrowTildeBracket => write!(f, "<~["),
+            Token::BracketTildeRightArrow => write!(f, "]~>"),
+            Token::LeftMinusRight => write!(f, "<->"),
+            Token::LeftArrowSlash => write!(f, "<-/"),
+            Token::RightSlashMinus => write!(f, "/-"),
+            Token::TildeLeftSlash => write!(f, "~/"),
+            Token::RightSlashTilde => write!(f, "/~"),
+            Token::MinusLeftSlash => write!(f, "-/"),
+            Token::SlashRightArrow => write!(f, "/->"),
+            Token::LeftArrowTildeSlash => write!(f, "<~/"),
+            Token::SlashTildeRightArrow => write!(f, "/~>"),
+
+            // other
             Token::UnquotedIdent(id) => write!(f, "<{id}:UNQUOTED_IDENT>"),
             Token::QuotedIdent(id) => write!(f, "<{id}:QUOTED_IDENT>"),
             Token::UnquotedAtIdentifier(id) => write!(f, "<{id}:UNQUOTED_ATIDENT>"),
@@ -679,7 +774,7 @@ impl fmt::Display for Token<'_> {
             Token::EmbeddedDocQuote => write!(f, "<DOC>"),
             Token::EmbeddedDoc(txt) => write!(f, "<```{txt}```:DOC>"),
             Token::EmptyEmbeddedDocQuote => write!(f, "<``:DOC>"),
-
+            // keywords
             _ => {
                 write!(f, "{}", format!("{self:?}").to_uppercase())
             }
