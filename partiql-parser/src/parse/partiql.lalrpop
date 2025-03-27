@@ -334,16 +334,445 @@ TableBaseReference: ast::AstNode<ast::FromLet> = {
             by_alias
         }, lo..hi)
     },
-    <lo:@L> <e:GraphMatchExprNoParens> <as_alias:AsIdent?> <at_alias:AtIdent?> <by_alias:ByIdent?> <hi:@R> => {
+    <GraphTable>,
+}
+
+
+// 7.1
+
+GraphTable: ast::AstNode<ast::FromLet> = {
+    <lo:@L> "GRAPH_TABLE" "(" <gm:GraphRefMatch> <shape:GraphTableShape> ")" <hi:@R> => {
+        // TODO: Dummy node for parser testing
         state.node(ast::FromLet {
-            expr: Box::new(e),
+            expr: Box::new(ast::Expr::Error), // TODO
             kind: ast::FromLetKind::Scan,
-            as_alias,
-            at_alias,
-            by_alias
+            as_alias: None,
+            at_alias: None,
+            by_alias: None,
         }, lo..hi)
     },
 }
+
+GraphTableShape: () = {
+    <GraphTableRowsClause>,
+    <GraphTableColumnsClause>,
+    <GraphTableExportClause>,
+}
+
+GraphTableRowsClause: () = {
+    <lo:@L> "ONE" "ROW" "PER" "MATCH" <hi:@R> => {
+        todo!("ONE ROW PER MATCH")
+    },
+    <lo:@L> "ONE" "ROW" "PER" <syn:GraphVertexSynonym>
+            "(" <var:GraphVertexVariable> ")"
+            <inc:GraphInPathsClause?> <hi:@R> => {
+        todo!("ONE ROW PER VERTEX")
+    },
+    <lo:@L> "ONE" "ROW" "PER" "STEP"
+            "(" <v1:GraphVertexVariable> "," <e:GraphEdgeVariable> "," <v2:GraphVertexVariable> ")"
+            <inc:GraphInPathsClause?> <hi:@R> => {
+        todo!("ONE ROW PER STEP")
+    },
+}
+
+GraphInPathsClause: () = {
+    <lo:@L> "IN" "(" <paths:CommaSepPlus<GraphPathVariable>> ")" <hi:@R> => {
+        todo!("GRAPH IN PATHS CLAUSE")
+    }
+}
+
+GraphTableColumnsClause: () = {
+    <lo:@L> "COLUMNS" "(" <paths:CommaSepPlus<GraphTableColumnDef>> ")" <hi:@R> => {
+        todo!("GRAPH COLUMNS")
+    }
+}
+
+GraphTableColumnDef: () = {
+    <lo:@L> <v:ExprQuery> <as_ident:AsIdent?> <properties:GraphElementVariable> "." "*" <hi:@R> => {
+        todo!("GRAPH COLUMN DEFINITION")
+    }
+}
+
+GraphTableExportClause: () = {
+    <lo:@L> "EXPORT" "ALL" "SINGLETONS" <except:GraphTableExportExcept?> <hi:@R> => {
+        todo!("EXPORT ALL SINGLETONS")
+    },
+    <lo:@L> "EXPORT" "SINGLETONS" "(" <exports:CommaSepPlus<GraphPatternVariable>> ")" <hi:@R> => {
+        todo!("EXPORT SINGLETONS")
+    },
+    <lo:@L> "EXPORT" "NO" "SINGLETONS" <hi:@R> => {
+        todo!("EXPORT NO SINGLETONS")
+    }
+}
+
+#[inline]
+GraphTableExportExcept: () = {
+    <lo:@L> "EXCEPT" "(" <exports:CommaSepPlus<GraphPatternVariable>> ")" <hi:@R> => {
+        todo!("GRAPH EXPORT EXCEPT")
+    },
+}
+
+GraphRefMatch: () = {
+    <lo:@L> <e:GraphReference> "MATCH" <patt:GraphPattern> <hi:@R> => {
+        todo!("GRAPH MATCH")
+    },
+}
+
+#[inline]
+GraphReference = <GraphName>;
+
+// 10.4
+
+GraphPattern: () = {
+    <lo:@L> <mode:GraphMatchMode?> <patterns:GraphPathPatternList> <keep:GraphKeepClause?> <filter:GraphPatternWhereClause?> <hi:@R> => {
+        ()
+    },
+}
+
+GraphMatchMode: () = {
+    <lo:@L> "REPEATABLE" "ELEMENT" "BINDINGS"? <hi:@R> => todo!("GRAPH MATCH MODE"),
+    <lo:@L> "REPEATABLE" "ELEMENTS" <hi:@R> => todo!("GRAPH MATCH MODE"),
+    <lo:@L> "DIFFERENT" <syn:GraphEdgeSynonym> "BINDINGS"? <hi:@R> => todo!("GRAPH MATCH MODE"),
+    <lo:@L> "DIFFERENT" <syn:GraphEdgesSynonym> <hi:@R> => todo!("GRAPH MATCH MODE"),
+}
+
+GraphPathPatternList: () = {
+    <lo:@L> <path_var:GraphPathVariableDecl?>  <prefix:GraphPathPatternPrefix?> <expr:GraphPathPatternExpr> <hi:@R> => {
+        todo!("Path Pattern")
+    }
+}
+
+GraphPathVariableDecl: () = {
+    <lo:@L> <var:GraphPathVariable> "=" <hi:@R> => {
+        todo!("Path Variable Decl")
+    }
+}
+
+GraphPathPattern: () = {
+    <lo:@L> <paths:CommaSepPlus<GraphPathPattern>>  <hi:@R> => {
+        todo!("Path Pattern List")
+    }
+}
+
+GraphKeepClause: () = {
+    <lo:@L> "KEEP" <prefix:GraphPathPatternPrefix> <hi:@R> => todo!("GRAPH KEEP CLAUSE"),
+}
+
+GraphPatternWhereClause: () = {
+    <lo:@L> "WHERE" <e:ExprQuery> <hi:@R> => todo!("GRAPH WHERE CLAUSE"),
+}
+
+// 10.5
+
+GraphPathPatternPrefix: () = {
+    <GraphPathModePrefix>,
+    <GraphPathSearchPrefix>,
+}
+
+GraphPathModePrefix: () = {
+    <lo:@L> <mode:GraphPathMode> <paths:GraphPathOrPaths?> <hi:@R> => todo!("GRAPH PATH MODE PREFIX"),
+}
+
+#[inline]
+GraphPathOrPaths= {
+    "PATH" , "PATHS"
+}
+
+#[inline]
+GraphPathMode: () = {
+    "WALK" => todo!("GraphPathMode"),
+    "TRAIL" => todo!("GraphPathMode"),
+    "SIMPLE" => todo!("GraphPathMode"),
+    "ACYCLIC" => todo!("GraphPathMode"),
+}
+
+#[inline]
+GraphPathSearchPrefix: () = {
+    <lo:@L> "ALL" <prefix:GraphPathModePrefix> <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "ANY" <k:"Int"?> <prefix:GraphPathModePrefix> <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "ALL" "SHORTEST" <prefix:GraphPathModePrefix> <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "ANY" "SHORTEST" <prefix:GraphPathModePrefix> <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "SHORTEST" <k:"Int"?> <prefix:GraphPathModePrefix> <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "SHORTEST" <k:"Int"?> <prefix:GraphPathModePrefix> "GROUP" <hi:@R> => todo!("GraphPathSearchPrefix"),
+    <lo:@L> "SHORTEST" <k:"Int"?> <prefix:GraphPathModePrefix> "GROUPS" <hi:@R> => todo!("GraphPathSearchPrefix"),
+}
+
+// 10.6
+
+GraphPathPatternExpr: () = {
+    <lo:@L> <term:GraphPathTerm> <hi:@R> => todo!("GRAPH Path Pattern expression"),
+    <lo:@L> <multiset:GraphPathMultisetAlternation> <hi:@R> => todo!("GRAPH Path Pattern expression"),
+    <lo:@L> <union:GraphPathUnion> <hi:@R> => todo!("GRAPH Path Pattern expression"),
+}
+
+GraphPathMultisetAlternation: () = {
+    <lo:@L> <term:GraphPathTerm> <terms:CommaSepPlus<GraphPathMultisetAlternationContinue>> <hi:@R> => todo!("GRAPH Path Pattern multiset"),
+}
+
+GraphPathMultisetAlternationContinue: () = {
+    <lo:@L> "|+|" <rterm:GraphPathTerm> <hi:@R> => todo!("GRAPH Path Pattern multiset"),
+}
+
+GraphPathUnion: () = {
+    <lo:@L> <term:GraphPathTerm> <terms:CommaSepPlus<GraphPathUnionContinue>> <hi:@R> => todo!("GRAPH Path Pattern unio"),
+}
+
+GraphPathUnionContinue: () = {
+    <lo:@L> "|" <rterm:GraphPathTerm> <hi:@R> => todo!("GRAPH Path Pattern union"),
+}
+
+GraphPathTerm: () = {
+    <lo:@L> <factor:GraphPathFactor> <hi:@R> => todo!("GRAPH Path Pattern term"),
+    <lo:@L> <term:GraphPathTerm> <factor:GraphPathFactor> <hi:@R> => todo!("GRAPH Path Pattern term"),
+}
+
+GraphPathFactor: () = {
+    <lo:@L> <p:GraphPathPrimary> <hi:@R> => todo!("GRAPH Path Pattern factor"),
+    <lo:@L> <p:GraphPathPrimary> <q:GraphPatternQuantifier> <hi:@R> => todo!("GRAPH Path Pattern factor"),
+    <lo:@L> <p:GraphPathPrimary> "?" <hi:@R> => todo!("GRAPH Path Pattern factor"),
+}
+
+GraphPathPrimary: () = {
+    <lo:@L> <pat:GraphElementPattern> <hi:@R> => todo!("GRAPH Path Pattern primary"),
+    <lo:@L> <pat:GraphParenthesizedPathPatternExpr> <hi:@R> => todo!("GRAPH Path Pattern primary"),
+    <lo:@L> <pat:GraphSimplifiedPathPatternExpression> <hi:@R> => todo!("GRAPH Path Pattern primary"),
+}
+
+GraphElementPattern: () = {
+    <lo:@L> <pat:GraphVertexPattern> <hi:@R> => todo!("GRAPH Element Pattern"),
+    <lo:@L> <pat:GraphEdgePattern> <hi:@R> => todo!("GRAPH Element Pattern"),
+}
+
+GraphVertexPattern: () = {
+    <lo:@L> "(" <pat:GraphElementPatternFiller> ")" <hi:@R> => todo!("GRAPH Vertex Pattern"),
+}
+
+GraphElementPatternFiller: () = {
+    <lo:@L> <var:GraphElementVariableDecl?> <label:GraphIsLabelExpression?> <w:GraphElementPatternWhereClause?> <hi:@R>
+        => todo!("GRAPH Element Pattern Filler"),
+}
+
+#[inline]
+GraphElementVariableDecl = <GraphElementVariable>;
+
+GraphIsLabelExpression: () = {
+    <lo:@L> ":" <l:GraphLabelExpr> <hi:@R> => todo!("GRAPH is label expr"),
+    <lo:@L> "IS" <l:GraphLabelExpr> <hi:@R> => todo!("GRAPH is label expr"),
+}
+
+GraphElementPatternWhereClause: () = {
+    <lo:@L> "WHERE" <e:ExprQuery> <hi:@R> => todo!("GRAPH element WHERE CLAUSE"),
+}
+
+GraphEdgePattern: () = {
+    <GraphFullEdgePattern>,
+    <GraphAbbreviatedEdgePattern>,
+}
+
+GraphFullEdgePattern: () = {
+    <lo:@L> "<-[" <pat:GraphElementPatternFiller> "]-" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "~[" <pat:GraphElementPatternFiller> "]~" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "-[" <pat:GraphElementPatternFiller> "]->" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "<~[" <pat:GraphElementPatternFiller> "]~" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "~[" <pat:GraphElementPatternFiller> "]~>" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "<-[" <pat:GraphElementPatternFiller> "]->" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "-[" <pat:GraphElementPatternFiller> "]-" <hi:@R> => todo!("GRAPH Edge Pattern"),
+}
+
+GraphAbbreviatedEdgePattern: () = {
+    <lo:@L> "<-" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "~" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "->" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "<~" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "~>" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "<->" <hi:@R> => todo!("GRAPH Edge Pattern"),
+    <lo:@L> "-" <hi:@R> => todo!("GRAPH Edge Pattern"),
+}
+
+
+GraphParenthesizedPathPatternExpr: () = {
+    <lo:@L> "(" <sub:GraphSubPathVariableDecl?>
+                <mode:GraphPathModePrefix?>
+                <e:GraphPathPatternExpr>
+                <w:GraphParenthesizedPathPatternWhereClause?>
+             ")"  <hi:@R> => todo!("GRAPH Paren Path Pattern "),
+}
+
+GraphSubPathVariableDecl: () = {
+    <lo:@L> <var:GraphSubPathVariable> "=" <hi:@R> => {
+        todo!("SubPath Variable Decl")
+    }
+}
+
+GraphParenthesizedPathPatternWhereClause: () = {
+    <lo:@L> "WHERE" <e:ExprQuery> <hi:@R> => todo!("GRAPH SubPath WHERE CLAUSE"),
+}
+
+
+// 10.7
+
+#[inline]
+GraphPatternQuantifier: () = {
+    <lo:@L> "*" <hi:@R> => todo!("GraphPatternQuantifier"),
+    <lo:@L> "+" <hi:@R> => todo!("GraphPatternQuantifier"),
+    <lo:@L> "{" <k:"Int"> "}" <hi:@R> => todo!("GraphPatternQuantifier"),
+    <lo:@L> "{" <l:"Int"?> "," <u:"Int"?> "}" <hi:@R> => todo!("GraphPatternQuantifier"),
+}
+
+// 10.8
+
+GraphLabelExpr: () = {
+    <lo:@L> <l:GraphLabelTerm> <hi:@R> => todo!("GraphLabelExpr"),
+    <lo:@L> <l:GraphLabelDisjunction> <hi:@R> => todo!("GraphLabelExpr"),
+}
+
+GraphLabelDisjunction: () = {
+    <lo:@L> <l:GraphLabelExpr> "|" <r:GraphLabelTerm> <hi:@R> => todo!("GraphLabelDisjunction"),
+}
+
+GraphLabelTerm: () = {
+    <lo:@L> <l:GraphLabelFactor> <hi:@R> => todo!("GraphLabelTerm"),
+    <lo:@L> <l:GraphLabelConjunction> <hi:@R> => todo!("GraphLabelTerm"),
+}
+
+GraphLabelConjunction: () = {
+    <lo:@L> <l:GraphLabelTerm> "&" <r:GraphLabelFactor> <hi:@R> => todo!("GraphLabelConjunction"),
+}
+
+GraphLabelFactor: () = {
+    <lo:@L> <negated:"!"?> <l:GraphLabelPrimary> <hi:@R> => todo!("GraphLabelFactor"),
+}
+
+#[inline]
+GraphLabelPrimary: () = {
+    <lo:@L> <l:GraphLabelName> <hi:@R> => todo!("GraphLabelPrimary"),
+    <lo:@L> "%" <hi:@R> => todo!("GraphLabelPrimary"),
+    <lo:@L> "(" <l:GraphLabelExpr> ")" <hi:@R> => todo!("GraphLabelPrimary"),
+
+}
+
+// 10.9
+GraphSimplifiedPathPatternExpression: () = {
+    <lo:@L> "<-/" <c:GraphSimplifiedContents> "/-" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "~/" <c:GraphSimplifiedContents> "/~" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "-/" <c:GraphSimplifiedContents> "/->" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "<~/" <c:GraphSimplifiedContents> "/~" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "~/" <c:GraphSimplifiedContents> "/~>" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "<-/" <c:GraphSimplifiedContents> "/->" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+    <lo:@L> "-/" <c:GraphSimplifiedContents> "/-" <hi:@R> => todo!("GraphSimplifiedPathPatternExpression"),
+}
+
+GraphSimplifiedContents: () = {
+    <GraphSimplifiedTerm>,
+    <GraphSimplifiedPathUnion>,
+    <GraphSimplifiedMultiSetAlternation>,
+}
+
+GraphSimplifiedMultiSetAlternation: () = {
+    <lo:@L> <term:GraphSimplifiedTerm> <terms:CommaSepPlus<GraphSimplifiedMultiSetAlternationContinue>> <hi:@R> => todo!("GRAPH Path Pattern multiset"),
+}
+
+GraphSimplifiedMultiSetAlternationContinue: () = {
+    <lo:@L> "|+|" <rterm:GraphSimplifiedTerm> <hi:@R> => todo!("GRAPH Path Pattern multiset"),
+}
+
+GraphSimplifiedPathUnion: () = {
+    <lo:@L> <term:GraphSimplifiedTerm> <terms:CommaSepPlus<GraphSimplifiedPathUnionContinue>> <hi:@R> => todo!("GRAPH Path Pattern unio"),
+}
+
+GraphSimplifiedPathUnionContinue: () = {
+    <lo:@L> "|" <rterm:GraphSimplifiedTerm> <hi:@R> => todo!("GRAPH Path Pattern union"),
+}
+
+GraphSimplifiedTerm: () = {
+    <lo:@L> <t:GraphSimplifiedTerm?> <f:GraphSimplifiedFactorLow> <hi:@R> => todo!("GraphSimplifiedTerm"),
+}
+
+GraphSimplifiedFactorLow: () = {
+    <lo:@L> <f:GraphSimplifiedFactorHigh> <hi:@R> => todo!("GraphSimplifiedFactorLow"),
+    <lo:@L> <c:GraphSimplifiedConjunction> <hi:@R> => todo!("GraphSimplifiedFactorLow"),
+}
+
+GraphSimplifiedConjunction: () = {
+    <lo:@L> <l:GraphSimplifiedFactorLow> "&" <r:GraphSimplifiedFactorHigh> <hi:@R> => todo!("GraphSimplifiedConjunction"),
+}
+
+GraphSimplifiedFactorHigh: () = {
+    <lo:@L> <f:GraphSimplifiedTertiary> <hi:@R> => todo!("GraphSimplifiedFactorHigh"),
+    <lo:@L> <f:GraphSimplifiedTertiary> <q:GraphPatternQuantifier> <hi:@R> => todo!("GraphSimplifiedFactorHigh"),
+    <lo:@L> <f:GraphSimplifiedTertiary> "?" <hi:@R> => todo!("GraphSimplifiedFactorHigh"),
+}
+
+GraphSimplifiedTertiary: () = {
+    <lo:@L> <f:GraphSimplifiedSecondary> <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "<" <f:GraphSimplifiedSecondary> <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "~" <f:GraphSimplifiedSecondary> <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> <f:GraphSimplifiedSecondary> ">" <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "<~" <f:GraphSimplifiedSecondary> <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "~" <f:GraphSimplifiedSecondary> ">" <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "<" <f:GraphSimplifiedSecondary> ">" <hi:@R> => todo!("GraphSimplifiedTertiary"),
+    <lo:@L> "-" <f:GraphSimplifiedSecondary> <hi:@R> => todo!("GraphSimplifiedTertiary"),
+}
+
+GraphSimplifiedSecondary: () = {
+    <lo:@L> <dir:GraphSimplifiedPrimary> <hi:@R> => todo!("GraphSimplifiedSecondary"),
+    <lo:@L> <dir:GraphSimplifiedNegation> <hi:@R> => todo!("GraphSimplifiedSecondary"),
+}
+
+GraphSimplifiedNegation: () = {
+    <lo:@L> <negated:"!"> <l:GraphSimplifiedPrimary> <hi:@R> => todo!("GraphLabelFactor"),
+}
+
+GraphSimplifiedPrimary: () = {
+    <lo:@L> <l:GraphLabelName> <hi:@R> => todo!("GraphSimplifiedPrimary"),
+    <lo:@L> "(" <c:GraphSimplifiedContents> ")" <hi:@R> => todo!("GraphSimplifiedPrimary"),
+}
+
+// 10.10
+#[inline]
+GraphElementReference = GraphElementVariable;
+
+// 10.11
+#[inline]
+GraphPathReference = GraphPathVariable;
+
+// 5.3
+
+
+#[inline]
+GraphName = <SymbolPrimitive>;
+
+#[inline]
+GraphVertexVariable = <GraphElementVariable>;
+
+#[inline]
+GraphEdgeVariable = <GraphElementVariable>;
+
+#[inline]
+GraphElementVariable: () = {
+    <SymbolPrimitive> => { () }
+}
+#[inline]
+GraphLabelName: () = {
+    <SymbolPrimitive> => { () }
+}
+#[inline]
+GraphPathOrSubPathVariable: () = {
+    //<GraphPathVariable>,
+    //<GraphSubPathVariable>,
+    <SymbolPrimitive> => { () }
+}
+#[inline]
+GraphPathVariable = <SymbolPrimitive>;
+#[inline]
+GraphSubPathVariable = <SymbolPrimitive>;
+#[inline]
+GraphPatternVariable: () = {
+    //<GraphElementVariable>,
+    //<GraphPathOrSubPathVariable>,
+    <SymbolPrimitive> => { () }
+}
+
 
 #[inline]
 TableUnpivot: ast::AstNode<ast::FromLet> = {
@@ -573,7 +1002,7 @@ OffsetByClause: Box<ast::Expr> = { "OFFSET" <ExprQuery> }
 // |    10 | = <> !=           |               | equality operators                 |
 // |    11 | IS                |               | IS [NOT] NULL                      |
 // |    12 | NOT               | right         | logical negate                     |
-// |    13 | AND               | left          | logical conjuct                    |
+// |    13 | AND               | left          | logical conjunct                    |
 // |    14 | OR                | left          | logical disjunct                   |
 // |-------+-------------------+---------------+------------------------------------|
 //
@@ -751,48 +1180,12 @@ ExprPrecedence09: Synth<ast::Expr> = {
            }, lo..hi)
        ))
     },
-    <GraphMatchExpr>,
     <ExprPrecedence08>,
 }
 
 #[inline]
 LikeEscape: Box<ast::Expr> = {
     "ESCAPE" <e:ExprPrecedence07> => Box::new(e.data)
-}
-
-#[inline]
-GraphMatchExpr: Synth<ast::Expr> = {
-    <lo:@L> "(" <l:ExprPrecedence08> "MATCH" <r:GraphMatchList> ")" <hi:@R> => {
-       Synth::empty(ast::Expr::GraphMatch(
-           state.node(ast::GraphMatch {
-               expr: Box::new(l.data),
-               graph_expr: Box::new(r),
-           }, lo..hi)
-       ))
-    }
-}
-
-#[inline]
-GraphMatchExprNoParens: ast::Expr = {
-    <lo:@L> <l:ExprPrecedence08> "MATCH" <r:GraphMatch> <hi:@R> =>
-       ast::Expr::GraphMatch(
-           state.node(ast::GraphMatch {
-               expr: Box::new(l.data),
-               graph_expr: Box::new(r),
-           }, lo..hi)
-       )
-}
-
-GraphMatch: ast::AstNode<ast::GraphMatchExpr> = {
-    <lo:@L> <selector:MatchPatternSelector?> <patterns:MatchPattern> <hi:@R> => {
-        state.node(ast::GraphMatchExpr{selector, patterns: vec![patterns]}, lo..hi)
-    },
-}
-
-GraphMatchList: ast::AstNode<ast::GraphMatchExpr> = {
-    <lo:@L> <selector:MatchPatternSelector?> <patterns:CommaSepStar<MatchPattern>> <hi:@R> => {
-        state.node(ast::GraphMatchExpr{selector, patterns: patterns}, lo..hi)
-    }
 }
 
 ExprPrecedence08: Synth<ast::Expr> = {
@@ -999,188 +1392,6 @@ SubQueryAst: ast::AstNode<ast::Expr> = {
 //                               GPML Expression                                  //
 //                                                                                //
 // ------------------------------------------------------------------------------ //
-
-//#[inline]
-MatchPatternSelector: ast::GraphMatchSelector = {
-   "ANY" "SHORTEST" => ast::GraphMatchSelector::AnyShortest,
-   "ALL" "SHORTEST" => ast::GraphMatchSelector::AllShortest,
-   "ANY" <k:"Int"?> => {
-        // TODO handle bad number parse
-        k.map(|n| ast::GraphMatchSelector::AnyK(n.parse().unwrap())).unwrap_or(ast::GraphMatchSelector::Any)
-   },
-   "SHORTEST" <k:"Int"> => {
-        // TODO handle bad number parse
-        ast::GraphMatchSelector::ShortestK(k.parse().unwrap())
-   },
-   "SHORTEST" <k:"Int"> "GROUP" => {
-        // TODO handle bad number parse
-        ast::GraphMatchSelector::ShortestKGroup(k.parse().unwrap())
-   }
-}
-
-MatchPattern: ast::AstNode<ast::GraphMatchPattern> = {
-    <lo:@L> <restrictor:MatchPatternRestrictor?> <variable:MatchPatternPathVariable?> <parts:MatchPatternParts>  <hi:@R> => {
-        state.node(ast::GraphMatchPattern{
-            restrictor,
-            quantifier: None,
-            prefilter: None,
-            variable,
-            parts,
-        }, lo..hi)
-    },
-    <lo:@L> "(" <pattern:MatchPattern> <prefilter:MatchPatternPartPrefilter?> ")" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
-         state.node(ast::GraphMatchPattern{
-             quantifier,
-             prefilter,
-             ..pattern.node
-         }, lo..hi)
-    },
-    <lo:@L> "[" <pattern:MatchPattern> <prefilter:MatchPatternPartPrefilter?> "]" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
-         state.node(ast::GraphMatchPattern{
-             quantifier,
-             prefilter,
-             ..pattern.node
-         }, lo..hi)
-    },
-}
-
-MatchPatternNested: ast::AstNode<ast::GraphMatchPattern> = {
-  <lo:@L> <restrictor:MatchPatternRestrictor?> <variable:MatchPatternPathVariable?> <parts:MatchPatternPartsNested> <hi:@R> => {
-    state.node(ast::GraphMatchPattern{
-        restrictor,
-        quantifier: None,
-        prefilter: None,
-        variable,
-        parts,
-    }, lo..hi)
- }
-}
-
-//#[inline]
-MatchPatternRestrictor: ast::GraphMatchRestrictor = {
-   "TRAIL" => ast::GraphMatchRestrictor::Trail,
-   "ACYCLIC" => ast::GraphMatchRestrictor::Acyclic,
-   "SIMPLE" => ast::GraphMatchRestrictor::Simple,
-}
-
-//#[inline]
-MatchPatternParts: Vec<ast::GraphMatchPatternPart> = {
-   <n:MatchPatternPartNode> <parts:MatchPatternPartContinue*> => {
-        let node = ast::GraphMatchPatternPart::Node(n);
-        std::iter::once(node).chain(parts.into_iter().flatten()).collect()
-   }
-}
-
-//#[inline]
-MatchPatternPartsNested: Vec<ast::GraphMatchPatternPart> = {
-   <MatchPatternParts>,
-   <MatchPatternPartContinue>,
-   <e:MatchPatternPartEdge> => vec![ast::GraphMatchPatternPart::Edge(e)],
-}
-
-MatchPatternPartContinue: Vec<ast::GraphMatchPatternPart> = {
-   <e:MatchPatternPartEdge> <n:MatchPatternPartNode> => vec![ast::GraphMatchPatternPart::Edge(e),ast::GraphMatchPatternPart::Node(n)],
-   <p:MatchPatternPartParen> <n:MatchPatternPartNode> => vec![ast::GraphMatchPatternPart::Pattern(p),ast::GraphMatchPatternPart::Node(n)],
-}
-
-MatchPatternPartParen: ast::AstNode<ast::GraphMatchPattern> = {
-    <lo:@L> "(" <pattern:MatchPatternNested> <prefilter:MatchPatternPartPrefilter?> ")" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
-           state.node(ast::GraphMatchPattern {
-                prefilter,
-                quantifier,
-                ..pattern.node
-           }, lo..hi)
-   },
-    <lo:@L> "[" <pattern:MatchPatternNested> <prefilter:MatchPatternPartPrefilter?> "]" <quantifier:MatchPatternQuantifier?> <hi:@R> => {
-            state.node(ast::GraphMatchPattern {
-                 prefilter,
-                 quantifier,
-                 ..pattern.node
-            }, lo..hi)
-    },
-}
-
-//#[inline]
-MatchPatternQuantifier: ast::AstNode<ast::GraphMatchQuantifier> = {
-   <lo:@L> "*" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:0, upper:None }, lo..hi),
-   <lo:@L> "+" <hi:@R> => state.node(ast::GraphMatchQuantifier{ lower:1, upper:None }, lo..hi),
-   <lo:@L> "{" <lower:"Int"> "," <upper:"Int"?> "}" <hi:@R> => {
- 	     // TODO error on invalid literal
-         state.node(ast::GraphMatchQuantifier{ lower: lower.parse().unwrap(), upper: upper.map(|n| n.parse().unwrap()) }, lo..hi)
-   },
-}
-
-MatchPatternPartNode: ast::AstNode<ast::GraphMatchNode> = {
-   <lo:@L> "(" <variable:MatchPatternPartName?> <label:MatchPatternPartLabel?> <prefilter:MatchPatternPartPrefilter?> ")" <hi:@R> => {
-       state.node(ast::GraphMatchNode {
-            prefilter,
-            variable,
-            label,
-       }, lo..hi)
-   },
-}
-
-MatchPatternPartEdge: ast::AstNode<ast::GraphMatchEdge> = {
-   <lo:@L> <spec:MatchPatternPartEdgeAbbr> <quantifier:MatchPatternQuantifier?> <hi:@R>  => state.node(ast::GraphMatchEdge{ quantifier, ..spec}, lo..hi),
-   <lo:@L> <spec:MatchPatternPartEdgeWSpec> <quantifier:MatchPatternQuantifier?> <hi:@R> => state.node(ast::GraphMatchEdge{ quantifier, ..spec}, lo..hi),
-}
-
-MatchPatternPartEdgeWSpec: ast::GraphMatchEdge = {
-   "-" <spec:MatchPatternPartEdgeSpec> "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Right, ..spec},
-   "~" <spec:MatchPatternPartEdgeSpec> "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Undirected, ..spec},
-   "<" "-" <spec:MatchPatternPartEdgeSpec> "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Left, ..spec},
-   "~" <spec:MatchPatternPartEdgeSpec> "~" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::UndirectedOrRight, ..spec},
-   "<" "~" <spec:MatchPatternPartEdgeSpec> "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirected, ..spec},
-   "<" "-" <spec:MatchPatternPartEdgeSpec> "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrRight, ..spec},
-   "-" <spec:MatchPatternPartEdgeSpec> "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirectedOrRight, ..spec},
-}
-
-MatchPatternPartEdgeSpec: ast::GraphMatchEdge = {
-   "[" <variable:MatchPatternPartName?> <label:MatchPatternPartLabel?> <prefilter:MatchPatternPartPrefilter?> "]" => {
-       ast::GraphMatchEdge {
-            direction: ast::GraphMatchDirection::Undirected,
-            quantifier: None,
-            prefilter,
-            variable,
-            label,
-       }
-    }
-}
-
-MatchPatternPartEdgeAbbr: ast::GraphMatchEdge = {
-   "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Right, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Undirected, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "<" "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::Left, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "~" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::UndirectedOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "<" "~" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirected, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "<" "-" ">" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-   "-" => ast::GraphMatchEdge{ direction: ast::GraphMatchDirection::LeftOrUndirectedOrRight, quantifier: None, prefilter: None, variable: None, label: Default::default() },
-}
-
-//#[inline]
-MatchPatternPartName: ast::SymbolPrimitive = {
-    <name:"UnquotedIdent"> => {
-        ast::SymbolPrimitive {
-            value: name.to_owned(),
-            case: ast::CaseSensitivity::CaseSensitive
-        }
-    }
-}
-
-//#[inline] // TODO conjunction/disjunction/negation
-MatchPatternPartLabel: Vec<ast::SymbolPrimitive> = {
-    ":" <l:MatchPatternPartName> => vec![l]
-}
-
-//#[inline]
-MatchPatternPartPrefilter: Box<ast::Expr> = {
-    "WHERE" <ExprQuery>
-}
-
-//#[inline]
-MatchPatternPathVariable: ast::SymbolPrimitive = {
-    <MatchPatternPartName> "="
-}
 
 
 
@@ -1686,11 +1897,61 @@ FnNonReservedKeyword: &'static str = {
 
 #[inline]
 NonReservedKeyword: &'static str = {
-    "ACYCLIC" => "ACYCLIC",
     "ANY" => "ANY",
     "SIMPLE" => "SIMPLE",
+    <GraphNonReservedKeyword>
+}
+
+
+//C.f. SQL '23, section 16, 5.2
+#[inline]
+GraphNonReservedKeyword: &'static str = {
+    "ACYCLIC" => "ACYCLIC",
+    "BINDINGS" => "BINDINGS",
+    "BOUND" => "BOUND",
+    "DESTINATION" => "DESTINATION",
+    "DIFFERENT" => "DIFFERENT",
+    "DIRECTED" => "DIRECTED",
+    "EDGE" => "EDGE",
+    "EDGES" => "EDGES",
+    "ELEMENTS" => "ELEMENTS",
+    "LABEL" => "LABEL",
+    "LABELED" => "LABELED",
+    "NODE" => "NODE",
+    "PATHS" => "PATHS",
+    "PROPERTIES" => "PROPERTIES",
+    "PROPERTY" => "PROPERTY",
+    "PROPERTY_GRAPH_CATALOG" => "PROPERTY_GRAPH_CATALOG",
+    "PROPERTY_GRAPH_NAME" => "PROPERTY_GRAPH_NAME",
+    "PROPERTY_GRAPH_SCHEMA" => "PROPERTY_GRAPH_SCHEMA",
+    "RELATIONSHIP" => "RELATIONSHIP",
+    "RELATIONSHIPS" => "RELATIONSHIPS",
     "SHORTEST" => "SHORTEST",
+    "SINGLETONS" => "SINGLETONS",
+    "STEP" => "STEP",
+    "TABLES" => "TABLES",
     "TRAIL" => "TRAIL",
+    "VERTEX" => "VERTEX",
+    "WALK" => "WALK",
+}
+
+
+#[inline]
+GraphEdgeSynonym = {
+    "EDGE",
+    "RELATIONSHIP",
+}
+
+#[inline]
+GraphEdgesSynonym = {
+    "EDGES",
+    "RELATIONSHIPS",
+}
+
+#[inline]
+GraphVertexSynonym = {
+    "NODE",
+    "VERTEX",
 }
 
 // The lexer is external; See [`lexer.rs`] for its definition.
@@ -1724,6 +1985,10 @@ extern {
         "%" => lexer::Token::Percent,
         "^" => lexer::Token::Caret,
         "||" => lexer::Token::DblPipe,
+        "|" => lexer::Token::Pipe,
+        "&" => lexer::Token::Ampersand,
+        "!" => lexer::Token::Bang,
+        "?" => lexer::Token::QuestionMark,
 
         "=" => lexer::Token::Equal,
         "==" => lexer::Token::EqualEqual,
@@ -1736,6 +2001,30 @@ extern {
         "<=" => lexer::Token::LessEqual,
         ">=" => lexer::Token::GreaterEqual,
 
+        // Graph
+        "|+|" => lexer::Token::PipePlusPipe,
+        "<-" => lexer::Token::LeftArrow,
+        "~" => lexer::Token::Tilde,
+        "->" => lexer::Token::RightArrow,
+        "<~" => lexer::Token::LeftArrowTilde,
+        "~>" => lexer::Token::TildeRightArrow,
+        "<-[" => lexer::Token::LeftArrowBracket,
+        "]-" => lexer::Token::RightBracketMinus,
+        "~[" => lexer::Token::TildeLeftBracket,
+        "]~" => lexer::Token::RightBracketTilde,
+        "-[" => lexer::Token::MinusLeftBracket,
+        "]->" => lexer::Token::BracketRightArrow,
+        "<~[" => lexer::Token::LeftArrowTildeBracket,
+        "]~>" => lexer::Token::BracketTildeRightArrow,
+        "<->" => lexer::Token::LeftMinusRight,
+        "<-/" => lexer::Token::LeftArrowSlash,
+        "/-" => lexer::Token::RightSlashMinus,
+        "~/" => lexer::Token::TildeLeftSlash,
+        "/~" => lexer::Token::RightSlashTilde,
+        "-/" => lexer::Token::MinusLeftSlash,
+        "/->" => lexer::Token::SlashRightArrow,
+        "<~/" => lexer::Token::LeftArrowTildeSlash,
+        "/~>" => lexer::Token::SlashTildeRightArrow,
 
         // Types
         "UnquotedIdent" => lexer::Token::UnquotedIdent(<&'input str>),
@@ -1759,28 +2048,33 @@ extern {
         "BETWEEN" => lexer::Token::Between,
         "BY" => lexer::Token::By,
         "CASE" => lexer::Token::Case,
+        "COLUMNS" => lexer::Token::Columns,
         "CROSS" => lexer::Token::Cross,
         "CYCLE" => lexer::Token::Cycle,
         "DATE" => lexer::Token::Date,
         "DESC" => lexer::Token::Desc,
         "DISTINCT" => lexer::Token::Distinct,
+        "ELEMENT" => lexer::Token::Element,
         "EXCLUDE" => lexer::Token::Exclude,
         "ELSE" => lexer::Token::Else,
         "END" => lexer::Token::End,
         "ESCAPE" => lexer::Token::Escape,
         "EXCEPT" => lexer::Token::Except,
+        "EXPORT" => lexer::Token::Export,
         "FALSE" => lexer::Token::False,
         "FIRST" => lexer::Token::First,
         "FOR" => lexer::Token::For,
         "FULL" => lexer::Token::Full,
         "FROM" => lexer::Token::From,
         "GROUP" => lexer::Token::Group,
+        "GROUPS" => lexer::Token::Groups,
         "HAVING" => lexer::Token::Having,
         "IN" => lexer::Token::In,
         "INNER" => lexer::Token::Inner,
         "INTERSECT" => lexer::Token::Intersect,
         "IS" => lexer::Token::Is,
         "JOIN" => lexer::Token::Join,
+        "KEEP" => lexer::Token::Keep,
         "LAST" => lexer::Token::Last,
         "LATERAL" => lexer::Token::Lateral,
         "LEFT" => lexer::Token::Left,
@@ -1789,19 +2083,25 @@ extern {
         "MATCH" => lexer::Token::Match,
         "MISSING" => lexer::Token::Missing,
         "NATURAL" => lexer::Token::Natural,
+        "NO" => lexer::Token::No,
         "NOT" => lexer::Token::Not,
         "NULL" => lexer::Token::Null,
         "NULLS" => lexer::Token::Nulls,
         "OFFSET" => lexer::Token::Offset,
         "ON" => lexer::Token::On,
+        "ONE" => lexer::Token::One,
         "OR" => lexer::Token::Or,
         "ORDER" => lexer::Token::Order,
         "OUTER" => lexer::Token::Outer,
+        "PATH" => lexer::Token::Path,
         "PARTIAL" => lexer::Token::Partial,
         "PIVOT" => lexer::Token::Pivot,
+        "PER" => lexer::Token::Per,
         "PRESERVE" => lexer::Token::Preserve,
-        "RIGHT" => lexer::Token::Right,
         "RECURSIVE" => lexer::Token::Recursive,
+        "REPEATABLE" => lexer::Token::Repeatable,
+        "RIGHT" => lexer::Token::Right,
+        "ROW" => lexer::Token::Row,
         "SELECT" => lexer::Token::Select,
         "SEARCH" => lexer::Token::Search,
         "TABLE" => lexer::Token::Table,
@@ -1822,5 +2122,47 @@ extern {
         "WITH" => lexer::Token::With,
         "WITHOUT" => lexer::Token::Without,
         "ZONE" => lexer::Token::Zone,
+
+        // Graph Keywords; reserved
+        "ALL_DIFFERENT" => lexer::Token::AllDifferent,
+        "BINDING_COUNT" => lexer::Token::BindingCount,
+        "ELEMENT_ID" => lexer::Token::ElementId,
+        "ELEMENT_NUMBER" => lexer::Token::ElementNumber,
+        "GRAPH" => lexer::Token::Graph,
+        "GRAPH_TABLE" => lexer::Token::GraphTable,
+        "MATCHNUM" => lexer::Token::MatchNum,
+        "PATH_LENGTH" => lexer::Token::PathLength,
+        "PATH_NAME" => lexer::Token::PathName,
+        "PROPERTY_EXISTS" => lexer::Token::PropertyExists,
+        "SAME" => lexer::Token::Same,
+
+        // Graph Keywords; non-reserved
+        "ACYCLIC" => lexer::Token::Acyclic,
+        "BINDINGS" => lexer::Token::Bindings,
+        "BOUND" => lexer::Token::Bound,
+        "DESTINATION" => lexer::Token::Destination,
+        "DIFFERENT" => lexer::Token::Different,
+        "DIRECTED" => lexer::Token::Directed,
+        "EDGE" => lexer::Token::Edge,
+        "EDGES" => lexer::Token::Edges,
+        "ELEMENTS" => lexer::Token::Elements,
+        "LABEL" => lexer::Token::Label,
+        "LABELED" => lexer::Token::Labeled,
+        "NODE" => lexer::Token::Node,
+        "PATHS" => lexer::Token::Paths,
+        "PROPERTIES" => lexer::Token::Properties,
+        "PROPERTY" => lexer::Token::Property,
+        "PROPERTY_GRAPH_CATALOG" => lexer::Token::PropertyGraphCatalog,
+        "PROPERTY_GRAPH_NAME" => lexer::Token::PropertyGraphName,
+        "PROPERTY_GRAPH_SCHEMA" => lexer::Token::PropertyGraphSchema,
+        "RELATIONSHIP" => lexer::Token::Relationship,
+        "RELATIONSHIPS" => lexer::Token::Relationships,
+        "SHORTEST" => lexer::Token::Shortest,
+        "SINGLETONS" => lexer::Token::Singletons,
+        "STEP" => lexer::Token::Step,
+        "TABLES" => lexer::Token::Tables,
+        "TRAIL" => lexer::Token::Trail,
+        "VERTEX" => lexer::Token::Vertex,
+        "WALK" => lexer::Token::Walk,
     }
 }
