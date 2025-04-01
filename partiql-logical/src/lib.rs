@@ -612,7 +612,7 @@ pub struct GraphMatchExpr {
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GraphMatchPattern {}
+pub struct GraphPathPattern {}
 
 /// Represents a sub-query expression, e.g. `SELECT v.a*2 AS u FROM t AS v` in
 /// `SELECT t.a, s FROM data AS t, (SELECT v.a*2 AS u FROM t AS v) AS s`

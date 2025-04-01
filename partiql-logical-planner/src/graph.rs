@@ -1,6 +1,6 @@
 use num::Integer;
 use partiql_ast::ast;
-use partiql_ast::ast::{GraphMatchDirection, GraphMatchPatternPart};
+use partiql_ast::ast::{GraphMatchDirection, GraphPathPatternPart};
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
@@ -186,7 +186,7 @@ impl GraphToLogical {
 
     fn plan_graph_pattern(
         &self,
-        pattern: &ast::GraphMatchPattern,
+        pattern: &ast::GraphPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
         if pattern.restrictor.is_some() {
             not_yet_implemented_result!("MATCH pattern restrictors are not yet supported.");
@@ -212,12 +212,12 @@ impl GraphToLogical {
 
     fn plan_graph_pattern_part(
         &self,
-        part: &ast::GraphMatchPatternPart,
+        part: &ast::GraphPathPatternPart,
     ) -> Result<Vec<MatchElement>, String> {
         match part {
-            GraphMatchPatternPart::Node(n) => self.plan_graph_pattern_part_node(&n.node),
-            GraphMatchPatternPart::Edge(e) => self.plan_graph_pattern_part_edge(&e.node),
-            GraphMatchPatternPart::Pattern(pattern) => self.plan_graph_pattern(&pattern.node),
+            GraphPathPatternPart::Node(n) => self.plan_graph_pattern_part_node(&n.node),
+            GraphPathPatternPart::Edge(e) => self.plan_graph_pattern_part_edge(&e.node),
+            GraphPathPatternPart::Pattern(pattern) => self.plan_graph_pattern(&pattern.node),
         }
     }
 

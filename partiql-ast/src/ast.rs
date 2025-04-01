@@ -10,11 +10,11 @@
 
 use rust_decimal::Decimal as RustDecimal;
 
-use std::fmt;
-use std::num::NonZeroU32;
-
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::num::NonZeroU32;
+use std::ops::Deref;
 
 use partiql_ast_macros::Visit;
 use partiql_common::node::NodeId;
@@ -25,6 +25,14 @@ use partiql_common::node::NodeId;
 pub struct AstNode<T> {
     pub id: NodeId,
     pub node: T,
+}
+
+impl<T> Deref for AstNode<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.node
+    }
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -835,12 +843,102 @@ pub enum JoinSpec {
     Natural,
 }
 
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphTable {
+    pub graph_match: AstNode<GraphMatch>,
+}
+
 /// `<expr> MATCH <graph_pattern>`
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatch {
     pub expr: Box<Expr>,
-    pub graph_expr: Box<AstNode<GraphMatchExpr>>,
+    // TODO remove
+    #[visit(skip)]
+    pub pattern: AstNode<GraphPattern>,
+    // TODO remove
+    #[visit(skip)]
+    pub shape: Option<GraphTableShape>,
+}
+
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphPattern {
+    // TODO #[visit(skip)]
+    pub mode: Option<GraphMatchMode>,
+    pub patterns: Vec<AstNode<GraphPathPattern>>,
+    // TODO #[visit(skip)]
+    pub keep: Option<GraphPathPrefix>,
+    pub where_clause: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchMode {
+    DifferentEdges,
+    RepeatableElements,
+}
+
+/// A graph match clause as defined in GPML
+/// See https://arxiv.org/abs/2112.06217
+#[derive(Visit, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchExpr {
+    #[visit(skip)] // TODO
+    pub patterns: Vec<AstNode<GraphPathPattern>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphTableShape {
+    Rows(AstNode<GraphTableRows>),
+    Columns(AstNode<GraphTableColumns>),
+    Export(AstNode<GraphTableExport>),
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphTableRows {
+    #[default]
+    OneRowPerMatch,
+    OneRowPerVertex {
+        v: SymbolPrimitive,
+        in_paths: Option<Vec<SymbolPrimitive>>,
+    },
+    OneRowPerStep {
+        v1: SymbolPrimitive,
+        e: SymbolPrimitive,
+        v2: SymbolPrimitive,
+        in_paths: Option<Vec<SymbolPrimitive>>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphTableColumns {
+    pub columns: Vec<GraphTableColumnDef>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphTableColumnDef {
+    Expr(Box<Expr>, Option<SymbolPrimitive>),
+    AllProperties(SymbolPrimitive),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphTableExport {
+    AllSingletons {
+        except: Option<Vec<SymbolPrimitive>>,
+    },
+    Singletons {
+        exports: Vec<SymbolPrimitive>,
+    },
+    NoSingletons,
 }
 
 /// The direction of an edge
@@ -853,9 +951,6 @@ pub struct GraphMatch {
 /// | Undirected or right       | ~[ spec ]~>  | ~>           |
 /// | Left or right             | <−[ spec ]−> | <−>          |
 /// | Left, undirected or right | −[ spec ]−   | −            |
-///
-/// Fig. 5. Table of edge patterns:
-/// https://arxiv.org/abs/2112.06217
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphMatchDirection {
@@ -868,20 +963,6 @@ pub enum GraphMatchDirection {
     LeftOrUndirectedOrRight,
 }
 
-/// A part of a graph pattern
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum GraphMatchPatternPart {
-    /// A single node in a graph pattern.
-    Node(AstNode<GraphMatchNode>),
-
-    /// A single edge in a graph pattern.
-    Edge(AstNode<GraphMatchEdge>),
-
-    /// A sub-pattern.
-    Pattern(AstNode<GraphMatchPattern>),
-}
-
 /// A quantifier for graph edges or patterns. (e.g., the `{2,5}` in `MATCH (x)->{2,5}(y)`)
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -890,18 +971,18 @@ pub struct GraphMatchQuantifier {
     pub upper: Option<NonZeroU32>,
 }
 
-/// A path restrictor
+/// A path mode
 /// | Keyword        | Description
 /// |----------------+--------------
+/// | WALK           |
 /// | TRAIL          | No repeated edges.
 /// | ACYCLIC        | No repeated nodes.
 /// | SIMPLE         | No repeated nodes, except that the ﬁrst and last nodes may be the same.
-///
-/// Fig. 7. Table of restrictors:
-/// https://arxiv.org/abs/2112.06217
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum GraphMatchRestrictor {
+pub enum GraphPathMode {
+    Walk,
     Trail,
     Acyclic,
     Simple,
@@ -911,14 +992,14 @@ pub enum GraphMatchRestrictor {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchNode {
-    /// an optional node pre-filter, e.g.: `WHERE c.name='Alarm'` in `MATCH (c WHERE c.name='Alarm')`
-    pub prefilter: Option<Box<Expr>>,
     /// the optional element variable of the node match, e.g.: `x` in `MATCH (x)`
     #[visit(skip)]
     pub variable: Option<SymbolPrimitive>,
     /// the optional label(s) to match for the node, e.g.: `Entity` in `MATCH (x:Entity)`
     #[visit(skip)]
-    pub label: Option<Vec<SymbolPrimitive>>,
+    pub label: Option<AstNode<GraphMatchLabel>>,
+    /// an optional node where clause, e.g.: `WHERE c.name='Alarm'` in `MATCH (c WHERE c.name='Alarm')`
+    pub where_clause: Option<Box<Expr>>,
 }
 
 /// A single edge in a graph pattern.
@@ -931,67 +1012,150 @@ pub struct GraphMatchEdge {
     /// an optional quantifier for the edge match
     #[visit(skip)]
     pub quantifier: Option<AstNode<GraphMatchQuantifier>>,
-    /// an optional edge pre-filter, e.g.: `WHERE t.capacity>100` in `MATCH −[t:hasSupply WHERE t.capacity>100]−>`
-    pub prefilter: Option<Box<Expr>>,
     /// the optional element variable of the edge match, e.g.: `t` in `MATCH −[t]−>`
     #[visit(skip)]
     pub variable: Option<SymbolPrimitive>,
     /// the optional label(s) to match for the edge. e.g.: `Target` in `MATCH −[t:Target]−>`
     #[visit(skip)]
-    pub label: Option<Vec<SymbolPrimitive>>,
+    pub label: Option<AstNode<GraphMatchLabel>>,
+    /// an optional edge where clause, e.g.: `WHERE t.capacity>100` in `MATCH −[t:hasSupply WHERE t.capacity>100]−>`
+    pub where_clause: Option<Box<Expr>>,
 }
 
-/// A single graph match pattern.
-#[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GraphMatchPattern {
-    /// an optional restrictor for the entire pattern match
-    #[visit(skip)]
-    pub restrictor: Option<GraphMatchRestrictor>,
-    /// an optional quantifier for the entire pattern match
-    #[visit(skip)]
-    pub quantifier: Option<AstNode<GraphMatchQuantifier>>,
-    /// an optional pattern pre-filter, e.g.: `WHERE a.name=b.name` in `MATCH [(a)->(b) WHERE a.name=b.name]`
-    pub prefilter: Option<Box<Expr>>,
-    /// the optional element variable of the pattern, e.g.: `p` in `MATCH p = (a) −[t]−> (b)`
-    #[visit(skip)]
-    pub variable: Option<SymbolPrimitive>,
-    /// the ordered pattern parts
-    #[visit(skip)]
-    pub parts: Vec<GraphMatchPatternPart>,
+pub enum GraphMatchLabel {
+    Name(SymbolPrimitive),
+    Wildcard,
+    Negated(Box<AstNode<GraphMatchLabel>>),
+    Conjunction(Vec<AstNode<GraphMatchLabel>>),
+    Disjunction(Vec<AstNode<GraphMatchLabel>>),
 }
 
-/// A path selector
-/// | Keyword
-/// |------------------
-/// | ANY SHORTEST
-/// | ALL SHORTEST
-/// | ANY
-/// | ANY k
-/// | SHORTEST k
-/// | SHORTEST k GROUP
-///
-/// Fig. 8. Table of restrictors:
-/// https://arxiv.org/abs/2112.06217
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphPathPattern {
+    /// the optional element variable of the pattern, e.g.: `p` in `MATCH p = (a) −[t]−> (b)`
+    // TODO #[visit(skip)]
+    pub variable: Option<SymbolPrimitive>,
+    // TODO #[visit(skip)]
+    pub prefix: Option<GraphPathPrefix>,
+    /// the ordered pattern parts
+    // TODO #[visit(skip)]
+    pub path: AstNode<GraphMatchPathPattern>,
+}
+
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphPathSubPattern {
+    /// the optional element variable of the pattern, e.g.: `p` in `MATCH p = (a) −[t]−> (b)`
+    // TODO #[visit(skip)]
+    pub variable: Option<SymbolPrimitive>,
+    // TODO #[visit(skip)]
+    pub mode: Option<GraphPathMode>,
+    /// the ordered pattern parts
+    // TODO #[visit(skip)]
+    pub path: AstNode<GraphMatchPathPattern>,
+    /// an optional pattern where e.g.: `WHERE a.name=b.name` in `MATCH [(a)->(b) WHERE a.name=b.name]`
+    pub where_clause: Option<Box<Expr>>,
+}
+
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchPathPattern {
+    Path(Vec<AstNode<GraphMatchPathPattern>>),
+    Union(Vec<AstNode<GraphMatchPathPattern>>),
+    Multiset(Vec<AstNode<GraphMatchPathPattern>>),
+
+    Questioned(Box<AstNode<GraphMatchPathPattern>>),
+    Quantified(
+        Box<AstNode<GraphMatchPathPattern>>,
+        AstNode<GraphMatchQuantifier>,
+    ),
+
+    Sub(Box<AstNode<GraphPathSubPattern>>),
+
+    /// A single node in a graph pattern.
+    Node(AstNode<GraphMatchNode>),
+
+    /// A single edge in a graph pattern.
+    Edge(AstNode<GraphMatchEdge>),
+
+    Simplified(AstNode<GraphMatchSimplified>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchElement {
+    pub variable: Option<SymbolPrimitive>,
+    pub label: Option<AstNode<GraphMatchLabel>>,
+    pub where_clause: Option<Box<Expr>>,
+}
+
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchSimplified {
+    pub dir: GraphMatchDirection,
+    pub pattern: AstNode<GraphMatchSimplifiedPattern>,
+}
+
+// TODO #[derive(Visit, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GraphMatchSimplifiedPattern {
+    Union(Vec<AstNode<GraphMatchSimplifiedPattern>>),
+    Multiset(Vec<AstNode<GraphMatchSimplifiedPattern>>),
+
+    Path(Vec<AstNode<GraphMatchSimplifiedPattern>>),
+
+    Conjunction(Vec<AstNode<GraphMatchSimplifiedPattern>>),
+
+    Questioned(Box<AstNode<GraphMatchSimplifiedPattern>>),
+    Quantified(
+        Box<AstNode<GraphMatchSimplifiedPattern>>,
+        AstNode<GraphMatchQuantifier>,
+    ),
+
+    /// Direction override
+    Direction(
+        GraphMatchDirection,
+        Box<AstNode<GraphMatchSimplifiedPattern>>,
+    ),
+
+    Negated(Box<AstNode<GraphMatchSimplifiedPattern>>),
+    Label(SymbolPrimitive),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum GraphMatchSelector {
-    AnyShortest,
-    AllShortest,
-    Any,
-    AnyK(NonZeroU32),
-    ShortestK(NonZeroU32),
-    ShortestKGroup(NonZeroU32),
+pub enum GraphPathPrefix {
+    Mode(GraphPathMode),
+    Search(GraphPathSearchPrefix, Option<GraphPathMode>),
 }
 
-/// A graph match clause as defined in GPML
-/// See https://arxiv.org/abs/2112.06217
-#[derive(Visit, Clone, Debug, PartialEq)]
+/// | Keyword
+/// |------------------
+/// | ALL
+/// | Any
+/// | ANY k
+/// | ALL SHORTEST
+/// | ANY SHORTEST
+/// | SHORTEST k
+/// | SHORTEST k GROUP
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GraphMatchExpr {
-    #[visit(skip)]
-    pub selector: Option<GraphMatchSelector>,
-    pub patterns: Vec<AstNode<GraphMatchPattern>>,
+pub enum GraphPathSearchPrefix {
+    All,
+    Any,
+    AnyK(NonZeroU32),
+    AllShortest,
+    AnyShortest,
+    ShortestK(NonZeroU32),
+    ShortestKGroup(Option<NonZeroU32>),
 }
 
 /// GROUP BY <`grouping_strategy`> <`group_key`>[, <`group_key`>]... \[AS <symbol>\]
