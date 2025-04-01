@@ -15,8 +15,8 @@ use partiql_ast::ast::{
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
 use partiql_logical::{
-    AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, IsTypeExpr, LikeMatch,
-    LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
+    AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, GraphMatchExpr, IsTypeExpr,
+    LikeMatch, LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
     PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
 };
 use std::borrow::Cow;
@@ -1896,7 +1896,26 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn enter_graph_match(&mut self, _graph_pattern: &'ast GraphMatch) -> Traverse {
-        not_yet_implemented_fault!(self, "MATCH expression");
+        self.enter_env();
+        Traverse::Continue
+    }
+    fn exit_graph_match(&mut self, graph_pattern: &'ast GraphMatch) -> Traverse {
+        let mut env = self.exit_env();
+        true_or_fault!(self, env.len() == 1, "env.len() is not 1");
+
+        let value = Box::new(env.pop().unwrap());
+        let graph_planner = crate::graph::GraphToLogical::default();
+        match graph_planner.plan_graph_match(&graph_pattern.graph_expr.node) {
+            Ok(pattern) => {
+                self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }));
+
+                Traverse::Continue
+            }
+            Err(e) => {
+                not_yet_implemented_err!(self, e);
+                Traverse::Stop
+            }
+        }
     }
 }
 

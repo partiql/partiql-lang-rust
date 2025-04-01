@@ -1,8 +1,8 @@
-use crate::eval::graph::bind_name::BindNameExt;
 use crate::eval::graph::engine::GraphEngine;
 use crate::eval::graph::result::{
-    GraphElement, NodeBinding, PathBinding, PathPatternBinding, PathPatternNodes,
+    GraphElement, NodeBinding, PathBinding, PathPatternBinding, PathPatternNodes, Triple,
 };
+use partiql_logical::graph::bind_name::BindNameExt;
 
 use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
@@ -92,7 +92,20 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
     fn eval_path_pattern(&self, matcher: PathPatternMatch<GT>) -> PathPatternBinding<GT> {
         match matcher {
             PathPatternMatch::Node(n) => self.eval_node(n).into(),
-            PathPatternMatch::Match(m) => self.eval_path(m).into(),
+            PathPatternMatch::Match(m) => {
+                let PathBinding {
+                    matcher,
+                    mut bindings,
+                } = self.eval_path(m);
+
+                // if edge is cyclic, filter triples
+                let (n1, _, n2) = &matcher.binders;
+                if n1 == n2 {
+                    bindings.retain(|Triple { lhs, e: _, rhs }| lhs == rhs)
+                }
+
+                PathBinding { matcher, bindings }.into()
+            }
             PathPatternMatch::Concat(ms) => ms
                 .into_iter()
                 .map(|p| self.eval_path_pattern(p))
