@@ -811,6 +811,7 @@ pub struct FromLet {
 pub enum FromLetKind {
     Scan,
     Unpivot,
+    GraphTable,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -860,7 +861,7 @@ pub struct GraphMatch {
     pub pattern: AstNode<GraphPattern>,
     // TODO remove
     #[visit(skip)]
-    pub shape: Option<GraphTableShape>,
+    pub shape: GraphTableShape,
 }
 
 // TODO #[derive(Visit, Clone, Debug, PartialEq)]
@@ -882,21 +883,12 @@ pub enum GraphMatchMode {
     RepeatableElements,
 }
 
-/// A graph match clause as defined in GPML
-/// See https://arxiv.org/abs/2112.06217
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GraphMatchExpr {
-    #[visit(skip)] // TODO
-    pub patterns: Vec<AstNode<GraphPathPattern>>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum GraphTableShape {
-    Rows(AstNode<GraphTableRows>),
-    Columns(AstNode<GraphTableColumns>),
-    Export(AstNode<GraphTableExport>),
+pub struct GraphTableShape {
+    pub rows: Option<AstNode<GraphTableRows>>,
+    pub cols: Option<AstNode<GraphTableColumns>>,
+    pub export: Option<AstNode<GraphTableExport>>,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq)]

@@ -9,35 +9,35 @@ SELECT * FROM tbl1 UNION (MyGraph MATCH (x))
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 ------------------------------------------------------------------------------------------------------------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 --------------------------------------------------------------------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 ----------------------------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 ------------------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 --------------------
 (SELECT * FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))
 
 ----------
 (SELECT *
   FROM tbl1)
 UNION
-(MyGraph MATCH (x))
+((MyGraph MATCH (x)))

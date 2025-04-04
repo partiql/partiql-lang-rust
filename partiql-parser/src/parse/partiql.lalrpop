@@ -344,7 +344,7 @@ GraphTable: ast::AstNode<ast::FromLet> = {
     <lo:@L> "GRAPH_TABLE" <e:ParenGraphMatch> <hi:@R> => {
         state.node(ast::FromLet {
             expr: Box::new(e),
-            kind: ast::FromLetKind::Scan,
+            kind: ast::FromLetKind::GraphTable,
             as_alias: None,
             at_alias: None,
             by_alias: None,
@@ -357,14 +357,13 @@ ParenGraphMatch: ast::Expr = {
 }
 
 GraphMatch: ast::Expr = {
-    <lo:@L> <expr:ExprQuery> "MATCH" <pattern:GraphPattern> <shape:GraphTableShape?> <hi:@R>
+    <lo:@L> <expr:ExprQuery> "MATCH" <pattern:GraphPattern> <shape:GraphTableShape> <hi:@R>
         => ast::Expr::GraphMatch(state.node(ast::GraphMatch{expr, pattern, shape}, lo..hi)),
 }
 
 GraphTableShape: ast::GraphTableShape = {
-    <rows: GraphTableRowsClause> => ast::GraphTableShape::Rows(rows),
-    <cols: GraphTableColumnsClause> => ast::GraphTableShape::Columns(cols),
-    <export: GraphTableExportClause> => ast::GraphTableShape::Export(export),
+    <rows: GraphTableRowsClause?> <cols: GraphTableColumnsClause?> <export: GraphTableExportClause?>
+        => ast::GraphTableShape{rows, cols, export}
 }
 
 GraphTableRowsClause: ast::AstNode<ast::GraphTableRows> = {
@@ -647,7 +646,7 @@ GraphPatternQuantifier: ast::AstNode<ast::GraphMatchQuantifier> = {
          } else {
             0
          };
-         let upper = if let Some(n) = l {
+         let upper = if let Some(n) = u {
             Some(std::num::NonZeroU32::new(n.parse().unwrap()).expect("non-zero upper bound"))
          } else {
             None
@@ -1570,8 +1569,7 @@ FunctionCall: CallSite = {
 #[inline]
 FunctionName: ast::SymbolPrimitive = {
     <SymbolPrimitive>,
-    <lo:@L> <ident:FnNonReservedKeyword> <hi:@R> =>
-        ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive }
+    <FnNonReservedKeyword>,
 }
 
 #[inline]
@@ -1698,7 +1696,7 @@ VarRef: ast::AstNode<ast::VarRef> = {
             qualifier: ast::ScopeQualifier::Unqualified
         },lo..hi),
     <lo:@L> <ident:VarNonReservedKeyword> <hi:@R> => state.node(ast::VarRef {
-            name: ast::SymbolPrimitive { value: ident.to_owned(), case: ast::CaseSensitivity::CaseInsensitive },
+            name: ident,
             qualifier: ast::ScopeQualifier::Unqualified
         },lo..hi),
 }
@@ -1968,10 +1966,7 @@ Identifier: ast::SymbolPrimitive = {
         value: ident.to_owned(),
         case: ast::CaseSensitivity::CaseSensitive,
     },
-    <ident:VarNonReservedKeyword>  => ast::SymbolPrimitive {
-        value: ident.to_owned(),
-        case: ast::CaseSensitivity::CaseInsensitive
-    },
+    <VarNonReservedKeyword>
 }
 
 AsIdent: ast::SymbolPrimitive = {
@@ -1993,53 +1988,59 @@ ByIdent: ast::SymbolPrimitive = {
 // ------------------------------------------------------------------------------ //
 
 #[inline]
-VarNonReservedKeyword: &'static str = {
-    <NonReservedKeyword>
+VarNonReservedKeyword: ast::SymbolPrimitive = {
+    <ident:NonReservedKeyword> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        case: ast::CaseSensitivity::CaseInsensitive
+    },
 }
 
 #[inline]
-FnNonReservedKeyword: &'static str = {
-    <NonReservedKeyword>
+FnNonReservedKeyword: ast::SymbolPrimitive = {
+    <ident:NonReservedKeyword> => ast::SymbolPrimitive {
+        value: ident.to_owned(),
+        case: ast::CaseSensitivity::CaseInsensitive
+    },
 }
 
 
-NonReservedKeyword: &'static str = {
-    "ANY" => "ANY",
-    "SIMPLE" => "SIMPLE",
+NonReservedKeyword: &'input str = {
+    "ANY",
+    "SIMPLE",
     <GraphNonReservedKeyword>
 }
 
 
 //C.f. SQL '23, section 16, 5.2
 #[inline]
-GraphNonReservedKeyword: &'static str = {
-    "ACYCLIC" => "ACYCLIC",
-    "BINDINGS" => "BINDINGS",
-    "BOUND" => "BOUND",
-    "DESTINATION" => "DESTINATION",
-    "DIFFERENT" => "DIFFERENT",
-    "DIRECTED" => "DIRECTED",
-    "EDGE" => "EDGE",
-    "EDGES" => "EDGES",
-    "ELEMENTS" => "ELEMENTS",
-    "LABEL" => "LABEL",
-    "LABELED" => "LABELED",
-    "NODE" => "NODE",
-    "PATHS" => "PATHS",
-    "PROPERTIES" => "PROPERTIES",
-    "PROPERTY" => "PROPERTY",
-    "PROPERTY_GRAPH_CATALOG" => "PROPERTY_GRAPH_CATALOG",
-    "PROPERTY_GRAPH_NAME" => "PROPERTY_GRAPH_NAME",
-    "PROPERTY_GRAPH_SCHEMA" => "PROPERTY_GRAPH_SCHEMA",
-    "RELATIONSHIP" => "RELATIONSHIP",
-    "RELATIONSHIPS" => "RELATIONSHIPS",
-    "SHORTEST" => "SHORTEST",
-    "SINGLETONS" => "SINGLETONS",
-    "STEP" => "STEP",
-    "TABLES" => "TABLES",
-    "TRAIL" => "TRAIL",
-    "VERTEX" => "VERTEX",
-    "WALK" => "WALK",
+GraphNonReservedKeyword: &'input str = {
+    "ACYCLIC",
+    "BINDINGS",
+    "BOUND",
+    "DESTINATION",
+    "DIFFERENT",
+    "DIRECTED",
+    "EDGE",
+    "EDGES",
+    "ELEMENTS",
+    "LABEL",
+    "LABELED",
+    "NODE",
+    "PATHS",
+    "PROPERTIES",
+    "PROPERTY",
+    "PROPERTY_GRAPH_CATALOG",
+    "PROPERTY_GRAPH_NAME",
+    "PROPERTY_GRAPH_SCHEMA",
+    "RELATIONSHIP",
+    "RELATIONSHIPS",
+    "SHORTEST",
+    "SINGLETONS",
+    "STEP",
+    "TABLES",
+    "TRAIL",
+    "VERTEX",
+    "WALK",
 }
 
 
@@ -2145,11 +2146,10 @@ extern {
         "EmbeddedDoc" => lexer::Token::EmbeddedDoc(<&'input str>),
 
         // Keywords
-        "ACYCLIC" => lexer::Token::Acyclic,
         "ALL" => lexer::Token::All,
         "ASC" => lexer::Token::Asc,
         "AND" => lexer::Token::And,
-        "ANY" => lexer::Token::Any,
+        "ANY" => lexer::Token::Any(<&'input str>),
         "AS" => lexer::Token::As,
         "AT" => lexer::Token::At,
         "BETWEEN" => lexer::Token::Between,
@@ -2214,10 +2214,8 @@ extern {
         "TABLE" => lexer::Token::Table,
         "TIME" => lexer::Token::Time,
         "TIMESTAMP" => lexer::Token::Timestamp,
-        "SIMPLE" => lexer::Token::Simple,
-        "SHORTEST" => lexer::Token::Shortest,
+        "SIMPLE" => lexer::Token::Simple(<&'input str>),
         "THEN" => lexer::Token::Then,
-        "TRAIL" => lexer::Token::Trail,
         "TRUE" => lexer::Token::True,
         "UNION" => lexer::Token::Union,
         "UNPIVOT" => lexer::Token::Unpivot,
@@ -2244,32 +2242,32 @@ extern {
         "SAME" => lexer::Token::Same,
 
         // Graph Keywords; non-reserved
-        "ACYCLIC" => lexer::Token::Acyclic,
-        "BINDINGS" => lexer::Token::Bindings,
-        "BOUND" => lexer::Token::Bound,
-        "DESTINATION" => lexer::Token::Destination,
-        "DIFFERENT" => lexer::Token::Different,
-        "DIRECTED" => lexer::Token::Directed,
-        "EDGE" => lexer::Token::Edge,
-        "EDGES" => lexer::Token::Edges,
-        "ELEMENTS" => lexer::Token::Elements,
-        "LABEL" => lexer::Token::Label,
-        "LABELED" => lexer::Token::Labeled,
-        "NODE" => lexer::Token::Node,
-        "PATHS" => lexer::Token::Paths,
-        "PROPERTIES" => lexer::Token::Properties,
-        "PROPERTY" => lexer::Token::Property,
-        "PROPERTY_GRAPH_CATALOG" => lexer::Token::PropertyGraphCatalog,
-        "PROPERTY_GRAPH_NAME" => lexer::Token::PropertyGraphName,
-        "PROPERTY_GRAPH_SCHEMA" => lexer::Token::PropertyGraphSchema,
-        "RELATIONSHIP" => lexer::Token::Relationship,
-        "RELATIONSHIPS" => lexer::Token::Relationships,
-        "SHORTEST" => lexer::Token::Shortest,
-        "SINGLETONS" => lexer::Token::Singletons,
-        "STEP" => lexer::Token::Step,
-        "TABLES" => lexer::Token::Tables,
-        "TRAIL" => lexer::Token::Trail,
-        "VERTEX" => lexer::Token::Vertex,
-        "WALK" => lexer::Token::Walk,
+        "ACYCLIC" => lexer::Token::Acyclic(<&'input str>),
+        "BINDINGS" => lexer::Token::Bindings(<&'input str>),
+        "BOUND" => lexer::Token::Bound(<&'input str>),
+        "DESTINATION" => lexer::Token::Destination(<&'input str>),
+        "DIFFERENT" => lexer::Token::Different(<&'input str>),
+        "DIRECTED" => lexer::Token::Directed(<&'input str>),
+        "EDGE" => lexer::Token::Edge(<&'input str>),
+        "EDGES" => lexer::Token::Edges(<&'input str>),
+        "ELEMENTS" => lexer::Token::Elements(<&'input str>),
+        "LABEL" => lexer::Token::Label(<&'input str>),
+        "LABELED" => lexer::Token::Labeled(<&'input str>),
+        "NODE" => lexer::Token::Node(<&'input str>),
+        "PATHS" => lexer::Token::Paths(<&'input str>),
+        "PROPERTIES" => lexer::Token::Properties(<&'input str>),
+        "PROPERTY" => lexer::Token::Property(<&'input str>),
+        "PROPERTY_GRAPH_CATALOG" => lexer::Token::PropertyGraphCatalog(<&'input str>),
+        "PROPERTY_GRAPH_NAME" => lexer::Token::PropertyGraphName(<&'input str>),
+        "PROPERTY_GRAPH_SCHEMA" => lexer::Token::PropertyGraphSchema(<&'input str>),
+        "RELATIONSHIP" => lexer::Token::Relationship(<&'input str>),
+        "RELATIONSHIPS" => lexer::Token::Relationships(<&'input str>),
+        "SHORTEST" => lexer::Token::Shortest(<&'input str>),
+        "SINGLETONS" => lexer::Token::Singletons(<&'input str>),
+        "STEP" => lexer::Token::Step(<&'input str>),
+        "TABLES" => lexer::Token::Tables(<&'input str>),
+        "TRAIL" => lexer::Token::Trail(<&'input str>),
+        "VERTEX" => lexer::Token::Vertex(<&'input str>),
+        "WALK" => lexer::Token::Walk(<&'input str>),
     }
 }

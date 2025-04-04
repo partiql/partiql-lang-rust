@@ -3,33 +3,30 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT * FROM g MATCH ALL SHORTEST [ (x)-[e]->*(y) ]
+SELECT * FROM (g MATCH ALL SHORTEST ( (x)-[e]->*(y) ))
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT * FROM g MATCH ALL SHORTEST (x) -[e]->* (y)
+SELECT * FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT * FROM g MATCH ALL SHORTEST (x) -[e]->* (y)
+SELECT * FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 --------------------------------------------------------------------------------
-SELECT * FROM g MATCH ALL SHORTEST (x) -[e]->* (y)
+SELECT * FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 ----------------------------------------
-SELECT * FROM g MATCH ALL SHORTEST
-  (x) -[e]->* (y)
+SELECT *
+FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 ------------------------------
 SELECT *
-FROM g MATCH ALL SHORTEST
-  (x) -[e]->* (y)
+FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 --------------------
 SELECT *
-FROM g MATCH ALL SHORTEST
-  (x) -[e]->* (y)
+FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))
 
 ----------
 SELECT *
-FROM g MATCH ALL SHORTEST
-  (x) -[e]->* (y)
+FROM (g MATCH ALL SHORTEST ((x) -[e]->* (y)))

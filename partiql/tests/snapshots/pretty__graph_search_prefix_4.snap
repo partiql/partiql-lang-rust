@@ -3,34 +3,31 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')
+SELECT p FROM (g MATCH p = ANY 5 (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT p FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT p FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 --------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT p
+FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 ----------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT p
+FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 ------------------------------
 SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 --------------------
 SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
 
 ----------
 SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+FROM (g MATCH p = ANY 5 (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))

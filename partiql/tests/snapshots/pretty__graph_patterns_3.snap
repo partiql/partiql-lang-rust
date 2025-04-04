@@ -3,35 +3,35 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT a,b FROM (g MATCH (a) -[:has]-> (x), (x)-[:contains]->(b))
+SELECT a,b FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x), (x)-[:contains]->(b))
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT a, b FROM (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
+SELECT a, b FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT a, b FROM (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
+SELECT a, b FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
 
 --------------------------------------------------------------------------------
-SELECT a, b FROM (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
+SELECT a, b FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x), (x) -[:contains]-> (b))
 
 ----------------------------------------
 SELECT a, b
-FROM (g MATCH (a) -[:has]-> (x),
+FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x),
     (x) -[:contains]-> (b))
 
 ------------------------------
 SELECT a, b
-FROM (g MATCH (a) -[:has]-> (x),
+FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x),
     (x) -[:contains]-> (b))
 
 --------------------
 SELECT a, b
-FROM (g MATCH (a) -[:has]-> (x),
+FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x),
     (x) -[:contains]-> (b))
 
 ----------
 SELECT a,
   b
-FROM (g MATCH (a) -[:has]-> (x),
+FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x),
     (x) -[:contains]-> (b))

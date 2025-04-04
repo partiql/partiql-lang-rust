@@ -136,9 +136,6 @@ impl<'input> Iterator for PartiqlLexer<'input, '_> {
 }
 
 /// Tokens that the lexer can generate.
-///
-/// # Note
-/// Tokens with names beginning with `__` are used internally and not meant to be used outside lexing.
 #[derive(Logos, Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 // TODO make pub(crate) ?
 // Skip whitespace
@@ -320,8 +317,8 @@ pub enum Token<'input> {
     Asc,
     #[regex("(?i:And)")]
     And,
-    #[regex("(?i:Any)")]
-    Any,
+    #[regex("(?i:Any)", |lex| lex.slice())]
+    Any(&'input str),
     #[regex("(?i:As)")]
     As,
     #[regex("(?i:At)")]
@@ -450,8 +447,8 @@ pub enum Token<'input> {
     Time,
     #[regex("(?i:Timestamp)")]
     Timestamp,
-    #[regex("(?i:Simple)")]
-    Simple,
+    #[regex("(?i:Simple)", |lex| lex.slice())]
+    Simple(&'input str),
     #[regex("(?i:Then)")]
     Then,
     #[regex("(?i:True)")]
@@ -502,71 +499,72 @@ pub enum Token<'input> {
     Same,
 
     // Graph Keywords; non-reserved
-    #[regex("(?i:ACYCLIC)")]
-    Acyclic,
-    #[regex("(?i:BINDINGS)")]
-    Bindings,
-    #[regex("(?i:BOUND)")]
-    Bound,
-    #[regex("(?i:DESTINATION)")]
-    Destination,
-    #[regex("(?i:DIFFERENT)")]
-    Different,
-    #[regex("(?i:DIRECTED)")]
-    Directed,
-    #[regex("(?i:EDGE)")]
-    Edge,
-    #[regex("(?i:EDGES)")]
-    Edges,
-    #[regex("(?i:ELEMENTS)")]
-    Elements,
-    #[regex("(?i:LABEL)")]
-    Label,
-    #[regex("(?i:LABELED)")]
-    Labeled,
-    #[regex("(?i:NODE)")]
-    Node,
-    #[regex("(?i:PATHS)")]
-    Paths,
-    #[regex("(?i:PROPERTIES)")]
-    Properties,
-    #[regex("(?i:PROPERTY)")]
-    Property,
-    #[regex("(?i:PROPERTY_GRAPH_CATALOG)")]
-    PropertyGraphCatalog,
-    #[regex("(?i:PROPERTY_GRAPH_NAME)")]
-    PropertyGraphName,
-    #[regex("(?i:PROPERTY_GRAPH_SCHEMA)")]
-    PropertyGraphSchema,
-    #[regex("(?i:RELATIONSHIP)")]
-    Relationship,
-    #[regex("(?i:RELATIONSHIPS)")]
-    Relationships,
-    #[regex("(?i:SHORTEST)")]
-    Shortest,
-    #[regex("(?i:SINGLETONS)")]
-    Singletons,
-    #[regex("(?i:STEP)")]
-    Step,
-    #[regex("(?i:TABLES)")]
-    Tables,
-    #[regex("(?i:TRAIL)")]
-    Trail,
-    #[regex("(?i:VERTEX)")]
-    Vertex,
-    #[regex("(?i:WALK)")]
-    Walk,
+    // Note: non-reserved keywords carry their input text for usage as variable references, etc.
+    #[regex("(?i:ACYCLIC)", |lex| lex.slice())]
+    Acyclic(&'input str),
+    #[regex("(?i:BINDINGS)", |lex| lex.slice())]
+    Bindings(&'input str),
+    #[regex("(?i:BOUND)", |lex| lex.slice())]
+    Bound(&'input str),
+    #[regex("(?i:DESTINATION)", |lex| lex.slice())]
+    Destination(&'input str),
+    #[regex("(?i:DIFFERENT)", |lex| lex.slice())]
+    Different(&'input str),
+    #[regex("(?i:DIRECTED)", |lex| lex.slice())]
+    Directed(&'input str),
+    #[regex("(?i:EDGE)", |lex| lex.slice())]
+    Edge(&'input str),
+    #[regex("(?i:EDGES)", |lex| lex.slice())]
+    Edges(&'input str),
+    #[regex("(?i:ELEMENTS)", |lex| lex.slice())]
+    Elements(&'input str),
+    #[regex("(?i:LABEL)", |lex| lex.slice())]
+    Label(&'input str),
+    #[regex("(?i:LABELED)", |lex| lex.slice())]
+    Labeled(&'input str),
+    #[regex("(?i:NODE)", |lex| lex.slice())]
+    Node(&'input str),
+    #[regex("(?i:PATHS)", |lex| lex.slice())]
+    Paths(&'input str),
+    #[regex("(?i:PROPERTIES)", |lex| lex.slice())]
+    Properties(&'input str),
+    #[regex("(?i:PROPERTY)", |lex| lex.slice())]
+    Property(&'input str),
+    #[regex("(?i:PROPERTY_GRAPH_CATALOG)", |lex| lex.slice())]
+    PropertyGraphCatalog(&'input str),
+    #[regex("(?i:PROPERTY_GRAPH_NAME)", |lex| lex.slice())]
+    PropertyGraphName(&'input str),
+    #[regex("(?i:PROPERTY_GRAPH_SCHEMA)", |lex| lex.slice())]
+    PropertyGraphSchema(&'input str),
+    #[regex("(?i:RELATIONSHIP)", |lex| lex.slice())]
+    Relationship(&'input str),
+    #[regex("(?i:RELATIONSHIPS)", |lex| lex.slice())]
+    Relationships(&'input str),
+    #[regex("(?i:SHORTEST)", |lex| lex.slice())]
+    Shortest(&'input str),
+    #[regex("(?i:SINGLETONS)", |lex| lex.slice())]
+    Singletons(&'input str),
+    #[regex("(?i:STEP)", |lex| lex.slice())]
+    Step(&'input str),
+    #[regex("(?i:TABLES)", |lex| lex.slice())]
+    Tables(&'input str),
+    #[regex("(?i:TRAIL)", |lex| lex.slice())]
+    Trail(&'input str),
+    #[regex("(?i:VERTEX)", |lex| lex.slice())]
+    Vertex(&'input str),
+    #[regex("(?i:WALK)", |lex| lex.slice())]
+    Walk(&'input str),
 }
 
 impl Token<'_> {
     #[inline]
     pub fn is_var_non_reserved(&self) -> bool {
-        matches!(self, Token::Any | Token::Simple) || self.is_graph_non_reserved()
+        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 
     #[inline]
     pub fn is_fn_non_reserved(&self) -> bool {
-        matches!(self, Token::Any | Token::Simple) || self.is_graph_non_reserved()
+        matches!(self, Token::Any(_) | Token::Simple(_)) || self.is_graph_non_reserved()
     }
 
     #[inline]
@@ -591,44 +589,44 @@ impl Token<'_> {
     pub fn is_graph_non_reserved(&self) -> bool {
         matches!(
             self,
-            Token::Acyclic
-                | Token::Bindings
-                | Token::Bound
-                | Token::Destination
-                | Token::Different
-                | Token::Directed
-                | Token::Edge
-                | Token::Edges
-                | Token::Elements
-                | Token::Label
-                | Token::Labeled
-                | Token::Node
-                | Token::Paths
-                | Token::Properties
-                | Token::Property
-                | Token::PropertyGraphCatalog
-                | Token::PropertyGraphName
-                | Token::PropertyGraphSchema
-                | Token::Relationship
-                | Token::Relationships
-                | Token::Shortest
-                | Token::Singletons
-                | Token::Step
-                | Token::Tables
-                | Token::Trail
-                | Token::Vertex
-                | Token::Walk
+            Token::Acyclic(_)
+                | Token::Bindings(_)
+                | Token::Bound(_)
+                | Token::Destination(_)
+                | Token::Different(_)
+                | Token::Directed(_)
+                | Token::Edge(_)
+                | Token::Edges(_)
+                | Token::Elements(_)
+                | Token::Label(_)
+                | Token::Labeled(_)
+                | Token::Node(_)
+                | Token::Paths(_)
+                | Token::Properties(_)
+                | Token::Property(_)
+                | Token::PropertyGraphCatalog(_)
+                | Token::PropertyGraphName(_)
+                | Token::PropertyGraphSchema(_)
+                | Token::Relationship(_)
+                | Token::Relationships(_)
+                | Token::Shortest(_)
+                | Token::Singletons(_)
+                | Token::Step(_)
+                | Token::Tables(_)
+                | Token::Trail(_)
+                | Token::Vertex(_)
+                | Token::Walk(_)
         )
     }
 
     pub fn is_keyword(&self) -> bool {
         matches!(
             self,
-            Token::Acyclic
+            Token::Acyclic(_)
                 | Token::All
                 | Token::Asc
                 | Token::And
-                | Token::Any
+                | Token::Any(_)
                 | Token::As
                 | Token::At
                 | Token::Between
@@ -683,10 +681,10 @@ impl Token<'_> {
                 | Token::Table
                 | Token::Time
                 | Token::Timestamp
-                | Token::Simple
-                | Token::Shortest
+                | Token::Simple(_)
+                | Token::Shortest(_)
                 | Token::Then
-                | Token::Trail
+                | Token::Trail(_)
                 | Token::Union
                 | Token::Unpivot
                 | Token::Using

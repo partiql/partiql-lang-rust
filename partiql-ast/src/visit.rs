@@ -520,21 +520,16 @@ pub trait Visitor<'ast> {
     fn exit_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
         Traverse::Continue
     }
-    fn enter_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
-        Traverse::Continue
-    }
-    fn exit_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
-        Traverse::Continue
-    }
+
     fn enter_graph_match_pattern(
         &mut self,
-        _graph_pattern: &'ast ast::GraphMatchPattern,
+        _graph_pattern: &'ast ast::GraphPathPattern,
     ) -> Traverse {
         Traverse::Continue
     }
     fn exit_graph_match_pattern(
         &mut self,
-        _graph_pattern: &'ast ast::GraphMatchPattern,
+        _graph_pattern: &'ast ast::GraphPathPattern,
     ) -> Traverse {
         Traverse::Continue
     }
@@ -548,6 +543,20 @@ pub trait Visitor<'ast> {
         Traverse::Continue
     }
     fn exit_graph_match_edge(&mut self, _graph_pattern: &'ast ast::GraphMatchEdge) -> Traverse {
+        Traverse::Continue
+    }
+
+    //TODO
+    fn enter_graph_match_element(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchElement,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_element(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchElement,
+    ) -> Traverse {
         Traverse::Continue
     }
 
