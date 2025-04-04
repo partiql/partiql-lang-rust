@@ -6,7 +6,6 @@ use partiql_common::pretty::{
 };
 use pretty::{DocAllocator, DocBuilder};
 use std::borrow::Cow;
-use std::num::NonZeroU32;
 
 impl<T> PrettyDoc for AstNode<T>
 where
@@ -1021,7 +1020,7 @@ impl PrettyDoc for GraphMatch {
             shape.export.as_ref().map(|d| d.pretty_doc(arena)),
         ]
         .into_iter()
-        .filter_map(|x| x)
+        .flatten()
         .collect::<Vec<_>>();
         if !shapes.is_empty() {
             let docs = std::iter::once(match_expr).chain(shapes);
@@ -1033,7 +1032,7 @@ impl PrettyDoc for GraphMatch {
 }
 
 impl PrettyDoc for GraphTableRows {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
@@ -1044,7 +1043,7 @@ impl PrettyDoc for GraphTableRows {
 }
 
 impl PrettyDoc for GraphTableColumns {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
@@ -1055,7 +1054,7 @@ impl PrettyDoc for GraphTableColumns {
 }
 
 impl PrettyDoc for GraphTableExport {
-    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
@@ -1083,7 +1082,7 @@ impl PrettyDoc for GraphPattern {
             mode.as_ref().map(|inner| inner.pretty_doc(arena)),
             Some(patterns),
             keep.as_ref().map(|inner| inner.pretty_doc(arena)),
-            self.where_clause.as_ref().map(|clause| {
+            where_clause.as_ref().map(|clause| {
                 arena.intersperse(
                     [arena.text("WHERE"), clause.pretty_doc(arena)],
                     arena.space(),
@@ -1091,7 +1090,7 @@ impl PrettyDoc for GraphPattern {
             }),
         ]
         .into_iter()
-        .filter_map(|x| x);
+        .flatten();
 
         arena.intersperse(parts, arena.space())
     }
@@ -1149,7 +1148,7 @@ impl PrettyDoc for GraphPathPrefix {
                     ],
                 }
                 .into_iter()
-                .filter_map(|x| x)
+                .flatten()
                 .collect::<Vec<_>>();
                 arena.intersperse(parts, arena.space())
             }
@@ -1190,7 +1189,7 @@ impl PrettyDoc for GraphPathPattern {
 
         let parts = [var, prefix, Some(self.path.pretty_doc(arena))]
             .into_iter()
-            .filter_map(|x| x);
+            .flatten();
         arena.intersperse(parts, arena.space())
     }
 }
@@ -1217,7 +1216,7 @@ impl PrettyDoc for GraphPathSubPattern {
 
         let parts = [var, mode, Some(self.path.pretty_doc(arena)), where_clause]
             .into_iter()
-            .filter_map(|x| x);
+            .flatten();
         arena.intersperse(parts, arena.space())
     }
 }
@@ -1258,7 +1257,7 @@ impl PrettyDoc for GraphMatchNode {
                 .map(|label| arena.concat([arena.text(":"), label.pretty_doc(arena)])),
         ]
         .into_iter()
-        .filter_map(|x| x)
+        .flatten()
         .collect();
         let name = if name.is_empty() {
             None
@@ -1271,7 +1270,7 @@ impl PrettyDoc for GraphMatchNode {
                 arena.space(),
             )
         });
-        let parts = [name, where_clause].into_iter().filter_map(|x| x);
+        let parts = [name, where_clause].into_iter().flatten();
 
         let spec = arena.intersperse(parts, arena.space());
         pretty_surrounded_doc(spec, "(", ")", arena).group()
@@ -1292,7 +1291,7 @@ impl PrettyDoc for GraphMatchEdge {
                 .map(|label| arena.concat([arena.text(":"), label.pretty_doc(arena)])),
         ]
         .into_iter()
-        .filter_map(|x| x)
+        .flatten()
         .collect();
         let name = if name.is_empty() {
             None
@@ -1307,7 +1306,7 @@ impl PrettyDoc for GraphMatchEdge {
         });
         let parts = [name, where_clause]
             .into_iter()
-            .filter_map(|x| x)
+            .flatten()
             .collect::<Vec<_>>();
 
         let mut edge = if !parts.is_empty() {

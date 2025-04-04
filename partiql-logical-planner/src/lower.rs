@@ -1911,7 +1911,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let graph_reference = Box::new(env.pop().unwrap());
         let graph_planner = crate::graph::GraphToLogical::default();
 
-        match graph_planner.plan_graph_match(&graph_match) {
+        match graph_planner.plan_graph_match(graph_match) {
             Ok(pattern) => {
                 self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr {
                     value: graph_reference,

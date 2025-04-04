@@ -1924,14 +1924,14 @@ PuncSepStar<P, T>: Vec<T> = {
 
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
 PuncSepPlus<P, T>: Vec<T> = {
-    <mut v:(<T> <P>)*> <e:T> => {
+    <v:(<T> <P>)*> <e:T> => {
         v.into_iter().map(|t|t.0).chain(std::iter::once(e)).collect()
     }
 }
 
 // This is a macro; see http://lalrpop.github.io/lalrpop/tutorial/006_macros.html
 PuncSep2Plus<P, T>: Vec<T> = {
-    <mut v:(<T> <P>)+> <e:T> => {
+    <v:(<T> <P>)+> <e:T> => {
         v.into_iter().map(|t|t.0).chain(std::iter::once(e)).collect()
     }
 }

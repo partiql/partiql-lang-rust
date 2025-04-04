@@ -6,7 +6,6 @@ use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
     PathMatch, PathPattern, PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
 };
-use petgraph::visit::Walker;
 use std::mem::take;
 
 #[macro_export]
@@ -249,24 +248,24 @@ impl GraphToLogical {
                 Ok(path?.into_iter().flatten().collect())
             }
             GraphMatchPathPattern::Union(_) => {
-                not_yet_implemented_result!("MATCH expression UNION is not yet supported.")
+                not_yet_implemented_result!("MATCH expression UNION is not yet supported.");
             }
             GraphMatchPathPattern::Multiset(_) => {
-                not_yet_implemented_result!("MATCH expression MULTISET is not yet supported.")
+                not_yet_implemented_result!("MATCH expression MULTISET is not yet supported.");
             }
             GraphMatchPathPattern::Questioned(_) => {
-                not_yet_implemented_result!("MATCH expression QUESTIONED is not yet supported.")
+                not_yet_implemented_result!("MATCH expression QUESTIONED is not yet supported.");
             }
             GraphMatchPathPattern::Quantified(_, _) => {
-                not_yet_implemented_result!("MATCH expression QUANTIFIED is not yet supported.")
+                not_yet_implemented_result!("MATCH expression QUANTIFIED is not yet supported.");
             }
             GraphMatchPathPattern::Sub(subpath) => self.plan_graph_subpath_pattern(subpath),
-            GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(&n),
-            GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(&e),
+            GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(n),
+            GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(e),
             GraphMatchPathPattern::Simplified(_) => {
                 not_yet_implemented_result!(
                     "MATCH expression Simplified Edge Expressions are not yet supported."
-                )
+                );
             }
         }
     }
