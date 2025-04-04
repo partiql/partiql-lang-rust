@@ -3,40 +3,36 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT the_a.name AS src, the_b.name AS dest FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE the_y.score > 10
+SELECT the_a.name AS src, the_b.name AS dest FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE the_y.score > 10)
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT the_a.name AS src, the_b.name AS dest FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10)
+SELECT the_a.name AS src, the_b.name AS dest FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT the_a.name AS src, the_b.name AS dest FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b)
-WHERE (the_y.score > 10)
+SELECT the_a.name AS src, the_b.name AS dest
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 --------------------------------------------------------------------------------
 SELECT the_a.name AS src, the_b.name AS dest
-FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10)
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 ----------------------------------------
 SELECT the_a.name AS src,
   the_b.name AS dest
-FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b)
-WHERE (the_y.score > 10)
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 ------------------------------
 SELECT the_a.name AS src,
   the_b.name AS dest
-FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b)
-WHERE (the_y.score > 10)
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 --------------------
 SELECT the_a.name AS src,
   the_b.name AS dest
-FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b)
-WHERE (the_y.score > 10)
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))
 
 ----------
 SELECT the_a.name AS src,
   the_b.name AS dest
-FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b)
-WHERE (the_y.score > 10)
+FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE (the_y.score > 10))

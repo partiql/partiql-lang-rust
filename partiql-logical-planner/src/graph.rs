@@ -1,11 +1,12 @@
 use num::Integer;
 use partiql_ast::ast;
-use partiql_ast::ast::{GraphMatchDirection, GraphPathPatternPart};
+use partiql_ast::ast::{GraphMatchDirection, GraphMatchLabel, GraphMatchPathPattern};
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
     PathMatch, PathPattern, PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
 };
+use petgraph::visit::Walker;
 use std::mem::take;
 
 #[macro_export]
@@ -165,76 +166,137 @@ impl GraphToLogical {
     }
     pub(crate) fn plan_graph_match(
         &self,
-        match_expr: &ast::GraphMatchExpr,
+        graph_match: &ast::GraphMatch,
     ) -> Result<PathPatternMatch, String> {
-        if match_expr.selector.is_some() {
-            not_yet_implemented_result!("MATCH expression selectors are not yet supported.");
+        if graph_match.shape.cols.is_some() {
+            not_yet_implemented_result!("MATCH expression COLUMNS are not yet supported.");
+        }
+        if graph_match.shape.export.is_some() {
+            not_yet_implemented_result!("MATCH expression EXPORT are not yet supported.");
+        }
+        if graph_match.shape.rows.is_some() {
+            not_yet_implemented_result!("MATCH expression ROWS are not yet supported.");
         }
 
-        if match_expr.patterns.len() != 1 {
-            not_yet_implemented_result!(
-                "MATCH expression with multiple patterns are not yet supported."
-            );
-        }
-
-        let first_pattern = &match_expr.patterns[0].node;
-        let pattern = self.plan_graph_pattern(first_pattern)?;
+        let pattern = self.plan_graph_pattern(&graph_match.pattern)?;
         let normalized = self.normalize(pattern)?;
         let expanded = self.expand(normalized)?;
         self.plan(expanded)
     }
 
-    fn plan_graph_pattern(
+    fn plan_graph_pattern(&self, pattern: &ast::GraphPattern) -> Result<Vec<MatchElement>, String> {
+        if pattern.mode.is_some() {
+            not_yet_implemented_result!("MATCH expression MATCH MODE is not yet supported.");
+        }
+        if pattern.keep.is_some() {
+            not_yet_implemented_result!("MATCH expression KEEP is not yet supported.");
+        }
+        if pattern.where_clause.is_some() {
+            not_yet_implemented_result!("MATCH expression WHERE is not yet supported.");
+        }
+
+        if pattern.patterns.len() != 1 {
+            not_yet_implemented_result!(
+                "MATCH expression with multiple patterns are not yet supported."
+            );
+        }
+
+        let first_pattern = &pattern.patterns[0];
+        self.plan_graph_path_pattern(first_pattern)
+    }
+
+    fn plan_graph_path_pattern(
         &self,
         pattern: &ast::GraphPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
-        if pattern.restrictor.is_some() {
-            not_yet_implemented_result!("MATCH pattern restrictors are not yet supported.");
-        }
-        if pattern.quantifier.is_some() {
-            not_yet_implemented_result!("MATCH pattern quantifiers are not yet supported.");
-        }
-        if pattern.prefilter.is_some() {
-            not_yet_implemented_result!("MATCH pattern prefilters are not yet supported.");
+        if pattern.prefix.is_some() {
+            not_yet_implemented_result!("MATCH pattern SEARCH/MODE prefix are not yet supported.");
         }
         if pattern.variable.is_some() {
             not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
         }
 
-        let parts = pattern
-            .parts
-            .iter()
-            .map(|p| self.plan_graph_pattern_part(p));
-        let result: Result<Vec<_>, _> = parts.collect();
-
-        result.map(|r| r.into_iter().flatten().collect())
+        self.plan_graph_match_path_pattern(&pattern.path)
     }
 
-    fn plan_graph_pattern_part(
+    fn plan_graph_subpath_pattern(
         &self,
-        part: &ast::GraphPathPatternPart,
+        pattern: &ast::GraphPathSubPattern,
     ) -> Result<Vec<MatchElement>, String> {
-        match part {
-            GraphPathPatternPart::Node(n) => self.plan_graph_pattern_part_node(&n.node),
-            GraphPathPatternPart::Edge(e) => self.plan_graph_pattern_part_edge(&e.node),
-            GraphPathPatternPart::Pattern(pattern) => self.plan_graph_pattern(&pattern.node),
+        if pattern.mode.is_some() {
+            not_yet_implemented_result!("MATCH pattern MODE prefix are not yet supported.");
+        }
+        if pattern.variable.is_some() {
+            not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
+        }
+        if pattern.where_clause.is_some() {
+            not_yet_implemented_result!("MATCH expression WHERE is not yet supported.");
+        }
+
+        self.plan_graph_match_path_pattern(&pattern.path)
+    }
+
+    fn plan_graph_match_path_pattern(
+        &self,
+        pattern: &ast::GraphMatchPathPattern,
+    ) -> Result<Vec<MatchElement>, String> {
+        match pattern {
+            GraphMatchPathPattern::Path(path) => {
+                let path: Result<Vec<Vec<_>>, _> = path
+                    .iter()
+                    .map(|elt| self.plan_graph_match_path_pattern(elt))
+                    .collect();
+                Ok(path?.into_iter().flatten().collect())
+            }
+            GraphMatchPathPattern::Union(_) => {
+                not_yet_implemented_result!("MATCH expression UNION is not yet supported.")
+            }
+            GraphMatchPathPattern::Multiset(_) => {
+                not_yet_implemented_result!("MATCH expression MULTISET is not yet supported.")
+            }
+            GraphMatchPathPattern::Questioned(_) => {
+                not_yet_implemented_result!("MATCH expression QUESTIONED is not yet supported.")
+            }
+            GraphMatchPathPattern::Quantified(_, _) => {
+                not_yet_implemented_result!("MATCH expression QUANTIFIED is not yet supported.")
+            }
+            GraphMatchPathPattern::Sub(subpath) => self.plan_graph_subpath_pattern(subpath),
+            GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(&n),
+            GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(&e),
+            GraphMatchPathPattern::Simplified(_) => {
+                not_yet_implemented_result!(
+                    "MATCH expression Simplified Edge Expressions are not yet supported."
+                )
+            }
         }
     }
 
     fn plan_graph_pattern_label(
         &self,
-        label: &Option<Vec<ast::SymbolPrimitive>>,
+        label: Option<&GraphMatchLabel>,
     ) -> Result<LabelFilter, String> {
-        match label {
-            None => Ok(LabelFilter::Always),
-            Some(labels) => {
-                if labels.len() != 1 {
+        if let Some(label) = label {
+            match label {
+                GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
+                GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
+                GraphMatchLabel::Negated(_) => {
                     not_yet_implemented_result!(
-                        "MATCH expression with multiple patterns are not yet supported."
+                        "MATCH expression label negation is not yet supported."
                     );
                 }
-                Ok(LabelFilter::Named(labels[0].value.clone()))
+                GraphMatchLabel::Conjunction(_) => {
+                    not_yet_implemented_result!(
+                        "MATCH expression label conjunction is not yet supported."
+                    );
+                }
+                GraphMatchLabel::Disjunction(_) => {
+                    not_yet_implemented_result!(
+                        "MATCH expression label disjunction is not yet supported."
+                    );
+                }
             }
+        } else {
+            Ok(LabelFilter::Always)
         }
     }
 
@@ -242,17 +304,18 @@ impl GraphToLogical {
         &self,
         node: &ast::GraphMatchNode,
     ) -> Result<Vec<MatchElement>, String> {
-        if node.prefilter.is_some() {
-            not_yet_implemented_result!("MATCH node prefilters are not yet supported.");
+        if node.where_clause.is_some() {
+            not_yet_implemented_result!("MATCH node where_clauses are not yet supported.");
         }
         let binder = match &node.variable {
             None => self.graph_id.node(),
             Some(v) => v.value.clone(),
         };
+        let label = self.plan_graph_pattern_label(node.label.as_deref())?;
         let node_match = NodeMatch {
             binder: BindSpec(binder),
             spec: NodeFilter {
-                label: self.plan_graph_pattern_label(&node.label)?,
+                label,
                 filter: ValueFilter::Always,
             },
         };
@@ -266,8 +329,8 @@ impl GraphToLogical {
         if edge.quantifier.is_some() {
             not_yet_implemented_result!("MATCH edge quantifiers are not yet supported.");
         }
-        if edge.prefilter.is_some() {
-            not_yet_implemented_result!("MATCH edge prefilters are not yet supported.");
+        if edge.where_clause.is_some() {
+            not_yet_implemented_result!("MATCH edge where_clauses are not yet supported.");
         }
         let direction = match &edge.direction {
             GraphMatchDirection::Left => DirectionFilter::L,
@@ -282,10 +345,11 @@ impl GraphToLogical {
             None => self.graph_id.node(),
             Some(v) => v.value.clone(),
         };
+        let label = self.plan_graph_pattern_label(edge.label.as_deref())?;
         let edge_match = EdgeMatch {
             binder: BindSpec(binder),
             spec: EdgeFilter {
-                label: self.plan_graph_pattern_label(&edge.label)?,
+                label,
                 filter: ValueFilter::Always,
             },
         };

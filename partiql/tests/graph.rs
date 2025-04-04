@@ -1,6 +1,16 @@
+use insta::assert_snapshot;
+use partiql_catalog::catalog::PartiqlCatalog;
+use partiql_catalog::context::SystemContext;
+use partiql_common::pretty::ToPretty;
+use partiql_eval::eval::graph::string_graph::StringGraphTypes;
+use partiql_eval::eval::BasicContext;
+use partiql_eval::plan::EvaluationMode;
 use partiql_extension_ion::decode::{IonDecodeResult, IonDecoderBuilder, IonDecoderConfig};
 
+use crate::common::{compile, evaluate, lower, parse};
 use partiql_extension_ion::Encoding;
+use partiql_value::{tuple, DateTime, Value};
+
 mod common;
 
 #[track_caller]
@@ -154,4 +164,35 @@ fn repeated_identifers() {
                         edges: [ {id:e1, ends: (n1 -> n1)},
                                  {id:e1, ends: (n1 -- n1)} ] }"##,
     )
+}
+
+#[track_caller]
+fn snapshot_test_graph_eval(name: &'static str, contents: &'static str, query: &'static str) {
+    let graph = decode_ion_text(contents, Encoding::PartiqlEncodedAsIon).expect("graph decode");
+    let bindings = tuple![("g", graph)];
+
+    let parsed = parse(query).expect("parse");
+    let catalog = PartiqlCatalog::default();
+    let lowered = lower(&catalog, &parsed).expect("lower");
+    let plan = compile(EvaluationMode::Permissive, &catalog, lowered).expect("compile");
+    let res = evaluate(plan, bindings.into());
+    assert!(res.is_ok());
+    assert_snapshot!(name, res.unwrap().result);
+}
+
+#[test]
+fn select_star_rfc_0025() {
+    // The RFC 0025 graph has no payloads so these just return an appropriate number of `{}`
+    let contents = include_str!("resources/rfc0025-example.ion");
+    snapshot_test_graph_eval("RFC0025 Nodes", contents, "(g MATCH (x))");
+    snapshot_test_graph_eval("RFC0025 L Triples", contents, "(g MATCH (x) -> (y))");
+    snapshot_test_graph_eval("RFC0025 LUR Triples", contents, "(g MATCH (x) - (y))");
+}
+
+#[test]
+fn select_star_gpml_paper() {
+    let contents = include_str!("resources/gpml-paper-example.ion");
+    snapshot_test_graph_eval("GPML Nodes", contents, "(g MATCH (x))");
+    snapshot_test_graph_eval("GPML L Triples", contents, "(g MATCH (x) -[e]-> (y))");
+    snapshot_test_graph_eval("GPML LUR Triples", contents, "(g MATCH (x) -[e]- (y))");
 }

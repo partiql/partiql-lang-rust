@@ -1512,6 +1512,11 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 as_key,
                 at_key,
             }),
+            FromLetKind::GraphTable => logical::BindingsOp::Scan(logical::Scan {
+                expr,
+                as_key,
+                at_key,
+            }),
         };
         let id = self.plan.add_operator(bexpr);
         self.push_bexpr(id);
@@ -1899,16 +1904,19 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         self.enter_env();
         Traverse::Continue
     }
-    fn exit_graph_match(&mut self, graph_pattern: &'ast GraphMatch) -> Traverse {
+    fn exit_graph_match(&mut self, graph_match: &'ast GraphMatch) -> Traverse {
         let mut env = self.exit_env();
         true_or_fault!(self, env.len() == 1, "env.len() is not 1");
 
-        let value = Box::new(env.pop().unwrap());
+        let graph_reference = Box::new(env.pop().unwrap());
         let graph_planner = crate::graph::GraphToLogical::default();
-        match graph_planner.plan_graph_match(&graph_pattern.graph_expr.node) {
-            Ok(pattern) => {
-                self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }));
 
+        match graph_planner.plan_graph_match(&graph_match) {
+            Ok(pattern) => {
+                self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr {
+                    value: graph_reference,
+                    pattern,
+                }));
                 Traverse::Continue
             }
             Err(e) => {

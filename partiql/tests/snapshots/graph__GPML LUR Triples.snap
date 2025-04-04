@@ -1,0 +1,172 @@
+---
+source: partiql/tests/graph.rs
+expression: res.unwrap().result
+---
+<<
+  {
+    'x': { 'owner': 'Scott', 'isBlocked': 'no' },
+    'y': { 'number': '123.111', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '123.111', 'isBlocked': 'no' },
+    'y': { 'owner': 'Scott', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '123.222', 'isBlocked': 'no' },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'y': { 'number': '123.222', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '111', 'isBlocked': 'no' },
+    'y': { 'owner': 'Scott', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Scott', 'isBlocked': 'no' },
+    'y': { 'number': '111', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '222', 'isBlocked': 'no' },
+    'y': { 'owner': 'Aretha', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'y': { 'number': '222', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'y': { 'number': '222', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '222', 'isBlocked': 'no' },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'y': { 'number': '333', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '333', 'isBlocked': 'no' },
+    'y': { 'owner': 'Jay', 'isBlocked': 'yes' }
+  },
+  {
+    'x': { 'number': '111', 'isBlocked': 'no' },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'y': { 'number': '111', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'number': '444', 'isBlocked': 'no' },
+    'y': { 'owner': 'Dave', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'y': { 'number': '444', 'isBlocked': 'no' }
+  },
+  { 'x': { 'owner': 'Scott', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  { 'x': { 'name': 'Zembla' }, 'y': { 'owner': 'Scott', 'isBlocked': 'no' } },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'y': { 'name': 'Ankh-Morpork' }
+  },
+  {
+    'x': { 'name': 'Ankh-Morpork' },
+    'y': { 'owner': 'Aretha', 'isBlocked': 'no' }
+  },
+  { 'x': { 'owner': 'Mike', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  { 'x': { 'name': 'Zembla' }, 'y': { 'owner': 'Mike', 'isBlocked': 'no' } },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'y': { 'name': 'Ankh-Morpork' }
+  },
+  {
+    'x': { 'name': 'Ankh-Morpork' },
+    'y': { 'owner': 'Jay', 'isBlocked': 'yes' }
+  },
+  { 'x': { 'owner': 'Charles', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  { 'x': { 'name': 'Zembla' }, 'y': { 'owner': 'Charles', 'isBlocked': 'no' } },
+  {
+    'x': { 'owner': 'Scott', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-01-01 0:00:00.0', 'amount': 8000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-01-01 0:00:00.0', 'amount': 8000000.00 },
+    'y': { 'owner': 'Scott', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-02-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Aretha', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-02-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-03-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Jay', 'isBlocked': 'yes' }
+  },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'e': { 'date': TIMESTAMP '2020-03-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Aretha', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'e': { 'date': TIMESTAMP '2020-04-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Dave', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-04-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Jay', 'isBlocked': 'yes' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-06-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-06-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Dave', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-07-01 0:00:00.0', 'amount': 4000000.00 },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-07-01 0:00:00.0', 'amount': 4000000.00 },
+    'y': { 'owner': 'Dave', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-08-01 0:00:00.0', 'amount': 6000000.00 },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-08-01 0:00:00.0', 'amount': 6000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-09-01 0:00:00.0', 'amount': 9000000.00 },
+    'y': { 'owner': 'Scott', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Scott', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-09-01 0:00:00.0', 'amount': 9000000.00 },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  }
+>>
