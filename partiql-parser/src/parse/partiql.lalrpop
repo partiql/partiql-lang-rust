@@ -512,8 +512,8 @@ GraphPathTerm: ast::AstNode<ast::GraphMatchPathPattern> = {
 
 GraphPathFactor: ast::AstNode<ast::GraphMatchPathPattern> = {
     <GraphPathPrimary>,
-    <lo:@L> <p:GraphPathPrimary> <q:GraphPatternQuantifier> <hi:@R>
-        => state.node(ast::GraphMatchPathPattern::Quantified(Box::new(p), q), lo..hi),
+    <lo:@L> <p:GraphPathPrimary> <quant:GraphPatternQuantifier> <hi:@R>
+        => state.node(ast::GraphMatchPathPattern::Quantified(ast::GraphMatchPathPatternQuantified{path: Box::new(p), quant}), lo..hi),
     <lo:@L> <p:GraphPathPrimary> "?" <hi:@R>
         => state.node(ast::GraphMatchPathPattern::Questioned(Box::new(p)), lo..hi),
 }

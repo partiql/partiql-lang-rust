@@ -1,6 +1,6 @@
 use num::Integer;
 use partiql_ast::ast;
-use partiql_ast::ast::{GraphMatchDirection, GraphMatchLabel, GraphMatchPathPattern};
+
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
@@ -240,29 +240,29 @@ impl GraphToLogical {
         pattern: &ast::GraphMatchPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
         match pattern {
-            GraphMatchPathPattern::Path(path) => {
+            ast::GraphMatchPathPattern::Path(path) => {
                 let path: Result<Vec<Vec<_>>, _> = path
                     .iter()
                     .map(|elt| self.plan_graph_match_path_pattern(elt))
                     .collect();
                 Ok(path?.into_iter().flatten().collect())
             }
-            GraphMatchPathPattern::Union(_) => {
+            ast::GraphMatchPathPattern::Union(_) => {
                 not_yet_implemented_result!("MATCH expression UNION is not yet supported.");
             }
-            GraphMatchPathPattern::Multiset(_) => {
+            ast::GraphMatchPathPattern::Multiset(_) => {
                 not_yet_implemented_result!("MATCH expression MULTISET is not yet supported.");
             }
-            GraphMatchPathPattern::Questioned(_) => {
+            ast::GraphMatchPathPattern::Questioned(_) => {
                 not_yet_implemented_result!("MATCH expression QUESTIONED is not yet supported.");
             }
-            GraphMatchPathPattern::Quantified(_, _) => {
+            ast::GraphMatchPathPattern::Quantified(_) => {
                 not_yet_implemented_result!("MATCH expression QUANTIFIED is not yet supported.");
             }
-            GraphMatchPathPattern::Sub(subpath) => self.plan_graph_subpath_pattern(subpath),
-            GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(n),
-            GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(e),
-            GraphMatchPathPattern::Simplified(_) => {
+            ast::GraphMatchPathPattern::Sub(subpath) => self.plan_graph_subpath_pattern(subpath),
+            ast::GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(n),
+            ast::GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(e),
+            ast::GraphMatchPathPattern::Simplified(_) => {
                 not_yet_implemented_result!(
                     "MATCH expression Simplified Edge Expressions are not yet supported."
                 );
@@ -272,23 +272,23 @@ impl GraphToLogical {
 
     fn plan_graph_pattern_label(
         &self,
-        label: Option<&GraphMatchLabel>,
+        label: Option<&ast::GraphMatchLabel>,
     ) -> Result<LabelFilter, String> {
         if let Some(label) = label {
             match label {
-                GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
-                GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
-                GraphMatchLabel::Negated(_) => {
+                ast::GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
+                ast::GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
+                ast::GraphMatchLabel::Negated(_) => {
                     not_yet_implemented_result!(
                         "MATCH expression label negation is not yet supported."
                     );
                 }
-                GraphMatchLabel::Conjunction(_) => {
+                ast::GraphMatchLabel::Conjunction(_) => {
                     not_yet_implemented_result!(
                         "MATCH expression label conjunction is not yet supported."
                     );
                 }
-                GraphMatchLabel::Disjunction(_) => {
+                ast::GraphMatchLabel::Disjunction(_) => {
                     not_yet_implemented_result!(
                         "MATCH expression label disjunction is not yet supported."
                     );
@@ -332,13 +332,13 @@ impl GraphToLogical {
             not_yet_implemented_result!("MATCH edge where_clauses are not yet supported.");
         }
         let direction = match &edge.direction {
-            GraphMatchDirection::Left => DirectionFilter::L,
-            GraphMatchDirection::Undirected => DirectionFilter::U,
-            GraphMatchDirection::Right => DirectionFilter::R,
-            GraphMatchDirection::LeftOrUndirected => DirectionFilter::LU,
-            GraphMatchDirection::UndirectedOrRight => DirectionFilter::UR,
-            GraphMatchDirection::LeftOrRight => DirectionFilter::LR,
-            GraphMatchDirection::LeftOrUndirectedOrRight => DirectionFilter::LUR,
+            ast::GraphMatchDirection::Left => DirectionFilter::L,
+            ast::GraphMatchDirection::Undirected => DirectionFilter::U,
+            ast::GraphMatchDirection::Right => DirectionFilter::R,
+            ast::GraphMatchDirection::LeftOrUndirected => DirectionFilter::LU,
+            ast::GraphMatchDirection::UndirectedOrRight => DirectionFilter::UR,
+            ast::GraphMatchDirection::LeftOrRight => DirectionFilter::LR,
+            ast::GraphMatchDirection::LeftOrUndirectedOrRight => DirectionFilter::LUR,
         };
         let binder = match &edge.variable {
             None => self.graph_id.node(),

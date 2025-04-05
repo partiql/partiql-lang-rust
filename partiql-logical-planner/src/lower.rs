@@ -6,11 +6,11 @@ use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
     CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
-    DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GraphMatch,
-    GroupByExpr, GroupKey, GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec,
-    Like, List, Lit, NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep,
-    ProjectExpr, Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set,
-    SetQuantifier, Sexp, SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
+    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
+    NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
+    Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
+    Sexp, SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
@@ -1900,11 +1900,11 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
-    fn enter_graph_match(&mut self, _graph_pattern: &'ast GraphMatch) -> Traverse {
+    fn enter_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
         self.enter_env();
         Traverse::Continue
     }
-    fn exit_graph_match(&mut self, graph_match: &'ast GraphMatch) -> Traverse {
+    fn exit_graph_match(&mut self, graph_match: &'ast ast::GraphMatch) -> Traverse {
         let mut env = self.exit_env();
         true_or_fault!(self, env.len() == 1, "env.len() is not 1");
 

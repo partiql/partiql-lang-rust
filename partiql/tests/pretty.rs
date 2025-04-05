@@ -500,6 +500,22 @@ mod graph {
         }
         parse!("SELECT * FROM (g MATCH ALL SHORTEST ( (x)-[e]->*(y) ))");
         parse!("SELECT * FROM (g MATCH ALL SHORTEST ( TRAIL (x)-[e]->*(y) ))");
+        parse!(
+            "SELECT * FROM (g MATCH \
+                                    REPEATABLE ELEMENTS \
+                                    ALL SHORTEST ( (x)-[e]->*(y) ) \
+                                    KEEP ANY SIMPLE PATHS \
+                                    WHERE x.foo = 'bar'
+                               )"
+        );
+        parse!(
+            "SELECT * FROM (g MATCH \
+                                    DIFFERENT EDGES \
+                                    ALL SHORTEST ( (x)-[e]->*(y) ) \
+                                    KEEP ANY SIMPLE PATHS \
+                                    WHERE x.foo = 'bar'
+                               )"
+        );
     }
     #[test]
     fn shapes() {
