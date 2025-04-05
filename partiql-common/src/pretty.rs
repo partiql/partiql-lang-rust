@@ -263,6 +263,18 @@ where
 }
 
 #[inline]
+pub fn pretty_doc_list<'b, I, D, A>(list: I, nest: isize, arena: &'b D) -> DocBuilder<'b, D, A>
+where
+    I: IntoIterator<Item = DocBuilder<'b, D, A>>,
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    let sep = arena.text(",").append(arena.softline());
+    pretty_seperated_doc(sep, list, nest, arena)
+}
+
+#[inline]
 pub fn pretty_seperated<'b, I, E, P, D, A>(
     sep: E,
     list: I,

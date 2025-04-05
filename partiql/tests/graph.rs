@@ -180,15 +180,39 @@ fn snapshot_test_graph_eval(name: &'static str, contents: &'static str, query: &
 fn select_star_rfc_0025() {
     // The RFC 0025 graph has no payloads so these just return an appropriate number of `{}`
     let contents = include_str!("resources/rfc0025-example.ion");
-    snapshot_test_graph_eval("RFC0025 Nodes", contents, "(g MATCH (x))");
-    snapshot_test_graph_eval("RFC0025 L Triples", contents, "(g MATCH (x) -> (y))");
-    snapshot_test_graph_eval("RFC0025 LUR Triples", contents, "(g MATCH (x) - (y))");
+    snapshot_test_graph_eval(
+        "RFC0025 Nodes",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x))",
+    );
+    snapshot_test_graph_eval(
+        "RFC0025 L Triples",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x) -> (y))",
+    );
+    snapshot_test_graph_eval(
+        "RFC0025 LUR Triples",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x) - (y))",
+    );
 }
 
 #[test]
 fn select_star_gpml_paper() {
     let contents = include_str!("resources/gpml-paper-example.ion");
-    snapshot_test_graph_eval("GPML Nodes", contents, "(g MATCH (x))");
-    snapshot_test_graph_eval("GPML L Triples", contents, "(g MATCH (x) -[e]-> (y))");
-    snapshot_test_graph_eval("GPML LUR Triples", contents, "(g MATCH (x) -[e]- (y))");
+    snapshot_test_graph_eval(
+        "GPML Nodes",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x))",
+    );
+    snapshot_test_graph_eval(
+        "GPML L Triples",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x) -[e]-> (y))",
+    );
+    snapshot_test_graph_eval(
+        "GPML LUR Triples",
+        contents,
+        "SELECT * FROM GRAPH_TABLE (g MATCH (x) -[e]- (y))",
+    );
 }

@@ -48,6 +48,7 @@ serde = { version = "1", features = ["derive"], optional = true }
 [dev-dependencies]
 criterion = "0.5"
 assert_matches = "1"
+insta = "1"
 
 [features]
 default = []

@@ -501,6 +501,98 @@ mod graph {
         parse!("SELECT * FROM (g MATCH ALL SHORTEST ( (x)-[e]->*(y) ))");
         parse!("SELECT * FROM (g MATCH ALL SHORTEST ( TRAIL (x)-[e]->*(y) ))");
     }
+    #[test]
+    fn shapes() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("shapes", $q)
+            }};
+        }
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER MATCH \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER NODE ( x ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH p = (x)-[e]->*(y) \
+                        ONE ROW PER NODE ( x ) IN ( p ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER STEP ( x, e, y ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH p = (x)-[e]->*(y)-[e2]-(z)  \
+                        ONE ROW PER STEP ( y, e2, z ) IN ( p ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        COLUMNS(x as node1, e, y.*) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        EXPORT ALL SINGLETONS \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        EXPORT ALL SINGLETONS EXCEPT ( e, y ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        EXPORT SINGLETONS ( x, e ) \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        EXPORT NO SINGLETONS \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER MATCH \
+                        COLUMNS(x as node1, e, y.*) \
+                        EXPORT ALL SINGLETONS \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER MATCH \
+                        COLUMNS(x as node1, e, y.*) \
+                        EXPORT ALL SINGLETONS \
+                      )"
+        );
+        parse!(
+            "SELECT * \
+                FROM (g MATCH (x)-[e]->*(y) \
+                        ONE ROW PER MATCH \
+                        COLUMNS(x,y) \
+                        EXPORT NO SINGLETONS \
+                      )"
+        );
+    }
 }
 
 #[test]

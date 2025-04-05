@@ -1,6 +1,6 @@
 use crate::ast::*;
 use partiql_common::pretty::{
-    pretty_list, pretty_parenthesized_doc, pretty_prefixed_doc, pretty_seperated,
+    pretty_doc_list, pretty_list, pretty_parenthesized_doc, pretty_prefixed_doc, pretty_seperated,
     pretty_seperated_doc, pretty_seq, pretty_seq_doc, pretty_surrounded, pretty_surrounded_doc,
     PrettyDoc, PRETTY_INDENT_MINOR_NEST, PRETTY_INDENT_SUBORDINATE_CLAUSE_NEST,
 };
@@ -1032,35 +1032,139 @@ impl PrettyDoc for GraphMatch {
 }
 
 impl PrettyDoc for GraphTableRows {
-    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
         A: Clone,
     {
-        todo!()
+        match self {
+            GraphTableRows::OneRowPerMatch => arena.text("ONE ROW PER MATCH"),
+            GraphTableRows::OneRowPerVertex { v, in_paths } => {
+                let prefix = arena.text("ONE ROW PER NODE");
+                let spec = pretty_parenthesized_doc(arena.text(&v.value), arena);
+                let in_paths = in_paths.as_ref().map(|paths| {
+                    let paths = pretty_parenthesized_doc(
+                        pretty_doc_list(paths.iter().map(|p| arena.text(&p.value)), 0, arena),
+                        arena,
+                    );
+                    [arena.text("IN"), paths]
+                });
+                arena.intersperse(
+                    [Some([prefix, spec]), in_paths]
+                        .into_iter()
+                        .flatten()
+                        .flatten(),
+                    arena.softline(),
+                )
+            }
+            GraphTableRows::OneRowPerStep {
+                v1,
+                e,
+                v2,
+                in_paths,
+            } => {
+                let prefix = arena.text("ONE ROW PER STEP");
+                let step = pretty_doc_list(
+                    [v1, e, v2].into_iter().map(|n| arena.text(&n.value)),
+                    0,
+                    arena,
+                );
+                let spec = pretty_parenthesized_doc(step, arena);
+                let in_paths = in_paths.as_ref().map(|paths| {
+                    let paths =
+                        pretty_doc_list(paths.iter().map(|p| arena.text(&p.value)), 0, arena);
+                    [arena.text("IN"), pretty_parenthesized_doc(paths, arena)]
+                });
+                arena.intersperse(
+                    [Some([prefix, spec]), in_paths]
+                        .into_iter()
+                        .flatten()
+                        .flatten(),
+                    arena.softline(),
+                )
+            }
+        }
     }
 }
 
 impl PrettyDoc for GraphTableColumns {
-    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
         A: Clone,
     {
-        todo!()
+        let col_defs = pretty_list(&self.columns, 0, arena);
+        arena.intersperse(
+            [
+                arena.text("COLUMNS"),
+                pretty_parenthesized_doc(col_defs, arena),
+            ],
+            arena.space(),
+        )
+    }
+}
+
+impl PrettyDoc for GraphTableColumnDef {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            GraphTableColumnDef::Expr(expr, as_ident) => {
+                let parts = if let Some(as_ident) = as_ident {
+                    vec![
+                        expr.pretty_doc(arena),
+                        arena.text("AS"),
+                        arena.text(&as_ident.value),
+                    ]
+                } else {
+                    vec![expr.pretty_doc(arena)]
+                };
+                arena.intersperse(parts, arena.space())
+            }
+            GraphTableColumnDef::AllProperties(_) => {
+                unreachable!()
+            }
+        }
     }
 }
 
 impl PrettyDoc for GraphTableExport {
-    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
         D::Doc: Clone,
         A: Clone,
     {
-        todo!()
+        match self {
+            GraphTableExport::AllSingletons { except } => {
+                let prefix = arena.text("EXPORT ALL SINGLETONS");
+                if let Some(except) = except {
+                    let except =
+                        pretty_doc_list(except.iter().map(|s| arena.text(&s.value)), 0, arena);
+                    let parts = [
+                        prefix,
+                        arena.text("EXCEPT"),
+                        pretty_parenthesized_doc(except, arena),
+                    ];
+                    arena.intersperse(parts, arena.space())
+                } else {
+                    prefix
+                }
+            }
+            GraphTableExport::Singletons { exports } => {
+                let prefix = arena.text("EXPORT SINGLETONS");
+                let exports =
+                    pretty_doc_list(exports.iter().map(|e| arena.text(&e.value)), 0, arena);
+                let parts = [prefix, pretty_parenthesized_doc(exports, arena)];
+                arena.intersperse(parts, arena.space())
+            }
+            GraphTableExport::NoSingletons => arena.text("EXPORT NO SINGLETONS"),
+        }
     }
 }
 
