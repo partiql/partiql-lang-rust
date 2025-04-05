@@ -280,9 +280,7 @@ fn function_call_def_coalesce() -> CallDef {
         names: vec!["coalesce"],
         overloads: (0..15)
             .map(|n| CallSpec {
-                input: std::iter::repeat(CallSpecArg::Positional)
-                    .take(n)
-                    .collect_vec(),
+                input: std::iter::repeat_n(CallSpecArg::Positional, n).collect_vec(),
                 output: Box::new(|args| {
                     logical::ValueExpr::CoalesceExpr(logical::CoalesceExpr { elements: args })
                 }),

@@ -665,7 +665,7 @@ impl Evaluable for EvalGroupBy {
             }
             EvalGroupingStrategy::GroupFull => {
                 let mut grouped: FxHashMap<GroupKey, CombinedState> = FxHashMap::default();
-                let state = std::iter::repeat(None).take(self.aggs.len()).collect_vec();
+                let state = std::iter::repeat_n(None, self.aggs.len()).collect_vec();
                 let distinct_state = std::iter::repeat_with(|| (None, FxHashMap::default()))
                     .take(self.distinct_aggs.len())
                     .collect_vec();
