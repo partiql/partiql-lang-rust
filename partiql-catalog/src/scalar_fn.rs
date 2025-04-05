@@ -75,7 +75,7 @@ impl ScalarFunction {
 pub fn vararg_scalar_fn_overloads(scalar_fn_expr: Box<dyn ScalarFnExpr>) -> Vec<ScalarFnCallSpec> {
     (1..=FN_VAR_ARG_MAX)
         .map(|n| ScalarFnCallSpec {
-            input: std::iter::repeat(CallSpecArg::Positional).take(n).collect(),
+            input: std::iter::repeat_n(CallSpecArg::Positional, n).collect(),
             output: scalar_fn_expr.clone(),
         })
         .collect()

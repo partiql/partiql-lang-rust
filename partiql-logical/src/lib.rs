@@ -15,8 +15,7 @@
 
 mod util;
 
-mod graph;
-pub use graph::*;
+pub mod graph;
 
 use ordered_float::OrderedFloat;
 use partiql_common::catalog::ObjectId;
@@ -609,7 +608,7 @@ pub struct LikeNonStringNonLiteralMatch {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphMatchExpr {
     pub value: Box<ValueExpr>,
-    pub pattern: PathPatternMatch,
+    pub pattern: graph::PathPatternMatch,
 }
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
