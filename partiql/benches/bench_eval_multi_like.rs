@@ -239,9 +239,9 @@ fn employee_data() -> Vec<Value> {
 
     // seed the rng with a known value to assure same data across runs
     let mut rng = rand::rngs::StdRng::from_seed([42; 32]);
-    use rand::distributions::Distribution;
-    let chars = rand::distributions::Alphanumeric;
-    let random_size = rand::distributions::uniform::Uniform::from(5..=100);
+    use rand::distr::Distribution;
+    let chars = rand::distr::Alphanumeric;
+    let random_size = rand::distr::uniform::Uniform::new_inclusive(5, 100).expect("rand");
 
     // add random string prefix and suffix to each combined name
     let employee_data: Vec<Value> = combined

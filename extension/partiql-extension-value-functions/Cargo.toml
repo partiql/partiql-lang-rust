@@ -24,7 +24,7 @@ bench = false
 partiql-value = { path = "../../partiql-value", version = "0.11.*" }
 partiql-catalog = { path = "../../partiql-catalog", version = "0.11.*" }
 
-ordered-float = "4"
+ordered-float = "5"
 unicase = "2.6"
 time = { version = "0.3", features = ["macros"] }
 

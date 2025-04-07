@@ -27,8 +27,8 @@ partiql-logical = { path = "../partiql-logical", version = "0.11.*" }
 partiql-types = { path = "../partiql-types", version = "0.11.*" }
 
 thiserror = "1.0"
-ordered-float = "4"
-itertools = "0.13"
+ordered-float = "5"
+itertools = "0.14"
 unicase = "2.7"
 
 dyn-clone = "1"

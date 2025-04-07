@@ -45,12 +45,12 @@ insta = "1"
 
 thiserror = "1.0"
 
-itertools = "0.13"
+itertools = "0.14"
 rust_decimal = { version = "1.25.0", default-features = false, features = ["std"] }
 time = { version = "0.3", features = ["macros"] }
 
 criterion = "0.5"
-rand = "0.8"
+rand = "0.9"
 
 assert_matches = "1"
 

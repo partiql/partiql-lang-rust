@@ -25,8 +25,8 @@ partiql-common = { path = "../partiql-common", version = "0.11.*" }
 partiql-types = { path = "../partiql-types", version = "0.11.*" }
 lasso = "0.7"
 delegate = "0.13"
-ordered-float = "4"
-itertools = "0.13"
+ordered-float = "5"
+itertools = "0.14"
 unicase = "2.7"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 rust_decimal_macros = "1.36"
