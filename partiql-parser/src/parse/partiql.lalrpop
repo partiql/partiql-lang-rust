@@ -577,7 +577,7 @@ GraphFullEdgePattern: ast::AstNode<ast::GraphMatchEdge> = {
 GraphEdgePatternFiller: ast::GraphMatchEdge = {
     <pat:GraphElementPatternFiller> => {
         let ast::GraphMatchElement{variable, label, where_clause} = pat;
-        ast::GraphMatchEdge {direction: ast::GraphMatchDirection::Undirected, quantifier: None, variable, label, where_clause}
+        ast::GraphMatchEdge {direction: ast::GraphMatchDirection::Undirected, variable, label, where_clause}
     }
 }
 
@@ -585,7 +585,6 @@ GraphAbbreviatedEdgePattern: ast::AstNode<ast::GraphMatchEdge> = {
     <lo:@L> <direction:GraphAbbreviatedEdgePatternEdge> <hi:@R> => {
         state.node(ast::GraphMatchEdge {
             direction,
-            quantifier: None,
             variable: None,
             label: None,
             where_clause: None,
@@ -757,19 +756,27 @@ GraphSimplifiedConjunction: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
 
 GraphSimplifiedFactorHigh: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
     <GraphSimplifiedTertiary>,
-    <lo:@L> <s:GraphSimplifiedTertiary> <q:GraphPatternQuantifier> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Quantified(Box::new(s), q), lo..hi),
+    <lo:@L> <s:GraphSimplifiedTertiary> <quant:GraphPatternQuantifier> <hi:@R> =>
+           state.node(ast::GraphMatchSimplifiedPattern::Quantified(ast::GraphMatchSimplifiedPatternQuantified{path: Box::new(s), quant}), lo..hi),
     <lo:@L> <s:GraphSimplifiedTertiary> "?" <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Questioned(Box::new(s)), lo..hi),
 }
 
 GraphSimplifiedTertiary: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
     <GraphSimplifiedSecondary>,
-    <lo:@L> "<" <s:GraphSimplifiedSecondary> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::Left, Box::new(s)), lo..hi),
-    <lo:@L> "~" <s:GraphSimplifiedSecondary> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::Undirected, Box::new(s)), lo..hi),
-    <lo:@L> <s:GraphSimplifiedSecondary> ">" <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::Right, Box::new(s)), lo..hi),
-    <lo:@L> "<~" <s:GraphSimplifiedSecondary> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::LeftOrUndirected, Box::new(s)), lo..hi),
-    <lo:@L> "~" <s:GraphSimplifiedSecondary> ">" <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::UndirectedOrRight, Box::new(s)), lo..hi),
-    <lo:@L> "<" <s:GraphSimplifiedSecondary> ">" <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::LeftOrRight, Box::new(s)), lo..hi),
-    <lo:@L> "-" <s:GraphSimplifiedSecondary> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchDirection::LeftOrUndirectedOrRight, Box::new(s)), lo..hi),
+    <lo:@L> "<" <s:GraphSimplifiedSecondary> <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::Left, path: Box::new(s)}), lo..hi),
+    <lo:@L> "~" <s:GraphSimplifiedSecondary> <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::Undirected, path: Box::new(s)}), lo..hi),
+    <lo:@L> <s:GraphSimplifiedSecondary> ">" <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::Right, path: Box::new(s)}), lo..hi),
+    <lo:@L> "<~" <s:GraphSimplifiedSecondary> <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::LeftOrUndirected, path: Box::new(s)}), lo..hi),
+    <lo:@L> "~" <s:GraphSimplifiedSecondary> ">" <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::UndirectedOrRight, path: Box::new(s)}), lo..hi),
+    <lo:@L> "<" <s:GraphSimplifiedSecondary> ">" <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::LeftOrRight, path: Box::new(s)}), lo..hi),
+    <lo:@L> "-" <s:GraphSimplifiedSecondary> <hi:@R>
+        => state.node(ast::GraphMatchSimplifiedPattern::Direction(ast::GraphMatchSimplifiedPatternDirected{dir: ast::GraphMatchDirection::LeftOrUndirectedOrRight, path: Box::new(s)}), lo..hi),
 }
 
 GraphSimplifiedSecondary: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
@@ -785,7 +792,7 @@ GraphSimplifiedSecondary: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
 #[inline]
 GraphSimplifiedPrimary: ast::AstNode<ast::GraphMatchSimplifiedPattern> = {
     <lo:@L> <l:GraphLabelName> <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Label(l), lo..hi),
-    "(" <GraphSimplifiedContents> ")",
+    <lo:@L> "(" <path:GraphSimplifiedContents> ")" <hi:@R> => state.node(ast::GraphMatchSimplifiedPattern::Sub(Box::new(path)), lo..hi),
 }
 
 // 10.10

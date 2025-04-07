@@ -342,6 +342,23 @@ mod graph {
         parse!(r#"SELECT a,b FROM (g MATCH (a:A) -[e:E]- (b:B))"#);
         parse!(r#"SELECT a,b FROM (g MATCH (a:A) - (b:B))"#);
     }
+
+    #[test]
+    fn labels() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("labels", $q)
+            }};
+        }
+
+        parse!(r#"SELECT a,b FROM (g MATCH (a:%) -[e:%]-> (b:%))"#);
+        parse!(r#"SELECT a,b FROM (g MATCH (a:!Z) -[e:!D]-> (b:!Y))"#);
+        parse!(r#"SELECT a,b FROM (g MATCH (a:A|Z) -[e:E|D]-> (b:B|Y))"#);
+        parse!(r#"SELECT a,b FROM (g MATCH (a:A&Z) -[e:E&D]-> (b:B&Y))"#);
+
+        parse!(r#"SELECT a,b FROM (g MATCH (a:(A|Z)&!Y) -[e:E&!D]-> (b:%&!(!B)))"#);
+    }
+
     #[test]
     fn quantifiers() {
         macro_rules! parse {
@@ -357,6 +374,7 @@ mod graph {
         parse!(r#"SELECT a,b FROM (g MATCH (a:A)<-+(b:B))"#);
         parse!(r#"SELECT a,b FROM (g MATCH (a:A)~{5,}(b:B))"#);
         parse!(r#"SELECT a,b FROM (g MATCH (a:A)-{2,6}(b:B))"#);
+        parse!(r#"SELECT a,b FROM (g MATCH (a:A) -? (b:B))"#);
     }
     #[test]
     fn patterns() {
@@ -423,6 +441,14 @@ mod graph {
                          )
                    WHERE p.title LIKE '%considered harmful%'"#
         );
+        parse!(
+            r#"SELECT u as banCandidate
+                   FROM (g MATCH
+                            (p:Post Where p.isFlagged = true)
+                            <-[e:createdPost where e.isMobile = true]-
+                            (u)
+                         )"#
+        );
     }
     #[test]
     fn path_mode() {
@@ -439,6 +465,9 @@ mod graph {
         );
         parse!(
             r#"SELECT p FROM (g MATCH p = ACYCLIC (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
+        );
+        parse!(
+            r#"SELECT p FROM (g MATCH p = WALK (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
         );
     }
     #[test]
@@ -465,6 +494,9 @@ mod graph {
         );
         parse!(
             r#"SELECT p FROM (g MATCH p = SHORTEST 5 GROUP (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
+        );
+        parse!(
+            r#"SELECT p FROM (g MATCH p = ALL (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
         );
     }
     #[test]
@@ -516,6 +548,8 @@ mod graph {
                                     WHERE x.foo = 'bar'
                                )"
         );
+        parse!("SELECT * FROM (g MATCH ( (x)-[e]->*(y) ) | (z) ~ (q) )");
+        parse!("SELECT * FROM (g MATCH ( (x)-[e]->*(y) ) |+| (z) ~ (q) )");
     }
     #[test]
     fn shapes() {
@@ -608,6 +642,23 @@ mod graph {
                         EXPORT NO SINGLETONS \
                       )"
         );
+    }
+    #[test]
+    fn simplified() {
+        macro_rules! parse {
+            ($q:expr) => {{
+                parse_test!("simplified", $q)
+            }};
+        }
+        parse!("SELECT * FROM (g MATCH <-/ start&begin fin> /- )");
+        parse!("SELECT * FROM (g MATCH ~/ !begin -fin /~ )");
+        parse!("SELECT * FROM (g MATCH -/ start <fin /-> )");
+        parse!("SELECT * FROM (g MATCH <~/ start <~fin |+| begin ~fin> /~ )");
+        parse!("SELECT * FROM (g MATCH ~/ start <fin> | begin -fin /~> )");
+        parse!("SELECT * FROM (g MATCH <-/ start? intermediate{1,} fin  /-> )");
+        parse!("SELECT * FROM (g MATCH <-/ start? intermediate* fin  /-> )");
+        parse!("SELECT * FROM (g MATCH <-/ edge+ fin  /-> )");
+        parse!("SELECT * FROM (g MATCH -/ start !(intermediate other){2,3} fin  /- )");
     }
 }
 

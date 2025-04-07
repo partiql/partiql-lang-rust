@@ -1,0 +1,33 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT p FROM (g MATCH p = ALL (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT p FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT p FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+--------------------------------------------------------------------------------
+SELECT p
+FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+----------------------------------------
+SELECT p
+FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+------------------------------
+SELECT p
+FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+--------------------
+SELECT p
+FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+----------
+SELECT p
+FROM (g MATCH p = ALL (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))

@@ -156,9 +156,6 @@ pub struct GraphMatchEdge {
     /// edge direction
     #[visit(skip)]
     pub direction: GraphMatchDirection,
-    /// an optional quantifier for the edge match
-    #[visit(skip)]
-    pub quantifier: Option<AstNode<GraphMatchQuantifier>>,
     /// the optional element variable of the edge match, e.g.: `t` in `MATCH −[t]−>`
     #[visit(skip)]
     pub variable: Option<SymbolPrimitive>,
@@ -257,23 +254,32 @@ pub enum GraphMatchSimplifiedPattern {
     Multiset(Vec<AstNode<GraphMatchSimplifiedPattern>>),
 
     Path(Vec<AstNode<GraphMatchSimplifiedPattern>>),
+    Sub(Box<AstNode<GraphMatchSimplifiedPattern>>),
 
     Conjunction(Vec<AstNode<GraphMatchSimplifiedPattern>>),
 
     Questioned(Box<AstNode<GraphMatchSimplifiedPattern>>),
-    Quantified(
-        Box<AstNode<GraphMatchSimplifiedPattern>>,
-        AstNode<GraphMatchQuantifier>,
-    ),
+    Quantified(GraphMatchSimplifiedPatternQuantified),
 
     /// Direction override
-    Direction(
-        GraphMatchDirection,
-        Box<AstNode<GraphMatchSimplifiedPattern>>,
-    ),
+    Direction(GraphMatchSimplifiedPatternDirected),
 
     Negated(Box<AstNode<GraphMatchSimplifiedPattern>>),
     Label(SymbolPrimitive),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchSimplifiedPatternQuantified {
+    pub path: Box<AstNode<GraphMatchSimplifiedPattern>>,
+    pub quant: AstNode<GraphMatchQuantifier>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GraphMatchSimplifiedPatternDirected {
+    pub dir: GraphMatchDirection,
+    pub path: Box<AstNode<GraphMatchSimplifiedPattern>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

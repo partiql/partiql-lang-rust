@@ -325,9 +325,6 @@ impl GraphToLogical {
         &self,
         edge: &ast::GraphMatchEdge,
     ) -> Result<Vec<MatchElement>, String> {
-        if edge.quantifier.is_some() {
-            not_yet_implemented_result!("MATCH edge quantifiers are not yet supported.");
-        }
         if edge.where_clause.is_some() {
             not_yet_implemented_result!("MATCH edge where_clauses are not yet supported.");
         }

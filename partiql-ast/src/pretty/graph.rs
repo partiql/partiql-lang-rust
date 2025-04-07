@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::pretty::pretty_parenthesized_expr;
 use partiql_common::pretty::{
     pretty_doc_list, pretty_list, pretty_parenthesized_doc, pretty_surrounded,
     pretty_surrounded_doc, PrettyDoc, PRETTY_INDENT_MINOR_NEST,
@@ -348,13 +349,101 @@ impl PrettyDoc for GraphMatchPathPattern {
             GraphMatchPathPattern::Quantified(GraphMatchPathPatternQuantified { path, quant }) => {
                 arena.concat([path.pretty_doc(arena), quant.pretty_doc(arena)])
             }
+            GraphMatchPathPattern::Questioned(p) => {
+                arena.concat([p.pretty_doc(arena), arena.text("?")])
+            }
             GraphMatchPathPattern::Sub(path) => pretty_surrounded(path, "(", ")", arena),
             GraphMatchPathPattern::Node(node) => node.pretty_doc(arena),
             GraphMatchPathPattern::Edge(edge) => edge.pretty_doc(arena),
-            GraphMatchPathPattern::Union(_) => todo!("{:?}", self),
-            GraphMatchPathPattern::Multiset(_) => todo!("{:?}", self),
-            GraphMatchPathPattern::Questioned(_) => todo!("{:?}", self),
-            GraphMatchPathPattern::Simplified(_) => todo!("{:?}", self),
+            GraphMatchPathPattern::Union(u) => {
+                arena.intersperse(u.iter().map(|l| l.pretty_doc(arena)), arena.text(" | "))
+            }
+            GraphMatchPathPattern::Multiset(s) => {
+                arena.intersperse(s.iter().map(|l| l.pretty_doc(arena)), arena.text(" |+| "))
+            }
+            GraphMatchPathPattern::Simplified(simplified) => simplified.pretty_doc(arena),
+        }
+    }
+}
+
+impl PrettyDoc for GraphMatchSimplified {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let ends = match self.dir {
+            GraphMatchDirection::Left => ["<-/", "/-"],
+            GraphMatchDirection::Undirected => ["~/", "/~"],
+            GraphMatchDirection::Right => ["-/", "/->"],
+            GraphMatchDirection::LeftOrUndirected => ["<~/", "/~"],
+            GraphMatchDirection::UndirectedOrRight => ["~/", "/~>"],
+            GraphMatchDirection::LeftOrRight => ["<-/", "/->"],
+            GraphMatchDirection::LeftOrUndirectedOrRight => ["-/", "/-"],
+        };
+
+        let parts = [
+            arena.text(ends[0]),
+            self.pattern.pretty_doc(arena),
+            arena.text(ends[1]),
+        ];
+        arena.intersperse(parts, arena.space()).group()
+    }
+}
+
+impl PrettyDoc for GraphMatchSimplifiedPattern {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            GraphMatchSimplifiedPattern::Union(u) => {
+                arena.intersperse(u.iter().map(|l| l.pretty_doc(arena)), arena.text(" | "))
+            }
+            GraphMatchSimplifiedPattern::Multiset(s) => {
+                arena.intersperse(s.iter().map(|l| l.pretty_doc(arena)), arena.text(" |+| "))
+            }
+            GraphMatchSimplifiedPattern::Path(path) => {
+                arena.intersperse(path.iter().map(|e| e.pretty_doc(arena)), arena.space())
+            }
+            GraphMatchSimplifiedPattern::Sub(path) => pretty_surrounded(path, "(", ")", arena),
+            GraphMatchSimplifiedPattern::Conjunction(c) => {
+                arena.intersperse(c.iter().map(|l| l.pretty_doc(arena)), arena.text("&"))
+            }
+            GraphMatchSimplifiedPattern::Questioned(p) => {
+                arena.concat([p.pretty_doc(arena), arena.text("?")])
+            }
+            GraphMatchSimplifiedPattern::Quantified(GraphMatchSimplifiedPatternQuantified {
+                path,
+                quant,
+            }) => arena.concat([path.pretty_doc(arena), quant.pretty_doc(arena)]),
+            GraphMatchSimplifiedPattern::Direction(GraphMatchSimplifiedPatternDirected {
+                dir,
+                path,
+            }) => {
+                let path = path.pretty_doc(arena);
+                let parts = match dir {
+                    GraphMatchDirection::Left => vec![arena.text("<"), path],
+                    GraphMatchDirection::Undirected => vec![arena.text("~"), path],
+                    GraphMatchDirection::Right => vec![path, arena.text(">")],
+                    GraphMatchDirection::LeftOrUndirected => vec![arena.text("<~"), path],
+                    GraphMatchDirection::UndirectedOrRight => {
+                        vec![arena.text("~"), path, arena.text(">")]
+                    }
+                    GraphMatchDirection::LeftOrRight => {
+                        vec![arena.text("<"), path, arena.text(">")]
+                    }
+                    GraphMatchDirection::LeftOrUndirectedOrRight => vec![arena.text("-"), path],
+                };
+                arena.concat(parts).group()
+            }
+            GraphMatchSimplifiedPattern::Negated(l) => {
+                arena.concat([arena.text("!"), l.pretty_doc(arena)])
+            }
+            GraphMatchSimplifiedPattern::Label(l) => arena.text(&l.value),
         }
     }
 }
@@ -425,7 +514,7 @@ impl PrettyDoc for GraphMatchEdge {
             .flatten()
             .collect::<Vec<_>>();
 
-        let mut edge = if !parts.is_empty() {
+        let edge = if !parts.is_empty() {
             let (prefix, suffix) = match self.direction {
                 GraphMatchDirection::Right => ("-[", "]->"),
                 GraphMatchDirection::Left => ("<-[", "]-"),
@@ -449,9 +538,6 @@ impl PrettyDoc for GraphMatchEdge {
             };
             arena.text(edge)
         };
-        if let Some(q) = &self.quantifier {
-            edge = arena.concat([edge, q.pretty_doc(arena)]);
-        }
         edge.group()
     }
 }
@@ -465,10 +551,18 @@ impl PrettyDoc for GraphMatchLabel {
     {
         match self {
             GraphMatchLabel::Name(name) => arena.text(&name.value),
-            GraphMatchLabel::Wildcard => todo!("{:?}", self),
-            GraphMatchLabel::Negated(_) => todo!("{:?}", self),
-            GraphMatchLabel::Conjunction(_) => todo!("{:?}", self),
-            GraphMatchLabel::Disjunction(_) => todo!("{:?}", self),
+            GraphMatchLabel::Wildcard => arena.text("%"),
+            GraphMatchLabel::Negated(l) => {
+                arena.concat([arena.text("!"), pretty_parenthesized_expr(l, 0, arena)])
+            }
+            GraphMatchLabel::Conjunction(c) => pretty_parenthesized_doc(
+                arena.intersperse(c.iter().map(|l| l.pretty_doc(arena)), arena.text("&")),
+                arena,
+            ),
+            GraphMatchLabel::Disjunction(d) => pretty_parenthesized_doc(
+                arena.intersperse(d.iter().map(|l| l.pretty_doc(arena)), arena.text("|")),
+                arena,
+            ),
         }
     }
 }
