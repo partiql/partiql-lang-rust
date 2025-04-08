@@ -3,33 +3,39 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT p FROM g MATCH ANY p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')
+SELECT * FROM (g MATCH (x)-[e]->*(y) ONE ROW PER STEP ( x, e, y ) )
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP (x, e, y))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP (x, e, y))
 
 --------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP (x, e, y))
 
 ----------------------------------------
-SELECT p FROM g MATCH ANY
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP (x, e, y))
 
 ------------------------------
-SELECT p FROM g MATCH ANY
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP (x, e, y))
 
 --------------------
-SELECT p
-FROM g MATCH ANY
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP
+  (x, e, y))
 
 ----------
-SELECT p
-FROM g MATCH ANY
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER STEP
+  (x, e,
+  y))

@@ -84,41 +84,39 @@ mod tests {
     fn display() -> Result<(), ParseError<'static, BytePosition>> {
         let symbols =
             "( [ { } ] ) << >> ; , < > <= >= != <> = == - + * ? % / ^ . || : --foo /*block*/";
+        let graph_symbols =
+            "|+| <- ~ -> <~ ~> <-[ ]- ~[ ]~ -[ ]-> <~[ ]~> <-> <-/ /- ~/ /~ -/ /-> <~/ /~>";
         let primitives = r#"unquoted_ident "quoted_ident" @unquoted_atident @"quoted_atident""#;
         let keywords =
             "WiTH Where Value uSiNg Unpivot UNION True Select right Preserve pivoT Outer Order Or \
              On Offset Nulls Null Not Natural Missing Limit Like Left Lateral Last Join \
              Intersect Is Inner In Having Group From For Full First False Except Escape Desc \
              Cross Table Time Timestamp Date By Between At As And Asc All Values Case When Then Else End \
-             Match Any Shortest Trail Acyclic Simple";
-        let symbols = symbols.split(' ').chain(primitives.split(' '));
+             Match";
+        let nonreserved_kw = "Any Simple Acyclic Bindings Bound Destination \
+            Different Directed Edge Edges Elements label Labeled Node Paths Properties Property \
+            PROPERTY_GRAPH_CaTalOg PROPERTY_GRAPH_NaMe PROPERTY_GRAPH_SchEma Relationship Relationships \
+            Shortest Singletons Step Tables Trail Vertex Walk";
+        let symbols = symbols.split(' ');
+        let graph_symbols = graph_symbols.split(' ');
+        let primitives = primitives.split(' ');
+        let nonreserved_kws = nonreserved_kw.split(' ');
         let keywords = keywords.split(' ');
 
-        let text = symbols.interleave(keywords).join("\n");
+        let text = symbols
+            .chain(graph_symbols)
+            .chain(primitives)
+            .chain(keywords)
+            .chain(nonreserved_kws)
+            .join("\n");
         let s = text.as_str();
 
         let mut offset_tracker = LineOffsetTracker::default();
         let lexer = PartiqlLexer::new(s, &mut offset_tracker);
         let toks: Vec<_> = lexer.collect::<Result<_, _>>().unwrap();
 
-        #[rustfmt::skip]
-        let expected = vec![
-            "(", "WITH", "[", "WHERE", "{", "VALUE", "}", "USING", "]", "UNPIVOT", ")", "UNION",
-            "<<", "TRUE", ">>", "SELECT", ";", "RIGHT", ",", "PRESERVE", "<", "PIVOT", ">", "OUTER",
-            "<=", "ORDER", ">=", "OR", "!=", "ON", "<>", "OFFSET", "=", "NULLS", "==", "NULL", "-",
-            "NOT", "+", "NATURAL", "*", "MISSING", "?", "LIMIT", "%", "LIKE", "/", "LEFT", "^",
-            "LATERAL", ".", "LAST", "||", "JOIN", ":", "INTERSECT", "--", "IS", "/**/", "INNER",
-            "<unquoted_ident:UNQUOTED_IDENT>", "IN", "<quoted_ident:QUOTED_IDENT>", "HAVING",
-            "<unquoted_atident:UNQUOTED_ATIDENT>", "GROUP", "<quoted_atident:QUOTED_ATIDENT>",
-            "FROM", "FOR", "FULL", "FIRST", "FALSE", "EXCEPT", "ESCAPE", "DESC", "CROSS", "TABLE",
-            "TIME", "TIMESTAMP", "DATE", "BY", "BETWEEN", "AT", "AS", "AND", "ASC", "ALL", "VALUES",
-            "CASE", "WHEN", "THEN", "ELSE", "END", "MATCH", "ANY", "SHORTEST", "TRAIL", "ACYCLIC", "SIMPLE"
-        ];
-        let displayed = toks
-            .into_iter()
-            .map(|(_s, t, _e)| t.to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(expected, displayed);
+        let toks = toks.into_iter().map(|(_s, t, _e)| t.to_string()).join("\n");
+        insta::assert_snapshot!(toks);
 
         Ok(())
     }

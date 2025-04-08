@@ -508,6 +508,7 @@ impl ToDot<ast::FromLet> for AstToDot {
         let lbl = match &ast.kind {
             ast::FromLetKind::Scan => "Scan",
             ast::FromLetKind::Unpivot => "Unpivot",
+            ast::FromLetKind::GraphTable => "GRAPH_TABLE",
         };
         let id = out.node_auto_labelled(lbl).id();
 

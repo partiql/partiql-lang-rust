@@ -1,0 +1,34 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT p FROM (g MATCH p = SHORTEST 5 GROUP (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT p FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+--------------------------------------------------------------------------------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+----------------------------------------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+------------------------------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+--------------------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))
+
+----------
+SELECT p
+FROM (g MATCH p = SHORTEST 5 GROUPS (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha')))

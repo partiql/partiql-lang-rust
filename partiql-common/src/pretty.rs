@@ -197,28 +197,6 @@ where
 }
 
 #[inline]
-pub fn pretty_sp_bracketed_doc<'b, E, D, A>(doc: E, arena: &'b D) -> DocBuilder<'b, D, A>
-where
-    E: Pretty<'b, D, A>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    pretty_surrounded_doc(doc, "[ ", " ]", arena)
-}
-
-#[inline]
-pub fn pretty_bracketed_doc<'b, E, D, A>(doc: E, arena: &'b D) -> DocBuilder<'b, D, A>
-where
-    E: Pretty<'b, D, A>,
-    D: DocAllocator<'b, A>,
-    D::Doc: Clone,
-    A: Clone,
-{
-    pretty_surrounded_doc(doc, "[", "]", arena)
-}
-
-#[inline]
 pub fn pretty_seq_doc<'i, 'b, I, E, D, A>(
     seq: I,
     start: &'static str,
@@ -282,6 +260,18 @@ where
 {
     let sep = arena.text(",").append(arena.softline());
     pretty_seperated(sep, list, nest, arena)
+}
+
+#[inline]
+pub fn pretty_doc_list<'b, I, D, A>(list: I, nest: isize, arena: &'b D) -> DocBuilder<'b, D, A>
+where
+    I: IntoIterator<Item = DocBuilder<'b, D, A>>,
+    D: DocAllocator<'b, A>,
+    D::Doc: Clone,
+    A: Clone,
+{
+    let sep = arena.text(",").append(arena.softline());
+    pretty_seperated_doc(sep, list, nest, arena)
 }
 
 #[inline]

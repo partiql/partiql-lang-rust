@@ -1,0 +1,53 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT * FROM (g MATCH (x)-[e]->*(y) ONE ROW PER MATCH COLUMNS(x,y) EXPORT NO SINGLETONS )
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+--------------------------------------------------------------------------------
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+----------------------------------------
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+------------------------------
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+--------------------
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x, y)
+  EXPORT NO SINGLETONS)
+
+----------
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  ONE ROW PER MATCH
+  COLUMNS (x,
+  y)
+  EXPORT NO SINGLETONS)

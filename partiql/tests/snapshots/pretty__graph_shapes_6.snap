@@ -3,34 +3,39 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')
+SELECT * FROM (g MATCH (x)-[e]->*(y) COLUMNS(x as node1, e, y.*) )
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1, e, y.*))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1, e, y.*))
 
 --------------------------------------------------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1, e, y.*))
 
 ----------------------------------------
-SELECT p FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1, e, y.*))
 
 ------------------------------
-SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1, e,
+  y.*))
 
 --------------------
-SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1,
+  e, y.*))
 
 ----------
-SELECT p
-FROM g MATCH ANY SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH (x) -[e]->* (y)
+  COLUMNS (x AS node1,
+  e, y.*))

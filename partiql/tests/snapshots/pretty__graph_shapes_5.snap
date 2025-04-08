@@ -3,34 +3,42 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT p FROM g MATCH ALL SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')
+SELECT * FROM (g MATCH p = (x)-[e]->*(y)-[e2]-(z)  ONE ROW PER STEP ( y, e2, z ) IN ( p ) )
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ALL SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP (y, e2, z) IN (p))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT p FROM g MATCH ALL SHORTEST p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP (y, e2, z) IN (p))
 
 --------------------------------------------------------------------------------
-SELECT p FROM g MATCH ALL SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT * FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP (y, e2, z) IN (p))
 
 ----------------------------------------
-SELECT p FROM g MATCH ALL SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP (y, e2, z) IN (p))
 
 ------------------------------
-SELECT p
-FROM g MATCH ALL SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP (y, e2, z)
+  IN (p))
 
 --------------------
-SELECT p
-FROM g MATCH ALL SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP
+  (y, e2, z) IN (p))
 
 ----------
-SELECT p
-FROM g MATCH ALL SHORTEST
-  p = (a WHERE (a.owner = 'Dave')) -[t:Transfer]->* (b WHERE (b.owner = 'Aretha'))
+SELECT *
+FROM (g MATCH p = (x) -[e]->* (y) -[e2]- (z)
+  ONE ROW PER STEP
+  (y, e2,
+  z) IN
+  (p))

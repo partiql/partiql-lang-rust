@@ -1,0 +1,34 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT * FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ( (x)-[e]->*(y) ) KEEP ANY SIMPLE PATHS WHERE x.foo = 'bar'
+                               )
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT * FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+--------------------------------------------------------------------------------
+SELECT *
+FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+----------------------------------------
+SELECT *
+FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+------------------------------
+SELECT *
+FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+--------------------
+SELECT *
+FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))
+
+----------
+SELECT *
+FROM (g MATCH REPEATABLE ELEMENTS ALL SHORTEST ((x) -[e]->* (y)) KEEP ANY SIMPLE WHERE (x.foo = 'bar'))

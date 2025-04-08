@@ -514,27 +514,72 @@ pub trait Visitor<'ast> {
         Traverse::Continue
     }
 
-    fn enter_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
+    fn enter_graph_table(&mut self, _gtable: &'ast ast::GraphTable) -> Traverse {
         Traverse::Continue
     }
-    fn exit_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
+    fn exit_graph_table(&mut self, _gtable: &'ast ast::GraphTable) -> Traverse {
         Traverse::Continue
     }
-    fn enter_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
+
+    fn enter_graph_match(&mut self, _gmatch: &'ast ast::GraphMatch) -> Traverse {
         Traverse::Continue
     }
-    fn exit_graph_match_expr(&mut self, _graph_pattern: &'ast ast::GraphMatchExpr) -> Traverse {
+    fn exit_graph_match(&mut self, _gmatch: &'ast ast::GraphMatch) -> Traverse {
         Traverse::Continue
     }
-    fn enter_graph_match_pattern(
+
+    fn enter_graph_pattern(&mut self, _graph_pattern: &'ast ast::GraphPattern) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_pattern(&mut self, _graph_pattern: &'ast ast::GraphPattern) -> Traverse {
+        Traverse::Continue
+    }
+
+    fn enter_graph_path_pattern(
         &mut self,
-        _graph_pattern: &'ast ast::GraphMatchPattern,
+        _graph_pattern: &'ast ast::GraphPathPattern,
     ) -> Traverse {
         Traverse::Continue
     }
-    fn exit_graph_match_pattern(
+    fn exit_graph_path_pattern(&mut self, _graph_pattern: &'ast ast::GraphPathPattern) -> Traverse {
+        Traverse::Continue
+    }
+
+    fn enter_graph_path_sub_pattern(
         &mut self,
-        _graph_pattern: &'ast ast::GraphMatchPattern,
+        _graph_pattern: &'ast ast::GraphPathSubPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_path_sub_pattern(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphPathSubPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+
+    fn enter_graph_match_path_pattern(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPathPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_path_pattern(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPathPattern,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+
+    fn enter_graph_match_path_pattern_quantified(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPathPatternQuantified,
+    ) -> Traverse {
+        Traverse::Continue
+    }
+    fn exit_graph_match_path_pattern_quantified(
+        &mut self,
+        _graph_pattern: &'ast ast::GraphMatchPathPatternQuantified,
     ) -> Traverse {
         Traverse::Continue
     }

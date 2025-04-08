@@ -757,134 +757,152 @@ mod tests {
 
         #[test]
         fn no_labels() {
-            parse!(r#"SELECT 1 FROM my_graph MATCH ()"#);
-            parse!(r#"SELECT 1 FROM (my_graph MATCH ())"#);
+            parse!(r#"SELECT 1 FROM GRAPH_TABLE (my_graph MATCH ())"#);
 
-            parse!(r#"SELECT 1 FROM my_graph MATCH () WHERE contains_value('1')"#);
-            parse!(r#"SELECT 1 FROM (my_graph MATCH ()) WHERE contains_value('1')"#);
+            parse!(r#"SELECT 1 FROM GRAPH_TABLE (my_graph MATCH ()) WHERE contains_value('1')"#);
 
-            parse!(r#"SELECT x.info AS info FROM my_graph MATCH (x) WHERE x.name LIKE 'foo'"#);
-            parse!(r#"SELECT x.info AS info FROM (my_graph MATCH (x)) WHERE x.name LIKE 'foo'"#);
-            // TODO fails due to edge first
-            // parse!(r#"SELECT 1 FROM (g MATCH -[]->) "#);
+            parse!(
+                r#"SELECT x.info AS info FROM GRAPH_TABLE (my_graph MATCH (x)) WHERE x.name LIKE 'foo'"#
+            );
+            parse!(r#"SELECT 1 FROM GRAPH_TABLE (g MATCH -[]->) "#);
         }
 
         #[test]
         fn lone_match_expr() {
             parse!(r#"(MyGraph MATCH (x))"#);
             parse!(r#"(MyGraph MATCH (x), (y) )"#);
-            // TODO fails due to edge first
-            //parse!(r#"(MyGraph MATCH (x), -[u]-> )"#);
+            parse!(r#"(MyGraph MATCH (x), -[u]-> )"#);
         }
 
         #[test]
         fn labelled_nodes() {
-            parse!(r#"SELECT x AS target FROM my_graph MATCH (x:Label) WHERE x.has_data = true"#);
+            parse!(r#"SELECT x AS target FROM (my_graph MATCH (x:Label) WHERE x.has_data = true)"#);
         }
 
         #[test]
         fn edges() {
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) -[e:E]-> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) -> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) ~[e:E]~ (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) ~ (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <-[e:E]- (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <- (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) ~[e:E]~> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) ~> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <~[e:E]~ (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <~ (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <-[e:E]-> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) <-> (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) -[e:E]- (b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A) - (b:B)"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) -[e:E]-> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) -> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) ~[e:E]~ (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) ~ (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <-[e:E]- (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <- (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) ~[e:E]~> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) ~> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <~[e:E]~ (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <~ (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <-[e:E]-> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) <-> (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) -[e:E]- (b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A) - (b:B))"#);
         }
 
         #[test]
         fn quantifiers() {
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)-[:edge]->*(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)<-[:edge]-+(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)~[:edge]~{5,}(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)-[e:edge]-{2,6}(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)->*(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)<-+(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)~{5,}(b:B)"#);
-            parse!(r#"SELECT a,b FROM g MATCH (a:A)-{2,6}(b:B)"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)-[:edge]->*(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)<-[:edge]-+(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)~[:edge]~{5,}(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)-[e:edge]-{2,6}(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)->*(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)<-+(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)~{5,}(b:B))"#);
+            parse!(r#"SELECT a,b FROM (g MATCH (a:A)-{2,6}(b:B))"#);
         }
 
         #[test]
         fn patterns() {
             parse!(
-                r#"SELECT the_a.name AS src, the_b.name AS dest FROM my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE the_y.score > 10"#
+                r#"SELECT the_a.name AS src, the_b.name AS dest FROM (my_graph MATCH (the_a:a) -[the_y:y]-> (the_b:b) WHERE the_y.score > 10)"#
             );
-            parse!(r#""SELECT a,b FROM g MATCH (a)-[:has]->()-[:contains]->(b)""#);
-            parse!(r#"SELECT a,b FROM (g MATCH (a) -[:has]-> (x), (x)-[:contains]->(b))"#);
+            parse!(r#""SELECT a,b FROM (g MATCH (a)-[:has]->()-[:contains]->(b))""#);
+            parse!(
+                r#"SELECT a,b FROM GRAPH_TABLE (g MATCH (a) -[:has]-> (x), (x)-[:contains]->(b))"#
+            );
         }
 
         #[test]
         fn path_var() {
-            parse!(r#"SELECT a,b FROM (g MATCH p = (a:A) -[e:E]-> (b:B))"#);
+            parse!(r#"SELECT a,b FROM GRAPH_TABLE (g MATCH p = (a:A) -[e:E]-> (b:B))"#);
         }
 
         #[test]
         fn paranthesized() {
             parse!(
-                r#"SELECT a,b FROM (g MATCH [(a:A)-[e:Edge]->(b:A) WHERE a.owner=b.owner]{2,5})"#
+                r#"SELECT a,b FROM GRAPH_TABLE (g MATCH ((a:A)-[e:Edge]->(b:A) WHERE a.owner=b.owner){2,5})"#
             );
-            parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)[()-[e:Edge]->()]{1,3}(b:B))"#);
-
-            // brackets
-            parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)[-[e:Edge]->]*(b:B))"#);
-            // parens
-            parse!(r#"SELECT a,b FROM (g MATCH pathVar = (a:A)(-[e:Edge]->)*(b:B))"#);
+            parse!(
+                r#"SELECT a,b FROM GRAPH_TABLE (g MATCH pathVar = (a:A)(()-[e:Edge]->()){1,3}(b:B))"#
+            );
+            parse!(r#"SELECT a,b FROM GRAPH_TABLE (g MATCH pathVar = (a:A)(-[e:Edge]->)*(b:B))"#);
         }
 
         #[test]
         fn filters() {
             parse!(
-                r#"SELECT u as banCandidate FROM g MATCH (p:Post Where p.isFlagged = true) <-[:createdPost]- (u:User WHERE u.isBanned = false AND u.karma < 20) -[:createdComment]->(c:Comment WHERE c.isFlagged = true) WHERE p.title LIKE '%considered harmful%'"#
+                r#"SELECT u as banCandidate
+                   FROM (g MATCH
+                            (p:Post Where p.isFlagged = true)
+                            <-[:createdPost]-
+                            (u:User WHERE u.isBanned = false AND u.karma < 20)
+                            -[:createdComment]->
+                            (c:Comment WHERE c.isFlagged = true)
+                          WHERE p.title LIKE '%considered harmful%')"#
+            );
+            parse!(
+                r#"SELECT u as banCandidate
+                   FROM (g MATCH
+                            (p:Post Where p.isFlagged = true)
+                            <-[:createdPost]-
+                            (u:User WHERE u.isBanned = false AND u.karma < 20)
+                            -[:createdComment]->
+                            (c:Comment WHERE c.isFlagged = true)
+                         )
+                   WHERE p.title LIKE '%considered harmful%'"#
             );
         }
 
         #[test]
-        fn restrictors() {
+        fn path_mode() {
             parse!(
-                r#"SELECT p FROM g MATCH TRAIL p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = TRAIL (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH SIMPLE p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = SIMPLE (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH ACYCLIC p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = ACYCLIC (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
         }
 
         #[test]
-        fn selectors() {
+        fn search_prefix() {
             parse!(
-                r#"SELECT p FROM g MATCH ANY SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = ANY SHORTEST (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH ALL SHORTEST p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = ALL SHORTEST (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH ANY p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = ANY (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH ANY 5 p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = ANY 5 (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH SHORTEST 5 p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = SHORTEST 5 (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
             parse!(
-                r#"SELECT p FROM g MATCH SHORTEST 5 GROUP p = (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha')"#
+                r#"SELECT p FROM (g MATCH p = SHORTEST 5 GROUP (a WHERE a.owner='Dave') -[t:Transfer]-> * (b WHERE b.owner='Aretha'))"#
             );
         }
 
         #[test]
         fn match_and_join() {
             parse!(
-                r#"SELECT a,b,c, t1.x as x, t2.y as y FROM (graph MATCH (a) -> (b), (a) -> (c)), table1 as t1, table2 as t2"#
+                r#"SELECT a,b,c, t1.x as x, t2.y as y FROM GRAPH_TABLE (g MATCH (a) -> (b), (a) -> (c)), table1 as t1, table2 as t2"#
+            );
+            parse!(
+                r#"SELECT a,b,c, t1.x as x, t2.y as y FROM table1 as t1, table2 as t2, GRAPH_TABLE (g MATCH (a) -> (b), (a) -> (c))"#
             );
         }
 
@@ -896,8 +914,8 @@ mod tests {
 
         #[test]
         fn etc() {
-            parse!("SELECT * FROM g MATCH ALL SHORTEST [ (x)-[e]->*(y) ]");
-            parse!("SELECT * FROM g MATCH ALL SHORTEST [ TRAIL (x)-[e]->*(y) ]");
+            parse!("SELECT * FROM (g MATCH ALL SHORTEST ( (x)-[e]->*(y) ))");
+            parse!("SELECT * FROM (g MATCH ALL SHORTEST ( TRAIL (x)-[e]->*(y) ))");
         }
     }
 

@@ -1,0 +1,39 @@
+---
+source: partiql/tests/pretty.rs
+expression: doc
+---
+========================================================================================================================================================================================================
+SELECT u as banCandidate
+                   FROM (g MATCH
+                            (p:Post Where p.isFlagged = true)
+                            <-[e:createdPost where e.isMobile = true]-
+                            (u)
+                         )
+========================================================================================================================================================================================================
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT u AS banCandidate FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+------------------------------------------------------------------------------------------------------------------------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+--------------------------------------------------------------------------------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+----------------------------------------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+------------------------------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+--------------------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))
+
+----------
+SELECT u AS banCandidate
+FROM (g MATCH (p:Post WHERE (p.isFlagged = true)) <-[e:createdPost WHERE (e.isMobile = true)]- (u))

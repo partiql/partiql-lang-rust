@@ -3,31 +3,32 @@ source: partiql/tests/pretty.rs
 expression: doc
 ---
 ========================================================================================================================================================================================================
-SELECT a,b FROM (g MATCH pathVar = (a:A)[()-[e:Edge]->()]{1,3}(b:B))
+SELECT a,b FROM GRAPH_TABLE (g MATCH pathVar = (a:A)(()-[e:Edge]->()){1,3}(b:B))
 ========================================================================================================================================================================================================
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-SELECT a, b FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+SELECT a, b FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 ------------------------------------------------------------------------------------------------------------------------
-SELECT a, b FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+SELECT a, b FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 --------------------------------------------------------------------------------
-SELECT a, b FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+SELECT a, b
+FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 ----------------------------------------
 SELECT a, b
-FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 ------------------------------
 SELECT a, b
-FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 --------------------
 SELECT a, b
-FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
 
 ----------
 SELECT a,
   b
-FROM g MATCH pathVar = (a:A) [() -[e:Edge]-> ()]{1,3} (b:B)
+FROM GRAPH_TABLE (g MATCH pathVar = (a:A) (() -[e:Edge]-> ()){1,3} (b:B))
