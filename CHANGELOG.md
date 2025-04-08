@@ -11,10 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-parser: Added a source location to `ParseError::UnexpectedEndOfInput`
 - *BREAKING* partiql-ast: Changed the modelling of parsed literals.
 - *BREAKING* partiql-logical: Changed the modelling of logical plan literals.
-- partiql-eval: Fixed behavior of comparison and `BETWEEN` operations w.r.t. type mismatches
+- *BREAKING* partiql-eval: Fixed behavior of comparison and `BETWEEN` operations w.r.t. type mismatches
+- *BREAKING* partiql-eval: `BindEvalExpr::bind` takes `self` rather than `&self`
+- *BREAKING* Changed modeling of Ion Literals to be evaluated to Boxed Variants rather than eagerly transformed to PartiQL Values.
 
 ### Added
 - partiql-value: Pretty-printing of `Value` via `ToPretty` trait
+- Added `Datum`, an interface to introspecting `Value`s
+- Added graph `MATCH` expressions and `GRAPH_TABLE` expression conformant with SQL 2023 Property Graph Query
+  - Parsing and pretty-printing are intended to be conformant
+  - Only a subset of planning and evaluation are supported currently
 
 ### Removed
 
