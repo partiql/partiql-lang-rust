@@ -1,0 +1,5 @@
+---
+source: extension/partiql-extension-csv/tests/scan.rs
+expression: errs
+---
+[]

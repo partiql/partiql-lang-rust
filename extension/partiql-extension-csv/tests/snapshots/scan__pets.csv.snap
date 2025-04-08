@@ -1,0 +1,10 @@
+---
+source: extension/partiql-extension-csv/tests/scan.rs
+expression: result
+---
+<<
+  { 'Pet': 'Dog', 'Food': 'Kibble' },
+  { 'Pet': 'Cat', 'Food': 'Canned' },
+  { 'Pet': 'Mouse', 'Food': 'Grain' },
+  { 'Pet': 'Chicken', 'Food': 'Grain' }
+>>

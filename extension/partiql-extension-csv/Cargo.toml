@@ -1,0 +1,51 @@
+[package]
+name = "partiql-extension-csv"
+description = "PartiQL CSV extensions"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["sql", "parser", "query", "compilers", "csv"]
+categories = ["database", "compilers"]
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+
+[dependencies]
+partiql-value = { path = "../../partiql-value", version = "0.11.*" }
+partiql-catalog = { path = "../../partiql-catalog", version = "0.11.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.11.*" }
+
+csv = "1"
+
+ordered-float = "5"
+itertools = "0.14"
+unicase = "2.7"
+rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
+ion-rs_old = { version = "0.18", package = "ion-rs" }
+ion-rs = { version = "1.0.0-rc.11", features = ["experimental"] }
+time = { version = "0.3", features = ["macros"] }
+once_cell = "1"
+regex = "1.10"
+thiserror = "1.0"
+delegate = "0.13"
+
+[dev-dependencies]
+partiql-parser = { path = "../../partiql-parser", version = "0.11.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.11.*" }
+partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.11.*" }
+partiql-eval = { path = "../../partiql-eval", version = "0.11.*" }
+
+insta = "1"
+
+[features]
+default = []

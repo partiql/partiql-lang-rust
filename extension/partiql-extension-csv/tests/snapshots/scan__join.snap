@@ -1,0 +1,12 @@
+---
+source: extension/partiql-extension-csv/tests/scan.rs
+expression: result
+---
+<<
+  { 'Color': 'Yellow', 'Food': 'Kibble' },
+  { 'Color': 'Pink', 'Food': 'Canned' },
+  { 'Color': 'Green', 'Food': 'Grain' },
+  { 'Color': 'White', 'Food': 'Grain' },
+  { 'Color': 'Blue', 'Food': 'Kibble' },
+  { 'Color': 'Brown', 'Food': 'Kibble' }
+>>
