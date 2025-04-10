@@ -17,7 +17,7 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, GraphMatchExpr, IsTypeExpr,
     LikeMatch, LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
-    PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
+    PatternMatchExpr, ProjectAllMode, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
 };
 use std::borrow::Cow;
 
@@ -879,7 +879,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let env = self.exit_env();
 
         let select: BindingsOp = match _projection_kind {
-            ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll,
+            ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll(Default::default()),
             ProjectionKind::ProjectList(_) => {
                 true_or_fault!(self, env.len().is_even(), "env.len() is not even");
                 let mut exprs = Vec::with_capacity(env.len() / 2);
@@ -1501,25 +1501,40 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             .as_ref()
             .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
-        let bexpr = match kind {
-            FromLetKind::Scan => logical::BindingsOp::Scan(logical::Scan {
-                expr,
-                as_key,
-                at_key,
-            }),
-            FromLetKind::Unpivot => logical::BindingsOp::Unpivot(logical::Unpivot {
-                expr,
-                as_key,
-                at_key,
-            }),
-            FromLetKind::GraphTable => logical::BindingsOp::Scan(logical::Scan {
-                expr,
-                as_key,
-                at_key,
-            }),
+        let (bexpr, project_all_mode) = match kind {
+            FromLetKind::Scan => (
+                logical::BindingsOp::Scan(logical::Scan {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::Unwrap,
+            ),
+            FromLetKind::Unpivot => (
+                logical::BindingsOp::Unpivot(logical::Unpivot {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::PassThrough,
+            ),
+            FromLetKind::GraphTable => (
+                logical::BindingsOp::Scan(logical::Scan {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::Unwrap,
+            ),
         };
         let id = self.plan.add_operator(bexpr);
         self.push_bexpr(id);
+        if let Some(select_id) = self.current_clauses_mut().select_clause {
+            if let Some(BindingsOp::ProjectAll(mode)) = self.plan.operator_as_mut(select_id) {
+                *mode = project_all_mode
+            }
+        }
+
         Traverse::Continue
     }
 
@@ -1671,7 +1686,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut binding = Vec::new();
         let select_clause_exprs = match select_clause {
             BindingsOp::Project(ref mut project) => &mut project.exprs,
-            BindingsOp::ProjectAll => &mut binding,
+            BindingsOp::ProjectAll(_) => &mut binding,
             BindingsOp::ProjectValue(_) => &mut binding, // TODO: replacement of SELECT VALUE expressions
             _ => {
                 self.errors.push(AstTransformError::IllegalState(

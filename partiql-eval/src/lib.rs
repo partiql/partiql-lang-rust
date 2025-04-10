@@ -1478,7 +1478,7 @@ mod tests {
 
         let from = lg.add_operator(scan("data", "data"));
 
-        let project = lg.add_operator(ProjectAll);
+        let project = lg.add_operator(ProjectAll(Default::default()));
 
         let sink = lg.add_operator(BindingsOp::Sink);
 

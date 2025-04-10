@@ -218,7 +218,7 @@ pub enum BindingsOp {
     Join(Join),
     BagOp(BagOp),
     Project(Project),
-    ProjectAll,
+    ProjectAll(ProjectAllMode),
     ProjectValue(ProjectValue),
     ExprQuery(ExprQuery),
     Distinct,
@@ -226,6 +226,14 @@ pub enum BindingsOp {
     Having(Having),
     #[default]
     Sink,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ProjectAllMode {
+    #[default]
+    Unwrap,
+    PassThrough,
 }
 
 /// [`Scan`] bridges from [`ValueExpr`]s to [`BindingsOp`]s.
