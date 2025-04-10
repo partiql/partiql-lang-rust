@@ -169,7 +169,7 @@ pub struct AstToLogical<'a> {
     arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
     sort_stack: Vec<Vec<logical::SortSpec>>,
-    aggregate_exprs: Vec<AggregateExpression>,
+    aggregate_exprs: Vec<Vec<AggregateExpression>>,
     projection_renames: Vec<FnvIndexMap<String, BindingsName<'a>>>,
 
     aliases: FnvIndexMap<NodeId, SymbolPrimitive>,
@@ -493,6 +493,7 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_q(&mut self) {
         self.q_stack.push(Default::default());
+        self.aggregate_exprs.push(Default::default());
         self.ctx_stack.push(QueryContext::Query);
         self.projection_renames.push(Default::default());
     }
@@ -501,6 +502,7 @@ impl<'a> AstToLogical<'a> {
     fn exit_q(&mut self) -> QueryClauses {
         self.projection_renames.pop().expect("q level");
         self.ctx_stack.pop().expect("q level");
+        self.aggregate_exprs.pop().expect("q level");
         self.q_stack.pop().expect("q level")
     }
 
@@ -852,7 +854,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
         // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
         // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
-        if !self.aggregate_exprs.is_empty() && self.current_clauses_mut().group_by_clause.is_none()
+        if !self.aggregate_exprs.last().unwrap().is_empty()
+            && self.current_clauses_mut().group_by_clause.is_none()
         {
             let exprs = HashMap::from([(
                 "$__gk".to_string(),
@@ -861,7 +864,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
                 strategy: logical::GroupingStrategy::GroupFull,
                 exprs,
-                aggregate_exprs: self.aggregate_exprs.clone(),
+                aggregate_exprs: self.aggregate_exprs.last().unwrap().clone(),
                 group_as_alias: None,
             });
             let id = self.curr_plan().add_operator(group_by);
@@ -1367,7 +1370,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 }
             }
         };
-        self.aggregate_exprs.push(agg_expr);
+        self.aggregate_exprs.last_mut().unwrap().push(agg_expr);
         Traverse::Continue
     }
 
@@ -1493,7 +1496,6 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
-        //self.enter_q();
         *self.current_ctx_mut() = QueryContext::FromLet;
         self.enter_plan();
         self.enter_benv();
@@ -1511,7 +1513,6 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
-        //let clauses = self.exit_q();
         *self.current_ctx_mut() = QueryContext::Query;
         let subplan = self.exit_plan();
         let mut benv = self.exit_benv();
@@ -1682,8 +1683,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
-    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
-        let aggregate_exprs = self.aggregate_exprs.clone();
+    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Traverse {
+        let aggregate_exprs = self.aggregate_exprs.last().unwrap().clone();
         let benv = self.exit_benv();
         if !benv.is_empty() {
             {
@@ -1693,12 +1694,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let env = self.exit_env();
         true_or_fault!(self, env.len().is_even(), "env.len() is not even");
 
-        let group_as_alias = _group_by_expr
+        let group_as_alias = group_by_expr
             .group_as_alias
             .as_ref()
             .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
-        let strategy = match _group_by_expr.strategy {
+        let strategy = match group_by_expr.strategy {
             None => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupFull) => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupPartial) => logical::GroupingStrategy::GroupPartial,
