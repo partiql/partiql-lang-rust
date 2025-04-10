@@ -32,7 +32,7 @@ pub enum CsvExtensionError {
     #[error("`scan_csv` io error: `{}`", .0)]
     IoError(std::io::Error),
 
-    /// Io error.
+    /// CSV read error.
     #[error("`scan_csv` io error: `{}`", .0)]
     CsvReadError(Box<dyn Error>),
 
