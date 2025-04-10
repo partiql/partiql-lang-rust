@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-eval: Fixed behavior of comparison and `BETWEEN` operations w.r.t. type mismatches
 - *BREAKING* partiql-eval: `BindEvalExpr::bind` takes `self` rather than `&self`
 - *BREAKING* Changed modeling of Ion Literals to be evaluated to Boxed Variants rather than eagerly transformed to PartiQL Values.
+- *BREAKING* partiql-logical: Change the modeling of `ProjectAll`
+- Fix some query evaluation edges cases.
 
 ### Added
 - partiql-value: Pretty-printing of `Value` via `ToPretty` trait

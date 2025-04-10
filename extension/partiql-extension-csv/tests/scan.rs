@@ -7,7 +7,7 @@ use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
 use partiql_extension_csv::CsvExtension;
 use partiql_parser::{Parsed, ParserResult};
-use partiql_value::{bag, tuple, DateTime, Value};
+use partiql_value::{DateTime, Value};
 use std::path::PathBuf;
 
 #[track_caller]
@@ -120,7 +120,7 @@ fn join() {
             INNER JOIN scan_csv('{pets}') as pets \
                     ON people.Pet=pets.Pet"
     );
-    let (result, errs) = evaluate_with_csv_scan(&query, &None);
+    let (result, _) = evaluate_with_csv_scan(&query, &None);
 
     insta::assert_snapshot!(result);
 }
