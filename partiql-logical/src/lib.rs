@@ -71,7 +71,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogicalPlan<T>
 where
-    T: Default,
+    T: Default + Debug,
 {
     nodes: Vec<T>,
     /// Third argument indicates the branch number into the outgoing node.
@@ -80,7 +80,7 @@ where
 
 impl<T> LogicalPlan<T>
 where
-    T: Default,
+    T: Default + Debug,
 {
     /// Creates a new default logical plan.
     #[must_use]
@@ -136,6 +136,22 @@ where
     #[inline]
     pub fn extend_with_flows(&mut self, flows: &[(OpId, OpId)]) {
         flows.iter().for_each(|&(s, d)| self.add_flow(s, d));
+    }
+
+    #[inline]
+    pub fn merge_plan(&mut self, other: Self) {
+        let LogicalPlan { nodes, edges } = other;
+        let mut mapping = HashMap::new();
+        for (old_id, op) in nodes.into_iter().enumerate().map(|(i, n)| (OpId(i + 1), n)) {
+            let new_id = self.add_operator(op);
+            mapping.insert(old_id, new_id);
+        }
+
+        for (old1, old2, branch) in edges {
+            let new1 = mapping[&old1];
+            let new2 = mapping[&old2];
+            self.edges.push((new1, new2, branch));
+        }
     }
 
     /// Returns the number of operators in the plan.
@@ -231,8 +247,12 @@ pub enum BindingsOp {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ProjectAllMode {
+    /// Unwrap the outer alias when project *
+    ///     (e.g., for `<< {'_1': {'a': 1, 'b': 2}} >>`, 'unwrap' the `'_1'` to project `a` and `b`)
     #[default]
     Unwrap,
+    /// Do not unwrap an outer alias when project *
+    ///     (e.g., for `<< {'a': 1, 'b': 2} >>`, project `a` and `b`)
     PassThrough,
 }
 
