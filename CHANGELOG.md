@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added graph `MATCH` expressions and `GRAPH_TABLE` expression conformant with SQL 2023 Property Graph Query
   - Parsing and pretty-printing are intended to be conformant
   - Only a subset of planning and evaluation are supported currently
+- Added extension `scan_csv`
 
 ### Removed
 

@@ -31,6 +31,7 @@ members = [
     "extension/partiql-extension-ion-functions",
     "extension/partiql-extension-value-functions",
     "extension/partiql-extension-visualize",
+    "extension/partiql-extension-csv",
 ]
 
 [profile.dev.build-override]
