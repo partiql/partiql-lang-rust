@@ -12,7 +12,8 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_logical as logical;
 use partiql_logical::BindingsOp::{Project, ProjectAll};
 use partiql_logical::{
-    BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ValueExpr, VarRefType,
+    BinaryOp, BindingsOp, JoinKind, LogicalPlan, PathComponent, ProjectAllMode, ValueExpr,
+    VarRefType,
 };
 use partiql_value::{bag, list, tuple, BindingsName, DateTime, Value};
 
@@ -174,7 +175,7 @@ fn eval_bench(c: &mut Criterion) {
             as_key: "x".to_string(),
             at_key: None,
         }));
-        let project_all = logical_plan.add_operator(ProjectAll);
+        let project_all = logical_plan.add_operator(ProjectAll(ProjectAllMode::Unwrap));
         let sink = logical_plan.add_operator(BindingsOp::Sink);
 
         logical_plan.add_flow(from, project_all);
