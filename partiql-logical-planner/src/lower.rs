@@ -17,7 +17,7 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggregateExpression, BagExpr, BagOp, BetweenExpr, BindingsOp, GraphMatchExpr, IsTypeExpr,
     LikeMatch, LikeNonStringNonLiteralMatch, ListExpr, LogicalPlan, OpId, PathComponent, Pattern,
-    PatternMatchExpr, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
+    PatternMatchExpr, ProjectAllMode, SortSpecOrder, TupleExpr, ValueExpr, VarRefType,
 };
 use std::borrow::Cow;
 
@@ -59,10 +59,19 @@ macro_rules! eq_or_fault {
 macro_rules! true_or_fault {
     ($self:ident, $expr:expr, $msg:expr) => {
         if !$expr {
+            true_or_fault_err!($self, $expr, $msg);
+            return partiql_ast::visit::Traverse::Stop;
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! true_or_fault_err {
+    ($self:ident, $expr:expr, $msg:expr) => {
+        if !$expr {
             $self
                 .errors
                 .push(AstTransformError::IllegalState($msg.to_string()));
-            return partiql_ast::visit::Traverse::Stop;
         }
     };
 }
@@ -160,10 +169,7 @@ pub struct AstToLogical<'a> {
     arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
     sort_stack: Vec<Vec<logical::SortSpec>>,
-    aggregate_exprs: Vec<AggregateExpression>,
-
-    from_lets: HashSet<NodeId>,
-
+    aggregate_exprs: Vec<Vec<AggregateExpression>>,
     projection_renames: Vec<FnvIndexMap<String, BindingsName<'a>>>,
 
     aliases: FnvIndexMap<NodeId, SymbolPrimitive>,
@@ -173,7 +179,7 @@ pub struct AstToLogical<'a> {
     agg_id: IdGenerator,
 
     // output
-    plan: LogicalPlan<BindingsOp>,
+    plan_stack: Vec<LogicalPlan<BindingsOp>>,
 
     // catalog & data flow data
     key_registry: name_resolver::KeyRegistry,
@@ -233,8 +239,6 @@ impl<'a> AstToLogical<'a> {
             sort_stack: Default::default(),
             aggregate_exprs: Default::default(),
 
-            from_lets: Default::default(),
-
             projection_renames: Default::default(),
 
             aliases: Default::default(),
@@ -244,7 +248,7 @@ impl<'a> AstToLogical<'a> {
             agg_id: Default::default(),
 
             // output
-            plan: Default::default(),
+            plan_stack: Default::default(),
 
             key_registry: registry,
             fnsym_tab,
@@ -258,13 +262,19 @@ impl<'a> AstToLogical<'a> {
         mut self,
         query: &ast::AstNode<ast::TopLevelQuery>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
+        self.enter_plan();
         query.visit(&mut self);
+        true_or_fault_err!(
+            self,
+            self.plan_stack.len() == 1,
+            "self.plan_stack.len() != 1"
+        );
         if !self.errors.is_empty() {
             return Err(AstTransformationError {
                 errors: self.errors,
             });
         }
-        Ok(self.plan)
+        Ok(self.plan_stack.pop().unwrap())
     }
 
     #[inline]
@@ -483,6 +493,7 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn enter_q(&mut self) {
         self.q_stack.push(Default::default());
+        self.aggregate_exprs.push(Default::default());
         self.ctx_stack.push(QueryContext::Query);
         self.projection_renames.push(Default::default());
     }
@@ -491,6 +502,7 @@ impl<'a> AstToLogical<'a> {
     fn exit_q(&mut self) -> QueryClauses {
         self.projection_renames.pop().expect("q level");
         self.ctx_stack.pop().expect("q level");
+        self.aggregate_exprs.pop().expect("q level");
         self.q_stack.pop().expect("q level")
     }
 
@@ -507,6 +519,21 @@ impl<'a> AstToLogical<'a> {
     #[inline]
     fn current_clauses_mut(&mut self) -> &mut QueryClauses {
         self.q_stack.last_mut().unwrap()
+    }
+
+    #[inline]
+    fn enter_plan(&mut self) {
+        self.plan_stack.push(LogicalPlan::default());
+    }
+
+    #[inline]
+    fn exit_plan(&mut self) -> LogicalPlan<BindingsOp> {
+        self.plan_stack.pop().expect("environment level")
+    }
+
+    #[inline]
+    fn curr_plan(&mut self) -> &mut LogicalPlan<BindingsOp> {
+        self.plan_stack.last_mut().expect("plan")
     }
 
     #[inline]
@@ -691,8 +718,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut benv = self.exit_benv();
         eq_or_fault!(self, benv.len(), 1, "Expect benv.len() == 1");
         let out = benv.pop().unwrap();
-        let sink_id = self.plan.add_operator(BindingsOp::Sink);
-        self.plan.add_flow(out, sink_id);
+        let sink_id = self.curr_plan().add_operator(BindingsOp::Sink);
+        self.curr_plan().add_flow(out, sink_id);
         Traverse::Continue
     }
 
@@ -712,7 +739,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 let mut clauses = clauses.evaluation_order().into_iter();
                 if let Some(mut src_id) = clauses.next() {
                     for dst_id in clauses {
-                        self.plan.add_flow(src_id, dst_id);
+                        self.curr_plan().add_flow(src_id, dst_id);
                         src_id = dst_id;
                     }
                     self.push_bexpr(src_id);
@@ -726,7 +753,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 );
                 let mut out = *benv.first().unwrap();
                 benv.into_iter().skip(1).for_each(|op| {
-                    self.plan.add_flow(out, op);
+                    self.curr_plan().add_flow(out, op);
                     out = op;
                 });
                 self.push_bexpr(out);
@@ -759,7 +786,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
         match query_set {
             QuerySet::BagOp(bag_op) => {
-                eq_or_fault!(self, benv.len(), 2, "benv.len() != 2");
+                eq_or_fault!(self, benv.len(), 2, "qs benv.len() != 2");
                 let rid = benv.pop().unwrap();
                 let lid = benv.pop().unwrap();
 
@@ -777,12 +804,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                     None => logical::SetQuantifier::Distinct,
                 };
 
-                let id = self.plan.add_operator(BindingsOp::BagOp(BagOp {
+                let id = self.curr_plan().add_operator(BindingsOp::BagOp(BagOp {
                     bag_op: bag_operator,
                     setq,
                 }));
-                self.plan.add_flow_with_branch_num(lid, id, 0);
-                self.plan.add_flow_with_branch_num(rid, id, 1);
+                self.curr_plan().add_flow_with_branch_num(lid, id, 0);
+                self.curr_plan().add_flow_with_branch_num(rid, id, 1);
                 self.push_bexpr(id);
             }
             QuerySet::Select(_) => {}
@@ -790,7 +817,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
                 let expr = env.into_iter().next().unwrap();
                 let op = BindingsOp::ExprQuery(logical::ExprQuery { expr });
-                let id = self.plan.add_operator(op);
+                let id = self.curr_plan().add_operator(op);
                 self.push_bexpr(id);
             }
             QuerySet::Values(_) => {
@@ -827,7 +854,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn exit_select(&mut self, _select: &'ast Select) -> Traverse {
         // PartiQL permits SQL aggregations without a GROUP BY (e.g. SELECT SUM(t.a) FROM ...)
         // What follows adds a GROUP BY clause with the rewrite `... GROUP BY true AS $__gk`
-        if !self.aggregate_exprs.is_empty() && self.current_clauses_mut().group_by_clause.is_none()
+        if !self.aggregate_exprs.last().unwrap().is_empty()
+            && self.current_clauses_mut().group_by_clause.is_none()
         {
             let exprs = HashMap::from([(
                 "$__gk".to_string(),
@@ -836,10 +864,10 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
                 strategy: logical::GroupingStrategy::GroupFull,
                 exprs,
-                aggregate_exprs: self.aggregate_exprs.clone(),
+                aggregate_exprs: self.aggregate_exprs.last().unwrap().clone(),
                 group_as_alias: None,
             });
-            let id = self.plan.add_operator(group_by);
+            let id = self.curr_plan().add_operator(group_by);
             self.current_clauses_mut().group_by_clause.replace(id);
         }
         Traverse::Continue
@@ -859,7 +887,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         eq_or_fault!(self, env.len(), 0, "env.len() != 0");
 
         if let Some(SetQuantifier::Distinct) = projection.setq {
-            let id = self.plan.add_operator(BindingsOp::Distinct);
+            let id = self.curr_plan().add_operator(BindingsOp::Distinct);
             self.current_clauses_mut().distinct.replace(id);
         }
         Traverse::Continue
@@ -879,7 +907,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let env = self.exit_env();
 
         let select: BindingsOp = match _projection_kind {
-            ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll,
+            ProjectionKind::ProjectStar => logical::BindingsOp::ProjectAll(Default::default()),
             ProjectionKind::ProjectList(_) => {
                 true_or_fault!(self, env.len().is_even(), "env.len() is not even");
                 let mut exprs = Vec::with_capacity(env.len() / 2);
@@ -934,7 +962,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 logical::BindingsOp::ProjectValue(logical::ProjectValue { expr })
             }
         };
-        let id = self.plan.add_operator(select);
+        let id = self.curr_plan().add_operator(select);
         self.current_clauses_mut().select_clause.replace(id);
         Traverse::Continue
     }
@@ -1342,7 +1370,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 }
             }
         };
-        self.aggregate_exprs.push(agg_expr);
+        self.aggregate_exprs.last_mut().unwrap().push(agg_expr);
         Traverse::Continue
     }
 
@@ -1468,8 +1496,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
-        self.from_lets.insert(*self.current_node());
         *self.current_ctx_mut() = QueryContext::FromLet;
+        self.enter_plan();
+        self.enter_benv();
         self.enter_env();
 
         let id = *self.current_node();
@@ -1485,10 +1514,20 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
         *self.current_ctx_mut() = QueryContext::Query;
+        let subplan = self.exit_plan();
+        let mut benv = self.exit_benv();
         let mut env = self.exit_env();
-        eq_or_fault!(self, env.len(), 1, "env.len() != 1");
+        eq_or_fault!(self, env.len() + benv.len(), 1, "env.len()+benv.len() != 1");
 
-        let expr = env.pop().unwrap();
+        let expr = if !benv.is_empty() {
+            // Subquery in From Let
+            let subq = logical::SubQueryExpr { plan: subplan };
+            ValueExpr::SubQueryExpr(subq)
+        } else {
+            // Expression in From Let
+            self.curr_plan().merge_plan(subplan); // merge in subplan, as there is no subquery
+            env.pop().unwrap()
+        };
 
         let FromLet {
             kind,
@@ -1501,25 +1540,43 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             .as_ref()
             .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
-        let bexpr = match kind {
-            FromLetKind::Scan => logical::BindingsOp::Scan(logical::Scan {
-                expr,
-                as_key,
-                at_key,
-            }),
-            FromLetKind::Unpivot => logical::BindingsOp::Unpivot(logical::Unpivot {
-                expr,
-                as_key,
-                at_key,
-            }),
-            FromLetKind::GraphTable => logical::BindingsOp::Scan(logical::Scan {
-                expr,
-                as_key,
-                at_key,
-            }),
+        let (bexpr, project_all_mode) = match kind {
+            FromLetKind::Scan => (
+                logical::BindingsOp::Scan(logical::Scan {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::Unwrap,
+            ),
+            FromLetKind::Unpivot => (
+                logical::BindingsOp::Unpivot(logical::Unpivot {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::PassThrough,
+            ),
+            FromLetKind::GraphTable => (
+                logical::BindingsOp::Scan(logical::Scan {
+                    expr,
+                    as_key,
+                    at_key,
+                }),
+                ProjectAllMode::Unwrap,
+            ),
         };
-        let id = self.plan.add_operator(bexpr);
+
+        let id = self.curr_plan().add_operator(bexpr);
         self.push_bexpr(id);
+
+        if let Some(select_id) = self.current_clauses_mut().select_clause {
+            if let Some(BindingsOp::ProjectAll(mode)) = self.curr_plan().operator_as_mut(select_id)
+            {
+                *mode = project_all_mode
+            }
+        }
+
         Traverse::Continue
     }
 
@@ -1531,7 +1588,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn exit_join(&mut self, join: &'ast Join) -> Traverse {
         let mut benv = self.exit_benv();
-        eq_or_fault!(self, benv.len(), 2, "benv.len() != 2");
+        eq_or_fault!(self, benv.len(), 2, "j benv.len() != 2");
 
         let mut env = self.exit_env();
         true_or_fault!(
@@ -1554,17 +1611,17 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
         let rid = benv.pop().unwrap();
         let lid = benv.pop().unwrap();
-        let left = Box::new(self.plan.operator(lid).unwrap().clone());
-        let right = Box::new(self.plan.operator(rid).unwrap().clone());
+        let left = Box::new(self.curr_plan().operator(lid).unwrap().clone());
+        let right = Box::new(self.curr_plan().operator(rid).unwrap().clone());
         let join = logical::BindingsOp::Join(logical::Join {
             kind,
             left,
             right,
             on,
         });
-        let join = self.plan.add_operator(join);
-        self.plan.add_flow_with_branch_num(lid, join, 0);
-        self.plan.add_flow_with_branch_num(rid, join, 1);
+        let join = self.curr_plan().add_operator(join);
+        self.curr_plan().add_flow_with_branch_num(lid, join, 0);
+        self.curr_plan().add_flow_with_branch_num(rid, join, 1);
         self.push_bexpr(join);
         Traverse::Continue
     }
@@ -1596,7 +1653,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let filter = logical::BindingsOp::Filter(logical::Filter {
             expr: env.pop().unwrap(),
         });
-        let id = self.plan.add_operator(filter);
+        let id = self.curr_plan().add_operator(filter);
 
         self.current_clauses_mut().where_clause.replace(id);
         Traverse::Continue
@@ -1614,7 +1671,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let having = BindingsOp::Having(logical::Having {
             expr: env.pop().unwrap(),
         });
-        let id = self.plan.add_operator(having);
+        let id = self.curr_plan().add_operator(having);
 
         self.current_clauses_mut().having_clause.replace(id);
         Traverse::Continue
@@ -1626,8 +1683,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
-    fn exit_group_by_expr(&mut self, _group_by_expr: &'ast GroupByExpr) -> Traverse {
-        let aggregate_exprs = self.aggregate_exprs.clone();
+    fn exit_group_by_expr(&mut self, group_by_expr: &'ast GroupByExpr) -> Traverse {
+        let aggregate_exprs = self.aggregate_exprs.last().unwrap().clone();
         let benv = self.exit_benv();
         if !benv.is_empty() {
             {
@@ -1637,12 +1694,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let env = self.exit_env();
         true_or_fault!(self, env.len().is_even(), "env.len() is not even");
 
-        let group_as_alias = _group_by_expr
+        let group_as_alias = group_by_expr
             .group_as_alias
             .as_ref()
             .map(|SymbolPrimitive { value, case: _ }| value.clone());
 
-        let strategy = match _group_by_expr.strategy {
+        let strategy = match group_by_expr.strategy {
             None => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupFull) => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupPartial) => logical::GroupingStrategy::GroupPartial,
@@ -1664,14 +1721,15 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             ));
             return Traverse::Stop;
         }
+        let mut errors = Vec::default();
         let select_clause = self
-            .plan
+            .curr_plan()
             .operator_as_mut(select_clause_op_id.expect("select_clause_op_id not None"))
             .unwrap();
         let mut binding = Vec::new();
         let select_clause_exprs = match select_clause {
             BindingsOp::Project(ref mut project) => &mut project.exprs,
-            BindingsOp::ProjectAll => &mut binding,
+            BindingsOp::ProjectAll(_) => &mut binding,
             BindingsOp::ProjectValue(_) => &mut binding, // TODO: replacement of SELECT VALUE expressions
             _ => {
                 self.errors.push(AstTransformError::IllegalState(
@@ -1690,14 +1748,14 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                     logical::Lit::String(s) => s.clone(),
                     _ => {
                         // Report error but allow visitor to continue
-                        self.errors.push(AstTransformError::IllegalState(
+                        errors.push(AstTransformError::IllegalState(
                             "Unexpected literal type".to_string(),
                         ));
                         String::new()
                     }
                 },
                 _ => {
-                    self.errors.push(AstTransformError::IllegalState(
+                    errors.push(AstTransformError::IllegalState(
                         "Unexpected alias type".to_string(),
                     ));
                     return Traverse::Stop;
@@ -1713,6 +1771,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             exprs.insert(alias, value);
         }
 
+        self.errors.extend(errors);
+
         let group_by: BindingsOp = BindingsOp::GroupBy(logical::GroupBy {
             strategy,
             exprs,
@@ -1720,7 +1780,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             group_as_alias,
         });
 
-        let id = self.plan.add_operator(group_by);
+        let id = self.curr_plan().add_operator(group_by);
         self.current_clauses_mut().group_by_clause.replace(id);
         Traverse::Continue
     }
@@ -1748,7 +1808,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn exit_order_by_expr(&mut self, _order_by_expr: &'ast OrderByExpr) -> Traverse {
         let specs = self.exit_sort();
         let order_by = logical::BindingsOp::OrderBy(logical::OrderBy { specs });
-        let id = self.plan.add_operator(order_by);
+        let id = self.curr_plan().add_operator(order_by);
         if matches!(self.current_ctx(), Some(QueryContext::Query)) {
             self.current_clauses_mut().order_by_clause.replace(id);
         } else {
@@ -1821,7 +1881,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         };
 
         let limit_offset = logical::BindingsOp::LimitOffset(logical::LimitOffset { limit, offset });
-        let id = self.plan.add_operator(limit_offset);
+        let id = self.curr_plan().add_operator(limit_offset);
         if matches!(self.current_ctx(), Some(QueryContext::Query)) {
             self.current_clauses_mut().limit_offset_clause.replace(id);
         } else {

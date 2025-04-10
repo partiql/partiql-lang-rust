@@ -21,8 +21,8 @@ use partiql_logical as logical;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GraphMatchExpr, GroupingStrategy,
     IsTypeExpr, JoinKind, Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr,
-    SearchedCase, SetQuantifier, SortSpecNullOrder, SortSpecOrder, Type, UnaryOp, ValueExpr,
-    VarRefType,
+    ProjectAllMode, SearchedCase, SetQuantifier, SortSpecNullOrder, SortSpecOrder, Type, UnaryOp,
+    ValueExpr, VarRefType,
 };
 use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
 use partiql_value::{Bag, List, Tuple, Value, Variant};
@@ -198,7 +198,9 @@ impl<'c> EvaluatorPlanner<'c> {
                     .collect();
                 Box::new(eval::evaluable::EvalSelect::new(exprs))
             }
-            BindingsOp::ProjectAll => Box::new(eval::evaluable::EvalSelectAll::new()),
+            BindingsOp::ProjectAll(mode) => Box::new(eval::evaluable::EvalSelectAll::new(
+                mode == &ProjectAllMode::PassThrough,
+            )),
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalSelectValue::new(expr))

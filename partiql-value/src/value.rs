@@ -15,7 +15,10 @@ mod iter;
 mod logic;
 mod math;
 
-use crate::datum::{Datum, DatumLower, DatumLowerResult, DatumValue};
+use crate::datum::{
+    Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult,
+    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValue,
+};
 pub use iter::*;
 pub use logic::*;
 pub use math::*;
@@ -71,45 +74,57 @@ impl Value {
     #[inline]
     #[must_use]
     pub fn coerce_into_tuple(self) -> Tuple {
-        match self {
-            Value::Tuple(t) => *t,
-            _ => self
+        let coerce = |non_tuple: Value| {
+            non_tuple
                 .into_bindings()
                 .map(|(k, v)| (k.unwrap_or_else(|| "_1".to_string()), v))
-                .collect(),
+                .collect()
+        };
+
+        match self {
+            Value::Tuple(t) => *t,
+            Value::Variant(ref v) => match v.category() {
+                DatumCategoryRef::Tuple(_) => self
+                    .into_lower()
+                    .expect("variant lower")
+                    .coerce_into_tuple(),
+                _ => coerce(self),
+            },
+            _ => coerce(self),
         }
     }
 
     #[inline]
     #[must_use]
     pub fn coerce_to_tuple(&self) -> Tuple {
-        match self {
-            Value::Tuple(t) => t.as_ref().clone(),
-            _ => {
-                let fresh = "_1".to_string();
-                self.as_bindings()
-                    .map(|(k, v)| (k.unwrap_or(&fresh), v.clone()))
-                    .collect()
-            }
-        }
+        self.clone().coerce_into_tuple()
     }
 
     #[inline]
     #[must_use]
     pub fn as_tuple_ref(&self) -> Cow<'_, Tuple> {
-        if let Value::Tuple(t) = self {
-            Cow::Borrowed(t)
-        } else {
-            Cow::Owned(self.coerce_to_tuple())
+        match self.category() {
+            DatumCategoryRef::Tuple(t) => match t {
+                DatumTupleRef::Tuple(t) => Cow::Borrowed(t),
+                DatumTupleRef::Dynamic(_) => match self.lower().expect("variant lower") {
+                    Cow::Borrowed(Value::Tuple(t)) => Cow::Borrowed(t.as_ref()),
+                    Cow::Owned(Value::Tuple(t)) => Cow::Owned(*t),
+                    _ => unreachable!(),
+                },
+            },
+            _ => Cow::Owned(self.coerce_to_tuple()),
         }
     }
 
     #[inline]
     #[must_use]
     pub fn as_bindings(&self) -> BindingIter<'_> {
-        match self {
-            Value::Tuple(t) => BindingIter::Tuple(t.pairs()),
-            Value::Missing => BindingIter::Empty,
+        match self.category() {
+            DatumCategoryRef::Missing => BindingIter::Empty,
+            DatumCategoryRef::Tuple(t) => match t {
+                DatumTupleRef::Tuple(t) => BindingIter::Tuple(t.pairs()),
+                DatumTupleRef::Dynamic(_) => unreachable!(),
+            },
             _ => BindingIter::Single(std::iter::once(self)),
         }
     }
@@ -120,6 +135,19 @@ impl Value {
         match self {
             Value::Tuple(t) => BindingIntoIter::Tuple(t.into_pairs()),
             Value::Missing => BindingIntoIter::Empty,
+            Value::Variant(v) => match v.category() {
+                DatumCategoryRef::Missing => BindingIntoIter::Empty,
+                DatumCategoryRef::Tuple(_) => match v.into_category() {
+                    DatumCategoryOwned::Tuple(DatumTupleOwned::Tuple(t)) => {
+                        BindingIntoIter::Tuple(t.into_pairs())
+                    }
+                    DatumCategoryOwned::Tuple(DatumTupleOwned::Dynamic(d)) => {
+                        BindingIntoIter::DynTuple(d.into_iter_boxed())
+                    }
+                    _ => unreachable!(),
+                },
+                _ => BindingIntoIter::Single(std::iter::once(Value::Variant(v))),
+            },
             _ => BindingIntoIter::Single(std::iter::once(self)),
         }
     }
