@@ -1,3 +1,4 @@
+use crate::datum::OwnedFieldView;
 use crate::{PairsIntoIter, PairsIter, Value};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -73,11 +74,11 @@ impl<'a> Iterator for BindingIter<'a> {
     }
 }
 
-#[derive(Debug)]
 pub enum BindingIntoIter {
     Tuple(PairsIntoIter),
     Single(Once<Value>),
     Empty,
+    DynTuple(Box<dyn Iterator<Item = OwnedFieldView<Value>>>),
 }
 
 impl Iterator for BindingIntoIter {
@@ -89,6 +90,7 @@ impl Iterator for BindingIntoIter {
             BindingIntoIter::Tuple(t) => t.next().map(|(k, v)| (Some(k), v)),
             BindingIntoIter::Single(single) => single.next().map(|v| (None, v)),
             BindingIntoIter::Empty => None,
+            BindingIntoIter::DynTuple(d) => d.next().map(|f| (Some(f.name), f.value)),
         }
     }
 
@@ -98,6 +100,7 @@ impl Iterator for BindingIntoIter {
             BindingIntoIter::Tuple(t) => t.size_hint(),
             BindingIntoIter::Single(_single) => (1, Some(1)),
             BindingIntoIter::Empty => (0, Some(0)),
+            BindingIntoIter::DynTuple(d) => d.size_hint(),
         }
     }
 }
