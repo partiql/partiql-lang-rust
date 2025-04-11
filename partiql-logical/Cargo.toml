@@ -21,8 +21,8 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-value = { path = "../partiql-value", version = "0.11.*" }
-partiql-common = { path = "../partiql-common", version = "0.11.*" }
+partiql-value = { path = "../partiql-value", version = "0.12.*" }
+partiql-common = { path = "../partiql-common", version = "0.12.*" }
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 ordered-float = "5"

@@ -21,12 +21,12 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-common = { path = "../partiql-common", version = "0.11.*" }
-partiql-logical = { path = "../partiql-logical", version = "0.11.*" }
-partiql-value = { path = "../partiql-value", version = "0.11.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.11.*" }
-partiql-types = { path = "../partiql-types", version = "0.11.*" }
-partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.11.*" }
+partiql-common = { path = "../partiql-common", version = "0.12.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.12.*" }
+partiql-value = { path = "../partiql-value", version = "0.12.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.12.*" }
+partiql-types = { path = "../partiql-types", version = "0.12.*" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.12.*" }
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 lasso = "0.7"
 petgraph = "0.7"
@@ -48,8 +48,8 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
-partiql-parser = { path = "../partiql-parser", version = "0.11.*" }
-partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.11.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.12.*" }
+partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.12.*" }
 
 
 [features]
