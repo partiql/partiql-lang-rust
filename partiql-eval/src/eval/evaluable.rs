@@ -1186,11 +1186,15 @@ impl Evaluable for EvalSelect {
 #[derive(Debug, Default)]
 pub(crate) struct EvalSelectAll {
     pub(crate) input: Option<Value>,
+    pub(crate) passthrough: bool,
 }
 
 impl EvalSelectAll {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(passthrough: bool) -> Self {
+        Self {
+            passthrough,
+            ..Self::default()
+        }
     }
 }
 
@@ -1201,10 +1205,14 @@ impl Evaluable for EvalSelectAll {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|val| {
-            val.coerce_into_tuple()
-                .into_values()
-                .flat_map(|v| v.coerce_into_tuple().into_pairs())
-                .collect::<Tuple>()
+            if self.passthrough {
+                val.coerce_into_tuple()
+            } else {
+                val.coerce_into_tuple()
+                    .into_values()
+                    .flat_map(|v| v.coerce_into_tuple().into_pairs())
+                    .collect::<Tuple>()
+            }
         });
 
         match ordered {

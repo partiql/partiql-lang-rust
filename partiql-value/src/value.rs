@@ -17,7 +17,7 @@ mod math;
 
 use crate::datum::{
     Datum, DatumCategory, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult,
-    DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValue,
+    DatumTupleOwned, DatumTupleRef, DatumValue,
 };
 pub use iter::*;
 pub use logic::*;

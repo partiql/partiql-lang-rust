@@ -100,7 +100,7 @@ impl PlanToDot {
                         .join(" | "),
                 )
             }
-            BindingsOp::ProjectAll => "{project  * }".to_string(),
+            BindingsOp::ProjectAll(_) => "{project  * }".to_string(),
             BindingsOp::ProjectValue(pv) => {
                 format!("{{project value | {} }}", expr_to_str(&pv.expr))
             }

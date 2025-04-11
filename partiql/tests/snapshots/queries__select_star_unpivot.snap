@@ -1,0 +1,5 @@
+---
+source: partiql/tests/queries.rs
+expression: res
+---
+<<{ 'price': 31.06, 'sym': 'tdc' }, { 'price': 840.05, 'sym': 'amzn' }>>
