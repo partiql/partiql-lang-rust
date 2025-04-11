@@ -5,7 +5,6 @@ use partiql_catalog::extension::Extension;
 use partiql_eval::eval::Evaluated;
 use partiql_eval::plan::EvaluationMode;
 use partiql_extension_value_functions::PartiqlValueFnExtension;
-use partiql_value::Value;
 
 mod common;
 
