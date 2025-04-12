@@ -61,11 +61,7 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate<'a, 'c>(&mut self, _ctx: &'c dyn EvalContext<'c>) -> Value {
-        panic!("ErrorNode will not be evaluated")
-    }
-
-    fn update_input(&mut self, _input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
+    fn evaluate<'a, 'c>(&mut self, _: [Option<Value>; 2], _ctx: &'c dyn EvalContext<'c>) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 }

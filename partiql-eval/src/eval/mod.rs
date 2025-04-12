@@ -4,12 +4,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use delegate::delegate;
-use std::fmt::Debug;
-
 use petgraph::algo::toposort;
 use petgraph::dot::Dot;
 use petgraph::prelude::StableGraph;
-use petgraph::{Directed, Outgoing};
+use petgraph::{Directed, Incoming, Outgoing};
+use std::fmt::Debug;
 
 use partiql_value::Value;
 
@@ -90,6 +89,19 @@ impl EvalPlan {
                 "Malformed evaluation plan detected: {e:?}"
             ))],
         })?;
+        let mut inputs: HashMap<NodeIndex, [Option<Value>; 2]> = HashMap::new();
+
+        // Set source node inputs to empty
+        for idx in ops.clone() {
+            let source_node = self.plan_graph.edges_directed(idx, Incoming).count() == 0;
+            let managed = self
+                .get_node(idx)
+                .map(|d| d.eval_type() != EvalType::GraphManaged)
+                .unwrap_or(false);
+            if source_node || managed {
+                inputs.insert(idx, [None, None]);
+            }
+        }
 
         let mut result = None;
         for idx in ops {
@@ -110,7 +122,10 @@ impl EvalPlan {
                 });
             if graph_managed {
                 let src = self.get_node(idx)?;
-                result = Some(src.evaluate(ctx));
+                let input = inputs
+                    .remove(&idx)
+                    .ok_or_else(|| err_illegal_state("Error in retrieving node input"))?;
+                result = Some(src.evaluate(input, ctx));
 
                 // return on first evaluation error
                 if ctx.has_errors() && self.mode == EvaluationMode::Strict {
@@ -129,7 +144,8 @@ impl EvalPlan {
 
                     let res =
                         res.ok_or_else(|| err_illegal_state("Error in retrieving source value"))?;
-                    self.get_node(dst_id)?.update_input(res, branch_num, ctx);
+                    let inputs = inputs.entry(dst_id).or_insert_with(|| [None, None]);
+                    inputs[branch_num as usize] = Some(res);
                 }
             }
         }

@@ -2269,7 +2269,7 @@ mod tests {
                 "y",
             );
 
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
             let expected = bag![
@@ -2298,7 +2298,7 @@ mod tests {
                 "y",
             );
 
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
             let expected = bag![
@@ -2336,7 +2336,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let scan_res = scan.evaluate(&ctx);
+            let scan_res = scan.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", 0)]];
             assert_eq!(Value::Bag(Box::new(expected)), scan_res);
@@ -2364,7 +2364,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", value::Value::Missing)]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
@@ -2402,7 +2402,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate([None, None], &ctx);
 
             let expected = bag![
                 tuple![("symbol", "tdc"), ("price", 31.06)],
@@ -2429,7 +2429,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", 1), ("y", "_1")]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
