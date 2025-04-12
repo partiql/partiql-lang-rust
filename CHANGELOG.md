@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Removed
+
+## [0.12.0]
+### Changed
 - *BREAKING* partiql-parser: Added a source location to `ParseError::UnexpectedEndOfInput`
 - *BREAKING* partiql-ast: Changed the modelling of parsed literals.
 - *BREAKING* partiql-logical: Changed the modelling of logical plan literals.
@@ -322,7 +329,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.12.0
 [0.11.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.11.0
 [0.10.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.1
 [0.10.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.10.0

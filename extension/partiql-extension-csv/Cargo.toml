@@ -21,9 +21,9 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-value = { path = "../../partiql-value", version = "0.11.*" }
-partiql-catalog = { path = "../../partiql-catalog", version = "0.11.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.11.*" }
+partiql-value = { path = "../../partiql-value", version = "0.12.*" }
+partiql-catalog = { path = "../../partiql-catalog", version = "0.12.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.12.*" }
 
 csv = "1"
 
@@ -40,10 +40,10 @@ thiserror = "1.0"
 delegate = "0.13"
 
 [dev-dependencies]
-partiql-parser = { path = "../../partiql-parser", version = "0.11.*" }
-partiql-logical = { path = "../../partiql-logical", version = "0.11.*" }
-partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.11.*" }
-partiql-eval = { path = "../../partiql-eval", version = "0.11.*" }
+partiql-parser = { path = "../../partiql-parser", version = "0.12.*" }
+partiql-logical = { path = "../../partiql-logical", version = "0.12.*" }
+partiql-logical-planner = { path = "../../partiql-logical-planner", version = "0.12.*" }
+partiql-eval = { path = "../../partiql-eval", version = "0.12.*" }
 
 insta = "1"
 
