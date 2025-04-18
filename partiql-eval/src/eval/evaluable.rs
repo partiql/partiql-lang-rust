@@ -15,7 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
-use partiql_value::datum::{Datum, DatumLower, DatumLowerResult};
+use partiql_value::datum::{Datum, DatumLower, DatumLowerResult, DatumTupleRef, RefTupleView};
 use std::rc::Rc;
 
 #[macro_export]
@@ -116,7 +116,7 @@ impl Evaluable for EvalScan {
         };
         let mut value = bag![];
         bindings.iter().for_each(|binding| {
-            let binding_tuple = binding.as_tuple_ref();
+            let binding_tuple = binding.as_datum_tuple_ref();
             let v = self.expr.evaluate(&binding_tuple, ctx).into_owned();
             let mut at_index_counter: i64 = 0;
             if let Some(at_key) = &self.at_key {
@@ -259,7 +259,8 @@ impl Evaluable for EvalJoin {
                                     .tuple_concat(b_r.as_tuple_ref().borrow());
                                 let env_b_l_b_r =
                                     &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
-                                let cond = condition.evaluate(env_b_l_b_r, ctx);
+                                let tuple_ref = DatumTupleRef::Tuple(env_b_l_b_r);
+                                let cond = condition.evaluate(&tuple_ref, ctx);
                                 if let Value::Boolean(true) = cond.as_ref() {
                                     output_bag.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
@@ -302,7 +303,8 @@ impl Evaluable for EvalJoin {
                                     .tuple_concat(b_r.as_tuple_ref().borrow());
                                 let env_b_l_b_r =
                                     &input_env.as_tuple_ref().as_ref().tuple_concat(&b_l_b_r);
-                                let cond = condition.evaluate(env_b_l_b_r, ctx);
+                                let tuple_ref = DatumTupleRef::Tuple(env_b_l_b_r);
+                                let cond = condition.evaluate(&tuple_ref, ctx);
                                 if cond.as_ref() == &Value::Boolean(true) {
                                     output_bag_left.push(Value::Tuple(Box::new(b_l_b_r)));
                                 }
@@ -634,7 +636,14 @@ impl EvalGroupBy {
     }
 
     #[inline]
-    fn group_key<'a, 'c>(&'a self, bindings: &'a Tuple, ctx: &'c dyn EvalContext<'c>) -> GroupKey {
+    fn group_key<'a, 'c>(
+        &'a self,
+        bindings: &'a DatumTupleRef<'a>,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> GroupKey
+    where
+        'c: 'a,
+    {
         self.group
             .iter()
             .map(|expr| match expr.evaluate(bindings, ctx).as_ref() {
@@ -672,7 +681,7 @@ impl Evaluable for EvalGroupBy {
                 let combined = CombinedState(state, distinct_state, group_as);
 
                 for v in input_value {
-                    let v_as_tuple = v.coerce_into_tuple();
+                    let v_as_tuple = v.as_datum_tuple_ref();
                     let group_key = self.group_key(&v_as_tuple, ctx);
                     let CombinedState(state, distinct_state, group_as) =
                         grouped.entry(group_key).or_insert_with(|| combined.clone());
@@ -693,7 +702,7 @@ impl Evaluable for EvalGroupBy {
 
                     // Add tuple to `GROUP AS` if applicable
                     if let Some(ref mut tuples) = group_as {
-                        tuples.push(Value::from(v_as_tuple));
+                        tuples.push(Value::from(v.coerce_into_tuple())); // TODO does this work?
                     }
                 }
 
@@ -769,7 +778,7 @@ impl Evaluable for EvalPivot {
         let tuple: Tuple = input_value
             .into_iter()
             .filter_map(|binding| {
-                let binding = binding.coerce_into_tuple();
+                let binding = binding.as_datum_tuple_ref();
                 let key = self.key.evaluate(&binding, ctx);
                 if let Value::String(s) = key.as_ref() {
                     let value = self.value.evaluate(&binding, ctx);
@@ -820,7 +829,7 @@ impl Evaluable for EvalUnpivot {
         inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
-        let tuple = match self.expr.evaluate(&Tuple::new(), ctx).into_owned() {
+        let tuple = match self.expr.evaluate(&DatumTupleRef::Empty, ctx).into_owned() {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_into_tuple(),
         };
@@ -858,7 +867,14 @@ impl EvalFilter {
     }
 
     #[inline]
-    fn eval_filter<'a, 'c>(&'a self, bindings: &'a Tuple, ctx: &'c dyn EvalContext<'c>) -> bool {
+    fn eval_filter<'a, 'c>(
+        &'a self,
+        bindings: &'a DatumTupleRef<'a>,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> bool
+    where
+        'c: 'a,
+    {
         let result = self.expr.evaluate(bindings, ctx);
         match result.as_ref() {
             Boolean(bool_val) => *bool_val,
@@ -880,8 +896,7 @@ impl Evaluable for EvalFilter {
 
         let filtered = input_value
             .into_iter()
-            .map(Value::coerce_into_tuple)
-            .filter_map(|v| self.eval_filter(&v, ctx).then_some(v));
+            .filter(|v| self.eval_filter(&v.as_datum_tuple_ref(), ctx));
         Value::from(filtered.collect::<Bag>())
     }
 }
@@ -900,7 +915,14 @@ impl EvalHaving {
     }
 
     #[inline]
-    fn eval_having<'a, 'c>(&'a self, bindings: &'a Tuple, ctx: &'c dyn EvalContext<'c>) -> bool {
+    fn eval_having<'a, 'c>(
+        &'a self,
+        bindings: &'a DatumTupleRef<'a>,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> bool
+    where
+        'c: 'a,
+    {
         let result = self.expr.evaluate(bindings, ctx);
         match result.as_ref() {
             Boolean(bool_val) => *bool_val,
@@ -924,8 +946,7 @@ impl Evaluable for EvalHaving {
 
         let filtered = input_value
             .into_iter()
-            .map(Value::coerce_into_tuple)
-            .filter_map(|v| self.eval_having(&v, ctx).then_some(v));
+            .filter(|v| self.eval_having(&v.as_datum_tuple_ref(), ctx));
         Value::from(filtered.collect::<Bag>())
     }
 }
@@ -953,8 +974,8 @@ pub(crate) struct EvalOrderBy {
 impl EvalOrderBy {
     #[inline]
     fn compare<'c>(&self, l: &Value, r: &Value, ctx: &'c dyn EvalContext<'c>) -> Ordering {
-        let l = l.as_tuple_ref();
-        let r = r.as_tuple_ref();
+        let l = l.as_datum_tuple_ref();
+        let r = r.as_datum_tuple_ref();
         self.cmp
             .iter()
             .map(|spec| {
@@ -1021,7 +1042,7 @@ impl Evaluable for EvalLimitOffset {
     ) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
-        let empty_bindings = Tuple::new();
+        let empty_bindings = DatumTupleRef::Empty;
 
         let offset = match &self.offset {
             None => 0,
@@ -1092,7 +1113,7 @@ impl Evaluable for EvalSelectValue {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|v| {
-            let v_as_tuple = v.coerce_into_tuple();
+            let v_as_tuple = v.as_datum_tuple_ref();
             self.expr.evaluate(&v_as_tuple, ctx).into_owned()
         });
 
@@ -1143,7 +1164,7 @@ impl Evaluable for EvalSelect {
         let ordered = input_value.is_ordered();
 
         let values = input_value.into_iter().map(|v| {
-            let v_as_tuple = v.coerce_into_tuple();
+            let v_as_tuple = v.as_datum_tuple_ref();
 
             let tuple_pairs = self.exprs.iter().filter_map(|(alias, expr)| {
                 let evaluated_val = expr.evaluate(&v_as_tuple, ctx);
@@ -1230,7 +1251,8 @@ impl Evaluable for EvalExprQuery {
         let input = inputs[0].take().unwrap_or(Value::Null);
         let input = input.as_tuple_ref();
         let input = input.as_ref();
-        self.expr.evaluate(input, ctx).into_owned()
+        let input = DatumTupleRef::Tuple(input);
+        self.expr.evaluate(&input, ctx).into_owned()
     }
 }
 
@@ -1298,7 +1320,7 @@ impl EvalSubQueryExpr {
 impl EvalExpr for EvalSubQueryExpr {
     fn evaluate<'a, 'c>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

@@ -1,5 +1,6 @@
 use crate::{
-    Bag, BagIntoIterator, BindingsName, Graph, List, ListIntoIterator, PairsIntoIter, Tuple, Value,
+    Bag, BagIntoIterator, BindingsName, Graph, List, ListIntoIterator, PairsIntoIter, PairsIter,
+    Tuple, Value,
 };
 use std::borrow::Cow;
 use std::error::Error;
@@ -78,8 +79,10 @@ pub enum DatumCategoryOwned {
 
 #[derive(Debug)]
 pub enum DatumTupleRef<'a> {
+    Empty,
     Tuple(&'a Tuple),
     Dynamic(&'a dyn RefTupleView<'a, Value>),
+    CoercedValue(usize, &'a Value),
 }
 
 #[derive(Debug)]
@@ -151,6 +154,11 @@ impl<'a> DatumCategory<'a> for Value {
     }
 }
 
+pub struct RefFieldView<'a, D: Datum<D>> {
+    pub name: Option<&'a str>,
+    pub value: &'a D,
+}
+
 pub trait TupleDatum {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
@@ -160,6 +168,7 @@ pub trait TupleDatum {
 
 pub trait RefTupleView<'a, DV: DatumValue<DV>>: TupleDatum + Debug {
     fn get_val(&self, k: &BindingsName<'_>) -> Option<Cow<'a, DV>>;
+    fn tuple_fields_iter(&'a self) -> Box<dyn Iterator<Item = RefFieldView<'a, DV>> + 'a>;
 }
 
 pub struct OwnedFieldView<D: Datum<D>> {
@@ -197,6 +206,8 @@ impl TupleDatum for DatumTupleRef<'_> {
         match self {
             DatumTupleRef::Tuple(tuple) => tuple.len(),
             DatumTupleRef::Dynamic(dynamic) => dynamic.len(),
+            DatumTupleRef::Empty => 0,
+            DatumTupleRef::CoercedValue(_, _) => 1,
         }
     }
 }
@@ -206,6 +217,57 @@ impl<'a> RefTupleView<'a, Value> for DatumTupleRef<'a> {
         match self {
             DatumTupleRef::Tuple(tuple) => Tuple::get(tuple, k).map(Cow::Borrowed),
             DatumTupleRef::Dynamic(dynamic) => dynamic.get_val(k),
+            DatumTupleRef::Empty => None,
+            DatumTupleRef::CoercedValue(idx, v) => {
+                if k.matcher().matches(&format!("_{idx}")) {
+                    Some(Cow::Borrowed(v))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn tuple_fields_iter(&'a self) -> Box<dyn Iterator<Item = RefFieldView<'a, Value>> + 'a> {
+        Box::new(IntoIterator::into_iter(self))
+    }
+}
+
+impl<'a> IntoIterator for &'a DatumTupleRef<'a> {
+    type Item = RefFieldView<'a, Value>;
+    type IntoIter = DatumTupleRefIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            DatumTupleRef::Tuple(t) => DatumTupleRefIterator::Tuple(t.pairs()),
+            DatumTupleRef::Empty => DatumTupleRefIterator::Empty,
+            DatumTupleRef::Dynamic(_) => todo!(),
+            DatumTupleRef::CoercedValue(idx, value) => {
+                DatumTupleRefIterator::CoercedValue(Some((*idx, value)))
+            }
+        }
+    }
+}
+
+pub enum DatumTupleRefIterator<'a> {
+    Empty,
+    Tuple(PairsIter<'a>),
+    CoercedValue(Option<(usize, &'a Value)>),
+}
+
+impl<'a> Iterator for DatumTupleRefIterator<'a> {
+    type Item = RefFieldView<'a, Value>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DatumTupleRefIterator::Tuple(t) => t.next().map(|(name, value)| RefFieldView {
+                name: Some(name),
+                value,
+            }),
+            DatumTupleRefIterator::Empty => None,
+            DatumTupleRefIterator::CoercedValue(payload) => payload
+                .take()
+                .map(|(_, value)| RefFieldView { name: None, value }),
         }
     }
 }

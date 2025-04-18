@@ -1,7 +1,8 @@
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
 
-use partiql_value::{Tuple, Value};
+use partiql_value::datum::RefTupleView;
+use partiql_value::Value;
 use std::borrow::Cow;
 use std::fmt::Debug;
 
@@ -13,9 +14,9 @@ pub(crate) struct EvalSearchedCaseExpr {
 }
 
 impl EvalExpr for EvalSearchedCaseExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

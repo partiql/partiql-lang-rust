@@ -6,7 +6,7 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_types::PartiqlNoIdShapeBuilder;
-use partiql_value::{Tuple, Value};
+use partiql_value::Value;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -14,6 +14,7 @@ use std::fmt::Debug;
 use crate::error::EvaluationError;
 use partiql_catalog::call_defs::ScalarFnCallSpec;
 use partiql_catalog::scalar_fn::ScalarFnExpr;
+use partiql_value::datum::RefTupleView;
 use std::ops::ControlFlow;
 
 impl BindEvalExpr for ScalarFnCallSpec {
@@ -33,9 +34,9 @@ pub(crate) struct EvalExprFnScalar<const STRICT: bool> {
 }
 
 impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 
 use partiql_logical::Type;
-use partiql_value::datum::{DatumCategory, DatumCategoryRef};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, RefTupleView};
 use std::ops::Not;
 
 /// Represents an evaluation operator for Tuple expressions such as `{t1.a: t1.b * 2}` in
@@ -21,9 +21,9 @@ pub(crate) struct EvalTupleExpr {
 }
 
 impl EvalExpr for EvalTupleExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where
@@ -60,9 +60,9 @@ pub(crate) struct EvalListExpr {
 }
 
 impl EvalExpr for EvalListExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where
@@ -85,9 +85,9 @@ pub(crate) struct EvalBagExpr {
 }
 
 impl EvalExpr for EvalBagExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where
@@ -111,9 +111,9 @@ pub(crate) struct EvalIsTypeExpr {
 }
 
 impl EvalExpr for EvalIsTypeExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

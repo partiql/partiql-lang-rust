@@ -4,9 +4,10 @@ use itertools::Itertools;
 use partiql_catalog::table_fn::BaseTableExpr;
 
 use partiql_value::Value::Missing;
-use partiql_value::{Bag, Tuple, Value};
+use partiql_value::{Bag, Value};
 
 use partiql_catalog::extension::ExtensionResultError;
+use partiql_value::datum::RefTupleView;
 use std::borrow::Cow;
 use std::fmt::Debug;
 
@@ -19,9 +20,9 @@ pub(crate) struct EvalFnBaseTableExpr {
 
 impl EvalExpr for EvalFnBaseTableExpr {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

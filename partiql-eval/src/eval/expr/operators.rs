@@ -12,14 +12,16 @@ use partiql_types::{
     ShapeBuilderExtensions,
 };
 use partiql_value::Value::{Boolean, Missing, Null};
-use partiql_value::{BinaryAnd, Comparable, EqualityValue, NullableEq, NullableOrd, Tuple, Value};
+use partiql_value::{BinaryAnd, Comparable, EqualityValue, NullableEq, NullableOrd, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Formatter};
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{DatumCategory, DatumCategoryRef, SequenceDatum, TupleDatum};
+use partiql_value::datum::{
+    DatumCategory, DatumCategoryRef, RefTupleView, SequenceDatum, TupleDatum,
+};
 use std::ops::ControlFlow;
 
 /// Represents a literal in (sub)query, e.g. `1` in `a + 1`.
@@ -50,9 +52,9 @@ impl BindEvalExpr for EvalLitExpr {
 }
 
 impl EvalExpr for EvalLitExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a Tuple,
+        _bindings: &'a dyn RefTupleView<'a, Value>,
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where
@@ -63,7 +65,7 @@ impl EvalExpr for EvalLitExpr {
 }
 
 impl ExecuteEvalExpr<0> for Value {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         _args: [Cow<'a, Value>; 0],
         _ctx: &'c dyn EvalContext<'c>,

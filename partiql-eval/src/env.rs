@@ -5,6 +5,8 @@ use unicase::UniCase;
 
 pub mod basic {
     use super::{Bindings, BindingsName, Debug, Tuple, UniCase, Value};
+    use partiql_value::datum::{RefFieldView, RefTupleView};
+
     use std::collections::HashMap;
 
     #[derive(Debug, Clone)]
@@ -52,6 +54,16 @@ pub mod basic {
                 }
             };
             idx.and_then(|idx| self.values.get(*idx))
+        }
+    }
+
+    impl<'a> From<&'a dyn RefTupleView<'a, Value>> for MapBindings<Value> {
+        fn from(value: &'a dyn RefTupleView<'a, Value>) -> Self {
+            let mut bindings = MapBindings::default();
+            for RefFieldView { name, value } in value.tuple_fields_iter() {
+                bindings.insert(name.unwrap_or("_1"), value.clone());
+            }
+            bindings
         }
     }
 
@@ -119,7 +131,7 @@ pub mod basic {
     where
         T: Debug,
     {
-        fn get(&self, name: &BindingsName<'_>) -> Option<&T> {
+        fn get<'a>(&'a self, name: &BindingsName<'a>) -> Option<&'a T> {
             self.bindings.get(name).or_else(|| self.parent.get(name))
         }
     }

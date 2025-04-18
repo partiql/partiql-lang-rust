@@ -2,7 +2,8 @@ use crate::eval::evaluable::Evaluable;
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
 use partiql_catalog::extension::ExtensionResultError;
-use partiql_value::{Tuple, Value};
+use partiql_value::datum::RefTupleView;
+use partiql_value::Value;
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -67,9 +68,9 @@ impl Evaluable for ErrorNode {
 }
 
 impl EvalExpr for ErrorNode {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a Tuple,
+        _bindings: &'a dyn RefTupleView<'a, Value>,
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Cow<'a, Value>
     where

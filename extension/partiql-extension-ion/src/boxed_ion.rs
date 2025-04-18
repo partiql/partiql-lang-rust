@@ -11,7 +11,8 @@ use partiql_value::boxed_variant::{
 use partiql_value::datum::{
     Datum, DatumCategoryOwned, DatumCategoryRef, DatumLower, DatumLowerResult, DatumSeqOwned,
     DatumSeqRef, DatumTupleOwned, DatumTupleRef, DatumValueOwned, DatumValueRef, OwnedFieldView,
-    OwnedSequenceView, OwnedTupleView, RefSequenceView, RefTupleView, SequenceDatum, TupleDatum,
+    OwnedSequenceView, OwnedTupleView, RefFieldView, RefSequenceView, RefTupleView, SequenceDatum,
+    TupleDatum,
 };
 use partiql_value::{Bag, BindingsName, List, NullableEq, Tuple, Value, Variant};
 use peekmore::{PeekMore, PeekMoreIterator};
@@ -419,6 +420,10 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
             }
         }
         None
+    }
+
+    fn tuple_fields_iter(&'a self) -> Box<dyn Iterator<Item = RefFieldView<'a, Value>> + 'a> {
+        todo!()
     }
 }
 

@@ -85,7 +85,7 @@ pub enum UserCtxError {
 pub(crate) struct EvalTestCtxTable {}
 
 impl BaseTableExpr for EvalTestCtxTable {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c, 'o>(
         &self,
         args: &[Cow<'_, Value>],
         _ctx: &'c dyn SessionContext<'c>,
