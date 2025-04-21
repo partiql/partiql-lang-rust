@@ -33,12 +33,12 @@ mod tests {
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
-        let mut plan = planner.compile(&logical).expect("Expect no plan error");
+        let plan = planner.compile(&logical).expect("Expect no plan error");
         let sys = SystemContext {
             now: DateTime::from_system_now_utc(),
         };
         let ctx = BasicContext::new(bindings, sys);
-        if let Ok(out) = plan.execute_mut(&ctx) {
+        if let Ok(out) = plan.execute(&ctx) {
             out.result
         } else {
             Missing
@@ -2261,7 +2261,7 @@ mod tests {
             };
             let ctx = BasicContext::new(p0, sys);
 
-            let mut scan = EvalScan::new_with_at_key(
+            let scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("someOrderedTable".to_string().into()),
                 }),
@@ -2290,7 +2290,7 @@ mod tests {
             };
             let ctx = BasicContext::new(p0, sys);
 
-            let mut scan = EvalScan::new_with_at_key(
+            let scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("someUnorderedTable".to_string().into()),
                 }),
@@ -2330,7 +2330,7 @@ mod tests {
                     EvalPathComponent::Key(BindingsName::CaseInsensitive("a".into())),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
+            let scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let sys = SystemContext {
                 now: DateTime::from_system_now_utc(),
@@ -2358,7 +2358,7 @@ mod tests {
                     EvalPathComponent::Key(BindingsName::CaseInsensitive("c".into())),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
+            let scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let sys = SystemContext {
                 now: DateTime::from_system_now_utc(),
@@ -2390,7 +2390,7 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("justATuple", just_a_tuple().into());
 
-            let mut unpivot = EvalUnpivot::new(
+            let unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("justATuple".to_string().into()),
                 }),
@@ -2417,7 +2417,7 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("nonTuple", Value::from(1));
 
-            let mut unpivot = EvalUnpivot::new(
+            let unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("nonTuple".to_string().into()),
                 }),

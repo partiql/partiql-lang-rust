@@ -6,7 +6,7 @@ use partiql_value::Value;
 use std::borrow::Cow;
 use std::fmt::Debug;
 
-/// Represents a searched case operator, e.g. CASE [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END.
+/// Represents a searched case operator, e.g. CASE [ WHEN <expr> THEN <expr> ]... [ ELSE<expr> ] END.
 #[derive(Debug)]
 pub(crate) struct EvalSearchedCaseExpr {
     pub(crate) cases: Vec<(Box<dyn EvalExpr>, Box<dyn EvalExpr>)>,
@@ -18,9 +18,10 @@ impl EvalExpr for EvalSearchedCaseExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         for (when_expr, then_expr) in &self.cases {
             let when_expr_evaluated = when_expr.evaluate(bindings, ctx);

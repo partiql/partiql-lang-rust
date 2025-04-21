@@ -54,11 +54,12 @@ impl BindEvalExpr for EvalLitExpr {
 impl EvalExpr for EvalLitExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a dyn RefTupleView<'a, Value>,
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         Cow::Borrowed(&self.val)
     }

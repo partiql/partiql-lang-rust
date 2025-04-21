@@ -36,13 +36,13 @@ pub(crate) fn evaluate(
     let mut planner =
         partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);
 
-    let mut plan = planner.compile(&logical).expect("Expect no plan error");
+    let plan = planner.compile(&logical).expect("Expect no plan error");
 
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
     };
     let ctx = BasicContext::new(bindings, sys);
-    let value = if let Ok(out) = plan.execute_mut(&ctx) {
+    let value = if let Ok(out) = plan.execute(&ctx) {
         out.result
     } else {
         Value::Missing

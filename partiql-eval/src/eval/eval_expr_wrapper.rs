@@ -425,11 +425,12 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        if STRICT && ctx.has_errors() {
+        if STRICT & &ctx.has_errors() {
             return Cow::Owned(Missing);
         }
         match self.evaluate_args(bindings, ctx) {

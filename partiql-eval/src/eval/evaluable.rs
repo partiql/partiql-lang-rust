@@ -1,4 +1,3 @@
-use crate::env::basic::MapBindings;
 use crate::error::EvaluationError;
 use crate::eval::expr::EvalExpr;
 use crate::eval::{EvalContext, EvalPlan, NestedContext};
@@ -8,13 +7,15 @@ use partiql_value::{
     bag, list, tuple, Bag, List, NullSortedValue, Tuple, Value, ValueIntoIterator,
 };
 use rustc_hash::FxHashMap;
-use std::borrow::{Borrow, Cow};
+use std::borrow::Borrow;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
+use crate::env::basic::MapBindings;
 use partiql_value::datum::{Datum, DatumLower, DatumLowerResult, DatumTupleRef, RefTupleView};
 use std::rc::Rc;
 
@@ -42,7 +43,7 @@ pub enum EvalType {
 
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
-    fn evaluate<'c>(&mut self, inputs: [Option<Value>; 2], ctx: &'c dyn EvalContext<'c>) -> Value;
+    fn evaluate<'c>(&self, inputs: [Option<Value>; 2], ctx: &'c dyn EvalContext<'c>) -> Value;
     fn get_vars(&self) -> Option<&[String]> {
         None
     }
@@ -102,8 +103,8 @@ impl EvalScan {
 }
 
 impl Evaluable for EvalScan {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -196,8 +197,8 @@ impl EvalJoin {
 }
 
 impl Evaluable for EvalJoin {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -655,8 +656,8 @@ impl EvalGroupBy {
 }
 
 impl Evaluable for EvalGroupBy {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -768,8 +769,8 @@ impl EvalPivot {
 }
 
 impl Evaluable for EvalPivot {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -824,8 +825,8 @@ impl EvalUnpivot {
 }
 
 impl Evaluable for EvalUnpivot {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -887,8 +888,8 @@ impl EvalFilter {
 }
 
 impl Evaluable for EvalFilter {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -937,8 +938,8 @@ impl EvalHaving {
 }
 
 impl Evaluable for EvalHaving {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1011,8 +1012,8 @@ impl EvalOrderBy {
 }
 
 impl Evaluable for EvalOrderBy {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1035,8 +1036,8 @@ pub(crate) struct EvalLimitOffset {
 }
 
 impl Evaluable for EvalLimitOffset {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1103,8 +1104,8 @@ impl EvalSelectValue {
 }
 
 impl Evaluable for EvalSelectValue {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1154,8 +1155,8 @@ impl Debug for EvalSelect {
 }
 
 impl Evaluable for EvalSelect {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1201,8 +1202,8 @@ impl EvalSelectAll {
 }
 
 impl Evaluable for EvalSelectAll {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1243,8 +1244,8 @@ impl EvalExprQuery {
 }
 
 impl Evaluable for EvalExprQuery {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1267,8 +1268,8 @@ impl EvalDistinct {
 }
 
 impl Evaluable for EvalDistinct {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1287,8 +1288,8 @@ impl Evaluable for EvalDistinct {
 pub(crate) struct EvalSink {}
 
 impl Evaluable for EvalSink {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1318,21 +1319,22 @@ impl EvalSubQueryExpr {
 }
 
 impl EvalExpr for EvalSubQueryExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        let bindings = MapBindings::from(bindings);
         let value = {
-            let nested_ctx: NestedContext<'_, '_> = NestedContext::new(bindings, ctx);
+            let bindings = MapBindings::from(bindings);
+            let nested_ctx: NestedContext<'_> = NestedContext::new(bindings, ctx);
 
-            let mut plan = self.plan.borrow_mut();
+            let plan = RefCell::borrow(&self.plan);
 
-            match plan.execute_mut(&nested_ctx) {
+            let value = match plan.execute(ctx) {
                 Ok(evaluated) => evaluated.result,
                 Err(err) => {
                     for e in err.errors {
@@ -1340,7 +1342,9 @@ impl EvalExpr for EvalSubQueryExpr {
                     }
                     Missing
                 }
-            }
+            };
+
+            value.clone()
         };
         Cow::Owned(value)
     }
@@ -1375,8 +1379,8 @@ impl EvalOuterUnion {
 }
 
 impl Evaluable for EvalOuterUnion {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1404,8 +1408,8 @@ impl EvalOuterIntersect {
 }
 
 impl Evaluable for EvalOuterIntersect {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Value {
@@ -1448,8 +1452,8 @@ impl EvalOuterExcept {
 }
 
 impl Evaluable for EvalOuterExcept {
-    fn evaluate<'a, 'c>(
-        &mut self,
+    fn evaluate<'a, 'c, 'o>(
+        &self,
         mut inputs: [Option<Value>; 2],
         _ctx: &'c dyn EvalContext<'c>,
     ) -> Value {

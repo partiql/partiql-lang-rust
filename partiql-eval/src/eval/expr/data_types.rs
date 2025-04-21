@@ -25,9 +25,10 @@ impl EvalExpr for EvalTupleExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let tuple = self
             .attrs
@@ -64,9 +65,10 @@ impl EvalExpr for EvalListExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let values = self
             .elements
@@ -89,9 +91,10 @@ impl EvalExpr for EvalBagExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let values = self
             .elements
@@ -115,9 +118,10 @@ impl EvalExpr for EvalIsTypeExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let expr = self.expr.evaluate(bindings, ctx);
         let result = match (&self.is_type, expr.category()) {

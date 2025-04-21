@@ -83,12 +83,12 @@ mod tests {
 
     #[track_caller]
     #[inline]
-    fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
+    fn evaluate(plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
         let sys = SystemContext {
             now: DateTime::from_system_now_utc(),
         };
         let ctx = BasicContext::new(bindings, sys);
-        plan.execute_mut(&ctx)
+        plan.execute(&ctx)
     }
 
     #[track_caller]

@@ -97,7 +97,8 @@ impl EvalPathComponent {
             (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get_val(k),
             (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get_val(*idx),
             (EvalPathComponent::KeyExpr(ke), DatumCategoryRef::Tuple(tuple)) => {
-                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get_val(&key))
+                as_name(ke.evaluate(bindings, ctx).borrow())
+                    .and_then(move |key| tuple.get_val(&key))
             }
             (EvalPathComponent::IndexExpr(ie), DatumCategoryRef::Sequence(seq)) => {
                 as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get_val(i))
@@ -139,9 +140,10 @@ impl EvalExpr for EvalPath {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let evaluated = self.expr.evaluate(bindings, ctx);
         let mut path_componenents = self.components.iter();
@@ -166,9 +168,10 @@ impl EvalExpr for EvalDynamicLookup {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let mut lookups = self.lookups.iter().filter_map(|lookup| {
             let val = lookup.evaluate(bindings, ctx);
@@ -216,10 +219,11 @@ impl EvalExpr for EvalLocalVarRef {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        ctx: &'c dyn EvalContext<'c>,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         match bindings.get_val(&self.name) {
             None => Cow::Owned(Value::Missing),
@@ -255,12 +259,16 @@ impl Debug for EvalGlobalVarRef {
 impl EvalExpr for EvalGlobalVarRef {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a dyn RefTupleView<'a, Value>,
+        bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        borrow_or_missing(ctx.bindings().get(&self.name))
+        match ctx.get(&self.name) {
+            None => Cow::Owned(Value::Missing),
+            Some(v) => v,
+        }
     }
 }

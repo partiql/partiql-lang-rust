@@ -1,27 +1,28 @@
 use partiql_value::datum::RefTupleView;
 use partiql_value::{BindingsName, DateTime, Tuple, Value};
 use std::any::Any;
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-pub trait Bindings<T>: Debug
+pub trait Bindings<'a, T>: Debug
 where
-    T: Debug,
+    T: Clone + Debug,
 {
-    fn get<'a>(&'a self, name: &BindingsName<'a>) -> Option<&'a T>;
+    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, T>>;
 }
 
-impl Bindings<Value> for Tuple {
-    fn get<'a>(&'a self, name: &BindingsName<'a>) -> Option<&'a Value> {
-        self.get(name)
+impl<'a> Bindings<'a, Value> for Tuple {
+    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+        self.get(name).map(Cow::Borrowed)
     }
 }
 
-impl<'x, T> Bindings<Value> for &T
+impl<'a, T> Bindings<'a, Value> for &T
 where
-    T: RefTupleView<'x, Value>,
+    T: RefTupleView<'a, Value>,
 {
-    fn get<'a>(&'a self, name: &BindingsName<'a>) -> Option<&'a Value> {
-        self.get_val(name).map(|c|c.as_ref())
+    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+        self.get_val(name)
     }
 }
 
@@ -32,8 +33,6 @@ pub struct SystemContext {
 
 /// Represents a session context that is used during evaluation of a plan.
 pub trait SessionContext<'a>: Debug {
-    fn bindings(&self) -> &dyn Bindings<Value>;
-
     fn system_context(&self) -> &SystemContext;
 
     fn user_context(&self, name: &str) -> Option<&(dyn Any)>;

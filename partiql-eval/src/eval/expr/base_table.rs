@@ -24,9 +24,10 @@ impl EvalExpr for EvalFnBaseTableExpr {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let args = self
             .args

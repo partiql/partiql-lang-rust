@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use std::any::Any;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -10,9 +11,9 @@ use petgraph::prelude::StableGraph;
 use petgraph::{Directed, Incoming, Outgoing};
 use std::fmt::Debug;
 
-use partiql_value::Value;
+use partiql_value::{BindingsName, Value};
 
-use crate::env::basic::{MapBindings, NestedBindings};
+use crate::env::basic::MapBindings;
 
 use petgraph::graph::NodeIndex;
 
@@ -64,20 +65,20 @@ impl EvalPlan {
     }
 
     #[inline]
-    fn plan_graph(&mut self) -> &mut StableGraph<Box<dyn Evaluable>, u8> {
-        &mut self.plan_graph
+    fn plan_graph(&self) -> &StableGraph<Box<dyn Evaluable>, u8> {
+        &self.plan_graph
     }
 
     #[inline]
-    fn get_node(&mut self, idx: NodeIndex) -> Result<&mut Box<dyn Evaluable>, EvalErr> {
+    fn get_node(&self, idx: NodeIndex) -> Result<&Box<dyn Evaluable>, EvalErr> {
         self.plan_graph()
-            .node_weight_mut(idx)
+            .node_weight(idx)
             .ok_or_else(|| err_illegal_state("Error in retrieving node"))
     }
 
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
     /// operators.
-    pub fn execute_mut<'c>(&mut self, ctx: &'c dyn EvalContext<'c>) -> Result<Evaluated, EvalErr> {
+    pub fn execute<'c>(&self, ctx: &'c dyn EvalContext<'c>) -> Result<Evaluated, EvalErr> {
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
         // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
@@ -172,7 +173,7 @@ pub struct Evaluated {
 }
 
 /// Represents an evaluation context that is used during evaluation of a plan.
-pub trait EvalContext<'a>: SessionContext<'a> + Debug {
+pub trait EvalContext<'a>: Bindings<'a, Value> + SessionContext<'a> + Debug {
     fn as_session(&'a self) -> &'a dyn SessionContext<'a>;
 
     fn add_error(&self, error: EvaluationError);
@@ -203,10 +204,6 @@ impl BasicContext<'_> {
 }
 
 impl<'a> SessionContext<'a> for BasicContext<'a> {
-    fn bindings(&self) -> &dyn Bindings<Value> {
-        &self.bindings
-    }
-
     fn system_context(&self) -> &SystemContext {
         &self.sys
     }
@@ -214,6 +211,12 @@ impl<'a> SessionContext<'a> for BasicContext<'a> {
     fn user_context(&self, name: &str) -> Option<&(dyn Any)> {
         let key = name.into();
         self.user.get(&key).copied()
+    }
+}
+
+impl<'a> Bindings<'a, Value> for BasicContext<'a> {
+    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+        self.bindings.get(name)
     }
 }
 
@@ -236,23 +239,18 @@ impl<'a> EvalContext<'a> for BasicContext<'a> {
 }
 
 #[derive(Debug)]
-pub struct NestedContext<'a, 'c> {
-    pub bindings: NestedBindings<'a, Value>,
-    pub parent: &'a dyn EvalContext<'c>,
+pub struct NestedContext<'c> {
+    pub bindings: MapBindings<Value>,
+    pub parent: &'c dyn EvalContext<'c>,
 }
 
-impl<'a, 'c> NestedContext<'a, 'c> {
-    pub fn new(bindings: MapBindings<Value>, parent: &'a dyn EvalContext<'c>) -> Self {
-        let bindings = NestedBindings::new(bindings, parent.bindings());
+impl<'c> NestedContext<'c> {
+    pub fn new(bindings: MapBindings<Value>, parent: &'c dyn EvalContext<'c>) -> Self {
         NestedContext { bindings, parent }
     }
 }
 
-impl<'a> SessionContext<'a> for NestedContext<'a, '_> {
-    fn bindings(&self) -> &dyn Bindings<Value> {
-        &self.bindings
-    }
-
+impl<'c> SessionContext<'c> for NestedContext<'c> {
     delegate! {
         to self.parent {
             fn system_context(&self) -> &SystemContext;
@@ -261,8 +259,17 @@ impl<'a> SessionContext<'a> for NestedContext<'a, '_> {
     }
 }
 
-impl<'a> EvalContext<'a> for NestedContext<'a, '_> {
-    fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
+impl<'a> Bindings<'a, Value> for NestedContext<'_> {
+    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+        match self.bindings.get(name) {
+            Some(v) => Some(v),
+            None => self.parent.get(name),
+        }
+    }
+}
+
+impl<'c> EvalContext<'c> for NestedContext<'c> {
+    fn as_session(&'c self) -> &'c dyn SessionContext<'c> {
         self
     }
 

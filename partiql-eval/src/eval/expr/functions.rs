@@ -38,9 +38,10 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
         ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch

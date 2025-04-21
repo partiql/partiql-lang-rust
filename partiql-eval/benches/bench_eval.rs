@@ -135,12 +135,12 @@ fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     planner.compile(logical).expect("Expect no plan error")
 }
 
-fn evaluate(mut plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
+fn evaluate(plan: EvalPlan, bindings: MapBindings<Value>) -> Value {
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
     };
     let ctx = BasicContext::new(bindings, sys);
-    if let Ok(out) = plan.execute_mut(&ctx) {
+    if let Ok(out) = plan.execute(&ctx) {
         out.result
     } else {
         Value::Missing

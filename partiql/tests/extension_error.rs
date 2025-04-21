@@ -129,7 +129,7 @@ pub(crate) fn evaluate(
 ) -> Result<Evaluated, EvalErr> {
     let mut planner = partiql_eval::plan::EvaluatorPlanner::new(mode, catalog);
 
-    let mut plan = planner.compile(&logical).expect("Expect no plan error");
+    let plan = planner.compile(&logical).expect("Expect no plan error");
 
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
@@ -139,7 +139,7 @@ pub(crate) fn evaluate(
         ctx.user.insert(k.as_str().into(), *v);
     }
 
-    plan.execute_mut(&ctx)
+    plan.execute(&ctx)
 }
 
 #[test]
