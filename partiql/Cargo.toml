@@ -61,3 +61,7 @@ harness = false
 [[bench]]
 name = "bench_agg"
 harness = false
+
+[[bench]]
+name = "bench_join"
+harness = false
