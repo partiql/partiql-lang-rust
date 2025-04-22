@@ -62,7 +62,7 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate<'a, 'o>(&self, _: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
+    fn evaluate(&self, _: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 }
