@@ -24,7 +24,7 @@ impl EvalExpr for EvalTupleExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -64,7 +64,7 @@ impl EvalExpr for EvalListExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -90,7 +90,7 @@ impl EvalExpr for EvalBagExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -117,7 +117,7 @@ impl EvalExpr for EvalIsTypeExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,

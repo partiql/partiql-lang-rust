@@ -37,7 +37,7 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -54,7 +54,7 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
             ctx,
         ) {
             ControlFlow::Break(v) => Cow::Owned(v),
-            ControlFlow::Continue(args) => match self.plan.evaluate(&args, ctx.as_session()) {
+            ControlFlow::Continue(args) => match self.plan.evaluate(&args, ctx) {
                 Ok(v) => v,
                 Err(e) => {
                     ctx.add_error(EvaluationError::ExtensionResultError(e));

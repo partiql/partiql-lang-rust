@@ -79,9 +79,13 @@ pub enum DatumCategoryOwned {
 
 #[derive(Debug)]
 pub enum DatumTupleRef<'a> {
+    /// A Tuple with no bindings
     Empty,
+    /// Holds a reference to a [`Tuple`]
     Tuple(&'a Tuple),
+    /// Holds a reference to a [`RefTupleView`]
     Dynamic(&'a dyn RefTupleView<'a, Value>),
+    /// Holds a reference to a value which is not a tuple, but has been coerced (e.g., for `9`: `{'_1': 9}`)
     CoercedValue(usize, &'a Value),
 }
 
@@ -154,9 +158,9 @@ impl<'a> DatumCategory<'a> for Value {
     }
 }
 
-pub struct RefFieldView<'a, D: Datum<D>> {
+pub struct RefFieldView<'a, DV: DatumValue<DV>> {
     pub name: Option<&'a str>,
-    pub value: &'a D,
+    pub value: Cow<'a, DV>,
 }
 
 pub trait TupleDatum {
@@ -241,7 +245,7 @@ impl<'a> IntoIterator for &'a DatumTupleRef<'a> {
         match self {
             DatumTupleRef::Tuple(t) => DatumTupleRefIterator::Tuple(t.pairs()),
             DatumTupleRef::Empty => DatumTupleRefIterator::Empty,
-            DatumTupleRef::Dynamic(_) => todo!(),
+            DatumTupleRef::Dynamic(d) => DatumTupleRefIterator::Dynamic(d.tuple_fields_iter()),
             DatumTupleRef::CoercedValue(idx, value) => {
                 DatumTupleRefIterator::CoercedValue(Some((*idx, value)))
             }
@@ -252,6 +256,7 @@ impl<'a> IntoIterator for &'a DatumTupleRef<'a> {
 pub enum DatumTupleRefIterator<'a> {
     Empty,
     Tuple(PairsIter<'a>),
+    Dynamic(Box<dyn Iterator<Item = RefFieldView<'a, Value>> + 'a>),
     CoercedValue(Option<(usize, &'a Value)>),
 }
 
@@ -262,12 +267,16 @@ impl<'a> Iterator for DatumTupleRefIterator<'a> {
         match self {
             DatumTupleRefIterator::Tuple(t) => t.next().map(|(name, value)| RefFieldView {
                 name: Some(name),
-                value,
+                value: Cow::Borrowed(value),
             }),
             DatumTupleRefIterator::Empty => None,
-            DatumTupleRefIterator::CoercedValue(payload) => payload
-                .take()
-                .map(|(_, value)| RefFieldView { name: None, value }),
+            DatumTupleRefIterator::CoercedValue(payload) => {
+                payload.take().map(|(_, value)| RefFieldView {
+                    name: None,
+                    value: Cow::Borrowed(value),
+                })
+            }
+            DatumTupleRefIterator::Dynamic(d) => d.next(),
         }
     }
 }

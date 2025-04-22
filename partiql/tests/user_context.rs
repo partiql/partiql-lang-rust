@@ -86,7 +86,7 @@ impl BaseTableExpr for EvalTestCtxTable {
     fn evaluate<'a, 'c, 'o>(
         &self,
         args: &[Cow<'_, Value>],
-        ctx: &'c dyn SessionContext<'c>,
+        ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
@@ -104,7 +104,7 @@ impl BaseTableExpr for EvalTestCtxTable {
 }
 
 struct TestDataGen<'a> {
-    ctx: &'a dyn SessionContext<'a>,
+    ctx: &'a dyn SessionContext,
     name: String,
 }
 
@@ -131,7 +131,7 @@ impl Iterator for TestDataGen<'_> {
     }
 }
 
-fn generated_data<'a>(name: String, ctx: &'a dyn SessionContext<'a>) -> BaseTableExprResult<'a> {
+fn generated_data(name: String, ctx: &dyn SessionContext) -> BaseTableExprResult<'_> {
     Ok(Box::new(TestDataGen { ctx, name }))
 }
 

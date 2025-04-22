@@ -70,15 +70,16 @@ impl EvalPlan {
     }
 
     #[inline]
-    fn get_node(&self, idx: NodeIndex) -> Result<&Box<dyn Evaluable>, EvalErr> {
+    fn get_node(&self, idx: NodeIndex) -> Result<&dyn Evaluable, EvalErr> {
         self.plan_graph()
             .node_weight(idx)
+            .map(|node| node.as_ref())
             .ok_or_else(|| err_illegal_state("Error in retrieving node"))
     }
 
     /// Executes the plan while mutating its state by changing the inputs and outputs of plan
     /// operators.
-    pub fn execute<'c>(&self, ctx: &'c dyn EvalContext<'c>) -> Result<Evaluated, EvalErr> {
+    pub fn execute(&self, ctx: &dyn EvalContext) -> Result<Evaluated, EvalErr> {
         // We are only interested in DAGs that can be used as execution plans, which leads to the
         // following definition.
         // A DAG is a directed, cycle-free graph G = (V, E) with a denoted root node v0 ∈ V such
@@ -173,20 +174,18 @@ pub struct Evaluated {
 }
 
 /// Represents an evaluation context that is used during evaluation of a plan.
-pub trait EvalContext<'a>: Bindings<'a, Value> + SessionContext<'a> + Debug {
-    fn as_session(&'a self) -> &'a dyn SessionContext<'a>;
-
+pub trait EvalContext: Bindings<Value> + SessionContext + Debug {
     fn add_error(&self, error: EvaluationError);
     fn has_errors(&self) -> bool;
     fn errors(&self) -> Vec<EvaluationError>;
 }
 
 #[derive(Debug)]
-pub struct BasicContext<'a> {
+pub struct BasicContext<'u> {
     pub bindings: MapBindings<Value>,
 
     pub sys: SystemContext,
-    pub user: HashMap<UniCase<String>, &'a (dyn Any)>,
+    pub user: HashMap<UniCase<String>, &'u (dyn Any)>,
 
     pub errors: RefCell<Vec<EvaluationError>>,
 }
@@ -203,7 +202,7 @@ impl BasicContext<'_> {
     }
 }
 
-impl<'a> SessionContext<'a> for BasicContext<'a> {
+impl SessionContext for BasicContext<'_> {
     fn system_context(&self) -> &SystemContext {
         &self.sys
     }
@@ -214,17 +213,13 @@ impl<'a> SessionContext<'a> for BasicContext<'a> {
     }
 }
 
-impl<'a> Bindings<'a, Value> for BasicContext<'a> {
-    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+impl Bindings<Value> for BasicContext<'_> {
+    fn get<'a>(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
         self.bindings.get(name)
     }
 }
 
-impl<'a> EvalContext<'a> for BasicContext<'a> {
-    fn as_session(&'a self) -> &'a dyn SessionContext<'a> {
-        self
-    }
-
+impl EvalContext for BasicContext<'_> {
     fn add_error(&self, error: EvaluationError) {
         self.errors.borrow_mut().push(error);
     }
@@ -241,16 +236,16 @@ impl<'a> EvalContext<'a> for BasicContext<'a> {
 #[derive(Debug)]
 pub struct NestedContext<'c> {
     pub bindings: MapBindings<Value>,
-    pub parent: &'c dyn EvalContext<'c>,
+    pub parent: &'c dyn EvalContext,
 }
 
 impl<'c> NestedContext<'c> {
-    pub fn new(bindings: MapBindings<Value>, parent: &'c dyn EvalContext<'c>) -> Self {
+    pub fn new(bindings: MapBindings<Value>, parent: &'c dyn EvalContext) -> Self {
         NestedContext { bindings, parent }
     }
 }
 
-impl<'c> SessionContext<'c> for NestedContext<'c> {
+impl SessionContext for NestedContext<'_> {
     delegate! {
         to self.parent {
             fn system_context(&self) -> &SystemContext;
@@ -259,8 +254,8 @@ impl<'c> SessionContext<'c> for NestedContext<'c> {
     }
 }
 
-impl<'a> Bindings<'a, Value> for NestedContext<'_> {
-    fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
+impl Bindings<Value> for NestedContext<'_> {
+    fn get<'a>(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, Value>> {
         match self.bindings.get(name) {
             Some(v) => Some(v),
             None => self.parent.get(name),
@@ -268,11 +263,7 @@ impl<'a> Bindings<'a, Value> for NestedContext<'_> {
     }
 }
 
-impl<'c> EvalContext<'c> for NestedContext<'c> {
-    fn as_session(&'c self) -> &'c dyn SessionContext<'c> {
-        self
-    }
-
+impl EvalContext for NestedContext<'_> {
     delegate! {
         to self.parent {
             fn add_error(&self, error: EvaluationError);

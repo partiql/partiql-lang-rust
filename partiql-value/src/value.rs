@@ -6,7 +6,7 @@ use std::hash::Hash;
 use rust_decimal::Decimal as RustDecimal;
 
 use crate::variant::Variant;
-use crate::{Bag, BindingIntoIter, BindingIter, DateTime, Graph, List, Tuple};
+use crate::{tuple, Bag, BindingIntoIter, BindingIter, DateTime, Graph, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -120,8 +120,8 @@ impl Value {
                     Cow::Owned(Value::Tuple(t)) => Cow::Owned(*t),
                     _ => unreachable!(),
                 },
-                DatumTupleRef::Empty => todo!(),
-                DatumTupleRef::CoercedValue(_, _) => todo!(),
+                DatumTupleRef::Empty => Cow::Owned(tuple![]),
+                DatumTupleRef::CoercedValue(_, v) => Cow::Owned(tuple![("_1", v.clone())]),
             },
             _ => Cow::Owned(self.coerce_to_tuple()),
         }

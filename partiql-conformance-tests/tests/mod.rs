@@ -72,7 +72,7 @@ pub(crate) fn compile(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate<'c>(plan: EvalPlan, ctx: &'c dyn EvalContext<'c>) -> EvalResult {
+pub(crate) fn evaluate(plan: EvalPlan, ctx: &dyn EvalContext) -> EvalResult {
     plan.execute(ctx)
 }
 

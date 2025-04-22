@@ -414,6 +414,7 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
             if let Ok(strct) = elt.expect_struct() {
                 for (k, elt) in strct {
                     if k.text().is_some_and(|k| matcher.matches(k)) {
+                        // TODO remove clone via ion-rs's new lazy element?
                         return Some(Cow::Owned(Self::new_value(elt.clone(), ctx.clone())));
                     }
                 }
@@ -423,7 +424,18 @@ impl<'a> RefTupleView<'a, Value> for BoxedIon {
     }
 
     fn tuple_fields_iter(&'a self) -> Box<dyn Iterator<Item = RefFieldView<'a, Value>> + 'a> {
-        todo!()
+        let Self { doc, ctx } = self;
+        if let BoxedIonValue::Value(elt) = doc {
+            if let Some(strct) = elt.as_struct() {
+                return Box::new(strct.iter().map(|(name, value)| {
+                    let name = name.text();
+                    let value = Cow::Owned(Self::new_value(value.clone(), ctx.clone()));
+                    // TODO remove clone via ion-rs's new lazy element?
+                    RefFieldView { name, value }
+                }));
+            }
+        }
+        Box::new(std::iter::empty())
     }
 }
 

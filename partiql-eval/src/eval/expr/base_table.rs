@@ -23,7 +23,7 @@ impl EvalExpr for EvalFnBaseTableExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -34,7 +34,7 @@ impl EvalExpr for EvalFnBaseTableExpr {
             .iter()
             .map(|arg| arg.evaluate(bindings, ctx))
             .collect_vec();
-        let results = self.expr.evaluate(&args, ctx.as_session());
+        let results = self.expr.evaluate(&args, ctx);
         let result = match results {
             Ok(it) => {
                 let bag: Result<Bag, _> = it

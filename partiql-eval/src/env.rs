@@ -42,12 +42,12 @@ pub mod basic {
         }
     }
 
-    impl<'a, T> Bindings<'a, T> for MapBindings<T>
+    impl<T> Bindings<T> for MapBindings<T>
     where
         T: Clone + Debug,
     {
         #[inline]
-        fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, T>> {
+        fn get<'a>(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, T>> {
             let idx = match name {
                 BindingsName::CaseSensitive(s) => self.sensitive.get(s.as_ref()),
                 BindingsName::CaseInsensitive(s) => {
@@ -62,7 +62,7 @@ pub mod basic {
         fn from(value: &'a dyn RefTupleView<'a, Value>) -> Self {
             let mut bindings = MapBindings::default();
             for RefFieldView { name, value } in value.tuple_fields_iter() {
-                bindings.insert(name.unwrap_or("_1"), value.clone());
+                bindings.insert(name.unwrap_or("_1"), value.into_owned());
             }
             bindings
         }
@@ -116,23 +116,23 @@ pub mod basic {
         T: Debug,
     {
         bindings: MapBindings<T>,
-        parent: &'a dyn Bindings<'a, T>,
+        parent: &'a dyn Bindings<T>,
     }
 
     impl<'a, T> NestedBindings<'a, T>
     where
         T: Debug,
     {
-        pub fn new(bindings: MapBindings<T>, parent: &'a dyn Bindings<'a, T>) -> Self {
+        pub fn new(bindings: MapBindings<T>, parent: &'a dyn Bindings<T>) -> Self {
             Self { bindings, parent }
         }
     }
 
-    impl<'a, T> Bindings<'a, T> for NestedBindings<'a, T>
+    impl<'b, T> Bindings<T> for NestedBindings<'b, T>
     where
-        T: Clone + Debug + 'a,
+        T: Clone + Debug + 'b,
     {
-        fn get(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, T>> {
+        fn get<'a>(&'a self, name: &BindingsName<'_>) -> Option<Cow<'a, T>> {
             match self.bindings.get(name) {
                 Some(v) => Some(v),
                 None => self.parent.get(name),

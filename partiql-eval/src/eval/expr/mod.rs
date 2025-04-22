@@ -35,7 +35,7 @@ pub trait EvalExpr: Debug {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,

@@ -43,7 +43,7 @@ pub enum EvalType {
 
 /// `Evaluable` represents each evaluation operator in the evaluation plan as an evaluable entity.
 pub trait Evaluable: Debug {
-    fn evaluate<'c>(&self, inputs: [Option<Value>; 2], ctx: &'c dyn EvalContext<'c>) -> Value;
+    fn evaluate(&self, inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value;
     fn get_vars(&self) -> Option<&[String]> {
         None
     }
@@ -103,11 +103,7 @@ impl EvalScan {
 }
 
 impl Evaluable for EvalScan {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = inputs[0].take().unwrap_or(Missing);
 
         let bindings = match input_value {
@@ -197,11 +193,7 @@ impl EvalJoin {
 }
 
 impl Evaluable for EvalJoin {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         /// Creates a `Tuple` with attributes `attrs`, each with value `Null`
         #[inline]
         fn tuple_with_null_vals<I, S>(attrs: I) -> Tuple
@@ -640,7 +632,7 @@ impl EvalGroupBy {
     fn group_key<'a, 'c>(
         &'a self,
         bindings: &'a DatumTupleRef<'a>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> GroupKey
     where
         'c: 'a,
@@ -656,11 +648,7 @@ impl EvalGroupBy {
 }
 
 impl Evaluable for EvalGroupBy {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let group_as_alias = &self.group_as_alias;
         let input_value = take_input!(inputs[0].take(), ctx);
 
@@ -769,11 +757,7 @@ impl EvalPivot {
 }
 
 impl Evaluable for EvalPivot {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let tuple: Tuple = input_value
@@ -825,11 +809,7 @@ impl EvalUnpivot {
 }
 
 impl Evaluable for EvalUnpivot {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, _inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let tuple = match self.expr.evaluate(&DatumTupleRef::Empty, ctx).into_owned() {
             Value::Tuple(tuple) => *tuple,
             other => other.coerce_into_tuple(),
@@ -871,7 +851,7 @@ impl EvalFilter {
     fn eval_filter<'a, 'c>(
         &'a self,
         bindings: &'a DatumTupleRef<'a>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> bool
     where
         'c: 'a,
@@ -888,11 +868,7 @@ impl EvalFilter {
 }
 
 impl Evaluable for EvalFilter {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let filtered = input_value
@@ -919,7 +895,7 @@ impl EvalHaving {
     fn eval_having<'a, 'c>(
         &'a self,
         bindings: &'a DatumTupleRef<'a>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> bool
     where
         'c: 'a,
@@ -938,11 +914,7 @@ impl EvalHaving {
 }
 
 impl Evaluable for EvalHaving {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let filtered = input_value
@@ -974,7 +946,7 @@ pub(crate) struct EvalOrderBy {
 
 impl EvalOrderBy {
     #[inline]
-    fn compare<'c>(&self, l: &Value, r: &Value, ctx: &'c dyn EvalContext<'c>) -> Ordering {
+    fn compare(&self, l: &Value, r: &Value, ctx: &dyn EvalContext) -> Ordering {
         let l = l.as_datum_tuple_ref();
         let r = r.as_datum_tuple_ref();
         self.cmp
@@ -1012,11 +984,7 @@ impl EvalOrderBy {
 }
 
 impl Evaluable for EvalOrderBy {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let values: DatumLowerResult<Vec<_>> =
@@ -1036,11 +1004,7 @@ pub(crate) struct EvalLimitOffset {
 }
 
 impl Evaluable for EvalLimitOffset {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let empty_bindings = DatumTupleRef::Empty;
@@ -1104,11 +1068,7 @@ impl EvalSelectValue {
 }
 
 impl Evaluable for EvalSelectValue {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1155,11 +1115,7 @@ impl Debug for EvalSelect {
 }
 
 impl Evaluable for EvalSelect {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1194,19 +1150,12 @@ pub(crate) struct EvalSelectAll {
 
 impl EvalSelectAll {
     pub(crate) fn new(passthrough: bool) -> Self {
-        Self {
-            passthrough,
-            ..Self::default()
-        }
+        Self { passthrough }
     }
 }
 
 impl Evaluable for EvalSelectAll {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
 
         let ordered = input_value.is_ordered();
@@ -1244,11 +1193,7 @@ impl EvalExprQuery {
 }
 
 impl Evaluable for EvalExprQuery {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input = inputs[0].take().unwrap_or(Value::Null);
         let input = input.as_tuple_ref();
         let input = input.as_ref();
@@ -1268,11 +1213,7 @@ impl EvalDistinct {
 }
 
 impl Evaluable for EvalDistinct {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], ctx: &dyn EvalContext) -> Value {
         let input_value = take_input!(inputs[0].take(), ctx);
         let ordered = input_value.is_ordered();
 
@@ -1288,11 +1229,7 @@ impl Evaluable for EvalDistinct {
 pub(crate) struct EvalSink {}
 
 impl Evaluable for EvalSink {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         inputs[0].take().unwrap_or(Missing)
     }
 }
@@ -1322,7 +1259,7 @@ impl EvalExpr for EvalSubQueryExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -1330,11 +1267,11 @@ impl EvalExpr for EvalSubQueryExpr {
     {
         let value = {
             let bindings = MapBindings::from(bindings);
-            let nested_ctx: NestedContext<'_> = NestedContext::new(bindings, ctx);
+            let nested_ctx = NestedContext::new(bindings, ctx);
 
             let plan = RefCell::borrow(&self.plan);
 
-            let value = match plan.execute(ctx) {
+            let value = match plan.execute(&nested_ctx) {
                 Ok(evaluated) => evaluated.result,
                 Err(err) => {
                     for e in err.errors {
@@ -1379,11 +1316,7 @@ impl EvalOuterUnion {
 }
 
 impl Evaluable for EvalOuterUnion {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         let lhs = bagop_iter(inputs[0].take().unwrap_or(Missing));
         let rhs = bagop_iter(inputs[1].take().unwrap_or(Missing));
         let chained = lhs.chain(rhs);
@@ -1408,11 +1341,7 @@ impl EvalOuterIntersect {
 }
 
 impl Evaluable for EvalOuterIntersect {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         let lhs = bagop_iter(inputs[0].take().unwrap_or(Missing));
         let rhs = bagop_iter(inputs[1].take().unwrap_or(Missing));
 
@@ -1452,11 +1381,7 @@ impl EvalOuterExcept {
 }
 
 impl Evaluable for EvalOuterExcept {
-    fn evaluate<'a, 'c, 'o>(
-        &self,
-        mut inputs: [Option<Value>; 2],
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Value {
+    fn evaluate<'a, 'o>(&self, mut inputs: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         let lhs = bagop_iter(inputs[0].take().unwrap_or(Missing));
         let rhs = bagop_iter(inputs[1].take().unwrap_or(Missing));
 

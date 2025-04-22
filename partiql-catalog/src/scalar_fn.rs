@@ -15,7 +15,7 @@ pub trait ScalarFnExpr: DynClone + Debug {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],
-        ctx: &'c dyn SessionContext<'c>,
+        ctx: &'c dyn SessionContext,
     ) -> ScalarFnExprResult<'c>;
 }
 

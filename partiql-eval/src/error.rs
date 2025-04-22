@@ -62,7 +62,7 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate<'a, 'c, 'o>(&self, _: [Option<Value>; 2], _ctx: &'c dyn EvalContext<'c>) -> Value {
+    fn evaluate<'a, 'o>(&self, _: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 }
@@ -70,8 +70,8 @@ impl Evaluable for ErrorNode {
 impl EvalExpr for ErrorNode {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        _bindings: &'a dyn RefTupleView<'a, Value>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,

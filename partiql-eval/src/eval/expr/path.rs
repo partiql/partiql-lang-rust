@@ -6,7 +6,6 @@ use crate::eval::EvalContext;
 use partiql_value::Value::Missing;
 use partiql_value::{BindingsName, Value};
 
-use partiql_catalog::context::Bindings;
 use partiql_value::datum::{
     DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedSequenceView, OwnedTupleView,
     RefSequenceView, RefTupleView,
@@ -87,7 +86,7 @@ impl EvalPathComponent {
         &'a self,
         value: &'a Value,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Option<Cow<'a, Value>>
     where
         'c: 'a,
@@ -112,7 +111,7 @@ impl EvalPathComponent {
         &'a self,
         value: Value,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Option<Cow<'a, Value>>
     where
         'c: 'a,
@@ -139,7 +138,7 @@ impl EvalExpr for EvalPath {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -167,7 +166,7 @@ impl EvalExpr for EvalDynamicLookup {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -204,11 +203,6 @@ impl BindEvalExpr for EvalVarRef {
     }
 }
 
-#[inline]
-fn borrow_or_missing(value: Option<&Value>) -> Cow<'_, Value> {
-    value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
-}
-
 /// Represents a local variable reference in a (sub)query, e.g. `b` in `SELECT t.b as a FROM T as t`.
 #[derive(Clone)]
 pub(crate) struct EvalLocalVarRef {
@@ -219,7 +213,7 @@ impl EvalExpr for EvalLocalVarRef {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -259,8 +253,8 @@ impl Debug for EvalGlobalVarRef {
 impl EvalExpr for EvalGlobalVarRef {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        _bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,

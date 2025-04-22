@@ -54,8 +54,8 @@ impl BindEvalExpr for EvalLitExpr {
 impl EvalExpr for EvalLitExpr {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a dyn RefTupleView<'a, Value>,
-        ctx: &'c dyn EvalContext<'c>,
+        _bindings: &'a dyn RefTupleView<'a, Value>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'o, Value>
     where
         'c: 'a,
@@ -69,7 +69,7 @@ impl ExecuteEvalExpr<0> for Value {
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         _args: [Cow<'a, Value>; 0],
-        _ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,

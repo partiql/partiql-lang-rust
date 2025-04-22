@@ -13,7 +13,7 @@ pub trait BaseTableExpr: Debug {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],
-        ctx: &'c dyn SessionContext<'c>,
+        ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c>;
 }
 
