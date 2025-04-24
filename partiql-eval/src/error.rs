@@ -2,7 +2,8 @@ use crate::eval::evaluable::Evaluable;
 use crate::eval::expr::EvalExpr;
 use crate::eval::EvalContext;
 use partiql_catalog::extension::ExtensionResultError;
-use partiql_value::{Tuple, Value};
+use partiql_value::datum::RefTupleView;
+use partiql_value::Value;
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -61,23 +62,20 @@ impl ErrorNode {
 }
 
 impl Evaluable for ErrorNode {
-    fn evaluate<'a, 'c>(&mut self, _ctx: &'c dyn EvalContext<'c>) -> Value {
-        panic!("ErrorNode will not be evaluated")
-    }
-
-    fn update_input(&mut self, _input: Value, _branch_num: u8, _ctx: &dyn EvalContext<'_>) {
+    fn evaluate(&self, _: [Option<Value>; 2], _ctx: &dyn EvalContext) -> Value {
         panic!("ErrorNode will not be evaluated")
     }
 }
 
 impl EvalExpr for ErrorNode {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a Tuple,
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        _bindings: &'a dyn RefTupleView<'a, Value>,
+        _ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         panic!("ErrorNode will not be evaluated")
     }

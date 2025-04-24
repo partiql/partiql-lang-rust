@@ -6,7 +6,7 @@ use std::hash::Hash;
 use rust_decimal::Decimal as RustDecimal;
 
 use crate::variant::Variant;
-use crate::{Bag, BindingIntoIter, BindingIter, DateTime, Graph, List, Tuple};
+use crate::{tuple, Bag, BindingIntoIter, BindingIter, DateTime, Graph, List, Tuple};
 use rust_decimal::prelude::FromPrimitive;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,15 @@ impl Value {
 
     #[inline]
     #[must_use]
+    pub fn as_datum_tuple_ref(&self) -> DatumTupleRef<'_> {
+        match self.category() {
+            DatumCategoryRef::Tuple(t) => t,
+            _ => DatumTupleRef::CoercedValue(1, self),
+        }
+    }
+
+    #[inline]
+    #[must_use]
     pub fn as_tuple_ref(&self) -> Cow<'_, Tuple> {
         match self.category() {
             DatumCategoryRef::Tuple(t) => match t {
@@ -111,6 +120,8 @@ impl Value {
                     Cow::Owned(Value::Tuple(t)) => Cow::Owned(*t),
                     _ => unreachable!(),
                 },
+                DatumTupleRef::Empty => Cow::Owned(tuple![]),
+                DatumTupleRef::CoercedValue(_, v) => Cow::Owned(tuple![("_1", v.clone())]),
             },
             _ => Cow::Owned(self.coerce_to_tuple()),
         }
@@ -124,6 +135,10 @@ impl Value {
             DatumCategoryRef::Tuple(t) => match t {
                 DatumTupleRef::Tuple(t) => BindingIter::Tuple(t.pairs()),
                 DatumTupleRef::Dynamic(_) => unreachable!(),
+                DatumTupleRef::Empty => BindingIter::Empty,
+                DatumTupleRef::CoercedValue(_, value) => {
+                    BindingIter::Single(std::iter::once(value))
+                }
             },
             _ => BindingIter::Single(std::iter::once(self)),
         }

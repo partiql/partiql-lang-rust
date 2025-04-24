@@ -57,6 +57,7 @@ mod tests {
     use partiql_catalog::context::SystemContext;
     use partiql_common::pretty::ToPretty;
     use partiql_logical::graph::bind_name::FreshBinder;
+    use partiql_value::datum::DatumTupleRef;
     use partiql_value::{tuple, BindingsName, DateTime, Value};
 
     impl<GT: GraphTypes> From<PathMatch<GT>> for PathPatternMatch<GT> {
@@ -156,6 +157,7 @@ mod tests {
             .expect("graph match bind");
 
         let bindings = tuple![("graph", graph())];
+        let bindings = DatumTupleRef::Tuple(&bindings);
         let ctx = context();
         let res = eval.evaluate(&bindings, &ctx);
         let expected = crate::test_value::parse_partiql_value_str(expected);

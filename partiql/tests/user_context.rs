@@ -83,10 +83,10 @@ pub enum UserCtxError {
 pub(crate) struct EvalTestCtxTable {}
 
 impl BaseTableExpr for EvalTestCtxTable {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c, 'o>(
         &self,
         args: &[Cow<'_, Value>],
-        ctx: &'c dyn SessionContext<'c>,
+        ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
@@ -104,7 +104,7 @@ impl BaseTableExpr for EvalTestCtxTable {
 }
 
 struct TestDataGen<'a> {
-    ctx: &'a dyn SessionContext<'a>,
+    ctx: &'a dyn SessionContext,
     name: String,
 }
 
@@ -131,7 +131,7 @@ impl Iterator for TestDataGen<'_> {
     }
 }
 
-fn generated_data<'a>(name: String, ctx: &'a dyn SessionContext<'a>) -> BaseTableExprResult<'a> {
+fn generated_data(name: String, ctx: &dyn SessionContext) -> BaseTableExprResult<'_> {
     Ok(Box::new(TestDataGen { ctx, name }))
 }
 
@@ -151,7 +151,7 @@ pub(crate) fn evaluate(
     let mut planner =
         partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);
 
-    let mut plan = planner.compile(&logical).expect("Expect no plan error");
+    let plan = planner.compile(&logical).expect("Expect no plan error");
 
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
@@ -160,7 +160,7 @@ pub(crate) fn evaluate(
     for (k, v) in ctx_vals {
         ctx.user.insert(k.as_str().into(), *v);
     }
-    if let Ok(out) = plan.execute_mut(&ctx) {
+    if let Ok(out) = plan.execute(&ctx) {
         out.result
     } else {
         Value::Missing

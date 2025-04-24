@@ -4,9 +4,8 @@ use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
 use partiql_value::Value::Missing;
-use partiql_value::{BindingsName, Tuple, Value};
+use partiql_value::{BindingsName, Value};
 
-use partiql_catalog::context::Bindings;
 use partiql_value::datum::{
     DatumCategory, DatumCategoryOwned, DatumCategoryRef, OwnedSequenceView, OwnedTupleView,
     RefSequenceView, RefTupleView,
@@ -84,17 +83,21 @@ fn as_int(v: &Value) -> Option<i64> {
 impl EvalPathComponent {
     #[inline]
     fn get_val<'a, 'c>(
-        &self,
+        &'a self,
         value: &'a Value,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Option<Cow<'a, Value>> {
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Option<Cow<'a, Value>>
+    where
+        'c: 'a,
+    {
         let category = value.category();
         match (self, category) {
             (EvalPathComponent::Key(k), DatumCategoryRef::Tuple(tuple)) => tuple.get_val(k),
             (EvalPathComponent::Index(idx), DatumCategoryRef::Sequence(seq)) => seq.get_val(*idx),
             (EvalPathComponent::KeyExpr(ke), DatumCategoryRef::Tuple(tuple)) => {
-                as_name(ke.evaluate(bindings, ctx).borrow()).and_then(|key| tuple.get_val(&key))
+                as_name(ke.evaluate(bindings, ctx).borrow())
+                    .and_then(move |key| tuple.get_val(&key))
             }
             (EvalPathComponent::IndexExpr(ie), DatumCategoryRef::Sequence(seq)) => {
                 as_int(ie.evaluate(bindings, ctx).borrow()).and_then(|i| seq.get_val(i))
@@ -105,11 +108,14 @@ impl EvalPathComponent {
 
     #[inline]
     fn take_val<'a, 'c>(
-        &self,
+        &'a self,
         value: Value,
-        bindings: &Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Option<Cow<'a, Value>> {
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Option<Cow<'a, Value>>
+    where
+        'c: 'a,
+    {
         let category = value.into_category();
         match (self, category) {
             (EvalPathComponent::Key(k), DatumCategoryOwned::Tuple(tuple)) => tuple.take_val(k),
@@ -129,13 +135,14 @@ impl EvalPathComponent {
 }
 
 impl EvalExpr for EvalPath {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let evaluated = self.expr.evaluate(bindings, ctx);
         let mut path_componenents = self.components.iter();
@@ -156,13 +163,14 @@ pub(crate) struct EvalDynamicLookup {
 }
 
 impl EvalExpr for EvalDynamicLookup {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let mut lookups = self.lookups.iter().filter_map(|lookup| {
             let val = lookup.evaluate(bindings, ctx);
@@ -195,11 +203,6 @@ impl BindEvalExpr for EvalVarRef {
     }
 }
 
-#[inline]
-fn borrow_or_missing(value: Option<&Value>) -> Cow<'_, Value> {
-    value.map_or_else(|| Cow::Owned(Missing), Cow::Borrowed)
-}
-
 /// Represents a local variable reference in a (sub)query, e.g. `b` in `SELECT t.b as a FROM T as t`.
 #[derive(Clone)]
 pub(crate) struct EvalLocalVarRef {
@@ -207,15 +210,19 @@ pub(crate) struct EvalLocalVarRef {
 }
 
 impl EvalExpr for EvalLocalVarRef {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        _ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        _ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        borrow_or_missing(Bindings::get(bindings, &self.name))
+        match bindings.get_val(&self.name) {
+            None => Cow::Owned(Value::Missing),
+            Some(v) => v,
+        }
     }
 }
 
@@ -244,14 +251,18 @@ impl Debug for EvalGlobalVarRef {
 }
 
 impl EvalExpr for EvalGlobalVarRef {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        _bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        _bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        borrow_or_missing(ctx.bindings().get(&self.name))
+        match ctx.get(&self.name) {
+            None => Cow::Owned(Value::Missing),
+            Some(v) => v,
+        }
     }
 }

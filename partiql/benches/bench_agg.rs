@@ -48,12 +48,12 @@ fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
         .expect("Expect no plan error")
 }
 #[inline]
-pub(crate) fn evaluate(mut eval: EvalPlan, bindings: MapBindings<Value>) -> Value {
+pub(crate) fn evaluate(eval: EvalPlan, bindings: MapBindings<Value>) -> Value {
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
     };
     let ctx = BasicContext::new(bindings, sys);
-    if let Ok(out) = eval.execute_mut(&ctx) {
+    if let Ok(out) = eval.execute(&ctx) {
         out.result
     } else {
         Value::Missing

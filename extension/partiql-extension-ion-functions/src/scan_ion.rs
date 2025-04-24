@@ -65,7 +65,7 @@ impl BaseTableExpr for EvalFnScanIon {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],
-        _ctx: &'c dyn SessionContext<'c>,
+        _ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {

@@ -33,12 +33,12 @@ mod tests {
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
         let catalog = PartiqlCatalog::default();
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
-        let mut plan = planner.compile(&logical).expect("Expect no plan error");
+        let plan = planner.compile(&logical).expect("Expect no plan error");
         let sys = SystemContext {
             now: DateTime::from_system_now_utc(),
         };
         let ctx = BasicContext::new(bindings, sys);
-        if let Ok(out) = plan.execute_mut(&ctx) {
+        if let Ok(out) = plan.execute(&ctx) {
             out.result
         } else {
             Missing
@@ -2261,7 +2261,7 @@ mod tests {
             };
             let ctx = BasicContext::new(p0, sys);
 
-            let mut scan = EvalScan::new_with_at_key(
+            let scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("someOrderedTable".to_string().into()),
                 }),
@@ -2269,7 +2269,7 @@ mod tests {
                 "y",
             );
 
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             // <<{ y: 0, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: 1 }>>
             let expected = bag![
@@ -2290,7 +2290,7 @@ mod tests {
             };
             let ctx = BasicContext::new(p0, sys);
 
-            let mut scan = EvalScan::new_with_at_key(
+            let scan = EvalScan::new_with_at_key(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("someUnorderedTable".to_string().into()),
                 }),
@@ -2298,7 +2298,7 @@ mod tests {
                 "y",
             );
 
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             // <<{ y: MISSING, x:  { b: 0, a: 0 } },  { x:  { b: 1, a: 1 }, y: MISSING }>>
             let expected = bag![
@@ -2330,13 +2330,13 @@ mod tests {
                     EvalPathComponent::Key(BindingsName::CaseInsensitive("a".into())),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
+            let scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let sys = SystemContext {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let scan_res = scan.evaluate(&ctx);
+            let scan_res = scan.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", 0)]];
             assert_eq!(Value::Bag(Box::new(expected)), scan_res);
@@ -2358,13 +2358,13 @@ mod tests {
                     EvalPathComponent::Key(BindingsName::CaseInsensitive("c".into())),
                 ],
             };
-            let mut scan = EvalScan::new(Box::new(path_to_scalar), "x");
+            let scan = EvalScan::new(Box::new(path_to_scalar), "x");
 
             let sys = SystemContext {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = scan.evaluate(&ctx);
+            let res = scan.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", value::Value::Missing)]];
             assert_eq!(Value::Bag(Box::new(expected)), res);
@@ -2390,7 +2390,7 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("justATuple", just_a_tuple().into());
 
-            let mut unpivot = EvalUnpivot::new(
+            let unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("justATuple".to_string().into()),
                 }),
@@ -2402,7 +2402,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate([None, None], &ctx);
 
             let expected = bag![
                 tuple![("symbol", "tdc"), ("price", 31.06)],
@@ -2417,7 +2417,7 @@ mod tests {
             let mut p0: MapBindings<Value> = MapBindings::default();
             p0.insert("nonTuple", Value::from(1));
 
-            let mut unpivot = EvalUnpivot::new(
+            let unpivot = EvalUnpivot::new(
                 Box::new(EvalGlobalVarRef {
                     name: BindingsName::CaseInsensitive("nonTuple".to_string().into()),
                 }),
@@ -2429,7 +2429,7 @@ mod tests {
                 now: DateTime::from_system_now_utc(),
             };
             let ctx = BasicContext::new(p0, sys);
-            let res = unpivot.evaluate(&ctx);
+            let res = unpivot.evaluate([None, None], &ctx);
 
             let expected = bag![tuple![("x", 1), ("y", "_1")]];
             assert_eq!(Value::Bag(Box::new(expected)), res);

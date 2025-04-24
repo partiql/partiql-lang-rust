@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 
 use partiql_logical::Type;
-use partiql_value::datum::{DatumCategory, DatumCategoryRef};
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, RefTupleView};
 use std::ops::Not;
 
 /// Represents an evaluation operator for Tuple expressions such as `{t1.a: t1.b * 2}` in
@@ -21,13 +21,14 @@ pub(crate) struct EvalTupleExpr {
 }
 
 impl EvalExpr for EvalTupleExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let tuple = self
             .attrs
@@ -60,13 +61,14 @@ pub(crate) struct EvalListExpr {
 }
 
 impl EvalExpr for EvalListExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let values = self
             .elements
@@ -85,13 +87,14 @@ pub(crate) struct EvalBagExpr {
 }
 
 impl EvalExpr for EvalBagExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let values = self
             .elements
@@ -111,13 +114,14 @@ pub(crate) struct EvalIsTypeExpr {
 }
 
 impl EvalExpr for EvalIsTypeExpr {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let expr = self.expr.evaluate(bindings, ctx);
         let result = match (&self.is_type, expr.category()) {

@@ -85,10 +85,10 @@ pub enum UserCtxError {
 pub(crate) struct EvalTestCtxTable {}
 
 impl BaseTableExpr for EvalTestCtxTable {
-    fn evaluate<'c>(
+    fn evaluate<'a, 'c, 'o>(
         &self,
         args: &[Cow<'_, Value>],
-        _ctx: &'c dyn SessionContext<'c>,
+        _ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         if let Some(arg1) = args.first() {
             match arg1.as_ref() {
@@ -129,7 +129,7 @@ pub(crate) fn evaluate(
 ) -> Result<Evaluated, EvalErr> {
     let mut planner = partiql_eval::plan::EvaluatorPlanner::new(mode, catalog);
 
-    let mut plan = planner.compile(&logical).expect("Expect no plan error");
+    let plan = planner.compile(&logical).expect("Expect no plan error");
 
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
@@ -139,7 +139,7 @@ pub(crate) fn evaluate(
         ctx.user.insert(k.as_str().into(), *v);
     }
 
-    plan.execute_mut(&ctx)
+    plan.execute(&ctx)
 }
 
 #[test]

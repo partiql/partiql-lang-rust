@@ -5,8 +5,8 @@ use crate::eval::EvalContext;
 use itertools::Itertools;
 
 use partiql_types::{PartiqlShape, Static, StaticCategory, TYPE_DYNAMIC};
+use partiql_value::Value;
 use partiql_value::Value::{Missing, Null};
-use partiql_value::{Tuple, Value};
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::{Debug, Formatter};
@@ -14,7 +14,9 @@ use std::hash::Hash;
 
 use std::marker::PhantomData;
 
-use partiql_value::datum::{DatumCategory, DatumCategoryRef, DatumLower, DatumValueRef};
+use partiql_value::datum::{
+    DatumCategory, DatumCategoryRef, DatumLower, DatumValueRef, RefTupleView,
+};
 use std::ops::ControlFlow;
 
 /// A Trait that represents the ability to match an expected 'type' judgement against a provided value.
@@ -98,10 +100,10 @@ pub(crate) fn unwrap_args<const N: usize>(
 /// An expression that is evaluated over `N` input arguments
 pub(crate) trait ExecuteEvalExpr<const N: usize>: Debug {
     /// Evaluate the expression
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; N],
-        ctx: &'c dyn EvalContext<'c>,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a;
@@ -296,8 +298,8 @@ impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker
     /// else [`ArgCheckControlFlow::Continue`] is returned containing the `N` values.
     pub fn evaluate_args<'a, 'c>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
     ) -> ControlFlow<Value, [Cow<'a, Value>; N]>
     where
         'c: 'a,
@@ -338,8 +340,8 @@ pub(crate) fn evaluate_and_validate_args<
 >(
     args: &'a [Box<dyn EvalExpr>],
     types: F,
-    bindings: &'a Tuple,
-    ctx: &'c dyn EvalContext<'c>,
+    bindings: &'a dyn RefTupleView<'a, Value>,
+    ctx: &'c dyn EvalContext,
 ) -> ControlFlow<Value, Vec<Cow<'a, Value>>>
 where
     'c: 'a,
@@ -419,15 +421,16 @@ where
 impl<const STRICT: bool, const N: usize, E: ExecuteEvalExpr<N>, ArgC: ArgChecker> EvalExpr
     for ArgCheckEvalExpr<STRICT, N, E, ArgC>
 {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
-        if STRICT && ctx.has_errors() {
+        if STRICT && (ctx.has_errors()) {
             return Cow::Owned(Missing);
         }
         match self.evaluate_args(bindings, ctx) {
@@ -479,10 +482,10 @@ where
     F: Fn(&Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 1],
-        _ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
@@ -543,10 +546,10 @@ where
     F: Fn(&Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 2],
-        _ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
@@ -607,10 +610,10 @@ where
     F: Fn(&Value, &Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 3],
-        _ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
@@ -671,10 +674,10 @@ where
     F: Fn(&Value, &Value, &Value, &Value) -> Value,
 {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 4],
-        _ctx: &'c dyn EvalContext<'c>,
+        _ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,

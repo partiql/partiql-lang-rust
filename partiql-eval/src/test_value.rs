@@ -68,7 +68,7 @@ pub(crate) fn parse_partiql_value_str(contents: &str) -> Value {
         .expect("Expect successful parse");
     let planner = partiql_logical_planner::LogicalPlanner::new(&catalog);
     let logical = planner.lower(&parsed).expect("logical plan");
-    let mut evaluator = EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog)
+    let evaluator = EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog)
         .compile(&logical)
         .expect("Expect no plan error");
     let sys = SystemContext {
@@ -76,7 +76,7 @@ pub(crate) fn parse_partiql_value_str(contents: &str) -> Value {
     };
     let bindings = MapBindings::default();
     let ctx = BasicContext::new(bindings, sys);
-    let value = evaluator.execute_mut(&ctx).expect("evaluation to succeed");
+    let value = evaluator.execute(&ctx).expect("evaluation to succeed");
 
     value.result
 }

@@ -4,9 +4,10 @@ use itertools::Itertools;
 use partiql_catalog::table_fn::BaseTableExpr;
 
 use partiql_value::Value::Missing;
-use partiql_value::{Bag, Tuple, Value};
+use partiql_value::{Bag, Value};
 
 use partiql_catalog::extension::ExtensionResultError;
+use partiql_value::datum::RefTupleView;
 use std::borrow::Cow;
 use std::fmt::Debug;
 
@@ -19,20 +20,21 @@ pub(crate) struct EvalFnBaseTableExpr {
 
 impl EvalExpr for EvalFnBaseTableExpr {
     #[inline]
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
+        'a: 'o,
     {
         let args = self
             .args
             .iter()
             .map(|arg| arg.evaluate(bindings, ctx))
             .collect_vec();
-        let results = self.expr.evaluate(&args, ctx.as_session());
+        let results = self.expr.evaluate(&args, ctx);
         let result = match results {
             Ok(it) => {
                 let bag: Result<Bag, _> = it

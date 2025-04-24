@@ -24,7 +24,7 @@ mod tests {
         let mut planner =
             partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Strict, catalog);
 
-        let mut plan = planner.compile(logical).expect("Expect no plan error");
+        let plan = planner.compile(logical).expect("Expect no plan error");
 
         let sys = SystemContext {
             now: DateTime::from_system_now_utc(),
@@ -33,7 +33,7 @@ mod tests {
         for (k, v) in ctx_vals {
             ctx.user.insert(k.as_str().into(), *v);
         }
-        plan.execute_mut(&ctx).map(|out| out.result)
+        plan.execute(&ctx).map(|out| out.result)
     }
 
     #[test]

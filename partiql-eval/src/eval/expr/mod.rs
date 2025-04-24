@@ -24,28 +24,22 @@ pub(crate) use operators::*;
 
 use crate::eval::EvalContext;
 
-use partiql_value::datum::DatumLowerError;
-use partiql_value::{Tuple, Value};
+use partiql_value::datum::{DatumLowerError, RefTupleView};
+use partiql_value::Value;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use thiserror::Error;
 
 /// A trait for expressions that require evaluation, e.g. `a + b` or `c > 2`.
 pub trait EvalExpr: Debug {
-    fn evaluate<'a, 'c>(
+    fn evaluate<'a, 'c, 'o>(
         &'a self,
-        bindings: &'a Tuple,
-        ctx: &'c dyn EvalContext<'c>,
-    ) -> Cow<'a, Value>
-    where
-        'c: 'a;
-
-    fn evaluate_owned<'a, 'c>(&'a self, bindings: Tuple, ctx: &'c dyn EvalContext<'c>) -> Value
+        bindings: &'a dyn RefTupleView<'a, Value>,
+        ctx: &'c dyn EvalContext,
+    ) -> Cow<'o, Value>
     where
         'c: 'a,
-    {
-        self.evaluate(&bindings, ctx).into_owned()
-    }
+        'a: 'o;
 }
 
 #[derive(Error, Debug)]

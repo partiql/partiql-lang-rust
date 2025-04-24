@@ -50,7 +50,7 @@ impl ScalarFnExpr for TupleUnionFnExpr {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],
-        _ctx: &'c dyn SessionContext<'c>,
+        _ctx: &'c dyn SessionContext,
     ) -> ScalarFnExprResult<'c> {
         let mut t = Tuple::default();
         for arg in args {
@@ -83,7 +83,7 @@ impl ScalarFnExpr for TupleConcatFnExpr {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],
-        _ctx: &'c dyn SessionContext<'c>,
+        _ctx: &'c dyn SessionContext,
     ) -> ScalarFnExprResult<'c> {
         let result = args
             .iter()

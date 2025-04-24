@@ -72,8 +72,8 @@ pub(crate) fn compile(
 
 #[track_caller]
 #[inline]
-pub(crate) fn evaluate<'c>(mut plan: EvalPlan, ctx: &'c dyn EvalContext<'c>) -> EvalResult {
-    plan.execute_mut(ctx)
+pub(crate) fn evaluate(plan: EvalPlan, ctx: &dyn EvalContext) -> EvalResult {
+    plan.execute(ctx)
 }
 
 #[track_caller]

@@ -212,7 +212,7 @@ impl<'c> EvaluatorPlanner<'c> {
                 eval::evaluable::EvalHaving::new(self.plan_value::<{ STRICT }>(expr)),
             ),
             BindingsOp::Distinct => Box::new(eval::evaluable::EvalDistinct::new()),
-            BindingsOp::Sink => Box::new(eval::evaluable::EvalSink { input: None }),
+            BindingsOp::Sink => Box::new(eval::evaluable::EvalSink {}),
             BindingsOp::Pivot(logical::Pivot { key, value }) => {
                 Box::new(eval::evaluable::EvalPivot::new(
                     self.plan_value::<{ STRICT }>(key),
@@ -328,13 +328,12 @@ impl<'c> EvaluatorPlanner<'c> {
                         EvalOrderBySortCondition { expr, spec }
                     })
                     .collect_vec();
-                Box::new(EvalOrderBy { cmp, input: None })
+                Box::new(EvalOrderBy { cmp })
             }
             BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
                 Box::new(eval::evaluable::EvalLimitOffset {
                     limit: limit.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
                     offset: offset.as_ref().map(|e| self.plan_value::<{ STRICT }>(e)),
-                    input: None,
                 })
             }
             BindingsOp::BagOp(logical::BagOp {
