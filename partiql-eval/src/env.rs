@@ -137,13 +137,6 @@ pub mod basic {
                 Some(v) => Some(v),
                 None => self.parent.get(name),
             }
-
-            /*
-            self.bindings
-                .get(name)
-                .or_else(move || self.parent.get(name))
-
-             */
         }
     }
 }

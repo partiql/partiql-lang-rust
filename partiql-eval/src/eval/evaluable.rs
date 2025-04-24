@@ -691,7 +691,7 @@ impl Evaluable for EvalGroupBy {
 
                     // Add tuple to `GROUP AS` if applicable
                     if let Some(ref mut tuples) = group_as {
-                        tuples.push(Value::from(v.coerce_into_tuple())); // TODO does this work?
+                        tuples.push(Value::from(v.coerce_into_tuple()));
                     }
                 }
 
