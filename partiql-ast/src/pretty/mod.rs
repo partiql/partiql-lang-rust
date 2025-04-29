@@ -315,7 +315,6 @@ impl PrettyDoc for Expr {
             Expr::Struct(inner) => inner.pretty_doc(arena),
             Expr::Bag(inner) => inner.pretty_doc(arena),
             Expr::List(inner) => inner.pretty_doc(arena),
-            Expr::Sexp(inner) => inner.pretty_doc(arena),
             Expr::Path(inner) => inner.pretty_doc(arena),
             Expr::Call(inner) => inner.pretty_doc(arena),
             Expr::CallAgg(inner) => inner.pretty_doc(arena),
@@ -444,7 +443,6 @@ impl PrettyDoc for Type {
             Type::StructType => arena.text("STRUCT"),
             Type::TupleType => arena.text("TUPLE"),
             Type::ListType => arena.text("LIST"),
-            Type::SexpType => arena.text("SEXP"),
             Type::BagType => arena.text("BAG"),
             Type::AnyType => arena.text("ANY"),
         }
@@ -782,17 +780,6 @@ impl PrettyDoc for ListLit {
         A: Clone,
     {
         pretty_seq(&self.values, "[", "]", ",", PRETTY_INDENT_MINOR_NEST, arena)
-    }
-}
-
-impl PrettyDoc for Sexp {
-    fn pretty_doc<'b, D, A>(&'b self, _arena: &'b D) -> DocBuilder<'b, D, A>
-    where
-        D: DocAllocator<'b, A>,
-        D::Doc: Clone,
-        A: Clone,
-    {
-        todo!("remove s-expr from ast?");
     }
 }
 

@@ -10,7 +10,7 @@ use partiql_ast::ast::{
     GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
     NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
     Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
-    Sexp, SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
@@ -1263,15 +1263,6 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let elements = self.exit_env();
         self.push_vexpr(ValueExpr::ListExpr(ListExpr { elements }));
         Traverse::Continue
-    }
-
-    fn enter_sexp(&mut self, _sexp: &'ast Sexp) -> Traverse {
-        self.enter_env();
-        Traverse::Continue
-    }
-
-    fn exit_sexp(&mut self, _sexp: &'ast Sexp) -> Traverse {
-        not_yet_implemented_fault!(self, "Sexp".to_string());
     }
 
     fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) -> Traverse {

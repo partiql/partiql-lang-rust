@@ -159,7 +159,6 @@ impl ToDot<ast::Expr> for AstToDot {
             Expr::Struct(_) => todo!(),
             Expr::Bag(_) => todo!(),
             Expr::List(_) => todo!(),
-            Expr::Sexp(_) => todo!(),
             Expr::Path(p) => self.to_dot(&mut expr_subgraph, p),
             Expr::Call(c) => self.to_dot(&mut expr_subgraph, c),
             Expr::CallAgg(c) => self.to_dot(&mut expr_subgraph, c),
