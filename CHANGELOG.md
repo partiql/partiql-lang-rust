@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - *BREAKING* Heavily refactors evaluation to be stateless
 - *BREAKING* Heavily refactors Session & Evaluation Contexts to no longer require lifetime parameters
+- *BREAKING* partiql-ast: Removes disused `Sexp` AST node
 
 ### Added
 

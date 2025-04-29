@@ -406,7 +406,6 @@ pub enum Expr {
     Struct(AstNode<Struct>),
     Bag(AstNode<Bag>),
     List(AstNode<List>),
-    Sexp(AstNode<Sexp>),
     /// Other expression types
     Path(AstNode<Path>),
     Call(AstNode<Call>),
@@ -644,12 +643,6 @@ pub struct Bag {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct List {
-    pub values: Vec<Box<Expr>>,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Sexp {
     pub values: Vec<Box<Expr>>,
 }
 
@@ -940,7 +933,6 @@ pub enum Type {
     StructType,
     TupleType,
     ListType,
-    SexpType,
     BagType,
     AnyType,
 

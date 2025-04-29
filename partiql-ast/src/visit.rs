@@ -399,12 +399,6 @@ pub trait Visitor<'ast> {
     fn exit_list(&mut self, _list: &'ast ast::List) -> Traverse {
         Traverse::Continue
     }
-    fn enter_sexp(&mut self, _sexp: &'ast ast::Sexp) -> Traverse {
-        Traverse::Continue
-    }
-    fn exit_sexp(&mut self, _sexp: &'ast ast::Sexp) -> Traverse {
-        Traverse::Continue
-    }
     fn enter_call(&mut self, _call: &'ast ast::Call) -> Traverse {
         Traverse::Continue
     }
