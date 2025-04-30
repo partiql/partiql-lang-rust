@@ -11,7 +11,7 @@
 use rust_decimal::Decimal as RustDecimal;
 
 use partiql_ast_macros::Visit;
-use partiql_common::node::NodeId;
+use partiql_common::node::{IdAnnotated, NodeId};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -33,6 +33,12 @@ impl<T> Deref for AstNode<T> {
 
     fn deref(&self) -> &T {
         &self.node
+    }
+}
+
+impl<T> IdAnnotated<NodeId> for AstNode<T> {
+    fn id(&self) -> NodeId {
+        self.id
     }
 }
 
@@ -419,6 +425,30 @@ pub enum Expr {
     /// Indicates an error occurred during query processing; The exact error details are out of band of the AST
     #[visit(skip)]
     Error,
+}
+
+impl IdAnnotated<NodeId> for Expr {
+    fn id(&self) -> NodeId {
+        match self {
+            Expr::Lit(l) => l.id(),
+            Expr::VarRef(v) => v.id(),
+            Expr::BinOp(b) => b.id(),
+            Expr::UniOp(u) => u.id(),
+            Expr::Like(l) => l.id(),
+            Expr::Between(l) => l.id(),
+            Expr::In(l) => l.id(),
+            Expr::Case(c) => c.id(),
+            Expr::Struct(s) => s.id(),
+            Expr::Bag(b) => b.id(),
+            Expr::List(l) => l.id(),
+            Expr::Path(p) => p.id(),
+            Expr::Call(c) => c.id(),
+            Expr::CallAgg(c) => c.id(),
+            Expr::GraphMatch(g) => g.id(),
+            Expr::Query(q) => q.id(),
+            Expr::Error => unreachable!(),
+        }
+    }
 }
 
 /// `Lit` is mostly inspired by SQL-92 Literals standard and `PartiQL` specification.

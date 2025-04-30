@@ -6,9 +6,19 @@ use serde::{Deserialize, Serialize};
 
 pub type NodeMap<T> = IndexMap<NodeId, T>;
 
+pub trait IdAnnotated<T: Copy> {
+    fn id(&self) -> T;
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeId(pub u32);
+
+impl IdAnnotated<NodeId> for NodeId {
+    fn id(&self) -> NodeId {
+        *self
+    }
+}
 
 #[derive(Debug)]
 /// Auto-incrementing [`NodeIdGenerator`]
