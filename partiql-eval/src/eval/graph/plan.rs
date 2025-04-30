@@ -25,6 +25,9 @@ pub enum LabelFilter<GT: GraphTypes> {
     #[default]
     Always,
     Named(GT::Label),
+    Negated(Box<LabelFilter<GT>>),
+    Disjunction(Vec<LabelFilter<GT>>),
+    Conjunction(Vec<LabelFilter<GT>>),
     Never,
 }
 

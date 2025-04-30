@@ -18,6 +18,7 @@ use itertools::{Either, Itertools};
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_logical as logical;
+use partiql_logical::graph::LabelFilter;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GraphMatchExpr, GroupingStrategy,
     IsTypeExpr, JoinKind, Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr,
@@ -813,6 +814,17 @@ fn plan_graph_plan(
             logical::graph::LabelFilter::Always => physical::LabelFilter::Always,
             logical::graph::LabelFilter::Never => physical::LabelFilter::Never,
             logical::graph::LabelFilter::Named(n) => physical::LabelFilter::Named(n.clone()),
+            logical::graph::LabelFilter::Negated(inner) => {
+                physical::LabelFilter::Negated(Box::new(plan_label_filter(inner)?))
+            }
+            logical::graph::LabelFilter::Conjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                physical::LabelFilter::Conjunction(inner?)
+            }
+            logical::graph::LabelFilter::Disjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                physical::LabelFilter::Disjunction(inner?)
+            }
         })
     }
 

@@ -278,20 +278,23 @@ impl GraphToLogical {
             match label {
                 ast::GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
                 ast::GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
-                ast::GraphMatchLabel::Negated(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label negation is not yet supported."
-                    );
+                ast::GraphMatchLabel::Negated(l) => {
+                    let inner = self.plan_graph_pattern_label(Some(l.as_ref()))?;
+                    Ok(LabelFilter::Negated(Box::new(inner)))
                 }
-                ast::GraphMatchLabel::Conjunction(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label conjunction is not yet supported."
-                    );
+                ast::GraphMatchLabel::Conjunction(inner) => {
+                    let inner: Result<Vec<_>, _> = inner
+                        .iter()
+                        .map(|l| self.plan_graph_pattern_label(Some(l)))
+                        .collect();
+                    Ok(LabelFilter::Conjunction(inner?))
                 }
-                ast::GraphMatchLabel::Disjunction(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label disjunction is not yet supported."
-                    );
+                ast::GraphMatchLabel::Disjunction(inner) => {
+                    let inner: Result<Vec<_>, _> = inner
+                        .iter()
+                        .map(|l| self.plan_graph_pattern_label(Some(l)))
+                        .collect();
+                    Ok(LabelFilter::Disjunction(inner?))
                 }
             }
         } else {

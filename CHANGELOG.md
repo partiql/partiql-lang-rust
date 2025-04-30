@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-ast: Removes disused `Sexp` AST node
 
 ### Added
+- Added lowering and evaluation of graph `MATCH` label negation, conjunction, and disjunction
 
 ### Removed
 
