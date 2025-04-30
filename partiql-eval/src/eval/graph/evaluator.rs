@@ -11,6 +11,7 @@ use itertools::Itertools;
 use crate::eval::graph::plan::{BindSpec, NodeMatch, PathMatch, PathPatternMatch};
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
+use crate::eval::EvalContext;
 use partiql_value::{Bag, Tuple, Value};
 use std::marker::PhantomData;
 
@@ -28,11 +29,15 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
         }
     }
 
-    pub fn eval(&self, matcher: &PathPatternMatch<StringGraphTypes>) -> Value {
+    pub fn eval(
+        &self,
+        matcher: &PathPatternMatch<StringGraphTypes>,
+        ctx: &dyn EvalContext,
+    ) -> Value {
         // encode plan
         let matcher = self.graph.convert_pathpattern_match(matcher);
         // query for triple bindings
-        let bindings = self.eval_path_pattern(matcher);
+        let bindings = self.eval_path_pattern(matcher, ctx);
 
         // decode binders to tuple keys for result tuples
         let keys: Vec<BindSpec<StringGraphTypes>> = bindings
@@ -77,26 +82,30 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
     }
 
     #[inline]
-    fn eval_path(&self, matcher: PathMatch<GT>) -> PathBinding<GT> {
-        let bindings = self.graph.scan(&matcher.spec);
+    fn eval_path(&self, matcher: PathMatch<GT>, ctx: &dyn EvalContext) -> PathBinding<GT> {
+        let bindings = self.graph.scan(&matcher, ctx);
         PathBinding { matcher, bindings }
     }
 
     #[inline]
-    fn eval_node(&self, matcher: NodeMatch<GT>) -> NodeBinding<GT> {
-        let binding = self.graph.get(&matcher.spec);
+    fn eval_node(&self, matcher: NodeMatch<GT>, ctx: &dyn EvalContext) -> NodeBinding<GT> {
+        let binding = self.graph.get(&matcher, ctx);
         NodeBinding { matcher, binding }
     }
 
     #[inline]
-    fn eval_path_pattern(&self, matcher: PathPatternMatch<GT>) -> PathPatternBinding<GT> {
+    fn eval_path_pattern(
+        &self,
+        matcher: PathPatternMatch<GT>,
+        ctx: &dyn EvalContext,
+    ) -> PathPatternBinding<GT> {
         match matcher {
-            PathPatternMatch::Node(n) => self.eval_node(n).into(),
+            PathPatternMatch::Node(n) => self.eval_node(n, ctx).into(),
             PathPatternMatch::Match(m) => {
                 let PathBinding {
                     matcher,
                     mut bindings,
-                } = self.eval_path(m);
+                } = self.eval_path(m, ctx);
 
                 // if edge is cyclic, filter triples
                 let (n1, _, n2) = &matcher.binders;
@@ -108,7 +117,7 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
             }
             PathPatternMatch::Concat(ms) => ms
                 .into_iter()
-                .map(|p| self.eval_path_pattern(p))
+                .map(|p| self.eval_path_pattern(p, ctx))
                 .tree_reduce(|l, r| join_bindings(l, r))
                 .unwrap(),
         }

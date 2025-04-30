@@ -122,6 +122,7 @@ impl Value {
                 },
                 DatumTupleRef::Empty => Cow::Owned(tuple![]),
                 DatumTupleRef::CoercedValue(_, v) => Cow::Owned(tuple![("_1", v.clone())]),
+                DatumTupleRef::SingleKey(k, v) => Cow::Owned(tuple![(k.as_ref(), v.clone())]),
             },
             _ => Cow::Owned(self.coerce_to_tuple()),
         }
@@ -139,6 +140,7 @@ impl Value {
                 DatumTupleRef::CoercedValue(_, value) => {
                     BindingIter::Single(std::iter::once(value))
                 }
+                DatumTupleRef::SingleKey(_, value) => BindingIter::Single(std::iter::once(value)),
             },
             _ => BindingIter::Single(std::iter::once(self)),
         }

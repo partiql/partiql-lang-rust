@@ -28,18 +28,20 @@ impl BindEvalExpr for EvalGraphMatch {
     ) -> Result<Box<dyn EvalExpr>, BindError> {
         // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
         let mut bld = PartiqlNoIdShapeBuilder::default();
-        UnaryValueExpr::create_typed::<{ STRICT }, _>([type_graph!(bld)], args, move |value| {
-            match value {
+        UnaryValueExpr::create_typed_with_ctx::<{ STRICT }, _>(
+            [type_graph!(bld)],
+            args,
+            move |value, ctx| match value {
                 Value::Graph(graph) => match graph.as_ref() {
                     Graph::Simple(g) => {
                         let engine = SimpleGraphEngine::new(g.clone());
                         let ge = GraphEvaluator::new(engine);
-                        ge.eval(&self.pattern)
+                        ge.eval(&self.pattern, ctx)
                     }
                 },
                 _ => Missing,
-            }
-        })
+            },
+        )
     }
 }
 

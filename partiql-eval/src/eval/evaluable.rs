@@ -53,7 +53,7 @@ pub trait Evaluable: Debug {
 }
 
 /// Represents an evaluation `Scan` operator; `Scan` operator scans the given bindings from its
-/// input and and the environment and outputs a bag of binding tuples for tuples/values matching the
+/// input and the environment and outputs a bag of binding tuples for tuples/values matching the
 /// scan `expr`, e.g. an SQL expression `table1` in SQL expression `FROM table1`.
 pub(crate) struct EvalScan {
     pub(crate) expr: Box<dyn EvalExpr>,

@@ -1,11 +1,14 @@
 use num::Integer;
 use partiql_ast::ast;
 
+use crate::lower::extract_vexpr_by_id;
+use partiql_common::node::{IdAnnotated, NodeId};
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
     PathMatch, PathPattern, PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
 };
+use partiql_logical::ValueExpr;
 use std::mem::take;
 
 #[macro_export]
@@ -15,9 +18,19 @@ macro_rules! not_yet_implemented_result {
     };
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct GraphToLogical {
     graph_id: FreshBinder,
+    env: Vec<(NodeId, ValueExpr)>,
+}
+
+impl GraphToLogical {
+    pub fn new(env: Vec<(NodeId, ValueExpr)>) -> Self {
+        Self {
+            graph_id: Default::default(),
+            env,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -121,17 +134,17 @@ impl<'a> Normalize<'a> {
 }
 
 impl GraphToLogical {
-    fn normalize(&self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
+    fn normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
         Normalize::new(&self.graph_id).normalize(elements)
     }
 
-    fn expand(&self, paths: Vec<PathPattern>) -> Result<Vec<PathPattern>, String> {
+    fn expand(&mut self, paths: Vec<PathPattern>) -> Result<Vec<PathPattern>, String> {
         // TODO handle expansion as described in 6.3 of https://arxiv.org/pdf/2112.06217
         // TODO   this will enable alternation and quantifiers
         Ok(paths)
     }
 
-    fn plan(&self, paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
+    fn plan(&mut self, paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
         debug_assert!(paths.len() == 1);
         let path_pattern = &paths[0];
         // pattern at this point should be a node, or a series of node-[edge-node]+
@@ -164,7 +177,7 @@ impl GraphToLogical {
         }
     }
     pub(crate) fn plan_graph_match(
-        &self,
+        mut self,
         graph_match: &ast::GraphMatch,
     ) -> Result<PathPatternMatch, String> {
         if graph_match.shape.cols.is_some() {
@@ -180,10 +193,15 @@ impl GraphToLogical {
         let pattern = self.plan_graph_pattern(&graph_match.pattern)?;
         let normalized = self.normalize(pattern)?;
         let expanded = self.expand(normalized)?;
-        self.plan(expanded)
+        let result = self.plan(expanded);
+        debug_assert!(self.env.is_empty());
+        result
     }
 
-    fn plan_graph_pattern(&self, pattern: &ast::GraphPattern) -> Result<Vec<MatchElement>, String> {
+    fn plan_graph_pattern(
+        &mut self,
+        pattern: &ast::GraphPattern,
+    ) -> Result<Vec<MatchElement>, String> {
         if pattern.mode.is_some() {
             not_yet_implemented_result!("MATCH expression MATCH MODE is not yet supported.");
         }
@@ -191,7 +209,7 @@ impl GraphToLogical {
             not_yet_implemented_result!("MATCH expression KEEP is not yet supported.");
         }
         if pattern.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH expression WHERE is not yet supported.");
+            not_yet_implemented_result!("MATCH expression pattern WHERE is not yet supported.");
         }
 
         if pattern.patterns.len() != 1 {
@@ -205,7 +223,7 @@ impl GraphToLogical {
     }
 
     fn plan_graph_path_pattern(
-        &self,
+        &mut self,
         pattern: &ast::GraphPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
         if pattern.prefix.is_some() {
@@ -219,7 +237,7 @@ impl GraphToLogical {
     }
 
     fn plan_graph_subpath_pattern(
-        &self,
+        &mut self,
         pattern: &ast::GraphPathSubPattern,
     ) -> Result<Vec<MatchElement>, String> {
         if pattern.mode.is_some() {
@@ -229,14 +247,14 @@ impl GraphToLogical {
             not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
         }
         if pattern.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH expression WHERE is not yet supported.");
+            not_yet_implemented_result!("MATCH expression subpath WHERE is not yet supported.");
         }
 
         self.plan_graph_match_path_pattern(&pattern.path)
     }
 
     fn plan_graph_match_path_pattern(
-        &self,
+        &mut self,
         pattern: &ast::GraphMatchPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
         match pattern {
@@ -271,34 +289,34 @@ impl GraphToLogical {
     }
 
     fn plan_graph_pattern_part_node(
-        &self,
+        &mut self,
         node: &ast::GraphMatchNode,
     ) -> Result<Vec<MatchElement>, String> {
-        if node.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH node where_clauses are not yet supported.");
-        }
         let binder = match &node.variable {
             None => self.graph_id.node(),
             Some(v) => v.value.clone(),
         };
         let label = plan_graph_pattern_label(node.label.as_deref())?;
+        let filter = if let Some(expr) = &node.where_clause {
+            let expr = extract_vexpr_by_id(&mut self.env, expr.id());
+            if expr.is_none() {
+                not_yet_implemented_result!("Internal error: expression not found.");
+            }
+            ValueFilter::Filter(Box::new(expr.unwrap()))
+        } else {
+            ValueFilter::Always
+        };
         let node_match = NodeMatch {
             binder: BindSpec(binder),
-            spec: NodeFilter {
-                label,
-                filter: ValueFilter::Always,
-            },
+            spec: NodeFilter { label, filter },
         };
         Ok(vec![MatchElement::Node(node_match)])
     }
 
     fn plan_graph_pattern_part_edge(
-        &self,
+        &mut self,
         edge: &ast::GraphMatchEdge,
     ) -> Result<Vec<MatchElement>, String> {
-        if edge.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH edge where_clauses are not yet supported.");
-        }
         let direction = match &edge.direction {
             ast::GraphMatchDirection::Left => DirectionFilter::L,
             ast::GraphMatchDirection::Undirected => DirectionFilter::U,
@@ -313,12 +331,18 @@ impl GraphToLogical {
             Some(v) => v.value.clone(),
         };
         let label = plan_graph_pattern_label(edge.label.as_deref())?;
+        let filter = if let Some(expr) = &edge.where_clause {
+            let expr = extract_vexpr_by_id(&mut self.env, expr.id());
+            if expr.is_none() {
+                not_yet_implemented_result!("Internal error: expression not found.");
+            }
+            ValueFilter::Filter(Box::new(expr.unwrap()))
+        } else {
+            ValueFilter::Always
+        };
         let edge_match = EdgeMatch {
             binder: BindSpec(binder),
-            spec: EdgeFilter {
-                label,
-                filter: ValueFilter::Always,
-            },
+            spec: EdgeFilter { label, filter },
         };
         Ok(vec![MatchElement::Edge(direction, edge_match)])
     }
