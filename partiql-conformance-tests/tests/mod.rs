@@ -213,8 +213,8 @@ pub(crate) fn pass_eval(
         Ok(v) => {
             assert_eq!(&TestValue::from(v), expected)
         },
-        Err(TestError::Parse(_)) => {
-            panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error")
+        Err(TestError::Parse(err)) => {
+            panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error: {err:#?}")
         }
         Err(TestError::Lower(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected lowering error `{err:?}`"),
         Err(TestError::Plan(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected planning error `{err:?}`"),

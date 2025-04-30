@@ -35,7 +35,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::Catalog;
-use partiql_common::node::NodeId;
+use partiql_common::node::{IdAnnotated, NodeId};
 
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
@@ -91,6 +91,11 @@ macro_rules! not_yet_implemented_err {
             .errors
             .push(AstTransformError::NotYetImplemented($msg.to_string()));
     };
+}
+
+fn extract_vexpr_by_id(v: &mut Vec<(NodeId, ValueExpr)>, target: NodeId) -> Option<ValueExpr> {
+    let position: usize = v.iter().position(|(id, _v)| *id == target)?;
+    Some(v.remove(position).1)
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -165,7 +170,7 @@ pub struct AstToLogical<'a> {
     q_stack: Vec<QueryClauses>,
     ctx_stack: Vec<QueryContext>,
     bexpr_stack: Vec<Vec<logical::OpId>>,
-    vexpr_stack: Vec<Vec<ValueExpr>>,
+    vexpr_stack: Vec<Vec<(NodeId, ValueExpr)>>,
     arg_stack: Vec<Vec<CallArgument>>,
     path_stack: Vec<Vec<PathComponent>>,
     sort_stack: Vec<Vec<logical::SortSpec>>,
@@ -557,13 +562,14 @@ impl<'a> AstToLogical<'a> {
     }
 
     #[inline]
-    fn exit_env(&mut self) -> Vec<ValueExpr> {
+    fn exit_env(&mut self) -> Vec<(NodeId, ValueExpr)> {
         self.vexpr_stack.pop().expect("environment level")
     }
 
     #[inline]
     fn push_vexpr(&mut self, vexpr: ValueExpr) {
-        self.vexpr_stack.last_mut().unwrap().push(vexpr);
+        let id = self.id_stack.last().unwrap();
+        self.vexpr_stack.last_mut().unwrap().push((*id, vexpr));
     }
 
     #[inline]
@@ -815,7 +821,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             QuerySet::Select(_) => {}
             QuerySet::Expr(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
-                let expr = env.into_iter().next().unwrap();
+                let (_, expr) = env.into_iter().next().unwrap();
                 let op = BindingsOp::ExprQuery(logical::ExprQuery { expr });
                 let id = self.curr_plan().add_operator(op);
                 self.push_bexpr(id);
@@ -912,8 +918,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 true_or_fault!(self, env.len().is_even(), "env.len() is not even");
                 let mut exprs = Vec::with_capacity(env.len() / 2);
                 let mut iter = env.into_iter();
-                while let Some(value) = iter.next() {
-                    let alias = iter.next().unwrap();
+                while let Some((_, value)) = iter.next() {
+                    let (_, alias) = iter.next().unwrap();
                     let alias = match alias {
                         ValueExpr::Lit(lit) => match *lit {
                             logical::Lit::String(s) => s.clone(),
@@ -951,14 +957,14 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
                 let mut iter = env.into_iter();
-                let key = iter.next().unwrap();
-                let value = iter.next().unwrap();
+                let (_, key) = iter.next().unwrap();
+                let (_, value) = iter.next().unwrap();
                 logical::BindingsOp::Pivot(logical::Pivot { key, value })
             }
             ProjectionKind::ProjectValue(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
-                let expr = env.into_iter().next().unwrap();
+                let (_, expr) = env.into_iter().next().unwrap();
                 logical::BindingsOp::ProjectValue(logical::ProjectValue { expr })
             }
         };
@@ -991,8 +997,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
-        let rhs = env.pop().unwrap();
-        let lhs = env.pop().unwrap();
+        let (_, rhs) = env.pop().unwrap();
+        let (_, lhs) = env.pop().unwrap();
         if _bin_op.kind == BinOpKind::Is {
             let is_type = match rhs {
                 ValueExpr::Lit(lit) => match lit.as_ref() {
@@ -1047,7 +1053,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
-        let expr = env.pop().unwrap();
+        let (_, expr) = env.pop().unwrap();
         let op = match _uni_op.kind {
             UniOpKind::Pos => logical::UnaryOp::Pos,
             UniOpKind::Neg => logical::UnaryOp::Neg,
@@ -1066,9 +1072,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 3, "env.len() != 3");
 
-        let to = Box::new(env.pop().unwrap());
-        let from = Box::new(env.pop().unwrap());
-        let value = Box::new(env.pop().unwrap());
+        let to = Box::new(env.pop().unwrap().1);
+        let from = Box::new(env.pop().unwrap().1);
+        let value = Box::new(env.pop().unwrap().1);
         self.push_vexpr(ValueExpr::BetweenExpr(BetweenExpr { value, from, to }));
         Traverse::Continue
     }
@@ -1081,8 +1087,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
-        let rhs = env.pop().unwrap();
-        let lhs = env.pop().unwrap();
+        let (_, rhs) = env.pop().unwrap();
+        let (_, lhs) = env.pop().unwrap();
         self.push_vexpr(logical::ValueExpr::BinaryExpr(
             logical::BinaryOp::In,
             Box::new(lhs),
@@ -1104,12 +1110,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             "env.len() is not between 2 and 3"
         );
         let escape_ve = if env.len() == 3 {
-            env.pop().unwrap()
+            env.pop().unwrap().1
         } else {
             ValueExpr::Lit(Box::new(logical::Lit::String(String::default())))
         };
-        let pattern_ve = env.pop().unwrap();
-        let value = Box::new(env.pop().unwrap());
+        let pattern_ve = env.pop().unwrap().1;
+        let value = Box::new(env.pop().unwrap().1);
 
         let pattern = match (&pattern_ve, &escape_ve) {
             (ValueExpr::Lit(pattern_lit), ValueExpr::Lit(escape_lit)) => {
@@ -1186,13 +1192,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             CallArg::Positional(_) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
-                self.push_call_arg(CallArgument::Positional(env.pop().unwrap()));
+                self.push_call_arg(CallArgument::Positional(env.pop().unwrap().1));
             }
             CallArg::Named(CallArgNamed { name, .. }) => {
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
                 let name = name.value.to_lowercase();
-                self.push_call_arg(CallArgument::Named(name, env.pop().unwrap()));
+                self.push_call_arg(CallArgument::Named(name, env.pop().unwrap().1));
             }
             CallArg::PositionalType(_) => {
                 not_yet_implemented_fault!(self, "PositionalType call argument".to_string());
@@ -1233,8 +1239,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut values = Vec::with_capacity(len);
 
         let mut iter = env.into_iter();
-        while let Some(attr) = iter.next() {
-            let value = iter.next().unwrap();
+        while let Some((_, attr)) = iter.next() {
+            let (_, value) = iter.next().unwrap();
             attrs.push(attr);
             values.push(value);
         }
@@ -1249,7 +1255,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_bag(&mut self, _bag: &'ast Bag) -> Traverse {
-        let elements = self.exit_env();
+        let elements = self.exit_env().into_iter().map(|(_, v)| v).collect();
         self.push_vexpr(ValueExpr::BagExpr(BagExpr { elements }));
         Traverse::Continue
     }
@@ -1260,7 +1266,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_list(&mut self, _list: &'ast List) -> Traverse {
-        let elements = self.exit_env();
+        let elements = self.exit_env().into_iter().map(|(_, v)| v).collect();
         self.push_vexpr(ValueExpr::ListExpr(ListExpr { elements }));
         Traverse::Continue
     }
@@ -1403,7 +1409,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let steps = self.exit_path();
-        let root = env.pop().unwrap();
+        let (_, root) = env.pop().unwrap();
 
         self.push_vexpr(ValueExpr::Path(Box::new(root), steps));
         Traverse::Continue
@@ -1434,7 +1440,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 let mut env = self.exit_env();
                 eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
-                let path = env.pop().unwrap();
+                let (_, path) = env.pop().unwrap();
                 match path {
                     ValueExpr::Lit(val) => match *val {
                         logical::Lit::Int8(idx) => logical::PathComponent::Index(idx.into()),
@@ -1517,7 +1523,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         } else {
             // Expression in From Let
             self.curr_plan().merge_plan(subplan); // merge in subplan, as there is no subquery
-            env.pop().unwrap()
+            env.pop().unwrap().1
         };
 
         let FromLet {
@@ -1598,7 +1604,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             JoinKind::Cross => logical::JoinKind::Cross,
         };
 
-        let on = env.pop();
+        let on = env.pop().map(|(_, v)| v);
 
         let rid = benv.pop().unwrap();
         let lid = benv.pop().unwrap();
@@ -1642,7 +1648,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
         let filter = logical::BindingsOp::Filter(logical::Filter {
-            expr: env.pop().unwrap(),
+            expr: env.pop().unwrap().1,
         });
         let id = self.curr_plan().add_operator(filter);
 
@@ -1660,7 +1666,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
         let having = BindingsOp::Having(logical::Having {
-            expr: env.pop().unwrap(),
+            expr: env.pop().unwrap().1,
         });
         let id = self.curr_plan().add_operator(having);
 
@@ -1732,8 +1738,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut exprs = HashMap::with_capacity(env.len() / 2);
         let mut iter = env.into_iter();
 
-        while let Some(value) = iter.next() {
-            let alias = iter.next().unwrap();
+        while let Some((_, value)) = iter.next() {
+            let (_, alias) = iter.next().unwrap();
             let alias = match alias {
                 ValueExpr::Lit(lit) => match *lit {
                     logical::Lit::String(s) => s.clone(),
@@ -1817,7 +1823,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
-        let expr = env.pop().unwrap();
+        let (_, expr) = env.pop().unwrap();
         let order = match sort_spec
             .ordering_spec
             .as_ref()
@@ -1861,12 +1867,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         );
 
         let offset = if limit_offset.offset.is_some() {
-            env.pop()
+            env.pop().map(|(_, v)| v)
         } else {
             None
         };
         let limit = if limit_offset.limit.is_some() {
-            env.pop()
+            env.pop().map(|(_, v)| v)
         } else {
             None
         };
@@ -1891,20 +1897,20 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         true_or_fault!(self, env.len() >= 2, "env.len < 2");
 
         let default = if env.len().is_even() {
-            Some(Box::new(env.pop().unwrap()))
+            Some(Box::new(env.pop().unwrap().1))
         } else {
             None
         };
 
         let mut params = env.into_iter();
-        let expr = Box::new(params.next().unwrap());
+        let expr = Box::new(params.next().unwrap().1);
 
         let cases = params
             .chunks(2)
             .into_iter()
             .map(|mut c| {
-                let when = c.next().unwrap();
-                let then = c.next().unwrap();
+                let (_, when) = c.next().unwrap();
+                let (_, then) = c.next().unwrap();
 
                 (Box::new(when), Box::new(then))
             })
@@ -1928,7 +1934,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         true_or_fault!(self, !env.is_empty(), "env is empty");
 
         let default = if env.len().is_odd() {
-            Some(Box::new(env.pop().unwrap()))
+            Some(Box::new(env.pop().unwrap().1))
         } else {
             None
         };
@@ -1938,8 +1944,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             .chunks(2)
             .into_iter()
             .map(|mut c| {
-                let when = c.next().unwrap();
-                let then = c.next().unwrap();
+                let (_, when) = c.next().unwrap();
+                let (_, then) = c.next().unwrap();
 
                 (Box::new(when), Box::new(then))
             })
@@ -1957,13 +1963,21 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
     fn exit_graph_match(&mut self, graph_match: &'ast ast::GraphMatch) -> Traverse {
         let mut env = self.exit_env();
-        true_or_fault!(self, env.len() == 1, "env.len() is not 1");
 
-        let graph_reference = Box::new(env.pop().unwrap());
         let graph_planner = crate::graph::GraphToLogical::default();
 
         match graph_planner.plan_graph_match(graph_match) {
             Ok(pattern) => {
+                // TODO deal with graph `WHERE` expressions
+                let graph_reference = extract_vexpr_by_id(&mut env, graph_match.expr.id());
+
+                true_or_fault!(
+                    self,
+                    graph_reference.is_some(),
+                    "could not find graph reference"
+                );
+                let graph_reference = Box::new(graph_reference.unwrap());
+
                 self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr {
                     value: graph_reference,
                     pattern,
