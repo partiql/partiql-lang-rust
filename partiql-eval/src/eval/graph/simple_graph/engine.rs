@@ -238,12 +238,14 @@ trait TripleMatcher<GT: GraphTypes> {
 trait NodeMatcher<GT: GraphTypes> {
     fn node_matches(&self, spec: &NodeFilter<GT>, node: &GT::NodeId) -> bool;
     fn node_label_matches(&self, spec: &LabelFilter<GT>, node: &GT::NodeId) -> bool;
+    #[allow(dead_code)] // TODO implement value filters for `where`
     fn node_value_matches(&self, spec: &ValueFilter, node: &GT::NodeId) -> bool;
 }
 
 trait EdgeMatcher<GT: GraphTypes> {
     fn edge_matches(&self, spec: &EdgeFilter<GT>, edge: &GT::EdgeId) -> bool;
     fn edge_label_matches(&self, spec: &LabelFilter<GT>, edge: &GT::EdgeId) -> bool;
+    #[allow(dead_code)] // TODO implement value filters for `where`
     fn edge_value_matches(&self, spec: &ValueFilter, edge: &GT::EdgeId) -> bool;
 }
 
@@ -290,7 +292,7 @@ impl NodeMatcher<SimpleGraphTypes> for SimpleGraph {
         }
     }
 
-    fn node_value_matches(&self, spec: &ValueFilter, node: &GNodeId) -> bool {
+    fn node_value_matches(&self, spec: &ValueFilter, _: &GNodeId) -> bool {
         match spec {
             ValueFilter::Always => true,
         }
@@ -327,7 +329,7 @@ impl EdgeMatcher<SimpleGraphTypes> for SimpleGraph {
         }
     }
 
-    fn edge_value_matches(&self, spec: &ValueFilter, edge: &GEdgeId) -> bool {
+    fn edge_value_matches(&self, spec: &ValueFilter, _: &GEdgeId) -> bool {
         match spec {
             ValueFilter::Always => true,
         }

@@ -18,7 +18,6 @@ use itertools::{Either, Itertools};
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_logical as logical;
-use partiql_logical::graph::LabelFilter;
 use partiql_logical::{
     AggFunc, BagOperator, BinaryOp, BindingsOp, CallName, GraphMatchExpr, GroupingStrategy,
     IsTypeExpr, JoinKind, Lit, LogicalPlan, OpId, PathComponent, Pattern, PatternMatchExpr,
