@@ -30,6 +30,9 @@ pub enum LabelFilter {
     #[default]
     Always,
     Named(String),
+    Negated(Box<LabelFilter>),
+    Conjunction(Vec<LabelFilter>),
+    Disjunction(Vec<LabelFilter>),
     Never,
 }
 

@@ -813,6 +813,17 @@ fn plan_graph_plan(
             logical::graph::LabelFilter::Always => physical::LabelFilter::Always,
             logical::graph::LabelFilter::Never => physical::LabelFilter::Never,
             logical::graph::LabelFilter::Named(n) => physical::LabelFilter::Named(n.clone()),
+            logical::graph::LabelFilter::Negated(inner) => {
+                physical::LabelFilter::Negated(Box::new(plan_label_filter(inner)?))
+            }
+            logical::graph::LabelFilter::Conjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                physical::LabelFilter::Conjunction(inner?)
+            }
+            logical::graph::LabelFilter::Disjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                physical::LabelFilter::Disjunction(inner?)
+            }
         })
     }
 

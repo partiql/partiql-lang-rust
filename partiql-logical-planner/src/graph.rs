@@ -270,35 +270,6 @@ impl GraphToLogical {
         }
     }
 
-    fn plan_graph_pattern_label(
-        &self,
-        label: Option<&ast::GraphMatchLabel>,
-    ) -> Result<LabelFilter, String> {
-        if let Some(label) = label {
-            match label {
-                ast::GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
-                ast::GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
-                ast::GraphMatchLabel::Negated(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label negation is not yet supported."
-                    );
-                }
-                ast::GraphMatchLabel::Conjunction(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label conjunction is not yet supported."
-                    );
-                }
-                ast::GraphMatchLabel::Disjunction(_) => {
-                    not_yet_implemented_result!(
-                        "MATCH expression label disjunction is not yet supported."
-                    );
-                }
-            }
-        } else {
-            Ok(LabelFilter::Always)
-        }
-    }
-
     fn plan_graph_pattern_part_node(
         &self,
         node: &ast::GraphMatchNode,
@@ -310,7 +281,7 @@ impl GraphToLogical {
             None => self.graph_id.node(),
             Some(v) => v.value.clone(),
         };
-        let label = self.plan_graph_pattern_label(node.label.as_deref())?;
+        let label = plan_graph_pattern_label(node.label.as_deref())?;
         let node_match = NodeMatch {
             binder: BindSpec(binder),
             spec: NodeFilter {
@@ -341,7 +312,7 @@ impl GraphToLogical {
             None => self.graph_id.node(),
             Some(v) => v.value.clone(),
         };
-        let label = self.plan_graph_pattern_label(edge.label.as_deref())?;
+        let label = plan_graph_pattern_label(edge.label.as_deref())?;
         let edge_match = EdgeMatch {
             binder: BindSpec(binder),
             spec: EdgeFilter {
@@ -350,5 +321,34 @@ impl GraphToLogical {
             },
         };
         Ok(vec![MatchElement::Edge(direction, edge_match)])
+    }
+}
+
+fn plan_graph_pattern_label(label: Option<&ast::GraphMatchLabel>) -> Result<LabelFilter, String> {
+    if let Some(label) = label {
+        match label {
+            ast::GraphMatchLabel::Name(n) => Ok(LabelFilter::Named(n.value.clone())),
+            ast::GraphMatchLabel::Wildcard => Ok(LabelFilter::Always),
+            ast::GraphMatchLabel::Negated(l) => {
+                let inner = plan_graph_pattern_label(Some(l.as_ref()))?;
+                Ok(LabelFilter::Negated(Box::new(inner)))
+            }
+            ast::GraphMatchLabel::Conjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner
+                    .iter()
+                    .map(|l| plan_graph_pattern_label(Some(l)))
+                    .collect();
+                Ok(LabelFilter::Conjunction(inner?))
+            }
+            ast::GraphMatchLabel::Disjunction(inner) => {
+                let inner: Result<Vec<_>, _> = inner
+                    .iter()
+                    .map(|l| plan_graph_pattern_label(Some(l)))
+                    .collect();
+                Ok(LabelFilter::Disjunction(inner?))
+            }
+        }
+    } else {
+        Ok(LabelFilter::Always)
     }
 }
