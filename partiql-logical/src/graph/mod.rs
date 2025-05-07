@@ -1,3 +1,4 @@
+use crate::ValueExpr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -42,7 +43,7 @@ pub enum LabelFilter {
 pub enum ValueFilter {
     #[default]
     Always,
-    // TODO other variant for, e.g., `WHERE` filters
+    Filter(Box<ValueExpr>),
 }
 
 /// A plan specification for node label & value filtering.

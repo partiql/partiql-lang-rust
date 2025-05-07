@@ -14,6 +14,7 @@ use crate::eval::expr::{
 };
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::EvalPlan;
+use eval::graph::plan as physical;
 use itertools::{Either, Itertools};
 use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
 use partiql_extension_ion::boxed_ion::BoxedIonType;
@@ -28,6 +29,7 @@ use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
 use partiql_value::{Bag, List, Tuple, Value, Variant};
 use petgraph::prelude::StableGraph;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[macro_export]
 macro_rules! correct_num_args_or_err {
@@ -495,15 +497,15 @@ impl<'c> EvaluatorPlanner<'c> {
 
                 ("pattern expr", expr)
             }
-            ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }) => (
-                "graphmatch expr",
-                match plan_graph_plan(pattern) {
-                    Ok(pattern) => {
-                        EvalGraphMatch::new(pattern).bind::<{ STRICT }>(plan_args(&[value]))
-                    }
+            ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }) => {
+                //
+                let args = plan_args(&[value]);
+                let expr = match self.plan_graph_plan::<{ STRICT }>(pattern) {
+                    Ok(pattern) => EvalGraphMatch::new(pattern).bind::<{ STRICT }>(args),
                     Err(e) => Ok(self.err(e) as Box<dyn EvalExpr>),
-                },
-            ),
+                };
+                ("graphmatch expr", expr)
+            }
             ValueExpr::SubQueryExpr(expr) => (
                 "subquery",
                 Ok(Box::new(EvalSubQueryExpr::new(
@@ -792,68 +794,85 @@ impl<'c> EvaluatorPlanner<'c> {
 
         self.unwrap_bind(name, bind)
     }
-}
 
-fn plan_graph_plan(
-    pattern: &logical::graph::PathPatternMatch,
-) -> Result<eval::graph::plan::PathPatternMatch<StringGraphTypes>, PlanningError> {
-    use eval::graph::plan as physical;
-    use partiql_logical as logical;
+    fn plan_graph_plan<const STRICT: bool>(
+        &mut self,
+        pattern: &logical::graph::PathPatternMatch,
+    ) -> Result<eval::graph::plan::PathPatternMatch<StringGraphTypes>, PlanningError> {
+        self.plan_path_pattern_match::<{ STRICT }>(pattern)
+    }
 
-    fn plan_bind_spec(
+    fn plan_bind_spec<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::BindSpec,
     ) -> Result<physical::BindSpec<StringGraphTypes>, PlanningError> {
         Ok(physical::BindSpec(pattern.0.clone()))
     }
 
-    fn plan_label_filter(
+    #[allow(clippy::only_used_in_recursion)]
+    fn plan_label_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::LabelFilter,
     ) -> Result<physical::LabelFilter<StringGraphTypes>, PlanningError> {
         Ok(match pattern {
             logical::graph::LabelFilter::Always => physical::LabelFilter::Always,
             logical::graph::LabelFilter::Never => physical::LabelFilter::Never,
             logical::graph::LabelFilter::Named(n) => physical::LabelFilter::Named(n.clone()),
-            logical::graph::LabelFilter::Negated(inner) => {
-                physical::LabelFilter::Negated(Box::new(plan_label_filter(inner)?))
-            }
+            logical::graph::LabelFilter::Negated(inner) => physical::LabelFilter::Negated(
+                Box::new(self.plan_label_filter::<{ STRICT }>(inner)?),
+            ),
             logical::graph::LabelFilter::Conjunction(inner) => {
-                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                let inner: Result<Vec<_>, _> = inner
+                    .iter()
+                    .map(|p| self.plan_label_filter::<{ STRICT }>(p))
+                    .collect();
                 physical::LabelFilter::Conjunction(inner?)
             }
             logical::graph::LabelFilter::Disjunction(inner) => {
-                let inner: Result<Vec<_>, _> = inner.iter().map(plan_label_filter).collect();
+                let inner: Result<Vec<_>, _> = inner
+                    .iter()
+                    .map(|p| self.plan_label_filter::<{ STRICT }>(p))
+                    .collect();
                 physical::LabelFilter::Disjunction(inner?)
             }
         })
     }
 
-    fn plan_value_filter(
+    fn plan_value_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::ValueFilter,
     ) -> Result<physical::ValueFilter, PlanningError> {
         Ok(match pattern {
             logical::graph::ValueFilter::Always => physical::ValueFilter::Always,
+            logical::graph::ValueFilter::Filter(expr) => {
+                let filter = self.plan_value::<{ STRICT }>(expr);
+                physical::ValueFilter::Filter(Rc::from(filter))
+            }
         })
     }
 
-    fn plan_node_filter(
+    fn plan_node_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::NodeFilter,
     ) -> Result<physical::NodeFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::NodeFilter {
-            label: plan_label_filter(&pattern.label)?,
-            filter: plan_value_filter(&pattern.filter)?,
+            label: self.plan_label_filter::<{ STRICT }>(&pattern.label)?,
+            filter: self.plan_value_filter::<{ STRICT }>(&pattern.filter)?,
         })
     }
 
-    fn plan_edge_filter(
+    fn plan_edge_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::EdgeFilter,
     ) -> Result<physical::EdgeFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::EdgeFilter {
-            label: plan_label_filter(&pattern.label)?,
-            filter: plan_value_filter(&pattern.filter)?,
+            label: self.plan_label_filter::<{ STRICT }>(&pattern.label)?,
+            filter: self.plan_value_filter::<{ STRICT }>(&pattern.filter)?,
         })
     }
 
-    fn plan_step_filter(
+    fn plan_step_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::StepFilter,
     ) -> Result<physical::StepFilter<StringGraphTypes>, PlanningError> {
         let dir = match pattern.dir {
@@ -867,58 +886,67 @@ fn plan_graph_plan(
         };
         Ok(physical::StepFilter {
             dir,
-            triple: plan_triple_filter(&pattern.triple)?,
+            triple: self.plan_triple_filter::<{ STRICT }>(&pattern.triple)?,
         })
     }
 
-    fn plan_triple_filter(
+    fn plan_triple_filter<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::TripleFilter,
     ) -> Result<physical::TripleFilter<StringGraphTypes>, PlanningError> {
         Ok(physical::TripleFilter {
-            lhs: plan_node_filter(&pattern.lhs)?,
-            e: plan_edge_filter(&pattern.e)?,
-            rhs: plan_node_filter(&pattern.rhs)?,
+            lhs: self.plan_node_filter::<{ STRICT }>(&pattern.lhs)?,
+            e: self.plan_edge_filter::<{ STRICT }>(&pattern.e)?,
+            rhs: self.plan_node_filter::<{ STRICT }>(&pattern.rhs)?,
         })
     }
 
-    fn plan_node_match(
+    fn plan_node_match<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::NodeMatch,
     ) -> Result<physical::NodeMatch<StringGraphTypes>, PlanningError> {
         Ok(physical::NodeMatch {
-            binder: plan_bind_spec(&pattern.binder)?,
-            spec: plan_node_filter(&pattern.spec)?,
+            binder: self.plan_bind_spec::<{ STRICT }>(&pattern.binder)?,
+            spec: self.plan_node_filter::<{ STRICT }>(&pattern.spec)?,
         })
     }
 
-    fn plan_path_match(
+    fn plan_path_match<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::PathMatch,
     ) -> Result<physical::PathMatch<StringGraphTypes>, PlanningError> {
         let (l, m, r) = &pattern.binders;
-        let binders = (plan_bind_spec(l)?, plan_bind_spec(m)?, plan_bind_spec(r)?);
+        let binders = (
+            self.plan_bind_spec::<{ STRICT }>(l)?,
+            self.plan_bind_spec::<{ STRICT }>(m)?,
+            self.plan_bind_spec::<{ STRICT }>(r)?,
+        );
         Ok(physical::PathMatch {
             binders,
-            spec: plan_step_filter(&pattern.spec)?,
+            spec: self.plan_step_filter::<{ STRICT }>(&pattern.spec)?,
         })
     }
 
-    fn plan_path_pattern_match(
+    fn plan_path_pattern_match<const STRICT: bool>(
+        &mut self,
         pattern: &logical::graph::PathPatternMatch,
     ) -> Result<physical::PathPatternMatch<StringGraphTypes>, PlanningError> {
         Ok(match pattern {
             logical::graph::PathPatternMatch::Node(n) => {
-                physical::PathPatternMatch::Node(plan_node_match(n)?)
+                physical::PathPatternMatch::Node(self.plan_node_match::<{ STRICT }>(n)?)
             }
             logical::graph::PathPatternMatch::Match(m) => {
-                physical::PathPatternMatch::Match(plan_path_match(m)?)
+                physical::PathPatternMatch::Match(self.plan_path_match::<{ STRICT }>(m)?)
             }
             logical::graph::PathPatternMatch::Concat(ms) => {
-                let ms: Result<Vec<_>, _> = ms.iter().map(plan_path_pattern_match).collect();
+                let ms: Result<Vec<_>, _> = ms
+                    .iter()
+                    .map(|p| self.plan_path_pattern_match::<{ STRICT }>(p))
+                    .collect();
                 physical::PathPatternMatch::Concat(ms?)
             }
         })
     }
-
-    plan_path_pattern_match(pattern)
 }
 
 fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {

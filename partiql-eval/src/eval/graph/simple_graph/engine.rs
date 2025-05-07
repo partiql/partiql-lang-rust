@@ -7,8 +7,10 @@ use crate::eval::graph::plan::{
 use crate::eval::graph::simple_graph::types::SimpleGraphTypes;
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
+use crate::eval::EvalContext;
 use delegate::delegate;
 use lasso::Rodeo;
+use partiql_value::datum::DatumTupleRef;
 use partiql_value::{GEdgeId, GLabelId, GNodeId, SimpleGraph, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,29 +33,6 @@ impl SimpleGraphEngine {
     }
 }
 impl GraphEngine<SimpleGraphTypes> for SimpleGraphEngine {}
-
-impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
-    delegate! {
-        to self.graph {
-            fn scan_directed_to_from(&self, spec: &TripleFilter<SimpleGraphTypes>) -> impl Iterator<Item = Triple<SimpleGraphTypes>>;
-            fn scan_directed_from_to(
-                &self,
-                spec: &TripleFilter<SimpleGraphTypes>,
-            ) -> impl Iterator<Item = Triple<SimpleGraphTypes>>;
-            fn scan_directed_both(
-                &self,
-                spec: &TripleFilter<SimpleGraphTypes>,
-            ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> ;
-
-            fn scan_undirected(
-                &self,
-                spec: &TripleFilter<SimpleGraphTypes>,
-            ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> ;
-
-            fn get(&self, spec: &NodeFilter<SimpleGraphTypes>) -> Vec<GNodeId>;
-        }
-    }
-}
 
 impl GraphAccess<SimpleGraphTypes> for SimpleGraphEngine {
     delegate! {
@@ -140,43 +119,69 @@ impl GraphAccess<SimpleGraphTypes> for SimpleGraph {
     }
 }
 
-impl TripleScan<SimpleGraphTypes> for SimpleGraph {
+impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
     fn scan_directed_from_to(
         &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         // scan directed triples left to right
-        self.g_dir
+        self.graph
+            .g_dir
             .iter()
             .map(build_triple)
-            .filter(move |t| TripleMatcher::matches(self, spec, t))
+            .filter(move |t| self.triple_matches(binders, spec, t, ctx))
     }
 
     fn scan_directed_to_from(
         &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         // scan directed triples right to left
-        self.g_dir
+        self.graph
+            .g_dir
             .iter()
             .map(reverse_triple)
-            .filter(move |t| TripleMatcher::matches(self, spec, t))
+            .filter(move |t| self.triple_matches(binders, spec, t, ctx))
     }
 
     fn scan_directed_both(
         &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
+        let (bl, bm, br) = binders;
         // scan directed triples left to right and right to left
-        self.g_dir
+        self.graph
+            .g_dir
             .iter()
-            .filter(move |(_, e, _)| self.edge_matches(&spec.e, e))
+            .filter(move |(_, e, _)| self.edge_matches(bm, &spec.e, e, ctx))
             .flat_map(move |(l, e, r)| {
                 let mut res = Vec::with_capacity(2);
-                if self.node_matches(&spec.lhs, l) && self.node_matches(&spec.rhs, r) {
+                if self.node_matches(bl, &spec.lhs, l, ctx)
+                    && self.node_matches(br, &spec.rhs, r, ctx)
+                {
                     res.push(build_triple(&(*l, *e, *r)))
                 }
-                if self.node_matches(&spec.rhs, l) && self.node_matches(&spec.lhs, r) {
+                if self.node_matches(br, &spec.rhs, l, ctx)
+                    && self.node_matches(bl, &spec.lhs, r, ctx)
+                {
                     res.push(reverse_triple(&(*l, *e, *r)))
                 }
 
@@ -186,18 +191,30 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraph {
 
     fn scan_undirected(
         &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
+        let (bl, bm, br) = binders;
         // scan undirected triples
-        self.g_undir
+        self.graph
+            .g_undir
             .iter()
-            .filter(move |(_, e, _)| self.edge_matches(&spec.e, e))
+            .filter(move |(_, e, _)| self.edge_matches(bm, &spec.e, e, ctx))
             .flat_map(move |(l, e, r)| {
                 let mut res = Vec::with_capacity(2);
-                if self.node_matches(&spec.lhs, l) && self.node_matches(&spec.rhs, r) {
+                if self.node_matches(bl, &spec.lhs, l, ctx)
+                    && self.node_matches(br, &spec.rhs, r, ctx)
+                {
                     res.push(build_triple(&(*l, *e, *r)))
                 }
-                if self.node_matches(&spec.rhs, l) && self.node_matches(&spec.lhs, r) {
+                if self.node_matches(br, &spec.rhs, l, ctx)
+                    && self.node_matches(bl, &spec.lhs, r, ctx)
+                {
                     res.push(reverse_triple(&(*l, *e, *r)))
                 }
 
@@ -205,10 +222,15 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraph {
             })
     }
 
-    fn get(&self, spec: &NodeFilter<SimpleGraphTypes>) -> Vec<GNodeId> {
-        (0..self.nodes.len())
+    fn get(
+        &self,
+        binder: &BindSpec<SimpleGraphTypes>,
+        spec: &NodeFilter<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
+    ) -> Vec<GNodeId> {
+        (0..self.graph.nodes.len())
             .map(GNodeId)
-            .filter(|node| self.node_matches(spec, node))
+            .filter(|node| self.node_matches(binder, spec, node, ctx))
             .collect()
     }
 }
@@ -231,107 +253,156 @@ fn reverse_triple<GT: GraphTypes>((l, e, r): &(GT::NodeId, GT::EdgeId, GT::NodeI
     }
 }
 
-trait TripleMatcher<GT: GraphTypes> {
-    fn matches(&self, spec: &TripleFilter<GT>, triple: &Triple<GT>) -> bool;
-}
-
-trait NodeMatcher<GT: GraphTypes> {
-    fn node_matches(&self, spec: &NodeFilter<GT>, node: &GT::NodeId) -> bool;
-    fn node_label_matches(&self, spec: &LabelFilter<GT>, node: &GT::NodeId) -> bool;
-    #[allow(dead_code)] // TODO implement value filters for `where`
-    fn node_value_matches(&self, spec: &ValueFilter, node: &GT::NodeId) -> bool;
-}
-
-trait EdgeMatcher<GT: GraphTypes> {
-    fn edge_matches(&self, spec: &EdgeFilter<GT>, edge: &GT::EdgeId) -> bool;
-    fn edge_label_matches(&self, spec: &LabelFilter<GT>, edge: &GT::EdgeId) -> bool;
-    #[allow(dead_code)] // TODO implement value filters for `where`
-    fn edge_value_matches(&self, spec: &ValueFilter, edge: &GT::EdgeId) -> bool;
-}
-
-impl TripleMatcher<SimpleGraphTypes> for SimpleGraph {
+impl SimpleGraphEngine {
     #[inline]
-    fn matches(
+    fn triple_matches(
         &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
         spec: &TripleFilter<SimpleGraphTypes>,
         triple: &Triple<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
     ) -> bool {
-        self.node_matches(&spec.lhs, &triple.lhs)
-            && self.edge_matches(&spec.e, &triple.e)
-            && self.node_matches(&spec.rhs, &triple.rhs)
+        let (bl, bm, br) = binders;
+        self.node_matches(bl, &spec.lhs, &triple.lhs, ctx)
+            && self.edge_matches(bm, &spec.e, &triple.e, ctx)
+            && self.node_matches(br, &spec.rhs, &triple.rhs, ctx)
     }
-}
 
-impl NodeMatcher<SimpleGraphTypes> for SimpleGraph {
     #[inline]
-    fn node_matches(&self, spec: &NodeFilter<SimpleGraphTypes>, node: &GNodeId) -> bool {
+    fn node_matches(
+        &self,
+        binder: &BindSpec<SimpleGraphTypes>,
+        spec: &NodeFilter<SimpleGraphTypes>,
+        node: &GNodeId,
+        ctx: &dyn EvalContext,
+    ) -> bool {
         let NodeFilter { label, filter } = spec;
         match (label, filter) {
             (LabelFilter::Never, _) => false,
             (LabelFilter::Always, ValueFilter::Always) => true,
-            //TODO when ValueFilter has other variants:
-            // (LabelFilter::Always, v) => self.node_value_matches(v, node),
-            (l, ValueFilter::Always) => self.node_label_matches(l, node),
-            //TODO when ValueFilter has other variants:
-            // (l, v) => self.node_label_matches(l, node) && self.node_value_matches(v, node),
+            (LabelFilter::Always, v) => self.node_value_matches(binder, v, node, ctx),
+            (l, ValueFilter::Always) => self.node_label_matches(binder, l, node, ctx),
+            (l, v) => {
+                self.node_label_matches(binder, l, node, ctx)
+                    && self.node_value_matches(binder, v, node, ctx)
+            }
         }
     }
 
-    fn node_label_matches(&self, spec: &LabelFilter<SimpleGraphTypes>, node: &GNodeId) -> bool {
+    fn node_label_matches(
+        &self,
+        _binder: &BindSpec<SimpleGraphTypes>,
+        spec: &LabelFilter<SimpleGraphTypes>,
+        node: &GNodeId,
+        _ctx: &dyn EvalContext,
+    ) -> bool {
         match spec {
             LabelFilter::Never => false,
             LabelFilter::Always => true,
-            LabelFilter::Named(l) => self.nodes[node.0].labels.0.contains(l),
-            LabelFilter::Negated(inner) => !self.node_label_matches(inner.as_ref(), node),
-            LabelFilter::Disjunction(inner) => {
-                inner.iter().any(|l| self.node_label_matches(l, node))
+            LabelFilter::Named(l) => self.graph.nodes[node.0].labels.0.contains(l),
+            LabelFilter::Negated(inner) => {
+                !self.node_label_matches(_binder, inner.as_ref(), node, _ctx)
             }
-            LabelFilter::Conjunction(inner) => {
-                inner.iter().all(|l| self.node_label_matches(l, node))
-            }
+            LabelFilter::Disjunction(inner) => inner
+                .iter()
+                .any(|l| self.node_label_matches(_binder, l, node, _ctx)),
+            LabelFilter::Conjunction(inner) => inner
+                .iter()
+                .all(|l| self.node_label_matches(_binder, l, node, _ctx)),
         }
     }
 
-    fn node_value_matches(&self, spec: &ValueFilter, _: &GNodeId) -> bool {
+    fn node_value_matches(
+        &self,
+        binder: &BindSpec<SimpleGraphTypes>,
+        spec: &ValueFilter,
+        node: &GNodeId,
+        ctx: &dyn EvalContext,
+    ) -> bool {
         match spec {
             ValueFilter::Always => true,
+            ValueFilter::Filter(expr) => {
+                let resolver = self.binder.borrow();
+                let bindings = match &self.graph.nodes[node.0].value {
+                    None => DatumTupleRef::Empty,
+                    Some(payload) => {
+                        let key = resolver.resolve(&binder.0);
+                        DatumTupleRef::SingleKey(key.into(), payload)
+                    }
+                };
+                matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+            }
         }
     }
-}
 
-impl EdgeMatcher<SimpleGraphTypes> for SimpleGraph {
     #[inline]
-    fn edge_matches(&self, spec: &EdgeFilter<SimpleGraphTypes>, edge: &GEdgeId) -> bool {
+    fn edge_matches(
+        &self,
+        binder: &BindSpec<SimpleGraphTypes>,
+        spec: &EdgeFilter<SimpleGraphTypes>,
+        edge: &GEdgeId,
+        ctx: &dyn EvalContext,
+    ) -> bool {
         let EdgeFilter { label, filter } = spec;
         match (label, filter) {
             (LabelFilter::Never, _) => false,
             (LabelFilter::Always, ValueFilter::Always) => true,
-            //TODO when ValueFilter has other variants:
-            // (LabelFilter::Always, v) => self.edge_value_matches(v, edge),
-            (l, ValueFilter::Always) => self.edge_label_matches(l, edge),
-            //TODO when ValueFilter has other variants:
-            // (l, v) => self.edge_label_matches(l, edge) && self.edge_value_matches(v, edge),
+            (LabelFilter::Always, v) => self.edge_value_matches(binder, v, edge, ctx),
+            (l, ValueFilter::Always) => self.edge_label_matches(binder, l, edge, ctx),
+            (l, v) => {
+                self.edge_label_matches(binder, l, edge, ctx)
+                    && self.edge_value_matches(binder, v, edge, ctx)
+            }
         }
     }
 
-    fn edge_label_matches(&self, spec: &LabelFilter<SimpleGraphTypes>, edge: &GEdgeId) -> bool {
+    fn edge_label_matches(
+        &self,
+        _binder: &BindSpec<SimpleGraphTypes>,
+        spec: &LabelFilter<SimpleGraphTypes>,
+        edge: &GEdgeId,
+        _ctx: &dyn EvalContext,
+    ) -> bool {
         match spec {
             LabelFilter::Never => false,
             LabelFilter::Always => true,
-            LabelFilter::Named(l) => self.edges[edge.0].labels.0.contains(l),
-            LabelFilter::Negated(inner) => !self.edge_label_matches(inner.as_ref(), edge),
-            LabelFilter::Disjunction(inner) => {
-                inner.iter().any(|l| self.edge_label_matches(l, edge))
+            LabelFilter::Named(l) => self.graph.edges[edge.0].labels.0.contains(l),
+            LabelFilter::Negated(inner) => {
+                !self.edge_label_matches(_binder, inner.as_ref(), edge, _ctx)
             }
-            LabelFilter::Conjunction(inner) => {
-                inner.iter().all(|l| self.edge_label_matches(l, edge))
-            }
+            LabelFilter::Disjunction(inner) => inner
+                .iter()
+                .any(|l| self.edge_label_matches(_binder, l, edge, _ctx)),
+            LabelFilter::Conjunction(inner) => inner
+                .iter()
+                .all(|l| self.edge_label_matches(_binder, l, edge, _ctx)),
         }
     }
 
-    fn edge_value_matches(&self, spec: &ValueFilter, _: &GEdgeId) -> bool {
+    fn edge_value_matches(
+        &self,
+        binder: &BindSpec<SimpleGraphTypes>,
+        spec: &ValueFilter,
+        edge: &GEdgeId,
+        ctx: &dyn EvalContext,
+    ) -> bool {
         match spec {
             ValueFilter::Always => true,
+            ValueFilter::Filter(expr) => {
+                let resolver = self.binder.borrow();
+                let bindings = match &self.graph.edges[edge.0].value {
+                    None => DatumTupleRef::Empty,
+                    Some(payload) => {
+                        let key = resolver.resolve(&binder.0);
+                        DatumTupleRef::SingleKey(key.into(), payload)
+                    }
+                };
+                matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+            }
         }
     }
 }

@@ -93,7 +93,10 @@ macro_rules! not_yet_implemented_err {
     };
 }
 
-fn extract_vexpr_by_id(v: &mut Vec<(NodeId, ValueExpr)>, target: NodeId) -> Option<ValueExpr> {
+pub(crate) fn extract_vexpr_by_id(
+    v: &mut Vec<(NodeId, ValueExpr)>,
+    target: NodeId,
+) -> Option<ValueExpr> {
     let position: usize = v.iter().position(|(id, _v)| *id == target)?;
     Some(v.remove(position).1)
 }
@@ -1958,19 +1961,24 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn enter_graph_match(&mut self, _graph_pattern: &'ast ast::GraphMatch) -> Traverse {
+        self.enter_benv();
         self.enter_env();
         Traverse::Continue
     }
     fn exit_graph_match(&mut self, graph_match: &'ast ast::GraphMatch) -> Traverse {
+        let benv = self.exit_benv();
+        if !benv.is_empty() {
+            {
+                not_yet_implemented_fault!(self, "Subexpression in GRAPH MATCH".to_string());
+            }
+        }
         let mut env = self.exit_env();
 
-        let graph_planner = crate::graph::GraphToLogical::default();
+        let graph_reference = extract_vexpr_by_id(&mut env, graph_match.expr.id());
 
+        let graph_planner = crate::graph::GraphToLogical::new(env);
         match graph_planner.plan_graph_match(graph_match) {
             Ok(pattern) => {
-                // TODO deal with graph `WHERE` expressions
-                let graph_reference = extract_vexpr_by_id(&mut env, graph_match.expr.id());
-
                 true_or_fault!(
                     self,
                     graph_reference.is_some(),

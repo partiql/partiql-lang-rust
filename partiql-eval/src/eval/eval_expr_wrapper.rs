@@ -471,6 +471,26 @@ impl<E: 'static, F: 'static> EvalExprWrapper<E, F> {
         let expr = ArgCheckEvalExpr::<STRICT, N, _, ArgC>::new(types, args, expr);
         Ok(Box::new(expr))
     }
+
+    #[inline]
+    pub(crate) fn create_checked_with_ctx<
+        const STRICT: bool,
+        const N: usize,
+        ArgC: 'static + ArgChecker,
+    >(
+        ident: E,
+        types: [PartiqlShape; N],
+        args: Vec<Box<dyn EvalExpr>>,
+        f: F,
+    ) -> Result<Box<dyn EvalExpr>, BindError>
+    where
+        EvalExprWrapper<E, F>: ExecuteEvalExpr<N>,
+    {
+        let args = unwrap_args(args)?;
+        let expr = Self { ident, f };
+        let expr = ArgCheckEvalExpr::<STRICT, N, _, ArgC>::new(types, args, expr);
+        Ok(Box::new(expr))
+    }
 }
 
 /// An [`ExecuteEvalExpr`] over a single [`Value`] argument
@@ -479,19 +499,19 @@ pub(crate) struct UnaryValueExpr {}
 
 impl<F> ExecuteEvalExpr<1> for EvalExprWrapper<UnaryValueExpr, F>
 where
-    F: Fn(&Value) -> Value,
+    F: Fn(&Value, &dyn EvalContext) -> Value,
 {
     #[inline]
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 1],
-        _ctx: &'c dyn EvalContext,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
     {
         let [arg] = args;
-        Cow::Owned((self.f)(arg.borrow()))
+        Cow::Owned((self.f)(arg.borrow(), ctx))
     }
 }
 
@@ -518,8 +538,21 @@ impl UnaryValueExpr {
     where
         F: 'static + Fn(&Value) -> Value,
     {
+        Self::create_typed_with_ctx::<{ STRICT }, _>(types, args, move |val, _| f(val))
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub(crate) fn create_typed_with_ctx<const STRICT: bool, F>(
+        types: [PartiqlShape; 1],
+        args: Vec<Box<dyn EvalExpr>>,
+        f: F,
+    ) -> Result<Box<dyn EvalExpr>, BindError>
+    where
+        F: 'static + Fn(&Value, &dyn EvalContext) -> Value,
+    {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
-        Self::create_checked::<{ STRICT }, Check<STRICT>, F>(types, args, f)
+        Self::create_checked_with_ctx::<{ STRICT }, Check<STRICT>, F>(types, args, f)
     }
 
     #[allow(dead_code)]
@@ -533,7 +566,26 @@ impl UnaryValueExpr {
         F: 'static + Fn(&Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
-        EvalExprWrapper::create_checked::<{ STRICT }, 1, ArgC>(Self::default(), types, args, f)
+        Self::create_checked_with_ctx::<{ STRICT }, ArgC, _>(types, args, move |val, _| f(val))
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub(crate) fn create_checked_with_ctx<const STRICT: bool, ArgC, F>(
+        types: [PartiqlShape; 1],
+        args: Vec<Box<dyn EvalExpr>>,
+        f: F,
+    ) -> Result<Box<dyn EvalExpr>, BindError>
+    where
+        F: 'static + Fn(&Value, &dyn EvalContext) -> Value,
+        ArgC: 'static + ArgChecker,
+    {
+        EvalExprWrapper::create_checked_with_ctx::<{ STRICT }, 1, ArgC>(
+            Self::default(),
+            types,
+            args,
+            f,
+        )
     }
 }
 
@@ -543,19 +595,19 @@ pub(crate) struct BinaryValueExpr {}
 
 impl<F> ExecuteEvalExpr<2> for EvalExprWrapper<BinaryValueExpr, F>
 where
-    F: Fn(&Value, &Value) -> Value,
+    F: Fn(&Value, &Value, &dyn EvalContext) -> Value,
 {
     #[inline]
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 2],
-        _ctx: &'c dyn EvalContext,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
     {
         let [arg1, arg2] = args;
-        Cow::Owned((self.f)(arg1.borrow(), arg2.borrow()))
+        Cow::Owned((self.f)(arg1.borrow(), arg2.borrow(), ctx))
     }
 }
 
@@ -597,7 +649,12 @@ impl BinaryValueExpr {
         F: 'static + Fn(&Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
-        EvalExprWrapper::create_checked::<{ STRICT }, 2, ArgC>(Self::default(), types, args, f)
+        EvalExprWrapper::create_checked::<{ STRICT }, 2, ArgC>(
+            Self::default(),
+            types,
+            args,
+            move |v1, v2, _| f(v1, v2),
+        )
     }
 }
 
@@ -607,19 +664,19 @@ pub(crate) struct TernaryValueExpr {}
 
 impl<F> ExecuteEvalExpr<3> for EvalExprWrapper<TernaryValueExpr, F>
 where
-    F: Fn(&Value, &Value, &Value) -> Value,
+    F: Fn(&Value, &Value, &Value, &dyn EvalContext) -> Value,
 {
     #[inline]
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 3],
-        _ctx: &'c dyn EvalContext,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
     {
         let [arg1, arg2, arg3] = args;
-        Cow::Owned((self.f)(arg1.borrow(), arg2.borrow(), arg3.borrow()))
+        Cow::Owned((self.f)(arg1.borrow(), arg2.borrow(), arg3.borrow(), ctx))
     }
 }
 
@@ -661,7 +718,12 @@ impl TernaryValueExpr {
         F: 'static + Fn(&Value, &Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
-        EvalExprWrapper::create_checked::<{ STRICT }, 3, ArgC>(Self::default(), types, args, f)
+        EvalExprWrapper::create_checked::<{ STRICT }, 3, ArgC>(
+            Self::default(),
+            types,
+            args,
+            move |v1, v2, v3, _| f(v1, v2, v3),
+        )
     }
 }
 
@@ -671,13 +733,13 @@ pub(crate) struct QuaternaryValueExpr {}
 
 impl<F> ExecuteEvalExpr<4> for EvalExprWrapper<QuaternaryValueExpr, F>
 where
-    F: Fn(&Value, &Value, &Value, &Value) -> Value,
+    F: Fn(&Value, &Value, &Value, &Value, &dyn EvalContext) -> Value,
 {
     #[inline]
     fn evaluate<'a, 'c, 'o>(
         &'a self,
         args: [Cow<'a, Value>; 4],
-        _ctx: &'c dyn EvalContext,
+        ctx: &'c dyn EvalContext,
     ) -> Cow<'a, Value>
     where
         'c: 'a,
@@ -688,6 +750,7 @@ where
             arg2.borrow(),
             arg3.borrow(),
             arg4.borrow(),
+            ctx,
         ))
     }
 }
@@ -730,6 +793,11 @@ impl QuaternaryValueExpr {
         F: 'static + Fn(&Value, &Value, &Value, &Value) -> Value,
         ArgC: 'static + ArgChecker,
     {
-        EvalExprWrapper::create_checked::<{ STRICT }, 4, ArgC>(Self::default(), types, args, f)
+        EvalExprWrapper::create_checked::<{ STRICT }, 4, ArgC>(
+            Self::default(),
+            types,
+            args,
+            move |v1, v2, v3, v4, _| f(v1, v2, v3, v4),
+        )
     }
 }

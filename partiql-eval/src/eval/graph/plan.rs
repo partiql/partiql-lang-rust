@@ -1,6 +1,8 @@
+use crate::eval::expr::EvalExpr;
 use crate::eval::graph::types::GraphTypes;
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::rc::Rc;
 
 /// A plan specification for an edge's direction filtering.
 #[allow(clippy::upper_case_acronyms)]
@@ -32,11 +34,11 @@ pub enum LabelFilter<GT: GraphTypes> {
 }
 
 /// A plan specification for value filtering.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub enum ValueFilter {
     #[default]
     Always,
-    // TODO other variant for, e.g., `WHERE` filters
+    Filter(Rc<dyn EvalExpr>),
 }
 
 /// A plan specification for node label & value filtering.
@@ -131,13 +133,13 @@ pub trait GraphPlanConvert<In: GraphTypes, Out: GraphTypes>: Debug {
     fn convert_node_filter(&self, node: &NodeFilter<In>) -> NodeFilter<Out> {
         NodeFilter {
             label: self.convert_label_filter(&node.label),
-            filter: node.filter,
+            filter: node.filter.clone(),
         }
     }
     fn convert_edge_filter(&self, edge: &EdgeFilter<In>) -> EdgeFilter<Out> {
         EdgeFilter {
             label: self.convert_label_filter(&edge.label),
-            filter: edge.filter,
+            filter: edge.filter.clone(),
         }
     }
     fn convert_node_match(&self, node: &NodeMatch<In>) -> NodeMatch<Out> {

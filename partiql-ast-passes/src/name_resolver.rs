@@ -2,7 +2,7 @@ use crate::error::{AstTransformError, AstTransformationError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
-use partiql_ast::ast::{GroupByExpr, GroupKey};
+use partiql_ast::ast::{GraphPattern, GroupByExpr, GroupKey};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_catalog::catalog::Catalog;
 use partiql_common::node::NodeId;
@@ -505,6 +505,55 @@ impl<'ast> Visitor<'ast> for NameResolver<'_> {
             produce.insert(as_alias);
         }
         self.schema.insert(id, KeySchema { consume, produce });
+        Traverse::Continue
+    }
+
+    fn enter_graph_pattern(&mut self, _: &'ast GraphPattern) -> Traverse {
+        self.enter_keyref();
+        Traverse::Continue
+    }
+
+    fn exit_graph_pattern(&mut self, _: &'ast GraphPattern) -> Traverse {
+        let id = *self.current_node();
+        let KeyRefs {
+            consume,
+            produce_required,
+            ..
+        } = match self.exit_keyref() {
+            Ok(kr) => kr,
+            Err(e) => {
+                self.errors.push(e);
+                return Traverse::Stop;
+            }
+        };
+        let produce: Names = produce_required;
+        self.schema.insert(id, KeySchema { consume, produce });
+
+        self.in_scope.entry(id).or_default().push(id);
+        Traverse::Continue
+    }
+
+    fn exit_graph_match_node(&mut self, node: &'ast ast::GraphMatchNode) -> Traverse {
+        if let Some(sym) = &node.variable {
+            let var = Symbol::Known(sym.clone());
+            self.keyref_stack
+                .last_mut()
+                .unwrap()
+                .produce_required
+                .insert(var);
+        }
+        Traverse::Continue
+    }
+
+    fn exit_graph_match_edge(&mut self, edge: &'ast ast::GraphMatchEdge) -> Traverse {
+        if let Some(sym) = &edge.variable {
+            let var = Symbol::Known(sym.clone());
+            self.keyref_stack
+                .last_mut()
+                .unwrap()
+                .produce_required
+                .insert(var);
+        }
         Traverse::Continue
     }
 }
