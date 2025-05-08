@@ -3,6 +3,7 @@ use crate::{
     Tuple, Value,
 };
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::error::Error;
 
 use std::fmt::Debug;
@@ -89,6 +90,8 @@ pub enum DatumTupleRef<'a> {
     CoercedValue(usize, &'a Value),
     /// A reference to a value stored under a single key
     SingleKey(Cow<'a, str>, &'a Value),
+    /// A reference to a value stored under a single key
+    Bindings(&'a HashMap<Cow<'a, str>, &'a Value>),
 }
 
 #[derive(Debug)]
@@ -215,6 +218,7 @@ impl TupleDatum for DatumTupleRef<'_> {
             DatumTupleRef::Empty => 0,
             DatumTupleRef::CoercedValue(_, _) => 1,
             DatumTupleRef::SingleKey(_, _) => 1,
+            DatumTupleRef::Bindings(map) => map.len(),
         }
     }
 }
@@ -239,6 +243,11 @@ impl<'a> RefTupleView<'a, Value> for DatumTupleRef<'a> {
                     None
                 }
             }
+            DatumTupleRef::Bindings(map) => {
+                let m = k.matcher();
+                map.iter()
+                    .find_map(|(k, &v)| m.matches(k).then_some(Cow::Borrowed(v)))
+            }
         }
     }
 
@@ -261,6 +270,12 @@ impl<'a> IntoIterator for &'a DatumTupleRef<'a> {
             }
             DatumTupleRef::SingleKey(key, value) => {
                 DatumTupleRefIterator::SingleKey(Some((key.as_ref(), value)))
+            }
+            DatumTupleRef::Bindings(m) => {
+                DatumTupleRefIterator::Dynamic(Box::new(m.iter().map(|(k, &v)| RefFieldView {
+                    name: Some(k.as_ref()),
+                    value: Cow::Borrowed(v),
+                })))
             }
         }
     }

@@ -1,11 +1,13 @@
 use crate::eval::graph::plan::{
-    BindSpec, DirectionFilter, GraphPlanConvert, NodeFilter, NodeMatch, PathMatch, StepFilter,
-    TripleFilter,
+    BindSpec, DirectionFilter, GraphPlanConvert, NodeFilter, NodeMatch, TripleFilter,
+    TripleStepFilter, TripleStepMatch, ValueFilter,
 };
-use crate::eval::graph::result::Triple;
+use crate::eval::graph::result::{PathPatternNodes, Triple};
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use crate::eval::EvalContext;
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
 use partiql_value::Value;
 
 /// A graph 'engine'; Exposes scanning, node access, and plan conversion to a target graph.
@@ -14,13 +16,26 @@ pub trait GraphEngine<GT: GraphTypes>:
     + GraphPlanConvert<StringGraphTypes, GT>
     + GraphPlanConvert<GT, StringGraphTypes>
     + GraphAccess<GT>
+    + GraphFilter<GT>
 {
 }
 
 /// A trait to scan paths and nodes for a graph.
 pub trait GraphScan<GT: GraphTypes> {
-    fn scan(&self, spec: &PathMatch<GT>, ctx: &dyn EvalContext) -> Vec<Triple<GT>>;
+    fn scan(&self, spec: &TripleStepMatch<GT>, ctx: &dyn EvalContext) -> Vec<Triple<GT>>;
     fn get(&self, spec: &NodeMatch<GT>, ctx: &dyn EvalContext) -> Vec<GT::NodeId>;
+}
+
+type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
+
+pub trait GraphFilter<GT: GraphTypes> {
+    fn filter_path_nodes(
+        &self,
+        binders: &[BindSpec<GT>],
+        spec: &ValueFilter,
+        bindings: FxIndexSet<PathPatternNodes<GT>>,
+        ctx: &dyn EvalContext,
+    ) -> FxIndexSet<PathPatternNodes<GT>>;
 }
 
 /// A trait to retrieve named nodes and edges for a graph.
@@ -35,6 +50,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
 
@@ -42,6 +58,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
 
@@ -49,6 +66,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
 
@@ -56,6 +74,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
     fn get(
@@ -71,10 +90,11 @@ where
     GT: GraphTypes,
     T: TripleScan<GT>,
 {
-    fn scan(&self, spec: &PathMatch<GT>, ctx: &dyn EvalContext) -> Vec<Triple<GT>> {
-        let PathMatch {
+    fn scan(&self, spec: &TripleStepMatch<GT>, ctx: &dyn EvalContext) -> Vec<Triple<GT>> {
+        let TripleStepMatch {
             binders,
-            spec: StepFilter { dir, triple },
+            spec: TripleStepFilter { dir, triple },
+            filter,
         } = spec;
         let (to_from, undirected, from_to) = match dir {
             DirectionFilter::L => (true, false, false),
@@ -88,17 +108,17 @@ where
 
         let mut result = vec![];
         if undirected {
-            result.extend(self.scan_undirected(binders, triple, ctx));
+            result.extend(self.scan_undirected(binders, triple, filter, ctx));
         }
         match (from_to, to_from) {
             (true, true) => {
-                result.extend(self.scan_directed_both(binders, triple, ctx));
+                result.extend(self.scan_directed_both(binders, triple, filter, ctx));
             }
             (true, false) => {
-                result.extend(self.scan_directed_from_to(binders, triple, ctx));
+                result.extend(self.scan_directed_from_to(binders, triple, filter, ctx));
             }
             (false, true) => {
-                result.extend(self.scan_directed_to_from(binders, triple, ctx));
+                result.extend(self.scan_directed_to_from(binders, triple, filter, ctx));
             }
             (false, false) => {}
         }
