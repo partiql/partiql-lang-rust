@@ -1,3 +1,4 @@
+use crate::graph::bind_name::BindNameExt;
 use crate::ValueExpr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,12 @@ pub enum DirectionFilter {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BindSpec(pub String);
 
+impl BindSpec {
+    pub fn is_anon(&self) -> bool {
+        self.0.is_anon()
+    }
+}
+
 /// A plan specification for label filtering.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -43,7 +50,28 @@ pub enum LabelFilter {
 pub enum ValueFilter {
     #[default]
     Always,
-    Filter(Box<ValueExpr>),
+    Filter(Vec<ValueExpr>),
+}
+
+impl ValueFilter {
+    pub fn and(mut self, other: ValueFilter) -> ValueFilter {
+        self.extend(other);
+        self
+    }
+
+    pub fn extend(&mut self, other: ValueFilter) {
+        match other {
+            ValueFilter::Always => {}
+            ValueFilter::Filter(rhs) => match self {
+                ValueFilter::Always => {
+                    *self = ValueFilter::Filter(rhs);
+                }
+                ValueFilter::Filter(lhs) => {
+                    lhs.extend(rhs);
+                }
+            },
+        }
+    }
 }
 
 /// A plan specification for node label & value filtering.
@@ -85,6 +113,7 @@ pub struct StepFilter {
 pub struct PathPattern {
     pub head: NodeMatch,
     pub tail: Vec<(DirectionFilter, EdgeMatch, NodeMatch)>,
+    pub filter: ValueFilter,
 }
 
 /// A plan specification for node matching.
@@ -106,16 +135,25 @@ pub struct EdgeMatch {
 /// A plan specification for path (i.e., node, edge, node) matching.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct PathMatch {
+pub struct TripleMatch {
     pub binders: (BindSpec, BindSpec, BindSpec),
     pub spec: StepFilter,
+    pub filter: ValueFilter,
 }
 
-/// A plan specification for path patterns (i.e., sequences of [`PathMatch`]s) matching.
+/// A plan specification for path (i.e., node, edge, node) matching.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TripleSeriesMatch {
+    pub triples: Vec<TripleMatch>,
+    pub filter: ValueFilter,
+}
+
+/// A plan specification for path patterns (i.e., sequences of [`TripleMatch`]s) matching.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PathPatternMatch {
     Node(NodeMatch),
-    Match(PathMatch),
-    Concat(Vec<PathPatternMatch>),
+    Match(TripleMatch),
+    Concat(Vec<TripleSeriesMatch>),
 }

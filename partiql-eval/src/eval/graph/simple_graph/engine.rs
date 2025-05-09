@@ -1,5 +1,6 @@
-use crate::eval::graph::engine::{GraphAccess, GraphEngine, TripleScan};
-use crate::eval::graph::result::Triple;
+use crate::eval::graph::engine::{GraphAccess, GraphEngine, GraphFilter, TripleScan};
+use crate::eval::graph::result::{GraphElement, PathPatternNodes, Triple};
+use std::borrow::Cow;
 
 use crate::eval::graph::plan::{
     BindSpec, EdgeFilter, GraphPlanConvert, LabelFilter, NodeFilter, TripleFilter, ValueFilter,
@@ -9,10 +10,13 @@ use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use crate::eval::EvalContext;
 use delegate::delegate;
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
 use lasso::Rodeo;
 use partiql_value::datum::DatumTupleRef;
 use partiql_value::{GEdgeId, GLabelId, GNodeId, SimpleGraph, Value};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// [`GraphEngine`] for [`SimpleGraph`]
@@ -32,6 +36,7 @@ impl SimpleGraphEngine {
         }
     }
 }
+
 impl GraphEngine<SimpleGraphTypes> for SimpleGraphEngine {}
 
 impl GraphAccess<SimpleGraphTypes> for SimpleGraphEngine {
@@ -128,6 +133,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         // scan directed triples left to right
@@ -135,7 +141,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             .g_dir
             .iter()
             .map(build_triple)
-            .filter(move |t| self.triple_matches(binders, spec, t, ctx))
+            .filter(move |t| self.triple_matches(binders, spec, t, filter, ctx))
     }
 
     fn scan_directed_to_from(
@@ -146,6 +152,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         // scan directed triples right to left
@@ -153,7 +160,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             .g_dir
             .iter()
             .map(reverse_triple)
-            .filter(move |t| self.triple_matches(binders, spec, t, ctx))
+            .filter(move |t| self.triple_matches(binders, spec, t, filter, ctx))
     }
 
     fn scan_directed_both(
@@ -164,6 +171,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         let (bl, bm, br) = binders;
@@ -171,8 +179,17 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_dir
             .iter()
-            .filter(move |(_, e, _)| self.edge_matches(bm, &spec.e, e, ctx))
-            .flat_map(move |(l, e, r)| {
+            .filter(|(lhs, e, rhs)| {
+                let triple = Triple {
+                    lhs: *lhs,
+                    e: *e,
+                    rhs: *rhs,
+                };
+                let edge = self.edge_matches(bm, &spec.e, e, ctx);
+                let triple = self.triple_value_matches(binders, filter, &triple, ctx);
+                edge && triple
+            })
+            .flat_map(|(l, e, r)| {
                 let mut res = Vec::with_capacity(2);
                 if self.node_matches(bl, &spec.lhs, l, ctx)
                     && self.node_matches(br, &spec.rhs, r, ctx)
@@ -197,6 +214,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
         let (bl, bm, br) = binders;
@@ -204,8 +222,17 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_undir
             .iter()
-            .filter(move |(_, e, _)| self.edge_matches(bm, &spec.e, e, ctx))
-            .flat_map(move |(l, e, r)| {
+            .filter(|(lhs, e, rhs)| {
+                let triple = Triple {
+                    lhs: *lhs,
+                    e: *e,
+                    rhs: *rhs,
+                };
+                let edge = self.edge_matches(bm, &spec.e, e, ctx);
+                let triple = self.triple_value_matches(binders, filter, &triple, ctx);
+                edge && triple
+            })
+            .flat_map(|(l, e, r)| {
                 let mut res = Vec::with_capacity(2);
                 if self.node_matches(bl, &spec.lhs, l, ctx)
                     && self.node_matches(br, &spec.rhs, r, ctx)
@@ -253,6 +280,54 @@ fn reverse_triple<GT: GraphTypes>((l, e, r): &(GT::NodeId, GT::EdgeId, GT::NodeI
     }
 }
 
+type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
+
+impl GraphFilter<SimpleGraphTypes> for SimpleGraphEngine {
+    fn filter_path_nodes(
+        &self,
+        binders: &[BindSpec<SimpleGraphTypes>],
+        spec: &ValueFilter,
+        mut bindings: FxIndexSet<PathPatternNodes<SimpleGraphTypes>>,
+        ctx: &dyn EvalContext,
+    ) -> FxIndexSet<PathPatternNodes<SimpleGraphTypes>> {
+        match spec {
+            ValueFilter::Always => (),
+            ValueFilter::Filter(exprs) => {
+                let resolver = self.binder.borrow();
+
+                bindings.retain(|path_nodes| {
+                    let binders = binders
+                        .iter()
+                        .map(|b| Cow::Borrowed(resolver.resolve(&b.0)));
+                    let values = path_nodes.iter().map(|elt| match elt {
+                        GraphElement::Node(node_id) => &self.graph.nodes[node_id.0].value,
+                        GraphElement::Edge(edge_id) => &self.graph.edges[edge_id.0].value,
+                    });
+
+                    let map: HashMap<_, _> = binders
+                        .zip(values)
+                        .filter_map(|(k, v)| v.as_ref().map(|v| (k, v)))
+                        .collect();
+
+                    let bindings = match map.len() {
+                        0 => DatumTupleRef::Empty,
+                        1 => {
+                            let (key, payload) = map.into_iter().next().unwrap();
+                            DatumTupleRef::SingleKey(key, payload)
+                        }
+                        _ => DatumTupleRef::Bindings(&map),
+                    };
+
+                    exprs.iter().all(|expr| {
+                        matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                    })
+                });
+            }
+        }
+        bindings
+    }
+}
+
 impl SimpleGraphEngine {
     #[inline]
     fn triple_matches(
@@ -264,12 +339,62 @@ impl SimpleGraphEngine {
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
         triple: &Triple<SimpleGraphTypes>,
+        filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> bool {
         let (bl, bm, br) = binders;
         self.node_matches(bl, &spec.lhs, &triple.lhs, ctx)
             && self.edge_matches(bm, &spec.e, &triple.e, ctx)
             && self.node_matches(br, &spec.rhs, &triple.rhs, ctx)
+            && self.triple_value_matches(binders, filter, triple, ctx)
+    }
+
+    #[inline]
+    fn triple_value_matches(
+        &self,
+        binders: &(
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+            BindSpec<SimpleGraphTypes>,
+        ),
+        spec: &ValueFilter,
+        triple: &Triple<SimpleGraphTypes>,
+        ctx: &dyn EvalContext,
+    ) -> bool {
+        match spec {
+            ValueFilter::Always => true,
+            ValueFilter::Filter(exprs) => {
+                let resolver = self.binder.borrow();
+                let (bl, be, br) = binders;
+                let Triple { lhs, e, rhs } = triple;
+                let (lv, ev, rv) = (
+                    &self.graph.nodes[lhs.0].value,
+                    &self.graph.edges[e.0].value,
+                    &self.graph.nodes[rhs.0].value,
+                );
+
+                let map: HashMap<_, _> = [(bl, lv), (be, ev), (br, rv)]
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        v.as_ref()
+                            .map(|v| (Cow::Borrowed(resolver.resolve(&k.0)), v))
+                    })
+                    .collect();
+
+                let bindings = match map.len() {
+                    0 => DatumTupleRef::Empty,
+                    1 => {
+                        let (key, payload) = map.into_iter().next().unwrap();
+                        DatumTupleRef::SingleKey(key, payload)
+                    }
+                    _ => DatumTupleRef::Bindings(&map),
+                };
+
+                exprs.iter().all(|expr| {
+                    matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                })
+            }
+        }
     }
 
     #[inline]
@@ -325,7 +450,7 @@ impl SimpleGraphEngine {
     ) -> bool {
         match spec {
             ValueFilter::Always => true,
-            ValueFilter::Filter(expr) => {
+            ValueFilter::Filter(exprs) => {
                 let resolver = self.binder.borrow();
                 let bindings = match &self.graph.nodes[node.0].value {
                     None => DatumTupleRef::Empty,
@@ -334,7 +459,9 @@ impl SimpleGraphEngine {
                         DatumTupleRef::SingleKey(key.into(), payload)
                     }
                 };
-                matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                exprs.iter().all(|expr| {
+                    matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                })
             }
         }
     }
@@ -392,7 +519,7 @@ impl SimpleGraphEngine {
     ) -> bool {
         match spec {
             ValueFilter::Always => true,
-            ValueFilter::Filter(expr) => {
+            ValueFilter::Filter(exprs) => {
                 let resolver = self.binder.borrow();
                 let bindings = match &self.graph.edges[edge.0].value {
                     None => DatumTupleRef::Empty,
@@ -401,7 +528,9 @@ impl SimpleGraphEngine {
                         DatumTupleRef::SingleKey(key.into(), payload)
                     }
                 };
-                matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                exprs.iter().all(|expr| {
+                    matches!(expr.evaluate(&bindings, ctx).as_ref(), Value::Boolean(true))
+                })
             }
         }
     }

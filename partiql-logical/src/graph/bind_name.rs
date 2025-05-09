@@ -18,7 +18,6 @@ impl<S: AsRef<str>> BindNameExt for S {
 #[derive(Debug)]
 pub struct FreshBinder {
     node: AtomicU32,
-
     edge: AtomicU32,
 }
 

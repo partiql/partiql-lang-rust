@@ -12,6 +12,7 @@ use crate::eval::expr::{
     EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
     EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
 };
+use crate::eval::graph::plan::ValueFilter;
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::EvalPlan;
 use eval::graph::plan as physical;
@@ -844,9 +845,9 @@ impl<'c> EvaluatorPlanner<'c> {
     ) -> Result<physical::ValueFilter, PlanningError> {
         Ok(match pattern {
             logical::graph::ValueFilter::Always => physical::ValueFilter::Always,
-            logical::graph::ValueFilter::Filter(expr) => {
-                let filter = self.plan_value::<{ STRICT }>(expr);
-                physical::ValueFilter::Filter(Rc::from(filter))
+            logical::graph::ValueFilter::Filter(exprs) => {
+                let filters = self.plan_values::<{ STRICT }, _>(exprs.iter());
+                physical::ValueFilter::Filter(filters.into_iter().map(Rc::from).collect())
             }
         })
     }
@@ -874,7 +875,7 @@ impl<'c> EvaluatorPlanner<'c> {
     fn plan_step_filter<const STRICT: bool>(
         &mut self,
         pattern: &logical::graph::StepFilter,
-    ) -> Result<physical::StepFilter<StringGraphTypes>, PlanningError> {
+    ) -> Result<physical::TripleStepFilter<StringGraphTypes>, PlanningError> {
         let dir = match pattern.dir {
             logical::graph::DirectionFilter::L => physical::DirectionFilter::L,
             logical::graph::DirectionFilter::R => physical::DirectionFilter::R,
@@ -884,7 +885,7 @@ impl<'c> EvaluatorPlanner<'c> {
             logical::graph::DirectionFilter::LR => physical::DirectionFilter::LR,
             logical::graph::DirectionFilter::LUR => physical::DirectionFilter::LUR,
         };
-        Ok(physical::StepFilter {
+        Ok(physical::TripleStepFilter {
             dir,
             triple: self.plan_triple_filter::<{ STRICT }>(&pattern.triple)?,
         })
@@ -913,17 +914,19 @@ impl<'c> EvaluatorPlanner<'c> {
 
     fn plan_path_match<const STRICT: bool>(
         &mut self,
-        pattern: &logical::graph::PathMatch,
-    ) -> Result<physical::PathMatch<StringGraphTypes>, PlanningError> {
+        pattern: &logical::graph::TripleMatch,
+    ) -> Result<physical::TripleStepMatch<StringGraphTypes>, PlanningError> {
         let (l, m, r) = &pattern.binders;
         let binders = (
             self.plan_bind_spec::<{ STRICT }>(l)?,
             self.plan_bind_spec::<{ STRICT }>(m)?,
             self.plan_bind_spec::<{ STRICT }>(r)?,
         );
-        Ok(physical::PathMatch {
+        let filter = self.plan_value_filter::<{ STRICT }>(&pattern.filter)?;
+        Ok(physical::TripleStepMatch {
             binders,
             spec: self.plan_step_filter::<{ STRICT }>(&pattern.spec)?,
+            filter,
         })
     }
 
@@ -939,11 +942,28 @@ impl<'c> EvaluatorPlanner<'c> {
                 physical::PathPatternMatch::Match(self.plan_path_match::<{ STRICT }>(m)?)
             }
             logical::graph::PathPatternMatch::Concat(ms) => {
-                let ms: Result<Vec<_>, _> = ms
+                let matches: Result<Vec<_>, _> = ms
                     .iter()
-                    .map(|p| self.plan_path_pattern_match::<{ STRICT }>(p))
+                    .map(|triples_series| {
+                        let triples: Result<Vec<_>, _> = triples_series
+                            .triples
+                            .iter()
+                            .map(|triple| {
+                                self.plan_path_match::<{ STRICT }>(triple)
+                                    .map(physical::PathPatternMatch::Match)
+                            })
+                            .collect();
+                        let filter = self.plan_value_filter::<{ STRICT }>(&triples_series.filter);
+                        match (triples, filter) {
+                            (Err(e), _) => Err(e),
+                            (_, Err(e)) => Err(e),
+                            (Ok(triples), Ok(filter)) => {
+                                Ok(physical::PathPatternMatch::Concat(triples, filter))
+                            }
+                        }
+                    })
                     .collect();
-                physical::PathPatternMatch::Concat(ms?)
+                physical::PathPatternMatch::Concat(matches?, ValueFilter::Always)
             }
         })
     }

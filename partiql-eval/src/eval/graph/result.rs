@@ -1,4 +1,4 @@
-use crate::eval::graph::plan::{BindSpec, NodeMatch, PathMatch};
+use crate::eval::graph::plan::{BindSpec, NodeMatch, TripleStepMatch};
 use crate::eval::graph::types::GraphTypes;
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
@@ -12,10 +12,10 @@ pub struct NodeBinding<GT: GraphTypes> {
     pub binding: Vec<GT::NodeId>,
 }
 
-/// A result of matching against a [`PathMatch`]
+/// A result of matching against a [`TripleStepMatch`]
 #[derive(Debug, Clone)]
 pub struct PathBinding<GT: GraphTypes> {
-    pub matcher: PathMatch<GT>,
+    pub matcher: TripleStepMatch<GT>,
     pub bindings: Vec<Triple<GT>>,
 }
 

@@ -45,22 +45,23 @@ impl<'s> From<&'s BindingsName<'s>> for BindingsMatcher<'s> {
     }
 }
 
-#[derive(Debug, Clone)]
 pub enum BindingIter<'a> {
     Tuple(PairsIter<'a>),
+    Dynamic(Box<dyn Iterator<Item = (Option<&'a str>, &'a Value)> + 'a>),
     Single(Once<&'a Value>),
     Empty,
 }
 
 impl<'a> Iterator for BindingIter<'a> {
-    type Item = (Option<&'a String>, &'a Value);
+    type Item = (Option<&'a str>, &'a Value);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            BindingIter::Tuple(t) => t.next().map(|(k, v)| (Some(k), v)),
+            BindingIter::Tuple(t) => t.next().map(|(k, v)| (Some(k.as_str()), v)),
             BindingIter::Single(single) => single.next().map(|v| (None, v)),
             BindingIter::Empty => None,
+            BindingIter::Dynamic(d) => d.next(),
         }
     }
 
@@ -70,6 +71,7 @@ impl<'a> Iterator for BindingIter<'a> {
             BindingIter::Tuple(t) => t.size_hint(),
             BindingIter::Single(_single) => (1, Some(1)),
             BindingIter::Empty => (0, Some(0)),
+            BindingIter::Dynamic(d) => d.size_hint(),
         }
     }
 }
