@@ -17,6 +17,19 @@ pub enum DirectionFilter {
     LUR, //  -
 }
 
+/// A plan specification for a path's matching mode.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PathMode {
+    /// No filtering of edges/nodes.
+    Walk,
+    /// No repeated edges.
+    Trail,
+    /// No repeated nodes.
+    Acyclic,
+    /// No repeated nodes, except that the ﬁrst and last nodes may be the same.
+    Simple,
+}
+
 /// A plan specification for bind names.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct BindSpec<GT: GraphTypes>(pub GT::Binder);
@@ -83,6 +96,7 @@ pub struct TripleStepMatch<GT: GraphTypes> {
     pub binders: (BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
     pub spec: TripleStepFilter<GT>,
     pub filter: ValueFilter,
+    pub path_mode: PathMode,
 }
 
 /// A plan specification for path patterns (i.e., sequences of [`TripleStepMatch`]s) matching.
@@ -90,7 +104,7 @@ pub struct TripleStepMatch<GT: GraphTypes> {
 pub enum PathPatternMatch<GT: GraphTypes> {
     Node(NodeMatch<GT>),
     Match(TripleStepMatch<GT>),
-    Concat(Vec<PathPatternMatch<GT>>, ValueFilter),
+    Concat(Vec<PathPatternMatch<GT>>, ValueFilter, PathMode),
 }
 
 /// A trait for converting between plans parameterized by different [`GraphTypes`]
@@ -99,11 +113,12 @@ pub trait GraphPlanConvert<In: GraphTypes, Out: GraphTypes>: Debug {
         match matcher {
             PathPatternMatch::Node(n) => PathPatternMatch::Node(self.convert_node_match(n)),
             PathPatternMatch::Match(m) => PathPatternMatch::Match(self.convert_path_match(m)),
-            PathPatternMatch::Concat(ms, filter) => PathPatternMatch::Concat(
+            PathPatternMatch::Concat(ms, filter, path_mode) => PathPatternMatch::Concat(
                 ms.iter()
                     .map(|m| self.convert_pathpattern_match(m))
                     .collect(),
                 filter.clone(),
+                *path_mode,
             ),
         }
     }
@@ -118,6 +133,7 @@ pub trait GraphPlanConvert<In: GraphTypes, Out: GraphTypes>: Debug {
             binders,
             spec: self.convert_step_filter(&matcher.spec),
             filter: matcher.filter.clone(),
+            path_mode: matcher.path_mode,
         }
     }
     fn convert_step_filter(&self, step: &TripleStepFilter<In>) -> TripleStepFilter<Out> {

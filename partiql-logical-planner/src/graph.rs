@@ -2,10 +2,11 @@ use num::Integer;
 use partiql_ast::ast;
 
 use crate::lower::extract_vexpr_by_id;
+use partiql_ast::ast::GraphPathPrefix;
 use partiql_common::node::{IdAnnotated, NodeId};
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
-    BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
+    BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch, PathMode,
     PathPattern, PathPatternMatch, StepFilter, TripleFilter, TripleMatch, TripleSeriesMatch,
     ValueFilter,
 };
@@ -38,7 +39,7 @@ impl GraphToLogical {
 enum MatchElement {
     Node(NodeMatch),
     Edge(DirectionFilter, EdgeMatch),
-    Pattern(Vec<MatchElement>, ValueFilter),
+    Pattern(Vec<MatchElement>, ValueFilter, PathMode),
 }
 
 #[derive(Debug)]
@@ -60,7 +61,8 @@ impl<'a> Normalize<'a> {
     /// 'Normalize' a series of node/edge/subpath match elements into a rigid pattern of
     ///    (<node> ( <edge> <node>)*)
     pub fn normalize(mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
-        self.do_normalize(elements)
+        let path_mode = PathMode::Walk; // TODO replace with input to function?
+        self.do_normalize(elements, path_mode)
     }
 
     fn fresh_node(&mut self) -> NodeMatch {
@@ -73,7 +75,7 @@ impl<'a> Normalize<'a> {
         }
     }
 
-    fn flush(&mut self) -> Option<PathPattern> {
+    fn flush(&mut self, mode: PathMode) -> Option<PathPattern> {
         if self.head.is_none() {
             debug_assert!(self.tail.is_empty());
             return None;
@@ -94,10 +96,15 @@ impl<'a> Normalize<'a> {
             head,
             tail,
             filter: ValueFilter::Always,
+            mode,
         })
     }
 
-    fn do_normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
+    fn do_normalize(
+        &mut self,
+        elements: Vec<MatchElement>,
+        normalize_mode: PathMode,
+    ) -> Result<Vec<PathPattern>, String> {
         let mut path_patterns = vec![];
 
         for elt in elements {
@@ -126,9 +133,9 @@ impl<'a> Normalize<'a> {
                     }
                     self.tail.push((d, e, None));
                 }
-                MatchElement::Pattern(p, filter) => {
-                    path_patterns.extend(self.flush());
-                    let mut normalized_pattern = self.do_normalize(p)?;
+                MatchElement::Pattern(p, filter, pattern_mode) => {
+                    path_patterns.extend(self.flush(normalize_mode));
+                    let mut normalized_pattern = self.do_normalize(p, pattern_mode)?;
                     match filter {
                         ValueFilter::Always => {
                             path_patterns.extend(normalized_pattern);
@@ -144,86 +151,13 @@ impl<'a> Normalize<'a> {
             }
         }
 
-        path_patterns.extend(self.flush());
+        path_patterns.extend(self.flush(normalize_mode));
 
         Ok(path_patterns)
     }
 }
 
 impl GraphToLogical {
-    fn normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
-        Normalize::new(&self.id_generator).normalize(elements)
-    }
-
-    fn expand(&mut self, paths: Vec<PathPattern>) -> Result<Vec<PathPattern>, String> {
-        debug_assert!(!paths.is_empty());
-        // TODO handle expansion as described in 6.3 of https://arxiv.org/pdf/2112.06217
-        // TODO   this will enable alternation and quantifiers
-
-        // first, add disjuncts for alternation/union
-        // TODO
-
-        // second, fix iterations for quantifiers
-        // TODO
-
-        // third, clean-up; delete duplicated anonymous edges and merge
-        let mut paths = paths.into_iter();
-        let mut path_patterns = vec![paths.next().unwrap()];
-        for path in paths {
-            if path.head.binder.is_anon() {
-                // if the head of this path has an anonymous binder, it was synthetically inserted;
-                //   Drop the head and merge its tail into the previous path.
-                let current_path = path_patterns.last_mut().unwrap();
-                current_path.tail.extend(path.tail);
-                current_path.filter.extend(path.filter);
-            } else {
-                path_patterns.push(path);
-            }
-        }
-
-        Ok(path_patterns)
-    }
-
-    fn plan(&mut self, mut paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
-        debug_assert!(paths.len() == 1);
-        let path_pattern = paths.remove(0);
-        // pattern at this point should be a node, or a series of node-[edge-node]+
-        debug_assert!((1 + (2 * path_pattern.tail.len())).is_odd());
-
-        if path_pattern.tail.is_empty() {
-            Ok(PathPatternMatch::Node(path_pattern.head.clone()))
-        } else {
-            let mut triples = vec![];
-            let mut head = &path_pattern.head;
-            for (d, e, n) in &path_pattern.tail {
-                let binders = (head.binder.clone(), e.binder.clone(), n.binder.clone());
-                let spec = StepFilter {
-                    dir: d.clone(),
-                    triple: TripleFilter {
-                        lhs: head.spec.clone(),
-                        e: e.spec.clone(),
-                        rhs: n.spec.clone(),
-                    },
-                };
-                triples.push(TripleMatch {
-                    binders,
-                    spec,
-                    filter: ValueFilter::Always,
-                });
-                head = n;
-            }
-            if triples.len() == 1 {
-                let mut triple = triples.remove(0);
-                triple.filter.extend(path_pattern.filter);
-                Ok(PathPatternMatch::Match(triple))
-            } else {
-                Ok(PathPatternMatch::Concat(vec![TripleSeriesMatch {
-                    triples,
-                    filter: path_pattern.filter,
-                }]))
-            }
-        }
-    }
     pub(crate) fn plan_graph_match(
         mut self,
         graph_match: &ast::GraphMatch,
@@ -250,10 +184,12 @@ impl GraphToLogical {
         &mut self,
         pattern: &ast::GraphPattern,
     ) -> Result<Vec<MatchElement>, String> {
-        if pattern.mode.is_some() {
+        if pattern.match_mode.is_some() {
+            // The current graph engine is basically doing RepeatableElements currently
             not_yet_implemented_result!("MATCH expression MATCH MODE is not yet supported.");
         }
         if pattern.keep.is_some() {
+            // TODO... this overrides mode and search prefixes
             not_yet_implemented_result!("MATCH expression KEEP is not yet supported.");
         }
 
@@ -276,30 +212,43 @@ impl GraphToLogical {
         let first_pattern = &pattern.patterns[0];
         let planned_first_pattern = self.plan_graph_path_pattern(first_pattern)?;
 
-        Ok(vec![MatchElement::Pattern(planned_first_pattern, filter)])
+        let mode = plan_path_mode(None)?; // TODO replace with processing of `keep`
+        Ok(vec![MatchElement::Pattern(
+            planned_first_pattern,
+            filter,
+            mode,
+        )])
     }
 
     fn plan_graph_path_pattern(
         &mut self,
         pattern: &ast::GraphPathPattern,
     ) -> Result<Vec<MatchElement>, String> {
-        if pattern.prefix.is_some() {
-            not_yet_implemented_result!("MATCH pattern SEARCH/MODE prefix are not yet supported.");
+        let (mode, prefix) = match &pattern.prefix {
+            None => (None, None),
+            Some(GraphPathPrefix::Mode(mode)) => (Some(mode), None),
+            Some(GraphPathPrefix::Search(prefix, mode)) => (mode.as_ref(), Some(prefix)),
+        };
+        if prefix.is_some() {
+            not_yet_implemented_result!("MATCH pattern SEARCH prefix are not yet supported.");
         }
         if pattern.variable.is_some() {
             not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
         }
 
-        self.plan_graph_match_path_pattern(&pattern.path)
+        let elts = self.plan_graph_match_path_pattern(&pattern.path, mode)?;
+        let mode = plan_path_mode(mode)?;
+        Ok(vec![MatchElement::Pattern(elts, ValueFilter::Always, mode)])
     }
 
     fn plan_graph_subpath_pattern(
         &mut self,
         pattern: &ast::GraphPathSubPattern,
+        mode: Option<&ast::GraphPathMode>,
     ) -> Result<Vec<MatchElement>, String> {
-        if pattern.mode.is_some() {
-            not_yet_implemented_result!("MATCH pattern MODE prefix are not yet supported.");
-        }
+        // override mode if supplied in sub-path
+        let mode = pattern.mode.as_ref().or(mode);
+
         if pattern.variable.is_some() {
             not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
         }
@@ -314,19 +263,21 @@ impl GraphToLogical {
             ValueFilter::Always
         };
 
-        let elts = self.plan_graph_match_path_pattern(&pattern.path)?;
-        Ok(vec![MatchElement::Pattern(elts, filter)])
+        let elts = self.plan_graph_match_path_pattern(&pattern.path, mode)?;
+        let mode = plan_path_mode(mode)?;
+        Ok(vec![MatchElement::Pattern(elts, filter, mode)])
     }
 
     fn plan_graph_match_path_pattern(
         &mut self,
         pattern: &ast::GraphMatchPathPattern,
+        mode: Option<&ast::GraphPathMode>,
     ) -> Result<Vec<MatchElement>, String> {
         match pattern {
             ast::GraphMatchPathPattern::Path(path) => {
                 let path: Result<Vec<Vec<_>>, _> = path
                     .iter()
-                    .map(|elt| self.plan_graph_match_path_pattern(elt))
+                    .map(|elt| self.plan_graph_match_path_pattern(elt, mode))
                     .collect();
                 Ok(path?.into_iter().flatten().collect())
             }
@@ -342,7 +293,9 @@ impl GraphToLogical {
             ast::GraphMatchPathPattern::Quantified(_) => {
                 not_yet_implemented_result!("MATCH expression QUANTIFIED is not yet supported.");
             }
-            ast::GraphMatchPathPattern::Sub(subpath) => self.plan_graph_subpath_pattern(subpath),
+            ast::GraphMatchPathPattern::Sub(subpath) => {
+                self.plan_graph_subpath_pattern(subpath, mode)
+            }
             ast::GraphMatchPathPattern::Node(n) => self.plan_graph_pattern_part_node(n),
             ast::GraphMatchPathPattern::Edge(e) => self.plan_graph_pattern_part_edge(e),
             ast::GraphMatchPathPattern::Simplified(_) => {
@@ -411,6 +364,97 @@ impl GraphToLogical {
         };
         Ok(vec![MatchElement::Edge(direction, edge_match)])
     }
+
+    fn normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
+        Normalize::new(&self.id_generator).normalize(elements)
+    }
+
+    fn expand(&mut self, paths: Vec<PathPattern>) -> Result<Vec<PathPattern>, String> {
+        debug_assert!(!paths.is_empty());
+        // TODO handle expansion as described in 6.3 of https://arxiv.org/pdf/2112.06217
+        // TODO   this will enable alternation and quantifiers
+
+        // first, add disjuncts for alternation/union
+        // TODO
+
+        // second, fix iterations for quantifiers
+        // TODO
+
+        // third, clean-up; delete duplicated anonymous edges and merge
+        let mut paths = paths.into_iter();
+        let mut path_patterns = vec![paths.next().unwrap()];
+        for path in paths {
+            if path.head.binder.is_anon() {
+                // if the head of this path has an anonymous binder, it was synthetically inserted;
+                //   Drop the head and merge its tail into the previous path.
+                let current_path = path_patterns.last_mut().unwrap();
+                current_path.tail.extend(path.tail);
+                current_path.filter.extend(path.filter);
+            } else {
+                path_patterns.push(path);
+            }
+        }
+
+        Ok(path_patterns)
+    }
+
+    fn plan(&mut self, mut paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
+        debug_assert!(paths.len() == 1);
+        let path_pattern = paths.remove(0);
+        // pattern at this point should be a node, or a series of node-[edge-node]+
+        debug_assert!((1 + (2 * path_pattern.tail.len())).is_odd());
+
+        let path_mode = path_pattern.mode;
+
+        if path_pattern.tail.is_empty() {
+            Ok(PathPatternMatch::Node(path_pattern.head.clone()))
+        } else {
+            let mut triples = vec![];
+            let mut head = &path_pattern.head;
+            for (d, e, n) in &path_pattern.tail {
+                let binders = (head.binder.clone(), e.binder.clone(), n.binder.clone());
+                let spec = StepFilter {
+                    dir: d.clone(),
+                    triple: TripleFilter {
+                        lhs: head.spec.clone(),
+                        e: e.spec.clone(),
+                        rhs: n.spec.clone(),
+                    },
+                };
+                triples.push(TripleMatch {
+                    binders,
+                    spec,
+                    filter: ValueFilter::Always,
+                    path_mode,
+                });
+                head = n;
+            }
+            if triples.len() == 1 {
+                let mut triple = triples.remove(0);
+                triple.filter.extend(path_pattern.filter);
+                Ok(PathPatternMatch::Match(triple))
+            } else {
+                Ok(PathPatternMatch::Concat(
+                    vec![TripleSeriesMatch {
+                        triples,
+                        filter: path_pattern.filter,
+                        path_mode,
+                    }],
+                    path_mode,
+                ))
+            }
+        }
+    }
+}
+
+fn plan_path_mode(mode: Option<&ast::GraphPathMode>) -> Result<PathMode, String> {
+    Ok(match mode {
+        None => PathMode::Walk,
+        Some(ast::GraphPathMode::Walk) => PathMode::Walk,
+        Some(ast::GraphPathMode::Trail) => PathMode::Trail,
+        Some(ast::GraphPathMode::Acyclic) => PathMode::Acyclic,
+        Some(ast::GraphPathMode::Simple) => PathMode::Simple,
+    })
 }
 
 fn plan_graph_pattern_label(label: Option<&ast::GraphMatchLabel>) -> Result<LabelFilter, String> {

@@ -24,7 +24,7 @@ pub struct GraphMatch {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GraphPattern {
     #[visit(skip)]
-    pub mode: Option<GraphMatchMode>,
+    pub match_mode: Option<GraphMatchMode>,
     pub patterns: Vec<AstNode<GraphPathPattern>>,
     #[visit(skip)]
     pub keep: Option<GraphPathPrefix>,
@@ -34,7 +34,9 @@ pub struct GraphPattern {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphMatchMode {
+    /// Edges are not allowed to bind to more than one edge variable in a path
     DifferentEdges,
+    /// No restrictions on binding of edges or vertices
     RepeatableElements,
 }
 
@@ -89,8 +91,9 @@ pub enum GraphTableExport {
 }
 
 /// The direction of an edge
+///
 /// | Orientation               | Edge pattern | Abbreviation |
-/// |---------------------------+--------------+--------------|
+/// |---------------------------|--------------|--------------|
 /// | Pointing left             | <−[ spec ]−  | <−           |
 /// | Undirected                | ~[ spec ]~   | ~            |
 /// | Pointing right            | −[ spec ]−>  | −>           |
@@ -118,20 +121,17 @@ pub struct GraphMatchQuantifier {
     pub upper: Option<NonZeroU32>,
 }
 
-/// A path mode
-/// | Keyword        | Description
-/// |----------------+--------------
-/// | WALK           |
-/// | TRAIL          | No repeated edges.
-/// | ACYCLIC        | No repeated nodes.
-/// | SIMPLE         | No repeated nodes, except that the ﬁrst and last nodes may be the same.
-
+/// Filters paths. Options other than `Walk` ensure a finite number of matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GraphPathMode {
+    /// No filtering of edges/nodes.
     Walk,
+    /// No repeated edges.
     Trail,
+    /// No repeated nodes.
     Acyclic,
+    /// No repeated nodes, except that the ﬁrst and last nodes may be the same.
     Simple,
 }
 
