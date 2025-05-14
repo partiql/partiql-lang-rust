@@ -26,6 +26,8 @@ pub enum DirectionFilter {
 pub struct BindSpec(pub String);
 
 impl BindSpec {
+    /// `true` if a bind name is 'anonymous'. Anonymous bind names are stand-ins in places
+    /// where the graph match expression doesn't explicitly include a bind name variable.
     pub fn is_anon(&self) -> bool {
         self.0.is_anon()
     }

@@ -159,13 +159,20 @@ impl GraphToLogical {
         debug_assert!(!paths.is_empty());
         // TODO handle expansion as described in 6.3 of https://arxiv.org/pdf/2112.06217
         // TODO   this will enable alternation and quantifiers
+
         // first, add disjuncts for alternation/union
+        // TODO
+
         // second, fix iterations for quantifiers
+        // TODO
+
         // third, clean-up; delete duplicated anonymous edges and merge
         let mut paths = paths.into_iter();
         let mut path_patterns = vec![paths.next().unwrap()];
         for path in paths {
             if path.head.binder.is_anon() {
+                // if the head of this path has an anonymous binder, it was synthetically inserted;
+                //   Drop the head and merge its tail into the previous path.
                 let current_path = path_patterns.last_mut().unwrap();
                 current_path.tail.extend(path.tail);
                 current_path.filter.extend(path.filter);
