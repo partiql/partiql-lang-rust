@@ -6,7 +6,8 @@ use partiql_common::node::{IdAnnotated, NodeId};
 use partiql_logical::graph::bind_name::FreshBinder;
 use partiql_logical::graph::{
     BindSpec, DirectionFilter, EdgeFilter, EdgeMatch, LabelFilter, NodeFilter, NodeMatch,
-    PathMatch, PathPattern, PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
+    PathPattern, PathPatternMatch, StepFilter, TripleFilter, TripleMatch, TripleSeriesMatch,
+    ValueFilter,
 };
 use partiql_logical::ValueExpr;
 use std::mem::take;
@@ -20,14 +21,14 @@ macro_rules! not_yet_implemented_result {
 
 #[derive(Debug)]
 pub(crate) struct GraphToLogical {
-    graph_id: FreshBinder,
+    id_generator: FreshBinder,
     env: Vec<(NodeId, ValueExpr)>,
 }
 
 impl GraphToLogical {
     pub fn new(env: Vec<(NodeId, ValueExpr)>) -> Self {
         Self {
-            graph_id: Default::default(),
+            id_generator: Default::default(),
             env,
         }
     }
@@ -37,8 +38,7 @@ impl GraphToLogical {
 enum MatchElement {
     Node(NodeMatch),
     Edge(DirectionFilter, EdgeMatch),
-    #[allow(dead_code)] // TODO with sub-graphs in graph MATCH
-    Pattern(Vec<MatchElement>),
+    Pattern(Vec<MatchElement>, ValueFilter),
 }
 
 #[derive(Debug)]
@@ -57,6 +57,8 @@ impl<'a> Normalize<'a> {
         }
     }
 
+    /// 'Normalize' a series of node/edge/subpath match elements into a rigid pattern of
+    ///    (<node> ( <edge> <node>)*)
     pub fn normalize(mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
         self.do_normalize(elements)
     }
@@ -88,7 +90,11 @@ impl<'a> Normalize<'a> {
             .map(|(d, e, n)| (d, e, n.unwrap()))
             .collect::<Vec<_>>();
 
-        Some(PathPattern { head, tail })
+        Some(PathPattern {
+            head,
+            tail,
+            filter: ValueFilter::Always,
+        })
     }
 
     fn do_normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
@@ -120,9 +126,20 @@ impl<'a> Normalize<'a> {
                     }
                     self.tail.push((d, e, None));
                 }
-                MatchElement::Pattern(p) => {
+                MatchElement::Pattern(p, filter) => {
                     path_patterns.extend(self.flush());
-                    path_patterns.extend(self.do_normalize(p)?);
+                    let mut normalized_pattern = self.do_normalize(p)?;
+                    match filter {
+                        ValueFilter::Always => {
+                            path_patterns.extend(normalized_pattern);
+                        }
+                        filter @ ValueFilter::Filter(_) => {
+                            debug_assert!(normalized_pattern.len() == 1);
+                            let mut normalized_pattern = normalized_pattern.remove(0);
+                            normalized_pattern.filter = filter;
+                            path_patterns.push(normalized_pattern);
+                        }
+                    }
                 }
             }
         }
@@ -135,25 +152,48 @@ impl<'a> Normalize<'a> {
 
 impl GraphToLogical {
     fn normalize(&mut self, elements: Vec<MatchElement>) -> Result<Vec<PathPattern>, String> {
-        Normalize::new(&self.graph_id).normalize(elements)
+        Normalize::new(&self.id_generator).normalize(elements)
     }
 
     fn expand(&mut self, paths: Vec<PathPattern>) -> Result<Vec<PathPattern>, String> {
+        debug_assert!(!paths.is_empty());
         // TODO handle expansion as described in 6.3 of https://arxiv.org/pdf/2112.06217
         // TODO   this will enable alternation and quantifiers
-        Ok(paths)
+
+        // first, add disjuncts for alternation/union
+        // TODO
+
+        // second, fix iterations for quantifiers
+        // TODO
+
+        // third, clean-up; delete duplicated anonymous edges and merge
+        let mut paths = paths.into_iter();
+        let mut path_patterns = vec![paths.next().unwrap()];
+        for path in paths {
+            if path.head.binder.is_anon() {
+                // if the head of this path has an anonymous binder, it was synthetically inserted;
+                //   Drop the head and merge its tail into the previous path.
+                let current_path = path_patterns.last_mut().unwrap();
+                current_path.tail.extend(path.tail);
+                current_path.filter.extend(path.filter);
+            } else {
+                path_patterns.push(path);
+            }
+        }
+
+        Ok(path_patterns)
     }
 
-    fn plan(&mut self, paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
+    fn plan(&mut self, mut paths: Vec<PathPattern>) -> Result<PathPatternMatch, String> {
         debug_assert!(paths.len() == 1);
-        let path_pattern = &paths[0];
+        let path_pattern = paths.remove(0);
         // pattern at this point should be a node, or a series of node-[edge-node]+
         debug_assert!((1 + (2 * path_pattern.tail.len())).is_odd());
 
         if path_pattern.tail.is_empty() {
             Ok(PathPatternMatch::Node(path_pattern.head.clone()))
         } else {
-            let mut paths = vec![];
+            let mut triples = vec![];
             let mut head = &path_pattern.head;
             for (d, e, n) in &path_pattern.tail {
                 let binders = (head.binder.clone(), e.binder.clone(), n.binder.clone());
@@ -165,14 +205,22 @@ impl GraphToLogical {
                         rhs: n.spec.clone(),
                     },
                 };
-                paths.push(PathPatternMatch::Match(PathMatch { binders, spec }));
+                triples.push(TripleMatch {
+                    binders,
+                    spec,
+                    filter: ValueFilter::Always,
+                });
                 head = n;
             }
-            if paths.len() == 1 {
-                let path = paths.into_iter().next().unwrap();
-                Ok(path)
+            if triples.len() == 1 {
+                let mut triple = triples.remove(0);
+                triple.filter.extend(path_pattern.filter);
+                Ok(PathPatternMatch::Match(triple))
             } else {
-                Ok(PathPatternMatch::Concat(paths))
+                Ok(PathPatternMatch::Concat(vec![TripleSeriesMatch {
+                    triples,
+                    filter: path_pattern.filter,
+                }]))
             }
         }
     }
@@ -208,9 +256,16 @@ impl GraphToLogical {
         if pattern.keep.is_some() {
             not_yet_implemented_result!("MATCH expression KEEP is not yet supported.");
         }
-        if pattern.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH expression pattern WHERE is not yet supported.");
-        }
+
+        let filter = if let Some(expr) = &pattern.where_clause {
+            let expr = extract_vexpr_by_id(&mut self.env, expr.id());
+            if expr.is_none() {
+                not_yet_implemented_result!("Internal error: expression not found.");
+            }
+            ValueFilter::Filter(vec![expr.unwrap()])
+        } else {
+            ValueFilter::Always
+        };
 
         if pattern.patterns.len() != 1 {
             not_yet_implemented_result!(
@@ -219,7 +274,9 @@ impl GraphToLogical {
         }
 
         let first_pattern = &pattern.patterns[0];
-        self.plan_graph_path_pattern(first_pattern)
+        let planned_first_pattern = self.plan_graph_path_pattern(first_pattern)?;
+
+        Ok(vec![MatchElement::Pattern(planned_first_pattern, filter)])
     }
 
     fn plan_graph_path_pattern(
@@ -246,11 +303,19 @@ impl GraphToLogical {
         if pattern.variable.is_some() {
             not_yet_implemented_result!("MATCH pattern path variables are not yet supported.");
         }
-        if pattern.where_clause.is_some() {
-            not_yet_implemented_result!("MATCH expression subpath WHERE is not yet supported.");
-        }
 
-        self.plan_graph_match_path_pattern(&pattern.path)
+        let filter = if let Some(expr) = &pattern.where_clause {
+            let expr = extract_vexpr_by_id(&mut self.env, expr.id());
+            if expr.is_none() {
+                not_yet_implemented_result!("Internal error: expression not found.");
+            }
+            ValueFilter::Filter(vec![expr.unwrap()])
+        } else {
+            ValueFilter::Always
+        };
+
+        let elts = self.plan_graph_match_path_pattern(&pattern.path)?;
+        Ok(vec![MatchElement::Pattern(elts, filter)])
     }
 
     fn plan_graph_match_path_pattern(
@@ -293,7 +358,7 @@ impl GraphToLogical {
         node: &ast::GraphMatchNode,
     ) -> Result<Vec<MatchElement>, String> {
         let binder = match &node.variable {
-            None => self.graph_id.node(),
+            None => self.id_generator.node(),
             Some(v) => v.value.clone(),
         };
         let label = plan_graph_pattern_label(node.label.as_deref())?;
@@ -302,7 +367,7 @@ impl GraphToLogical {
             if expr.is_none() {
                 not_yet_implemented_result!("Internal error: expression not found.");
             }
-            ValueFilter::Filter(Box::new(expr.unwrap()))
+            ValueFilter::Filter(vec![expr.unwrap()])
         } else {
             ValueFilter::Always
         };
@@ -327,7 +392,7 @@ impl GraphToLogical {
             ast::GraphMatchDirection::LeftOrUndirectedOrRight => DirectionFilter::LUR,
         };
         let binder = match &edge.variable {
-            None => self.graph_id.node(),
+            None => self.id_generator.edge(),
             Some(v) => v.value.clone(),
         };
         let label = plan_graph_pattern_label(edge.label.as_deref())?;
@@ -336,7 +401,7 @@ impl GraphToLogical {
             if expr.is_none() {
                 not_yet_implemented_result!("Internal error: expression not found.");
             }
-            ValueFilter::Filter(Box::new(expr.unwrap()))
+            ValueFilter::Filter(vec![expr.unwrap()])
         } else {
             ValueFilter::Always
         };

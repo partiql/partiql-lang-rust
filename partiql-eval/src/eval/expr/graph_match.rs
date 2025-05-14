@@ -49,8 +49,8 @@ impl BindEvalExpr for EvalGraphMatch {
 mod tests {
     use crate::eval::expr::{BindEvalExpr, EvalGlobalVarRef, EvalGraphMatch};
     use crate::eval::graph::plan::{
-        BindSpec, DirectionFilter, EdgeFilter, LabelFilter, NodeFilter, NodeMatch, PathMatch,
-        PathPatternMatch, StepFilter, TripleFilter, ValueFilter,
+        BindSpec, DirectionFilter, EdgeFilter, LabelFilter, NodeFilter, NodeMatch,
+        PathPatternMatch, TripleFilter, TripleStepFilter, TripleStepMatch, ValueFilter,
     };
     use crate::eval::graph::string_graph::StringGraphTypes;
     use crate::eval::graph::types::GraphTypes;
@@ -62,8 +62,8 @@ mod tests {
     use partiql_value::datum::DatumTupleRef;
     use partiql_value::{tuple, BindingsName, DateTime, Value};
 
-    impl<GT: GraphTypes> From<PathMatch<GT>> for PathPatternMatch<GT> {
-        fn from(value: PathMatch<GT>) -> Self {
+    impl<GT: GraphTypes> From<TripleStepMatch<GT>> for PathPatternMatch<GT> {
+        fn from(value: TripleStepMatch<GT>) -> Self {
             Self::Match(value)
         }
     }
@@ -189,7 +189,7 @@ mod tests {
             BindSpec("e".to_string()),
             BindSpec(fresh.node()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -198,7 +198,11 @@ mod tests {
             },
         };
 
-        let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: ValueFilter::Always,
+        };
 
         test_graph(matcher.into(), "<<  >>")
     }
@@ -210,10 +214,10 @@ mod tests {
         // Query: (graph MATCH (:foo) -[]- ())
         let binders = (
             BindSpec(fresh.node()),
-            BindSpec(fresh.node()),
+            BindSpec(fresh.edge()),
             BindSpec(fresh.node()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::labeled("foo".to_string()),
@@ -222,7 +226,11 @@ mod tests {
             },
         };
 
-        let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: ValueFilter::Always,
+        };
 
         test_graph(matcher.into(), "<<  >>")
     }
@@ -235,7 +243,7 @@ mod tests {
             BindSpec("z".to_string()),
             BindSpec("y".to_string()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::L,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -244,7 +252,11 @@ mod tests {
             },
         };
 
-        let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: ValueFilter::Always,
+        };
 
         test_graph(matcher.into(), "<< {'x': 2, 'z': 1.2, 'y': 1} >>")
     }
@@ -259,7 +271,7 @@ mod tests {
             BindSpec(fresh.edge()),
             BindSpec(fresh.node()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::R,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -268,7 +280,11 @@ mod tests {
             },
         };
 
-        let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: ValueFilter::Always,
+        };
 
         test_graph(matcher.into(), "<< {  }, {  } >>")
     }
@@ -283,7 +299,7 @@ mod tests {
             BindSpec("z".to_string()),
             BindSpec(fresh.node()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LR,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -292,7 +308,11 @@ mod tests {
             },
         };
 
-        let matcher: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: ValueFilter::Always,
+        };
 
         test_graph(
             matcher.into(),
@@ -308,7 +328,7 @@ mod tests {
             BindSpec("z1".to_string()),
             BindSpec("y1".to_string()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::labeled("b".to_string()),
@@ -316,14 +336,18 @@ mod tests {
                 rhs: NodeFilter::labeled("a".to_string()),
             },
         };
-        let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher1: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: Default::default(),
+        };
 
         let binders = (
             BindSpec("y1".to_string()),
             BindSpec("z2".to_string()),
             BindSpec("y2".to_string()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::labeled("a".to_string()),
@@ -331,12 +355,19 @@ mod tests {
                 rhs: NodeFilter::labeled("b".to_string()),
             },
         };
-        let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher2: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: Default::default(),
+        };
 
-        let pattern_match = PathPatternMatch::Concat(vec![
-            PathPatternMatch::Match(matcher1),
-            PathPatternMatch::Match(matcher2),
-        ]);
+        let pattern_match = PathPatternMatch::Concat(
+            vec![
+                PathPatternMatch::Match(matcher1),
+                PathPatternMatch::Match(matcher2),
+            ],
+            Default::default(),
+        );
 
         test_graph(
             pattern_match,
@@ -354,7 +385,7 @@ mod tests {
             BindSpec(fresh.edge()),
             BindSpec("x2".to_string()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -362,14 +393,18 @@ mod tests {
                 rhs: NodeFilter::any(),
             },
         };
-        let matcher1: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher1: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: Default::default(),
+        };
 
         let binders = (
             BindSpec("x2".to_string()),
             BindSpec(fresh.edge()),
             BindSpec("x1".to_string()),
         );
-        let spec = StepFilter {
+        let spec = TripleStepFilter {
             dir: DirectionFilter::LUR,
             triple: TripleFilter {
                 lhs: NodeFilter::any(),
@@ -377,12 +412,19 @@ mod tests {
                 rhs: NodeFilter::any(),
             },
         };
-        let matcher2: PathMatch<StringGraphTypes> = PathMatch { binders, spec };
+        let matcher2: TripleStepMatch<StringGraphTypes> = TripleStepMatch {
+            binders,
+            spec,
+            filter: Default::default(),
+        };
 
-        let pattern_match = PathPatternMatch::Concat(vec![
-            PathPatternMatch::Match(matcher1),
-            PathPatternMatch::Match(matcher2),
-        ]);
+        let pattern_match = PathPatternMatch::Concat(
+            vec![
+                PathPatternMatch::Match(matcher1),
+                PathPatternMatch::Match(matcher2),
+            ],
+            Default::default(),
+        );
         test_graph(
             pattern_match,
             "<< { 'x1': 3, 'x2': 3 }, \

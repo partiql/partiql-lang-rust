@@ -38,7 +38,7 @@ pub enum LabelFilter<GT: GraphTypes> {
 pub enum ValueFilter {
     #[default]
     Always,
-    Filter(Rc<dyn EvalExpr>),
+    Filter(Vec<Rc<dyn EvalExpr>>),
 }
 
 /// A plan specification for node label & value filtering.
@@ -65,7 +65,7 @@ pub struct TripleFilter<GT: GraphTypes> {
 
 /// A plan specification for 'step' (triple + edge direction) matching.
 #[derive(Debug, Clone)]
-pub struct StepFilter<GT: GraphTypes> {
+pub struct TripleStepFilter<GT: GraphTypes> {
     pub dir: DirectionFilter,
     pub triple: TripleFilter<GT>,
 }
@@ -79,17 +79,18 @@ pub struct NodeMatch<GT: GraphTypes> {
 
 /// A plan specification for path (i.e., node, edge, node) matching.
 #[derive(Debug, Clone)]
-pub struct PathMatch<GT: GraphTypes> {
+pub struct TripleStepMatch<GT: GraphTypes> {
     pub binders: (BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
-    pub spec: StepFilter<GT>,
+    pub spec: TripleStepFilter<GT>,
+    pub filter: ValueFilter,
 }
 
-/// A plan specification for path patterns (i.e., sequences of [`PathMatch`]s) matching.
+/// A plan specification for path patterns (i.e., sequences of [`TripleStepMatch`]s) matching.
 #[derive(Debug, Clone)]
 pub enum PathPatternMatch<GT: GraphTypes> {
     Node(NodeMatch<GT>),
-    Match(PathMatch<GT>),
-    Concat(Vec<PathPatternMatch<GT>>),
+    Match(TripleStepMatch<GT>),
+    Concat(Vec<PathPatternMatch<GT>>, ValueFilter),
 }
 
 /// A trait for converting between plans parameterized by different [`GraphTypes`]
@@ -98,27 +99,29 @@ pub trait GraphPlanConvert<In: GraphTypes, Out: GraphTypes>: Debug {
         match matcher {
             PathPatternMatch::Node(n) => PathPatternMatch::Node(self.convert_node_match(n)),
             PathPatternMatch::Match(m) => PathPatternMatch::Match(self.convert_path_match(m)),
-            PathPatternMatch::Concat(ms) => PathPatternMatch::Concat(
+            PathPatternMatch::Concat(ms, filter) => PathPatternMatch::Concat(
                 ms.iter()
                     .map(|m| self.convert_pathpattern_match(m))
                     .collect(),
+                filter.clone(),
             ),
         }
     }
-    fn convert_path_match(&self, matcher: &PathMatch<In>) -> PathMatch<Out> {
+    fn convert_path_match(&self, matcher: &TripleStepMatch<In>) -> TripleStepMatch<Out> {
         let (x, y, z) = &matcher.binders;
         let binders = (
             self.convert_binder(x),
             self.convert_binder(y),
             self.convert_binder(z),
         );
-        PathMatch {
+        TripleStepMatch {
             binders,
             spec: self.convert_step_filter(&matcher.spec),
+            filter: matcher.filter.clone(),
         }
     }
-    fn convert_step_filter(&self, step: &StepFilter<In>) -> StepFilter<Out> {
-        StepFilter {
+    fn convert_step_filter(&self, step: &TripleStepFilter<In>) -> TripleStepFilter<Out> {
+        TripleStepFilter {
             dir: step.dir,
             triple: self.convert_triple_filter(&step.triple),
         }

@@ -8,7 +8,7 @@ use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
-use crate::eval::graph::plan::{BindSpec, NodeMatch, PathMatch, PathPatternMatch};
+use crate::eval::graph::plan::{BindSpec, NodeMatch, PathPatternMatch, TripleStepMatch};
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use crate::eval::EvalContext;
@@ -82,7 +82,11 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
     }
 
     #[inline]
-    fn eval_path(&self, matcher: PathMatch<GT>, ctx: &dyn EvalContext) -> PathBinding<GT> {
+    fn eval_triple_step(
+        &self,
+        matcher: TripleStepMatch<GT>,
+        ctx: &dyn EvalContext,
+    ) -> PathBinding<GT> {
         let bindings = self.graph.scan(&matcher, ctx);
         PathBinding { matcher, bindings }
     }
@@ -105,9 +109,9 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
                 let PathBinding {
                     matcher,
                     mut bindings,
-                } = self.eval_path(m, ctx);
+                } = self.eval_triple_step(m, ctx);
 
-                // if edge is cyclic, filter triples
+                // if edge is cyclic, assure identity for identical binder names; for longer paths this is handled by `join_bindings`
                 let (n1, _, n2) = &matcher.binders;
                 if n1 == n2 {
                     bindings.retain(|Triple { lhs, e: _, rhs }| lhs == rhs)
@@ -115,11 +119,19 @@ impl<GT: GraphTypes, G: GraphEngine<GT>> GraphEvaluator<GT, G> {
 
                 PathBinding { matcher, bindings }.into()
             }
-            PathPatternMatch::Concat(ms) => ms
-                .into_iter()
-                .map(|p| self.eval_path_pattern(p, ctx))
-                .tree_reduce(|l, r| join_bindings(l, r))
-                .unwrap(),
+            PathPatternMatch::Concat(ms, filter) => {
+                let PathPatternBinding { binders, bindings } = ms
+                    .into_iter()
+                    .map(|p| self.eval_path_pattern(p, ctx))
+                    .tree_reduce(|l, r| join_bindings(l, r))
+                    .unwrap();
+
+                let bindings = self
+                    .graph
+                    .filter_path_nodes(&binders, &filter, bindings, ctx);
+
+                PathPatternBinding { binders, bindings }
+            }
         }
     }
 }
