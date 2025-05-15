@@ -1986,10 +1986,10 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 );
                 let graph_reference = Box::new(graph_reference.unwrap());
 
-                self.push_vexpr(ValueExpr::GraphMatch(GraphMatchExpr {
+                self.push_vexpr(ValueExpr::GraphMatch(Box::new(GraphMatchExpr {
                     value: graph_reference,
                     pattern,
-                }));
+                })));
                 Traverse::Continue
             }
             Err(e) => {
