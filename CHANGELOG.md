@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added lowering and evaluation of graph `MATCH` label negation, conjunction, and disjunction
 - Added lowering and evaluation of graph `MATCH` `WHERE` clauses
+- Added lowering and evaluation of graph `MATCH` modes (i.e., `WALK`, `TRAIL`, `ACYCLIC`, `SIMPLE`)
 
 ### Removed
 

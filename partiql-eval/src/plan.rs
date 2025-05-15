@@ -923,10 +923,12 @@ impl<'c> EvaluatorPlanner<'c> {
             self.plan_bind_spec::<{ STRICT }>(r)?,
         );
         let filter = self.plan_value_filter::<{ STRICT }>(&pattern.filter)?;
+        let path_mode = plan_path_mode(&pattern.path_mode)?;
         Ok(physical::TripleStepMatch {
             binders,
             spec: self.plan_step_filter::<{ STRICT }>(&pattern.spec)?,
             filter,
+            path_mode,
         })
     }
 
@@ -941,10 +943,12 @@ impl<'c> EvaluatorPlanner<'c> {
             logical::graph::PathPatternMatch::Match(m) => {
                 physical::PathPatternMatch::Match(self.plan_path_match::<{ STRICT }>(m)?)
             }
-            logical::graph::PathPatternMatch::Concat(ms) => {
+            logical::graph::PathPatternMatch::Concat(ms, path_mode) => {
+                let path_mode = plan_path_mode(path_mode)?;
                 let matches: Result<Vec<_>, _> = ms
                     .iter()
                     .map(|triples_series| {
+                        let path_mode = plan_path_mode(&triples_series.path_mode)?;
                         let triples: Result<Vec<_>, _> = triples_series
                             .triples
                             .iter()
@@ -957,16 +961,27 @@ impl<'c> EvaluatorPlanner<'c> {
                         match (triples, filter) {
                             (Err(e), _) => Err(e),
                             (_, Err(e)) => Err(e),
-                            (Ok(triples), Ok(filter)) => {
-                                Ok(physical::PathPatternMatch::Concat(triples, filter))
-                            }
+                            (Ok(triples), Ok(filter)) => Ok(physical::PathPatternMatch::Concat(
+                                triples, filter, path_mode,
+                            )),
                         }
                     })
                     .collect();
-                physical::PathPatternMatch::Concat(matches?, ValueFilter::Always)
+                physical::PathPatternMatch::Concat(matches?, ValueFilter::Always, path_mode)
             }
         })
     }
+}
+
+fn plan_path_mode(
+    path_mode: &logical::graph::PathMode,
+) -> Result<physical::PathMode, PlanningError> {
+    Ok(match path_mode {
+        logical::graph::PathMode::Walk => physical::PathMode::Walk,
+        logical::graph::PathMode::Trail => physical::PathMode::Trail,
+        logical::graph::PathMode::Acyclic => physical::PathMode::Acyclic,
+        logical::graph::PathMode::Simple => physical::PathMode::Simple,
+    })
 }
 
 fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {

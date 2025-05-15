@@ -1,5 +1,5 @@
 use crate::eval::graph::plan::{
-    BindSpec, DirectionFilter, GraphPlanConvert, NodeFilter, NodeMatch, TripleFilter,
+    BindSpec, DirectionFilter, GraphPlanConvert, NodeFilter, NodeMatch, PathMode, TripleFilter,
     TripleStepFilter, TripleStepMatch, ValueFilter,
 };
 use crate::eval::graph::result::{PathPatternNodes, Triple};
@@ -50,6 +50,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
@@ -58,6 +59,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
@@ -66,6 +68,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
@@ -74,6 +77,7 @@ pub trait TripleScan<GT: GraphTypes> {
         &self,
         binders: &(BindSpec<GT>, BindSpec<GT>, BindSpec<GT>),
         spec: &TripleFilter<GT>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<GT>>;
@@ -95,6 +99,7 @@ where
             binders,
             spec: TripleStepFilter { dir, triple },
             filter,
+            path_mode,
         } = spec;
         let (to_from, undirected, from_to) = match dir {
             DirectionFilter::L => (true, false, false),
@@ -106,19 +111,38 @@ where
             DirectionFilter::LUR => (true, true, true),
         };
 
+        let allow_repeated_nodes = !matches!(path_mode, PathMode::Acyclic);
         let mut result = vec![];
         if undirected {
-            result.extend(self.scan_undirected(binders, triple, filter, ctx));
+            result.extend(self.scan_undirected(binders, triple, allow_repeated_nodes, filter, ctx));
         }
         match (from_to, to_from) {
             (true, true) => {
-                result.extend(self.scan_directed_both(binders, triple, filter, ctx));
+                result.extend(self.scan_directed_both(
+                    binders,
+                    triple,
+                    allow_repeated_nodes,
+                    filter,
+                    ctx,
+                ));
             }
             (true, false) => {
-                result.extend(self.scan_directed_from_to(binders, triple, filter, ctx));
+                result.extend(self.scan_directed_from_to(
+                    binders,
+                    triple,
+                    allow_repeated_nodes,
+                    filter,
+                    ctx,
+                ));
             }
             (false, true) => {
-                result.extend(self.scan_directed_to_from(binders, triple, filter, ctx));
+                result.extend(self.scan_directed_to_from(
+                    binders,
+                    triple,
+                    allow_repeated_nodes,
+                    filter,
+                    ctx,
+                ));
             }
             (false, false) => {}
         }

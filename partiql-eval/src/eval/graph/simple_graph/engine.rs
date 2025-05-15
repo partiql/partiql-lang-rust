@@ -133,6 +133,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
@@ -140,6 +141,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_dir
             .iter()
+            .filter(move |(n1, _, n2)| allow_repeated_nodes || n1 != n2)
             .map(build_triple)
             .filter(move |t| self.triple_matches(binders, spec, t, filter, ctx))
     }
@@ -152,6 +154,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
@@ -159,6 +162,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_dir
             .iter()
+            .filter(move |(n1, _, n2)| allow_repeated_nodes || n1 != n2)
             .map(reverse_triple)
             .filter(move |t| self.triple_matches(binders, spec, t, filter, ctx))
     }
@@ -171,6 +175,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
@@ -179,6 +184,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_dir
             .iter()
+            .filter(move |(n1, _, n2)| allow_repeated_nodes || n1 != n2)
             .filter(|(lhs, e, rhs)| {
                 let triple = Triple {
                     lhs: *lhs,
@@ -214,6 +220,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
             BindSpec<SimpleGraphTypes>,
         ),
         spec: &TripleFilter<SimpleGraphTypes>,
+        allow_repeated_nodes: bool,
         filter: &ValueFilter,
         ctx: &dyn EvalContext,
     ) -> impl Iterator<Item = Triple<SimpleGraphTypes>> {
@@ -222,6 +229,7 @@ impl TripleScan<SimpleGraphTypes> for SimpleGraphEngine {
         self.graph
             .g_undir
             .iter()
+            .filter(move |(n1, _, n2)| allow_repeated_nodes || n1 != n2)
             .filter(|(lhs, e, rhs)| {
                 let triple = Triple {
                     lhs: *lhs,

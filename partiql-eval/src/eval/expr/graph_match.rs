@@ -49,7 +49,7 @@ impl BindEvalExpr for EvalGraphMatch {
 mod tests {
     use crate::eval::expr::{BindEvalExpr, EvalGlobalVarRef, EvalGraphMatch};
     use crate::eval::graph::plan::{
-        BindSpec, DirectionFilter, EdgeFilter, LabelFilter, NodeFilter, NodeMatch,
+        BindSpec, DirectionFilter, EdgeFilter, LabelFilter, NodeFilter, NodeMatch, PathMode,
         PathPatternMatch, TripleFilter, TripleStepFilter, TripleStepMatch, ValueFilter,
     };
     use crate::eval::graph::string_graph::StringGraphTypes;
@@ -202,6 +202,7 @@ mod tests {
             binders,
             spec,
             filter: ValueFilter::Always,
+            path_mode: PathMode::Walk,
         };
 
         test_graph(matcher.into(), "<<  >>")
@@ -230,6 +231,7 @@ mod tests {
             binders,
             spec,
             filter: ValueFilter::Always,
+            path_mode: PathMode::Walk,
         };
 
         test_graph(matcher.into(), "<<  >>")
@@ -256,6 +258,7 @@ mod tests {
             binders,
             spec,
             filter: ValueFilter::Always,
+            path_mode: PathMode::Walk,
         };
 
         test_graph(matcher.into(), "<< {'x': 2, 'z': 1.2, 'y': 1} >>")
@@ -284,6 +287,7 @@ mod tests {
             binders,
             spec,
             filter: ValueFilter::Always,
+            path_mode: PathMode::Walk,
         };
 
         test_graph(matcher.into(), "<< {  }, {  } >>")
@@ -312,6 +316,7 @@ mod tests {
             binders,
             spec,
             filter: ValueFilter::Always,
+            path_mode: PathMode::Walk,
         };
 
         test_graph(
@@ -340,6 +345,7 @@ mod tests {
             binders,
             spec,
             filter: Default::default(),
+            path_mode: PathMode::Walk,
         };
 
         let binders = (
@@ -359,6 +365,7 @@ mod tests {
             binders,
             spec,
             filter: Default::default(),
+            path_mode: PathMode::Walk,
         };
 
         let pattern_match = PathPatternMatch::Concat(
@@ -367,6 +374,7 @@ mod tests {
                 PathPatternMatch::Match(matcher2),
             ],
             Default::default(),
+            PathMode::Walk,
         );
 
         test_graph(
@@ -397,6 +405,7 @@ mod tests {
             binders,
             spec,
             filter: Default::default(),
+            path_mode: PathMode::Walk,
         };
 
         let binders = (
@@ -416,6 +425,7 @@ mod tests {
             binders,
             spec,
             filter: Default::default(),
+            path_mode: PathMode::Walk,
         };
 
         let pattern_match = PathPatternMatch::Concat(
@@ -424,6 +434,7 @@ mod tests {
                 PathPatternMatch::Match(matcher2),
             ],
             Default::default(),
+            PathMode::Walk,
         );
         test_graph(
             pattern_match,

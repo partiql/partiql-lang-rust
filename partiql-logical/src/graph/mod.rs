@@ -20,6 +20,20 @@ pub enum DirectionFilter {
     LUR, //  -
 }
 
+/// A plan specification for a path's matching mode.
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PathMode {
+    /// No filtering of edges/nodes.
+    Walk,
+    /// No repeated edges.
+    Trail,
+    /// No repeated nodes.
+    Acyclic,
+    /// No repeated nodes, except that the ﬁrst and last nodes may be the same.
+    Simple,
+}
+
 /// A plan specification for bind names.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -116,6 +130,7 @@ pub struct PathPattern {
     pub head: NodeMatch,
     pub tail: Vec<(DirectionFilter, EdgeMatch, NodeMatch)>,
     pub filter: ValueFilter,
+    pub mode: PathMode,
 }
 
 /// A plan specification for node matching.
@@ -141,6 +156,7 @@ pub struct TripleMatch {
     pub binders: (BindSpec, BindSpec, BindSpec),
     pub spec: StepFilter,
     pub filter: ValueFilter,
+    pub path_mode: PathMode,
 }
 
 /// A plan specification for path (i.e., node, edge, node) matching.
@@ -149,6 +165,7 @@ pub struct TripleMatch {
 pub struct TripleSeriesMatch {
     pub triples: Vec<TripleMatch>,
     pub filter: ValueFilter,
+    pub path_mode: PathMode,
 }
 
 /// A plan specification for path patterns (i.e., sequences of [`TripleMatch`]s) matching.
@@ -157,5 +174,5 @@ pub struct TripleSeriesMatch {
 pub enum PathPatternMatch {
     Node(NodeMatch),
     Match(TripleMatch),
-    Concat(Vec<TripleSeriesMatch>),
+    Concat(Vec<TripleSeriesMatch>, PathMode),
 }

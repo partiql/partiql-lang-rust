@@ -416,8 +416,8 @@ GraphReference = <GraphName>;
 // 10.4
 
 GraphPattern: ast::AstNode<ast::GraphPattern> = {
-    <lo:@L> <mode:GraphMatchMode?> <patterns:CommaSepPlus<GraphPathPattern>> <keep:GraphKeepClause?> <where_clause:GraphPatternWhereClause?> <hi:@R> => {
-        state.node(ast::GraphPattern{mode, patterns, keep, where_clause}, lo..hi)
+    <lo:@L> <match_mode:GraphMatchMode?> <patterns:CommaSepPlus<GraphPathPattern>> <keep:GraphKeepClause?> <where_clause:GraphPatternWhereClause?> <hi:@R> => {
+        state.node(ast::GraphPattern{match_mode, patterns, keep, where_clause}, lo..hi)
     },
 }
 

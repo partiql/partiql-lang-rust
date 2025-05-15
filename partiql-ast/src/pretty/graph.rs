@@ -184,14 +184,14 @@ impl PrettyDoc for GraphPattern {
         A: Clone,
     {
         let GraphPattern {
-            mode,
+            match_mode,
             patterns,
             keep,
             where_clause,
         } = &self;
         let patterns = pretty_list(patterns, PRETTY_INDENT_MINOR_NEST, arena).group();
         let parts = [
-            mode.as_ref().map(|inner| inner.pretty_doc(arena)),
+            match_mode.as_ref().map(|inner| inner.pretty_doc(arena)),
             Some(patterns),
             keep.as_ref().map(|keep| {
                 arena.intersperse([arena.text("KEEP"), keep.pretty_doc(arena)], arena.space())
