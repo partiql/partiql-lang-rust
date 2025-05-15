@@ -473,7 +473,7 @@ pub enum ValueExpr {
     NullIfExpr(NullIfExpr),
     CoalesceExpr(CoalesceExpr),
     Call(CallExpr),
-    GraphMatch(GraphMatchExpr),
+    GraphMatch(Box<GraphMatchExpr>),
 }
 
 /// Represents a `PartiQL` literal value.

@@ -417,7 +417,7 @@ pub enum Expr {
     Call(AstNode<Call>),
     CallAgg(AstNode<CallAgg>),
     /// <expr> MATCH <graph_pattern>
-    GraphMatch(AstNode<GraphMatch>),
+    GraphMatch(Box<AstNode<GraphMatch>>),
 
     /// Query, e.g. `UNION` | `EXCEPT` | `INTERSECT` | `SELECT` and their parts.
     Query(AstNode<Query>),

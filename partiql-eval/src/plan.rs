@@ -498,8 +498,8 @@ impl<'c> EvaluatorPlanner<'c> {
 
                 ("pattern expr", expr)
             }
-            ValueExpr::GraphMatch(GraphMatchExpr { value, pattern }) => {
-                //
+            ValueExpr::GraphMatch(graph_match) => {
+                let GraphMatchExpr { value, pattern } = graph_match.as_ref();
                 let args = plan_args(&[value]);
                 let expr = match self.plan_graph_plan::<{ STRICT }>(pattern) {
                     Ok(pattern) => EvalGraphMatch::new(pattern).bind::<{ STRICT }>(args),

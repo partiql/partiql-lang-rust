@@ -280,7 +280,6 @@ impl Datum<Value> for Value {
     }
 
     #[inline]
-    #[must_use]
     fn is_sequence(&self) -> bool {
         match self {
             Value::List(_) => true,
@@ -291,7 +290,6 @@ impl Datum<Value> for Value {
     }
 
     #[inline]
-    #[must_use]
     fn is_ordered(&self) -> bool {
         match self {
             Value::List(_) => true,
