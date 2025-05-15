@@ -3,6 +3,7 @@ use crate::eval::graph::result::{
     GraphElement, NodeBinding, PathBinding, PathPatternBinding, PathPatternNodes, Triple,
 };
 use partiql_logical::graph::bind_name::BindNameExt;
+use std::collections::HashMap;
 
 use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
@@ -212,21 +213,23 @@ fn join_bindings<GT: GraphTypes>(
                 }
                 PathMode::Simple => {
                     // No duplicate nodes allowed except that first&last nodes in the pattern may match each other
-                    let path_elts = path_elts.collect_vec();
-                    // all elements except the first
-                    let tail = path_elts
-                        .iter()
-                        .skip(1)
-                        .filter(|elt| matches!(elt, GraphElement::Node(_)));
-                    let head = path_elts
-                        .iter()
-                        .rev()
-                        .skip(1)
-                        .rev()
-                        .filter(|elt| matches!(elt, GraphElement::Node(_)));
-
-                    if tail.duplicates().any(|_| true) || head.duplicates().any(|_| true) {
-                        return None;
+                    let path_elts: Vec<&GT::NodeId> = path_elts
+                        .filter_map(|elt| match elt {
+                            GraphElement::Node(e) => Some(e),
+                            _ => None,
+                        })
+                        .collect_vec();
+                    let mut seen: HashMap<&GT::NodeId, usize> = HashMap::default();
+                    for i in 0..path_elts.len() {
+                        let last_seen = seen.get(&path_elts[i]);
+                        if let Some(last_seen) = last_seen {
+                            if *last_seen == 0 && i == path_elts.len() - 1 {
+                                // first and last are allowed to be the same
+                            } else {
+                                return None;
+                            }
+                        }
+                        seen.insert(path_elts[i], i);
                     }
                 }
             }

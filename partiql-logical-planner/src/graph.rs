@@ -2,6 +2,7 @@ use num::Integer;
 use partiql_ast::ast;
 
 use crate::lower::extract_vexpr_by_id;
+use itertools::Itertools;
 use partiql_ast::ast::GraphPathPrefix;
 use partiql_common::node::{IdAnnotated, NodeId};
 use partiql_logical::graph::bind_name::FreshBinder;
@@ -185,7 +186,8 @@ impl GraphToLogical {
         pattern: &ast::GraphPattern,
     ) -> Result<Vec<MatchElement>, String> {
         if pattern.match_mode.is_some() {
-            // The current graph engine is basically doing RepeatableElements currently
+            // The current graph engine is basically executing as though
+            // `pattern.match_mode` is `Some(GraphMatchMode::RepeatableElements)` currently
             not_yet_implemented_result!("MATCH expression MATCH MODE is not yet supported.");
         }
         if pattern.keep.is_some() {
@@ -375,25 +377,32 @@ impl GraphToLogical {
         // TODO   this will enable alternation and quantifiers
 
         // first, add disjuncts for alternation/union
-        // TODO
 
         // second, fix iterations for quantifiers
         // TODO
 
         // third, clean-up; delete duplicated anonymous edges and merge
-        let mut paths = paths.into_iter();
-        let mut path_patterns = vec![paths.next().unwrap()];
-        for path in paths {
-            if path.head.binder.is_anon() {
-                // if the head of this path has an anonymous binder, it was synthetically inserted;
-                //   Drop the head and merge its tail into the previous path.
-                let current_path = path_patterns.last_mut().unwrap();
-                current_path.tail.extend(path.tail);
-                current_path.filter.extend(path.filter);
-            } else {
-                path_patterns.push(path);
-            }
-        }
+        let paths = paths.into_iter();
+        let path_patterns = paths
+            .coalesce(|mut previous, current| {
+                if current.head.binder.is_anon() {
+                    // if the head of this path has an anonymous binder, it was synthetically inserted;
+                    //   Drop the head and merge its tail into the previous path.
+                    let PathPattern {
+                        head: _,
+                        tail,
+                        filter,
+                        mode,
+                    } = current;
+                    previous.tail.extend(tail);
+                    previous.filter.extend(filter);
+                    debug_assert_eq!(previous.mode, mode);
+                    Ok(previous)
+                } else {
+                    Err((previous, current))
+                }
+            })
+            .collect::<Vec<_>>();
 
         Ok(path_patterns)
     }
