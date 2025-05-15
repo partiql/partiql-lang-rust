@@ -358,7 +358,7 @@ ParenGraphMatch: ast::Expr = {
 
 GraphMatch: ast::Expr = {
     <lo:@L> <expr:ExprQuery> "MATCH" <pattern:GraphPattern> <shape:GraphTableShape> <hi:@R>
-        => ast::Expr::GraphMatch(state.node(ast::GraphMatch{expr, pattern, shape}, lo..hi)),
+        => ast::Expr::GraphMatch(Box::new(state.node(ast::GraphMatch{expr, pattern, shape}, lo..hi))),
 }
 
 GraphTableShape: ast::GraphTableShape = {
