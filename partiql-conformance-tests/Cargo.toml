@@ -29,19 +29,19 @@ bench = false
 
 [build-dependencies]
 miette = { version = "7", features = ["fancy"] }
-partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.12.*" }
+partiql-conformance-test-generator = { path = "../partiql-conformance-test-generator", version = "0.13.*" }
 
 [dependencies]
-partiql-parser = { path = "../partiql-parser", version = "0.12.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.12.*" }
-partiql-common = { path = "../partiql-common", version = "0.12.*" }
-partiql-ast = { path = "../partiql-ast", version = "0.12.*" }
-partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.12.*" }
-partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.12.*" }
-partiql-logical = { path = "../partiql-logical", version = "0.12.*" }
-partiql-value = { path = "../partiql-value", version = "0.12.*" }
-partiql-eval = { path = "../partiql-eval", version = "0.12.*" }
-partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.12.*" }
+partiql-parser = { path = "../partiql-parser", version = "0.13.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.13.*" }
+partiql-common = { path = "../partiql-common", version = "0.13.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.13.*" }
+partiql-ast-passes = { path = "../partiql-ast-passes", version = "0.13.*" }
+partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.13.*" }
+partiql-logical = { path = "../partiql-logical", version = "0.13.*" }
+partiql-value = { path = "../partiql-value", version = "0.13.*" }
+partiql-eval = { path = "../partiql-eval", version = "0.13.*" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.13.*" }
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 

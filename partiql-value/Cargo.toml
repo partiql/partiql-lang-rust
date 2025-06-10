@@ -21,8 +21,8 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-common = { path = "../partiql-common", version = "0.12.*" }
-partiql-types = { path = "../partiql-types", version = "0.12.*" }
+partiql-common = { path = "../partiql-common", version = "0.13.*" }
+partiql-types = { path = "../partiql-types", version = "0.13.*" }
 lasso = "0.7"
 delegate = "0.13"
 ordered-float = "5"
