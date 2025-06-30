@@ -1,5 +1,5 @@
 use partiql_ast_passes::error::AstTransformationError;
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{PartiqlCatalog, SharedCatalog};
 use partiql_catalog::context::SystemContext;
 use partiql_catalog::extension::ExtensionResultError;
 use partiql_eval as eval;
@@ -76,7 +76,7 @@ pub fn parse(statement: &str) -> ParserResult<'_> {
 #[track_caller]
 #[inline]
 pub fn lower(
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     parsed: &Parsed<'_>,
 ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -88,7 +88,7 @@ pub fn lower(
 #[inline]
 pub fn compile(
     mode: EvaluationMode,
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
 ) -> Result<EvalPlan, PlanErr> {
     let mut planner = eval::plan::EvaluatorPlanner::new(mode, catalog);
@@ -111,7 +111,7 @@ pub fn evaluate(plan: EvalPlan, bindings: MapBindings<Value>) -> EvalResult {
 #[inline]
 pub fn eval_query_with_catalog<'a>(
     statement: &'a str,
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     mode: EvaluationMode,
 ) -> Result<Evaluated, TestError<'a>> {
     let parsed = parse(statement)?;
@@ -125,6 +125,6 @@ pub fn eval_query_with_catalog<'a>(
 #[track_caller]
 #[inline]
 pub fn eval_query(statement: &str, mode: EvaluationMode) -> Result<Evaluated, TestError<'_>> {
-    let catalog = PartiqlCatalog::default();
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
     eval_query_with_catalog(statement, &catalog, mode)
 }

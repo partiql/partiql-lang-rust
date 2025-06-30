@@ -6,7 +6,7 @@ mod subquery_tests;
 #[cfg(test)]
 mod tests {
     use partiql_ast_passes::error::AstTransformationError;
-    use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+    use partiql_catalog::catalog::{PartiqlCatalog, SharedCatalog};
     use partiql_catalog::context::SystemContext;
     use partiql_eval as eval;
     use partiql_eval::env::basic::MapBindings;
@@ -63,7 +63,7 @@ mod tests {
     #[track_caller]
     #[inline]
     fn lower(
-        catalog: &dyn Catalog,
+        catalog: &dyn SharedCatalog,
         parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -74,7 +74,7 @@ mod tests {
     #[inline]
     fn compile(
         mode: EvaluationMode,
-        catalog: &dyn Catalog,
+        catalog: &dyn SharedCatalog,
         logical: logical::LogicalPlan<logical::BindingsOp>,
     ) -> Result<EvalPlan, PlanErr> {
         let mut planner = eval::plan::EvaluatorPlanner::new(mode, catalog);
@@ -94,7 +94,7 @@ mod tests {
     #[track_caller]
     #[inline]
     fn eval(statement: &str, mode: EvaluationMode) -> Result<Evaluated, TestError<'_>> {
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
 
         let parsed = parse(statement)?;
         let lowered = lower(&catalog, &parsed)?;

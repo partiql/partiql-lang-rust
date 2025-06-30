@@ -31,7 +31,7 @@ mod tests {
     use partiql_value::{bag, list, tuple, Bag, BindingsName, DateTime, List, Tuple, Value};
 
     fn evaluate(logical: LogicalPlan<BindingsOp>, bindings: MapBindings<Value>) -> Value {
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let plan = planner.compile(&logical).expect("Expect no plan error");
         let sys = SystemContext {
