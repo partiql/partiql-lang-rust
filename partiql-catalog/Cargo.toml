@@ -30,5 +30,6 @@ thiserror = "1.0"
 ordered-float = "5"
 itertools = "0.14"
 unicase = "2.7"
+rustc-hash = "2"
 
 dyn-clone = "1"

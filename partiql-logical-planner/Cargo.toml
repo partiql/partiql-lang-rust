@@ -40,6 +40,7 @@ fnv = "1"
 assert_matches = "1"
 once_cell = "1"
 thiserror = "1"
+rustc-hash = "2"
 
 [dev-dependencies]
 #partiql-eval = { path = "../partiql-eval", version = "0.12.*" }

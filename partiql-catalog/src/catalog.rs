@@ -3,12 +3,11 @@ use crate::scalar_fn::ScalarFunction;
 use crate::table_fn::TableFunction;
 use partiql_common::catalog::{CatalogId, EntryId, ObjectId};
 use partiql_types::PartiqlShape;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 use unicase::UniCase;
-
 /// Contains the errors that occur during Catalog related operations
 #[derive(Error, Debug, Clone, PartialEq)]
 #[error("Catalog error: encountered errors")]
@@ -218,9 +217,9 @@ impl PartiqlCatalog {
 
 #[derive(Debug)]
 struct CatalogEntrySet<T> {
-    entries: HashMap<EntryId, T>,
-    by_name: HashMap<UniCase<String>, EntryId>,
-    by_alias: HashMap<UniCase<String>, EntryId>,
+    entries: FxHashMap<EntryId, T>,
+    by_name: FxHashMap<UniCase<String>, EntryId>,
+    by_alias: FxHashMap<UniCase<String>, EntryId>,
 
     next_id: AtomicU64,
 }

@@ -6,9 +6,9 @@ use crate::eval::graph::result::{PathPatternNodes, Triple};
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use crate::eval::EvalContext;
-use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use partiql_value::Value;
+use rustc_hash::FxBuildHasher;
 
 /// A graph 'engine'; Exposes scanning, node access, and plan conversion to a target graph.
 pub trait GraphEngine<GT: GraphTypes>:

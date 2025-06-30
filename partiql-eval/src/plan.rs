@@ -29,7 +29,7 @@ use partiql_logical::{
 use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
 use partiql_value::{Bag, List, Tuple, Value, Variant};
 use petgraph::prelude::StableGraph;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 #[macro_export]
@@ -153,7 +153,7 @@ impl<'c> EvaluatorPlanner<'c> {
         let flows = lg.flows();
 
         let mut plan_graph: StableGraph<_, _> = Default::default();
-        let mut seen = HashMap::new();
+        let mut seen = FxHashMap::default();
 
         for (s, d, branch_num) in flows {
             let mut add_node = |op_id: &OpId| {

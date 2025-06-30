@@ -3,9 +3,7 @@ use crate::eval::graph::result::{
     GraphElement, NodeBinding, PathBinding, PathPatternBinding, PathPatternNodes, Triple,
 };
 use partiql_logical::graph::bind_name::BindNameExt;
-use std::collections::HashMap;
 
-use fxhash::FxBuildHasher;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
@@ -14,6 +12,7 @@ use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::graph::types::GraphTypes;
 use crate::eval::EvalContext;
 use partiql_value::{Bag, Tuple, Value};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::marker::PhantomData;
 
 /// An evaluator for [`PathPatternMatch`]s over a graph.
@@ -219,7 +218,7 @@ fn join_bindings<GT: GraphTypes>(
                             _ => None,
                         })
                         .collect_vec();
-                    let mut seen: HashMap<&GT::NodeId, usize> = HashMap::default();
+                    let mut seen: FxHashMap<&GT::NodeId, usize> = FxHashMap::default();
                     for i in 0..path_elts.len() {
                         let last_seen = seen.get(&path_elts[i]);
                         if let Some(last_seen) = last_seen {

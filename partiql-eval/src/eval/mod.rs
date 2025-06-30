@@ -2,7 +2,6 @@ use itertools::Itertools;
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use delegate::delegate;
 use petgraph::algo::toposort;
@@ -20,6 +19,7 @@ use petgraph::graph::NodeIndex;
 use crate::error::{EvalErr, EvaluationError};
 use partiql_catalog::context::{Bindings, SessionContext, SystemContext};
 use petgraph::visit::EdgeRef;
+use rustc_hash::FxHashMap;
 use unicase::UniCase;
 
 use crate::eval::evaluable::{EvalType, Evaluable};
@@ -91,7 +91,7 @@ impl EvalPlan {
                 "Malformed evaluation plan detected: {e:?}"
             ))],
         })?;
-        let mut inputs: HashMap<NodeIndex, [Option<Value>; 2]> = HashMap::new();
+        let mut inputs: FxHashMap<NodeIndex, [Option<Value>; 2]> = FxHashMap::default();
 
         // Set source node inputs to empty
         for idx in ops.clone() {
@@ -185,7 +185,7 @@ pub struct BasicContext<'u> {
     pub bindings: MapBindings<Value>,
 
     pub sys: SystemContext,
-    pub user: HashMap<UniCase<String>, &'u (dyn Any)>,
+    pub user: FxHashMap<UniCase<String>, &'u (dyn Any)>,
 
     pub errors: RefCell<Vec<EvaluationError>>,
 }

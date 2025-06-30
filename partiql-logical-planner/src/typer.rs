@@ -12,7 +12,7 @@ use partiql_value::BindingsName;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableGraph;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 #[macro_export]
@@ -391,7 +391,7 @@ impl<'c> PlanTyper<'c> {
         let flows = lg.flows();
 
         let mut graph: StableGraph<_, _> = Default::default();
-        let mut seen = HashMap::new();
+        let mut seen = FxHashMap::default();
 
         for (s, d, w) in flows {
             let mut add_node = |op_id: &OpId| {
