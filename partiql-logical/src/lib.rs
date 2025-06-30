@@ -19,6 +19,7 @@ pub mod graph;
 
 use ordered_float::OrderedFloat;
 use partiql_common::catalog::ObjectId;
+use partiql_value::BindingsName;
 /// # Examples
 /// ```
 /// use partiql_logical::{BinaryOp, BindingsOp, LogicalPlan, PathComponent, ProjectValue, Scan, ValueExpr, VarRefType};
@@ -59,12 +60,10 @@ use partiql_common::catalog::ObjectId;
 /// assert_eq!(2, p.flows().len());
 /// ```
 use rust_decimal::Decimal as RustDecimal;
-use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
-
-use partiql_value::BindingsName;
+use rustc_hash::FxHashMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::fmt::{Debug, Display, Formatter};
 
 /// Represents a `PartiQL` logical plan.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
@@ -141,7 +140,7 @@ where
     #[inline]
     pub fn merge_plan(&mut self, other: Self) {
         let LogicalPlan { nodes, edges } = other;
-        let mut mapping = HashMap::new();
+        let mut mapping = FxHashMap::default();
         for (old_id, op) in nodes.into_iter().enumerate().map(|(i, n)| (OpId(i + 1), n)) {
             let new_id = self.add_operator(op);
             mapping.insert(old_id, new_id);
@@ -415,7 +414,7 @@ pub enum AggFunc {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GroupBy {
     pub strategy: GroupingStrategy,
-    pub exprs: HashMap<String, ValueExpr>,
+    pub exprs: FxHashMap<String, ValueExpr>,
     pub aggregate_exprs: Vec<AggregateExpression>,
     pub group_as_alias: Option<String>,
 }

@@ -8,20 +8,20 @@ pub mod basic {
     use partiql_value::datum::{RefFieldView, RefTupleView};
     use std::borrow::Cow;
 
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap;
 
     #[derive(Debug, Clone)]
     pub struct MapBindings<T> {
-        sensitive: HashMap<String, usize>,
-        insensitive: HashMap<UniCase<String>, usize>,
+        sensitive: FxHashMap<String, usize>,
+        insensitive: FxHashMap<UniCase<String>, usize>,
         values: Vec<T>,
     }
 
     impl<T> Default for MapBindings<T> {
         fn default() -> Self {
             MapBindings {
-                sensitive: HashMap::new(),
-                insensitive: HashMap::new(),
+                sensitive: FxHashMap::default(),
+                insensitive: FxHashMap::default(),
                 values: vec![],
             }
         }

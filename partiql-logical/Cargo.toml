@@ -31,6 +31,7 @@ rust_decimal = { version = "1.36.0", default-features = false, features = ["std"
 rust_decimal_macros = "1.36"
 unicase = "2.7"
 thiserror = "1"
+rustc-hash = "2"
 
 serde = { version = "1", features = ["derive"], optional = true }
 

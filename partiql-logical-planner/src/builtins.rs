@@ -1,11 +1,10 @@
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use partiql_logical as logical;
 use partiql_logical::{SetQuantifier, ValueExpr};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Debug;
-
-use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
 use unicase::UniCase;
 
 fn function_call_def_char_len() -> CallDef {
@@ -727,8 +726,8 @@ pub(crate) static FN_SYM_TAB: Lazy<FnSymTab> = Lazy::new(function_call_def);
 /// Function symbol table
 #[derive(Debug)]
 pub struct FnSymTab {
-    calls: HashMap<UniCase<String>, CallDef>,
-    synonyms: HashMap<UniCase<String>, UniCase<String>>,
+    calls: FxHashMap<UniCase<String>, CallDef>,
+    synonyms: FxHashMap<UniCase<String>, UniCase<String>>,
 }
 
 impl FnSymTab {
@@ -740,8 +739,8 @@ impl FnSymTab {
 }
 
 pub fn function_call_def() -> FnSymTab {
-    let mut calls: HashMap<UniCase<String>, CallDef> = HashMap::new();
-    let mut synonyms: HashMap<UniCase<String>, UniCase<String>> = HashMap::new();
+    let mut calls: FxHashMap<UniCase<String>, CallDef> = FxHashMap::default();
+    let mut synonyms: FxHashMap<UniCase<String>, UniCase<String>> = FxHashMap::default();
 
     for def in [
         function_call_def_char_len(),

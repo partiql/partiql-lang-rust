@@ -60,7 +60,7 @@ impl PlanToDot {
                         )
                     })
                     .join(" | ");
-                format!("{{order by | {} }}", specs)
+                format!("{{order by | {specs} }}")
             }
             BindingsOp::LimitOffset(lo) => {
                 let clauses = [
@@ -148,7 +148,7 @@ fn expr_to_str(expr: &ValueExpr) -> String {
             )
         }
         expr => {
-            let expr: String = format!("{:?}", expr).escape_default().collect();
+            let expr: String = format!("{expr:?}").escape_default().collect();
             let expr = expr.replace('{', "\\{");
             let expr = expr.replace('}', "\\}");
             let expr = expr.replace('<', "\\<");

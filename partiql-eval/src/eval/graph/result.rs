@@ -1,7 +1,7 @@
 use crate::eval::graph::plan::{BindSpec, NodeMatch, TripleStepMatch};
 use crate::eval::graph::types::GraphTypes;
-use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
+use rustc_hash::FxBuildHasher;
 
 type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
 

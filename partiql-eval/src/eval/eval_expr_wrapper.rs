@@ -382,10 +382,7 @@ where
                     let arg_end = args.len();
                     let arg_count = 0..arg_end;
 
-                    let signature = (arg_count)
-                        .map(types)
-                        .map(|typ| format!("{}", typ))
-                        .join(",");
+                    let signature = (arg_count).map(types).map(|typ| format!("{typ}")).join(",");
                     let before = (0..idx).map(|_| "_");
                     let arg = "MISSING"; // TODO display actual argument?
                     let after = (idx + 1..arg_end).map(|_| "_");

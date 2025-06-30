@@ -30,7 +30,6 @@ partiql-extension-ion = { path = "../extension/partiql-extension-ion", version =
 ion-rs_old = { version = "0.18", package = "ion-rs" }
 lasso = "0.7"
 petgraph = "0.7"
-fxhash = "0.2"
 indexmap = "2"
 ordered-float = "5"
 itertools = "0.14"

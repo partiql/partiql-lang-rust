@@ -23,8 +23,6 @@ use std::borrow::Cow;
 
 use partiql_value::BindingsName;
 
-use std::collections::HashMap;
-
 use crate::builtins::{FnSymTab, FN_SYM_TAB};
 use itertools::Itertools;
 use partiql_ast_passes::name_resolver;
@@ -39,6 +37,7 @@ use partiql_common::node::{IdAnnotated, NodeId};
 
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -866,7 +865,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         if !self.aggregate_exprs.last().unwrap().is_empty()
             && self.current_clauses_mut().group_by_clause.is_none()
         {
-            let exprs = HashMap::from([(
+            let exprs = FxHashMap::from_iter([(
                 "$__gk".to_string(),
                 ValueExpr::Lit(Box::new(logical::Lit::Bool(true))),
             )]);
@@ -1738,7 +1737,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 return Traverse::Stop;
             }
         };
-        let mut exprs = HashMap::with_capacity(env.len() / 2);
+        let mut exprs = FxHashMap::with_capacity_and_hasher(env.len() / 2, FxBuildHasher);
         let mut iter = env.into_iter();
 
         while let Some((_, value)) = iter.next() {

@@ -345,24 +345,24 @@ where
                     if idx > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", item)?;
+                    write!(f, "{item}")?;
                 }
                 write!(f, "]")
             }
-            PartiqlMetaValue::Bool(v) => write!(f, "{}", v),
-            PartiqlMetaValue::Decimal(v) => write!(f, "{}", v),
-            PartiqlMetaValue::Float64(v) => write!(f, "{}", v),
-            PartiqlMetaValue::Float32(v) => write!(f, "{}", v),
-            PartiqlMetaValue::Int32(v) => write!(f, "{}", v),
-            PartiqlMetaValue::Int64(v) => write!(f, "{}", v),
+            PartiqlMetaValue::Bool(v) => write!(f, "{v}"),
+            PartiqlMetaValue::Decimal(v) => write!(f, "{v}"),
+            PartiqlMetaValue::Float64(v) => write!(f, "{v}"),
+            PartiqlMetaValue::Float32(v) => write!(f, "{v}"),
+            PartiqlMetaValue::Int32(v) => write!(f, "{v}"),
+            PartiqlMetaValue::Int64(v) => write!(f, "{v}"),
             PartiqlMetaValue::Map(map) => {
                 write!(f, "{{")?;
                 for (t, v) in map.iter() {
-                    write!(f, "{}: {} , ", t, v)?;
+                    write!(f, "{t}: {v} , ")?;
                 }
                 write!(f, "}}")
             }
-            PartiqlMetaValue::String(v) => write!(f, "{}", v),
+            PartiqlMetaValue::String(v) => write!(f, "{v}"),
         }
     }
 }

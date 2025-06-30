@@ -116,6 +116,6 @@ impl PrettyDoc for DynBoxedVariant {
         A: Clone,
     {
         // todo!("impl PrettyDoc for BoxedVariant")
-        arena.text(format!("{}", self))
+        arena.text(format!("{self}"))
     }
 }

@@ -208,8 +208,7 @@ impl PartiqlDdlEncoder for PartiqlBasicDdlEncoder {
             Ok(output)
         } else {
             Err(ShapeEncodingError::UnsupportedEncoding(format!(
-                "Unsupported top level type {:?}",
-                ty
+                "Unsupported top level type {ty:?}"
             )))
         }
     }
