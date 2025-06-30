@@ -321,7 +321,7 @@ impl Debug for Value {
             Value::Blob(blob) => {
                 write!(f, "x'")?;
                 for byte in blob.as_ref() {
-                    f.write_str(&format!("{:02x}", byte))?;
+                    f.write_str(&format!("{byte:02x}"))?;
                 }
                 write!(f, "'")
             }

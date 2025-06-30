@@ -29,7 +29,7 @@ fn escape_str(s: &str) -> String {
         None => "_".to_string(),
         Some(c) => {
             if c.is_numeric() {
-                format!("_{}", snake_case)
+                format!("_{snake_case}")
             } else {
                 snake_case
             }

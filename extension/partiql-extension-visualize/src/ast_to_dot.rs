@@ -186,10 +186,10 @@ fn lit_to_str(ast: &ast::Lit) -> String {
         Lit::DoubleLit(l) => l.to_string(),
         Lit::BoolLit(l) => (if *l { "TRUE" } else { "FALSE" }).to_string(),
         Lit::EmbeddedDocLit(l, typ) => format!("`{}`::{}", l, type_to_str(typ)),
-        Lit::CharStringLit(l) => format!("'{}'", l),
-        Lit::NationalCharStringLit(l) => format!("'{}'", l),
-        Lit::BitStringLit(l) => format!("b'{}'", l),
-        Lit::HexStringLit(l) => format!("x'{}'", l),
+        Lit::CharStringLit(l) => format!("'{l}'"),
+        Lit::NationalCharStringLit(l) => format!("'{l}'"),
+        Lit::BitStringLit(l) => format!("b'{l}'"),
+        Lit::HexStringLit(l) => format!("x'{l}'"),
         Lit::BagLit(_b) => todo!("bag literals"),
         Lit::ListLit(_b) => todo!("list literals"),
         Lit::StructLit(_b) => todo!("struct literals"),
@@ -220,7 +220,7 @@ fn custom_type_part_to_str(part: &ast::CustomTypePart) -> String {
                 .map(custom_type_param_to_str)
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("{}({})", name, args)
+            format!("{name}({args})")
         }
     }
 }
@@ -235,7 +235,7 @@ fn type_to_str(ty: &ast::Type) -> String {
             .map(custom_type_part_to_str)
             .collect::<Vec<_>>()
             .join(" "),
-        _ => format!("{:?}", ty),
+        _ => format!("{ty:?}"),
     }
 }
 
@@ -467,7 +467,7 @@ impl ToDot<ast::VarRef> for AstToDot {
         let lbl = symbol_primitive_to_label(&ast.name);
         let lbl = match &ast.qualifier {
             ast::ScopeQualifier::Unqualified => lbl,
-            ast::ScopeQualifier::Qualified => format!("@{}", lbl),
+            ast::ScopeQualifier::Qualified => format!("@{lbl}"),
         };
         let id = out.node_auto_labelled(&lbl).id();
 

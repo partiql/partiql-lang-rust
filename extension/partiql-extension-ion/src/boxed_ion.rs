@@ -875,7 +875,7 @@ mod tests {
                 flatten_dump(c.expect("boxed ion element"))
             }
         } else {
-            println!("{:?}", doc);
+            println!("{doc:?}");
         }
     }
 

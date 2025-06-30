@@ -77,7 +77,7 @@ impl From<(&str, BindError)> for PlanningError {
             BindError::NotYetImplemented(name) => PlanningError::NotYetImplemented(name),
             BindError::ArgumentConstraint(msg) => PlanningError::IllegalState(msg),
             BindError::LiteralValue(err) => {
-                PlanningError::IllegalState(format!("Literal error: {}", err))
+                PlanningError::IllegalState(format!("Literal error: {err}"))
             }
         }
     }
