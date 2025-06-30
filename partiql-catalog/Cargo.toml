@@ -31,5 +31,5 @@ ordered-float = "5"
 itertools = "0.14"
 unicase = "2.7"
 rustc-hash = "2"
-
+delegate = "0.13"
 dyn-clone = "1"

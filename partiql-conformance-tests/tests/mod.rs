@@ -1,5 +1,6 @@
 use partiql_ast_passes::error::AstTransformationError;
 use partiql_eval as eval;
+use std::ops::Deref;
 
 use partiql_eval::error::{EvalErr, PlanErr};
 use partiql_eval::eval::{BasicContext, EvalContext, EvalPlan, EvalResult, Evaluated};
@@ -7,12 +8,19 @@ use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
 use partiql_value::DateTime;
 
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{PartiqlCatalog, PartiqlSharedCatalog, SharedCatalog};
 use partiql_catalog::context::SystemContext;
 use thiserror::Error;
 
 mod test_value;
 pub(crate) use test_value::TestValue;
+
+use once_cell::sync::Lazy;
+pub(crate) static SHARED_CATALOG: Lazy<PartiqlSharedCatalog> = Lazy::new(init_shared_catalog);
+
+fn init_shared_catalog() -> PartiqlSharedCatalog {
+    PartiqlCatalog::default().to_shared_catalog()
+}
 
 #[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
@@ -52,7 +60,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     parsed: &Parsed<'_>,
 ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -63,7 +71,7 @@ pub(crate) fn lower(
 #[inline]
 pub(crate) fn compile(
     mode: EvaluationMode,
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     logical: logical::LogicalPlan<logical::BindingsOp>,
 ) -> Result<EvalPlan, PlanErr> {
     let mut planner = eval::plan::EvaluatorPlanner::new(mode.into(), catalog);
@@ -103,9 +111,9 @@ pub(crate) fn pass_syntax(statement: &str) -> Parsed {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn fail_semantics(statement: &str) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
     if let Ok(parsed) = parse(statement) {
-        let lowered = lower(&catalog, &parsed);
+        let lowered = lower(catalog, &parsed);
 
         assert!(
             lowered.is_err(),
@@ -118,9 +126,9 @@ pub(crate) fn fail_semantics(statement: &str) {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn pass_semantics(statement: &str) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
     let parsed = pass_syntax(statement);
-    let lowered = lower(&catalog, &parsed);
+    let lowered = lower(catalog, &parsed);
     assert!(
         lowered.is_ok(),
         "When semantically verifying `{statement}`, expected `Ok(_)`, but was `{lowered:#?}`"
@@ -171,17 +179,17 @@ pub(crate) fn eval<'a>(
     mode: EvaluationMode,
     env: &Option<TestValue>,
 ) -> Result<Evaluated, TestError<'a>> {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
 
     let parsed = parse(statement)?;
-    let lowered = lower(&catalog, &parsed)?;
+    let lowered = lower(catalog, &parsed)?;
 
     let bindings = env.as_ref().map(|e| (&e.value).into()).unwrap_or_default();
     let sys = SystemContext {
         now: DateTime::from_system_now_utc(),
     };
     let ctx = BasicContext::new(bindings, sys);
-    let plan = compile(mode, &catalog, lowered)?;
+    let plan = compile(mode, catalog, lowered)?;
 
     Ok(evaluate(plan, &ctx)?)
 }

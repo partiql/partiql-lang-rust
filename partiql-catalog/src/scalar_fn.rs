@@ -11,7 +11,7 @@ use std::fmt::{Debug, Formatter};
 pub type ScalarFnExprResultValue<'a> = Cow<'a, Value>;
 pub type ScalarFnExprResult<'a> = Result<ScalarFnExprResultValue<'a>, ExtensionResultError>;
 
-pub trait ScalarFnExpr: DynClone + Debug {
+pub trait ScalarFnExpr: DynClone + Debug + Send + Sync {
     fn evaluate<'c>(
         &self,
         args: &[Cow<'_, Value>],

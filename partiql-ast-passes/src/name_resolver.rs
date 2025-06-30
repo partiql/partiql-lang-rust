@@ -4,7 +4,7 @@ use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast;
 use partiql_ast::ast::{GraphPattern, GroupByExpr, GroupKey};
 use partiql_ast::visit::{Traverse, Visit, Visitor};
-use partiql_catalog::catalog::Catalog;
+use partiql_catalog::catalog::SharedCatalog;
 use partiql_common::node::NodeId;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -102,11 +102,11 @@ pub struct NameResolver<'c> {
 
     // errors that occur during name resolution
     errors: Vec<AstTransformError>,
-    catalog: &'c dyn Catalog,
+    catalog: &'c dyn SharedCatalog,
 }
 
 impl<'c> NameResolver<'c> {
-    pub fn new(catalog: &'c dyn Catalog) -> Self {
+    pub fn new(catalog: &'c dyn SharedCatalog) -> Self {
         NameResolver {
             // environment stack tracking
             id_path_to_root: Default::default(),

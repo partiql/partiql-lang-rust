@@ -168,7 +168,7 @@ fn snapshot_test_graph_eval(name: &'static str, contents: &'static str, query: &
     let bindings = tuple![("g", graph)];
 
     let parsed = parse(query).expect("parse");
-    let catalog = PartiqlCatalog::default();
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
     let lowered = lower(&catalog, &parsed).expect("lower");
     let plan = compile(EvaluationMode::Permissive, &catalog, lowered).expect("compile");
     let res = evaluate(plan, bindings.into());

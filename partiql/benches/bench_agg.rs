@@ -1,8 +1,9 @@
+use std::ops::Deref;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog, PartiqlSharedCatalog, SharedCatalog};
 use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{BasicContext, EvalPlan};
@@ -12,6 +13,13 @@ use partiql_logical_planner::LogicalPlanner;
 
 use partiql_parser::{Parser, ParserResult};
 use partiql_value::{tuple, Bag, DateTime, Value};
+
+use once_cell::sync::Lazy;
+pub(crate) static SHARED_CATALOG: Lazy<PartiqlSharedCatalog> = Lazy::new(init_shared_catalog);
+
+fn init_shared_catalog() -> PartiqlSharedCatalog {
+    PartiqlCatalog::default().to_shared_catalog()
+}
 
 fn numbers() -> impl Iterator<Item = Value> {
     (0..1000i64).map(Value::from)
@@ -37,12 +45,15 @@ fn parse(text: &str) -> ParserResult {
     Parser::default().parse(text)
 }
 #[inline]
-fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
+fn compile(
+    catalog: &dyn SharedCatalog,
+    parsed: &partiql_parser::Parsed,
+) -> LogicalPlan<BindingsOp> {
     let planner = LogicalPlanner::new(catalog);
     planner.lower(parsed).expect("Expect no lower error")
 }
 #[inline]
-fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
+fn plan(catalog: &dyn SharedCatalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     EvaluatorPlanner::new(EvaluationMode::Permissive, catalog)
         .compile(logical)
         .expect("Expect no plan error")
@@ -134,14 +145,14 @@ fn create_tests() -> Vec<(String, String)> {
 }
 
 fn bench_agg(c: &mut Criterion) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
     let bindings = data();
 
     for (name, query) in create_tests() {
-        let compiled = compile(&catalog, &parse(query.as_str()).unwrap());
+        let compiled = compile(catalog, &parse(query.as_str()).unwrap());
         c.bench_function(name.as_str(), |b| {
             b.iter(|| {
-                let plan = plan(&catalog, &compiled);
+                let plan = plan(catalog, &compiled);
                 let bindings = bindings.clone();
                 evaluate(black_box(plan), black_box(bindings))
             })
