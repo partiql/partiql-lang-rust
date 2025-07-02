@@ -335,12 +335,15 @@ fn parse(text: &str) -> ParserResult {
     Parser::default().parse(text)
 }
 #[inline]
-fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
+fn compile(
+    catalog: &dyn SharedCatalog,
+    parsed: &partiql_parser::Parsed,
+) -> LogicalPlan<BindingsOp> {
     let planner = LogicalPlanner::new(catalog);
     planner.lower(parsed).expect("Expect no lower error")
 }
 #[inline]
-fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
+fn plan(catalog: &dyn SharedCatalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     EvaluatorPlanner::new(EvaluationMode::Permissive, catalog)
         .compile(logical)
         .expect("Expect no plan error")

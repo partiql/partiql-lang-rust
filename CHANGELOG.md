@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - Changed many internal `HashMap`s to use `rustc-hash`'s `FxHash`
+- *BREAKING* Refactors `Catalog` to allow `Send`+`Sync` for re-use.
 
 ### Added
 
