@@ -1,8 +1,9 @@
+use std::ops::Deref;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog, PartiqlSharedCatalog, SharedCatalog};
 use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{BasicContext, EvalPlan};
@@ -263,6 +264,13 @@ fn employee_data() -> Vec<Value> {
     employee_data
 }
 
+use once_cell::sync::Lazy;
+pub(crate) static SHARED_CATALOG: Lazy<PartiqlSharedCatalog> = Lazy::new(init_shared_catalog);
+
+fn init_shared_catalog() -> PartiqlSharedCatalog {
+    PartiqlCatalog::default().to_shared_catalog()
+}
+
 fn data() -> MapBindings<Value> {
     let data = tuple![("hr", tuple![("employees", Bag::from(employee_data()))])];
 
@@ -335,12 +343,15 @@ fn parse(text: &str) -> ParserResult {
     Parser::default().parse(text)
 }
 #[inline]
-fn compile(catalog: &dyn Catalog, parsed: &partiql_parser::Parsed) -> LogicalPlan<BindingsOp> {
+fn compile(
+    catalog: &dyn SharedCatalog,
+    parsed: &partiql_parser::Parsed,
+) -> LogicalPlan<BindingsOp> {
     let planner = LogicalPlanner::new(catalog);
     planner.lower(parsed).expect("Expect no lower error")
 }
 #[inline]
-fn plan(catalog: &dyn Catalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
+fn plan(catalog: &dyn SharedCatalog, logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
     EvaluatorPlanner::new(EvaluationMode::Permissive, catalog)
         .compile(logical)
         .expect("Expect no plan error")
@@ -378,27 +389,27 @@ fn bench_parse(c: &mut Criterion) {
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_compile(c: &mut Criterion) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
 
     let parsed_1 = parse(QUERY_1).unwrap();
     let parsed_15 = parse(QUERY_15).unwrap();
     let parsed_30 = parse(QUERY_30).unwrap();
 
-    let compiled_1 = compile(&catalog, &parsed_1);
+    let compiled_1 = compile(catalog, &parsed_1);
     assert_eq!(compiled_1.operator_count(), 4);
-    let compiled_15 = compile(&catalog, &parsed_15);
+    let compiled_15 = compile(catalog, &parsed_15);
     assert_eq!(compiled_15.operator_count(), 4);
-    let compiled_30 = compile(&catalog, &parsed_30);
+    let compiled_30 = compile(catalog, &parsed_30);
     assert_eq!(compiled_30.operator_count(), 4);
 
     c.bench_function("compile-1", |b| {
-        b.iter(|| compile(&catalog, black_box(&parsed_1)))
+        b.iter(|| compile(catalog, black_box(&parsed_1)))
     });
     c.bench_function("compile-15", |b| {
-        b.iter(|| compile(&catalog, black_box(&parsed_15)))
+        b.iter(|| compile(catalog, black_box(&parsed_15)))
     });
     c.bench_function("compile-30", |b| {
-        b.iter(|| compile(&catalog, black_box(&parsed_30)))
+        b.iter(|| compile(catalog, black_box(&parsed_30)))
     });
 }
 
@@ -406,24 +417,24 @@ fn bench_compile(c: &mut Criterion) {
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_plan(c: &mut Criterion) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
 
-    let compiled_1 = compile(&catalog, &parse(QUERY_1).unwrap());
-    let compiled_15 = compile(&catalog, &parse(QUERY_15).unwrap());
-    let compiled_30 = compile(&catalog, &parse(QUERY_30).unwrap());
+    let compiled_1 = compile(catalog, &parse(QUERY_1).unwrap());
+    let compiled_15 = compile(catalog, &parse(QUERY_15).unwrap());
+    let compiled_30 = compile(catalog, &parse(QUERY_30).unwrap());
 
-    let _planned_1 = plan(&catalog, &compiled_1);
-    let _planned_15 = plan(&catalog, &compiled_15);
-    let _planned_30 = plan(&catalog, &compiled_30);
+    let _planned_1 = plan(catalog, &compiled_1);
+    let _planned_15 = plan(catalog, &compiled_15);
+    let _planned_30 = plan(catalog, &compiled_30);
 
     c.bench_function("plan-1", |b| {
-        b.iter(|| plan(&catalog, black_box(&compiled_1)))
+        b.iter(|| plan(catalog, black_box(&compiled_1)))
     });
     c.bench_function("plan-15", |b| {
-        b.iter(|| plan(&catalog, black_box(&compiled_15)))
+        b.iter(|| plan(catalog, black_box(&compiled_15)))
     });
     c.bench_function("plan-30", |b| {
-        b.iter(|| plan(&catalog, black_box(&compiled_30)))
+        b.iter(|| plan(catalog, black_box(&compiled_30)))
     });
 }
 
@@ -431,31 +442,31 @@ fn bench_plan(c: &mut Criterion) {
 /// filter against 1, 15, or 30 `OR`ed `LIKE` expressions
 /// over 10201 rows of tuples containing an id and a string
 fn bench_eval(c: &mut Criterion) {
-    let catalog = PartiqlCatalog::default();
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
 
-    let compiled_1 = compile(&catalog, &parse(QUERY_1).unwrap());
-    let compiled_15 = compile(&catalog, &parse(QUERY_15).unwrap());
-    let compiled_30 = compile(&catalog, &parse(QUERY_30).unwrap());
+    let compiled_1 = compile(catalog, &parse(QUERY_1).unwrap());
+    let compiled_15 = compile(catalog, &parse(QUERY_15).unwrap());
+    let compiled_30 = compile(catalog, &parse(QUERY_30).unwrap());
 
     let bindings = data();
 
     c.bench_function("eval-1", |b| {
         b.iter(|| {
-            let plan = plan(&catalog, &compiled_1);
+            let plan = plan(catalog, &compiled_1);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })
     });
     c.bench_function("eval-15", |b| {
         b.iter(|| {
-            let plan = plan(&catalog, &compiled_15);
+            let plan = plan(catalog, &compiled_15);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })
     });
     c.bench_function("eval-30", |b| {
         b.iter(|| {
-            let plan = plan(&catalog, &compiled_30);
+            let plan = plan(catalog, &compiled_30);
             let bindings = bindings.clone();
             evaluate(black_box(plan), black_box(bindings))
         })

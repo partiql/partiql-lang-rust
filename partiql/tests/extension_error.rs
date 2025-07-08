@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use thiserror::Error;
 
 use partiql_catalog::call_defs::{CallDef, CallSpec, CallSpecArg};
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{Catalog, PartiqlCatalog, SharedCatalog};
 use partiql_catalog::context::{SessionContext, SystemContext};
 use partiql_catalog::extension::{Extension, ExtensionResultError};
 use partiql_catalog::table_fn::{
@@ -122,7 +122,7 @@ impl Iterator for TestDataGen {
 #[inline]
 pub(crate) fn evaluate(
     mode: EvaluationMode,
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     bindings: MapBindings<Value>,
     ctx_vals: &[(String, &(dyn Any))],
@@ -149,6 +149,7 @@ fn test_context_bad_args_permissive() -> Result<(), TestError<'static>> {
     let mut catalog = PartiqlCatalog::default();
     let ext = UserCtxTestExtension {};
     ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
 
     let parsed = parse(query);
     let lowered = lower(&catalog, &parsed.expect("parse"))?;
@@ -176,6 +177,7 @@ fn test_context_bad_args_strict() -> Result<(), TestError<'static>> {
     let mut catalog = PartiqlCatalog::default();
     let ext = UserCtxTestExtension {};
     ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
 
     let parsed = parse(query);
     let lowered = lower(&catalog, &parsed.expect("parse"))?;
@@ -202,6 +204,7 @@ fn test_context_runtime_permissive() -> Result<(), TestError<'static>> {
     let mut catalog = PartiqlCatalog::default();
     let ext = UserCtxTestExtension {};
     ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
 
     let parsed = parse(query);
     let lowered = lower(&catalog, &parsed.expect("parse"))?;
@@ -229,6 +232,7 @@ fn test_context_runtime_strict() -> Result<(), TestError<'static>> {
     let mut catalog = PartiqlCatalog::default();
     let ext = UserCtxTestExtension {};
     ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
 
     let parsed = parse(query);
     let lowered = lower(&catalog, &parsed.expect("parse"))?;

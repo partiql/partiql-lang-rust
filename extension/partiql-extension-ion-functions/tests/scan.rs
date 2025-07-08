@@ -1,4 +1,4 @@
-use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+use partiql_catalog::catalog::{PartiqlCatalog, SharedCatalog};
 use partiql_catalog::context::SystemContext;
 use partiql_catalog::extension::Extension;
 use partiql_eval::env::basic::MapBindings;
@@ -19,7 +19,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult<'_> {
 #[track_caller]
 #[inline]
 pub(crate) fn lower(
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     parsed: &Parsed<'_>,
 ) -> partiql_logical::LogicalPlan<partiql_logical::BindingsOp> {
     let planner = partiql_logical_planner::LogicalPlanner::new(catalog);
@@ -29,7 +29,7 @@ pub(crate) fn lower(
 #[track_caller]
 #[inline]
 pub(crate) fn evaluate(
-    catalog: &dyn Catalog,
+    catalog: &dyn SharedCatalog,
     logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     bindings: MapBindings<Value>,
 ) -> (Value, Vec<EvaluationError>) {
@@ -61,6 +61,7 @@ pub(crate) fn evaluate_with_ion_scan(
     let ext = IonExtension {};
     ext.load(&mut catalog)
         .expect("ion extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
 
     let parsed = parse(statement);
     let lowered = lower(&catalog, &parsed.expect("parse"));
