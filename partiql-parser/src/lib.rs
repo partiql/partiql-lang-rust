@@ -7,6 +7,10 @@
 //! # Usage
 //!
 //! ```
+//! use std::fmt;
+//! use std::fmt::Formatter;
+//! use itertools::Itertools;
+//! use partiql_common::syntax::location::LineAndColumn;
 //! use partiql_parser::{Parser, ParserError, ParserResult};
 //!
 //! let parser = Parser::default();
@@ -15,9 +19,35 @@
 //!
 //! let errs: ParserError = parser.parse("SELECT").expect_err("expected error");
 //!
+//! // Print out messages with byte offsets
 //! let errs_at: ParserError =
 //!     parser.parse("SELECT * FROM a AY a CROSS JOIN c AS c AT q").unwrap_err();
 //! assert_eq!(errs_at.errors[0].to_string(), "Unexpected token `<a:UNQUOTED_IDENT>` at `(b19..b20)`");
+//!
+//! // Print out messages with line:column offsets
+//! let errs_at_nice: ParserError =
+//!     parser.parse("SELECT * FROM a AY a CROSS JOIN c AS c AT q").unwrap_err();
+//! let offsets = &errs_at_nice.offsets;
+//! let source = &errs_at_nice.text;
+//! let err_msg = errs_at_nice.errors.iter().map(|e|
+//!     e.clone().map_loc(|loc| LineAndColumn::from(offsets.at(source, loc).unwrap()).to_string())).join("\n");
+//! assert_eq!(err_msg, "Unexpected token `<a:UNQUOTED_IDENT>` at `(1:20..1:21)`");
+//!
+//!
+//!
+//! // Print out messages with custom line:column offsets
+//! #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+//! pub struct VerboseLineAndColumn(LineAndColumn);
+//!
+//! impl fmt::Display for VerboseLineAndColumn {
+//!     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//!         write!(f, "Line {}, Offset {}", self.0.line, self.0.column)
+//!     }
+//! }
+//!
+//! let err_msg = errs_at_nice.errors.iter().map(|e|
+//!     e.clone().map_loc(|loc| VerboseLineAndColumn(LineAndColumn::from(offsets.at(source, loc).unwrap())).to_string())).join("\n");
+//! assert_eq!(err_msg, "Unexpected token `<a:UNQUOTED_IDENT>` at `(Line 1, Offset 20..Line 1, Offset 21)`");
 //! ```
 //!
 //! [partiql]: https://partiql.org
