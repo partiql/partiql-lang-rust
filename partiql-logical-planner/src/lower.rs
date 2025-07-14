@@ -32,7 +32,7 @@ use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use crate::functions::Function;
 use partiql_ast_passes::name_resolver::NameRef;
-use partiql_catalog::catalog::Catalog;
+use partiql_catalog::catalog::SharedCatalog;
 use partiql_common::node::{IdAnnotated, NodeId};
 
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
@@ -191,7 +191,7 @@ pub struct AstToLogical<'a> {
     // catalog & data flow data
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
-    catalog: &'a dyn Catalog,
+    catalog: &'a dyn SharedCatalog,
 
     // list of errors encountered during AST lowering
     errors: Vec<AstTransformError>,
@@ -232,7 +232,7 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
 }
 
 impl<'a> AstToLogical<'a> {
-    pub fn new(catalog: &'a dyn Catalog, registry: name_resolver::KeyRegistry) -> Self {
+    pub fn new(catalog: &'a dyn SharedCatalog, registry: name_resolver::KeyRegistry) -> Self {
         let fnsym_tab: &FnSymTab = &FN_SYM_TAB;
         AstToLogical {
             id_stack: Default::default(),
@@ -2068,14 +2068,14 @@ mod tests {
     use super::*;
     use crate::LogicalPlanner;
     use assert_matches::assert_matches;
-    use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, TypeEnvEntry};
     use partiql_logical::BindingsOp::Project;
     use partiql_logical::ValueExpr;
     use partiql_types::PartiqlShape;
 
     #[test]
     fn test_plan_non_existent_fns() {
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let statement = "foo(1, 2) + bar(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
@@ -2097,7 +2097,7 @@ mod tests {
 
     #[test]
     fn test_plan_bad_num_arguments() {
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let statement = "abs(1, 2) + mod(3)";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)
@@ -2169,6 +2169,7 @@ mod tests {
         let mut catalog = PartiqlCatalog::default();
         let _oid =
             catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
         let statement = "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c";
         let parsed = partiql_parser::Parser::default()
             .parse(statement)

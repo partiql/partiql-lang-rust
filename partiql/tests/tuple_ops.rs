@@ -15,6 +15,7 @@ pub fn eval(statement: &str, mode: EvaluationMode) -> Result<Evaluated, TestErro
     let mut catalog = PartiqlCatalog::default();
     let ext = PartiqlValueFnExtension::default();
     ext.load(&mut catalog)?;
+    let catalog = catalog.to_shared_catalog();
 
     eval_query_with_catalog(statement, &catalog, mode)
 }

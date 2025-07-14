@@ -62,7 +62,7 @@ pub(crate) fn parse_partiql_value_str(contents: &str) -> Value {
     use partiql_catalog::catalog::PartiqlCatalog;
     use partiql_catalog::context::SystemContext;
     use partiql_value::DateTime;
-    let catalog = PartiqlCatalog::default();
+    let catalog = PartiqlCatalog::default().to_shared_catalog();
     let parsed = partiql_parser::Parser::default()
         .parse(contents)
         .expect("Expect successful parse");

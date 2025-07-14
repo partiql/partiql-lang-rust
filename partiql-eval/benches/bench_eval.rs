@@ -1,10 +1,12 @@
 use std::borrow::Cow;
+use std::ops::Deref;
 use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use partiql_catalog::catalog::PartiqlCatalog;
+use partiql_catalog::catalog::{PartiqlCatalog, PartiqlSharedCatalog};
 use partiql_catalog::context::SystemContext;
 
+use once_cell::sync::Lazy;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::{BasicContext, EvalPlan};
 use partiql_eval::plan;
@@ -16,6 +18,11 @@ use partiql_logical::{
     VarRefType,
 };
 use partiql_value::{bag, list, tuple, BindingsName, DateTime, Value};
+pub(crate) static SHARED_CATALOG: Lazy<PartiqlSharedCatalog> = Lazy::new(init_shared_catalog);
+
+fn init_shared_catalog() -> PartiqlSharedCatalog {
+    PartiqlCatalog::default().to_shared_catalog()
+}
 
 fn data() -> MapBindings<Value> {
     let hr = tuple![(
@@ -130,8 +137,8 @@ fn logical_plan() -> LogicalPlan<BindingsOp> {
 }
 
 fn eval_plan(logical: &LogicalPlan<BindingsOp>) -> EvalPlan {
-    let catalog = PartiqlCatalog::default();
-    let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
+    let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
+    let mut planner = plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);
     planner.compile(logical).expect("Expect no plan error")
 }
 
