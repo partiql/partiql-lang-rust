@@ -1,6 +1,7 @@
 use crate::call_defs::ScalarFnCallSpecs;
 use crate::scalar_fn::ScalarFunction;
 use crate::table_fn::TableFunction;
+use delegate::delegate;
 use partiql_common::catalog::{CatalogId, EntryId, ObjectId};
 use partiql_types::PartiqlShape;
 use rustc_hash::FxHashMap;
@@ -42,18 +43,21 @@ pub enum CatalogErrorKind {
     Unknown,
 }
 
-pub trait Catalog: Debug {
+pub trait MutableCatalog: Debug {
     fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError>;
     fn add_scalar_function(&mut self, info: ScalarFunction) -> Result<ObjectId, CatalogError>;
-
     fn add_type_entry(&mut self, entry: TypeEnvEntry<'_>) -> Result<ObjectId, CatalogError>;
+}
 
+pub trait ReadOnlyCatalog: Debug {
     fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
-
     fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>>;
-
     fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
 }
+
+pub trait SharedCatalog: ReadOnlyCatalog + Send + Sync {}
+
+pub trait Catalog: MutableCatalog + ReadOnlyCatalog {}
 
 #[derive(Debug)]
 pub struct TypeEnvEntry<'a> {
@@ -123,6 +127,9 @@ pub struct PartiqlCatalog {
     id: CatalogId,
 }
 
+#[derive(Debug)]
+pub struct PartiqlSharedCatalog(PartiqlCatalog);
+
 impl Default for PartiqlCatalog {
     fn default() -> Self {
         PartiqlCatalog {
@@ -133,9 +140,15 @@ impl Default for PartiqlCatalog {
     }
 }
 
-impl PartiqlCatalog {}
+impl PartiqlCatalog {
+    pub fn to_shared_catalog(self) -> PartiqlSharedCatalog {
+        PartiqlSharedCatalog(self)
+    }
+}
 
-impl Catalog for PartiqlCatalog {
+impl Catalog for PartiqlCatalog {}
+
+impl MutableCatalog for PartiqlCatalog {
     fn add_table_function(&mut self, info: TableFunction) -> Result<ObjectId, CatalogError> {
         let call_def = info.call_def();
         let names = call_def.names.clone();
@@ -180,7 +193,9 @@ impl Catalog for PartiqlCatalog {
             Err(e) => Err(e),
         }
     }
+}
 
+impl ReadOnlyCatalog for PartiqlCatalog {
     fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>> {
         self.functions
             .find_by_name(name)
@@ -201,6 +216,18 @@ impl Catalog for PartiqlCatalog {
         })
     }
 }
+
+impl ReadOnlyCatalog for PartiqlSharedCatalog {
+    delegate! {
+        to self.0 {
+            fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
+            fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>>;
+            fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
+        }
+    }
+}
+
+impl SharedCatalog for PartiqlSharedCatalog {}
 
 impl PartiqlCatalog {
     fn to_function_entry<'a>(

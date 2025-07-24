@@ -17,7 +17,7 @@ pub trait BaseTableExpr: Debug {
     ) -> BaseTableExprResult<'c>;
 }
 
-pub trait BaseTableFunctionInfo: Debug {
+pub trait BaseTableFunctionInfo: Debug + Send + Sync {
     fn call_def(&self) -> &CallDef;
     fn plan_eval(&self) -> Box<dyn BaseTableExpr>;
 }

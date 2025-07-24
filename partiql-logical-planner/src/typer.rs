@@ -1,7 +1,7 @@
 use crate::typer::LookupOrder::{GlobalLocal, LocalGlobal};
 use indexmap::{IndexMap, IndexSet};
 use partiql_ast::ast::{CaseSensitivity, SymbolPrimitive};
-use partiql_catalog::catalog::Catalog;
+use partiql_catalog::catalog::SharedCatalog;
 use partiql_logical::{BindingsOp, Lit, LogicalPlan, OpId, PathComponent, ValueExpr, VarRefType};
 use partiql_types::{
     type_array, type_bag, type_bool, type_decimal, type_dynamic, type_float64, type_int,
@@ -128,7 +128,7 @@ type LocalTypeEnv = IndexMap<SymbolPrimitive, PartiqlShape>;
 #[derive(Debug)]
 pub struct PlanTyper<'c> {
     typing_mode: TypingMode,
-    catalog: &'c dyn Catalog,
+    catalog: &'c dyn SharedCatalog,
     logical_plan: LogicalPlan<BindingsOp>,
     errors: Vec<TypingError>,
     type_env_stack: Vec<TypeEnvContext>,
@@ -140,7 +140,7 @@ pub struct PlanTyper<'c> {
 #[allow(dead_code)]
 impl<'c> PlanTyper<'c> {
     /// Creates a new [`PlanTyper`] for the given Catalog and Intermediate Representation with `Strict` Typing Mode.
-    pub fn new_strict(catalog: &'c dyn Catalog, ir: &LogicalPlan<BindingsOp>) -> Self {
+    pub fn new_strict(catalog: &'c dyn SharedCatalog, ir: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Strict,
             catalog,
@@ -154,7 +154,7 @@ impl<'c> PlanTyper<'c> {
     }
 
     /// Creates a new [`PlanTyper`] for the given Catalog and Intermediate Representation with `Permissive` Typing Mode.
-    pub fn new_permissive(catalog: &'c dyn Catalog, lg: &LogicalPlan<BindingsOp>) -> Self {
+    pub fn new_permissive(catalog: &'c dyn SharedCatalog, lg: &LogicalPlan<BindingsOp>) -> Self {
         PlanTyper {
             typing_mode: TypingMode::Permissive,
             catalog,
@@ -605,7 +605,7 @@ mod tests {
     use super::*;
     use crate::{logical, LogicalPlanner};
     use partiql_ast_passes::error::AstTransformationError;
-    use partiql_catalog::catalog::{PartiqlCatalog, TypeEnvEntry};
+    use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog, TypeEnvEntry};
     use partiql_parser::{Parsed, Parser};
     use partiql_types::{
         struct_fields, PartiqlNoIdShapeBuilder, ShapeBuilderExtensions, StructType,
@@ -920,6 +920,7 @@ mod tests {
     ) -> Result<PartiqlShape, TypeErr> {
         let mut catalog = PartiqlCatalog::default();
         let _oid = catalog.add_type_entry(type_env_entry);
+        let catalog = catalog.to_shared_catalog();
 
         let parsed = parse(query);
         let lg = lower(&parsed, &catalog).expect("Logical plan");
@@ -940,7 +941,7 @@ mod tests {
     #[track_caller]
     fn lower(
         parsed: &Parsed<'_>,
-        catalog: &dyn Catalog,
+        catalog: &dyn SharedCatalog,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let planner = LogicalPlanner::new(catalog);
         planner.lower(parsed)

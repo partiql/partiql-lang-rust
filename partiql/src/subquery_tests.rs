@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use partiql_catalog::catalog::{Catalog, PartiqlCatalog};
+    use partiql_catalog::catalog::{PartiqlCatalog, SharedCatalog};
     use partiql_catalog::context::SystemContext;
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::error::EvalErr;
@@ -16,7 +16,7 @@ mod tests {
     #[track_caller]
     #[inline]
     pub(crate) fn evaluate(
-        catalog: &dyn Catalog,
+        catalog: &dyn SharedCatalog,
         logical: &LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
         ctx_vals: &[(String, &(dyn Any))],
@@ -88,7 +88,7 @@ mod tests {
         let sink_op_id = plan.add_operator(partiql_logical::BindingsOp::Sink);
         plan.add_flow(project_value_op_id, sink_op_id);
 
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let bindings = MapBindings::default();
         let res = evaluate(&catalog, &plan, bindings, &[]).expect("should eval correctly");
         dbg!(&res);
@@ -145,7 +145,7 @@ mod tests {
         let sink_op_id = plan.add_operator(partiql_logical::BindingsOp::Sink);
         plan.add_flow(project_value_op_id, sink_op_id);
 
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let mut bindings = MapBindings::default();
         bindings.insert(
             "foo",

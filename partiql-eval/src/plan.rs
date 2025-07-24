@@ -17,7 +17,7 @@ use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::EvalPlan;
 use eval::graph::plan as physical;
 use itertools::{Either, Itertools};
-use partiql_catalog::catalog::{Catalog, FunctionEntryFunction};
+use partiql_catalog::catalog::{FunctionEntryFunction, SharedCatalog};
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_logical as logical;
 use partiql_logical::{
@@ -61,7 +61,7 @@ pub enum EvaluationMode {
 
 pub struct EvaluatorPlanner<'c> {
     mode: EvaluationMode,
-    catalog: &'c dyn Catalog,
+    catalog: &'c dyn SharedCatalog,
     errors: Vec<PlanningError>,
 }
 
@@ -126,7 +126,7 @@ impl From<&BinaryOp> for EvalOpBinary {
 }
 
 impl<'c> EvaluatorPlanner<'c> {
-    pub fn new(mode: EvaluationMode, catalog: &'c dyn Catalog) -> Self {
+    pub fn new(mode: EvaluationMode, catalog: &'c dyn SharedCatalog) -> Self {
         EvaluatorPlanner {
             mode,
             catalog,
@@ -1056,7 +1056,7 @@ mod tests {
         let sink = logical.add_operator(BindingsOp::Sink);
         logical.add_flow(expq, sink);
 
-        let catalog = PartiqlCatalog::default();
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
         let mut planner = EvaluatorPlanner::new(EvaluationMode::Permissive, &catalog);
         let plan = planner.compile(&logical);
 
