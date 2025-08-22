@@ -20,10 +20,10 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-partiql-ast = { path = "../partiql-ast", version = "0.13.*" }
-partiql-catalog = { path = "../partiql-catalog", version = "0.13.*" }
-partiql-common = { path = "../partiql-common", version = "0.13.*" }
-partiql-types = { path = "../partiql-types", version = "0.13.*" }
+partiql-ast = { path = "../partiql-ast", version = "0.14.*" }
+partiql-catalog = { path = "../partiql-catalog", version = "0.14.*" }
+partiql-common = { path = "../partiql-common", version = "0.14.*" }
+partiql-types = { path = "../partiql-types", version = "0.14.*" }
 
 fnv = "1"
 indexmap = "2"
