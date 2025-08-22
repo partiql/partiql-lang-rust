@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+
+### Added
+
+### Removed
+
+## [0.14.0]
+### Changed
 - Changed many internal `HashMap`s to use `rustc-hash`'s `FxHash`
 - *BREAKING* Refactors `Catalog` to allow `Send`+`Sync` for re-use.
 
@@ -344,7 +351,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.14.0
 [0.13.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.13.0
 [0.12.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.12.0
 [0.11.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.11.0
