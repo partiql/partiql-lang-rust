@@ -7,6 +7,10 @@ env:
   CONFORMANCE_REPORT_NAME: cts_report.json
   COMPARISON_REPORT_NAME: cts-comparison-report.md
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   build:
     name: Build and Test
