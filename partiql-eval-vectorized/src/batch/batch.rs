@@ -1,0 +1,106 @@
+use crate::batch::{PVector, SourceTypeDef, TypeInfo};
+use crate::error::EvalError;
+
+/// Batch of columnar data
+#[derive(Debug, Clone)]
+pub struct VectorizedBatch {
+    columns: Vec<PVector>,
+    row_count: usize,
+    schema: SourceTypeDef,
+    /// Number of source columns (non-scratch)
+    source_column_count: usize,
+}
+
+impl VectorizedBatch {
+    /// Create new batch with pre-allocated columns
+    pub fn new(schema: SourceTypeDef, capacity: usize) -> Self {
+        let columns: Vec<PVector> = schema
+            .fields()
+            .iter()
+            .map(|f| PVector::new(f.type_info, capacity))
+            .collect();
+
+        let source_column_count = columns.len();
+
+        Self {
+            columns,
+            row_count: 0,
+            schema,
+            source_column_count,
+        }
+    }
+
+    /// Get number of rows in batch
+    pub fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    /// Set row count
+    pub fn set_row_count(&mut self, count: usize) {
+        self.row_count = count;
+    }
+
+    /// Get column by index
+    pub fn column(&self, idx: usize) -> Result<&PVector, EvalError> {
+        self.columns
+            .get(idx)
+            .ok_or(EvalError::InvalidColumnIndex(idx))
+    }
+
+    /// Get mutable column by index
+    pub fn column_mut(&mut self, idx: usize) -> Result<&mut PVector, EvalError> {
+        self.columns
+            .get_mut(idx)
+            .ok_or(EvalError::InvalidColumnIndex(idx))
+    }
+
+    /// Get schema
+    pub fn schema(&self) -> &SourceTypeDef {
+        &self.schema
+    }
+
+    /// Clear all columns, retaining capacity
+    pub fn clear(&mut self) {
+        for col in &mut self.columns {
+            match col {
+                PVector::Int64(v) => v.clear(),
+                PVector::Float64(v) => v.clear(),
+                PVector::Boolean(v) => v.clear(),
+                PVector::String(v) => v.clear(),
+            }
+        }
+        self.row_count = 0;
+    }
+
+    /// Allocate a scratch column for intermediate expression results
+    /// Returns the column index where the scratch column was added
+    pub fn add_scratch_column(&mut self, type_info: TypeInfo) -> usize {
+        let capacity = self.columns.first().map(|c| c.len()).unwrap_or(1024);
+        let scratch_col = PVector::new(type_info, capacity);
+        self.columns.push(scratch_col);
+        self.columns.len() - 1
+    }
+
+    /// Get the number of source columns (non-scratch)
+    pub fn source_column_count(&self) -> usize {
+        self.source_column_count
+    }
+
+    /// Get total number of columns (source + scratch)
+    pub fn total_column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Clear only scratch columns, keeping source columns
+    pub fn clear_scratch_columns(&mut self) {
+        // Only clear columns beyond source_column_count
+        for col in self.columns.iter_mut().skip(self.source_column_count) {
+            match col {
+                PVector::Int64(v) => v.clear(),
+                PVector::Float64(v) => v.clear(),
+                PVector::Boolean(v) => v.clear(),
+                PVector::String(v) => v.clear(),
+            }
+        }
+    }
+}

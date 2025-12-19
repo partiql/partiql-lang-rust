@@ -33,6 +33,7 @@ members = [
     "extension/partiql-extension-value-functions",
     "extension/partiql-extension-visualize",
     "extension/partiql-extension-csv",
+    "partiql-eval-vectorized",
 ]
 
 [profile.dev.build-override]

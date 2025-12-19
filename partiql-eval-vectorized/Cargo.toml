@@ -1,0 +1,20 @@
+[package]
+name = "partiql-eval-vectorized"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "partiql-metal-cli"
+path = "src/bin/main.rs"
+
+[dependencies]
+memmap2 = "0.9"
+partiql-logical = { path = "../partiql-logical" }
+partiql-ast-passes = { path = "../partiql-ast-passes" }
+partiql-catalog = { path = "../partiql-catalog" }
+partiql-eval = { path = "../partiql-eval" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
+partiql-parser = { path = "../partiql-parser" }
+
+[dev-dependencies]
+criterion = "0.5"
