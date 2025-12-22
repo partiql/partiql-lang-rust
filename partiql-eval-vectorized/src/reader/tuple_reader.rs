@@ -57,7 +57,7 @@ fn generate_mock_batch(
     schema: &SourceTypeDef,
     batch_size: usize,
 ) -> Result<VectorizedBatch, EvalError> {
-    use crate::batch::{PVector, TypeInfo};
+    use crate::batch::{PhysicalVectorEnum, LogicalType};
     
     let mut batch = VectorizedBatch::new(schema.clone(), batch_size);
     
@@ -66,8 +66,8 @@ fn generate_mock_batch(
         let vector = batch.column_mut(col_idx)?;
         
         match field.type_info {
-            TypeInfo::Int64 => {
-                if let PVector::Int64(v) = vector {
+            LogicalType::Int64 => {
+                if let PhysicalVectorEnum::Int64(v) = &mut vector.physical {
                     // Generate sequential integers for testing
                     // Column 0 (a): 0, 1, 2, ..., batch_size-1
                     // Column 1 (b): 100, 101, 102, ..., 100+batch_size-1
@@ -78,8 +78,8 @@ fn generate_mock_batch(
                     }
                 }
             }
-            TypeInfo::Float64 => {
-                if let PVector::Float64(v) = vector {
+            LogicalType::Float64 => {
+                if let PhysicalVectorEnum::Float64(v) = &mut vector.physical {
                     // Generate sequential floats for testing
                     let offset = col_idx as f64 * 100.0;
                     let slice = v.as_mut_slice();
@@ -88,8 +88,8 @@ fn generate_mock_batch(
                     }
                 }
             }
-            TypeInfo::Boolean => {
-                if let PVector::Boolean(v) = vector {
+            LogicalType::Boolean => {
+                if let PhysicalVectorEnum::Boolean(v) = &mut vector.physical {
                     // Alternate true/false
                     let slice = v.as_mut_slice();
                     for i in 0..batch_size {
@@ -97,8 +97,8 @@ fn generate_mock_batch(
                     }
                 }
             }
-            TypeInfo::String => {
-                if let PVector::String(v) = vector {
+            LogicalType::String => {
+                if let PhysicalVectorEnum::String(v) = &mut vector.physical {
                     // Generate simple string values
                     let slice = v.as_mut_slice();
                     for i in 0..batch_size {

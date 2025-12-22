@@ -1,4 +1,4 @@
-use crate::batch::{TypeInfo, VectorizedBatch};
+use crate::batch::{LogicalType, VectorizedBatch};
 use crate::error::EvalError;
 use std::fmt::Debug;
 
@@ -12,5 +12,5 @@ pub trait VectorizedExpr: Debug {
     fn eval(&self, batch: &mut VectorizedBatch, output_col: usize) -> Result<(), EvalError>;
 
     /// Get the output type of this expression
-    fn output_type(&self) -> TypeInfo;
+    fn output_type(&self) -> LogicalType;
 }

@@ -1,4 +1,4 @@
-use crate::batch::TypeInfo;
+use crate::batch::LogicalType;
 use crate::functions::VectorizedFn;
 use std::collections::HashMap;
 
@@ -40,7 +40,7 @@ pub enum OpType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FnKey {
     op_type: OpType,
-    signature: Vec<TypeInfo>,
+    signature: Vec<LogicalType>,
 }
 
 /// Registry of vectorized functions
@@ -67,7 +67,7 @@ impl VectorizedFnRegistry {
     pub fn register(
         &mut self,
         op: OpType,
-        signature: Vec<TypeInfo>,
+        signature: Vec<LogicalType>,
         func: Box<dyn VectorizedFn>,
     ) {
         let key = FnKey {
@@ -81,8 +81,8 @@ impl VectorizedFnRegistry {
     pub fn resolve_binary_op(
         &self,
         op: BinaryOp,
-        lhs_type: TypeInfo,
-        rhs_type: TypeInfo,
+        lhs_type: LogicalType,
+        rhs_type: LogicalType,
     ) -> Option<&dyn VectorizedFn> {
         let key = FnKey {
             op_type: OpType::Binary(op),
@@ -95,7 +95,7 @@ impl VectorizedFnRegistry {
     pub fn resolve_unary_op(
         &self,
         op: UnaryOp,
-        operand_type: TypeInfo,
+        operand_type: LogicalType,
     ) -> Option<&dyn VectorizedFn> {
         let key = FnKey {
             op_type: OpType::Unary(op),

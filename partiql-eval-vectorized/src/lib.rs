@@ -13,7 +13,7 @@ pub mod compiler;
 
 // Re-export commonly used types
 pub use error::{EvalError, PlanError};
-pub use batch::{Field, PVector, SourceTypeDef, TypeInfo, VectorizedBatch};
+pub use batch::{Field, Vector, SourceTypeDef, LogicalType, VectorizedBatch};
 pub use reader::{BatchReader, Tuple, TupleIteratorReader};
 pub use functions::{BinaryOp, FnId, OpType, UnaryOp, VectorizedFn, VectorizedFnRegistry};
 pub use expr::{ColumnRef, FnCallExpr, LiteralExpr, VectorizedExpr};

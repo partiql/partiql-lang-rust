@@ -1,11 +1,11 @@
-use crate::batch::TypeInfo;
+use crate::batch::LogicalType;
 use crate::error::PlanError;
 
 /// Field in a schema
 #[derive(Debug, Clone)]
 pub struct Field {
     pub name: String,
-    pub type_info: TypeInfo,
+    pub type_info: LogicalType,
 }
 
 /// Source schema definition
@@ -21,7 +21,7 @@ impl SourceTypeDef {
     }
 
     /// Get type for a column by name
-    pub fn get_type(&self, name: &str) -> Result<TypeInfo, PlanError> {
+    pub fn get_type(&self, name: &str) -> Result<LogicalType, PlanError> {
         self.fields
             .iter()
             .find(|f| f.name == name)

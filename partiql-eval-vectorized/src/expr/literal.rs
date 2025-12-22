@@ -1,17 +1,17 @@
-use crate::batch::{PVector, TypeInfo, VectorizedBatch};
+use crate::batch::{Vector, LogicalType, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::VectorizedExpr;
 
 /// Literal value expression - a constant that gets broadcast to all rows
 #[derive(Debug)]
 pub struct LiteralExpr {
-    value: PVector,
-    type_info: TypeInfo,
+    value: Vector,
+    type_info: LogicalType,
 }
 
 impl LiteralExpr {
     /// Create new literal expression
-    pub fn new(value: PVector, type_info: TypeInfo) -> Self {
+    pub fn new(value: Vector, type_info: LogicalType) -> Self {
         Self { value, type_info }
     }
 }
@@ -25,7 +25,7 @@ impl VectorizedExpr for LiteralExpr {
         Ok(())
     }
 
-    fn output_type(&self) -> TypeInfo {
+    fn output_type(&self) -> LogicalType {
         self.type_info
     }
 }

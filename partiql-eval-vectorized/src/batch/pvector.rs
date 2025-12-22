@@ -2,9 +2,9 @@ use crate::error::EvalError;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-/// Type information for columns
+/// Logical type information for SQL-like types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TypeInfo {
+pub enum LogicalType {
     Int64,
     Float64,
     Boolean,
@@ -55,10 +55,8 @@ impl<T> MmapSlice<T> {
 /// Buffers can be:
 /// - Owned: Heap-allocated immutable shared data via Arc<[T]>
 /// - Mmap: Memory-mapped read-only data
-/// - Constant: Single value logically repeated across all rows
 /// 
-/// The Arc wrapping happens at this level, enabling multiple TypedVector
-/// views to share the same underlying data without copying.
+/// Constants are now handled at the PhysicalVector level.
 #[derive(Debug, Clone)]
 pub enum Buffer<T> {
     /// Owned heap-allocated immutable shared slice
@@ -66,92 +64,48 @@ pub enum Buffer<T> {
     
     /// Memory-mapped read-only data
     Mmap(Arc<MmapSlice<T>>),
-    
-    /// Single constant value (logically repeated across rows)
-    /// Useful for literal values in expressions
-    Constant(T),
 }
 
-impl<T> Buffer<T> {
-    /// Get a slice view of the buffer's data
-    /// 
-    /// For Constant buffers, returns a slice of length 1 pointing to the constant value.
-    /// Callers should use TypedVector's offset/len to handle the logical repetition.
-    #[inline]
-    fn as_slice(&self) -> &[T] {
-        match self {
-            Buffer::Owned(arc) => arc.as_ref(),
-            Buffer::Mmap(mmap) => mmap.as_slice(),
-            Buffer::Constant(val) => {
-                // Return single-element slice
-                unsafe { std::slice::from_raw_parts(val, 1) }
-            }
-        }
-    }
-}
-
-/// TypedVector is a view into a Buffer with a specific offset and length.
+/// PhysicalVector represents the physical storage of columnar data.
 /// 
-/// The Buffer enum owns the Arc internally, so TypedVector no longer needs
-/// to wrap Buffer in Arc. This simplifies the ownership model:
-/// - Buffer owns the Arc<[T]> or Arc<MmapSlice<T>>
-/// - TypedVector owns a Buffer and defines a view (offset, len)
+/// Can be either:
+/// - Flat: Traditional columnar storage with buffer + offset + len
+/// - Constant: Single value logically repeated across all rows
 /// 
-/// # Memory Model
-/// ```text
-/// Buffer::Owned: Arc<[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]>
-///                         ↑←────────────→↑
-///                    TypedVector { offset: 2, len: 6 }
-///                    Represents: [2, 3, 4, 5, 6, 7]
-/// 
-/// Buffer::Constant: Single value 42
-///                   TypedVector { offset: 0, len: 1000 }
-///                   Logically represents: [42, 42, ..., 42] (1000 times)
-/// ```
+/// This is the generic representation that works with any type T.
 #[derive(Debug, Clone)]
-pub struct TypedVector<T> {
-    /// The underlying buffer (owns Arc internally)
-    buffer: Buffer<T>,
-    /// Starting offset into the buffer
-    offset: usize,
-    /// Number of elements in this view
-    len: usize,
+pub enum PhysicalVector<T> {
+    /// Flat vector with buffer, offset, and length
+    Flat {
+        buffer: Buffer<T>,
+        offset: usize,
+        len: usize,
+    },
+    
+    /// Constant vector with a single value repeated logically
+    Constant {
+        value: T,
+        len: usize,
+    },
 }
 
-impl<T: Clone> TypedVector<T> {
-    /// Create a new vector with a fresh owned buffer
-    pub fn new(capacity: usize) -> Self {
-        let data: Arc<[T]> = Arc::from(Vec::with_capacity(capacity));
-        Self {
-            buffer: Buffer::Owned(data),
-            offset: 0,
-            len: 0,
-        }
-    }
-
-    /// Create a vector from existing data (converts Vec to Arc<[T]>)
+impl<T: Clone> PhysicalVector<T> {
+    /// Create a flat vector from existing data
     pub fn from_vec(data: Vec<T>) -> Self {
         let len = data.len();
-        Self {
+        PhysicalVector::Flat {
             buffer: Buffer::Owned(Arc::from(data)),
             offset: 0,
             len,
         }
     }
 
-    /// Create a vector from a constant value
-    /// 
-    /// The constant value is stored once and logically repeated `len` times.
-    /// This is memory-efficient for literal expressions.
+    /// Create a constant vector
     pub fn from_constant(value: T, len: usize) -> Self {
-        Self {
-            buffer: Buffer::Constant(value),
-            offset: 0,
-            len,
-        }
+        PhysicalVector::Constant { value, len }
     }
 
-    /// Create a vector from memory-mapped data
+    /// Create a flat vector from memory-mapped data
     /// 
     /// # Safety
     /// - The mmap must contain valid data of type T
@@ -160,71 +114,43 @@ impl<T: Clone> TypedVector<T> {
     pub unsafe fn from_mmap(mmap: memmap2::Mmap) -> Result<Self, EvalError> {
         let mmap_slice = MmapSlice::new(mmap)?;
         let len = mmap_slice.as_slice().len();
-        Ok(Self {
+        Ok(PhysicalVector::Flat {
             buffer: Buffer::Mmap(Arc::new(mmap_slice)),
             offset: 0,
             len,
         })
     }
 
-    /// Get a read-only slice view of the data
-    /// 
-    /// Note: For Constant buffers, this will materialize the constant into an owned buffer
-    /// on first call. This trades memory for safe access.
-    pub fn as_slice(&self) -> &[T] {
-        match &self.buffer {
-            Buffer::Owned(arc) => &arc[self.offset..self.offset + self.len],
-            Buffer::Mmap(mmap) => {
-                let full_slice = mmap.as_slice();
-                &full_slice[self.offset..self.offset + self.len]
-            }
-            Buffer::Constant(_) => {
-                // Constant buffers cannot provide a safe slice without materialization
-                // This is a limitation of the current API
-                panic!("Cannot get slice from constant buffer - use as_mut_slice() to materialize or handle at higher level");
-            }
-        }
-    }
-    
-    /// Get a read-only slice view, materializing constant buffers if needed
-    /// 
-    /// This is a workaround for constant buffers. It will convert the buffer
-    /// to owned if it's a constant, then return the slice.
-    fn as_slice_materialized(&mut self) -> &[T] {
-        // Materialize constant buffers
-        if matches!(&self.buffer, Buffer::Constant(_)) {
-            let data: Vec<T> = vec![
-                match &self.buffer {
-                    Buffer::Constant(val) => val.clone(),
-                    _ => unreachable!(),
-                };
-                self.len
-            ];
-            self.buffer = Buffer::Owned(Arc::from(data));
-            self.offset = 0;
-        }
-        
-        // Now we can safely call as_slice
-        match &self.buffer {
-            Buffer::Owned(arc) => &arc[self.offset..self.offset + self.len],
-            Buffer::Mmap(mmap) => {
-                let full_slice = mmap.as_slice();
-                &full_slice[self.offset..self.offset + self.len]
-            }
-            Buffer::Constant(_) => unreachable!(),
+    /// Get the length of this vector
+    pub fn len(&self) -> usize {
+        match self {
+            PhysicalVector::Flat { len, .. } => *len,
+            PhysicalVector::Constant { len, .. } => *len,
         }
     }
 
-    /// Create a new view into a subset of this vector (zero-copy)
+    /// Check if this vector is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get a read-only slice view of the data
     /// 
-    /// # Panics
-    /// Panics if `start + len` exceeds the vector's length
-    pub fn slice(&self, start: usize, len: usize) -> Self {
-        assert!(start + len <= self.len, "Slice out of bounds");
-        Self {
-            buffer: self.buffer.clone(),
-            offset: self.offset + start,
-            len,
+    /// For Constant vectors, this will materialize the constant into a flat vector.
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            PhysicalVector::Flat { buffer, offset, len } => {
+                match buffer {
+                    Buffer::Owned(arc) => &arc[*offset..*offset + *len],
+                    Buffer::Mmap(mmap) => {
+                        let full_slice = mmap.as_slice();
+                        &full_slice[*offset..*offset + *len]
+                    }
+                }
+            }
+            PhysicalVector::Constant { .. } => {
+                panic!("Cannot get slice from constant vector - use as_mut_slice() to materialize");
+            }
         }
     }
 
@@ -234,234 +160,368 @@ impl<T: Clone> TypedVector<T> {
     /// - Panics if the buffer is memory-mapped (mmap buffers are read-only)
     /// 
     /// # Copy-on-Write
-    /// - For Owned buffers: If the buffer is shared (Arc strong count > 1), creates a copy
-    /// - For Constant buffers: Always creates an owned copy
+    /// - For Flat with Owned: If shared (Arc strong count > 1), creates a copy
+    /// - For Constant: Always materializes to Flat with owned buffer
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        match &mut self.buffer {
-            Buffer::Owned(arc) => {
-                // Copy-on-write: if buffer is shared, make our own copy
-                if Arc::strong_count(arc) > 1 {
-                    let data: Vec<T> = self.as_slice().to_vec();
-                    self.buffer = Buffer::Owned(Arc::from(data));
-                    self.offset = 0;
+        // Check if we need to materialize or COW
+        let needs_transform = match self {
+            PhysicalVector::Flat { buffer, .. } => {
+                matches!(buffer, Buffer::Owned(arc) if Arc::strong_count(arc) > 1)
+            }
+            PhysicalVector::Constant { .. } => true,
+        };
+
+        if needs_transform {
+            // Get the data we need before the transform
+            let (new_data, new_len) = match self {
+                PhysicalVector::Flat { buffer, offset, len } => {
+                    if let Buffer::Owned(arc) = buffer {
+                        let data = arc[*offset..*offset + *len].to_vec();
+                        (data, *len)
+                    } else {
+                        unreachable!()
+                    }
                 }
-                
-                // Now we have exclusive access
-                let slice = Arc::get_mut(match &mut self.buffer {
-                    Buffer::Owned(a) => a,
-                    _ => unreachable!(),
-                })
-                .expect("Buffer should not be shared after COW");
-                
-                &mut slice[self.offset..self.offset + self.len]
-            }
-            Buffer::Mmap(_) => {
-                panic!("Cannot get mutable access to memory-mapped buffer");
-            }
-            Buffer::Constant(val) => {
-                // Copy-on-write: expand constant to owned buffer
-                let data: Vec<T> = vec![val.clone(); self.len];
-                self.buffer = Buffer::Owned(Arc::from(data));
-                self.offset = 0;
-                // Recurse to get mutable slice from newly created owned buffer
-                self.as_mut_slice()
-            }
+                PhysicalVector::Constant { value, len } => {
+                    (vec![value.clone(); *len], *len)
+                }
+            };
+
+            // Transform to owned flat vector
+            *self = PhysicalVector::Flat {
+                buffer: Buffer::Owned(Arc::from(new_data)),
+                offset: 0,
+                len: new_len,
+            };
         }
-    }
 
-    /// Get the length of this vector view
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Check if this vector view is empty
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Clear the vector, setting length to 0
-    /// 
-    /// For shared or mmap buffers, this creates a new empty owned buffer.
-    pub fn clear(&mut self) {
-        match &mut self.buffer {
-            Buffer::Owned(arc) => {
-                if Arc::strong_count(arc) > 1 {
-                    // Buffer is shared, create new empty buffer
-                    self.buffer = Buffer::Owned(Arc::from(Vec::<T>::new()));
-                } else {
-                    // We have exclusive access, can clear in place
-                    if let Some(slice_mut) = Arc::get_mut(arc) {
-                        // Arc<[T]> cannot be resized, so create new empty one
-                        self.buffer = Buffer::Owned(Arc::from(Vec::<T>::new()));
+        // Now we can safely get mutable access
+        match self {
+            PhysicalVector::Flat { buffer, offset, len } => {
+                match buffer {
+                    Buffer::Owned(arc) => {
+                        let slice = Arc::get_mut(arc)
+                            .expect("Buffer should not be shared after COW");
+                        &mut slice[*offset..*offset + *len]
+                    }
+                    Buffer::Mmap(_) => {
+                        panic!("Cannot get mutable access to memory-mapped buffer");
                     }
                 }
             }
-            Buffer::Mmap(_) => {
-                // Cannot clear mmap, create new empty buffer
-                self.buffer = Buffer::Owned(Arc::from(Vec::<T>::new()));
-            }
-            Buffer::Constant(_) => {
-                // Cannot clear constant, create new empty buffer
-                self.buffer = Buffer::Owned(Arc::from(Vec::<T>::new()));
+            PhysicalVector::Constant { .. } => {
+                unreachable!("Should have been transformed to Flat above")
             }
         }
-        self.offset = 0;
-        self.len = 0;
+    }
+
+    /// Create a new view into a subset of this vector (zero-copy for Flat)
+    /// 
+    /// # Panics
+    /// Panics if `start + len` exceeds the vector's length
+    pub fn slice(&self, start: usize, len: usize) -> Self {
+        assert!(start + len <= self.len(), "Slice out of bounds");
+        
+        match self {
+            PhysicalVector::Flat { buffer, offset, .. } => {
+                PhysicalVector::Flat {
+                    buffer: buffer.clone(),
+                    offset: offset + start,
+                    len,
+                }
+            }
+            PhysicalVector::Constant { value, .. } => {
+                PhysicalVector::Constant {
+                    value: value.clone(),
+                    len,
+                }
+            }
+        }
+    }
+
+    /// Clear the vector by setting its length to 0
+    /// 
+    /// For Flat vectors with owned buffers, this maintains the capacity.
+    /// For Constant vectors, just sets len to 0.
+    pub fn clear(&mut self) {
+        match self {
+            PhysicalVector::Flat { len, .. } => {
+                *len = 0;
+            }
+            PhysicalVector::Constant { len, .. } => {
+                *len = 0;
+            }
+        }
     }
 }
 
-impl<T: Clone + Default> TypedVector<T> {
-    /// Create a new vector with default-initialized elements
+impl<T: Clone + Default> PhysicalVector<T> {
+    /// Create a flat vector with default-initialized elements
     pub fn with_default(size: usize) -> Self {
         Self::from_vec(vec![T::default(); size])
     }
 }
 
-/// Physical vector - type-erased columnar storage
+/// Type-erased physical vector
 /// 
-/// `PVector` is an enum that wraps `TypedVector<T>` for different data types,
-/// providing a type-erased interface for working with columns of different types.
-/// 
-/// The underlying data is stored in `Buffer` instances which handle Arc sharing,
-/// allowing for efficient zero-copy operations between operators.
+/// Wraps PhysicalVector<T> for different concrete types, providing
+/// a type-erased interface for working with columns of different types.
 #[derive(Debug, Clone)]
-pub enum PVector {
-    Int64(TypedVector<i64>),
-    Float64(TypedVector<f64>),
-    Boolean(TypedVector<bool>),
-    String(TypedVector<String>),
+pub enum PhysicalVectorEnum {
+    Int64(PhysicalVector<i64>),
+    Float64(PhysicalVector<f64>),
+    Boolean(PhysicalVector<bool>),
+    String(PhysicalVector<String>),
 }
 
-impl PVector {
-    /// Create new vector of given type pre-allocated with size
-    /// All elements initialized to default values (0, false, empty string)
-    pub fn new(type_info: TypeInfo, size: usize) -> Self {
-        match type_info {
-            TypeInfo::Int64 => PVector::Int64(TypedVector::with_default(size)),
-            TypeInfo::Float64 => PVector::Float64(TypedVector::with_default(size)),
-            TypeInfo::Boolean => PVector::Boolean(TypedVector::with_default(size)),
-            TypeInfo::String => PVector::String(TypedVector::with_default(size)),
+impl PhysicalVectorEnum {
+    /// Create a new vector of the given logical type
+    pub fn new(ty: LogicalType, size: usize) -> Self {
+        match ty {
+            LogicalType::Int64 => PhysicalVectorEnum::Int64(PhysicalVector::with_default(size)),
+            LogicalType::Float64 => PhysicalVectorEnum::Float64(PhysicalVector::with_default(size)),
+            LogicalType::Boolean => PhysicalVectorEnum::Boolean(PhysicalVector::with_default(size)),
+            LogicalType::String => PhysicalVectorEnum::String(PhysicalVector::with_default(size)),
         }
     }
 
-    /// Get number of elements
+    /// Get the logical type of this vector
+    pub fn logical_type(&self) -> LogicalType {
+        match self {
+            PhysicalVectorEnum::Int64(_) => LogicalType::Int64,
+            PhysicalVectorEnum::Float64(_) => LogicalType::Float64,
+            PhysicalVectorEnum::Boolean(_) => LogicalType::Boolean,
+            PhysicalVectorEnum::String(_) => LogicalType::String,
+        }
+    }
+
+    /// Get the length of this vector
     pub fn len(&self) -> usize {
         match self {
-            PVector::Int64(v) => v.len(),
-            PVector::Float64(v) => v.len(),
-            PVector::Boolean(v) => v.len(),
-            PVector::String(v) => v.len(),
+            PhysicalVectorEnum::Int64(v) => v.len(),
+            PhysicalVectorEnum::Float64(v) => v.len(),
+            PhysicalVectorEnum::Boolean(v) => v.len(),
+            PhysicalVectorEnum::String(v) => v.len(),
         }
     }
 
-    /// Check if empty
+    /// Check if this vector is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Copy data from another vector
-    pub fn copy_from(&mut self, other: &PVector) -> Result<(), EvalError> {
-        match (self, other) {
-            (PVector::Int64(dst), PVector::Int64(src)) => {
-                let dst_slice = dst.as_mut_slice();
-                let src_slice = src.as_slice();
-                dst_slice.copy_from_slice(src_slice);
-                Ok(())
-            }
-            (PVector::Float64(dst), PVector::Float64(src)) => {
-                let dst_slice = dst.as_mut_slice();
-                let src_slice = src.as_slice();
-                dst_slice.copy_from_slice(src_slice);
-                Ok(())
-            }
-            (PVector::Boolean(dst), PVector::Boolean(src)) => {
-                let dst_slice = dst.as_mut_slice();
-                let src_slice = src.as_slice();
-                dst_slice.copy_from_slice(src_slice);
-                Ok(())
-            }
-            (PVector::String(dst), PVector::String(src)) => {
-                let dst_slice = dst.as_mut_slice();
-                let src_slice = src.as_slice();
-                dst_slice.clone_from_slice(src_slice);
-                Ok(())
-            }
-            _ => Err(EvalError::TypeMismatch),
-        }
-    }
-
-    /// Get type information
-    pub fn type_info(&self) -> TypeInfo {
-        match self {
-            PVector::Int64(_) => TypeInfo::Int64,
-            PVector::Float64(_) => TypeInfo::Float64,
-            PVector::Boolean(_) => TypeInfo::Boolean,
-            PVector::String(_) => TypeInfo::String,
-        }
-    }
-
     /// Get as Int64 vector if possible
-    pub fn as_int64(&self) -> Option<&TypedVector<i64>> {
+    pub fn as_int64(&self) -> Option<&PhysicalVector<i64>> {
         match self {
-            PVector::Int64(v) => Some(v),
+            PhysicalVectorEnum::Int64(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get as Float64 vector if possible
-    pub fn as_float64(&self) -> Option<&TypedVector<f64>> {
+    pub fn as_float64(&self) -> Option<&PhysicalVector<f64>> {
         match self {
-            PVector::Float64(v) => Some(v),
+            PhysicalVectorEnum::Float64(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get as Boolean vector if possible
-    pub fn as_boolean(&self) -> Option<&TypedVector<bool>> {
+    pub fn as_boolean(&self) -> Option<&PhysicalVector<bool>> {
         match self {
-            PVector::Boolean(v) => Some(v),
+            PhysicalVectorEnum::Boolean(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get as String vector if possible
-    pub fn as_string(&self) -> Option<&TypedVector<String>> {
+    pub fn as_string(&self) -> Option<&PhysicalVector<String>> {
         match self {
-            PVector::String(v) => Some(v),
+            PhysicalVectorEnum::String(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get mutable Int64 vector if possible
-    pub fn as_int64_mut(&mut self) -> Option<&mut TypedVector<i64>> {
+    pub fn as_int64_mut(&mut self) -> Option<&mut PhysicalVector<i64>> {
         match self {
-            PVector::Int64(v) => Some(v),
+            PhysicalVectorEnum::Int64(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get mutable Float64 vector if possible
-    pub fn as_float64_mut(&mut self) -> Option<&mut TypedVector<f64>> {
+    pub fn as_float64_mut(&mut self) -> Option<&mut PhysicalVector<f64>> {
         match self {
-            PVector::Float64(v) => Some(v),
+            PhysicalVectorEnum::Float64(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get mutable Boolean vector if possible
-    pub fn as_boolean_mut(&mut self) -> Option<&mut TypedVector<bool>> {
+    pub fn as_boolean_mut(&mut self) -> Option<&mut PhysicalVector<bool>> {
         match self {
-            PVector::Boolean(v) => Some(v),
+            PhysicalVectorEnum::Boolean(v) => Some(v),
             _ => None,
         }
     }
 
     /// Get mutable String vector if possible
-    pub fn as_string_mut(&mut self) -> Option<&mut TypedVector<String>> {
+    pub fn as_string_mut(&mut self) -> Option<&mut PhysicalVector<String>> {
         match self {
-            PVector::String(v) => Some(v),
+            PhysicalVectorEnum::String(v) => Some(v),
             _ => None,
         }
+    }
+}
+
+/// Vector is the primary public API for columnar data
+/// 
+/// Combines logical type information with physical storage representation.
+/// This is what operators and expressions work with.
+#[derive(Debug, Clone)]
+pub struct Vector {
+    /// Logical type (SQL-like type)
+    pub ty: LogicalType,
+    
+    /// Physical representation
+    pub physical: PhysicalVectorEnum,
+}
+
+impl Vector {
+    /// Create a new vector with the given logical type and size
+    pub fn new(ty: LogicalType, size: usize) -> Self {
+        Self {
+            ty,
+            physical: PhysicalVectorEnum::new(ty, size),
+        }
+    }
+
+    /// Create an Int64 vector from data
+    pub fn from_i64(data: Vec<i64>) -> Self {
+        Self {
+            ty: LogicalType::Int64,
+            physical: PhysicalVectorEnum::Int64(PhysicalVector::from_vec(data)),
+        }
+    }
+
+    /// Create a Float64 vector from data
+    pub fn from_f64(data: Vec<f64>) -> Self {
+        Self {
+            ty: LogicalType::Float64,
+            physical: PhysicalVectorEnum::Float64(PhysicalVector::from_vec(data)),
+        }
+    }
+
+    /// Create a Boolean vector from data
+    pub fn from_bool(data: Vec<bool>) -> Self {
+        Self {
+            ty: LogicalType::Boolean,
+            physical: PhysicalVectorEnum::Boolean(PhysicalVector::from_vec(data)),
+        }
+    }
+
+    /// Create a String vector from data
+    pub fn from_string(data: Vec<String>) -> Self {
+        Self {
+            ty: LogicalType::String,
+            physical: PhysicalVectorEnum::String(PhysicalVector::from_vec(data)),
+        }
+    }
+
+    /// Create a constant Int64 vector
+    pub fn constant_i64(value: i64, len: usize) -> Self {
+        Self {
+            ty: LogicalType::Int64,
+            physical: PhysicalVectorEnum::Int64(PhysicalVector::from_constant(value, len)),
+        }
+    }
+
+    /// Create a constant Float64 vector
+    pub fn constant_f64(value: f64, len: usize) -> Self {
+        Self {
+            ty: LogicalType::Float64,
+            physical: PhysicalVectorEnum::Float64(PhysicalVector::from_constant(value, len)),
+        }
+    }
+
+    /// Create a constant Boolean vector
+    pub fn constant_bool(value: bool, len: usize) -> Self {
+        Self {
+            ty: LogicalType::Boolean,
+            physical: PhysicalVectorEnum::Boolean(PhysicalVector::from_constant(value, len)),
+        }
+    }
+
+    /// Create a constant String vector
+    pub fn constant_string(value: String, len: usize) -> Self {
+        Self {
+            ty: LogicalType::String,
+            physical: PhysicalVectorEnum::String(PhysicalVector::from_constant(value, len)),
+        }
+    }
+
+    /// Get the length of this vector
+    pub fn len(&self) -> usize {
+        self.physical.len()
+    }
+
+    /// Check if this vector is empty
+    pub fn is_empty(&self) -> bool {
+        self.physical.is_empty()
+    }
+
+    /// Get the logical type
+    pub fn logical_type(&self) -> LogicalType {
+        self.ty
+    }
+
+    /// Copy data from another vector into this one
+    /// 
+    /// # Errors
+    /// Returns an error if the types don't match or lengths differ
+    pub fn copy_from(&mut self, other: &Vector) -> Result<(), EvalError> {
+        if self.ty != other.ty {
+            return Err(EvalError::General(format!(
+                "Type mismatch: cannot copy {:?} into {:?}",
+                other.ty, self.ty
+            )));
+        }
+
+        if self.len() != other.len() {
+            return Err(EvalError::General(format!(
+                "Length mismatch: cannot copy {} elements into vector of length {}",
+                other.len(),
+                self.len()
+            )));
+        }
+
+        // Copy data based on type
+        match (&mut self.physical, &other.physical) {
+            (PhysicalVectorEnum::Int64(dest), PhysicalVectorEnum::Int64(src)) => {
+                let dest_slice = dest.as_mut_slice();
+                let src_slice = src.as_slice();
+                dest_slice.copy_from_slice(src_slice);
+            }
+            (PhysicalVectorEnum::Float64(dest), PhysicalVectorEnum::Float64(src)) => {
+                let dest_slice = dest.as_mut_slice();
+                let src_slice = src.as_slice();
+                dest_slice.copy_from_slice(src_slice);
+            }
+            (PhysicalVectorEnum::Boolean(dest), PhysicalVectorEnum::Boolean(src)) => {
+                let dest_slice = dest.as_mut_slice();
+                let src_slice = src.as_slice();
+                dest_slice.copy_from_slice(src_slice);
+            }
+            (PhysicalVectorEnum::String(dest), PhysicalVectorEnum::String(src)) => {
+                let dest_slice = dest.as_mut_slice();
+                let src_slice = src.as_slice();
+                dest_slice.clone_from_slice(src_slice);
+            }
+            _ => unreachable!("Type mismatch should have been caught earlier"),
+        }
+
+        Ok(())
     }
 }
 
@@ -470,58 +530,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_constant_buffer() {
-        let mut vec = TypedVector::from_constant(42, 100);
+    fn test_flat_vector() {
+        let vec = Vector::from_i64(vec![1, 2, 3, 4, 5]);
+        assert_eq!(vec.len(), 5);
+        assert_eq!(vec.logical_type(), LogicalType::Int64);
+        
+        if let PhysicalVectorEnum::Int64(pv) = &vec.physical {
+            assert_eq!(pv.as_slice(), &[1, 2, 3, 4, 5]);
+        } else {
+            panic!("Expected Int64 vector");
+        }
+    }
+
+    #[test]
+    fn test_constant_vector() {
+        let vec = Vector::constant_i64(42, 100);
         assert_eq!(vec.len(), 100);
-        // Materialize constant before reading
-        let slice = vec.as_slice_materialized();
-        assert_eq!(slice[0], 42);
-        assert_eq!(slice[99], 42);
+        assert_eq!(vec.logical_type(), LogicalType::Int64);
+        
+        if let PhysicalVectorEnum::Int64(pv) = &vec.physical {
+            assert!(matches!(pv, PhysicalVector::Constant { value: 42, len: 100 }));
+        } else {
+            panic!("Expected Int64 vector");
+        }
     }
 
     #[test]
-    fn test_constant_cow() {
-        let mut vec = TypedVector::from_constant(42, 10);
-        // as_mut_slice will materialize the constant
-        let slice = vec.as_mut_slice();
-        slice[0] = 100;
+    fn test_constant_materialization() {
+        let mut vec = Vector::constant_i64(42, 10);
         
-        // After COW (materialization), first element should be changed
-        assert_eq!(vec.as_slice()[0], 100);
-        // Rest should still be 42
-        assert_eq!(vec.as_slice()[1], 42);
-        assert_eq!(vec.as_slice()[9], 42);
-    }
-
-    #[test]
-    fn test_owned_buffer_sharing() {
-        let vec1 = TypedVector::from_vec(vec![1, 2, 3, 4, 5]);
-        let vec2 = vec1.clone();
-        
-        // Both should see same data
-        assert_eq!(vec1.as_slice(), &[1, 2, 3, 4, 5]);
-        assert_eq!(vec2.as_slice(), &[1, 2, 3, 4, 5]);
-    }
-
-    #[test]
-    fn test_owned_buffer_cow() {
-        let vec1 = TypedVector::from_vec(vec![1, 2, 3, 4, 5]);
-        let mut vec2 = vec1.clone();
-        
-        // Mutating vec2 should trigger COW
-        vec2.as_mut_slice()[0] = 100;
-        
-        // vec1 unchanged
-        assert_eq!(vec1.as_slice()[0], 1);
-        // vec2 changed
-        assert_eq!(vec2.as_slice()[0], 100);
+        if let PhysicalVectorEnum::Int64(pv) = &mut vec.physical {
+            let slice = pv.as_mut_slice();
+            slice[0] = 100;
+            
+            assert_eq!(slice[0], 100);
+            assert_eq!(slice[1], 42);
+        } else {
+            panic!("Expected Int64 vector");
+        }
     }
 
     #[test]
     fn test_slice_operation() {
-        let vec = TypedVector::from_vec(vec![1, 2, 3, 4, 5]);
-        let sliced = vec.slice(1, 3);
+        let vec = Vector::from_i64(vec![1, 2, 3, 4, 5]);
         
-        assert_eq!(sliced.as_slice(), &[2, 3, 4]);
+        if let PhysicalVectorEnum::Int64(pv) = &vec.physical {
+            let sliced = pv.slice(1, 3);
+            assert_eq!(sliced.as_slice(), &[2, 3, 4]);
+        } else {
+            panic!("Expected Int64 vector");
+        }
+    }
+
+    #[test]
+    fn test_cow_on_shared() {
+        let vec1 = Vector::from_i64(vec![1, 2, 3, 4, 5]);
+        let mut vec2 = vec1.clone();
+        
+        if let PhysicalVectorEnum::Int64(pv) = &mut vec2.physical {
+            pv.as_mut_slice()[0] = 100;
+        }
+        
+        // vec1 should be unchanged
+        if let PhysicalVectorEnum::Int64(pv) = &vec1.physical {
+            assert_eq!(pv.as_slice()[0], 1);
+        }
+        
+        // vec2 should be changed
+        if let PhysicalVectorEnum::Int64(pv) = &vec2.physical {
+            assert_eq!(pv.as_slice()[0], 100);
+        }
     }
 }

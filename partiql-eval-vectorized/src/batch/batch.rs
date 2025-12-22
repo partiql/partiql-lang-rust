@@ -1,10 +1,10 @@
-use crate::batch::{PVector, SourceTypeDef, TypeInfo};
+use crate::batch::{Vector, SourceTypeDef, LogicalType, PhysicalVectorEnum};
 use crate::error::EvalError;
 
 /// Batch of columnar data
 #[derive(Debug, Clone)]
 pub struct VectorizedBatch {
-    columns: Vec<PVector>,
+    columns: Vec<Vector>,
     row_count: usize,
     schema: SourceTypeDef,
     /// Number of source columns (non-scratch)
@@ -14,10 +14,10 @@ pub struct VectorizedBatch {
 impl VectorizedBatch {
     /// Create new batch with pre-allocated columns
     pub fn new(schema: SourceTypeDef, capacity: usize) -> Self {
-        let columns: Vec<PVector> = schema
+        let columns: Vec<Vector> = schema
             .fields()
             .iter()
-            .map(|f| PVector::new(f.type_info, capacity))
+            .map(|f| Vector::new(f.type_info, capacity))
             .collect();
 
         let source_column_count = columns.len();
@@ -41,14 +41,14 @@ impl VectorizedBatch {
     }
 
     /// Get column by index
-    pub fn column(&self, idx: usize) -> Result<&PVector, EvalError> {
+    pub fn column(&self, idx: usize) -> Result<&Vector, EvalError> {
         self.columns
             .get(idx)
             .ok_or(EvalError::InvalidColumnIndex(idx))
     }
 
     /// Get mutable column by index
-    pub fn column_mut(&mut self, idx: usize) -> Result<&mut PVector, EvalError> {
+    pub fn column_mut(&mut self, idx: usize) -> Result<&mut Vector, EvalError> {
         self.columns
             .get_mut(idx)
             .ok_or(EvalError::InvalidColumnIndex(idx))
@@ -62,11 +62,11 @@ impl VectorizedBatch {
     /// Clear all columns, retaining capacity
     pub fn clear(&mut self) {
         for col in &mut self.columns {
-            match col {
-                PVector::Int64(v) => v.clear(),
-                PVector::Float64(v) => v.clear(),
-                PVector::Boolean(v) => v.clear(),
-                PVector::String(v) => v.clear(),
+            match &mut col.physical {
+                PhysicalVectorEnum::Int64(v) => v.clear(),
+                PhysicalVectorEnum::Float64(v) => v.clear(),
+                PhysicalVectorEnum::Boolean(v) => v.clear(),
+                PhysicalVectorEnum::String(v) => v.clear(),
             }
         }
         self.row_count = 0;
@@ -74,9 +74,9 @@ impl VectorizedBatch {
 
     /// Allocate a scratch column for intermediate expression results
     /// Returns the column index where the scratch column was added
-    pub fn add_scratch_column(&mut self, type_info: TypeInfo) -> usize {
+    pub fn add_scratch_column(&mut self, type_info: LogicalType) -> usize {
         let capacity = self.columns.first().map(|c| c.len()).unwrap_or(1024);
-        let scratch_col = PVector::new(type_info, capacity);
+        let scratch_col = Vector::new(type_info, capacity);
         self.columns.push(scratch_col);
         self.columns.len() - 1
     }
@@ -95,11 +95,11 @@ impl VectorizedBatch {
     pub fn clear_scratch_columns(&mut self) {
         // Only clear columns beyond source_column_count
         for col in self.columns.iter_mut().skip(self.source_column_count) {
-            match col {
-                PVector::Int64(v) => v.clear(),
-                PVector::Float64(v) => v.clear(),
-                PVector::Boolean(v) => v.clear(),
-                PVector::String(v) => v.clear(),
+            match &mut col.physical {
+                PhysicalVectorEnum::Int64(v) => v.clear(),
+                PhysicalVectorEnum::Float64(v) => v.clear(),
+                PhysicalVectorEnum::Boolean(v) => v.clear(),
+                PhysicalVectorEnum::String(v) => v.clear(),
             }
         }
     }

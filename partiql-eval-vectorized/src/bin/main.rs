@@ -123,17 +123,17 @@ fn compile(
 fn compile_vectorized(
     logical: &LogicalPlan<partiql_logical::BindingsOp>,
 ) -> partiql_eval_vectorized::VectorizedPlan {
-    use partiql_eval_vectorized::{BatchReader, Field, SourceTypeDef, Tuple, TupleIteratorReader, TypeInfo};
+    use partiql_eval_vectorized::{BatchReader, Field, SourceTypeDef, Tuple, TupleIteratorReader, LogicalType};
     
     // Create a dummy schema for the "data" table
     let schema = SourceTypeDef::new(vec![
         Field {
             name: "a".to_string(),
-            type_info: TypeInfo::Int64,
+            type_info: LogicalType::Int64,
         },
         Field {
             name: "b".to_string(),
-            type_info: TypeInfo::Int64,
+            type_info: LogicalType::Int64,
         },
     ]);
     

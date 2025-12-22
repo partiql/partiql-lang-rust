@@ -1,4 +1,4 @@
-use crate::batch::{PVector, TypeInfo};
+use crate::batch::{Vector, LogicalType};
 use crate::error::EvalError;
 use std::fmt::Debug;
 
@@ -7,7 +7,7 @@ use std::fmt::Debug;
 pub struct FnId {
     pub name: &'static str,
     pub id: u32,
-    pub signature: Vec<TypeInfo>,
+    pub signature: Vec<LogicalType>,
 }
 
 /// Vectorized function that operates on column vectors
@@ -20,11 +20,11 @@ pub trait VectorizedFn: Debug {
     /// Preconditions:
     /// - output.len() == inputs[0].len() (all inputs same length)
     /// - output type matches expected output type
-    fn execute(&self, inputs: &[&PVector], output: &mut PVector) -> Result<(), EvalError>;
+    fn execute(&self, inputs: &[&Vector], output: &mut Vector) -> Result<(), EvalError>;
 
     /// Get function identifier
     fn fn_id(&self) -> FnId;
 
     /// Get output type given input types
-    fn output_type(&self, input_types: &[TypeInfo]) -> TypeInfo;
+    fn output_type(&self, input_types: &[LogicalType]) -> LogicalType;
 }

@@ -1,4 +1,4 @@
-use crate::batch::{Field, PVector, SourceTypeDef, TypeInfo, TypedVector};
+use crate::batch::{Field, Vector, SourceTypeDef, LogicalType, PhysicalVector, PhysicalVectorEnum};
 use crate::compiler::VectorizedPlan;
 use crate::error::PlanError;
 use crate::expr::{ColumnRef, FnCallExpr, LiteralExpr};
@@ -96,29 +96,29 @@ impl Compiler {
         let scratch_col_and = 6;           // For final AND result
         
         // Build: a > 500
-        let col_a = Box::new(ColumnRef::new(0, TypeInfo::Int64)); // Column 'a' at index 0
+        let col_a = Box::new(ColumnRef::new(0, LogicalType::Int64)); // Column 'a' at index 0
         let literal_500 = Box::new(LiteralExpr::new(
-            PVector::Int64(TypedVector::from_vec(vec![500])),
-            TypeInfo::Int64
+            Vector::from_i64(vec![500]),
+            LogicalType::Int64
         ));
         let a_gt_500 = Box::new(FnCallExpr::new(
             Box::new(VecGtInt64),
             vec![col_a, literal_500],
             vec![0, scratch_col_literal_500], // Input columns: a is at 0, literal writes to scratch 2
-            TypeInfo::Boolean,
+            LogicalType::Boolean,
         ));
 
         // Build: b < 100
-        let col_b = Box::new(ColumnRef::new(1, TypeInfo::Int64)); // Column 'b' at index 1
+        let col_b = Box::new(ColumnRef::new(1, LogicalType::Int64)); // Column 'b' at index 1
         let literal_100 = Box::new(LiteralExpr::new(
-            PVector::Int64(TypedVector::from_vec(vec![100])),
-            TypeInfo::Int64
+            Vector::from_i64(vec![100]),
+            LogicalType::Int64
         ));
         let b_lt_100 = Box::new(FnCallExpr::new(
             Box::new(VecLtInt64),
             vec![col_b, literal_100],
             vec![1, scratch_col_literal_100], // Input columns: b is at 1, literal writes to scratch 4
-            TypeInfo::Boolean,
+            LogicalType::Boolean,
         ));
 
         // Build: (a > 500) AND (b < 100)
@@ -126,24 +126,24 @@ impl Compiler {
             Box::new(VecAnd),
             vec![a_gt_500, b_lt_100],
             vec![scratch_col_a_gt_500, scratch_col_b_lt_100], // Read from previous results
-            TypeInfo::Boolean,
+            LogicalType::Boolean,
         ));
 
         // Create FILTER operator - it will evaluate predicate which writes to scratch_col_and
         let filter = VectorizedFilter::new(Box::new(scan), predicate);
 
         // Step 3: Create PROJECT for columns a, b
-        let proj_col_a = Box::new(ColumnRef::new(0, TypeInfo::Int64)); // Column 'a'
-        let proj_col_b = Box::new(ColumnRef::new(1, TypeInfo::Int64)); // Column 'b'
+        let proj_col_a = Box::new(ColumnRef::new(0, LogicalType::Int64)); // Column 'a'
+        let proj_col_b = Box::new(ColumnRef::new(1, LogicalType::Int64)); // Column 'b'
         
         let output_schema = SourceTypeDef::new(vec![
             Field {
                 name: "a".to_string(),
-                type_info: TypeInfo::Int64,
+                type_info: LogicalType::Int64,
             },
             Field {
                 name: "b".to_string(),
-                type_info: TypeInfo::Int64,
+                type_info: LogicalType::Int64,
             },
         ]);
 
@@ -164,7 +164,7 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::batch::{Field, TypeInfo};
+    use crate::batch::{Field, LogicalType};
     use crate::reader::{Tuple, TupleIteratorReader};
 
     #[test]
@@ -173,11 +173,11 @@ mod tests {
         let schema = SourceTypeDef::new(vec![
             Field {
                 name: "a".to_string(),
-                type_info: TypeInfo::Int64,
+                type_info: LogicalType::Int64,
             },
             Field {
                 name: "b".to_string(),
-                type_info: TypeInfo::Int64,
+                type_info: LogicalType::Int64,
             },
         ]);
 

@@ -1,4 +1,4 @@
-use crate::batch::{TypeInfo, VectorizedBatch};
+use crate::batch::{LogicalType, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::VectorizedExpr;
 use crate::functions::VectorizedFn;
@@ -15,7 +15,7 @@ pub struct FnCallExpr {
     inputs: Vec<Box<dyn VectorizedExpr>>,
     /// Column indices where input expressions will write their results
     input_cols: Vec<usize>,
-    output_type: TypeInfo,
+    output_type: LogicalType,
 }
 
 impl FnCallExpr {
@@ -24,7 +24,7 @@ impl FnCallExpr {
         function: Box<dyn VectorizedFn>,
         inputs: Vec<Box<dyn VectorizedExpr>>,
         input_cols: Vec<usize>,
-        output_type: TypeInfo,
+        output_type: LogicalType,
     ) -> Self {
         assert_eq!(
             inputs.len(),
@@ -47,7 +47,7 @@ impl VectorizedExpr for FnCallExpr {
             input_expr.eval(batch, input_col)?;
         }
 
-        // Gather cloned input columns (cheap with Arc-based PVector)
+        // Gather cloned input columns (cheap with Arc-based Vector)
         // This avoids borrow checker issues when we need mutable access to output
         let input_vecs: Vec<_> = self.input_cols.iter()
             .map(|&col_idx| batch.column(col_idx).map(|c| c.clone()))
@@ -63,7 +63,7 @@ impl VectorizedExpr for FnCallExpr {
         Ok(())
     }
 
-    fn output_type(&self) -> TypeInfo {
+    fn output_type(&self) -> LogicalType {
         self.output_type
     }
 }
