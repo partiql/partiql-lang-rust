@@ -4,4 +4,4 @@ mod batch;
 
 pub use pvector::{Buffer, LogicalType, PhysicalVector, PhysicalVectorEnum, Vector};
 pub use source_type::{Field, SourceTypeDef};
-pub use batch::VectorizedBatch;
+pub use batch::{SelectionVector, VectorizedBatch};

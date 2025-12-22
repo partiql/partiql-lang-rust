@@ -1,6 +1,13 @@
 use crate::batch::{Vector, SourceTypeDef, LogicalType, PhysicalVectorEnum};
 use crate::error::EvalError;
 
+/// Selection vector for filtered batches
+/// Maps logical row indices to physical row indices
+#[derive(Debug, Clone)]
+pub struct SelectionVector {
+    pub indices: Vec<usize>,
+}
+
 /// Batch of columnar data
 #[derive(Debug, Clone)]
 pub struct VectorizedBatch {
@@ -9,6 +16,8 @@ pub struct VectorizedBatch {
     schema: SourceTypeDef,
     /// Number of source columns (non-scratch)
     source_column_count: usize,
+    /// Optional selection vector for filtering
+    selection: Option<SelectionVector>,
 }
 
 impl VectorizedBatch {
@@ -27,6 +36,7 @@ impl VectorizedBatch {
             row_count: 0,
             schema,
             source_column_count,
+            selection: None,
         }
     }
 
@@ -59,6 +69,16 @@ impl VectorizedBatch {
         &self.schema
     }
 
+    /// Get selection vector
+    pub fn selection(&self) -> Option<&SelectionVector> {
+        self.selection.as_ref()
+    }
+
+    /// Set selection vector
+    pub fn set_selection(&mut self, selection: Option<SelectionVector>) {
+        self.selection = selection;
+    }
+
     /// Clear all columns, retaining capacity
     pub fn clear(&mut self) {
         for col in &mut self.columns {
@@ -70,6 +90,7 @@ impl VectorizedBatch {
             }
         }
         self.row_count = 0;
+        self.selection = None;
     }
 
     /// Allocate a scratch column for intermediate expression results

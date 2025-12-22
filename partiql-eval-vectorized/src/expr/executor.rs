@@ -1,6 +1,6 @@
 use crate::batch::{VectorizedBatch, Vector, LogicalType};
 use crate::error::EvalError;
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 
 /// Constant values used in expressions
 #[derive(Clone, Debug, PartialEq)]
@@ -99,12 +99,14 @@ impl ExpressionExecutor {
     /// Create a new expression executor
     pub fn new(
         exprs: Vec<CompiledExpr>,
-        num_scratch: usize,
+        scratch_types: Vec<LogicalType>,
         outputs: Vec<usize>,
     ) -> Self {
-        // TODO: Determine proper types and sizes for scratch vectors from expression analysis
-        // Pre-allocate scratch vectors
-        let scratch = vec![Vector::new(LogicalType::Int64, 0); num_scratch];
+        // Pre-allocate scratch vectors with specified types
+        let scratch: Vec<Vector> = scratch_types
+            .iter()
+            .map(|&ty| Vector::new(ty, 1024)) // TODO: Either pass in, or handle globally.
+            .collect();
         
         Self {
             exprs,
@@ -132,10 +134,14 @@ impl ExpressionExecutor {
             }
         }
         
+        // Get selection vector from input (if present)
+        let selection = input.selection();
+        
         // Phase 1: Execute all expressions (writes to scratch only)
+        // Pass selection vector to enable scalar/SIMD path selection
         let exprs = self.exprs.clone();
         for compiled in &exprs {
-            self.execute_op(compiled, input)?;
+            self.execute_op(compiled, input, selection)?;
         }
         
         // Phase 2: Transfer final results from scratch to output (zero-copy!)
@@ -155,6 +161,7 @@ impl ExpressionExecutor {
         &mut self,
         compiled: &CompiledExpr,
         input: &VectorizedBatch,
+        selection: Option<&crate::batch::SelectionVector>,
     ) -> Result<(), EvalError> {
         // Execute operation
         match compiled.op {
@@ -166,7 +173,8 @@ impl ExpressionExecutor {
                     ));
                 }
                 
-                // Clone the input vector first to avoid borrow checker issues
+                // For identity, we can just clone the vector (Arc clone is cheap)
+                // Selection vector is maintained in the batch, not in individual vectors
                 let input_vec = self.get_input(&compiled.inputs[0], input)?;
                 let cloned_input = input_vec.clone();
                 
@@ -229,9 +237,21 @@ impl ExpressionExecutor {
                     .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
                 let out = output_phys.as_mut_slice();
                 
-                // Vectorized addition: for i = 0; i < len; i++ { output[i] = lhs[i] + rhs[i] }
-                for i in 0..len {
-                    out[i] = lhs[i] + rhs[i];
+                // Dual path execution: choose based on selection vector presence
+                if let Some(sel) = selection {
+                    println!("USING SELECTION!");
+                    // SCALAR PATH: Process only selected rows (sparse data)
+                    // Efficient for low selectivity (few rows pass filter)
+                    for &idx in &sel.indices {
+                        out[idx] = lhs[idx] + rhs[idx];
+                    }
+                } else {
+                    // SIMD PATH: Process all rows sequentially (dense data)
+                    // Enables compiler auto-vectorization for high performance
+                    println!("NOT USING SELECTION!");
+                    for i in 0..len {
+                        out[i] = lhs[i] + rhs[i];
+                    }
                 }
             }
             ExprOp::AddI32 | ExprOp::AddF64 => {
@@ -265,6 +285,11 @@ impl ExpressionExecutor {
                 // Stub: would perform vectorized less-or-equal comparison
             }
             ExprOp::AndBool => {
+                // TODO: This is JUST to test that we can filter some. Actually implement this.
+                let output_vec = self.get_output_mut(compiled.output)?;
+                let out_phys = output_vec.physical.as_boolean_mut().expect("Needed boolean buffer.");
+                let out = out_phys.as_mut_slice();
+                out[0] = true;
                 // Stub: would perform vectorized logical AND
             }
             ExprOp::OrBool => {
@@ -328,7 +353,11 @@ mod tests {
             output: 0,
         }];
         
-        let executor = ExpressionExecutor::new(exprs, 2, vec![0]);
+        let executor = ExpressionExecutor::new(
+            exprs,
+            vec![LogicalType::Int64, LogicalType::Int64],
+            vec![0]
+        );
         
         assert_eq!(executor.exprs.len(), 1);
         assert_eq!(executor.scratch.len(), 2);
@@ -346,7 +375,11 @@ mod tests {
             output: 0,
         }];
         
-        let mut executor = ExpressionExecutor::new(exprs, 1, vec![0]);
+        let mut executor = ExpressionExecutor::new(
+            exprs,
+            vec![LogicalType::Int64],
+            vec![0]
+        );
         
         // Create input batch
         let schema = SourceTypeDef::new(vec![

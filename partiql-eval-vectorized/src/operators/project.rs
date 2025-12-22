@@ -27,15 +27,26 @@ impl VectorizedProject {
 
 impl VectorizedOperator for VectorizedProject {
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
-        // TODO: Implement actual projection logic
-        // 1. Get input batch
-        // 2. Create output batch with correct schema
-        // 3. Evaluate projection expressions using ExpressionExecutor
-        // 4. Copy/reference projected columns to output batch
-        // 5. Return projected batch with new schema
+        // 1. Get next batch from input operator
+        let input_batch = match self.input.next_batch()? {
+            Some(batch) => batch,
+            None => return Ok(None), // End of input stream
+        };
+
+        // 2. Create output batch with projection schema
+        let row_count = input_batch.row_count();
+        let mut output_batch = VectorizedBatch::new(self.output_schema.clone(), row_count);
+        output_batch.set_row_count(input_batch.row_count());
+        output_batch.set_selection(input_batch.selection().cloned());
+
+        // 3. Execute projection expressions
+        // The executor will:
+        //   - Evaluate expressions using input columns
+        //   - Write results to scratch registers
+        //   - Transfer physical buffers from scratch to output batch
+        self.projections.execute(&input_batch, &mut output_batch)?;
         
-        // For now, just pass through the input batch
-        // In real implementation, would evaluate projections and create new batch
-        self.input.next_batch()
+        // 4. Return the projected batch
+        Ok(Some(output_batch))
     }
 }

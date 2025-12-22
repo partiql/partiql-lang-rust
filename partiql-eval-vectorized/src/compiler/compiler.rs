@@ -121,7 +121,12 @@ impl Compiler {
         ];
         
         // Filter output mapping: scratch register 2 contains the final boolean result
-        let filter_executor = ExpressionExecutor::new(filter_exprs, 3, vec![2]);
+        // Scratch types: 0=Boolean (a>500), 1=Boolean (b<100), 2=Boolean (AND result)
+        let filter_executor = ExpressionExecutor::new(
+            filter_exprs,
+            vec![LogicalType::Boolean, LogicalType::Boolean, LogicalType::Boolean],
+            vec![2]
+        );
 
         // Create FILTER operator
         let filter = VectorizedFilter::new(Box::new(scan), filter_executor);
@@ -143,7 +148,12 @@ impl Compiler {
             },
         ];
         // Output mapping: scratch registers 0 and 1 map to output columns 0 and 1
-        let project_executor = ExpressionExecutor::new(project_exprs, 2, vec![0, 1]);
+        // Scratch types: 0=Int64 (column a), 1=Int64 (column b)
+        let project_executor = ExpressionExecutor::new(
+            project_exprs,
+            vec![LogicalType::Int64, LogicalType::Int64],
+            vec![0, 1]
+        );
         
         let output_schema = SourceTypeDef::new(vec![
             Field {

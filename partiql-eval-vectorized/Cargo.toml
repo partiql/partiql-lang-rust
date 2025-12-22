@@ -16,6 +16,7 @@ partiql-catalog = { path = "../partiql-catalog" }
 partiql-eval = { path = "../partiql-eval" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
+partiql-value = { path = "../partiql-value" }
 
 [dev-dependencies]
 criterion = "0.5"
