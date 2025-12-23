@@ -40,7 +40,8 @@ impl BatchReader for TupleIteratorReader {
         
         // TODO: Replace this mock data generation with actual tuple-to-columnar conversion
         // This generates synthetic batches for testing the vectorized execution pipeline
-        let batch = generate_mock_batch(&self.schema, self.batch_size)?;
+        // Pass batches_generated as start offset to generate incrementing values across batches
+        let batch = generate_mock_batch(&self.schema, self.batch_size, (self.batches_generated * self.batch_size) as i64)?;
         
         self.batches_generated += 1;
         Ok(Some(batch))
@@ -56,6 +57,7 @@ impl BatchReader for TupleIteratorReader {
 fn generate_mock_batch(
     schema: &SourceTypeDef,
     batch_size: usize,
+    start: i64
 ) -> Result<VectorizedBatch, EvalError> {
     use crate::batch::{PhysicalVectorEnum, LogicalType};
     
@@ -74,7 +76,7 @@ fn generate_mock_batch(
                     let offset = col_idx as i64 * 100;
                     let slice = v.as_mut_slice();
                     for i in 0..batch_size {
-                        slice[i] = offset + i as i64;
+                        slice[i] = start + offset + i as i64;
                     }
                 }
             }
@@ -84,7 +86,7 @@ fn generate_mock_batch(
                     let offset = col_idx as f64 * 100.0;
                     let slice = v.as_mut_slice();
                     for i in 0..batch_size {
-                        slice[i] = offset + i as f64;
+                        slice[i] = start as f64 + offset + i as f64;
                     }
                 }
             }
@@ -101,8 +103,10 @@ fn generate_mock_batch(
                 if let PhysicalVectorEnum::String(v) = &mut vector.physical {
                     // Generate simple string values
                     let slice = v.as_mut_slice();
+                    let offset = col_idx as i64 * 100;
                     for i in 0..batch_size {
-                        slice[i] = format!("value_{}", i);
+                        let value = start + offset + i as i64;
+                        slice[i] = format!("value_{}", value);
                     }
                 }
             }

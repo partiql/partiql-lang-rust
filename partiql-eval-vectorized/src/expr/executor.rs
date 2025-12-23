@@ -1,6 +1,78 @@
-use crate::batch::{VectorizedBatch, Vector, LogicalType};
+use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
 use smallvec::{smallvec, SmallVec};
+use std::marker::PhantomData;
+
+/// Runtime operand representation for SIMD kernels
+/// 
+/// Provides efficient access to vector data with support for:
+/// - Flat vectors (via data pointer)
+/// - Constant/broadcast scalars (via is_constant flag)
+/// - Selection vectors (sparse access pattern)
+#[derive(Debug)]
+pub struct ExecInput<'a, T: Copy> {
+    /// Pointer to underlying data (flat base or scalar)
+    pub data: *const T,
+
+    /// Optional selection (logical row → physical row)
+    pub selection: Option<*const usize>,
+
+    /// Number of logical rows
+    pub len: usize,
+
+    /// True if broadcast scalar
+    pub is_constant: bool,
+
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T: Copy> ExecInput<'a, T> {
+    /// Create ExecInput from PhysicalVector with optional selection
+    pub fn from_physical(
+        phys: &'a PhysicalVector<T>,
+        selection: Option<&'a crate::batch::SelectionVector>,
+    ) -> Self {
+        match phys {
+            PhysicalVector::Flat { .. } => {
+                let slice = phys.as_slice();
+                Self {
+                    data: slice.as_ptr(),
+                    selection: selection.map(|s| s.indices.as_ptr()),
+                    len: slice.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                }
+            }
+            PhysicalVector::Constant { value, len } => {
+                Self {
+                    data: value as *const T,
+                    selection: None, // Selection ignored for constants
+                    len: *len,
+                    is_constant: true,
+                    _marker: PhantomData,
+                }
+            }
+        }
+    }
+
+    /// Get value at logical index (handles both flat and constant)
+    /// 
+    /// # Safety
+    /// Caller must ensure idx < len
+    #[inline(always)]
+    pub unsafe fn get_unchecked(&self, idx: usize) -> T {
+        if self.is_constant {
+            *self.data
+        } else {
+            let physical_idx = if let Some(sel_ptr) = self.selection {
+                *sel_ptr.add(idx) as usize
+            } else {
+                idx
+            };
+            *self.data.add(physical_idx)
+        }
+    }
+}
 
 /// Constant values used in expressions
 #[derive(Clone, Debug, PartialEq)]
@@ -155,6 +227,248 @@ impl ExpressionExecutor {
         Ok(())
     }
     
+    // ============================================================================
+    // Helper Functions for Operation Execution
+    // ============================================================================
+    
+    /// Validate that we have exactly 2 inputs for a binary operation
+    #[inline]
+    fn validate_binary_inputs(inputs: &[ExprInput]) -> Result<(), EvalError> {
+        if inputs.len() != 2 {
+            return Err(EvalError::General(
+                format!("Binary operation requires exactly 2 inputs, got {}", inputs.len())
+            ));
+        }
+        Ok(())
+    }
+    
+    /// Decode ExprInput to ExecInput<i64> for runtime execution
+    /// 
+    /// Handles InputCol, Scratch, and Constant inputs
+    fn decode_input_i64<'a>(
+        &'a self,
+        input: &ExprInput,
+        batch: &'a VectorizedBatch,
+        selection: Option<&'a crate::batch::SelectionVector>,
+    ) -> Result<ExecInput<'a, i64>, EvalError> {
+        match input {
+            ExprInput::InputCol(idx) => {
+                let vec = batch.column(*idx)?;
+                if vec.logical_type() != LogicalType::Int64 {
+                    return Err(EvalError::General(
+                        format!("Expected Int64 column, got {:?}", vec.logical_type())
+                    ));
+                }
+                let phys = vec.physical.as_int64()
+                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                Ok(ExecInput::from_physical(phys, selection))
+            }
+            ExprInput::Scratch(idx) => {
+                let vec = self.scratch.get(*idx)
+                    .ok_or_else(|| EvalError::General(format!("Invalid scratch index: {}", idx)))?;
+                if vec.logical_type() != LogicalType::Int64 {
+                    return Err(EvalError::General(
+                        format!("Expected Int64 scratch, got {:?}", vec.logical_type())
+                    ));
+                }
+                let phys = vec.physical.as_int64()
+                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                Ok(ExecInput::from_physical(phys, selection))
+            }
+            ExprInput::Constant(ConstantValue::Int64(value)) => {
+                // Create ExecInput directly for constant (no heap allocation needed)
+                let len = batch.row_count();
+                Ok(ExecInput {
+                    data: value as *const i64,
+                    selection: None,
+                    len,
+                    is_constant: true,
+                    _marker: PhantomData,
+                })
+            }
+            ExprInput::Constant(_) => {
+                Err(EvalError::General("Type mismatch: expected Int64 constant".to_string()))
+            }
+        }
+    }
+    
+    /// Prepare output vector and return mutable slice for Int64
+    #[inline]
+    fn prepare_output_i64(&mut self, output_idx: usize, len: usize) -> Result<&mut [i64], EvalError> {
+        self.prepare_output(output_idx, len, LogicalType::Int64)
+    }
+    
+    /// Prepare output vector and return mutable slice for Float64
+    #[inline]
+    fn prepare_output_f64(&mut self, output_idx: usize, len: usize) -> Result<&mut [f64], EvalError> {
+        self.prepare_output(output_idx, len, LogicalType::Float64)
+    }
+    
+    /// Prepare output vector and return mutable slice for Boolean
+    #[inline]
+    fn prepare_output_bool(&mut self, output_idx: usize, len: usize) -> Result<&mut [bool], EvalError> {
+        self.prepare_output(output_idx, len, LogicalType::Boolean)
+    }
+    
+    /// Generic prepare output that dispatches based on LogicalType
+    /// 
+    /// This is zero-cost at runtime due to:
+    /// 1. Monomorphization - compiler generates separate code for each T
+    /// 2. Inlining - the match gets optimized away
+    /// 3. The accessor methods are also inlined
+    #[inline]
+    fn prepare_output<T>(&mut self, output_idx: usize, len: usize, logical_type: LogicalType) -> Result<&mut [T], EvalError> {
+        let output_vec = self.get_output_mut(output_idx)?;
+        
+        // Ensure output has correct type and length
+        if output_vec.logical_type() != logical_type {
+            *output_vec = Vector::new(logical_type, len);
+        }
+        
+        // Get mutable slice via type-specific accessor
+        // The match compiles to a jump table or gets optimized away entirely
+        let phys_vec: *mut PhysicalVectorEnum = &mut output_vec.physical;
+        unsafe {
+            match logical_type {
+                LogicalType::Int64 => {
+                    let vec = (*phys_vec).as_int64_mut()
+                        .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                    let slice = vec.as_mut_slice();
+                    // Cast to generic slice type
+                    Ok(std::slice::from_raw_parts_mut(
+                        slice.as_mut_ptr() as *mut T,
+                        len.min(slice.len())
+                    ))
+                }
+                LogicalType::Float64 => {
+                    let vec = (*phys_vec).as_float64_mut()
+                        .ok_or_else(|| EvalError::General("Expected Float64 physical vector".to_string()))?;
+                    let slice = vec.as_mut_slice();
+                    Ok(std::slice::from_raw_parts_mut(
+                        slice.as_mut_ptr() as *mut T,
+                        len.min(slice.len())
+                    ))
+                }
+                LogicalType::Boolean => {
+                    let vec = (*phys_vec).as_boolean_mut()
+                        .ok_or_else(|| EvalError::General("Expected Boolean physical vector".to_string()))?;
+                    let slice = vec.as_mut_slice();
+                    Ok(std::slice::from_raw_parts_mut(
+                        slice.as_mut_ptr() as *mut T,
+                        len.min(slice.len())
+                    ))
+                }
+                LogicalType::String => {
+                    let vec = (*phys_vec).as_string_mut()
+                        .ok_or_else(|| EvalError::General("Expected String physical vector".to_string()))?;
+                    let slice = vec.as_mut_slice();
+                    Ok(std::slice::from_raw_parts_mut(
+                        slice.as_mut_ptr() as *mut T,
+                        len.min(slice.len())
+                    ))
+                }
+            }
+        }
+    }
+    
+    // ============================================================================
+    // SIMD Kernels
+    // ============================================================================
+    
+    /// Int64 addition kernel - handles all input combinations
+    /// 
+    /// Efficiently handles 4 cases:
+    /// - vector + vector (standard SIMD)
+    /// - vector + const (broadcast const)
+    /// - const + vector (broadcast const)
+    /// - const + const (single computation)
+    ///
+    /// # Safety
+    /// Caller must ensure len <= out.len()
+    #[inline]
+    unsafe fn kernel_add_i64(
+        lhs: ExecInput<i64>,
+        rhs: ExecInput<i64>,
+        out: &mut [i64],
+        len: usize,
+    ) {
+        match (lhs.is_constant, rhs.is_constant) {
+            (false, false) => {
+                // Vector + Vector: standard element-wise addition
+                for i in 0..len {
+                    out[i] = lhs.get_unchecked(i) + rhs.get_unchecked(i);
+                }
+            }
+            (false, true) => {
+                // Vector + Constant: broadcast constant
+                let c = *rhs.data;
+                for i in 0..len {
+                    out[i] = lhs.get_unchecked(i) + c;
+                }
+            }
+            (true, false) => {
+                // Constant + Vector: broadcast constant
+                let c = *lhs.data;
+                for i in 0..len {
+                    out[i] = c + rhs.get_unchecked(i);
+                }
+            }
+            (true, true) => {
+                // Constant + Constant: single computation, fill all
+                let result = *lhs.data + *rhs.data;
+                for i in 0..len {
+                    out[i] = result;
+                }
+            }
+        }
+    }
+    
+    /// Int64 equality kernel - handles all input combinations
+    ///
+    /// # Safety
+    /// Caller must ensure len <= out.len()
+    #[inline]
+    unsafe fn kernel_eq_i64(
+        lhs: ExecInput<i64>,
+        rhs: ExecInput<i64>,
+        out: &mut [bool],
+        len: usize,
+    ) {
+        match (lhs.is_constant, rhs.is_constant) {
+            (false, false) => {
+                // Vector == Vector
+                for i in 0..len {
+                    out[i] = lhs.get_unchecked(i) == rhs.get_unchecked(i);
+                }
+            }
+            (false, true) => {
+                // Vector == Constant
+                let c = *rhs.data;
+                for i in 0..len {
+                    out[i] = lhs.get_unchecked(i) == c;
+                }
+            }
+            (true, false) => {
+                // Constant == Vector
+                let c = *lhs.data;
+                for i in 0..len {
+                    out[i] = c == rhs.get_unchecked(i);
+                }
+            }
+            (true, true) => {
+                // Constant == Constant
+                let result = *lhs.data == *rhs.data;
+                for i in 0..len {
+                    out[i] = result;
+                }
+            }
+        }
+    }
+    
+    // ============================================================================
+    // End SIMD Kernels
+    // ============================================================================
+    
     /// Execute a single compiled operation
     /// All outputs go to scratch registers only.
     fn execute_op(
@@ -183,75 +497,29 @@ impl ExpressionExecutor {
                 *output_vec = cloned_input;
             }
             ExprOp::AddI64 => {
-                // AddI64: element-wise addition of two Int64 vectors
-                if compiled.inputs.len() != 2 {
-                    return Err(EvalError::General(
-                        format!("AddI64 operation requires exactly 2 inputs, got {}", compiled.inputs.len())
-                    ));
-                }
+                // AddI64: element-wise addition using ExecInput (supports constants!)
+                Self::validate_binary_inputs(&compiled.inputs)?;
+                let len = input.row_count();
                 
-                // Clone input vectors to avoid borrow conflicts
-                // Note: Vector uses Arc internally, so this just increments ref counts (cheap)
-                let left_vec = self.get_input(&compiled.inputs[0], input)?.clone();
-                let right_vec = self.get_input(&compiled.inputs[1], input)?.clone();
+                // SAFETY: We use raw pointers here to work around borrow checker limitations.
+                // decode_input_i64() needs immutable access to self.scratch, which conflicts
+                // with the mutable slice from prepare_output(). The pointer remains valid because:
+                // 1. prepare_output ensures the output buffer exists and has correct capacity
+                // 2. No reallocations occur between getting the pointer and using it
+                // 3. The reconstructed slice has the same length as the original
+                let out_ptr = {
+                    let out_slice = self.prepare_output_i64(compiled.output, len)?;
+                    out_slice.as_mut_ptr()
+                };
                 
-                // Verify types
-                if left_vec.logical_type() != LogicalType::Int64 {
-                    return Err(EvalError::General(
-                        format!("AddI64 left operand must be Int64, got {:?}", left_vec.logical_type())
-                    ));
-                }
-                if right_vec.logical_type() != LogicalType::Int64 {
-                    return Err(EvalError::General(
-                        format!("AddI64 right operand must be Int64, got {:?}", right_vec.logical_type())
-                    ));
-                }
+                // Now decode inputs (no longer conflicts with output preparation)
+                let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
+                let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
                 
-                // Extract physical vectors and get slices
-                let left_phys = left_vec.physical.as_int64()
-                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
-                let right_phys = right_vec.physical.as_int64()
-                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
-                
-                let lhs = left_phys.as_slice();
-                let rhs = right_phys.as_slice();
-                
-                // Verify lengths match
-                let len = lhs.len();
-                if len != rhs.len() {
-                    return Err(EvalError::General(
-                        format!("Vector length mismatch: {} != {}", len, rhs.len())
-                    ));
-                }
-                
-                // Now we can safely get mutable output (no conflicting borrows)
-                let output_vec = self.get_output_mut(compiled.output)?;
-                
-                // Ensure output is Int64 type with correct length
-                if output_vec.logical_type() != LogicalType::Int64 {
-                    *output_vec = Vector::new(LogicalType::Int64, len);
-                }
-                
-                // Get mutable slice and perform addition
-                let output_phys = output_vec.physical.as_int64_mut()
-                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
-                let out = output_phys.as_mut_slice();
-                
-                // Dual path execution: choose based on selection vector presence
-                if let Some(sel) = selection {
-                    println!("USING SELECTION!");
-                    // SCALAR PATH: Process only selected rows (sparse data)
-                    // Efficient for low selectivity (few rows pass filter)
-                    for &idx in &sel.indices {
-                        out[idx] = lhs[idx] + rhs[idx];
-                    }
-                } else {
-                    // SIMD PATH: Process all rows sequentially (dense data)
-                    // Enables compiler auto-vectorization for high performance
-                    println!("NOT USING SELECTION!");
-                    for i in 0..len {
-                        out[i] = lhs[i] + rhs[i];
-                    }
+                // Reconstruct output slice and execute kernel
+                unsafe {
+                    let out = std::slice::from_raw_parts_mut(out_ptr, len);
+                    Self::kernel_add_i64(lhs, rhs, out, len);
                 }
             }
             ExprOp::AddI32 | ExprOp::AddF64 => {
@@ -272,8 +540,34 @@ impl ExpressionExecutor {
             ExprOp::LtI32 | ExprOp::LtI64 | ExprOp::LtF64 => {
                 // Stub: would perform vectorized less-than comparison
             }
-            ExprOp::EqI32 | ExprOp::EqI64 | ExprOp::EqF64 | ExprOp::EqBool => {
+            ExprOp::EqI32 | ExprOp::EqF64 | ExprOp::EqBool => {
                 // Stub: would perform vectorized equality comparison
+            }
+            ExprOp::EqI64 => {
+                // EqI64: element-wise equality using ExecInput (supports constants!)
+                Self::validate_binary_inputs(&compiled.inputs)?;
+                let len = input.row_count();
+                
+                // SAFETY: We use raw pointers here to work around borrow checker limitations.
+                // decode_input_i64() needs immutable access to self.scratch, which conflicts
+                // with the mutable slice from prepare_output(). The pointer remains valid because:
+                // 1. prepare_output ensures the output buffer exists and has correct capacity
+                // 2. No reallocations occur between getting the pointer and using it
+                // 3. The reconstructed slice has the same length as the original
+                let out_ptr = {
+                    let out_slice = self.prepare_output_bool(compiled.output, len)?;
+                    out_slice.as_mut_ptr()
+                };
+                
+                // Now decode inputs (no longer conflicts with output preparation)
+                let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
+                let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
+                
+                // Reconstruct output slice and execute kernel
+                unsafe {
+                    let out = std::slice::from_raw_parts_mut(out_ptr, len);
+                    Self::kernel_eq_i64(lhs, rhs, out, len);
+                }
             }
             ExprOp::NeI32 | ExprOp::NeI64 | ExprOp::NeF64 | ExprOp::NeBool => {
                 // Stub: would perform vectorized inequality comparison

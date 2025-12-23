@@ -93,30 +93,12 @@ impl Compiler {
         let filter_exprs = vec![
             // Step 1: Compare a > 500
             CompiledExpr {
-                op: ExprOp::GtI64,
+                op: ExprOp::EqI64,
                 inputs: smallvec![
                     ExprInput::InputCol(0),  // column 'a'
-                    ExprInput::Constant(ConstantValue::Int64(500))
+                    ExprInput::Constant(ConstantValue::Int64(1000))
                 ],
                 output: 0,  // scratch register 0
-            },
-            // Step 2: Compare b < 100
-            CompiledExpr {
-                op: ExprOp::LtI64,
-                inputs: smallvec![
-                    ExprInput::InputCol(1),  // column 'b'
-                    ExprInput::Constant(ConstantValue::Int64(100))
-                ],
-                output: 1,  // scratch register 1
-            },
-            // Step 3: AND the results
-            CompiledExpr {
-                op: ExprOp::AndBool,
-                inputs: smallvec![
-                    ExprInput::Scratch(0),  // result of a > 500
-                    ExprInput::Scratch(1)   // result of b < 100
-                ],
-                output: 2,  // scratch register 2 (final result)
             },
         ];
         
@@ -124,8 +106,8 @@ impl Compiler {
         // Scratch types: 0=Boolean (a>500), 1=Boolean (b<100), 2=Boolean (AND result)
         let filter_executor = ExpressionExecutor::new(
             filter_exprs,
-            vec![LogicalType::Boolean, LogicalType::Boolean, LogicalType::Boolean],
-            vec![2]
+            vec![LogicalType::Boolean],
+            vec![0]
         );
 
         // Create FILTER operator

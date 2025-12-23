@@ -47,8 +47,8 @@ impl VectorizedOperator for VectorizedFilter {
         let predicate_bool = predicate_col.physical.as_boolean()
             .ok_or_else(|| EvalError::General("Expected Boolean predicate result".to_string()))?;
         let predicate_values = predicate_bool.as_slice();
-        
         // Collect indices where predicate is true
+
         let mut selected_indices = Vec::new();
         for i in 0..row_count {
             if predicate_values[i] {
