@@ -51,10 +51,10 @@ impl BaseTableExpr for DataTableExpr {
         _ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         // Create an iterator that generates 1,024,000 tuples
-        let iter = (0..1_024_000).map(|i| {
+        let iter = (0..10_024_000).map(|i| {
             let tuple = Tuple::from([
                 ("a", Value::Integer(i)),
-                ("b", Value::Integer(i * 2)),
+                ("b", Value::Integer(i + 100)),
             ]);
             Ok(Value::Tuple(Box::new(tuple)))
         });

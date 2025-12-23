@@ -10,6 +10,7 @@ path = "src/bin/main.rs"
 [dependencies]
 memmap2 = "0.9"
 smallvec = "1.13"
+wide = "0.7"
 partiql-logical = { path = "../partiql-logical" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog" }

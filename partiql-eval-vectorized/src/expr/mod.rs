@@ -3,6 +3,7 @@ mod column_ref;
 mod literal;
 mod fn_call;
 mod executor;
+mod operators;
 
 pub use expr_trait::VectorizedExpr;
 pub use column_ref::ColumnRef;

@@ -26,7 +26,7 @@ impl TupleIteratorReader {
             schema,
             batch_size,
             batches_generated: 0,
-            max_batches: 1000, // Generate 1000 batches for testing
+            max_batches: 10000, // Generate 10000 batches for testing
         }
     }
 }

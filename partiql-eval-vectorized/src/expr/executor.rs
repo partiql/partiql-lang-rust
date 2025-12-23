@@ -1,7 +1,22 @@
 use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
-use smallvec::{smallvec, SmallVec};
+use crate::expr::operators::eq_i64;
+use smallvec::SmallVec;
 use std::marker::PhantomData;
+
+// ============================================================================
+// Kernel Function Pointer Types
+// ============================================================================
+
+/// Kernel function pointer types for different operation signatures
+/// These enable type-safe dispatch to operation kernels
+type KernelI64ToI64 = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [i64], usize);
+type KernelI64ToBool = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [bool], usize);
+type KernelI32ToI32 = unsafe fn(ExecInput<i32>, ExecInput<i32>, &mut [i32], usize);
+type KernelI32ToBool = unsafe fn(ExecInput<i32>, ExecInput<i32>, &mut [bool], usize);
+type KernelF64ToF64 = unsafe fn(ExecInput<f64>, ExecInput<f64>, &mut [f64], usize);
+type KernelF64ToBool = unsafe fn(ExecInput<f64>, ExecInput<f64>, &mut [bool], usize);
+type KernelBoolToBool = unsafe fn(ExecInput<bool>, ExecInput<bool>, &mut [bool], usize);
 
 /// Runtime operand representation for SIMD kernels
 /// 
@@ -372,6 +387,74 @@ impl ExpressionExecutor {
     }
     
     // ============================================================================
+    // Generic Binary Operation Executors
+    // ============================================================================
+    
+    /// Execute binary operation: i64 × i64 → i64
+    /// 
+    /// Generic executor for all arithmetic operations on i64 that produce i64 output.
+    /// Handles input decoding, output preparation, and kernel invocation.
+    fn execute_binary_i64_to_i64(
+        &mut self,
+        kernel: KernelI64ToI64,
+        compiled: &CompiledExpr,
+        input: &VectorizedBatch,
+        selection: Option<&crate::batch::SelectionVector>,
+    ) -> Result<(), EvalError> {
+        Self::validate_binary_inputs(&compiled.inputs)?;
+        let len = input.row_count();
+        
+        // Prepare output buffer
+        let out_ptr = {
+            let out_slice = self.prepare_output_i64(compiled.output, len)?;
+            out_slice.as_mut_ptr()
+        };
+        
+        // Decode inputs
+        let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
+        let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
+        
+        // Execute kernel
+        unsafe {
+            let out = std::slice::from_raw_parts_mut(out_ptr, len);
+            kernel(lhs, rhs, out, len);
+        }
+        Ok(())
+    }
+    
+    /// Execute binary operation: i64 × i64 → bool
+    /// 
+    /// Generic executor for all comparison operations on i64.
+    /// Handles input decoding, output preparation, and kernel invocation.
+    fn execute_binary_i64_to_bool(
+        &mut self,
+        kernel: KernelI64ToBool,
+        compiled: &CompiledExpr,
+        input: &VectorizedBatch,
+        selection: Option<&crate::batch::SelectionVector>,
+    ) -> Result<(), EvalError> {
+        Self::validate_binary_inputs(&compiled.inputs)?;
+        let len = input.row_count();
+        
+        // Prepare output buffer
+        let out_ptr = {
+            let out_slice = self.prepare_output_bool(compiled.output, len)?;
+            out_slice.as_mut_ptr()
+        };
+        
+        // Decode inputs
+        let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
+        let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
+        
+        // Execute kernel
+        unsafe {
+            let out = std::slice::from_raw_parts_mut(out_ptr, len);
+            kernel(lhs, rhs, out, len);
+        }
+        Ok(())
+    }
+    
+    // ============================================================================
     // SIMD Kernels
     // ============================================================================
     
@@ -423,48 +506,6 @@ impl ExpressionExecutor {
         }
     }
     
-    /// Int64 equality kernel - handles all input combinations
-    ///
-    /// # Safety
-    /// Caller must ensure len <= out.len()
-    #[inline]
-    unsafe fn kernel_eq_i64(
-        lhs: ExecInput<i64>,
-        rhs: ExecInput<i64>,
-        out: &mut [bool],
-        len: usize,
-    ) {
-        match (lhs.is_constant, rhs.is_constant) {
-            (false, false) => {
-                // Vector == Vector
-                for i in 0..len {
-                    out[i] = lhs.get_unchecked(i) == rhs.get_unchecked(i);
-                }
-            }
-            (false, true) => {
-                // Vector == Constant
-                let c = *rhs.data;
-                for i in 0..len {
-                    out[i] = lhs.get_unchecked(i) == c;
-                }
-            }
-            (true, false) => {
-                // Constant == Vector
-                let c = *lhs.data;
-                for i in 0..len {
-                    out[i] = c == rhs.get_unchecked(i);
-                }
-            }
-            (true, true) => {
-                // Constant == Constant
-                let result = *lhs.data == *rhs.data;
-                for i in 0..len {
-                    out[i] = result;
-                }
-            }
-        }
-    }
-    
     // ============================================================================
     // End SIMD Kernels
     // ============================================================================
@@ -497,30 +538,7 @@ impl ExpressionExecutor {
                 *output_vec = cloned_input;
             }
             ExprOp::AddI64 => {
-                // AddI64: element-wise addition using ExecInput (supports constants!)
-                Self::validate_binary_inputs(&compiled.inputs)?;
-                let len = input.row_count();
-                
-                // SAFETY: We use raw pointers here to work around borrow checker limitations.
-                // decode_input_i64() needs immutable access to self.scratch, which conflicts
-                // with the mutable slice from prepare_output(). The pointer remains valid because:
-                // 1. prepare_output ensures the output buffer exists and has correct capacity
-                // 2. No reallocations occur between getting the pointer and using it
-                // 3. The reconstructed slice has the same length as the original
-                let out_ptr = {
-                    let out_slice = self.prepare_output_i64(compiled.output, len)?;
-                    out_slice.as_mut_ptr()
-                };
-                
-                // Now decode inputs (no longer conflicts with output preparation)
-                let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
-                let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
-                
-                // Reconstruct output slice and execute kernel
-                unsafe {
-                    let out = std::slice::from_raw_parts_mut(out_ptr, len);
-                    Self::kernel_add_i64(lhs, rhs, out, len);
-                }
+                self.execute_binary_i64_to_i64(Self::kernel_add_i64, compiled, input, selection)?;
             }
             ExprOp::AddI32 | ExprOp::AddF64 => {
                 // Stub: would perform vectorized addition
@@ -544,30 +562,7 @@ impl ExpressionExecutor {
                 // Stub: would perform vectorized equality comparison
             }
             ExprOp::EqI64 => {
-                // EqI64: element-wise equality using ExecInput (supports constants!)
-                Self::validate_binary_inputs(&compiled.inputs)?;
-                let len = input.row_count();
-                
-                // SAFETY: We use raw pointers here to work around borrow checker limitations.
-                // decode_input_i64() needs immutable access to self.scratch, which conflicts
-                // with the mutable slice from prepare_output(). The pointer remains valid because:
-                // 1. prepare_output ensures the output buffer exists and has correct capacity
-                // 2. No reallocations occur between getting the pointer and using it
-                // 3. The reconstructed slice has the same length as the original
-                let out_ptr = {
-                    let out_slice = self.prepare_output_bool(compiled.output, len)?;
-                    out_slice.as_mut_ptr()
-                };
-                
-                // Now decode inputs (no longer conflicts with output preparation)
-                let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
-                let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
-                
-                // Reconstruct output slice and execute kernel
-                unsafe {
-                    let out = std::slice::from_raw_parts_mut(out_ptr, len);
-                    Self::kernel_eq_i64(lhs, rhs, out, len);
-                }
+                self.execute_binary_i64_to_bool(eq_i64::kernel_eq_i64, compiled, input, selection)?;
             }
             ExprOp::NeI32 | ExprOp::NeI64 | ExprOp::NeF64 | ExprOp::NeBool => {
                 // Stub: would perform vectorized inequality comparison
