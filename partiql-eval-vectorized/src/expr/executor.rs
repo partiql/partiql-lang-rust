@@ -1,7 +1,7 @@
 use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
-use crate::expr::operators::eq_i64;
-use smallvec::SmallVec;
+use crate::expr::operators::{div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64, sub_i64};
+use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
 
 // ============================================================================
@@ -540,37 +540,61 @@ impl ExpressionExecutor {
             ExprOp::AddI64 => {
                 self.execute_binary_i64_to_i64(Self::kernel_add_i64, compiled, input, selection)?;
             }
+            ExprOp::SubI64 => {
+                self.execute_binary_i64_to_i64(sub_i64::kernel_sub_i64, compiled, input, selection)?;
+            }
+            ExprOp::MulI64 => {
+                self.execute_binary_i64_to_i64(mul_i64::kernel_mul_i64, compiled, input, selection)?;
+            }
+            ExprOp::DivI64 => {
+                self.execute_binary_i64_to_i64(div_i64::kernel_div_i64, compiled, input, selection)?;
+            }
+            ExprOp::GtI64 => {
+                self.execute_binary_i64_to_bool(gt_i64::kernel_gt_i64, compiled, input, selection)?;
+            }
+            ExprOp::LtI64 => {
+                self.execute_binary_i64_to_bool(lt_i64::kernel_lt_i64, compiled, input, selection)?;
+            }
+            ExprOp::EqI64 => {
+                self.execute_binary_i64_to_bool(eq_i64::kernel_eq_i64, compiled, input, selection)?;
+            }
+            ExprOp::NeI64 => {
+                self.execute_binary_i64_to_bool(ne_i64::kernel_ne_i64, compiled, input, selection)?;
+            }
+            ExprOp::GeI64 => {
+                self.execute_binary_i64_to_bool(ge_i64::kernel_ge_i64, compiled, input, selection)?;
+            }
+            ExprOp::LeI64 => {
+                self.execute_binary_i64_to_bool(le_i64::kernel_le_i64, compiled, input, selection)?;
+            }
             ExprOp::AddI32 | ExprOp::AddF64 => {
                 // Stub: would perform vectorized addition
             }
-            ExprOp::SubI32 | ExprOp::SubI64 | ExprOp::SubF64 => {
+            ExprOp::SubI32 | ExprOp::SubF64 => {
                 // Stub: would perform vectorized subtraction
             }
-            ExprOp::MulI32 | ExprOp::MulI64 | ExprOp::MulF64 => {
+            ExprOp::MulI32 | ExprOp::MulF64 => {
                 // Stub: would perform vectorized multiplication
             }
-            ExprOp::DivI32 | ExprOp::DivI64 | ExprOp::DivF64 => {
+            ExprOp::DivI32 | ExprOp::DivF64 => {
                 // Stub: would perform vectorized division
             }
-            ExprOp::GtI32 | ExprOp::GtI64 | ExprOp::GtF64 => {
+            ExprOp::GtI32 | ExprOp::GtF64 => {
                 // Stub: would perform vectorized greater-than comparison
             }
-            ExprOp::LtI32 | ExprOp::LtI64 | ExprOp::LtF64 => {
+            ExprOp::LtI32 | ExprOp::LtF64 => {
                 // Stub: would perform vectorized less-than comparison
             }
             ExprOp::EqI32 | ExprOp::EqF64 | ExprOp::EqBool => {
                 // Stub: would perform vectorized equality comparison
             }
-            ExprOp::EqI64 => {
-                self.execute_binary_i64_to_bool(eq_i64::kernel_eq_i64, compiled, input, selection)?;
-            }
-            ExprOp::NeI32 | ExprOp::NeI64 | ExprOp::NeF64 | ExprOp::NeBool => {
+            ExprOp::NeI32 | ExprOp::NeF64 | ExprOp::NeBool => {
                 // Stub: would perform vectorized inequality comparison
             }
-            ExprOp::GeI32 | ExprOp::GeI64 | ExprOp::GeF64 => {
+            ExprOp::GeI32 | ExprOp::GeF64 => {
                 // Stub: would perform vectorized greater-or-equal comparison
             }
-            ExprOp::LeI32 | ExprOp::LeI64 | ExprOp::LeF64 => {
+            ExprOp::LeI32 | ExprOp::LeF64 => {
                 // Stub: would perform vectorized less-or-equal comparison
             }
             ExprOp::AndBool => {
@@ -688,5 +712,98 @@ mod tests {
         // Execute (stub implementation won't actually compute anything)
         let result = executor.execute(&input, &mut output);
         assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_sub_i64_kernel() {
+        // Test the SubI64 kernel directly
+        let lhs_data = vec![10i64, 20, 30, 40, 50];
+        let rhs_data = vec![1i64, 2, 3, 4, 5];
+        let mut out = vec![0i64; 5];
+        
+        unsafe {
+            sub_i64::kernel_sub_i64(
+                ExecInput {
+                    data: lhs_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: rhs_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                5,
+            );
+        }
+        
+        assert_eq!(out, vec![9, 18, 27, 36, 45]);
+    }
+    
+    #[test]
+    fn test_sub_i64_with_constant() {
+        // Test SubI64 with constant (vector - constant)
+        let vec_data = vec![10i64, 20, 30, 40, 50];
+        let constant = 5i64;
+        let mut out = vec![0i64; 5];
+        
+        unsafe {
+            sub_i64::kernel_sub_i64(
+                ExecInput {
+                    data: vec_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: &constant as *const i64,
+                    selection: None,
+                    len: 5,
+                    is_constant: true,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                5,
+            );
+        }
+        
+        assert_eq!(out, vec![5, 15, 25, 35, 45]);
+    }
+    
+    #[test]
+    fn test_sub_i64_constant_minus_vector() {
+        // Test SubI64 with constant - vector (order matters!)
+        let constant = 100i64;
+        let vec_data = vec![10i64, 20, 30, 40, 50];
+        let mut out = vec![0i64; 5];
+        
+        unsafe {
+            sub_i64::kernel_sub_i64(
+                ExecInput {
+                    data: &constant as *const i64,
+                    selection: None,
+                    len: 5,
+                    is_constant: true,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: vec_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                5,
+            );
+        }
+        
+        assert_eq!(out, vec![90, 80, 70, 60, 50]);
     }
 }
