@@ -1,4 +1,4 @@
-use crate::batch::{Field, SourceTypeDef, LogicalType};
+use crate::batch::{Field, LogicalType, SourceTypeDef};
 use crate::compiler::VectorizedPlan;
 use crate::error::PlanError;
 use crate::expr::ExpressionExecutor;
@@ -71,7 +71,7 @@ impl Compiler {
         // TODO: Traverse logical plan and build vectorized operators
         // TODO: Perform type inference using fn_registry
         // TODO: Resolve table references via data_sources
-        
+
         // Get data source
         let mut reader = self
             .context
@@ -80,9 +80,9 @@ impl Compiler {
 
         // Phase 0: Configure reader with projection specification
         // For this demo, we'll project columns 'a' and 'b' as Int64
-        use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
         use crate::batch::LogicalType;
-        
+        use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
+
         let projections = vec![
             Projection::new(
                 ProjectionSource::FieldPath("a".to_string()),
@@ -100,7 +100,8 @@ impl Compiler {
             .map_err(|e| PlanError::General(format!("Failed to create projection spec: {}", e)))?;
 
         // Configure the reader with the projection
-        reader.set_projection(projection_spec)
+        reader
+            .set_projection(projection_spec)
             .map_err(|e| PlanError::General(format!("Failed to set projection: {}", e)))?;
 
         // Step 1: Create SCAN operator
@@ -110,27 +111,24 @@ impl Compiler {
         // Compile filter expression to bytecode
         // Expression: (a > 500) AND (b < 100)
         // Scratch registers: 0 = a > 500 result, 1 = b < 100 result, 2 = AND result
-        use crate::expr::{CompiledExpr, ExprOp, ExprInput, ConstantValue};
-        
+        use crate::expr::{CompiledExpr, ConstantValue, ExprInput, ExprOp};
+
         let filter_exprs = vec![
             // Step 1: Compare a > 500
             CompiledExpr {
                 op: ExprOp::EqI64,
                 inputs: smallvec![
-                    ExprInput::InputCol(0),  // column 'a'
+                    ExprInput::InputCol(0), // column 'a'
                     ExprInput::Constant(ConstantValue::Int64(1000))
                 ],
-                output: 0,  // scratch register 0
+                output: 0, // scratch register 0
             },
         ];
-        
+
         // Filter output mapping: scratch register 2 contains the final boolean result
         // Scratch types: 0=Boolean (a>500), 1=Boolean (b<100), 2=Boolean (AND result)
-        let filter_executor = ExpressionExecutor::new(
-            filter_exprs,
-            vec![LogicalType::Boolean],
-            vec![0]
-        );
+        let filter_executor =
+            ExpressionExecutor::new(filter_exprs, vec![LogicalType::Boolean], vec![0]);
 
         // Create FILTER operator
         let filter = VectorizedFilter::new(Box::new(scan), filter_executor);
@@ -156,9 +154,9 @@ impl Compiler {
         let project_executor = ExpressionExecutor::new(
             project_exprs,
             vec![LogicalType::Int64, LogicalType::Int64],
-            vec![0, 1]
+            vec![0, 1],
         );
-        
+
         let output_schema = SourceTypeDef::new(vec![
             Field {
                 name: "a".to_string(),
@@ -170,11 +168,8 @@ impl Compiler {
             },
         ]);
 
-        let project = VectorizedProject::new(
-            Box::new(filter),
-            project_executor,
-            output_schema.clone(),
-        );
+        let project =
+            VectorizedProject::new(Box::new(filter), project_executor, output_schema.clone());
 
         // Return plan with PROJECT as the root
         Ok(VectorizedPlan::new(Box::new(project), output_schema))
@@ -203,10 +198,8 @@ mod tests {
 
         // Create a dummy reader (Phase 0 - no schema in constructor)
         let tuples: Vec<partiql_value::Value> = vec![];
-        let reader: Box<dyn BatchReader> = Box::new(TupleIteratorReader::new(
-            Box::new(tuples.into_iter()),
-            1024,
-        ));
+        let reader: Box<dyn BatchReader> =
+            Box::new(TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024));
 
         // Create compiler context with data source
         let context = CompilerContext::new().with_data_source("data".to_string(), reader);

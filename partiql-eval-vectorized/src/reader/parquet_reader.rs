@@ -1,22 +1,22 @@
-use crate::batch::{LogicalType, VectorizedBatch, SourceTypeDef, Field};
+use crate::batch::{Field, LogicalType, SourceTypeDef, VectorizedBatch};
 use crate::error::EvalError;
 use crate::reader::error::*;
 use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
+use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
+use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use parquet::arrow::ProjectionMask;
 use std::fs::File;
 use std::path::Path;
-use arrow::record_batch::RecordBatch;
-use arrow::array::{Array, Int64Array, Float64Array, BooleanArray, StringArray};
-use parquet::arrow::ProjectionMask;
 
 /// ParquetReader implements BatchReader for Parquet files
-/// 
+///
 /// Key characteristics:
 /// - Uses ColumnIndex projections for direct columnar access
 /// - Reads Parquet files with row group processing for memory efficiency
 /// - Converts Parquet data types to PartiQL LogicalTypes with validation
 /// - Handles file I/O and decompression transparently
-/// 
+///
 /// Phase 0 Compliance:
 /// - Accepts only ColumnIndex projections (rejects FieldPath)
 /// - Populates vectors according to ProjectionSpec
@@ -24,7 +24,8 @@ use parquet::arrow::ProjectionMask;
 /// - Maintains consistent batch sizes across all vectors
 pub struct ParquetReader {
     /// Arrow-based Parquet reader for efficient columnar access
-    record_batch_reader: Option<Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send>>,
+    record_batch_reader:
+        Option<Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send>>,
     /// Current projection specification
     projection_spec: Option<ProjectionSpec>,
     /// File path for error reporting
@@ -37,12 +38,16 @@ impl ParquetReader {
     /// Create a new ParquetReader from a file path
     pub fn from_file<P: AsRef<Path>>(file_path: P, batch_size: usize) -> Result<Self, EvalError> {
         let path_str = file_path.as_ref().to_string_lossy().to_string();
-        
+
         // Validate file exists and is readable
         if !file_path.as_ref().exists() {
-            return Err(BatchReaderError::data_source(
-                DataSourceError::access_failed(&path_str, "File does not exist")
-            ).into());
+            return Err(
+                BatchReaderError::data_source(DataSourceError::access_failed(
+                    &path_str,
+                    "File does not exist",
+                ))
+                .into(),
+            );
         }
 
         Ok(ParquetReader {
@@ -59,14 +64,17 @@ impl ParquetReader {
             return Ok(()); // Already initialized
         }
 
-        let projection_spec = self.projection_spec.as_ref()
-            .ok_or_else(|| EvalError::General("set_projection must be called before next_batch".to_string()))?;
+        let projection_spec = self.projection_spec.as_ref().ok_or_else(|| {
+            EvalError::General("set_projection must be called before next_batch".to_string())
+        })?;
 
         // Open the Parquet file
-        let file = File::open(&self.file_path)
-            .map_err(|e| BatchReaderError::data_source(
-                DataSourceError::access_failed(&self.file_path, &e.to_string())
-            ))?;
+        let file = File::open(&self.file_path).map_err(|e| {
+            BatchReaderError::data_source(DataSourceError::access_failed(
+                &self.file_path,
+                &e.to_string(),
+            ))
+        })?;
 
         // Extract column indices from projections
         let mut column_indices = Vec::new();
@@ -90,45 +98,46 @@ impl ParquetReader {
         }
 
         // Create Arrow-based reader with column projection
-        let builder = ParquetRecordBatchReaderBuilder::try_new(file)
-            .map_err(|e| BatchReaderError::data_source(
-                DataSourceError::initialization_failed(
-                    "Parquet",
-                    &format!("Failed to create reader: {}", e)
-                )
-            ))?;
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| {
+            BatchReaderError::data_source(DataSourceError::initialization_failed(
+                "Parquet",
+                &format!("Failed to create reader: {}", e),
+            ))
+        })?;
 
         // Column bounds were already validated in set_projection, so we can proceed
         let parquet_schema = builder.parquet_schema();
 
         // Create projection mask for column selection
-        let projection_mask = ProjectionMask::roots(
-            parquet_schema,
-            column_indices.iter().cloned()
-        );
+        let projection_mask = ProjectionMask::roots(parquet_schema, column_indices.iter().cloned());
 
         let reader = builder
             .with_batch_size(self.batch_size)
             .with_projection(projection_mask)
             .build()
-            .map_err(|e| BatchReaderError::data_source(
-                DataSourceError::initialization_failed(
+            .map_err(|e| {
+                BatchReaderError::data_source(DataSourceError::initialization_failed(
                     "Parquet",
-                    &format!("Failed to build reader: {}", e)
-                )
-            ))?;
+                    &format!("Failed to build reader: {}", e),
+                ))
+            })?;
 
         self.record_batch_reader = Some(Box::new(reader));
         Ok(())
     }
 
     /// Convert Arrow RecordBatch to VectorizedBatch
-    fn convert_record_batch(&self, record_batch: RecordBatch) -> Result<VectorizedBatch, EvalError> {
+    fn convert_record_batch(
+        &self,
+        record_batch: RecordBatch,
+    ) -> Result<VectorizedBatch, EvalError> {
         let projection_spec = self.projection_spec.as_ref().unwrap();
         let batch_size = record_batch.num_rows();
-        
+
         // Create schema from projection
-        let fields: Vec<Field> = projection_spec.projections.iter()
+        let fields: Vec<Field> = projection_spec
+            .projections
+            .iter()
             .enumerate()
             .map(|(_proj_idx, p)| Field {
                 name: match &p.source {
@@ -139,13 +148,13 @@ impl ParquetReader {
                         } else {
                             format!("col_{}", idx)
                         }
-                    },
+                    }
                     _ => unreachable!("FieldPath should have been rejected earlier"),
                 },
                 type_info: p.logical_type,
             })
             .collect();
-        
+
         let schema = SourceTypeDef::new(fields);
         let mut batch = VectorizedBatch::new(schema, batch_size);
 
@@ -156,16 +165,16 @@ impl ParquetReader {
                     // After projection, columns are reordered to match projection order
                     // So we use the projection index, not the original column index
                     proj_idx
-                },
+                }
                 _ => unreachable!("FieldPath should have been rejected earlier"),
             };
 
             // Get the Arrow array for this column from the projected batch
             let arrow_array = record_batch.column(col_idx);
-            
+
             // Get the target vector from the batch
             let vector = batch.column_mut(proj_idx)?;
-            
+
             // Convert Arrow array to PartiQL vector based on logical type
             match projection.logical_type {
                 LogicalType::Int64 => {
@@ -190,24 +199,27 @@ impl ParquetReader {
                 }
             }
         }
-        
+
         batch.set_row_count(batch_size);
         Ok(batch)
     }
 
     /// Convert Arrow array to Int64 slice
-    fn convert_arrow_to_int64(&self, array: &dyn Array, target: &mut [i64]) -> Result<(), EvalError> {
+    fn convert_arrow_to_int64(
+        &self,
+        array: &dyn Array,
+        target: &mut [i64],
+    ) -> Result<(), EvalError> {
         match array.data_type() {
             arrow::datatypes::DataType::Int64 => {
-                let int_array = array.as_any().downcast_ref::<Int64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow array",
-                            "downcast",
-                            LogicalType::Int64,
-                            "Failed to downcast to Int64Array"
-                        )
-                    ))?;
+                let int_array = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                    BatchReaderError::type_conversion(TypeConversionError::conversion_failed(
+                        "Arrow array",
+                        "downcast",
+                        LogicalType::Int64,
+                        "Failed to downcast to Int64Array",
+                    ))
+                })?;
 
                 for (i, value) in int_array.iter().enumerate() {
                     if i >= target.len() {
@@ -218,48 +230,67 @@ impl ParquetReader {
             }
             arrow::datatypes::DataType::Float64 => {
                 // Convert Float64 to Int64 (truncation)
-                let float_array = array.as_any().downcast_ref::<Float64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow Float64Array",
-                            "downcast",
-                            LogicalType::Int64,
-                            "Failed to downcast to Float64Array"
-                        )
-                    ))?;
+                let float_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<Float64Array>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow Float64Array",
+                                    "downcast",
+                                    LogicalType::Int64,
+                                    "Failed to downcast to Float64Array",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in float_array.iter().enumerate() {
                     if i >= target.len() {
                         break;
                     }
-                    target[i] = value.map(|v| if v.is_finite() { v as i64 } else { 0 }).unwrap_or(0);
+                    target[i] = value
+                        .map(|v| if v.is_finite() { v as i64 } else { 0 })
+                        .unwrap_or(0);
                 }
             }
-            _ => return Err(BatchReaderError::type_conversion(
-                TypeConversionError::type_mismatch(
-                    "Arrow array",
-                    &format!("{:?}", array.data_type()),
-                    LogicalType::Int64,
-                    Some("Use explicit conversion or cast to Int64")
+            _ => {
+                return Err(
+                    BatchReaderError::type_conversion(TypeConversionError::type_mismatch(
+                        "Arrow array",
+                        &format!("{:?}", array.data_type()),
+                        LogicalType::Int64,
+                        Some("Use explicit conversion or cast to Int64"),
+                    ))
+                    .into(),
                 )
-            ).into())
+            }
         }
         Ok(())
     }
 
     /// Convert Arrow array to Float64 slice
-    fn convert_arrow_to_float64(&self, array: &dyn Array, target: &mut [f64]) -> Result<(), EvalError> {
+    fn convert_arrow_to_float64(
+        &self,
+        array: &dyn Array,
+        target: &mut [f64],
+    ) -> Result<(), EvalError> {
         match array.data_type() {
             arrow::datatypes::DataType::Float64 => {
-                let float_array = array.as_any().downcast_ref::<Float64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow array",
-                            "downcast",
-                            LogicalType::Float64,
-                            "Failed to downcast to Float64Array"
-                        )
-                    ))?;
+                let float_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<Float64Array>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow array",
+                                    "downcast",
+                                    LogicalType::Float64,
+                                    "Failed to downcast to Float64Array",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in float_array.iter().enumerate() {
                     if i >= target.len() {
@@ -270,15 +301,14 @@ impl ParquetReader {
             }
             arrow::datatypes::DataType::Int64 => {
                 // Convert Int64 to Float64
-                let int_array = array.as_any().downcast_ref::<Int64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow Int64Array",
-                            "downcast",
-                            LogicalType::Float64,
-                            "Failed to downcast to Int64Array"
-                        )
-                    ))?;
+                let int_array = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                    BatchReaderError::type_conversion(TypeConversionError::conversion_failed(
+                        "Arrow Int64Array",
+                        "downcast",
+                        LogicalType::Float64,
+                        "Failed to downcast to Int64Array",
+                    ))
+                })?;
 
                 for (i, value) in int_array.iter().enumerate() {
                     if i >= target.len() {
@@ -287,31 +317,43 @@ impl ParquetReader {
                     target[i] = value.map(|v| v as f64).unwrap_or(0.0);
                 }
             }
-            _ => return Err(BatchReaderError::type_conversion(
-                TypeConversionError::type_mismatch(
-                    "Arrow array",
-                    &format!("{:?}", array.data_type()),
-                    LogicalType::Float64,
-                    Some("Use explicit conversion or cast to Float64")
+            _ => {
+                return Err(
+                    BatchReaderError::type_conversion(TypeConversionError::type_mismatch(
+                        "Arrow array",
+                        &format!("{:?}", array.data_type()),
+                        LogicalType::Float64,
+                        Some("Use explicit conversion or cast to Float64"),
+                    ))
+                    .into(),
                 )
-            ).into())
+            }
         }
         Ok(())
     }
 
     /// Convert Arrow array to Boolean slice
-    fn convert_arrow_to_boolean(&self, array: &dyn Array, target: &mut [bool]) -> Result<(), EvalError> {
+    fn convert_arrow_to_boolean(
+        &self,
+        array: &dyn Array,
+        target: &mut [bool],
+    ) -> Result<(), EvalError> {
         match array.data_type() {
             arrow::datatypes::DataType::Boolean => {
-                let bool_array = array.as_any().downcast_ref::<BooleanArray>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow array",
-                            "downcast",
-                            LogicalType::Boolean,
-                            "Failed to downcast to BooleanArray"
-                        )
-                    ))?;
+                let bool_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<BooleanArray>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow array",
+                                    "downcast",
+                                    LogicalType::Boolean,
+                                    "Failed to downcast to BooleanArray",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in bool_array.iter().enumerate() {
                     if i >= target.len() {
@@ -320,31 +362,43 @@ impl ParquetReader {
                     target[i] = value.unwrap_or(false);
                 }
             }
-            _ => return Err(BatchReaderError::type_conversion(
-                TypeConversionError::type_mismatch(
-                    "Arrow array",
-                    &format!("{:?}", array.data_type()),
-                    LogicalType::Boolean,
-                    Some("Use explicit conversion or cast to Boolean")
+            _ => {
+                return Err(
+                    BatchReaderError::type_conversion(TypeConversionError::type_mismatch(
+                        "Arrow array",
+                        &format!("{:?}", array.data_type()),
+                        LogicalType::Boolean,
+                        Some("Use explicit conversion or cast to Boolean"),
+                    ))
+                    .into(),
                 )
-            ).into())
+            }
         }
         Ok(())
     }
 
     /// Convert Arrow array to String slice
-    fn convert_arrow_to_string(&self, array: &dyn Array, target: &mut [String]) -> Result<(), EvalError> {
+    fn convert_arrow_to_string(
+        &self,
+        array: &dyn Array,
+        target: &mut [String],
+    ) -> Result<(), EvalError> {
         match array.data_type() {
             arrow::datatypes::DataType::Utf8 => {
-                let string_array = array.as_any().downcast_ref::<StringArray>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow array",
-                            "downcast",
-                            LogicalType::String,
-                            "Failed to downcast to StringArray"
-                        )
-                    ))?;
+                let string_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow array",
+                                    "downcast",
+                                    LogicalType::String,
+                                    "Failed to downcast to StringArray",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in string_array.iter().enumerate() {
                     if i >= target.len() {
@@ -355,15 +409,14 @@ impl ParquetReader {
             }
             arrow::datatypes::DataType::Int64 => {
                 // Convert Int64 to String
-                let int_array = array.as_any().downcast_ref::<Int64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow Int64Array",
-                            "downcast",
-                            LogicalType::String,
-                            "Failed to downcast to Int64Array"
-                        )
-                    ))?;
+                let int_array = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                    BatchReaderError::type_conversion(TypeConversionError::conversion_failed(
+                        "Arrow Int64Array",
+                        "downcast",
+                        LogicalType::String,
+                        "Failed to downcast to Int64Array",
+                    ))
+                })?;
 
                 for (i, value) in int_array.iter().enumerate() {
                     if i >= target.len() {
@@ -374,15 +427,20 @@ impl ParquetReader {
             }
             arrow::datatypes::DataType::Float64 => {
                 // Convert Float64 to String
-                let float_array = array.as_any().downcast_ref::<Float64Array>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow Float64Array",
-                            "downcast",
-                            LogicalType::String,
-                            "Failed to downcast to Float64Array"
-                        )
-                    ))?;
+                let float_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<Float64Array>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow Float64Array",
+                                    "downcast",
+                                    LogicalType::String,
+                                    "Failed to downcast to Float64Array",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in float_array.iter().enumerate() {
                     if i >= target.len() {
@@ -393,15 +451,20 @@ impl ParquetReader {
             }
             arrow::datatypes::DataType::Boolean => {
                 // Convert Boolean to String
-                let bool_array = array.as_any().downcast_ref::<BooleanArray>()
-                    .ok_or_else(|| BatchReaderError::type_conversion(
-                        TypeConversionError::conversion_failed(
-                            "Arrow BooleanArray",
-                            "downcast",
-                            LogicalType::String,
-                            "Failed to downcast to BooleanArray"
-                        )
-                    ))?;
+                let bool_array =
+                    array
+                        .as_any()
+                        .downcast_ref::<BooleanArray>()
+                        .ok_or_else(|| {
+                            BatchReaderError::type_conversion(
+                                TypeConversionError::conversion_failed(
+                                    "Arrow BooleanArray",
+                                    "downcast",
+                                    LogicalType::String,
+                                    "Failed to downcast to BooleanArray",
+                                ),
+                            )
+                        })?;
 
                 for (i, value) in bool_array.iter().enumerate() {
                     if i >= target.len() {
@@ -410,14 +473,17 @@ impl ParquetReader {
                     target[i] = value.map(|v| v.to_string()).unwrap_or_default();
                 }
             }
-            _ => return Err(BatchReaderError::type_conversion(
-                TypeConversionError::type_mismatch(
-                    "Arrow array",
-                    &format!("{:?}", array.data_type()),
-                    LogicalType::String,
-                    Some("Most types can be converted to String")
+            _ => {
+                return Err(
+                    BatchReaderError::type_conversion(TypeConversionError::type_mismatch(
+                        "Arrow array",
+                        &format!("{:?}", array.data_type()),
+                        LogicalType::String,
+                        Some("Most types can be converted to String"),
+                    ))
+                    .into(),
                 )
-            ).into())
+            }
         }
         Ok(())
     }
@@ -452,7 +518,7 @@ impl BatchReader for ParquetReader {
             if let Ok(builder) = ParquetRecordBatchReaderBuilder::try_new(file) {
                 let parquet_schema = builder.parquet_schema();
                 let num_columns = parquet_schema.columns().len();
-                
+
                 for projection in &spec.projections {
                     if let ProjectionSource::ColumnIndex(col_idx) = &projection.source {
                         if *col_idx >= num_columns {
@@ -475,21 +541,20 @@ impl BatchReader for ParquetReader {
         self.initialize_reader()?;
 
         let reader = self.record_batch_reader.as_mut().unwrap();
-        
+
         match reader.next() {
             Some(Ok(record_batch)) => {
                 let batch = self.convert_record_batch(record_batch)?;
                 Ok(Some(batch))
             }
-            Some(Err(e)) => {
-                Err(BatchReaderError::data_source(
-                    DataSourceError::corrupted_data(
-                        &self.file_path,
-                        "record batch",
-                        &format!("Failed to read Parquet data: {}", e)
-                    )
-                ).into())
-            }
+            Some(Err(e)) => Err(
+                BatchReaderError::data_source(DataSourceError::corrupted_data(
+                    &self.file_path,
+                    "record batch",
+                    &format!("Failed to read Parquet data: {}", e),
+                ))
+                .into(),
+            ),
             None => Ok(None), // End of data
         }
     }
@@ -498,14 +563,14 @@ impl BatchReader for ParquetReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use tempfile::NamedTempFile;
-    use arrow::array::{Int64Array, StringArray, Float64Array};
+    use crate::reader::Projection;
+    use arrow::array::{Float64Array, Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use parquet::arrow::ArrowWriter;
     use parquet::file::properties::WriterProperties;
-    use crate::reader::Projection;
+    use std::sync::Arc;
+    use tempfile::NamedTempFile;
 
     fn create_test_parquet_file() -> Result<NamedTempFile, Box<dyn std::error::Error>> {
         // Create test data
@@ -516,13 +581,13 @@ mod tests {
         ]));
 
         let id_array = Arc::new(Int64Array::from(vec![1, 2, 3, 4, 5]));
-        let name_array = Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie", "Diana", "Eve"]));
+        let name_array = Arc::new(StringArray::from(vec![
+            "Alice", "Bob", "Charlie", "Diana", "Eve",
+        ]));
         let score_array = Arc::new(Float64Array::from(vec![95.5, 87.2, 92.8, 88.1, 94.3]));
 
-        let record_batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![id_array, name_array, score_array],
-        )?;
+        let record_batch =
+            RecordBatch::try_new(schema.clone(), vec![id_array, name_array, score_array])?;
 
         // Create temporary file
         let temp_file = NamedTempFile::new()?;
@@ -592,11 +657,13 @@ mod tests {
         let mut reader = ParquetReader::from_file(temp_file.path(), 10).unwrap();
 
         // Try to set projection with FieldPath - should fail
-        let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("name".to_string()),
+            0,
+            LogicalType::String,
+        )];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
-        
+
         let result = reader.set_projection(projection_spec);
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
@@ -611,15 +678,17 @@ mod tests {
         let mut reader = ParquetReader::from_file(temp_file.path(), 10).unwrap();
 
         // Try to access column index 5 when only columns 0, 1, 2 exist
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(5), 0, LogicalType::Int64),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::ColumnIndex(5),
+            0,
+            LogicalType::Int64,
+        )];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
-        
+
         // Error should occur during set_projection now (not next_batch)
         let result = reader.set_projection(projection_spec);
         assert!(result.is_err());
-        
+
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("out of bounds"));
         assert!(error_msg.contains("Column index 5"));
@@ -644,7 +713,7 @@ mod tests {
         // Test type conversions: Int64 to Float64, Float64 to String
         let projections = vec![
             Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Float64), // Int64 -> Float64
-            Projection::new(ProjectionSource::ColumnIndex(2), 1, LogicalType::String),  // Float64 -> String
+            Projection::new(ProjectionSource::ColumnIndex(2), 1, LogicalType::String), // Float64 -> String
         ];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         reader.set_projection(projection_spec).unwrap();

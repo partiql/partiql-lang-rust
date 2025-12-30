@@ -8,10 +8,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionError {
     /// Projection specification validation failed
-    InvalidSpec {
-        reason: String,
-        context: String,
-    },
+    InvalidSpec { reason: String, context: String },
     /// Projection source is not supported by this reader
     UnsupportedSource {
         source_type: String,
@@ -35,9 +32,17 @@ impl fmt::Display for ProjectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProjectionError::InvalidSpec { reason, context } => {
-                write!(f, "Invalid projection specification: {}. Context: {}", reason, context)
+                write!(
+                    f,
+                    "Invalid projection specification: {}. Context: {}",
+                    reason, context
+                )
             }
-            ProjectionError::UnsupportedSource { source_type, reader_type, supported_sources } => {
+            ProjectionError::UnsupportedSource {
+                source_type,
+                reader_type,
+                supported_sources,
+            } => {
                 write!(
                     f,
                     "Projection source '{}' is not supported by {} reader. Supported sources: [{}]",
@@ -46,7 +51,10 @@ impl fmt::Display for ProjectionError {
                     supported_sources.join(", ")
                 )
             }
-            ProjectionError::SourceNotFound { source, available_sources } => {
+            ProjectionError::SourceNotFound {
+                source,
+                available_sources,
+            } => {
                 write!(
                     f,
                     "Projection source '{}' not found. Available sources: [{}]",
@@ -54,7 +62,11 @@ impl fmt::Display for ProjectionError {
                     available_sources.join(", ")
                 )
             }
-            ProjectionError::NonScalarData { source, actual_type, expected_scalar_types } => {
+            ProjectionError::NonScalarData {
+                source,
+                actual_type,
+                expected_scalar_types,
+            } => {
                 write!(
                     f,
                     "Projection source '{}' contains non-scalar data of type '{}'. Phase 0 only supports scalar types: [{}]",
@@ -70,10 +82,7 @@ impl fmt::Display for ProjectionError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataSourceError {
     /// File or resource access failed
-    AccessFailed {
-        resource: String,
-        reason: String,
-    },
+    AccessFailed { resource: String, reason: String },
     /// Data format is corrupted or invalid
     CorruptedData {
         resource: String,
@@ -86,10 +95,7 @@ pub enum DataSourceError {
         required_for: String,
     },
     /// Data source initialization failed
-    InitializationFailed {
-        source_type: String,
-        reason: String,
-    },
+    InitializationFailed { source_type: String, reason: String },
 }
 
 impl fmt::Display for DataSourceError {
@@ -98,22 +104,36 @@ impl fmt::Display for DataSourceError {
             DataSourceError::AccessFailed { resource, reason } => {
                 write!(f, "Failed to access data source '{}': {}", resource, reason)
             }
-            DataSourceError::CorruptedData { resource, location, details } => {
+            DataSourceError::CorruptedData {
+                resource,
+                location,
+                details,
+            } => {
                 write!(
                     f,
                     "Corrupted data in '{}' at {}: {}",
                     resource, location, details
                 )
             }
-            DataSourceError::MissingConfiguration { parameter, required_for } => {
+            DataSourceError::MissingConfiguration {
+                parameter,
+                required_for,
+            } => {
                 write!(
                     f,
                     "Missing required configuration parameter '{}' for {}",
                     parameter, required_for
                 )
             }
-            DataSourceError::InitializationFailed { source_type, reason } => {
-                write!(f, "Failed to initialize {} data source: {}", source_type, reason)
+            DataSourceError::InitializationFailed {
+                source_type,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Failed to initialize {} data source: {}",
+                    source_type, reason
+                )
             }
         }
     }
@@ -145,8 +165,14 @@ pub enum TypeConversionError {
 impl fmt::Display for TypeConversionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TypeConversionError::TypeMismatch { source, source_type, target_type, conversion_hint } => {
-                let hint = conversion_hint.as_ref()
+            TypeConversionError::TypeMismatch {
+                source,
+                source_type,
+                target_type,
+                conversion_hint,
+            } => {
+                let hint = conversion_hint
+                    .as_ref()
                     .map(|h| format!(" Hint: {}", h))
                     .unwrap_or_default();
                 write!(
@@ -155,14 +181,22 @@ impl fmt::Display for TypeConversionError {
                     source, source_type, target_type, hint
                 )
             }
-            TypeConversionError::ConversionFailed { source, value, target_type, reason } => {
+            TypeConversionError::ConversionFailed {
+                source,
+                value,
+                target_type,
+                reason,
+            } => {
                 write!(
                     f,
                     "Failed to convert value '{}' from source '{}' to {:?}: {}",
                     value, source, target_type, reason
                 )
             }
-            TypeConversionError::UnexpectedNull { source, target_type } => {
+            TypeConversionError::UnexpectedNull {
+                source,
+                target_type,
+            } => {
                 write!(
                     f,
                     "Unexpected null value from source '{}' when converting to {:?}",
@@ -385,7 +419,7 @@ mod tests {
     fn test_projection_error_display() {
         let error = ProjectionError::invalid_spec(
             "Duplicate indices",
-            "Projections at indices [0, 0] conflict"
+            "Projections at indices [0, 0] conflict",
         );
         let display = error.to_string();
         assert!(display.contains("Invalid projection specification"));
@@ -407,7 +441,7 @@ mod tests {
             "column_a",
             "String",
             LogicalType::Int64,
-            Some("Use CAST function for explicit conversion")
+            Some("Use CAST function for explicit conversion"),
         );
         let display = error.to_string();
         assert!(display.contains("Type mismatch for source 'column_a'"));
@@ -419,7 +453,7 @@ mod tests {
     fn test_batch_reader_error_with_context() {
         let projection_error = ProjectionError::source_not_found(
             "missing_field",
-            &vec!["field_a".to_string(), "field_b".to_string()]
+            &vec!["field_a".to_string(), "field_b".to_string()],
         );
         let error = BatchReaderError::projection(projection_error)
             .with_context("While processing Ion data".to_string())
@@ -435,13 +469,12 @@ mod tests {
 
     #[test]
     fn test_error_severity_classification() {
-        let fatal_error = BatchReaderError::projection(
-            ProjectionError::invalid_spec("test", "test")
-        );
+        let fatal_error =
+            BatchReaderError::projection(ProjectionError::invalid_spec("test", "test"));
         assert_eq!(fatal_error.severity, ErrorSeverity::Fatal);
 
         let recoverable_error = BatchReaderError::type_conversion(
-            TypeConversionError::unexpected_null("test", LogicalType::Int64)
+            TypeConversionError::unexpected_null("test", LogicalType::Int64),
         );
         assert_eq!(recoverable_error.severity, ErrorSeverity::Recoverable);
 
@@ -451,11 +484,13 @@ mod tests {
 
     #[test]
     fn test_eval_error_conversion() {
-        let batch_error = BatchReaderError::data_source(
-            DataSourceError::corrupted_data("test.parquet", "row 100", "Invalid checksum")
-        );
+        let batch_error = BatchReaderError::data_source(DataSourceError::corrupted_data(
+            "test.parquet",
+            "row 100",
+            "Invalid checksum",
+        ));
         let eval_error: EvalError = batch_error.into();
-        
+
         match eval_error {
             EvalError::General(msg) => {
                 assert!(msg.contains("[FATAL]"));

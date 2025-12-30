@@ -18,17 +18,19 @@ impl ProjectionSpec {
     /// Validate projection specification invariants
     fn validate(&self) -> Result<(), EvalError> {
         // Check that target vector indices are unique and contiguous from 0
-        let mut indices: Vec<usize> = self.projections.iter()
+        let mut indices: Vec<usize> = self
+            .projections
+            .iter()
             .map(|p| p.target_vector_idx)
             .collect();
-        
+
         // Check uniqueness before sorting
         let mut unique_indices = indices.clone();
         unique_indices.sort_unstable();
         unique_indices.dedup();
         if unique_indices.len() != indices.len() {
             return Err(EvalError::General(
-                "Duplicate target vector indices found".to_string()
+                "Duplicate target vector indices found".to_string(),
             ));
         }
 
@@ -139,11 +141,19 @@ mod tests {
     #[test]
     fn test_projection_spec_validation_success() {
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("a".to_string()), 0, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("b".to_string()), 1, LogicalType::String),
+            Projection::new(
+                ProjectionSource::FieldPath("a".to_string()),
+                0,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("b".to_string()),
+                1,
+                LogicalType::String,
+            ),
             Projection::new(ProjectionSource::ColumnIndex(2), 2, LogicalType::Float64),
         ];
-        
+
         let spec = ProjectionSpec::new(projections).unwrap();
         assert_eq!(spec.output_vector_count(), 3);
     }
@@ -151,10 +161,18 @@ mod tests {
     #[test]
     fn test_projection_spec_validation_non_contiguous() {
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("a".to_string()), 0, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("b".to_string()), 2, LogicalType::String), // Skip 1
+            Projection::new(
+                ProjectionSource::FieldPath("a".to_string()),
+                0,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("b".to_string()),
+                2,
+                LogicalType::String,
+            ), // Skip 1
         ];
-        
+
         let result = ProjectionSpec::new(projections);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("contiguous"));
@@ -163,10 +181,18 @@ mod tests {
     #[test]
     fn test_projection_spec_validation_duplicate_indices() {
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("a".to_string()), 0, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("b".to_string()), 0, LogicalType::String), // Duplicate
+            Projection::new(
+                ProjectionSource::FieldPath("a".to_string()),
+                0,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("b".to_string()),
+                0,
+                LogicalType::String,
+            ), // Duplicate
         ];
-        
+
         let result = ProjectionSpec::new(projections);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Duplicate"));
@@ -175,13 +201,24 @@ mod tests {
     #[test]
     fn test_projection_spec_validation_not_starting_from_zero() {
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("a".to_string()), 1, LogicalType::Int64), // Should start from 0
-            Projection::new(ProjectionSource::FieldPath("b".to_string()), 2, LogicalType::String),
+            Projection::new(
+                ProjectionSource::FieldPath("a".to_string()),
+                1,
+                LogicalType::Int64,
+            ), // Should start from 0
+            Projection::new(
+                ProjectionSource::FieldPath("b".to_string()),
+                2,
+                LogicalType::String,
+            ),
         ];
-        
+
         let result = ProjectionSpec::new(projections);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Expected 0, found 1"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected 0, found 1"));
     }
 
     #[test]
@@ -193,7 +230,7 @@ mod tests {
             .add_column(1, LogicalType::Float64)
             .build()
             .unwrap();
-        
+
         assert_eq!(spec.output_vector_count(), 3);
         assert_eq!(spec.projections[0].source, ProjectionSource::ColumnIndex(0));
         assert_eq!(spec.projections[1].source, ProjectionSource::ColumnIndex(2));
@@ -209,10 +246,19 @@ mod tests {
             .add_field("score", LogicalType::Float64)
             .build()
             .unwrap();
-        
+
         assert_eq!(spec.output_vector_count(), 3);
-        assert_eq!(spec.projections[0].source, ProjectionSource::FieldPath("name".to_string()));
-        assert_eq!(spec.projections[1].source, ProjectionSource::FieldPath("person.age".to_string()));
-        assert_eq!(spec.projections[2].source, ProjectionSource::FieldPath("score".to_string()));
+        assert_eq!(
+            spec.projections[0].source,
+            ProjectionSource::FieldPath("name".to_string())
+        );
+        assert_eq!(
+            spec.projections[1].source,
+            ProjectionSource::FieldPath("person.age".to_string())
+        );
+        assert_eq!(
+            spec.projections[2].source,
+            ProjectionSource::FieldPath("score".to_string())
+        );
     }
 }

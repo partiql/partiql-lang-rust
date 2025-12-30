@@ -1,8 +1,10 @@
-use partiql_eval_vectorized::batch::LogicalType;
-use partiql_eval_vectorized::reader::{ArrowReader, BatchReader, Projection, ProjectionSource, ProjectionSpec};
-use arrow::array::{Int64Array, Float64Array, BooleanArray, StringArray};
+use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field as ArrowField, Schema};
 use arrow::record_batch::RecordBatch;
+use partiql_eval_vectorized::batch::LogicalType;
+use partiql_eval_vectorized::reader::{
+    ArrowReader, BatchReader, Projection, ProjectionSource, ProjectionSpec,
+};
 use std::sync::Arc;
 
 // ANSI color codes
@@ -17,37 +19,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: Basic Arrow reading with all scalar types
     test_basic_arrow_reading()?;
-    
+
     println!();
     println!("----------------------------------------");
     println!();
-    
+
     // Test 2: Type conversions (Int64->Float64, Float64->String, etc.)
     test_arrow_type_conversions()?;
-    
+
     println!();
     println!("----------------------------------------");
     println!();
-    
+
     // Test 3: Multiple Arrow RecordBatches
     test_multiple_record_batches()?;
-    
+
     println!();
     println!("----------------------------------------");
     println!();
-    
+
     // Test 4: Column index projections and partial column selection
     test_column_projections()?;
-    
+
     println!();
     println!("----------------------------------------");
     println!();
-    
+
     // Test 5: Error cases (FieldPath rejection, column bounds, etc.)
     test_error_cases()?;
 
     println!();
-    println!("{}PASS:{} All ArrowReader tests completed successfully!", GREEN, RESET);
+    println!(
+        "{}PASS:{} All ArrowReader tests completed successfully!",
+        GREEN, RESET
+    );
     println!("The ArrowReader implementation is working correctly with Phase 0 constraints.");
 
     Ok(())
@@ -102,16 +107,24 @@ fn test_basic_arrow_reading() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(batch) = reader.next_batch()? {
         batch_count += 1;
         total_rows += batch.row_count();
-        
-        println!("Batch {}: {} rows, {} columns", batch_count, batch.row_count(), batch.total_column_count());
-        
+
+        println!(
+            "Batch {}: {} rows, {} columns",
+            batch_count,
+            batch.row_count(),
+            batch.total_column_count()
+        );
+
         // Print sample data
         print_batch_sample(&batch, 3)?;
     }
 
-    println!("Results: {} batches, {} total rows", batch_count, total_rows);
+    println!(
+        "Results: {} batches, {} total rows",
+        batch_count, total_rows
+    );
     assert_eq!(total_rows, 3, "Should have read 3 rows");
-    
+
     println!("{}PASS:{} Basic Arrow reading test passed", GREEN, RESET);
     Ok(())
 }
@@ -132,10 +145,7 @@ fn test_arrow_type_conversions() -> Result<(), Box<dyn std::error::Error>> {
     let float_array = Arc::new(Float64Array::from(vec![3.14, 2.71]));
     let bool_array = Arc::new(BooleanArray::from(vec![true, false]));
 
-    let record_batch = RecordBatch::try_new(
-        schema,
-        vec![int_array, float_array, bool_array],
-    )?;
+    let record_batch = RecordBatch::try_new(schema, vec![int_array, float_array, bool_array])?;
 
     println!("Arrow RecordBatch with type conversions:");
     println!("  int_col: [42, 100] -> Float64 and String");
@@ -148,9 +158,9 @@ fn test_arrow_type_conversions() -> Result<(), Box<dyn std::error::Error>> {
     // Set projection with type conversions
     let projections = vec![
         Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Float64), // Int64 -> Float64
-        Projection::new(ProjectionSource::ColumnIndex(0), 1, LogicalType::String),  // Int64 -> String
-        Projection::new(ProjectionSource::ColumnIndex(1), 2, LogicalType::String),  // Float64 -> String
-        Projection::new(ProjectionSource::ColumnIndex(2), 3, LogicalType::String),  // Boolean -> String
+        Projection::new(ProjectionSource::ColumnIndex(0), 1, LogicalType::String), // Int64 -> String
+        Projection::new(ProjectionSource::ColumnIndex(1), 2, LogicalType::String), // Float64 -> String
+        Projection::new(ProjectionSource::ColumnIndex(2), 3, LogicalType::String), // Boolean -> String
     ];
 
     let projection_spec = ProjectionSpec::new(projections)?;
@@ -159,7 +169,7 @@ fn test_arrow_type_conversions() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(batch) = reader.next_batch()? {
         println!("Type conversions test batch: {} rows", batch.row_count());
         print_batch_sample(&batch, 2)?;
-        
+
         println!("{}PASS:{} Type conversions working:", GREEN, RESET);
         println!("  - Int64 -> Float64");
         println!("  - Int64 -> String");
@@ -230,14 +240,17 @@ fn test_multiple_record_batches() -> Result<(), Box<dyn std::error::Error>> {
         batch_count += 1;
         total_rows += batch.row_count();
         println!("  Batch {}: {} rows", batch_count, batch.row_count());
-        
+
         // Print sample from first batch
         if batch_count == 1 {
             print_batch_sample(&batch, 2)?;
         }
     }
 
-    println!("{}PASS:{} Successfully processed multiple RecordBatches", GREEN, RESET);
+    println!(
+        "{}PASS:{} Successfully processed multiple RecordBatches",
+        GREEN, RESET
+    );
     println!("  - Total batches: {}", batch_count);
     println!("  - Total rows: {}", total_rows);
     println!("  - Expected 3 batches with 6 total rows");
@@ -279,19 +292,26 @@ fn test_column_projections() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set projection to select only specific columns (0, 2, 4)
     let projections = vec![
-        Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64),   // col_0
+        Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64), // col_0
         Projection::new(ProjectionSource::ColumnIndex(2), 1, LogicalType::Float64), // col_2
-        Projection::new(ProjectionSource::ColumnIndex(4), 2, LogicalType::Int64),   // col_4
+        Projection::new(ProjectionSource::ColumnIndex(4), 2, LogicalType::Int64), // col_4
     ];
 
     let projection_spec = ProjectionSpec::new(projections)?;
     reader.set_projection(projection_spec)?;
 
     if let Some(batch) = reader.next_batch()? {
-        println!("Column projection test batch: {} rows, {} columns", batch.row_count(), batch.total_column_count());
+        println!(
+            "Column projection test batch: {} rows, {} columns",
+            batch.row_count(),
+            batch.total_column_count()
+        );
         print_batch_sample(&batch, 2)?;
-        
-        println!("{}PASS:{} Column index projections working correctly", GREEN, RESET);
+
+        println!(
+            "{}PASS:{} Column index projections working correctly",
+            GREEN, RESET
+        );
         println!("  - Selected columns 0, 2, 4 from 5 available columns");
         println!("  - Skipped columns 1 and 3 as intended");
     }
@@ -305,33 +325,45 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 5a: FieldPath rejection
     println!("5a. Testing FieldPath rejection...");
-    let schema = Arc::new(Schema::new(vec![
-        ArrowField::new("name", DataType::Utf8, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![ArrowField::new(
+        "name",
+        DataType::Utf8,
+        false,
+    )]));
 
     let name_array = Arc::new(StringArray::from(vec!["Alice"]));
     let record_batch = RecordBatch::try_new(schema, vec![name_array])?;
     let mut reader = ArrowReader::from_record_batch(record_batch);
 
-    let projections = vec![
-        Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-    ];
+    let projections = vec![Projection::new(
+        ProjectionSource::FieldPath("name".to_string()),
+        0,
+        LogicalType::String,
+    )];
 
     let projection_spec = ProjectionSpec::new(projections)?;
     match reader.set_projection(projection_spec) {
         Err(e) => {
-            println!("  {}PASS:{} FieldPath correctly rejected: {}", GREEN, RESET, e);
+            println!(
+                "  {}PASS:{} FieldPath correctly rejected: {}",
+                GREEN, RESET, e
+            );
         }
         Ok(_) => {
-            println!("  {}FAIL:{} FieldPath should have been rejected", RED, RESET);
+            println!(
+                "  {}FAIL:{} FieldPath should have been rejected",
+                RED, RESET
+            );
         }
     }
 
     // Test 5b: Column index out of bounds
     println!("5b. Testing column index bounds checking...");
-    let schema = Arc::new(Schema::new(vec![
-        ArrowField::new("col1", DataType::Int64, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![ArrowField::new(
+        "col1",
+        DataType::Int64,
+        false,
+    )]));
 
     let col1_array = Arc::new(Int64Array::from(vec![1, 2, 3]));
     let record_batch = RecordBatch::try_new(schema, vec![col1_array])?;
@@ -344,18 +376,26 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
     let projection_spec = ProjectionSpec::new(projections)?;
     match reader.set_projection(projection_spec) {
         Err(e) => {
-            println!("  {}PASS:{} Column bounds correctly checked: {}", GREEN, RESET, e);
+            println!(
+                "  {}PASS:{} Column bounds correctly checked: {}",
+                GREEN, RESET, e
+            );
         }
         Ok(_) => {
-            println!("  {}FAIL:{} Column bounds should have been checked", RED, RESET);
+            println!(
+                "  {}FAIL:{} Column bounds should have been checked",
+                RED, RESET
+            );
         }
     }
 
     // Test 5c: Unsupported Arrow type conversion
     println!("5c. Testing unsupported type conversion...");
-    let schema = Arc::new(Schema::new(vec![
-        ArrowField::new("string_col", DataType::Utf8, false),
-    ]));
+    let schema = Arc::new(Schema::new(vec![ArrowField::new(
+        "string_col",
+        DataType::Utf8,
+        false,
+    )]));
 
     let string_array = Arc::new(StringArray::from(vec!["not_a_number"]));
     let record_batch = RecordBatch::try_new(schema, vec![string_array])?;
@@ -370,10 +410,16 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
 
     match reader.next_batch() {
         Err(e) => {
-            println!("  {}PASS:{} Unsupported type conversion detected: {}", GREEN, RESET, e);
+            println!(
+                "  {}PASS:{} Unsupported type conversion detected: {}",
+                GREEN, RESET, e
+            );
         }
         Ok(_) => {
-            println!("  {}FAIL:{} Unsupported type conversion should have been detected", RED, RESET);
+            println!(
+                "  {}FAIL:{} Unsupported type conversion should have been detected",
+                RED, RESET
+            );
         }
     }
 
@@ -381,31 +427,34 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_batch_sample(batch: &partiql_eval_vectorized::VectorizedBatch, max_rows: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn print_batch_sample(
+    batch: &partiql_eval_vectorized::VectorizedBatch,
+    max_rows: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     use partiql_eval_vectorized::PhysicalVectorEnum;
-    
+
     let schema = batch.schema();
     let row_count = std::cmp::min(batch.row_count(), max_rows);
-    
+
     if row_count == 0 {
         println!("  (No rows to display)");
         return Ok(());
     }
-    
+
     // Print header
     print!("  |");
     for field in schema.fields() {
         print!(" {:>12} |", field.name);
     }
     println!();
-    
+
     // Print separator
     print!("  |");
     for _ in 0..schema.field_count() {
         print!("--------------|");
     }
     println!();
-    
+
     // Print rows
     for row_idx in 0..row_count {
         print!("  |");
@@ -449,11 +498,11 @@ fn print_batch_sample(batch: &partiql_eval_vectorized::VectorizedBatch, max_rows
         }
         println!();
     }
-    
+
     if batch.row_count() > max_rows {
         println!("  ... ({} more rows)", batch.row_count() - max_rows);
     }
     println!();
-    
+
     Ok(())
 }

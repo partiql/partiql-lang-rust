@@ -1,11 +1,15 @@
-use crate::batch::{LogicalType, Vector, VectorizedBatch, SourceTypeDef, Field, PhysicalVectorEnum};
+use crate::batch::{
+    Field, LogicalType, PhysicalVectorEnum, SourceTypeDef, Vector, VectorizedBatch,
+};
 use crate::error::EvalError;
-use crate::reader::error::{BatchReaderError, DataSourceError, ProjectionError, TypeConversionError};
+use crate::reader::error::{
+    BatchReaderError, DataSourceError, ProjectionError, TypeConversionError,
+};
 use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
 use ion_rs::{Element, Value};
 
 /// Phase 0 Ion reader implementation
-/// 
+///
 /// Supports reading Ion data with FieldPath projections for flat field access.
 /// Phase 0 constraints:
 /// - Only scalar values (Int64, Float64, Boolean, String)
@@ -27,9 +31,12 @@ impl IonReader {
     /// Create a new IonReader from Ion text data
     pub fn from_ion_text(ion_text: &str, batch_size: usize) -> Result<Self, EvalError> {
         let elements: Vec<Element> = Element::read_all(ion_text.as_bytes())
-            .map_err(|e| BatchReaderError::data_source(
-                DataSourceError::initialization_failed("Ion", &format!("Failed to parse Ion text: {}", e))
-            ))?
+            .map_err(|e| {
+                BatchReaderError::data_source(DataSourceError::initialization_failed(
+                    "Ion",
+                    &format!("Failed to parse Ion text: {}", e),
+                ))
+            })?
             .into();
 
         Ok(Self {
@@ -51,18 +58,23 @@ impl IonReader {
     }
 
     /// Extract a scalar value from an Ion element based on field path
-    fn extract_field_value(&self, element: &Element, field_path: &str) -> Result<Option<Value>, EvalError> {
+    fn extract_field_value(
+        &self,
+        element: &Element,
+        field_path: &str,
+    ) -> Result<Option<Value>, EvalError> {
         // Phase 0 supports single-level nesting: "field" or "struct.field"
         let path_parts: Vec<&str> = field_path.split('.').collect();
-        
+
         if path_parts.len() > 2 {
-            return Err(BatchReaderError::projection(
-                ProjectionError::unsupported_source(
+            return Err(
+                BatchReaderError::projection(ProjectionError::unsupported_source(
                     &format!("FieldPath({})", field_path),
                     "IonReader",
-                    &["Single-level field paths like 'field' or 'struct.field'"]
-                )
-            ).into());
+                    &["Single-level field paths like 'field' or 'struct.field'"],
+                ))
+                .into(),
+            );
         }
 
         let current_element = element;
@@ -88,9 +100,10 @@ impl IonReader {
                         return Err(BatchReaderError::projection(
                             ProjectionError::source_not_found(
                                 field_path,
-                                &vec!["<non-struct element has no fields>".to_string()]
-                            )
-                        ).into());
+                                &vec!["<non-struct element has no fields>".to_string()],
+                            ),
+                        )
+                        .into());
                     } else {
                         // Nested access on non-struct - missing field
                         return Ok(None);
@@ -128,8 +141,8 @@ impl IonReader {
                                                     source_name,
                                                     "Ion Int",
                                                     LogicalType::Int64,
-                                                    "Integer value too large for i64"
-                                                )
+                                                    "Integer value too large for i64",
+                                                ),
                                             )
                                         })?;
                                     }
@@ -143,9 +156,10 @@ impl IonReader {
                                                 source_name,
                                                 &format!("{:?}", value.ion_type()),
                                                 LogicalType::Int64,
-                                                Some("Use explicit conversion or check data types")
-                                            )
-                                        ).into());
+                                                Some("Use explicit conversion or check data types"),
+                                            ),
+                                        )
+                                        .into());
                                     }
                                 }
                             }
@@ -182,8 +196,8 @@ impl IonReader {
                                                     source_name,
                                                     "Ion Decimal",
                                                     LogicalType::Float64,
-                                                    "Failed to convert decimal to f64"
-                                                )
+                                                    "Failed to convert decimal to f64",
+                                                ),
                                             )
                                         })?;
                                     }
@@ -196,9 +210,10 @@ impl IonReader {
                                                 source_name,
                                                 &format!("{:?}", value.ion_type()),
                                                 LogicalType::Float64,
-                                                Some("Use explicit conversion or check data types")
-                                            )
-                                        ).into());
+                                                Some("Use explicit conversion or check data types"),
+                                            ),
+                                        )
+                                        .into());
                                     }
                                 }
                             }
@@ -230,9 +245,10 @@ impl IonReader {
                                                 source_name,
                                                 &format!("{:?}", value.ion_type()),
                                                 LogicalType::Boolean,
-                                                Some("Use explicit conversion or check data types")
-                                            )
-                                        ).into());
+                                                Some("Use explicit conversion or check data types"),
+                                            ),
+                                        )
+                                        .into());
                                     }
                                 }
                             }
@@ -268,9 +284,10 @@ impl IonReader {
                                                 source_name,
                                                 &format!("{:?}", value.ion_type()),
                                                 LogicalType::String,
-                                                Some("Use explicit conversion or check data types")
-                                            )
-                                        ).into());
+                                                Some("Use explicit conversion or check data types"),
+                                            ),
+                                        )
+                                        .into());
                                     }
                                 }
                             }
@@ -295,13 +312,14 @@ impl BatchReader for IonReader {
                     // Valid for Ion reader
                 }
                 ProjectionSource::ColumnIndex(idx) => {
-                    return Err(BatchReaderError::projection(
-                        ProjectionError::unsupported_source(
+                    return Err(
+                        BatchReaderError::projection(ProjectionError::unsupported_source(
                             &format!("ColumnIndex({})", idx),
                             "IonReader",
-                            &["FieldPath"]
-                        )
-                    ).into());
+                            &["FieldPath"],
+                        ))
+                        .into(),
+                    );
                 }
             }
         }
@@ -311,8 +329,9 @@ impl BatchReader for IonReader {
     }
 
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
-        let projection = self.projection.as_ref()
-            .ok_or_else(|| EvalError::General("set_projection must be called before next_batch".to_string()))?;
+        let projection = self.projection.as_ref().ok_or_else(|| {
+            EvalError::General("set_projection must be called before next_batch".to_string())
+        })?;
 
         // Check if we've reached the end of data
         if self.current_position >= self.elements.len() {
@@ -324,13 +343,15 @@ impl BatchReader for IonReader {
         let actual_batch_size = std::cmp::min(self.batch_size, remaining_elements);
 
         // Create schema for the batch (Phase 0 workaround)
-        let fields: Vec<Field> = projection.projections.iter()
+        let fields: Vec<Field> = projection
+            .projections
+            .iter()
             .map(|p| Field {
                 name: format!("col_{}", p.target_vector_idx),
                 type_info: p.logical_type,
             })
             .collect();
-        
+
         let temp_schema = SourceTypeDef::new(fields);
         let mut batch = VectorizedBatch::new(temp_schema, actual_batch_size);
 
@@ -339,11 +360,11 @@ impl BatchReader for IonReader {
             if let ProjectionSource::FieldPath(field_path) = &proj.source {
                 // Extract values for this field from the current batch
                 let mut field_values = Vec::with_capacity(actual_batch_size);
-                
+
                 for i in 0..actual_batch_size {
                     let element_idx = self.current_position + i;
                     let element = &self.elements[element_idx];
-                    
+
                     let value = self.extract_field_value(element, field_path)?;
                     field_values.push(value);
                 }
@@ -387,10 +408,26 @@ mod tests {
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-            Projection::new(ProjectionSource::FieldPath("age".to_string()), 1, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("score".to_string()), 2, LogicalType::Float64),
-            Projection::new(ProjectionSource::FieldPath("active".to_string()), 3, LogicalType::Boolean),
+            Projection::new(
+                ProjectionSource::FieldPath("name".to_string()),
+                0,
+                LogicalType::String,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("age".to_string()),
+                1,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("score".to_string()),
+                2,
+                LogicalType::Float64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("active".to_string()),
+                3,
+                LogicalType::Boolean,
+            ),
         ];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
@@ -414,9 +451,21 @@ mod tests {
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-            Projection::new(ProjectionSource::FieldPath("age".to_string()), 1, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("score".to_string()), 2, LogicalType::Float64),
+            Projection::new(
+                ProjectionSource::FieldPath("name".to_string()),
+                0,
+                LogicalType::String,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("age".to_string()),
+                1,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("score".to_string()),
+                2,
+                LogicalType::Float64,
+            ),
         ];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
@@ -438,13 +487,15 @@ mod tests {
         let ion_data = r#"{name: "Alice", age: 30}"#;
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::String),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::ColumnIndex(0),
+            0,
+            LogicalType::String,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         let result = reader.set_projection(projection_spec);
-        
+
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("ColumnIndex"));
@@ -456,9 +507,11 @@ mod tests {
         let ion_data = r#"{person: {details: {name: "Alice"}}}"#;
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
-        let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("person.details.name".to_string()), 0, LogicalType::String),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("person.details.name".to_string()),
+            0,
+            LogicalType::String,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         assert!(reader.set_projection(projection_spec).is_ok());
@@ -466,7 +519,10 @@ mod tests {
         // Should fail when trying to read the batch due to deep nesting
         let result = reader.next_batch();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("person.details.name"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("person.details.name"));
     }
 
     #[test]
@@ -475,8 +531,16 @@ mod tests {
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("person.name".to_string()), 0, LogicalType::String),
-            Projection::new(ProjectionSource::FieldPath("person.age".to_string()), 1, LogicalType::Int64),
+            Projection::new(
+                ProjectionSource::FieldPath("person.name".to_string()),
+                0,
+                LogicalType::String,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("person.age".to_string()),
+                1,
+                LogicalType::Int64,
+            ),
         ];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
@@ -495,9 +559,11 @@ mod tests {
         let ion_data = r#"{name: "Alice", age: "thirty"}"#;
         let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
 
-        let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("age".to_string()), 0, LogicalType::Int64),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("age".to_string()),
+            0,
+            LogicalType::Int64,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         assert!(reader.set_projection(projection_spec).is_ok());

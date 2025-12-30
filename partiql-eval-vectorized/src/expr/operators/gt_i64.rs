@@ -22,7 +22,7 @@ pub(crate) unsafe fn kernel_gt_i64(
     len: usize,
 ) {
     let out_ptr = out.as_mut_ptr();
-    
+
     match (lhs.is_constant, rhs.is_constant) {
         (false, false) => {
             for i in 0..len {

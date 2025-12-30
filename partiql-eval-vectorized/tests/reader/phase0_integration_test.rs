@@ -1,5 +1,7 @@
 use partiql_eval_vectorized::batch::LogicalType;
-use partiql_eval_vectorized::reader::{BatchReader, Projection, ProjectionSource, ProjectionSpec, TupleIteratorReader, ParquetReader};
+use partiql_eval_vectorized::reader::{
+    BatchReader, ParquetReader, Projection, ProjectionSource, ProjectionSpec, TupleIteratorReader,
+};
 
 #[cfg(test)]
 mod tests {
@@ -10,21 +12,24 @@ mod tests {
         // Create test tuples with data
         let tuples: Vec<partiql_value::Value> = vec![
             partiql_value::Value::Tuple(Box::new(partiql_value::Tuple::from([
-                ("name", partiql_value::Value::String(Box::new("Alice".to_string()))),
+                (
+                    "name",
+                    partiql_value::Value::String(Box::new("Alice".to_string())),
+                ),
                 ("age", partiql_value::Value::Integer(30)),
                 ("score", partiql_value::Value::Real(95.5.into())),
             ]))),
             partiql_value::Value::Tuple(Box::new(partiql_value::Tuple::from([
-                ("name", partiql_value::Value::String(Box::new("Bob".to_string()))),
+                (
+                    "name",
+                    partiql_value::Value::String(Box::new("Bob".to_string())),
+                ),
                 ("age", partiql_value::Value::Integer(25)),
                 ("score", partiql_value::Value::Real(87.2.into())),
             ]))),
         ];
-        
-        let mut reader = TupleIteratorReader::new(
-            Box::new(tuples.into_iter()),
-            1024,
-        );
+
+        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024);
 
         // Create a Phase 0 projection specification
         let projections = vec![
@@ -65,7 +70,7 @@ mod tests {
     #[test]
     fn test_phase0_projection_validation() {
         // Test that projection validation works correctly
-        
+
         // Valid projection - contiguous indices starting from 0
         let valid_projections = vec![
             Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64),
@@ -92,15 +97,15 @@ mod tests {
     fn test_phase0_reader_requires_projection() {
         // Test that calling next_batch without set_projection fails
         let tuples: Vec<partiql_value::Value> = vec![];
-        let mut reader = TupleIteratorReader::new(
-            Box::new(tuples.into_iter()),
-            1024,
-        );
+        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024);
 
         // Should fail because set_projection hasn't been called
         let result = reader.next_batch();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("set_projection must be called"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("set_projection must be called"));
     }
 
     #[test]
@@ -110,30 +115,63 @@ mod tests {
             // Column-based access (for columnar data like Arrow/Parquet)
             Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64),
             Projection::new(ProjectionSource::ColumnIndex(2), 1, LogicalType::Float64),
-            
             // Field-based access (for row/struct data like Ion)
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 2, LogicalType::String),
-            Projection::new(ProjectionSource::FieldPath("active".to_string()), 3, LogicalType::Boolean),
+            Projection::new(
+                ProjectionSource::FieldPath("name".to_string()),
+                2,
+                LogicalType::String,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("active".to_string()),
+                3,
+                LogicalType::Boolean,
+            ),
         ];
 
         let spec = ProjectionSpec::new(projections).unwrap();
         assert_eq!(spec.output_vector_count(), 4);
 
         // Verify the projection sources are preserved correctly
-        assert!(matches!(spec.projections[0].source, ProjectionSource::ColumnIndex(0)));
-        assert!(matches!(spec.projections[1].source, ProjectionSource::ColumnIndex(2)));
-        assert!(matches!(spec.projections[2].source, ProjectionSource::FieldPath(ref path) if path == "name"));
-        assert!(matches!(spec.projections[3].source, ProjectionSource::FieldPath(ref path) if path == "active"));
+        assert!(matches!(
+            spec.projections[0].source,
+            ProjectionSource::ColumnIndex(0)
+        ));
+        assert!(matches!(
+            spec.projections[1].source,
+            ProjectionSource::ColumnIndex(2)
+        ));
+        assert!(
+            matches!(spec.projections[2].source, ProjectionSource::FieldPath(ref path) if path == "name")
+        );
+        assert!(
+            matches!(spec.projections[3].source, ProjectionSource::FieldPath(ref path) if path == "active")
+        );
     }
 
     #[test]
     fn test_phase0_scalar_types_only() {
         // Test that all Phase 0 scalar types are supported
         let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("int_field".to_string()), 0, LogicalType::Int64),
-            Projection::new(ProjectionSource::FieldPath("float_field".to_string()), 1, LogicalType::Float64),
-            Projection::new(ProjectionSource::FieldPath("bool_field".to_string()), 2, LogicalType::Boolean),
-            Projection::new(ProjectionSource::FieldPath("string_field".to_string()), 3, LogicalType::String),
+            Projection::new(
+                ProjectionSource::FieldPath("int_field".to_string()),
+                0,
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("float_field".to_string()),
+                1,
+                LogicalType::Float64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("bool_field".to_string()),
+                2,
+                LogicalType::Boolean,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("string_field".to_string()),
+                3,
+                LogicalType::String,
+            ),
         ];
 
         let spec = ProjectionSpec::new(projections).unwrap();
@@ -148,25 +186,25 @@ mod tests {
 
     #[test]
     fn test_phase0_parquet_reader_workflow() {
-        use tempfile::tempdir;
-        use std::fs::File;
-        use arrow::array::{Int64Array, Float64Array, StringArray};
-        use arrow::record_batch::RecordBatch;
+        use arrow::array::{Float64Array, Int64Array, StringArray};
         use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::record_batch::RecordBatch;
         use parquet::arrow::ArrowWriter;
+        use std::fs::File;
         use std::sync::Arc;
-        
+        use tempfile::tempdir;
+
         // Create a temporary Parquet file for testing
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join("test.parquet");
-        
+
         // Create test data
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
             Field::new("score", DataType::Float64, false),
             Field::new("name", DataType::Utf8, false),
         ]));
-        
+
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![
@@ -174,16 +212,17 @@ mod tests {
                 Arc::new(Float64Array::from(vec![95.5, 87.2, 92.1])),
                 Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"])),
             ],
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let file = File::create(&file_path).unwrap();
         let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
         writer.write(&batch).unwrap();
         writer.close().unwrap();
-        
+
         // Test Phase 0 workflow with ParquetReader
         let mut reader = ParquetReader::from_file(file_path.to_str().unwrap(), 1024).unwrap();
-        
+
         // Create a Phase 0 projection specification using ColumnIndex
         let projections = vec![
             Projection::new(
@@ -217,83 +256,76 @@ mod tests {
 
     #[test]
     fn test_phase0_parquet_reader_requires_projection() {
-        use tempfile::tempdir;
-        use std::fs::File;
         use arrow::array::Int64Array;
-        use arrow::record_batch::RecordBatch;
         use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::record_batch::RecordBatch;
         use parquet::arrow::ArrowWriter;
+        use std::fs::File;
         use std::sync::Arc;
-        
+        use tempfile::tempdir;
+
         // Create a minimal Parquet file
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join("test.parquet");
-        
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("col", DataType::Int64, false),
-        ]));
-        
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![1]))],
-        ).unwrap();
-        
+
+        let schema = Arc::new(Schema::new(vec![Field::new("col", DataType::Int64, false)]));
+
+        let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1]))])
+            .unwrap();
+
         let file = File::create(&file_path).unwrap();
         let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
         writer.write(&batch).unwrap();
         writer.close().unwrap();
-        
+
         // Test that calling next_batch without set_projection fails
         let mut reader = ParquetReader::from_file(file_path.to_str().unwrap(), 1024).unwrap();
 
         // Should fail because set_projection hasn't been called
         let result = reader.next_batch();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("set_projection must be called"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("set_projection must be called"));
     }
 
     #[test]
     fn test_phase0_parquet_reader_column_index_only() {
-        use tempfile::tempdir;
-        use std::fs::File;
         use arrow::array::Int64Array;
-        use arrow::record_batch::RecordBatch;
         use arrow::datatypes::{DataType, Field, Schema};
+        use arrow::record_batch::RecordBatch;
         use parquet::arrow::ArrowWriter;
+        use std::fs::File;
         use std::sync::Arc;
-        
+        use tempfile::tempdir;
+
         // Create a minimal Parquet file
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join("test.parquet");
-        
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("col", DataType::Int64, false),
-        ]));
-        
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![1]))],
-        ).unwrap();
-        
+
+        let schema = Arc::new(Schema::new(vec![Field::new("col", DataType::Int64, false)]));
+
+        let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1]))])
+            .unwrap();
+
         let file = File::create(&file_path).unwrap();
         let mut writer = ArrowWriter::try_new(file, schema, None).unwrap();
         writer.write(&batch).unwrap();
         writer.close().unwrap();
-        
+
         // Test that ParquetReader rejects FieldPath projections
         let mut reader = ParquetReader::from_file(file_path.to_str().unwrap(), 1024).unwrap();
-        
-        let projections = vec![
-            Projection::new(
-                ProjectionSource::FieldPath("col".to_string()), // Should be rejected
-                0,
-                LogicalType::Int64,
-            ),
-        ];
+
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("col".to_string()), // Should be rejected
+            0,
+            LogicalType::Int64,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         let result = reader.set_projection(projection_spec);
-        
+
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("FieldPath"));

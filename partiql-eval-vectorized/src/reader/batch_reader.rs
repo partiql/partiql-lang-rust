@@ -6,14 +6,14 @@ use crate::reader::projection::ProjectionSpec;
 pub trait BatchReader {
     /// Configure the reader with a fixed projection.
     /// Must be called exactly once before reading.
-    /// 
+    ///
     /// The reader must either accept the projection (returning Ok(())) or reject it
     /// with a descriptive error. If accepted, all subsequent batches must conform
     /// exactly to the projection specification.
     fn set_projection(&mut self, spec: ProjectionSpec) -> Result<(), EvalError>;
 
     /// Produce the next batch, or None at end of input.
-    /// 
+    ///
     /// set_projection() must be called successfully before calling this method.
     /// All returned batches must have:
     /// - Vectors at indices specified by the projection

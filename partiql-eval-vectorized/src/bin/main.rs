@@ -2,14 +2,16 @@ use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::call_defs::{CallDef, CallSpec};
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog};
 use partiql_catalog::context::SessionContext;
-use partiql_catalog::table_fn::{BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo, TableFunction};
+use partiql_catalog::table_fn::{
+    BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo, TableFunction,
+};
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
 use partiql_logical::LogicalPlan;
 use partiql_logical_planner::LogicalPlanner;
 use partiql_parser::{Parsed, Parser, ParserError};
-use partiql_value::{Value, Tuple};
+use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
 
@@ -23,15 +25,15 @@ impl BaseTableFunctionInfo for DataTableFunction {
         static CALL_DEF: std::sync::OnceLock<CallDef> = std::sync::OnceLock::new();
         CALL_DEF.get_or_init(|| CallDef {
             names: vec!["data"],
-                overloads: vec![CallSpec {
-                    input: vec![],
-                    output: Box::new(|args| {
-                        partiql_logical::ValueExpr::Call(partiql_logical::CallExpr {
-                            name: partiql_logical::CallName::ByName("data".to_string()),
-                            arguments: args,
-                        })
-                    }),
-                }],
+            overloads: vec![CallSpec {
+                input: vec![],
+                output: Box::new(|args| {
+                    partiql_logical::ValueExpr::Call(partiql_logical::CallExpr {
+                        name: partiql_logical::CallName::ByName("data".to_string()),
+                        arguments: args,
+                    })
+                }),
+            }],
         })
     }
 
@@ -51,10 +53,7 @@ impl BaseTableExpr for DataTableExpr {
     ) -> BaseTableExprResult<'c> {
         // Create an iterator that generates 1,024,000 tuples
         let iter = (0..10_024_000).map(|i| {
-            let tuple = Tuple::from([
-                ("a", Value::Integer(i)),
-                ("b", Value::Integer(i + 100)),
-            ]);
+            let tuple = Tuple::from([("a", Value::Integer(i)), ("b", Value::Integer(i + 100))]);
             Ok(Value::Tuple(Box::new(tuple)))
         });
 
@@ -72,7 +71,7 @@ fn main() {
     }
 
     let query = &args[1];
-    
+
     println!("Query: {}", query);
     println!("Data Source: Generated tuples");
     println!();
@@ -80,7 +79,9 @@ fn main() {
     // Create catalog and add the data table function
     let mut catalog = PartiqlCatalog::default();
     let data_fn = TableFunction::new(Box::new(DataTableFunction));
-    catalog.add_table_function(data_fn).expect("Failed to add table function");
+    catalog
+        .add_table_function(data_fn)
+        .expect("Failed to add table function");
     let catalog = catalog.to_shared_catalog();
 
     // Phase 1: Parse
@@ -129,15 +130,17 @@ fn main() {
     println!("=== NON-VECTORIZED EXECUTION ===");
     let non_vec_exec_start = Instant::now();
     let mut non_vec_row_count = 0;
-    
+
     // Create evaluation context
     use partiql_eval::env::basic::MapBindings;
     use partiql_eval::eval::BasicContext;
-    use partiql_value::{DateTime, Bag};
+    use partiql_value::{Bag, DateTime};
     let bindings = MapBindings::default();
-    let sys = partiql_catalog::context::SystemContext { now: DateTime::from_system_now_utc() };
+    let sys = partiql_catalog::context::SystemContext {
+        now: DateTime::from_system_now_utc(),
+    };
     let ctx = BasicContext::new(bindings, sys);
-    
+
     // Execute and iterate through results
     match plan.execute(&ctx) {
         Ok(evaluated) => {
@@ -159,8 +162,11 @@ fn main() {
         }
     }
     let non_vec_exec_time = non_vec_exec_start.elapsed();
-    
-    println!("Execution time: {:.3}ms", non_vec_exec_time.as_secs_f64() * 1000.0);
+
+    println!(
+        "Execution time: {:.3}ms",
+        non_vec_exec_time.as_secs_f64() * 1000.0
+    );
     println!("Rows processed: {}", non_vec_row_count);
 
     // Execute Vectorized Version
@@ -168,12 +174,12 @@ fn main() {
     let vec_exec_start = Instant::now();
     let mut batch_count = 0;
     let mut vec_row_count = 0;
-    
+
     for batch_result in vec_plan.execute() {
         match batch_result {
             Ok(batch) => {
                 batch_count += 1;
-                
+
                 // Calculate row count based on selection vector if present
                 let batch_row_count = if let Some(selection) = batch.selection() {
                     // Count selected rows (length of indices vector)
@@ -182,7 +188,7 @@ fn main() {
                     // No selection vector, use total row count
                     batch.row_count()
                 };
-                
+
                 vec_row_count += batch_row_count;
                 // Optionally print batch details
                 // print_batch(&batch);
@@ -194,8 +200,11 @@ fn main() {
         }
     }
     let vec_exec_time = vec_exec_start.elapsed();
-    
-    println!("Execution time: {:.3}ms", vec_exec_time.as_secs_f64() * 1000.0);
+
+    println!(
+        "Execution time: {:.3}ms",
+        vec_exec_time.as_secs_f64() * 1000.0
+    );
     println!("Batches processed: {}", batch_count);
     println!("Rows processed: {}", vec_row_count);
 
@@ -203,22 +212,40 @@ fn main() {
     println!("\n{}", "=".repeat(60));
     println!("TIMING SUMMARY");
     println!("{}", "=".repeat(60));
-    
+
     println!("\nPlanning Phase:");
-    println!("  Parse:                {:.3}ms", parse_time.as_secs_f64() * 1000.0);
-    println!("  Lower:                {:.3}ms", lower_time.as_secs_f64() * 1000.0);
-    println!("  Non-Vec Compile:      {:.3}ms", compile_time.as_secs_f64() * 1000.0);
-    println!("  Vectorized Compile:   {:.3}μs", vec_compile_time.as_secs_f64() * 1_000_000.0);
-    
+    println!(
+        "  Parse:                {:.3}ms",
+        parse_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  Lower:                {:.3}ms",
+        lower_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  Non-Vec Compile:      {:.3}ms",
+        compile_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  Vectorized Compile:   {:.3}μs",
+        vec_compile_time.as_secs_f64() * 1_000_000.0
+    );
+
     println!("\nExecution Phase:");
-    println!("  Non-Vectorized:       {:.3}ms", non_vec_exec_time.as_secs_f64() * 1000.0);
-    println!("  Vectorized:           {:.3}ms", vec_exec_time.as_secs_f64() * 1000.0);
-    
+    println!(
+        "  Non-Vectorized:       {:.3}ms",
+        non_vec_exec_time.as_secs_f64() * 1000.0
+    );
+    println!(
+        "  Vectorized:           {:.3}ms",
+        vec_exec_time.as_secs_f64() * 1000.0
+    );
+
     if non_vec_exec_time.as_secs_f64() > 0.0 && vec_exec_time.as_secs_f64() > 0.0 {
         let speedup = non_vec_exec_time.as_secs_f64() / vec_exec_time.as_secs_f64();
         println!("  Speedup:              {:.2}x", speedup);
     }
-    
+
     println!("\nNote: Using mock data. Replace data sources with real implementations for accurate benchmarks.");
 }
 
@@ -249,19 +276,20 @@ fn compile_vectorized(
     // TODO: This is complier's work - convert LogicalPlan to PhysicalPlan
     // They should analyze the logical plan and create appropriate ProjectionSpec
     // For now, using mock data source for compatibility
-    
+
     use partiql_eval_vectorized::reader::TupleIteratorReader;
-    
+
     let tuples: Vec<partiql_value::Value> = vec![];
-    let reader: Box<dyn partiql_eval_vectorized::BatchReader> = Box::new(
-        TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024)
-    );
-    
+    let reader: Box<dyn partiql_eval_vectorized::BatchReader> =
+        Box::new(TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024));
+
     let context = partiql_eval_vectorized::CompilerContext::new()
         .with_data_source("data".to_string(), reader);
-    
+
     let mut compiler = partiql_eval_vectorized::Compiler::new(context);
-    compiler.compile(logical).expect("Vectorized compilation failed")
+    compiler
+        .compile(logical)
+        .expect("Vectorized compilation failed")
 }
 
 /// Print a batch with SelectionVector support
@@ -269,7 +297,7 @@ fn compile_vectorized(
 fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
     let schema = batch.schema();
     let row_count = batch.row_count();
-    
+
     // DIAGNOSTIC INFO
     println!("[DEBUG] Batch info:");
     println!("  - Row count: {}", row_count);
@@ -279,16 +307,16 @@ fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
         print!("{} ({:?}), ", field.name, field.type_info);
     }
     println!();
-    
+
     // If row_count is 0, nothing to print
     if row_count == 0 {
         println!("[DEBUG] Skipping batch with 0 rows");
         return;
     }
-    
+
     // Get selection vector if present
     let selection = batch.selection();
-    
+
     // Determine which rows to print
     let rows_to_print: Vec<usize> = if let Some(sel) = selection {
         // Use selection indices
@@ -297,21 +325,21 @@ fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
         // Print all rows
         (0..row_count).collect()
     };
-    
+
     // Print header
     print!("|");
     for field in schema.fields() {
         print!(" {:>10} |", field.name);
     }
     println!();
-    
+
     // Print separator
     print!("|");
     for _ in 0..schema.field_count() {
         print!("------------|");
     }
     println!();
-    
+
     // Print rows
     for &row_idx in &rows_to_print {
         print!("|");
@@ -322,10 +350,14 @@ fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
         }
         println!();
     }
-    
+
     // Print summary
     if let Some(_sel) = selection {
-        println!("({} rows selected out of {} total)", rows_to_print.len(), row_count);
+        println!(
+            "({} rows selected out of {} total)",
+            rows_to_print.len(),
+            row_count
+        );
     } else {
         println!("({} rows)", rows_to_print.len());
     }
@@ -333,7 +365,11 @@ fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
 }
 
 /// Format a single value from a physical vector
-fn format_value(physical: &partiql_eval_vectorized::PhysicalVectorEnum, idx: usize, logical_type: partiql_eval_vectorized::LogicalType) -> String {
+fn format_value(
+    physical: &partiql_eval_vectorized::PhysicalVectorEnum,
+    idx: usize,
+    logical_type: partiql_eval_vectorized::LogicalType,
+) -> String {
     use partiql_eval_vectorized::PhysicalVectorEnum;
     match physical {
         PhysicalVectorEnum::Int64(vec) => {

@@ -1,12 +1,14 @@
-use partiql_eval_vectorized::batch::LogicalType;
-use partiql_eval_vectorized::reader::{BatchReader, Projection, ProjectionSource, ProjectionSpec, ParquetReader};
-use std::fs::File;
-use std::sync::Arc;
-use arrow::array::{Int64Array, StringArray, Float64Array, BooleanArray};
+use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use partiql_eval_vectorized::batch::LogicalType;
+use partiql_eval_vectorized::reader::{
+    BatchReader, ParquetReader, Projection, ProjectionSource, ProjectionSpec,
+};
+use std::fs::File;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 
 /// Create a test Parquet file with sample data for property testing
@@ -61,7 +63,11 @@ mod unit_tests {
     fn test_parquet_conversion_basic_types() -> Result<(), Box<dyn std::error::Error>> {
         let temp_file = create_test_parquet_file_with_data(
             vec![1, 2, 3],
-            vec!["Alice".to_string(), "Bob".to_string(), "Charlie".to_string()],
+            vec![
+                "Alice".to_string(),
+                "Bob".to_string(),
+                "Charlie".to_string(),
+            ],
             vec![95.5, 87.2, 92.8],
             vec![true, false, true],
         )?;
@@ -146,9 +152,11 @@ mod unit_tests {
 
         let mut reader = ParquetReader::from_file(temp_file.path(), 10)?;
 
-        let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("name".to_string()),
+            0,
+            LogicalType::String,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections)?;
         let result = reader.set_projection(projection_spec);
@@ -173,20 +181,34 @@ mod unit_tests {
         let mut reader = ParquetReader::from_file(temp_file.path(), 10)?;
 
         // Try to access column 5 when only 4 columns exist (0-3)
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(5), 0, LogicalType::Int64),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::ColumnIndex(5),
+            0,
+            LogicalType::Int64,
+        )];
 
         let projection_spec = ProjectionSpec::new(projections)?;
-        
+
         // Error should occur during set_projection now (bounds checking moved there)
         let result = reader.set_projection(projection_spec);
-        assert!(result.is_err(), "Expected column bounds error during set_projection");
-        
+        assert!(
+            result.is_err(),
+            "Expected column bounds error during set_projection"
+        );
+
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("out of bounds"), "Error should mention 'out of bounds'");
-        assert!(error_msg.contains("Column index 5"), "Error should mention the invalid column index");
-        assert!(error_msg.contains("4 columns"), "Error should mention the actual number of columns");
+        assert!(
+            error_msg.contains("out of bounds"),
+            "Error should mention 'out of bounds'"
+        );
+        assert!(
+            error_msg.contains("Column index 5"),
+            "Error should mention the invalid column index"
+        );
+        assert!(
+            error_msg.contains("4 columns"),
+            "Error should mention the actual number of columns"
+        );
 
         Ok(())
     }
@@ -199,14 +221,22 @@ fn test_parquet_data_conversion_integrity() -> Result<(), Box<dyn std::error::Er
     // Test with various data patterns
     let test_cases = vec![
         // Small dataset
-        (vec![1, 2, 3], vec!["a".to_string(), "b".to_string(), "c".to_string()]),
+        (
+            vec![1, 2, 3],
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        ),
         // Larger dataset
         (
             (0..50).collect::<Vec<i64>>(),
-            (0..50).map(|i| format!("item_{}", i)).collect::<Vec<String>>()
+            (0..50)
+                .map(|i| format!("item_{}", i))
+                .collect::<Vec<String>>(),
         ),
         // Edge cases
-        (vec![i64::MIN, 0, i64::MAX], vec!["min".to_string(), "zero".to_string(), "max".to_string()]),
+        (
+            vec![i64::MIN, 0, i64::MAX],
+            vec!["min".to_string(), "zero".to_string(), "max".to_string()],
+        ),
     ];
 
     for (int_data, string_data) in test_cases {
@@ -252,7 +282,13 @@ fn test_parquet_data_conversion_integrity() -> Result<(), Box<dyn std::error::Er
 fn test_parquet_column_index_support() -> Result<(), Box<dyn std::error::Error>> {
     let temp_file = create_test_parquet_file_with_data(
         vec![1, 2, 3, 4, 5],
-        vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string(), "e".to_string()],
+        vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+            "e".to_string(),
+        ],
         vec![1.1, 2.2, 3.3, 4.4, 5.5],
         vec![true, false, true, false, true],
     )?;
@@ -273,7 +309,9 @@ fn test_parquet_column_index_support() -> Result<(), Box<dyn std::error::Error>>
     for column_indices in test_cases {
         let mut reader = ParquetReader::from_file(temp_file.path(), 10)?;
 
-        let projections: Vec<Projection> = column_indices.iter().enumerate()
+        let projections: Vec<Projection> = column_indices
+            .iter()
+            .enumerate()
             .map(|(target_idx, &col_idx)| {
                 let logical_type = match col_idx {
                     0 => LogicalType::Int64,
@@ -282,7 +320,11 @@ fn test_parquet_column_index_support() -> Result<(), Box<dyn std::error::Error>>
                     3 => LogicalType::Boolean,
                     _ => unreachable!(),
                 };
-                Projection::new(ProjectionSource::ColumnIndex(col_idx), target_idx, logical_type)
+                Projection::new(
+                    ProjectionSource::ColumnIndex(col_idx),
+                    target_idx,
+                    logical_type,
+                )
             })
             .collect();
 
@@ -308,12 +350,8 @@ fn test_parquet_io_efficiency() -> Result<(), Box<dyn std::error::Error>> {
     let float_data: Vec<f64> = (0..size).map(|i| i as f64 * 1.5).collect();
     let bool_data: Vec<bool> = (0..size).map(|i| i % 3 == 0).collect();
 
-    let temp_file = create_test_parquet_file_with_data(
-        int_data,
-        string_data,
-        float_data,
-        bool_data,
-    )?;
+    let temp_file =
+        create_test_parquet_file_with_data(int_data, string_data, float_data, bool_data)?;
 
     // Test reading with different batch sizes
     let batch_sizes = vec![10, 50, 100, 500];

@@ -1,6 +1,6 @@
 use crate::batch::VectorizedBatch;
 use crate::error::EvalError;
-use crate::reader::{BatchReader, ProjectionSpec, ProjectionSource};
+use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
 use arrow::record_batch::RecordBatch;
 use arrow_array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray};
 use std::sync::Arc;
@@ -54,7 +54,7 @@ impl BatchReader for ArrowReader {
         if !self.batches.is_empty() {
             let schema = self.batches[0].schema();
             let num_columns = schema.fields().len();
-            
+
             for proj in &spec.projections {
                 if let ProjectionSource::ColumnIndex(col_idx) = &proj.source {
                     if *col_idx >= num_columns {
@@ -66,30 +66,31 @@ impl BatchReader for ArrowReader {
                 }
             }
         }
-        
+
         self.projection = Some(spec);
         Ok(())
     }
 
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
         // Check if projection has been set
-        let projection = self.projection.as_ref()
-            .ok_or_else(|| EvalError::General("set_projection must be called before next_batch".to_string()))?;
+        let projection = self.projection.as_ref().ok_or_else(|| {
+            EvalError::General("set_projection must be called before next_batch".to_string())
+        })?;
 
         // Check if we're already finished
         if self.finished || self.current_batch_idx >= self.batches.len() {
             return Ok(None);
         }
-        
+
         // Get current Arrow RecordBatch
         let arrow_batch = &self.batches[self.current_batch_idx];
         self.current_batch_idx += 1;
-        
+
         // Check if we've processed all batches
         if self.current_batch_idx >= self.batches.len() {
             self.finished = true;
         }
-        
+
         // Convert Arrow RecordBatch to PartiQL VectorizedBatch
         let batch = convert_arrow_to_vectorized_batch(arrow_batch, projection)?;
         Ok(Some(batch))
@@ -101,12 +102,14 @@ fn convert_arrow_to_vectorized_batch(
     arrow_batch: &RecordBatch,
     projection: &ProjectionSpec,
 ) -> Result<VectorizedBatch, EvalError> {
-    use crate::batch::{PhysicalVectorEnum, LogicalType, SourceTypeDef, Field};
-    
+    use crate::batch::{Field, LogicalType, PhysicalVectorEnum, SourceTypeDef};
+
     let batch_size = arrow_batch.num_rows();
-    
+
     // Create schema from projection
-    let fields: Vec<Field> = projection.projections.iter()
+    let fields: Vec<Field> = projection
+        .projections
+        .iter()
         .map(|p| Field {
             name: match &p.source {
                 ProjectionSource::ColumnIndex(idx) => {
@@ -116,31 +119,33 @@ fn convert_arrow_to_vectorized_batch(
                     } else {
                         format!("col_{}", idx)
                     }
-                },
+                }
                 ProjectionSource::FieldPath(path) => path.clone(),
             },
             type_info: p.logical_type,
         })
         .collect();
-    
+
     let schema = SourceTypeDef::new(fields);
     let mut batch = VectorizedBatch::new(schema, batch_size);
-    
+
     // Convert each projected column from Arrow to PartiQL
     for proj in &projection.projections {
         let col_idx = match &proj.source {
             ProjectionSource::ColumnIndex(idx) => *idx,
             ProjectionSource::FieldPath(_) => {
-                return Err(EvalError::General("FieldPath not supported for Arrow reader".to_string()));
+                return Err(EvalError::General(
+                    "FieldPath not supported for Arrow reader".to_string(),
+                ));
             }
         };
-        
+
         // Get Arrow column
         let arrow_column = arrow_batch.column(col_idx);
-        
+
         // Get target PartiQL vector
         let vector = batch.column_mut(proj.target_vector_idx)?;
-        
+
         // Convert Arrow array to PartiQL vector based on logical type
         match proj.logical_type {
             LogicalType::Int64 => {
@@ -165,7 +170,7 @@ fn convert_arrow_to_vectorized_batch(
             }
         }
     }
-    
+
     batch.set_row_count(batch_size);
     Ok(batch)
 }
@@ -289,9 +294,9 @@ fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
     use crate::batch::LogicalType;
-    use arrow::array::{Int64Array, Float64Array, BooleanArray, StringArray};
+    use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
+    use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field as ArrowField, Schema};
     use std::sync::Arc;
 
@@ -313,7 +318,8 @@ mod tests {
         let record_batch = RecordBatch::try_new(
             schema,
             vec![id_array, name_array, score_array, active_array],
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut reader = ArrowReader::from_record_batch(record_batch);
 
@@ -347,17 +353,14 @@ mod tests {
         let int_array = Arc::new(Int64Array::from(vec![42, 100]));
         let float_array = Arc::new(Float64Array::from(vec![3.14, 2.71]));
 
-        let record_batch = RecordBatch::try_new(
-            schema,
-            vec![int_array, float_array],
-        ).unwrap();
+        let record_batch = RecordBatch::try_new(schema, vec![int_array, float_array]).unwrap();
 
         let mut reader = ArrowReader::from_record_batch(record_batch);
 
         // Set projection with type conversions
         let projections = vec![
             Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Float64), // Int64 -> Float64
-            Projection::new(ProjectionSource::ColumnIndex(1), 1, LogicalType::String),  // Float64 -> String
+            Projection::new(ProjectionSource::ColumnIndex(1), 1, LogicalType::String), // Float64 -> String
         ];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         reader.set_projection(projection_spec).unwrap();
@@ -370,9 +373,11 @@ mod tests {
 
     #[test]
     fn test_arrow_reader_field_path_rejection() {
-        let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("name", DataType::Utf8, false),
-        ]));
+        let schema = Arc::new(Schema::new(vec![ArrowField::new(
+            "name",
+            DataType::Utf8,
+            false,
+        )]));
 
         let name_array = Arc::new(StringArray::from(vec!["Alice"]));
         let record_batch = RecordBatch::try_new(schema, vec![name_array]).unwrap();
@@ -380,11 +385,13 @@ mod tests {
         let mut reader = ArrowReader::from_record_batch(record_batch);
 
         // Try to set projection with FieldPath - should fail
-        let projections = vec![
-            Projection::new(ProjectionSource::FieldPath("name".to_string()), 0, LogicalType::String),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::FieldPath("name".to_string()),
+            0,
+            LogicalType::String,
+        )];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
-        
+
         let result = reader.set_projection(projection_spec);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("FieldPath"));
@@ -392,9 +399,11 @@ mod tests {
 
     #[test]
     fn test_arrow_reader_column_index_bounds_check() {
-        let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("col1", DataType::Int64, false),
-        ]));
+        let schema = Arc::new(Schema::new(vec![ArrowField::new(
+            "col1",
+            DataType::Int64,
+            false,
+        )]));
 
         let col1_array = Arc::new(Int64Array::from(vec![1, 2, 3]));
         let record_batch = RecordBatch::try_new(schema, vec![col1_array]).unwrap();
@@ -402,11 +411,13 @@ mod tests {
         let mut reader = ArrowReader::from_record_batch(record_batch);
 
         // Try to access column index 1 when only column 0 exists
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(1), 0, LogicalType::Int64),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::ColumnIndex(1),
+            0,
+            LogicalType::Int64,
+        )];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
-        
+
         let result = reader.set_projection(projection_spec);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of bounds"));
@@ -415,26 +426,30 @@ mod tests {
     #[test]
     fn test_arrow_reader_multiple_batches() {
         // Create multiple Arrow RecordBatches
-        let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("id", DataType::Int64, false),
-        ]));
+        let schema = Arc::new(Schema::new(vec![ArrowField::new(
+            "id",
+            DataType::Int64,
+            false,
+        )]));
 
-        let batch1 = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![1, 2]))],
-        ).unwrap();
+        let batch1 =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1, 2]))])
+                .unwrap();
 
         let batch2 = RecordBatch::try_new(
             schema.clone(),
             vec![Arc::new(Int64Array::from(vec![3, 4, 5]))],
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut reader = ArrowReader::new(vec![batch1, batch2]);
 
         // Set projection
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64),
-        ];
+        let projections = vec![Projection::new(
+            ProjectionSource::ColumnIndex(0),
+            0,
+            LogicalType::Int64,
+        )];
         let projection_spec = ProjectionSpec::new(projections).unwrap();
         reader.set_projection(projection_spec).unwrap();
 

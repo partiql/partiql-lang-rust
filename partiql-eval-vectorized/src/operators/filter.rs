@@ -1,4 +1,4 @@
-use crate::batch::{SelectionVector, VectorizedBatch, LogicalType};
+use crate::batch::{LogicalType, SelectionVector, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::ExpressionExecutor;
 use crate::operators::VectorizedOperator;
@@ -12,10 +12,7 @@ pub struct VectorizedFilter {
 impl VectorizedFilter {
     /// Create new filter operator with compiled predicate expression
     pub fn new(input: Box<dyn VectorizedOperator>, predicate: ExpressionExecutor) -> Self {
-        Self {
-            input,
-            predicate,
-        }
+        Self { input, predicate }
     }
 }
 
@@ -26,25 +23,26 @@ impl VectorizedOperator for VectorizedFilter {
             Some(batch) => batch,
             None => return Ok(None), // End of input stream
         };
-        
+
         // 2. Create temporary output batch for predicate evaluation
         // The predicate result will be a single Boolean column
-        let predicate_schema = crate::batch::SourceTypeDef::new(vec![
-            crate::batch::Field {
-                name: "predicate".to_string(),
-                type_info: LogicalType::Boolean,
-            },
-        ]);
+        let predicate_schema = crate::batch::SourceTypeDef::new(vec![crate::batch::Field {
+            name: "predicate".to_string(),
+            type_info: LogicalType::Boolean,
+        }]);
         let row_count = input_batch.row_count();
         let mut predicate_output = VectorizedBatch::new(predicate_schema, row_count);
-        predicate_output.set_row_count(row_count);  // Set row count for predicate evaluation
-        
+        predicate_output.set_row_count(row_count); // Set row count for predicate evaluation
+
         // 3. Evaluate predicate expression
-        self.predicate.execute(&input_batch, &mut predicate_output)?;
-        
+        self.predicate
+            .execute(&input_batch, &mut predicate_output)?;
+
         // 4. Build selection vector from predicate results
         let predicate_col = predicate_output.column(0)?;
-        let predicate_bool = predicate_col.physical.as_boolean()
+        let predicate_bool = predicate_col
+            .physical
+            .as_boolean()
             .ok_or_else(|| EvalError::General("Expected Boolean predicate result".to_string()))?;
         let predicate_values = predicate_bool.as_slice();
         // Collect indices where predicate is true
@@ -55,7 +53,7 @@ impl VectorizedOperator for VectorizedFilter {
                 selected_indices.push(i);
             }
         }
-        
+
         // 5. Set selection vector on input batch
         // If all rows selected, keep selection as None (optimization)
         // If no rows selected, set to None (empty result)
@@ -72,7 +70,7 @@ impl VectorizedOperator for VectorizedFilter {
                 indices: selected_indices,
             }));
         }
-        
+
         // 6. Return filtered batch
         Ok(Some(input_batch))
     }

@@ -1,4 +1,4 @@
-use crate::batch::{Vector, LogicalType};
+use crate::batch::{LogicalType, Vector};
 use crate::error::EvalError;
 use crate::functions::{FnId, VectorizedFn};
 
@@ -13,7 +13,7 @@ impl VectorizedFn for VecGtInt64 {
         // TODO: Implement actual greater-than comparison
         // For each row: output[i] = inputs[0][i] > inputs[1][i]
         // Handle nulls appropriately
-        
+
         // Mock implementation: do nothing (return empty result)
         Ok(())
     }
@@ -40,7 +40,7 @@ impl VectorizedFn for VecLtInt64 {
         // TODO: Implement actual less-than comparison
         // For each row: output[i] = inputs[0][i] < inputs[1][i]
         // Handle nulls appropriately
-        
+
         // Mock implementation: do nothing (return empty result)
         Ok(())
     }

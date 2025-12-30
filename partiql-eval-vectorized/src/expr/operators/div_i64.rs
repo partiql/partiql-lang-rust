@@ -16,12 +16,7 @@ pub(crate) unsafe fn scalar_div_i64_vv(
 
 /// Scalar implementation: Vector / Constant
 #[inline]
-pub(crate) unsafe fn scalar_div_i64_vc(
-    vec: *const i64,
-    constant: i64,
-    out: *mut i64,
-    len: usize,
-) {
+pub(crate) unsafe fn scalar_div_i64_vc(vec: *const i64, constant: i64, out: *mut i64, len: usize) {
     for i in 0..len {
         *out.add(i) = *vec.add(i) / constant;
     }
@@ -29,12 +24,7 @@ pub(crate) unsafe fn scalar_div_i64_vc(
 
 /// Scalar implementation: Constant / Vector
 #[inline]
-pub(crate) unsafe fn scalar_div_i64_cv(
-    constant: i64,
-    vec: *const i64,
-    out: *mut i64,
-    len: usize,
-) {
+pub(crate) unsafe fn scalar_div_i64_cv(constant: i64, vec: *const i64, out: *mut i64, len: usize) {
     for i in 0..len {
         *out.add(i) = constant / *vec.add(i);
     }
@@ -63,8 +53,13 @@ pub(crate) unsafe fn kernel_div_i64(
     len: usize,
 ) {
     let out_ptr = out.as_mut_ptr();
-    
-    match (lhs.is_constant, rhs.is_constant, lhs.selection.is_some(), rhs.selection.is_some()) {
+
+    match (
+        lhs.is_constant,
+        rhs.is_constant,
+        lhs.selection.is_some(),
+        rhs.selection.is_some(),
+    ) {
         (false, false, false, false) => {
             scalar_div_i64_vv(lhs.data, rhs.data, out_ptr, len);
         }

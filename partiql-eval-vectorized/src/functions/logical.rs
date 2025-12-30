@@ -1,4 +1,4 @@
-use crate::batch::{Vector, LogicalType};
+use crate::batch::{LogicalType, Vector};
 use crate::error::EvalError;
 use crate::functions::{FnId, VectorizedFn};
 
@@ -13,7 +13,7 @@ impl VectorizedFn for VecAnd {
         // TODO: Implement actual AND logic
         // For each row: output[i] = inputs[0][i] AND inputs[1][i]
         // Handle three-valued logic (true/false/null) appropriately
-        
+
         // Mock implementation: do nothing (return empty result)
         Ok(())
     }
@@ -40,7 +40,7 @@ impl VectorizedFn for VecOr {
         // TODO: Implement actual OR logic
         // For each row: output[i] = inputs[0][i] OR inputs[1][i]
         // Handle three-valued logic (true/false/null) appropriately
-        
+
         // Mock implementation: do nothing (return empty result)
         Ok(())
     }
@@ -67,7 +67,7 @@ impl VectorizedFn for VecNot {
         // TODO: Implement actual NOT logic
         // For each row: output[i] = NOT inputs[0][i]
         // Handle three-valued logic (true/false/null) appropriately
-        
+
         // Mock implementation: do nothing (return empty result)
         Ok(())
     }

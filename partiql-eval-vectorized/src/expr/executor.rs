@@ -1,6 +1,8 @@
 use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
-use crate::expr::operators::{div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64, sub_i64};
+use crate::expr::operators::{
+    div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64, sub_i64,
+};
 use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
 
@@ -19,7 +21,7 @@ type KernelF64ToBool = unsafe fn(ExecInput<f64>, ExecInput<f64>, &mut [bool], us
 type KernelBoolToBool = unsafe fn(ExecInput<bool>, ExecInput<bool>, &mut [bool], usize);
 
 /// Runtime operand representation for SIMD kernels
-/// 
+///
 /// Provides efficient access to vector data with support for:
 /// - Flat vectors (via data pointer)
 /// - Constant/broadcast scalars (via is_constant flag)
@@ -71,7 +73,7 @@ impl<'a, T: Copy> ExecInput<'a, T> {
     }
 
     /// Get value at logical index (handles both flat and constant)
-    /// 
+    ///
     /// # Safety
     /// Caller must ensure idx < len
     #[inline(always)]
@@ -114,7 +116,7 @@ pub enum ExprInput {
 pub enum ExprOp {
     // Identity operation (pass-through)
     Identity,
-    
+
     // Arithmetic operations
     AddI32,
     AddI64,
@@ -128,7 +130,7 @@ pub enum ExprOp {
     DivI32,
     DivI64,
     DivF64,
-    
+
     // Comparison operations
     GtI32,
     GtI64,
@@ -150,7 +152,7 @@ pub enum ExprOp {
     LeI32,
     LeI64,
     LeF64,
-    
+
     // Logical operations
     AndBool,
     OrBool,
@@ -169,7 +171,7 @@ pub struct CompiledExpr {
 }
 
 /// Register-based expression executor
-/// 
+///
 /// Executes a sequence of compiled expressions using a register machine model.
 /// This avoids recursion overhead and enables better vectorization.
 pub struct ExpressionExecutor {
@@ -194,16 +196,16 @@ impl ExpressionExecutor {
             .iter()
             .map(|&ty| Vector::new(ty, 1024)) // TODO: Either pass in, or handle globally.
             .collect();
-        
+
         Self {
             exprs,
             scratch,
             outputs,
         }
     }
-    
+
     /// Execute the compiled expressions
-    /// 
+    ///
     /// Reads from input batch, writes intermediate results to scratch,
     /// then transfers final scratch results to output batch (zero-copy).
     pub fn execute(
@@ -212,7 +214,7 @@ impl ExpressionExecutor {
         output: &mut VectorizedBatch,
     ) -> Result<(), EvalError> {
         let batch_size = input.row_count();
-        
+
         // Ensure scratch vectors have correct size
         for scratch_vec in &mut self.scratch {
             // Resize if needed (stub - would need proper resizing logic)
@@ -220,17 +222,17 @@ impl ExpressionExecutor {
                 // In real implementation: resize or recreate vector
             }
         }
-        
+
         // Get selection vector from input (if present)
         let selection = input.selection();
-        
+
         // Phase 1: Execute all expressions (writes to scratch only)
         // Pass selection vector to enable scalar/SIMD path selection
         let exprs = self.exprs.clone();
         for compiled in &exprs {
             self.execute_op(compiled, input, selection)?;
         }
-        
+
         // Phase 2: Transfer final results from scratch to output (zero-copy!)
         // Clone physical buffers (just Arc ref count increment)
         for (output_col_idx, &scratch_idx) in self.outputs.iter().enumerate() {
@@ -238,27 +240,28 @@ impl ExpressionExecutor {
             // Transfer the physical buffer by cloning the Arc (cheap - just ref count)
             output_col.physical = self.scratch[scratch_idx].physical.clone();
         }
-        
+
         Ok(())
     }
-    
+
     // ============================================================================
     // Helper Functions for Operation Execution
     // ============================================================================
-    
+
     /// Validate that we have exactly 2 inputs for a binary operation
     #[inline]
     fn validate_binary_inputs(inputs: &[ExprInput]) -> Result<(), EvalError> {
         if inputs.len() != 2 {
-            return Err(EvalError::General(
-                format!("Binary operation requires exactly 2 inputs, got {}", inputs.len())
-            ));
+            return Err(EvalError::General(format!(
+                "Binary operation requires exactly 2 inputs, got {}",
+                inputs.len()
+            )));
         }
         Ok(())
     }
-    
+
     /// Decode ExprInput to ExecInput<i64> for runtime execution
-    /// 
+    ///
     /// Handles InputCol, Scratch, and Constant inputs
     fn decode_input_i64<'a>(
         &'a self,
@@ -270,24 +273,30 @@ impl ExpressionExecutor {
             ExprInput::InputCol(idx) => {
                 let vec = batch.column(*idx)?;
                 if vec.logical_type() != LogicalType::Int64 {
-                    return Err(EvalError::General(
-                        format!("Expected Int64 column, got {:?}", vec.logical_type())
-                    ));
+                    return Err(EvalError::General(format!(
+                        "Expected Int64 column, got {:?}",
+                        vec.logical_type()
+                    )));
                 }
-                let phys = vec.physical.as_int64()
-                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                let phys = vec.physical.as_int64().ok_or_else(|| {
+                    EvalError::General("Expected Int64 physical vector".to_string())
+                })?;
                 Ok(ExecInput::from_physical(phys, selection))
             }
             ExprInput::Scratch(idx) => {
-                let vec = self.scratch.get(*idx)
+                let vec = self
+                    .scratch
+                    .get(*idx)
                     .ok_or_else(|| EvalError::General(format!("Invalid scratch index: {}", idx)))?;
                 if vec.logical_type() != LogicalType::Int64 {
-                    return Err(EvalError::General(
-                        format!("Expected Int64 scratch, got {:?}", vec.logical_type())
-                    ));
+                    return Err(EvalError::General(format!(
+                        "Expected Int64 scratch, got {:?}",
+                        vec.logical_type()
+                    )));
                 }
-                let phys = vec.physical.as_int64()
-                    .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                let phys = vec.physical.as_int64().ok_or_else(|| {
+                    EvalError::General("Expected Int64 physical vector".to_string())
+                })?;
                 Ok(ExecInput::from_physical(phys, selection))
             }
             ExprInput::Constant(ConstantValue::Int64(value)) => {
@@ -301,97 +310,118 @@ impl ExpressionExecutor {
                     _marker: PhantomData,
                 })
             }
-            ExprInput::Constant(_) => {
-                Err(EvalError::General("Type mismatch: expected Int64 constant".to_string()))
-            }
+            ExprInput::Constant(_) => Err(EvalError::General(
+                "Type mismatch: expected Int64 constant".to_string(),
+            )),
         }
     }
-    
+
     /// Prepare output vector and return mutable slice for Int64
     #[inline]
-    fn prepare_output_i64(&mut self, output_idx: usize, len: usize) -> Result<&mut [i64], EvalError> {
+    fn prepare_output_i64(
+        &mut self,
+        output_idx: usize,
+        len: usize,
+    ) -> Result<&mut [i64], EvalError> {
         self.prepare_output(output_idx, len, LogicalType::Int64)
     }
-    
+
     /// Prepare output vector and return mutable slice for Float64
     #[inline]
-    fn prepare_output_f64(&mut self, output_idx: usize, len: usize) -> Result<&mut [f64], EvalError> {
+    fn prepare_output_f64(
+        &mut self,
+        output_idx: usize,
+        len: usize,
+    ) -> Result<&mut [f64], EvalError> {
         self.prepare_output(output_idx, len, LogicalType::Float64)
     }
-    
+
     /// Prepare output vector and return mutable slice for Boolean
     #[inline]
-    fn prepare_output_bool(&mut self, output_idx: usize, len: usize) -> Result<&mut [bool], EvalError> {
+    fn prepare_output_bool(
+        &mut self,
+        output_idx: usize,
+        len: usize,
+    ) -> Result<&mut [bool], EvalError> {
         self.prepare_output(output_idx, len, LogicalType::Boolean)
     }
-    
+
     /// Generic prepare output that dispatches based on LogicalType
-    /// 
+    ///
     /// This is zero-cost at runtime due to:
     /// 1. Monomorphization - compiler generates separate code for each T
     /// 2. Inlining - the match gets optimized away
     /// 3. The accessor methods are also inlined
     #[inline]
-    fn prepare_output<T>(&mut self, output_idx: usize, len: usize, logical_type: LogicalType) -> Result<&mut [T], EvalError> {
+    fn prepare_output<T>(
+        &mut self,
+        output_idx: usize,
+        len: usize,
+        logical_type: LogicalType,
+    ) -> Result<&mut [T], EvalError> {
         let output_vec = self.get_output_mut(output_idx)?;
-        
+
         // Ensure output has correct type and length
         if output_vec.logical_type() != logical_type {
             *output_vec = Vector::new(logical_type, len);
         }
-        
+
         // Get mutable slice via type-specific accessor
         // The match compiles to a jump table or gets optimized away entirely
         let phys_vec: *mut PhysicalVectorEnum = &mut output_vec.physical;
         unsafe {
             match logical_type {
                 LogicalType::Int64 => {
-                    let vec = (*phys_vec).as_int64_mut()
-                        .ok_or_else(|| EvalError::General("Expected Int64 physical vector".to_string()))?;
+                    let vec = (*phys_vec).as_int64_mut().ok_or_else(|| {
+                        EvalError::General("Expected Int64 physical vector".to_string())
+                    })?;
                     let slice = vec.as_mut_slice();
                     // Cast to generic slice type
                     Ok(std::slice::from_raw_parts_mut(
                         slice.as_mut_ptr() as *mut T,
-                        len.min(slice.len())
+                        len.min(slice.len()),
                     ))
                 }
                 LogicalType::Float64 => {
-                    let vec = (*phys_vec).as_float64_mut()
-                        .ok_or_else(|| EvalError::General("Expected Float64 physical vector".to_string()))?;
+                    let vec = (*phys_vec).as_float64_mut().ok_or_else(|| {
+                        EvalError::General("Expected Float64 physical vector".to_string())
+                    })?;
                     let slice = vec.as_mut_slice();
                     Ok(std::slice::from_raw_parts_mut(
                         slice.as_mut_ptr() as *mut T,
-                        len.min(slice.len())
+                        len.min(slice.len()),
                     ))
                 }
                 LogicalType::Boolean => {
-                    let vec = (*phys_vec).as_boolean_mut()
-                        .ok_or_else(|| EvalError::General("Expected Boolean physical vector".to_string()))?;
+                    let vec = (*phys_vec).as_boolean_mut().ok_or_else(|| {
+                        EvalError::General("Expected Boolean physical vector".to_string())
+                    })?;
                     let slice = vec.as_mut_slice();
                     Ok(std::slice::from_raw_parts_mut(
                         slice.as_mut_ptr() as *mut T,
-                        len.min(slice.len())
+                        len.min(slice.len()),
                     ))
                 }
                 LogicalType::String => {
-                    let vec = (*phys_vec).as_string_mut()
-                        .ok_or_else(|| EvalError::General("Expected String physical vector".to_string()))?;
+                    let vec = (*phys_vec).as_string_mut().ok_or_else(|| {
+                        EvalError::General("Expected String physical vector".to_string())
+                    })?;
                     let slice = vec.as_mut_slice();
                     Ok(std::slice::from_raw_parts_mut(
                         slice.as_mut_ptr() as *mut T,
-                        len.min(slice.len())
+                        len.min(slice.len()),
                     ))
                 }
             }
         }
     }
-    
+
     // ============================================================================
     // Generic Binary Operation Executors
     // ============================================================================
-    
+
     /// Execute binary operation: i64 × i64 → i64
-    /// 
+    ///
     /// Generic executor for all arithmetic operations on i64 that produce i64 output.
     /// Handles input decoding, output preparation, and kernel invocation.
     fn execute_binary_i64_to_i64(
@@ -403,17 +433,17 @@ impl ExpressionExecutor {
     ) -> Result<(), EvalError> {
         Self::validate_binary_inputs(&compiled.inputs)?;
         let len = input.row_count();
-        
+
         // Prepare output buffer
         let out_ptr = {
             let out_slice = self.prepare_output_i64(compiled.output, len)?;
             out_slice.as_mut_ptr()
         };
-        
+
         // Decode inputs
         let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
         let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
-        
+
         // Execute kernel
         unsafe {
             let out = std::slice::from_raw_parts_mut(out_ptr, len);
@@ -421,9 +451,9 @@ impl ExpressionExecutor {
         }
         Ok(())
     }
-    
+
     /// Execute binary operation: i64 × i64 → bool
-    /// 
+    ///
     /// Generic executor for all comparison operations on i64.
     /// Handles input decoding, output preparation, and kernel invocation.
     fn execute_binary_i64_to_bool(
@@ -435,17 +465,17 @@ impl ExpressionExecutor {
     ) -> Result<(), EvalError> {
         Self::validate_binary_inputs(&compiled.inputs)?;
         let len = input.row_count();
-        
+
         // Prepare output buffer
         let out_ptr = {
             let out_slice = self.prepare_output_bool(compiled.output, len)?;
             out_slice.as_mut_ptr()
         };
-        
+
         // Decode inputs
         let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
         let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
-        
+
         // Execute kernel
         unsafe {
             let out = std::slice::from_raw_parts_mut(out_ptr, len);
@@ -453,13 +483,13 @@ impl ExpressionExecutor {
         }
         Ok(())
     }
-    
+
     // ============================================================================
     // SIMD Kernels
     // ============================================================================
-    
+
     /// Int64 addition kernel - handles all input combinations
-    /// 
+    ///
     /// Efficiently handles 4 cases:
     /// - vector + vector (standard SIMD)
     /// - vector + const (broadcast const)
@@ -505,11 +535,11 @@ impl ExpressionExecutor {
             }
         }
     }
-    
+
     // ============================================================================
     // End SIMD Kernels
     // ============================================================================
-    
+
     /// Execute a single compiled operation
     /// All outputs go to scratch registers only.
     fn execute_op(
@@ -523,16 +553,17 @@ impl ExpressionExecutor {
             ExprOp::Identity => {
                 // Identity: copy input to output (pass-through)
                 if compiled.inputs.len() != 1 {
-                    return Err(EvalError::General(
-                        format!("Identity operation requires exactly 1 input, got {}", compiled.inputs.len())
-                    ));
+                    return Err(EvalError::General(format!(
+                        "Identity operation requires exactly 1 input, got {}",
+                        compiled.inputs.len()
+                    )));
                 }
-                
+
                 // For identity, we can just clone the vector (Arc clone is cheap)
                 // Selection vector is maintained in the batch, not in individual vectors
                 let input_vec = self.get_input(&compiled.inputs[0], input)?;
                 let cloned_input = input_vec.clone();
-                
+
                 // Now get mutable output and assign
                 let output_vec = self.get_output_mut(compiled.output)?;
                 *output_vec = cloned_input;
@@ -541,13 +572,28 @@ impl ExpressionExecutor {
                 self.execute_binary_i64_to_i64(Self::kernel_add_i64, compiled, input, selection)?;
             }
             ExprOp::SubI64 => {
-                self.execute_binary_i64_to_i64(sub_i64::kernel_sub_i64, compiled, input, selection)?;
+                self.execute_binary_i64_to_i64(
+                    sub_i64::kernel_sub_i64,
+                    compiled,
+                    input,
+                    selection,
+                )?;
             }
             ExprOp::MulI64 => {
-                self.execute_binary_i64_to_i64(mul_i64::kernel_mul_i64, compiled, input, selection)?;
+                self.execute_binary_i64_to_i64(
+                    mul_i64::kernel_mul_i64,
+                    compiled,
+                    input,
+                    selection,
+                )?;
             }
             ExprOp::DivI64 => {
-                self.execute_binary_i64_to_i64(div_i64::kernel_div_i64, compiled, input, selection)?;
+                self.execute_binary_i64_to_i64(
+                    div_i64::kernel_div_i64,
+                    compiled,
+                    input,
+                    selection,
+                )?;
             }
             ExprOp::GtI64 => {
                 self.execute_binary_i64_to_bool(gt_i64::kernel_gt_i64, compiled, input, selection)?;
@@ -600,7 +646,10 @@ impl ExpressionExecutor {
             ExprOp::AndBool => {
                 // TODO: This is JUST to test that we can filter some. Actually implement this.
                 let output_vec = self.get_output_mut(compiled.output)?;
-                let out_phys = output_vec.physical.as_boolean_mut().expect("Needed boolean buffer.");
+                let out_phys = output_vec
+                    .physical
+                    .as_boolean_mut()
+                    .expect("Needed boolean buffer.");
                 let out = out_phys.as_mut_slice();
                 out[0] = true;
                 // Stub: would perform vectorized logical AND
@@ -612,10 +661,10 @@ impl ExpressionExecutor {
                 // Stub: would perform vectorized logical NOT
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get input vector reference
     /// Inputs can only come from input batch columns or scratch registers
     fn get_input<'a>(
@@ -625,12 +674,9 @@ impl ExpressionExecutor {
     ) -> Result<&'a Vector, EvalError> {
         match input {
             ExprInput::InputCol(idx) => batch.column(*idx),
-            ExprInput::Scratch(idx) => {
-                self.scratch.get(*idx)
-                    .ok_or_else(|| EvalError::General(
-                        format!("Invalid scratch register index: {}", idx)
-                    ))
-            }
+            ExprInput::Scratch(idx) => self.scratch.get(*idx).ok_or_else(|| {
+                EvalError::General(format!("Invalid scratch register index: {}", idx))
+            }),
             ExprInput::Constant(_val) => {
                 // Stub: In real implementation, would materialize constant to a vector
                 Err(EvalError::General(
@@ -639,14 +685,13 @@ impl ExpressionExecutor {
             }
         }
     }
-    
+
     /// Get mutable output vector reference
     /// Outputs can ONLY go to scratch registers
     fn get_output_mut(&mut self, output_idx: usize) -> Result<&mut Vector, EvalError> {
-        self.scratch.get_mut(output_idx)
-            .ok_or_else(|| EvalError::General(
-                format!("Invalid scratch register index: {}", output_idx)
-            ))
+        self.scratch.get_mut(output_idx).ok_or_else(|| {
+            EvalError::General(format!("Invalid scratch register index: {}", output_idx))
+        })
     }
 }
 
@@ -665,35 +710,25 @@ mod tests {
             ],
             output: 0,
         }];
-        
-        let executor = ExpressionExecutor::new(
-            exprs,
-            vec![LogicalType::Int64, LogicalType::Int64],
-            vec![0]
-        );
-        
+
+        let executor =
+            ExpressionExecutor::new(exprs, vec![LogicalType::Int64, LogicalType::Int64], vec![0]);
+
         assert_eq!(executor.exprs.len(), 1);
         assert_eq!(executor.scratch.len(), 2);
         assert_eq!(executor.outputs.len(), 1);
     }
-    
+
     #[test]
     fn test_expression_executor_execute() {
         let exprs = vec![CompiledExpr {
             op: ExprOp::AddI64,
-            inputs: smallvec![
-                ExprInput::InputCol(0),
-                ExprInput::InputCol(1)
-            ],
+            inputs: smallvec![ExprInput::InputCol(0), ExprInput::InputCol(1)],
             output: 0,
         }];
-        
-        let mut executor = ExpressionExecutor::new(
-            exprs,
-            vec![LogicalType::Int64],
-            vec![0]
-        );
-        
+
+        let mut executor = ExpressionExecutor::new(exprs, vec![LogicalType::Int64], vec![0]);
+
         // Create input batch
         let schema = SourceTypeDef::new(vec![
             Field {
@@ -705,22 +740,22 @@ mod tests {
                 type_info: LogicalType::Int64,
             },
         ]);
-        
+
         let input = VectorizedBatch::new(schema.clone(), 10);
         let mut output = VectorizedBatch::new(schema, 10);
-        
+
         // Execute (stub implementation won't actually compute anything)
         let result = executor.execute(&input, &mut output);
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_sub_i64_kernel() {
         // Test the SubI64 kernel directly
         let lhs_data = vec![10i64, 20, 30, 40, 50];
         let rhs_data = vec![1i64, 2, 3, 4, 5];
         let mut out = vec![0i64; 5];
-        
+
         unsafe {
             sub_i64::kernel_sub_i64(
                 ExecInput {
@@ -741,17 +776,17 @@ mod tests {
                 5,
             );
         }
-        
+
         assert_eq!(out, vec![9, 18, 27, 36, 45]);
     }
-    
+
     #[test]
     fn test_sub_i64_with_constant() {
         // Test SubI64 with constant (vector - constant)
         let vec_data = vec![10i64, 20, 30, 40, 50];
         let constant = 5i64;
         let mut out = vec![0i64; 5];
-        
+
         unsafe {
             sub_i64::kernel_sub_i64(
                 ExecInput {
@@ -772,17 +807,17 @@ mod tests {
                 5,
             );
         }
-        
+
         assert_eq!(out, vec![5, 15, 25, 35, 45]);
     }
-    
+
     #[test]
     fn test_sub_i64_constant_minus_vector() {
         // Test SubI64 with constant - vector (order matters!)
         let constant = 100i64;
         let vec_data = vec![10i64, 20, 30, 40, 50];
         let mut out = vec![0i64; 5];
-        
+
         unsafe {
             sub_i64::kernel_sub_i64(
                 ExecInput {
@@ -803,7 +838,7 @@ mod tests {
                 5,
             );
         }
-        
+
         assert_eq!(out, vec![90, 80, 70, 60, 50]);
     }
 }
