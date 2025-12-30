@@ -6,7 +6,6 @@ use partiql_catalog::table_fn::{BaseTableExpr, BaseTableExprResult, BaseTableFun
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
-use partiql_eval_vectorized::{Compiler, CompilerContext};
 use partiql_logical::LogicalPlan;
 use partiql_logical_planner::LogicalPlanner;
 use partiql_parser::{Parsed, Parser, ParserError};
@@ -73,7 +72,10 @@ fn main() {
     }
 
     let query = &args[1];
-    println!("Query: {}\n", query);
+    
+    println!("Query: {}", query);
+    println!("Data Source: Generated tuples");
+    println!();
 
     // Create catalog and add the data table function
     let mut catalog = PartiqlCatalog::default();
@@ -244,34 +246,21 @@ fn compile(
 fn compile_vectorized(
     logical: &LogicalPlan<partiql_logical::BindingsOp>,
 ) -> partiql_eval_vectorized::VectorizedPlan {
-    use partiql_eval_vectorized::{BatchReader, Field, SourceTypeDef, Tuple, TupleIteratorReader, LogicalType};
+    // TODO: This is complier's work - convert LogicalPlan to PhysicalPlan
+    // They should analyze the logical plan and create appropriate ProjectionSpec
+    // For now, using mock data source for compatibility
     
-    // Create a dummy schema for the "data" table
-    let schema = SourceTypeDef::new(vec![
-        Field {
-            name: "a".to_string(),
-            type_info: LogicalType::Int64,
-        },
-        Field {
-            name: "b".to_string(),
-            type_info: LogicalType::Int64,
-        },
-    ]);
+    use partiql_eval_vectorized::reader::TupleIteratorReader;
     
-    // Create a dummy reader (would be replaced with actual data source)
-    let tuples: Vec<Tuple> = vec![];
-    let reader: Box<dyn BatchReader> = Box::new(TupleIteratorReader::new(
-        Box::new(tuples.into_iter()),
-        schema,
-        1024,
-    ));
+    let tuples: Vec<partiql_value::Value> = vec![];
+    let reader: Box<dyn partiql_eval_vectorized::BatchReader> = Box::new(
+        TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024)
+    );
     
-    // Create compiler context with data source
-    let context = CompilerContext::new()
+    let context = partiql_eval_vectorized::CompilerContext::new()
         .with_data_source("data".to_string(), reader);
     
-    // Create compiler and compile the logical plan
-    let mut compiler = Compiler::new(context);
+    let mut compiler = partiql_eval_vectorized::Compiler::new(context);
     compiler.compile(logical).expect("Vectorized compilation failed")
 }
 

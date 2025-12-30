@@ -73,13 +73,35 @@ impl Compiler {
         // TODO: Resolve table references via data_sources
         
         // Get data source
-        let reader = self
+        let mut reader = self
             .context
             .get_data_source("data")
             .ok_or_else(|| PlanError::General("No data source found".to_string()))?;
 
-        // Get schema from reader (assumes columns: a INT64, b INT64)
-        let _input_schema = reader.schema().clone();
+        // Phase 0: Configure reader with projection specification
+        // For this demo, we'll project columns 'a' and 'b' as Int64
+        use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
+        use crate::batch::LogicalType;
+        
+        let projections = vec![
+            Projection::new(
+                ProjectionSource::FieldPath("a".to_string()),
+                0, // Target vector index 0
+                LogicalType::Int64,
+            ),
+            Projection::new(
+                ProjectionSource::FieldPath("b".to_string()),
+                1, // Target vector index 1
+                LogicalType::Int64,
+            ),
+        ];
+
+        let projection_spec = ProjectionSpec::new(projections)
+            .map_err(|e| PlanError::General(format!("Failed to create projection spec: {}", e)))?;
+
+        // Configure the reader with the projection
+        reader.set_projection(projection_spec)
+            .map_err(|e| PlanError::General(format!("Failed to set projection: {}", e)))?;
 
         // Step 1: Create SCAN operator
         let scan = VectorizedScan::new(reader);
@@ -163,7 +185,7 @@ impl Compiler {
 mod tests {
     use super::*;
     use crate::batch::{Field, LogicalType};
-    use crate::reader::{Tuple, TupleIteratorReader};
+    use crate::reader::TupleIteratorReader;
 
     #[test]
     fn test_compiler_basic() {
@@ -179,11 +201,10 @@ mod tests {
             },
         ]);
 
-        // Create a dummy reader
-        let tuples: Vec<Tuple> = vec![];
+        // Create a dummy reader (Phase 0 - no schema in constructor)
+        let tuples: Vec<partiql_value::Value> = vec![];
         let reader: Box<dyn BatchReader> = Box::new(TupleIteratorReader::new(
             Box::new(tuples.into_iter()),
-            schema.clone(),
             1024,
         ));
 
