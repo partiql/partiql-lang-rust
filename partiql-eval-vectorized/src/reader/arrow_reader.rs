@@ -2,14 +2,25 @@ use crate::batch::VectorizedBatch;
 use crate::error::EvalError;
 use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
 use arrow::record_batch::RecordBatch;
+use arrow::datatypes::Schema;
 use arrow_array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray};
+use arrow_ipc::reader::FileReader;
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Arrow RecordBatch reader for Phase 0 compliance
 /// Converts Arrow RecordBatch data to PartiQL VectorizedBatch format
 pub struct ArrowReader {
-    batches: Vec<RecordBatch>,
+    // For in-memory batches (from new() or from_record_batch())
+    batches: Option<Vec<RecordBatch>>,
     current_batch_idx: usize,
+    
+    // For lazy file reading (from from_file())
+    file_reader: Option<Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send>>,
+    file_path: Option<String>,
+    schema: Option<Arc<Schema>>,
+    
     projection: Option<ProjectionSpec>,
     finished: bool,
 }
@@ -18,8 +29,11 @@ impl ArrowReader {
     /// Create new ArrowReader from a vector of Arrow RecordBatches
     pub fn new(batches: Vec<RecordBatch>) -> Self {
         Self {
-            batches,
+            batches: Some(batches),
             current_batch_idx: 0,
+            file_reader: None,
+            file_path: None,
+            schema: None,
             projection: None,
             finished: false,
         }
@@ -29,6 +43,43 @@ impl ArrowReader {
     pub fn from_record_batch(batch: RecordBatch) -> Self {
         Self::new(vec![batch])
     }
+
+    /// Create ArrowReader from an Arrow IPC file (lazy loading)
+    /// Only reads the schema, batches are read on-demand in next_batch()
+    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, EvalError> {
+        let path_str = file_path.as_ref().to_string_lossy().to_string();
+        
+        let file = File::open(file_path.as_ref()).map_err(|e| {
+            EvalError::General(format!(
+                "Failed to open Arrow file: {}",
+                e
+            ))
+        })?;
+
+        let reader = FileReader::try_new(file, None).map_err(|e| {
+            EvalError::General(format!(
+                "Failed to create Arrow file reader: {}",
+                e
+            ))
+        })?;
+
+        // Read schema only (lightweight operation)
+        let schema = reader.schema().clone();
+
+        // Convert FileReader to boxed iterator for lazy loading
+        let file_reader: Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send> = 
+            Box::new(reader);
+
+        Ok(Self {
+            batches: None,
+            current_batch_idx: 0,
+            file_reader: Some(file_reader),
+            file_path: Some(path_str),
+            schema: Some(schema),
+            projection: None,
+            finished: false,
+        })
+    }
 }
 
 impl BatchReader for ArrowReader {
@@ -37,14 +88,20 @@ impl BatchReader for ArrowReader {
         Ok(())
     }
 
-    // TODO: Keep the schema of the file outside so I don't need to peek at the batches every time.
     fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
-        // For Arrow reader, resolve field names to column indices
-        if self.batches.is_empty() {
-            return None;
-        }
+        // Get schema from either in-memory batches or file reader
+        let schema_arc: &Arc<Schema> = match (&self.batches, &self.schema) {
+            (Some(batches), _) => {
+                if batches.is_empty() {
+                    return None;
+                }
+                &batches[0].schema()
+            }
+            (None, Some(schema)) => schema,
+            _ => return None,
+        };
+        let schema: &Schema = schema_arc.as_ref();
 
-        let schema = self.batches[0].schema();
         for (idx, field) in schema.fields().iter().enumerate() {
             if field.name() == field_name {
                 return Some(ProjectionSource::ColumnIndex(idx));
@@ -72,19 +129,27 @@ impl BatchReader for ArrowReader {
             }
         }
 
-        // Validate column indices against available batches
-        if !self.batches.is_empty() {
-            let schema = self.batches[0].schema();
-            let num_columns = schema.fields().len();
+        // Validate column indices against schema
+        let schema_arc: &Arc<Schema> = match (&self.batches, &self.schema) {
+            (Some(batches), _) => {
+                if batches.is_empty() {
+                    return Err(EvalError::General("Cannot set projection: no batches available".to_string()));
+                }
+                &batches[0].schema()
+            }
+            (None, Some(schema)) => schema,
+            _ => return Err(EvalError::General("Cannot set projection: no schema available".to_string())),
+        };
+        let schema: &Schema = schema_arc.as_ref();
 
-            for proj in &spec.projections {
-                if let ProjectionSource::ColumnIndex(col_idx) = &proj.source {
-                    if *col_idx >= num_columns {
-                        return Err(EvalError::General(format!(
-                            "Column index {} is out of bounds. Arrow schema has {} columns.",
-                            col_idx, num_columns
-                        )));
-                    }
+        let num_columns = schema.fields().len();
+        for proj in &spec.projections {
+            if let ProjectionSource::ColumnIndex(col_idx) = &proj.source {
+                if *col_idx >= num_columns {
+                    return Err(EvalError::General(format!(
+                        "Column index {} is out of bounds. Arrow schema has {} columns.",
+                        col_idx, num_columns
+                    )));
                 }
             }
         }
@@ -100,21 +165,44 @@ impl BatchReader for ArrowReader {
         })?;
 
         // Check if we're already finished
-        if self.finished || self.current_batch_idx >= self.batches.len() {
+        if self.finished {
             return Ok(None);
         }
 
-        // Get current Arrow RecordBatch
-        let arrow_batch = &self.batches[self.current_batch_idx];
-        self.current_batch_idx += 1;
-
-        // Check if we've processed all batches
-        if self.current_batch_idx >= self.batches.len() {
-            self.finished = true;
-        }
+        // Read next batch - either from in-memory batches or file reader
+        let arrow_batch = if let Some(ref batches) = self.batches {
+            // In-memory mode: use pre-loaded batches
+            if self.current_batch_idx >= batches.len() {
+                self.finished = true;
+                return Ok(None);
+            }
+            let batch = &batches[self.current_batch_idx];
+            self.current_batch_idx += 1;
+            if self.current_batch_idx >= batches.len() {
+                self.finished = true;
+            }
+            batch.clone()
+        } else if let Some(ref mut reader) = self.file_reader {
+            // Lazy file mode: read batch on-demand
+            match reader.next() {
+                Some(Ok(batch)) => batch,
+                Some(Err(e)) => {
+                    return Err(EvalError::General(format!(
+                        "Failed to read Arrow batch: {}",
+                        e
+                    )));
+                }
+                None => {
+                    self.finished = true;
+                    return Ok(None);
+                }
+            }
+        } else {
+            return Err(EvalError::General("ArrowReader not properly initialized".to_string()));
+        };
 
         // Convert Arrow RecordBatch to PartiQL VectorizedBatch
-        let batch = convert_arrow_to_vectorized_batch(arrow_batch, projection)?;
+        let batch = convert_arrow_to_vectorized_batch(&arrow_batch, projection)?;
         Ok(Some(batch))
     }
 

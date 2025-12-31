@@ -39,9 +39,16 @@ impl VectorizedOperator for VectorizedProject {
         };
 
         // 2. Create output batch with projection schema
-        let row_count = input_batch.row_count();
+        // Get row_count from input batch - if there's a selection vector, use its length
+        // Otherwise use the batch's row_count
+        let row_count = if let Some(selection) = input_batch.selection() {
+            selection.indices.len()
+        } else {
+            input_batch.row_count()
+        };
+        
         let mut output_batch = VectorizedBatch::new(self.output_schema.clone(), row_count);
-        output_batch.set_row_count(input_batch.row_count());
+        output_batch.set_row_count(row_count);
         output_batch.set_selection(input_batch.selection().cloned());
 
         // 3. Execute projection expressions

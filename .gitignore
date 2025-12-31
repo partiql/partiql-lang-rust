@@ -602,3 +602,6 @@ bb.out.*
 *.code-workspace
 
 # End of https://www.toptal.com/developers/gitignore/api/c,c++,rust,cmake,clion,macos,emacs,valgrind,intellij+iml,intellij+all,visualstudiocode,node
+
+# PartiQL Vectorized Test Data
+partiql-eval-vectorized/test_data/

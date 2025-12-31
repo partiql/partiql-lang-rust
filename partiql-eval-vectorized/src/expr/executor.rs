@@ -218,10 +218,12 @@ impl ExpressionExecutor {
         let batch_size = input.row_count();
 
         // Ensure scratch vectors have correct size
+        // If batch is larger than scratch capacity, recreate scratch vectors
         for scratch_vec in &mut self.scratch {
-            // Resize if needed (stub - would need proper resizing logic)
-            if scratch_vec.len() != batch_size {
-                // In real implementation: resize or recreate vector
+            if scratch_vec.len() < batch_size {
+                // Recreate vector with correct size
+                let ty = scratch_vec.logical_type();
+                *scratch_vec = Vector::new(ty, batch_size);
             }
         }
 

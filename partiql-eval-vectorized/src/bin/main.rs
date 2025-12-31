@@ -51,8 +51,36 @@ impl BaseTableExpr for DataTableExpr {
         _args: &[Cow<'_, Value>],
         _ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
-        // Create an iterator that generates 1,024,000 tuples
-        let iter = (0..10_240_000).map(|i| {
+        // Get total rows from environment variable (set by main() for file-based sources)
+        // or calculate from BATCH_SIZE and NUM_BATCHES for in-memory sources
+        let total_rows = if let Ok(rows_str) = std::env::var("TOTAL_ROWS") {
+            rows_str.parse().unwrap_or_else(|_| {
+                // Fallback to calculating from batch_size and num_batches
+                let batch_size = std::env::var("BATCH_SIZE")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1024);
+                let num_batches = std::env::var("NUM_BATCHES")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(10_000);
+                batch_size * num_batches
+            })
+        } else {
+            // Fallback to calculating from batch_size and num_batches
+            let batch_size = std::env::var("BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1024);
+            let num_batches = std::env::var("NUM_BATCHES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10_000);
+            batch_size * num_batches
+        };
+        
+        // Create an iterator that generates tuples matching vectorized reader
+        let iter = (0..total_rows as i64).map(|i| {
             let tuple = Tuple::from([("a", Value::Integer(i)), ("b", Value::Integer(i + 100))]);
             Ok(Value::Tuple(Box::new(tuple)))
         });
@@ -65,23 +93,106 @@ fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} <non-vectorized-query> [vectorized-query]", args[0]);
+        eprintln!("Usage: {} <non-vectorized-query> [vectorized-query] [--data-source <mem|arrow|parquet|ion>] [--data-path <path>]", args[0]);
         eprintln!("Examples:");
         eprintln!("  {} \"SELECT a FROM data()\"", args[0]);
         eprintln!("  {} \"SELECT * FROM data()\" \"SELECT a FROM data\"", args[0]);
+        eprintln!("  {} \"SELECT a FROM data()\" \"SELECT a FROM data\" --data-source arrow --data-path ./data/data_b1024_n10000.arrow", args[0]);
         eprintln!("\nIf only one query is provided, it will be used for both evaluators.");
+        eprintln!("\nData source options:");
+        eprintln!("  --data-source mem      Use in-memory generated reader (default)");
+        eprintln!("  --data-source arrow    Read from Arrow IPC file");
+        eprintln!("  --data-source parquet  Read from Parquet file");
+        eprintln!("  --data-source ion      Read from Ion text file");
+        eprintln!("  --data-path <path>    Path to data file (required for file-based sources)");
         std::process::exit(1);
     }
 
-    let non_vec_query = &args[1];
-    let vec_query = if args.len() >= 3 {
-        &args[2]
-    } else {
-        non_vec_query
-    };
+    let mut non_vec_query = None;
+    let mut vec_query = None;
+    let mut data_source = "mem".to_string();
+    let mut data_path = None;
+
+    // Parse arguments
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--data-source" => {
+                if i + 1 < args.len() {
+                    data_source = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    eprintln!("Error: --data-source requires a value");
+                    std::process::exit(1);
+                }
+            }
+            "--data-path" => {
+                if i + 1 < args.len() {
+                    data_path = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --data-path requires a value");
+                    std::process::exit(1);
+                }
+            }
+            arg if !arg.starts_with("--") => {
+                if non_vec_query.is_none() {
+                    non_vec_query = Some(arg.to_string());
+                } else if vec_query.is_none() {
+                    vec_query = Some(arg.to_string());
+                } else {
+                    eprintln!("Error: Too many positional arguments");
+                    std::process::exit(1);
+                }
+                i += 1;
+            }
+            _ => {
+                eprintln!("Unknown argument: {}", args[i]);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let non_vec_query = non_vec_query.ok_or_else(|| {
+        eprintln!("Error: At least one query is required");
+        std::process::exit(1);
+    }).unwrap();
+    let vec_query = vec_query.unwrap_or_else(|| non_vec_query.clone());
     
     println!("Non-Vectorized Query: {}", non_vec_query);
-    println!("Vectorized Query:     {}\n", vec_query);
+    println!("Vectorized Query:     {}", vec_query);
+    println!("Data Source:          {}", data_source);
+    if let Some(ref path) = data_path {
+        println!("Data Path:            {}", path);
+    }
+    
+    // Calculate total rows and set environment variable for non-vectorized evaluator
+    let total_rows = if data_source == "mem" {
+        let batch_size = std::env::var("BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1024);
+        let num_batches = std::env::var("NUM_BATCHES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10_000);
+        let total = batch_size * num_batches;
+        println!("Reader Config:        batch_size={}, num_batches={}, total_rows={}", 
+                 batch_size, num_batches, total);
+        total
+    } else if let Some(ref path) = data_path {
+        // Count total rows from file
+        let total = count_rows_from_file(&data_source, path);
+        println!("Reader Config:        total_rows={} (from file)", total);
+        total
+    } else {
+        0
+    };
+    
+    // Set environment variable for non-vectorized evaluator
+    std::env::set_var("TOTAL_ROWS", total_rows.to_string());
+    
+    println!();
 
     // Create catalog and add the data table function
     let mut catalog = PartiqlCatalog::default();
@@ -110,7 +221,7 @@ fn main() {
 
     // Phase 1: Parse Non-Vectorized Query
     let non_vec_parse_start = Instant::now();
-    let non_vec_parsed = match parse(non_vec_query) {
+    let non_vec_parsed = match parse(&non_vec_query) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Non-vectorized parse error: {:?}", e);
@@ -143,7 +254,7 @@ fn main() {
 
     // Phase 4: Parse Vectorized Query
     let vec_parse_start = Instant::now();
-    let vec_parsed = match parse(vec_query) {
+    let vec_parsed = match parse(&vec_query) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Vectorized parse error: {:?}", e);
@@ -165,7 +276,7 @@ fn main() {
 
     // Phase 6: Vectorized Compilation (Logical → Physical Vectorized Operators)
     let vec_compile_start = Instant::now();
-    let mut vec_plan = compile_vectorized(&vec_logical);
+    let mut vec_plan = compile_vectorized(&vec_logical, &data_source, data_path.as_deref());
     let vec_compile_time = vec_compile_start.elapsed();
 
     println!("\n{}", "=".repeat(60));
@@ -228,16 +339,15 @@ fn main() {
 
                 // Calculate row count based on selection vector if present
                 let batch_row_count = if let Some(selection) = batch.selection() {
-                    // Count selected rows (length of indices vector)
+                    // Partial selection: count selected rows (length of indices vector)
                     selection.indices.len()
                 } else {
-                    // No selection vector, use total row count
+                    // No selection vector: all rows in batch passed (or no filter)
+                    // Use the batch's row_count
                     batch.row_count()
                 };
 
                 vec_row_count += batch_row_count;
-                // Optionally print batch details
-                // print_batch(&batch);
             }
             Err(e) => {
                 eprintln!("Vectorized execution error: {:?}", e);
@@ -308,17 +418,117 @@ fn compile(
     planner.compile(&logical)
 }
 
+/// Count total rows from a file-based data source
+fn count_rows_from_file(data_source: &str, file_path: &str) -> usize {
+    match data_source {
+        "arrow" => {
+            use arrow_ipc::reader::FileReader;
+            use std::fs::File;
+            if let Ok(file) = File::open(file_path) {
+                if let Ok(reader) = FileReader::try_new(file, None) {
+                    let mut total = 0;
+                    for batch_result in reader {
+                        if let Ok(batch) = batch_result {
+                            total += batch.num_rows();
+                        }
+                    }
+                    return total;
+                }
+            }
+            0
+        }
+        "parquet" => {
+            use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+            use std::fs::File;
+            if let Ok(file) = File::open(file_path) {
+                if let Ok(builder) = ParquetRecordBatchReaderBuilder::try_new(file) {
+                    if let Ok(reader) = builder.build() {
+                        let mut total = 0;
+                        for batch_result in reader {
+                            if let Ok(batch) = batch_result {
+                                total += batch.num_rows();
+                            }
+                        }
+                        return total;
+                    }
+                }
+            }
+            0
+        }
+        "ion" => {
+            // For Ion, try to parse the filename pattern first (e.g., data_b4096_n244.ion)
+            // If that fails, parse the Ion file to count rows
+            if let Some(filename) = std::path::Path::new(file_path).file_name() {
+                if let Some(name_str) = filename.to_str() {
+                    // Try to extract batch_size and num_batches from filename
+                    // Pattern: data_b<batch_size>_n<num_batches>.ion
+                    if let Some(b_pos) = name_str.find("_b") {
+                        if let Some(n_pos) = name_str.find("_n") {
+                            if let Some(ext_pos) = name_str.rfind('.') {
+                                if let Ok(batch_size) = name_str[b_pos + 2..n_pos].parse::<usize>() {
+                                    if let Ok(num_batches) = name_str[n_pos + 2..ext_pos].parse::<usize>() {
+                                        return batch_size * num_batches;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Fallback: parse Ion file to count rows (more expensive)
+            // For now, return 0 and let the user set TOTAL_ROWS manually if needed
+            // Or we could use IonReader to count, but that's more complex
+            0
+        }
+        _ => 0,
+    }
+}
+
 fn compile_vectorized(
     logical: &LogicalPlan<partiql_logical::BindingsOp>,
+    data_source: &str,
+    data_path: Option<&str>,
 ) -> partiql_eval_vectorized::VectorizedPlan {
-    // TODO: This is complier's work - convert LogicalPlan to PhysicalPlan
-    // They should analyze the logical plan and create appropriate ProjectionSpec
-    // For now, using mock data source for compatibility
+    use partiql_eval_vectorized::reader::{ArrowReader, InMemoryGeneratedReader, IonReader, ParquetReader};
 
-    use partiql_eval_vectorized::reader::InMemoryGeneratedReader;
-
-    let reader: Box<dyn partiql_eval_vectorized::BatchReader> =
-        Box::new(InMemoryGeneratedReader::new());
+    let reader: Box<dyn partiql_eval_vectorized::BatchReader> = match data_source {
+        "mem" => {
+            // Configure reader size via environment variables
+            let batch_size = std::env::var("BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1024);
+            let num_batches = std::env::var("NUM_BATCHES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10_000);
+            Box::new(InMemoryGeneratedReader::with_config(batch_size, num_batches))
+        }
+        "arrow" => {
+            let path = data_path.expect("--data-path required for arrow data source");
+            Box::new(ArrowReader::from_file(path).expect("Failed to create ArrowReader"))
+        }
+        "parquet" => {
+            let path = data_path.expect("--data-path required for parquet data source");
+            let batch_size = std::env::var("BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1024);
+            Box::new(ParquetReader::from_file(path, batch_size).expect("Failed to create ParquetReader"))
+        }
+        "ion" => {
+            let path = data_path.expect("--data-path required for ion data source");
+            let batch_size = std::env::var("BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1024);
+            let ion_text = std::fs::read_to_string(path).expect("Failed to read Ion file");
+            Box::new(IonReader::from_ion_text(&ion_text, batch_size).expect("Failed to create IonReader"))
+        }
+        _ => {
+            panic!("Unknown data source: {}", data_source);
+        }
+    };
 
     let context = partiql_eval_vectorized::CompilerContext::new()
         .with_data_source("data".to_string(), reader);
