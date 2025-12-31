@@ -1,6 +1,6 @@
 use partiql_eval_vectorized::batch::LogicalType;
 use partiql_eval_vectorized::reader::{
-    BatchReader, ParquetReader, Projection, ProjectionSource, ProjectionSpec, TupleIteratorReader,
+    BatchReader, InMemoryGeneratedReader, ParquetReader, Projection, ProjectionSource, ProjectionSpec,
 };
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ mod tests {
             ]))),
         ];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 1024);
 
         // Create a Phase 0 projection specification
         let projections = vec![
@@ -97,7 +97,7 @@ mod tests {
     fn test_phase0_reader_requires_projection() {
         // Test that calling next_batch without set_projection fails
         let tuples: Vec<partiql_value::Value> = vec![];
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 1024);
 
         // Should fail because set_projection hasn't been called
         let result = reader.next_batch();

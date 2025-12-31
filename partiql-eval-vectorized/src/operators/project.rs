@@ -26,6 +26,11 @@ impl VectorizedProject {
 }
 
 impl VectorizedOperator for VectorizedProject {
+    fn open(&mut self) -> Result<(), EvalError> {
+        // Open the child operator
+        self.input.open()
+    }
+    
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
         // 1. Get next batch from input operator
         let input_batch = match self.input.next_batch()? {
@@ -48,5 +53,14 @@ impl VectorizedOperator for VectorizedProject {
 
         // 4. Return the projected batch
         Ok(Some(output_batch))
+    }
+    
+    fn output_schema(&self) -> &SourceTypeDef {
+        &self.output_schema
+    }
+    
+    fn close(&mut self) -> Result<(), EvalError> {
+        // Close the child operator
+        self.input.close()
     }
 }

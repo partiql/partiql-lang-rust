@@ -32,6 +32,28 @@ impl ArrowReader {
 }
 
 impl BatchReader for ArrowReader {
+    fn open(&mut self) -> Result<(), EvalError> {
+        // No-op for ArrowReader
+        Ok(())
+    }
+
+    // TODO: Keep the schema of the file outside so I don't need to peek at the batches every time.
+    fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
+        // For Arrow reader, resolve field names to column indices
+        if self.batches.is_empty() {
+            return None;
+        }
+
+        let schema = self.batches[0].schema();
+        for (idx, field) in schema.fields().iter().enumerate() {
+            if field.name() == field_name {
+                return Some(ProjectionSource::ColumnIndex(idx));
+            }
+        }
+
+        None
+    }
+
     fn set_projection(&mut self, spec: ProjectionSpec) -> Result<(), EvalError> {
         // Validate that all projections use ColumnIndex (not FieldPath)
         for proj in &spec.projections {
@@ -94,6 +116,11 @@ impl BatchReader for ArrowReader {
         // Convert Arrow RecordBatch to PartiQL VectorizedBatch
         let batch = convert_arrow_to_vectorized_batch(arrow_batch, projection)?;
         Ok(Some(batch))
+    }
+
+    fn close(&mut self) -> Result<(), EvalError> {
+        // No-op for ArrowReader
+        Ok(())
     }
 }
 

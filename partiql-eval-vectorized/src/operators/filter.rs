@@ -1,4 +1,4 @@
-use crate::batch::{LogicalType, SelectionVector, VectorizedBatch};
+use crate::batch::{LogicalType, SelectionVector, SourceTypeDef, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::ExpressionExecutor;
 use crate::operators::VectorizedOperator;
@@ -7,16 +7,28 @@ use crate::operators::VectorizedOperator;
 pub struct VectorizedFilter {
     input: Box<dyn VectorizedOperator>,
     predicate: ExpressionExecutor,
+    output_schema: SourceTypeDef,
 }
 
 impl VectorizedFilter {
     /// Create new filter operator with compiled predicate expression
     pub fn new(input: Box<dyn VectorizedOperator>, predicate: ExpressionExecutor) -> Self {
-        Self { input, predicate }
+        // Cache the input schema since filter doesn't change it
+        let output_schema = input.output_schema().clone();
+        Self {
+            input,
+            predicate,
+            output_schema,
+        }
     }
 }
 
 impl VectorizedOperator for VectorizedFilter {
+    fn open(&mut self) -> Result<(), EvalError> {
+        // Open the child operator
+        self.input.open()
+    }
+    
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
         // 1. Get next batch from input operator
         let mut input_batch = match self.input.next_batch()? {
@@ -73,5 +85,14 @@ impl VectorizedOperator for VectorizedFilter {
 
         // 6. Return filtered batch
         Ok(Some(input_batch))
+    }
+
+    fn output_schema(&self) -> &SourceTypeDef {
+        &self.output_schema
+    }
+    
+    fn close(&mut self) -> Result<(), EvalError> {
+        // Close the child operator
+        self.input.close()
     }
 }

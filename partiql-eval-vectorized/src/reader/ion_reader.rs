@@ -304,6 +304,18 @@ impl IonReader {
 }
 
 impl BatchReader for IonReader {
+    fn open(&mut self) -> Result<(), EvalError> {
+        // No-op for IonReader
+        Ok(())
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
+        // For Ion reader, return FieldPath projections
+        // Since Ion data is schema-less, we can't validate field existence ahead of time
+        // Just return the field name as a FieldPath
+        Some(ProjectionSource::FieldPath(field_name.to_string()))
+    }
+
     fn set_projection(&mut self, spec: ProjectionSpec) -> Result<(), EvalError> {
         // Validate that all projection sources are FieldPath (Ion doesn't support ColumnIndex)
         for projection in &spec.projections {
@@ -390,6 +402,11 @@ impl BatchReader for IonReader {
         self.current_position += actual_batch_size;
 
         Ok(Some(batch))
+    }
+
+    fn close(&mut self) -> Result<(), EvalError> {
+        // No-op for IonReader
+        Ok(())
     }
 }
 

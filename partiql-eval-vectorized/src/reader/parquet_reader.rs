@@ -490,6 +490,36 @@ impl ParquetReader {
 }
 
 impl BatchReader for ParquetReader {
+    fn open(&mut self) -> Result<(), EvalError> {
+        // No-op for ParquetReader - initialization happens in initialize_reader
+        Ok(())
+    }
+
+    // TODO: Keep the schema of the file outside so I don't need to open the file every time.
+    fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
+        // For Parquet reader, resolve field names to column indices
+        // We need to open the file temporarily to read the schema
+        let file = match File::open(&self.file_path) {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+
+        let builder = match ParquetRecordBatchReaderBuilder::try_new(file) {
+            Ok(b) => b,
+            Err(_) => return None,
+        };
+
+        let arrow_schema = builder.schema();
+        
+        for (idx, field) in arrow_schema.fields().iter().enumerate() {
+            if field.name() == field_name {
+                return Some(ProjectionSource::ColumnIndex(idx));
+            }
+        }
+
+        None
+    }
+
     fn set_projection(&mut self, spec: ProjectionSpec) -> Result<(), EvalError> {
         // Validate projection sources - only ColumnIndex allowed
         for projection in &spec.projections {
@@ -557,6 +587,11 @@ impl BatchReader for ParquetReader {
             ),
             None => Ok(None), // End of data
         }
+    }
+
+    fn close(&mut self) -> Result<(), EvalError> {
+        // No-op for ParquetReader
+        Ok(())
     }
 }
 

@@ -52,7 +52,7 @@ impl BaseTableExpr for DataTableExpr {
         _ctx: &'c dyn SessionContext,
     ) -> BaseTableExprResult<'c> {
         // Create an iterator that generates 1,024,000 tuples
-        let iter = (0..10_024_000).map(|i| {
+        let iter = (0..10_240_000).map(|i| {
             let tuple = Tuple::from([("a", Value::Integer(i)), ("b", Value::Integer(i + 100))]);
             Ok(Value::Tuple(Box::new(tuple)))
         });
@@ -65,61 +65,107 @@ fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} <query>", args[0]);
-        eprintln!("Example: {} \"SELECT a, b FROM data()\"", args[0]);
+        eprintln!("Usage: {} <non-vectorized-query> [vectorized-query]", args[0]);
+        eprintln!("Examples:");
+        eprintln!("  {} \"SELECT a FROM data()\"", args[0]);
+        eprintln!("  {} \"SELECT * FROM data()\" \"SELECT a FROM data\"", args[0]);
+        eprintln!("\nIf only one query is provided, it will be used for both evaluators.");
         std::process::exit(1);
     }
 
-    let query = &args[1];
-
-    println!("Query: {}", query);
-    println!("Data Source: Generated tuples");
-    println!();
+    let non_vec_query = &args[1];
+    let vec_query = if args.len() >= 3 {
+        &args[2]
+    } else {
+        non_vec_query
+    };
+    
+    println!("Non-Vectorized Query: {}", non_vec_query);
+    println!("Vectorized Query:     {}\n", vec_query);
 
     // Create catalog and add the data table function
     let mut catalog = PartiqlCatalog::default();
     let data_fn = TableFunction::new(Box::new(DataTableFunction));
-    catalog
-        .add_table_function(data_fn)
-        .expect("Failed to add table function");
+    catalog.add_table_function(data_fn).expect("Failed to add table function");
+    
+    // Add type entry for "data" table so it can be referenced without parentheses
+    use partiql_catalog::catalog::TypeEnvEntry;
+    use partiql_types::{PartiqlShapeBuilder, StructField, Static, StructType, struct_fields, StructConstraint};
+    use indexmap::IndexSet;
+    
+    let mut bld = PartiqlShapeBuilder::default();
+    let fields = IndexSet::from([
+        StructField::new("a", bld.new_static(Static::Int)),
+        StructField::new("b", bld.new_static(Static::Int)),
+    ]);
+    let data_type = bld.new_struct(StructType::new(IndexSet::from([
+        StructConstraint::Fields(fields),
+        StructConstraint::Open(false),
+    ])));
+    
+    let data_type_entry = TypeEnvEntry::new("data", &[], data_type);
+    catalog.add_type_entry(data_type_entry).expect("Failed to add type entry");
+    
     let catalog = catalog.to_shared_catalog();
 
-    // Phase 1: Parse
-    let parse_start = Instant::now();
-    let parsed = match parse(query) {
+    // Phase 1: Parse Non-Vectorized Query
+    let non_vec_parse_start = Instant::now();
+    let non_vec_parsed = match parse(non_vec_query) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Parse error: {:?}", e);
+            eprintln!("Non-vectorized parse error: {:?}", e);
             std::process::exit(1);
         }
     };
-    let parse_time = parse_start.elapsed();
+    let non_vec_parse_time = non_vec_parse_start.elapsed();
 
-    // Phase 2: Lower (AST → Logical Plan)
-    let lower_start = Instant::now();
-    let logical = match lower(&catalog, &parsed) {
+    // Phase 2: Lower Non-Vectorized (AST → Logical Plan)
+    let non_vec_lower_start = Instant::now();
+    let non_vec_logical = match lower(&catalog, &non_vec_parsed) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Lower error: {:?}", e);
+            eprintln!("Non-vectorized lower error: {:?}", e);
             std::process::exit(1);
         }
     };
-    let lower_time = lower_start.elapsed();
+    let non_vec_lower_time = non_vec_lower_start.elapsed();
 
-    // Phase 3: Compile (Logical → Physical/Executable Plan) - Non-Vectorized
-    let compile_start = Instant::now();
-    let plan = match compile(EvaluationMode::Permissive, &catalog, logical.clone()) {
+    // Phase 3: Compile Non-Vectorized (Logical → Physical/Executable Plan)
+    let non_vec_compile_start = Instant::now();
+    let plan = match compile(EvaluationMode::Permissive, &catalog, non_vec_logical) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Non-vectorized compile error: {:?}", e);
             std::process::exit(1);
         }
     };
-    let compile_time = compile_start.elapsed();
+    let non_vec_compile_time = non_vec_compile_start.elapsed();
 
-    // Phase 4: Vectorized Compilation (convert to vectorized operators)
+    // Phase 4: Parse Vectorized Query
+    let vec_parse_start = Instant::now();
+    let vec_parsed = match parse(vec_query) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Vectorized parse error: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    let vec_parse_time = vec_parse_start.elapsed();
+
+    // Phase 5: Lower Vectorized (AST → Logical Plan)
+    let vec_lower_start = Instant::now();
+    let vec_logical = match lower(&catalog, &vec_parsed) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Vectorized lower error: {:?}", e);
+            std::process::exit(1);
+        }
+    };
+    let vec_lower_time = vec_lower_start.elapsed();
+
+    // Phase 6: Vectorized Compilation (Logical → Physical Vectorized Operators)
     let vec_compile_start = Instant::now();
-    let mut vec_plan = compile_vectorized(&logical);
+    let mut vec_plan = compile_vectorized(&vec_logical);
     let vec_compile_time = vec_compile_start.elapsed();
 
     println!("\n{}", "=".repeat(60));
@@ -212,25 +258,17 @@ fn main() {
     println!("\n{}", "=".repeat(60));
     println!("TIMING SUMMARY");
     println!("{}", "=".repeat(60));
-
-    println!("\nPlanning Phase:");
-    println!(
-        "  Parse:                {:.3}ms",
-        parse_time.as_secs_f64() * 1000.0
-    );
-    println!(
-        "  Lower:                {:.3}ms",
-        lower_time.as_secs_f64() * 1000.0
-    );
-    println!(
-        "  Non-Vec Compile:      {:.3}ms",
-        compile_time.as_secs_f64() * 1000.0
-    );
-    println!(
-        "  Vectorized Compile:   {:.3}μs",
-        vec_compile_time.as_secs_f64() * 1_000_000.0
-    );
-
+    
+    println!("\nNon-Vectorized Planning Phase:");
+    println!("  Parse:                {:.3}ms", non_vec_parse_time.as_secs_f64() * 1000.0);
+    println!("  Lower:                {:.3}ms", non_vec_lower_time.as_secs_f64() * 1000.0);
+    println!("  Compile:              {:.3}ms", non_vec_compile_time.as_secs_f64() * 1000.0);
+    
+    println!("\nVectorized Planning Phase:");
+    println!("  Parse:                {:.3}ms", vec_parse_time.as_secs_f64() * 1000.0);
+    println!("  Lower:                {:.3}ms", vec_lower_time.as_secs_f64() * 1000.0);
+    println!("  Compile:              {:.3}μs", vec_compile_time.as_secs_f64() * 1_000_000.0);
+    
     println!("\nExecution Phase:");
     println!(
         "  Non-Vectorized:       {:.3}ms",
@@ -277,11 +315,10 @@ fn compile_vectorized(
     // They should analyze the logical plan and create appropriate ProjectionSpec
     // For now, using mock data source for compatibility
 
-    use partiql_eval_vectorized::reader::TupleIteratorReader;
+    use partiql_eval_vectorized::reader::InMemoryGeneratedReader;
 
-    let tuples: Vec<partiql_value::Value> = vec![];
     let reader: Box<dyn partiql_eval_vectorized::BatchReader> =
-        Box::new(TupleIteratorReader::new(Box::new(tuples.into_iter()), 1024));
+        Box::new(InMemoryGeneratedReader::new());
 
     let context = partiql_eval_vectorized::CompilerContext::new()
         .with_data_source("data".to_string(), reader);
