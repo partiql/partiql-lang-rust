@@ -60,7 +60,17 @@ impl VectorizedOperator for VectorizedFilter {
             .as_boolean()
             .ok_or_else(|| EvalError::General("Expected Boolean predicate result".to_string()))?;
         let predicate_values = predicate_bool.as_slice();
-
+        
+        // Ensure predicate values match row count
+        let predicate_len = predicate_values.len();
+        if predicate_len != row_count {
+            return Err(EvalError::General(format!(
+                "Predicate output length ({}) does not match input batch row count ({})",
+                predicate_len, row_count
+            )));
+        }
+        
+        // Collect indices where predicate is true
         let mut selected_indices = Vec::new();
         for i in 0..row_count {
             if predicate_values[i] {
