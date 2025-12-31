@@ -45,7 +45,7 @@ impl VectorizedOperator for VectorizedProject {
         //   - Write results to scratch registers
         //   - Transfer physical buffers from scratch to output batch
         self.projections.execute(&input_batch, &mut output_batch)?;
-        
+
         // 4. Return the projected batch
         Ok(Some(output_batch))
     }

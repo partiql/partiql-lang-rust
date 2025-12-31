@@ -1,4 +1,4 @@
-use crate::batch::{Vector, LogicalType};
+use crate::batch::{LogicalType, Vector};
 use crate::error::EvalError;
 use std::fmt::Debug;
 
@@ -11,12 +11,12 @@ pub struct FnId {
 }
 
 /// Vectorized function that operates on column vectors
-/// 
+///
 /// Contract: Output must be pre-allocated by caller with correct size and type.
 /// Functions write directly to output indices without resizing.
 pub trait VectorizedFn: Debug {
     /// Execute function, writing results to pre-allocated output
-    /// 
+    ///
     /// Preconditions:
     /// - output.len() == inputs[0].len() (all inputs same length)
     /// - output type matches expected output type

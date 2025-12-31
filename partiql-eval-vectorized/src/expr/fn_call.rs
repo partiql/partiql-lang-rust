@@ -4,7 +4,7 @@ use crate::expr::VectorizedExpr;
 use crate::functions::VectorizedFn;
 
 /// Function call expression
-/// 
+///
 /// Evaluates input expressions first, then calls the function with those results.
 /// Input expressions write to pre-allocated scratch columns, and this expression
 /// reads from those columns and writes the function result to its output column.
@@ -49,7 +49,9 @@ impl VectorizedExpr for FnCallExpr {
 
         // Gather cloned input columns (cheap with Arc-based Vector)
         // This avoids borrow checker issues when we need mutable access to output
-        let input_vecs: Vec<_> = self.input_cols.iter()
+        let input_vecs: Vec<_> = self
+            .input_cols
+            .iter()
             .map(|&col_idx| batch.column(col_idx).map(|c| c.clone()))
             .collect::<Result<Vec<_>, _>>()?;
 

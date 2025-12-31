@@ -1,9 +1,9 @@
-mod operator_trait;
-mod scan;
 mod filter;
+mod operator_trait;
 mod project;
+mod scan;
 
-pub use operator_trait::VectorizedOperator;
-pub use scan::VectorizedScan;
 pub use filter::VectorizedFilter;
+pub use operator_trait::VectorizedOperator;
 pub use project::VectorizedProject;
+pub use scan::VectorizedScan;

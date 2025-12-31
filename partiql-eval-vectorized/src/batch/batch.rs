@@ -1,4 +1,4 @@
-use crate::batch::{Vector, SourceTypeDef, LogicalType, PhysicalVectorEnum};
+use crate::batch::{LogicalType, PhysicalVectorEnum, SourceTypeDef, Vector};
 use crate::error::EvalError;
 
 /// Selection vector for filtered batches

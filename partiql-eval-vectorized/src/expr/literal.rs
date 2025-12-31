@@ -1,4 +1,4 @@
-use crate::batch::{Vector, LogicalType, VectorizedBatch};
+use crate::batch::{LogicalType, Vector, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::VectorizedExpr;
 

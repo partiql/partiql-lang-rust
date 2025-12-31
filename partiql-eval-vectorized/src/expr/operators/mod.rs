@@ -1,9 +1,9 @@
-pub mod eq_i64;
-pub mod sub_i64;
-pub mod mul_i64;
 pub mod div_i64;
-pub mod gt_i64;
-pub mod lt_i64;
-pub mod ne_i64;
+pub mod eq_i64;
 pub mod ge_i64;
+pub mod gt_i64;
 pub mod le_i64;
+pub mod lt_i64;
+pub mod mul_i64;
+pub mod ne_i64;
+pub mod sub_i64;

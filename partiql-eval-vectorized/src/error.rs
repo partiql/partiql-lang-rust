@@ -47,7 +47,11 @@ impl fmt::Display for PlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PlanError::ColumnNotFound(name) => write!(f, "Column not found: {}", name),
-            PlanError::NoFunctionMatch { op, lhs_type, rhs_type } => {
+            PlanError::NoFunctionMatch {
+                op,
+                lhs_type,
+                rhs_type,
+            } => {
                 write!(f, "No function for {} ({}, {})", op, lhs_type, rhs_type)
             }
             PlanError::UnsupportedExpr => write!(f, "Unsupported expression"),
