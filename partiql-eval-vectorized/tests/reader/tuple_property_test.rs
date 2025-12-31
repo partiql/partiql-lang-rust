@@ -2,7 +2,7 @@ use partiql_eval_vectorized::batch::LogicalType;
 /// Property test for Tuple data conversion integrity
 /// Validates that PartiQL tuples convert correctly to LogicalTypes without data loss
 use partiql_eval_vectorized::reader::{
-    BatchReader, Projection, ProjectionSource, ProjectionSpec, TupleIteratorReader,
+    BatchReader, InMemoryGeneratedReader, Projection, ProjectionSource, ProjectionSpec,
 };
 use partiql_value::{Tuple, Value};
 use proptest::prelude::*;
@@ -72,7 +72,7 @@ proptest! {
     /// Test that PartiQL tuples convert correctly to columnar vectors
     #[test]
     fn test_tuple_data_conversion_integrity(tuples in arb_tuple_data()) {
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.clone().into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.clone().into_iter()), 10);
 
         // Test different field projections
         let test_cases = vec![
@@ -89,7 +89,7 @@ proptest! {
 
             if let Ok(projection_spec) = ProjectionSpec::new(projections) {
                 // Reset reader for each test
-                let mut test_reader = TupleIteratorReader::new(Box::new(tuples.clone().into_iter()), 10);
+                let mut test_reader = InMemoryGeneratedReader::new(Box::new(tuples.clone().into_iter()), 10);
 
                 if test_reader.set_projection(projection_spec).is_ok() {
                     // If projection is accepted, reading should either succeed or fail gracefully
@@ -123,7 +123,7 @@ proptest! {
             return Ok(());
         }
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.clone().into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.clone().into_iter()), 10);
 
         // Test valid field paths
         let field_names = vec!["id", "name", "score", "active"];
@@ -139,7 +139,7 @@ proptest! {
             prop_assert!(reader.set_projection(projection_spec).is_ok());
 
             // Reset reader
-            reader = TupleIteratorReader::new(Box::new(tuples.clone().into_iter()), 10);
+            reader = InMemoryGeneratedReader::new(Box::new(tuples.clone().into_iter()), 10);
         }
 
         // Test ColumnIndex rejection
@@ -170,7 +170,7 @@ proptest! {
         ])));
 
         let tuples = vec![tuple];
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         // Project both existing and missing fields
         let projections = vec![
@@ -209,7 +209,7 @@ proptest! {
         ])));
 
         let tuples = vec![outer_tuple];
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         // Test single-level nesting
         let nested_path = format!("{}.{}", outer_field, inner_field);
@@ -243,7 +243,7 @@ proptest! {
             ])))
         }).collect();
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), batch_size);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), batch_size);
 
         let projections = vec![
             Projection::new(ProjectionSource::FieldPath("id".to_string()), 0, LogicalType::Int64),
@@ -297,7 +297,7 @@ mod unit_tests {
             ("active", Value::Boolean(true)),
         ])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![
             Projection::new(
@@ -341,7 +341,7 @@ mod unit_tests {
             Value::Integer(42),
         )])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![Projection::new(
             ProjectionSource::FieldPath("value".to_string()),
@@ -370,7 +370,7 @@ mod unit_tests {
             ("string_val", Value::String(Box::new("hello".to_string()))),
         ])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![
             Projection::new(
@@ -413,7 +413,7 @@ mod unit_tests {
             Value::String(Box::new("Alice".to_string())),
         )])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         // Try to set projection with ColumnIndex - should fail
         let projections = vec![Projection::new(
@@ -437,7 +437,7 @@ mod unit_tests {
             // Missing age field
         ])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![
             Projection::new(
@@ -475,7 +475,7 @@ mod unit_tests {
             ]))),
         )])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![
             Projection::new(
@@ -514,7 +514,7 @@ mod unit_tests {
             )]))),
         )])))];
 
-        let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
+        let mut reader = InMemoryGeneratedReader::new(Box::new(tuples.into_iter()), 10);
 
         let projections = vec![Projection::new(
             ProjectionSource::FieldPath("deep.nested.field".to_string()),

@@ -1,151 +1,166 @@
 use partiql_eval_vectorized::batch::LogicalType;
 use partiql_eval_vectorized::reader::{
-    BatchReader, Projection, ProjectionSource, ProjectionSpec, TupleIteratorReader,
+    BatchReader, InMemoryGeneratedReader, Projection, ProjectionSource, ProjectionSpec,
 };
-use partiql_value::{Tuple, Value};
 
 // ANSI color codes
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
+const BLUE: &str = "\x1b[34m";
 const RESET: &str = "\x1b[0m";
 
 fn main() {
-    println!("TupleIteratorReader Comprehensive Test");
-    println!("=====================================");
+    println!("{}InMemoryGeneratedReader Fake Data Generation Test{}", BLUE, RESET);
+    println!("===================================================");
+    println!();
+    println!("InMemoryGeneratedReader now generates fake data with two Int64 columns:");
+    println!("  - Column 'a': starts at 0, increments by 1");
+    println!("  - Column 'b': starts at 100, increments by 1");
+    println!();
+    println!("Default configuration:");
+    println!("  - batch_size: 1024 rows per batch");
+    println!("  - num_batches: 10,000 batches");
+    println!("  - Total rows: 10,240,000");
     println!();
 
-    // Test 1: Basic tuple-to-columnar conversion
-    println!("Test 1: Basic Tuple-to-Columnar Conversion");
-    println!("------------------------------------------");
-    test_basic_conversion();
-
-    println!();
-    println!("----------------------------------------");
-    println!();
-
-    // Test 2: Type conversions and missing fields
-    println!("Test 2: Type Conversions and Missing Fields");
-    println!("-------------------------------------------");
-    test_type_conversions_and_missing_fields();
-
-    println!();
-    println!("----------------------------------------");
-    println!();
-
-    // Test 3: Single-level nesting support
-    println!("Test 3: Single-Level Nesting Support");
-    println!("------------------------------------");
-    test_single_level_nesting();
+    // Test 1: Basic fake data generation
+    println!("{}Test 1: Basic Fake Data Generation{}", BLUE, RESET);
+    println!("----------------------------------");
+    test_basic_fake_data();
 
     println!();
     println!("----------------------------------------");
     println!();
 
-    // Test 4: Batch processing with multiple batches
-    println!("Test 4: Batch Processing with Multiple Batches");
-    println!("----------------------------------------------");
-    test_batch_processing();
+    // Test 2: Custom configuration
+    println!("{}Test 2: Custom Configuration{}", BLUE, RESET);
+    println!("----------------------------");
+    test_custom_config();
 
     println!();
     println!("----------------------------------------");
     println!();
 
-    // Test 5: Error handling
-    println!("Test 5: Error Handling");
-    println!("----------------------");
-    test_error_handling();
+    // Test 3: Single column projection
+    println!("{}Test 3: Single Column Projection{}", BLUE, RESET);
+    println!("--------------------------------");
+    test_single_column();
+
+    println!();
+    println!("----------------------------------------");
+    println!();
+
+    // Test 4: Multiple batches
+    println!("{}Test 4: Multiple Batches{}", BLUE, RESET);
+    println!("------------------------");
+    test_multiple_batches();
+
+    println!();
+    println!("----------------------------------------");
+    println!();
+
+    // Test 5: Large batch processing
+    println!("{}Test 5: Large Batch Processing (Performance Test){}", BLUE, RESET);
+    println!("------------------------------------------------");
+    test_large_batch_processing();
 
     println!();
     println!(
-        "{}PASS:{} All TupleIteratorReader tests completed successfully!",
+        "{}PASS:{} All InMemoryGeneratedReader tests completed successfully!",
         GREEN, RESET
-    );
-    println!(
-        "The TupleIteratorReader implementation is working correctly with Phase 0 constraints."
     );
 }
 
-fn test_basic_conversion() {
-    // Create test tuples with various data types
-    let tuples = vec![
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::String(Box::new("Alice".to_string()))),
-            ("age", Value::Integer(30)),
-            ("score", Value::Real(95.5.into())),
-            ("active", Value::Boolean(true)),
-        ]))),
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::String(Box::new("Bob".to_string()))),
-            ("age", Value::Integer(25)),
-            ("score", Value::Real(87.2.into())),
-            ("active", Value::Boolean(false)),
-        ]))),
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::String(Box::new("Charlie".to_string()))),
-            ("age", Value::Integer(35)),
-            ("score", Value::Real(92.8.into())),
-            ("active", Value::Boolean(true)),
-        ]))),
-    ];
+fn test_basic_fake_data() {
+    println!("Creating reader with default configuration (batch_size=1024, num_batches=10,000)");
+    let mut reader = InMemoryGeneratedReader::new();
 
-    println!("Tuple Data:");
-    println!("  {{name: \"Alice\", age: 30, score: 95.5, active: true}}");
-    println!("  {{name: \"Bob\", age: 25, score: 87.2, active: false}}");
-    println!("  {{name: \"Charlie\", age: 35, score: 92.8, active: true}}");
-    println!();
-
-    let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
-
-    // Set projection for all fields
+    // Set projection for both columns
     let projections = vec![
         Projection::new(
-            ProjectionSource::FieldPath("name".to_string()),
+            ProjectionSource::FieldPath("a".to_string()),
             0,
-            LogicalType::String,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("age".to_string()),
-            1,
             LogicalType::Int64,
         ),
         Projection::new(
-            ProjectionSource::FieldPath("score".to_string()),
-            2,
-            LogicalType::Float64,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("active".to_string()),
-            3,
-            LogicalType::Boolean,
+            ProjectionSource::FieldPath("b".to_string()),
+            1,
+            LogicalType::Int64,
         ),
     ];
     let projection_spec = ProjectionSpec::new(projections).unwrap();
     reader.set_projection(projection_spec).unwrap();
 
-    // Read batch
+    // Read first batch
+    println!("Reading first batch...");
     match reader.next_batch().unwrap() {
         Some(batch) => {
             println!(
-                "Batch 1: {} rows, {} columns",
+                "  Batch 1: {} rows, {} columns",
                 batch.row_count(),
                 batch.total_column_count()
             );
-            print_batch_sample(&batch, 3).unwrap();
+            print_batch_sample(&batch, 5).unwrap();
 
             println!(
-                "{}PASS:{} Successfully converted 3 tuples to columnar batch",
+                "{}PASS:{} Successfully generated first batch with fake data",
                 GREEN, RESET
             );
-            println!("  - Row count: {}", batch.row_count());
-            println!("  - Column count: {}", batch.total_column_count());
+        }
+        None => {
+            println!("{}FAIL:{} Expected batch but got None", RED, RESET);
+            return;
+        }
+    }
+}
+
+fn test_custom_config() {
+    println!("Creating reader with custom config (batch_size=10, num_batches=3)");
+    let mut reader = InMemoryGeneratedReader::with_config(10, 3);
+
+    // Set projection for both columns
+    let projections = vec![
+        Projection::new(
+            ProjectionSource::FieldPath("a".to_string()),
+            0,
+            LogicalType::Int64,
+        ),
+        Projection::new(
+            ProjectionSource::FieldPath("b".to_string()),
+            1,
+            LogicalType::Int64,
+        ),
+    ];
+    let projection_spec = ProjectionSpec::new(projections).unwrap();
+    reader.set_projection(projection_spec).unwrap();
+
+    // Read first batch
+    println!("Reading first batch (rows 0-9)...");
+    match reader.next_batch().unwrap() {
+        Some(batch) => {
+            println!("  Batch 1: {} rows", batch.row_count());
+            print_batch_sample(&batch, 10).unwrap();
+
+            // Verify data values
+            use partiql_eval_vectorized::PhysicalVectorEnum;
+            let col_a = batch.column(0).unwrap();
+            let col_b = batch.column(1).unwrap();
+
+            if let PhysicalVectorEnum::Int64(v) = &col_a.physical {
+                let slice = v.as_slice();
+                assert_eq!(slice[0], 0, "First value of 'a' should be 0");
+                assert_eq!(slice[9], 9, "Last value of 'a' should be 9");
+            }
+
+            if let PhysicalVectorEnum::Int64(v) = &col_b.physical {
+                let slice = v.as_slice();
+                assert_eq!(slice[0], 100, "First value of 'b' should be 100");
+                assert_eq!(slice[9], 109, "Last value of 'b' should be 109");
+            }
+
             println!(
-                "  - Schema fields: {:?}",
-                batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|f| &f.name)
-                    .collect::<Vec<_>>()
+                "{}PASS:{} Data values verified: a=[0..9], b=[100..109]",
+                GREEN, RESET
             );
         }
         None => {
@@ -154,77 +169,21 @@ fn test_basic_conversion() {
         }
     }
 
-    // Verify no more batches
-    match reader.next_batch().unwrap() {
-        Some(_) => println!("{}FAIL:{} Expected no more batches", RED, RESET),
-        None => println!(
-            "{}PASS:{} Correctly returned None for subsequent batch",
-            GREEN, RESET
-        ),
-    }
-}
-
-fn test_type_conversions_and_missing_fields() {
-    // Create tuples with type conversions and missing fields
-    let tuples = vec![
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::String(Box::new("Alice".to_string()))),
-            ("age", Value::Integer(30)),
-            ("score", Value::Real(95.5.into())),
-        ]))),
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::String(Box::new("Bob".to_string()))),
-            // Missing age field
-            ("score", Value::Integer(87)), // Int instead of Real
-        ]))),
-        Value::Tuple(Box::new(Tuple::from([
-            ("name", Value::Integer(123)), // Int converted to String
-            ("age", Value::Real(35.5.into())), // Real converted to Int64
-                                           // Missing score field
-        ]))),
-    ];
-
-    println!("Tuple Data with type conversions and missing fields:");
-    println!("  {{name: \"Alice\", age: 30, score: 95.5}}");
-    println!("  {{name: \"Bob\", score: 87}}  // missing age");
-    println!("  {{name: 123, age: 35.5}}     // missing score, type conversions");
-    println!();
-
-    let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
-
-    // Set projection with type conversions
-    let projections = vec![
-        Projection::new(
-            ProjectionSource::FieldPath("name".to_string()),
-            0,
-            LogicalType::String,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("age".to_string()),
-            1,
-            LogicalType::Int64,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("score".to_string()),
-            2,
-            LogicalType::Float64,
-        ),
-    ];
-    let projection_spec = ProjectionSpec::new(projections).unwrap();
-    reader.set_projection(projection_spec).unwrap();
-
-    // Read batch
+    // Read second batch
+    println!("Reading second batch (rows 10-19)...");
     match reader.next_batch().unwrap() {
         Some(batch) => {
-            println!("Type conversions test batch: {} rows", batch.row_count());
-            print_batch_sample(&batch, 3).unwrap();
+            use partiql_eval_vectorized::PhysicalVectorEnum;
+            let col_a = batch.column(0).unwrap();
 
-            println!(
-                "{}PASS:{} Successfully handled type conversions and missing fields",
-                GREEN, RESET
-            );
-            println!("  - Handled missing fields with default values");
-            println!("  - Performed type conversions (Int→String, Real→Int64, Int→Float64)");
+            if let PhysicalVectorEnum::Int64(v) = &col_a.physical {
+                let slice = v.as_slice();
+                assert_eq!(slice[0], 10, "Batch 2: First value of 'a' should be 10");
+                println!(
+                    "{}PASS:{} Data continues correctly from previous batch",
+                    GREEN, RESET
+                );
+            }
         }
         None => {
             println!("{}FAIL:{} Expected batch but got None", RED, RESET);
@@ -232,73 +191,38 @@ fn test_type_conversions_and_missing_fields() {
     }
 }
 
-fn test_single_level_nesting() {
-    // Create tuples with nested structures
-    let tuples = vec![
-        Value::Tuple(Box::new(Tuple::from([
-            ("id", Value::Integer(1)),
-            (
-                "person",
-                Value::Tuple(Box::new(Tuple::from([
-                    ("name", Value::String(Box::new("Alice".to_string()))),
-                    ("age", Value::Integer(30)),
-                ]))),
-            ),
-        ]))),
-        Value::Tuple(Box::new(Tuple::from([
-            ("id", Value::Integer(2)),
-            (
-                "person",
-                Value::Tuple(Box::new(Tuple::from([
-                    ("name", Value::String(Box::new("Bob".to_string()))),
-                    ("age", Value::Integer(25)),
-                ]))),
-            ),
-        ]))),
-    ];
+fn test_single_column() {
+    println!("Creating reader and projecting only column 'b'");
+    let mut reader = InMemoryGeneratedReader::with_config(5, 1);
 
-    println!("Tuple Data with single-level nesting:");
-    println!("  {{id: 1, person: {{name: \"Alice\", age: 30}}}}");
-    println!("  {{id: 2, person: {{name: \"Bob\", age: 25}}}}");
-    println!();
-
-    let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
-
-    // Set projection with single-level nesting
-    let projections = vec![
-        Projection::new(
-            ProjectionSource::FieldPath("id".to_string()),
-            0,
-            LogicalType::Int64,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("person.name".to_string()),
-            1,
-            LogicalType::String,
-        ),
-        Projection::new(
-            ProjectionSource::FieldPath("person.age".to_string()),
-            2,
-            LogicalType::Int64,
-        ),
-    ];
+    // Project only column "b"
+    let projections = vec![Projection::new(
+        ProjectionSource::FieldPath("b".to_string()),
+        0,
+        LogicalType::Int64,
+    )];
     let projection_spec = ProjectionSpec::new(projections).unwrap();
     reader.set_projection(projection_spec).unwrap();
 
     // Read batch
     match reader.next_batch().unwrap() {
         Some(batch) => {
-            println!(
-                "Single-level nesting test batch: {} rows",
-                batch.row_count()
-            );
-            print_batch_sample(&batch, 2).unwrap();
+            println!("  Batch: {} rows, {} column", batch.row_count(), batch.total_column_count());
+            print_batch_sample(&batch, 5).unwrap();
+
+            // Verify only column "b" is present
+            use partiql_eval_vectorized::PhysicalVectorEnum;
+            let col = batch.column(0).unwrap();
+            if let PhysicalVectorEnum::Int64(v) = &col.physical {
+                let slice = v.as_slice();
+                assert_eq!(slice[0], 100);
+                assert_eq!(slice[4], 104);
+            }
 
             println!(
-                "{}PASS:{} Successfully handled single-level nesting",
+                "{}PASS:{} Single column projection works correctly",
                 GREEN, RESET
             );
-            println!("  - Extracted nested fields using 'struct.field' syntax");
         }
         None => {
             println!("{}FAIL:{} Expected batch but got None", RED, RESET);
@@ -306,33 +230,21 @@ fn test_single_level_nesting() {
     }
 }
 
-fn test_batch_processing() {
-    // Create many tuples to test batch processing
-    let tuples: Vec<Value> = (0..25)
-        .map(|i| {
-            Value::Tuple(Box::new(Tuple::from([
-                ("id", Value::Integer(i)),
-                ("value", Value::Real(((i as f64) * 1.5).into())),
-            ])))
-        })
-        .collect();
-
-    println!("Generated 25 tuples for batch processing test (batch size = 10)");
-    println!();
-
-    let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10); // Batch size of 10
+fn test_multiple_batches() {
+    println!("Creating reader with 5 batches of 10 rows each");
+    let mut reader = InMemoryGeneratedReader::with_config(10, 5);
 
     // Set projection
     let projections = vec![
         Projection::new(
-            ProjectionSource::FieldPath("id".to_string()),
+            ProjectionSource::FieldPath("a".to_string()),
             0,
             LogicalType::Int64,
         ),
         Projection::new(
-            ProjectionSource::FieldPath("value".to_string()),
+            ProjectionSource::FieldPath("b".to_string()),
             1,
-            LogicalType::Float64,
+            LogicalType::Int64,
         ),
     ];
     let projection_spec = ProjectionSpec::new(projections).unwrap();
@@ -341,114 +253,77 @@ fn test_batch_processing() {
     let mut batch_count = 0;
     let mut total_rows = 0;
 
-    // Read all batches
+    println!("Reading all batches...");
     while let Some(batch) = reader.next_batch().unwrap() {
         batch_count += 1;
         total_rows += batch.row_count();
         println!("  Batch {}: {} rows", batch_count, batch.row_count());
 
-        // Print sample from first batch
+        // Print first batch
         if batch_count == 1 {
             print_batch_sample(&batch, 3).unwrap();
         }
     }
 
     println!(
-        "{}PASS:{} Successfully processed multiple batches",
-        GREEN, RESET
+        "{}PASS:{} Processed {} batches with {} total rows",
+        GREEN, RESET, batch_count, total_rows
     );
-    println!("  - Total batches: {}", batch_count);
-    println!("  - Total rows: {}", total_rows);
-    println!("  - Expected 3 batches (10 + 10 + 5 rows)");
+    assert_eq!(batch_count, 5, "Should have 5 batches");
+    assert_eq!(total_rows, 50, "Should have 50 total rows");
 }
 
-fn test_error_handling() {
-    let tuples = vec![Value::Tuple(Box::new(Tuple::from([(
-        "name",
-        Value::String(Box::new("Alice".to_string())),
-    )])))];
+fn test_large_batch_processing() {
+    println!("Creating reader with default config (1024 rows × 10,000 batches = 10,240,000 rows)");
+    println!("Processing first 10 batches...");
+    
+    let mut reader = InMemoryGeneratedReader::new();
 
-    // Test 1: ColumnIndex rejection
-    println!("5a. Testing ColumnIndex rejection...");
-    let mut reader = TupleIteratorReader::new(Box::new(tuples.into_iter()), 10);
-
-    let projections = vec![Projection::new(
-        ProjectionSource::ColumnIndex(0),
-        0,
-        LogicalType::String,
-    )];
+    // Set projection
+    let projections = vec![
+        Projection::new(
+            ProjectionSource::FieldPath("a".to_string()),
+            0,
+            LogicalType::Int64,
+        ),
+        Projection::new(
+            ProjectionSource::FieldPath("b".to_string()),
+            1,
+            LogicalType::Int64,
+        ),
+    ];
     let projection_spec = ProjectionSpec::new(projections).unwrap();
+    reader.set_projection(projection_spec).unwrap();
 
-    match reader.set_projection(projection_spec) {
-        Ok(_) => println!(
-            "  {}FAIL:{} Expected ColumnIndex rejection but got success",
-            RED, RESET
-        ),
-        Err(e) => {
-            println!(
-                "  {}PASS:{} Correctly rejected ColumnIndex projection",
-                GREEN, RESET
-            );
-            println!("    Error: {}", e);
+    let start = std::time::Instant::now();
+    let mut batch_count = 0;
+    let mut total_rows = 0;
+
+    // Process first 10 batches for demonstration
+    for _ in 0..10 {
+        if let Some(batch) = reader.next_batch().unwrap() {
+            batch_count += 1;
+            total_rows += batch.row_count();
+        } else {
+            break;
         }
     }
 
-    // Test 2: Missing projection error
-    println!("5b. Testing missing projection error...");
-    let tuples2 = vec![Value::Tuple(Box::new(Tuple::from([(
-        "name",
-        Value::String(Box::new("Alice".to_string())),
-    )])))];
-    let mut reader2 = TupleIteratorReader::new(Box::new(tuples2.into_iter()), 10);
+    let duration = start.elapsed();
 
-    match reader2.next_batch() {
-        Ok(_) => println!(
-            "  {}FAIL:{} Expected missing projection error but got success",
-            RED, RESET
-        ),
-        Err(e) => {
-            println!(
-                "  {}PASS:{} Correctly detected missing projection",
-                GREEN, RESET
-            );
-            println!("    Error: {}", e);
-        }
-    }
+    println!("  Processed {} batches", batch_count);
+    println!("  Total rows: {}", total_rows);
+    println!("  Time: {:.3}ms", duration.as_secs_f64() * 1000.0);
+    println!(
+        "  Throughput: {:.2} million rows/sec",
+        (total_rows as f64) / duration.as_secs_f64() / 1_000_000.0
+    );
 
-    // Test 3: Deep nesting rejection
-    println!("5c. Testing deep nesting rejection...");
-    let tuples3 = vec![Value::Tuple(Box::new(Tuple::from([(
-        "deep",
-        Value::Tuple(Box::new(Tuple::from([(
-            "nested",
-            Value::Tuple(Box::new(Tuple::from([(
-                "field",
-                Value::String(Box::new("value".to_string())),
-            )]))),
-        )]))),
-    )])))];
-    let mut reader3 = TupleIteratorReader::new(Box::new(tuples3.into_iter()), 10);
-
-    let projections = vec![Projection::new(
-        ProjectionSource::FieldPath("deep.nested.field".to_string()),
-        0,
-        LogicalType::String,
-    )];
-    let projection_spec = ProjectionSpec::new(projections).unwrap();
-    reader3.set_projection(projection_spec).unwrap();
-
-    match reader3.next_batch() {
-        Ok(_) => println!(
-            "  {}FAIL:{} Expected deep nesting rejection but got success",
-            RED, RESET
-        ),
-        Err(e) => {
-            println!("  {}PASS:{} Correctly rejected deep nesting", GREEN, RESET);
-            println!("    Error: {}", e);
-        }
-    }
-
-    println!("{}PASS:{} All error cases handled correctly", GREEN, RESET);
+    println!(
+        "{}PASS:{} Large batch processing completed successfully",
+        GREEN, RESET
+    );
+    println!("  Note: This is a mock data generator. Actual readers will have different performance characteristics.");
 }
 
 fn print_batch_sample(
@@ -504,7 +379,12 @@ fn print_batch_sample(
                 PhysicalVectorEnum::Boolean(vec) => {
                     let slice = vec.as_slice();
                     if row_idx < slice.len() {
-                        if slice[row_idx] { "true" } else { "false" }.to_string()
+                        if slice[row_idx] {
+                            "true"
+                        } else {
+                            "false"
+                        }
+                        .to_string()
                     } else {
                         "NULL".to_string()
                     }

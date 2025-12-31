@@ -8,6 +8,7 @@ name = "partiql-metal-cli"
 path = "src/bin/main.rs"
 
 [dependencies]
+indexmap = "2"
 memmap2 = "0.9"
 smallvec = "1.13"
 wide = "0.7"
@@ -22,6 +23,7 @@ partiql-catalog = { path = "../partiql-catalog" }
 partiql-eval = { path = "../partiql-eval" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
+partiql-types = { path = "../partiql-types" }
 partiql-value = { path = "../partiql-value" }
 
 [dev-dependencies]
