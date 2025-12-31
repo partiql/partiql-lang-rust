@@ -336,18 +336,18 @@ fn print_batch(batch: &partiql_eval_vectorized::VectorizedBatch) {
     let row_count = batch.row_count();
 
     // DIAGNOSTIC INFO
-    println!("[DEBUG] Batch info:");
-    println!("  - Row count: {}", row_count);
-    println!("  - Field count: {}", schema.field_count());
-    print!("  - Fields: ");
-    for field in schema.fields() {
-        print!("{} ({:?}), ", field.name, field.type_info);
-    }
-    println!();
+    // println!("[DEBUG] Batch info:");
+    // println!("  - Row count: {}", row_count);
+    // println!("  - Field count: {}", schema.field_count());
+    // print!("  - Fields: ");
+    // for field in schema.fields() {
+        // print!("{} ({:?}), ", field.name, field.type_info);
+    // }
+    // println!();
 
     // If row_count is 0, nothing to print
     if row_count == 0 {
-        println!("[DEBUG] Skipping batch with 0 rows");
+        // println!("[DEBUG] Skipping batch with 0 rows");
         return;
     }
 

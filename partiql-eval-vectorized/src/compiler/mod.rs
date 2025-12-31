@@ -1,4 +1,5 @@
 mod compiler;
+mod expr_compiler;
 mod plan;
 mod translator;
 

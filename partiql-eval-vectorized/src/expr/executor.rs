@@ -1,7 +1,8 @@
 use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::operators::{
-    div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64, sub_i64,
+    add_i64, and_bool, div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64,
+    not_bool, or_bool, sub_i64,
 };
 use smallvec::{smallvec, SmallVec};
 use std::marker::PhantomData;
@@ -12,8 +13,9 @@ use std::marker::PhantomData;
 
 /// Kernel function pointer types for different operation signatures
 /// These enable type-safe dispatch to operation kernels
-type KernelI64ToI64 = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [i64], usize);
-type KernelI64ToBool = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [bool], usize);
+/// Note: Approach 2 adds out_selection parameter for selection-aware output
+type KernelI64ToI64 = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [i64], Option<*const usize>, usize);
+type KernelI64ToBool = unsafe fn(ExecInput<i64>, ExecInput<i64>, &mut [bool], Option<*const usize>, usize);
 type KernelI32ToI32 = unsafe fn(ExecInput<i32>, ExecInput<i32>, &mut [i32], usize);
 type KernelI32ToBool = unsafe fn(ExecInput<i32>, ExecInput<i32>, &mut [bool], usize);
 type KernelF64ToF64 = unsafe fn(ExecInput<f64>, ExecInput<f64>, &mut [f64], usize);
@@ -316,6 +318,62 @@ impl ExpressionExecutor {
         }
     }
 
+    /// Decode ExprInput to ExecInput<bool> for runtime execution
+    ///
+    /// Handles InputCol, Scratch, and Constant inputs
+    fn decode_input_bool<'a>(
+        &'a self,
+        input: &ExprInput,
+        batch: &'a VectorizedBatch,
+        selection: Option<&'a crate::batch::SelectionVector>,
+    ) -> Result<ExecInput<'a, bool>, EvalError> {
+        match input {
+            ExprInput::InputCol(idx) => {
+                let vec = batch.column(*idx)?;
+                if vec.logical_type() != LogicalType::Boolean {
+                    return Err(EvalError::General(format!(
+                        "Expected Boolean column, got {:?}",
+                        vec.logical_type()
+                    )));
+                }
+                let phys = vec.physical.as_boolean().ok_or_else(|| {
+                    EvalError::General("Expected Boolean physical vector".to_string())
+                })?;
+                Ok(ExecInput::from_physical(phys, selection))
+            }
+            ExprInput::Scratch(idx) => {
+                let vec = self
+                    .scratch
+                    .get(*idx)
+                    .ok_or_else(|| EvalError::General(format!("Invalid scratch index: {}", idx)))?;
+                if vec.logical_type() != LogicalType::Boolean {
+                    return Err(EvalError::General(format!(
+                        "Expected Boolean scratch, got {:?}",
+                        vec.logical_type()
+                    )));
+                }
+                let phys = vec.physical.as_boolean().ok_or_else(|| {
+                    EvalError::General("Expected Boolean physical vector".to_string())
+                })?;
+                Ok(ExecInput::from_physical(phys, selection))
+            }
+            ExprInput::Constant(ConstantValue::Boolean(value)) => {
+                // Create ExecInput directly for constant (no heap allocation needed)
+                let len = batch.row_count();
+                Ok(ExecInput {
+                    data: value as *const bool,
+                    selection: None,
+                    len,
+                    is_constant: true,
+                    _marker: PhantomData,
+                })
+            }
+            ExprInput::Constant(_) => Err(EvalError::General(
+                "Type mismatch: expected Boolean constant".to_string(),
+            )),
+        }
+    }
+
     /// Prepare output vector and return mutable slice for Int64
     #[inline]
     fn prepare_output_i64(
@@ -424,6 +482,11 @@ impl ExpressionExecutor {
     ///
     /// Generic executor for all arithmetic operations on i64 that produce i64 output.
     /// Handles input decoding, output preparation, and kernel invocation.
+    ///
+    /// Selection Vector Behavior:
+    /// - Inputs respect selection vectors (read from sparse physical indices)
+    /// - Output is always dense (written to consecutive indices 0..len)
+    /// - len is the selection count if present, otherwise the full batch row count
     fn execute_binary_i64_to_i64(
         &mut self,
         kernel: KernelI64ToI64,
@@ -432,7 +495,13 @@ impl ExpressionExecutor {
         selection: Option<&crate::batch::SelectionVector>,
     ) -> Result<(), EvalError> {
         Self::validate_binary_inputs(&compiled.inputs)?;
-        let len = input.row_count();
+        
+        // Use selection-aware length: if selection present, use selection count
+        // Otherwise use full batch row count
+        let len = match selection {
+            Some(sel) => sel.indices.len(),
+            None => input.row_count(),
+        };
 
         // Prepare output buffer
         let out_ptr = {
@@ -444,10 +513,13 @@ impl ExpressionExecutor {
         let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
         let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
 
+        // Get output selection for Approach 2
+        let out_selection = selection.map(|s| s.indices.as_ptr());
+
         // Execute kernel
         unsafe {
             let out = std::slice::from_raw_parts_mut(out_ptr, len);
-            kernel(lhs, rhs, out, len);
+            kernel(lhs, rhs, out, out_selection, len);
         }
         Ok(())
     }
@@ -456,6 +528,11 @@ impl ExpressionExecutor {
     ///
     /// Generic executor for all comparison operations on i64.
     /// Handles input decoding, output preparation, and kernel invocation.
+    ///
+    /// Selection Vector Behavior (Approach 2):
+    /// - Inputs respect selection vectors (read from sparse physical indices)
+    /// - Output writes to sparse physical indices if selection present
+    /// - len is the selection count if present, otherwise the full batch row count
     fn execute_binary_i64_to_bool(
         &mut self,
         kernel: KernelI64ToBool,
@@ -464,9 +541,11 @@ impl ExpressionExecutor {
         selection: Option<&crate::batch::SelectionVector>,
     ) -> Result<(), EvalError> {
         Self::validate_binary_inputs(&compiled.inputs)?;
+        
+        // For Approach 2: len is always original batch size (selection writes to sparse indices)
         let len = input.row_count();
 
-        // Prepare output buffer
+        // Prepare output buffer - allocate full batch size for sparse writes
         let out_ptr = {
             let out_slice = self.prepare_output_bool(compiled.output, len)?;
             out_slice.as_mut_ptr()
@@ -476,69 +555,106 @@ impl ExpressionExecutor {
         let lhs = self.decode_input_i64(&compiled.inputs[0], input, selection)?;
         let rhs = self.decode_input_i64(&compiled.inputs[1], input, selection)?;
 
+        // Get output selection for Approach 2
+        let out_selection = selection.map(|s| s.indices.as_ptr());
+        let selection_len = selection.map(|s| s.indices.len()).unwrap_or(len);
+
         // Execute kernel
         unsafe {
             let out = std::slice::from_raw_parts_mut(out_ptr, len);
-            kernel(lhs, rhs, out, len);
+            kernel(lhs, rhs, out, out_selection, selection_len);
         }
         Ok(())
     }
 
-    // ============================================================================
-    // SIMD Kernels
-    // ============================================================================
+    /// Execute binary operation: bool × bool → bool
+    ///
+    /// Generic executor for logical operations (AND, OR).
+    /// Handles input decoding, output preparation, and kernel invocation.
+    ///
+    /// Selection Vector Behavior (Approach 2):
+    /// - Inputs respect selection vectors (read from sparse physical indices)
+    /// - Output writes to sparse physical indices if selection present
+    fn execute_binary_bool_to_bool(
+        &mut self,
+        kernel: unsafe fn(ExecInput<bool>, ExecInput<bool>, &mut [bool], Option<*const usize>, usize),
+        compiled: &CompiledExpr,
+        input: &VectorizedBatch,
+        selection: Option<&crate::batch::SelectionVector>,
+    ) -> Result<(), EvalError> {
+        Self::validate_binary_inputs(&compiled.inputs)?;
+        
+        // For Approach 2: len is always original batch size (selection writes to sparse indices)
+        let len = input.row_count();
 
-    /// Int64 addition kernel - handles all input combinations
-    ///
-    /// Efficiently handles 4 cases:
-    /// - vector + vector (standard SIMD)
-    /// - vector + const (broadcast const)
-    /// - const + vector (broadcast const)
-    /// - const + const (single computation)
-    ///
-    /// # Safety
-    /// Caller must ensure len <= out.len()
-    #[inline]
-    unsafe fn kernel_add_i64(
-        lhs: ExecInput<i64>,
-        rhs: ExecInput<i64>,
-        out: &mut [i64],
-        len: usize,
-    ) {
-        match (lhs.is_constant, rhs.is_constant) {
-            (false, false) => {
-                // Vector + Vector: standard element-wise addition
-                for i in 0..len {
-                    out[i] = lhs.get_unchecked(i) + rhs.get_unchecked(i);
-                }
-            }
-            (false, true) => {
-                // Vector + Constant: broadcast constant
-                let c = *rhs.data;
-                for i in 0..len {
-                    out[i] = lhs.get_unchecked(i) + c;
-                }
-            }
-            (true, false) => {
-                // Constant + Vector: broadcast constant
-                let c = *lhs.data;
-                for i in 0..len {
-                    out[i] = c + rhs.get_unchecked(i);
-                }
-            }
-            (true, true) => {
-                // Constant + Constant: single computation, fill all
-                let result = *lhs.data + *rhs.data;
-                for i in 0..len {
-                    out[i] = result;
-                }
-            }
+        // Prepare output buffer - allocate full batch size for sparse writes
+        let out_ptr = {
+            let out_slice = self.prepare_output_bool(compiled.output, len)?;
+            out_slice.as_mut_ptr()
+        };
+
+        // Decode inputs
+        let lhs = self.decode_input_bool(&compiled.inputs[0], input, selection)?;
+        let rhs = self.decode_input_bool(&compiled.inputs[1], input, selection)?;
+
+        // Get output selection for Approach 2
+        let out_selection = selection.map(|s| s.indices.as_ptr());
+        let selection_len = selection.map(|s| s.indices.len()).unwrap_or(len);
+
+        // Execute kernel
+        unsafe {
+            let out = std::slice::from_raw_parts_mut(out_ptr, len);
+            kernel(lhs, rhs, out, out_selection, selection_len);
         }
+        Ok(())
     }
 
-    // ============================================================================
-    // End SIMD Kernels
-    // ============================================================================
+    /// Execute unary operation: bool → bool
+    ///
+    /// Executor for unary logical operations (NOT).
+    /// Handles input decoding, output preparation, and kernel invocation.
+    ///
+    /// Selection Vector Behavior (Approach 2):
+    /// - Input respects selection vector (read from sparse physical indices)
+    /// - Output writes to sparse physical indices if selection present
+    fn execute_unary_bool_to_bool(
+        &mut self,
+        kernel: unsafe fn(ExecInput<bool>, &mut [bool], Option<*const usize>, usize),
+        compiled: &CompiledExpr,
+        input: &VectorizedBatch,
+        selection: Option<&crate::batch::SelectionVector>,
+    ) -> Result<(), EvalError> {
+        if compiled.inputs.len() != 1 {
+            return Err(EvalError::General(format!(
+                "Unary operation requires exactly 1 input, got {}",
+                compiled.inputs.len()
+            )));
+        }
+        
+        // For Approach 2: len is always original batch size (selection writes to sparse indices)
+        let len = input.row_count();
+
+        // Prepare output buffer - allocate full batch size for sparse writes
+        let out_ptr = {
+            let out_slice = self.prepare_output_bool(compiled.output, len)?;
+            out_slice.as_mut_ptr()
+        };
+
+        // Decode input
+        let input_exec = self.decode_input_bool(&compiled.inputs[0], input, selection)?;
+
+        // Get output selection for Approach 2
+        let out_selection = selection.map(|s| s.indices.as_ptr());
+        let selection_len = selection.map(|s| s.indices.len()).unwrap_or(len);
+
+        // Execute kernel
+        unsafe {
+            let out = std::slice::from_raw_parts_mut(out_ptr, len);
+            kernel(input_exec, out, out_selection, selection_len);
+        }
+        Ok(())
+    }
+
 
     /// Execute a single compiled operation
     /// All outputs go to scratch registers only.
@@ -569,7 +685,12 @@ impl ExpressionExecutor {
                 *output_vec = cloned_input;
             }
             ExprOp::AddI64 => {
-                self.execute_binary_i64_to_i64(Self::kernel_add_i64, compiled, input, selection)?;
+                self.execute_binary_i64_to_i64(
+                    add_i64::kernel_add_i64,
+                    compiled,
+                    input,
+                    selection,
+                )?;
             }
             ExprOp::SubI64 => {
                 self.execute_binary_i64_to_i64(
@@ -644,21 +765,13 @@ impl ExpressionExecutor {
                 // Stub: would perform vectorized less-or-equal comparison
             }
             ExprOp::AndBool => {
-                // TODO: This is JUST to test that we can filter some. Actually implement this.
-                let output_vec = self.get_output_mut(compiled.output)?;
-                let out_phys = output_vec
-                    .physical
-                    .as_boolean_mut()
-                    .expect("Needed boolean buffer.");
-                let out = out_phys.as_mut_slice();
-                out[0] = true;
-                // Stub: would perform vectorized logical AND
+                self.execute_binary_bool_to_bool(and_bool::kernel_and_bool, compiled, input, selection)?;
             }
             ExprOp::OrBool => {
-                // Stub: would perform vectorized logical OR
+                self.execute_binary_bool_to_bool(or_bool::kernel_or_bool, compiled, input, selection)?;
             }
             ExprOp::NotBool => {
-                // Stub: would perform vectorized logical NOT
+                self.execute_unary_bool_to_bool(not_bool::kernel_not_bool, compiled, input, selection)?;
             }
         }
 
@@ -773,6 +886,7 @@ mod tests {
                     _marker: PhantomData,
                 },
                 &mut out,
+                None,
                 5,
             );
         }
@@ -804,6 +918,7 @@ mod tests {
                     _marker: PhantomData,
                 },
                 &mut out,
+                None,
                 5,
             );
         }
@@ -835,10 +950,155 @@ mod tests {
                     _marker: PhantomData,
                 },
                 &mut out,
+                None,
                 5,
             );
         }
 
         assert_eq!(out, vec![90, 80, 70, 60, 50]);
+    }
+
+    #[test]
+    fn test_add_i64_with_selection_vector() {
+        // Test that addition with selection vector produces dense output
+        // Input: [10, 20, 30, 40, 50] with selection [0, 2, 4]
+        // Expected output: [11, 33, 55] (dense, not sparse)
+        let lhs_data = vec![10i64, 20, 30, 40, 50];
+        let rhs_data = vec![1i64, 2, 3, 4, 5];
+        let selection = vec![0usize, 2, 4]; // Select indices 0, 2, 4
+        let mut out = vec![0i64; 3]; // Output should be 3 elements (selection count)
+
+        unsafe {
+            add_i64::kernel_add_i64(
+                ExecInput {
+                    data: lhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: lhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: rhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: rhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None, // No out_selection - output is dense
+                3, // len should be selection count, not original data length
+            );
+        }
+
+        // Output should be dense: [10+1, 30+3, 50+5] = [11, 33, 55]
+        assert_eq!(out, vec![11, 33, 55]);
+    }
+
+    #[test]
+    fn test_comparison_with_selection_vector() {
+        // Test that comparison with selection vector produces sparse output (Approach 2)
+        // Input: [10, 20, 30, 40, 50] with selection [1, 3]
+        // Compare with: [15, 25, 35, 45, 55]
+        // Expected: sparse writes at indices 1 and 3
+        let lhs_data = vec![10i64, 20, 30, 40, 50];
+        let rhs_data = vec![15i64, 25, 35, 45, 55];
+        let selection = vec![1usize, 3]; // Select indices 1, 3
+        let mut out = vec![false; 5]; // Allocate full batch size for sparse writes
+
+        unsafe {
+            gt_i64::kernel_gt_i64(
+                ExecInput {
+                    data: lhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: lhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: rhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: rhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                Some(selection.as_ptr()), // Pass selection for sparse output
+                2, // len should be selection count
+            );
+        }
+
+        // Output: sparse writes at indices 1 and 3: [20 > 25, 40 > 45] = [false, false]
+        assert_eq!(out[1], false); // 20 > 25
+        assert_eq!(out[3], false); // 40 > 45
+    }
+
+    #[test]
+    fn test_selection_with_constant() {
+        // Test selection vector with one constant operand
+        // Input: [10, 20, 30, 40, 50] with selection [0, 4]
+        // Add constant: 100
+        // Expected: [110, 150]
+        let vec_data = vec![10i64, 20, 30, 40, 50];
+        let constant = 100i64;
+        let selection = vec![0usize, 4];
+        let mut out = vec![0i64; 2];
+
+        unsafe {
+            add_i64::kernel_add_i64(
+                ExecInput {
+                    data: vec_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: vec_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: &constant as *const i64,
+                    selection: None, // Constants don't use selection
+                    len: vec_data.len(),
+                    is_constant: true,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None, // Dense output
+                2,
+            );
+        }
+
+        // Output: [10+100, 50+100] = [110, 150]
+        assert_eq!(out, vec![110, 150]);
+    }
+
+    #[test]
+    fn test_empty_selection() {
+        // Test with empty selection vector
+        let lhs_data = vec![10i64, 20, 30, 40, 50];
+        let rhs_data = vec![1i64, 2, 3, 4, 5];
+        let selection: Vec<usize> = vec![]; // Empty selection
+        let mut out = vec![0i64; 0]; // No output expected
+
+        unsafe {
+            add_i64::kernel_add_i64(
+                ExecInput {
+                    data: lhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: lhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: rhs_data.as_ptr(),
+                    selection: Some(selection.as_ptr()),
+                    len: rhs_data.len(),
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None, // Dense output
+                0, // Zero length for empty selection
+            );
+        }
+
+        assert_eq!(out.len(), 0);
     }
 }

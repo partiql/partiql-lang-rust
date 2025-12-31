@@ -1,3 +1,5 @@
+pub mod add_i64;
+pub mod and_bool;
 pub mod div_i64;
 pub mod eq_i64;
 pub mod ge_i64;
@@ -6,4 +8,6 @@ pub mod le_i64;
 pub mod lt_i64;
 pub mod mul_i64;
 pub mod ne_i64;
+pub mod not_bool;
+pub mod or_bool;
 pub mod sub_i64;

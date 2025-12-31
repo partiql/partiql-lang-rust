@@ -1,32 +1,41 @@
 use crate::expr::executor::ExecInput;
 
-/// Scalar implementation: Vector / Vector
-/// Note: i64 division is not available in SIMD for wide crate, so we use scalar
+/// Scalar implementation: Vector + Vector (always dense output)
 #[inline]
-pub(crate) unsafe fn scalar_div_i64_vv(
+pub(crate) unsafe fn scalar_add_i64_vv(
     lhs: *const i64,
     rhs: *const i64,
     out: *mut i64,
     len: usize,
 ) {
     for i in 0..len {
-        *out.add(i) = *lhs.add(i) / *rhs.add(i);
+        *out.add(i) = *lhs.add(i) + *rhs.add(i);
     }
 }
 
-/// Scalar implementation: Vector / Constant
+/// Scalar implementation: Vector + Constant (always dense output)
 #[inline]
-pub(crate) unsafe fn scalar_div_i64_vc(vec: *const i64, constant: i64, out: *mut i64, len: usize) {
+pub(crate) unsafe fn scalar_add_i64_vc(
+    vec: *const i64,
+    constant: i64,
+    out: *mut i64,
+    len: usize,
+) {
     for i in 0..len {
-        *out.add(i) = *vec.add(i) / constant;
+        *out.add(i) = *vec.add(i) + constant;
     }
 }
 
-/// Scalar implementation: Constant / Vector
+/// Scalar implementation: Constant + Vector (always dense output)
 #[inline]
-pub(crate) unsafe fn scalar_div_i64_cv(constant: i64, vec: *const i64, out: *mut i64, len: usize) {
+pub(crate) unsafe fn scalar_add_i64_cv(
+    constant: i64,
+    vec: *const i64,
+    out: *mut i64,
+    len: usize,
+) {
     for i in 0..len {
-        *out.add(i) = constant / *vec.add(i);
+        *out.add(i) = constant + *vec.add(i);
     }
 }
 
@@ -36,7 +45,7 @@ pub(crate) unsafe fn scalar_div_i64_cv(constant: i64, vec: *const i64, out: *mut
 /// - Inputs: `get_unchecked(i)` maps logical index to physical index via input selection
 /// - Output: Writes to sparse physical indices if out_selection present, dense otherwise
 #[inline]
-pub(crate) unsafe fn scalar_div_i64(
+pub(crate) unsafe fn scalar_add_i64(
     lhs: ExecInput<i64>,
     rhs: ExecInput<i64>,
     out: *mut i64,
@@ -47,20 +56,19 @@ pub(crate) unsafe fn scalar_div_i64(
         // Sparse output
         for i in 0..len {
             let out_idx = *sel_ptr.add(i);
-            *out.add(out_idx) = lhs.get_unchecked(i) / rhs.get_unchecked(i);
+            *out.add(out_idx) = lhs.get_unchecked(i) + rhs.get_unchecked(i);
         }
     } else {
         // Dense output
         for i in 0..len {
-            *out.add(i) = lhs.get_unchecked(i) / rhs.get_unchecked(i);
+            *out.add(i) = lhs.get_unchecked(i) + rhs.get_unchecked(i);
         }
     }
 }
 
-/// Int64 division kernel
-/// Note: Uses scalar operations as i64 division is not available in SIMD
+/// Int64 addition kernel
 #[inline]
-pub(crate) unsafe fn kernel_div_i64(
+pub(crate) unsafe fn kernel_add_i64(
     lhs: ExecInput<i64>,
     rhs: ExecInput<i64>,
     out: &mut [i64],
@@ -76,22 +84,27 @@ pub(crate) unsafe fn kernel_div_i64(
         rhs.selection.is_some(),
     ) {
         (false, false, false, false) => {
-            scalar_div_i64_vv(lhs.data, rhs.data, out_ptr, len);
+            // No input selections = write densely
+            scalar_add_i64_vv(lhs.data, rhs.data, out_ptr, len);
         }
         (false, true, false, _) => {
-            scalar_div_i64_vc(lhs.data, *rhs.data, out_ptr, len);
+            // No input selections = write densely
+            scalar_add_i64_vc(lhs.data, *rhs.data, out_ptr, len);
         }
         (true, false, _, false) => {
-            scalar_div_i64_cv(*lhs.data, rhs.data, out_ptr, len);
+            // No input selections = write densely
+            scalar_add_i64_cv(*lhs.data, rhs.data, out_ptr, len);
         }
         (true, true, _, _) => {
-            let result = *lhs.data / *rhs.data;
+            // Both constants = no selection needed
+            let result = *lhs.data + *rhs.data;
             for i in 0..len {
                 *out_ptr.add(i) = result;
             }
         }
         _ => {
-            scalar_div_i64(lhs, rhs, out_ptr, out_selection, len);
+            // Fallback handles selections - pass through out_selection
+            scalar_add_i64(lhs, rhs, out_ptr, out_selection, len);
         }
     }
 }

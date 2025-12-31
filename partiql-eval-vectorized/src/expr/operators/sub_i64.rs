@@ -133,9 +133,9 @@ pub(crate) unsafe fn simd_sub_i64_cv(constant: i64, vec: *const i64, out: *mut i
 
 /// Scalar fallback: handles selection vectors and edge cases
 ///
-/// Used when:
-/// - Either input has a selection vector (sparse access)
-/// - For very small batches where SIMD overhead isn't worth it
+/// Selection Vector Behavior (Approach 2):
+/// - Inputs: `get_unchecked(i)` maps logical index to physical index via input selection
+/// - Output: Writes to sparse physical indices if out_selection present, dense otherwise
 ///
 /// # Safety
 /// - Must respect the ExecInput contracts (selection vector validity, data pointer)
@@ -144,10 +144,20 @@ pub(crate) unsafe fn scalar_sub_i64(
     lhs: ExecInput<i64>,
     rhs: ExecInput<i64>,
     out: *mut i64,
+    out_selection: Option<*const usize>,
     len: usize,
 ) {
-    for i in 0..len {
-        *out.add(i) = lhs.get_unchecked(i) - rhs.get_unchecked(i);
+    if let Some(sel_ptr) = out_selection {
+        // Sparse output
+        for i in 0..len {
+            let out_idx = *sel_ptr.add(i);
+            *out.add(out_idx) = lhs.get_unchecked(i) - rhs.get_unchecked(i);
+        }
+    } else {
+        // Dense output
+        for i in 0..len {
+            *out.add(i) = lhs.get_unchecked(i) - rhs.get_unchecked(i);
+        }
     }
 }
 
@@ -165,6 +175,7 @@ pub(crate) unsafe fn kernel_sub_i64(
     lhs: ExecInput<i64>,
     rhs: ExecInput<i64>,
     out: &mut [i64],
+    out_selection: Option<*const usize>,
     len: usize,
 ) {
     let out_ptr = out.as_mut_ptr();
@@ -201,7 +212,7 @@ pub(crate) unsafe fn kernel_sub_i64(
 
         // Fallback: Selection vectors or other complex cases → scalar
         _ => {
-            scalar_sub_i64(lhs, rhs, out_ptr, len);
+            scalar_sub_i64(lhs, rhs, out_ptr, out_selection, len);
         }
     }
 }

@@ -41,6 +41,7 @@ impl VectorizedBatch {
     }
 
     /// Get number of rows in batch
+    /// TODO: Figure this out. I'm not sure if we should be checking this here, or if we should be set_row_count manually somewhere else.
     pub fn row_count(&self) -> usize {
         self.row_count
     }
