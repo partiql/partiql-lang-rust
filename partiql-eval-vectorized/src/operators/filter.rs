@@ -70,26 +70,67 @@ impl VectorizedOperator for VectorizedFilter {
             )));
         }
         
-        // Collect indices where predicate is true
-        let mut selected_indices = Vec::new();
-        for i in 0..row_count {
-            if predicate_values[i] {
-                selected_indices.push(i);
-            }
+        // Optimization: Early exit checks - detect all-true or all-false before building selection vector
+        // This avoids unnecessary allocation and iteration for common cases
+        if row_count == 0 {
+            // Empty batch - return as-is
+            output_batch.set_selection(None);
+            return Ok(Some(output_batch));
         }
+        
+        // Quick scan to check for all-true or all-false
+        // Check first element to short-circuit common cases
+        let first_val = predicate_values[0];
+        
+        // Fast path: all true (common for filters with high selectivity)
+        // If first is true, check if all are true
+        if first_val && predicate_values.iter().all(|&x| x) {
+            output_batch.set_selection(None);
+            return Ok(Some(output_batch));
+        }
+        
+        // Fast path: all false (common for very selective filters)
+        // If first is false, check if all are false
+        if !first_val && predicate_values.iter().all(|&x| !x) {
+            output_batch.set_selection(None);
+            output_batch.set_row_count(0);
+            return Ok(Some(output_batch));
+        }
+        
+        // Partial selection case - need to build selection vector
+        // Optimized: Pre-allocate with estimated capacity and use iterator-based collection
+        // 
+        // Note: 50% is a heuristic estimate. In a production system, this could be:
+        // - Based on column statistics (min/max, histograms)
+        // - Learned from previous batches (adaptive estimation)
+        // - Query-specific (e.g., range predicates often have lower selectivity)
+        // 
+        // For now, 50% is a reasonable default that balances memory usage
+        // (avoiding over-allocation) with performance (minimizing reallocations).
+        // Vec will automatically grow if needed, so this is just an optimization.
+        let estimated_capacity = (row_count / 2).max(1);
+        let mut selected_indices = Vec::with_capacity(estimated_capacity);
+        
+        // Use iterator with enumerate for better performance
+        selected_indices.extend(
+            predicate_values
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &val)| if val { Some(i) } else { None })
+        );
 
-        // 6. Set selection vector on output batch
-        // If all rows selected, keep selection as None (optimization)
-        // If no rows selected, set to None (empty result)
+        // Set selection vector on output batch
         if selected_indices.len() == row_count {
-            // All rows pass - no selection needed
+            // All rows pass - no selection needed (shouldn't happen due to early exit, but handle it)
             output_batch.set_selection(None);
         } else if selected_indices.is_empty() {
-            // No rows pass - still return batch but with empty selection
+            // No rows pass (shouldn't happen due to early exit, but handle it)
             output_batch.set_selection(None);
             output_batch.set_row_count(0);
         } else {
             // Partial selection - create selection vector
+            // Shrink to fit to save memory if capacity is much larger than needed
+            selected_indices.shrink_to_fit();
             output_batch.set_selection(Some(SelectionVector {
                 indices: selected_indices,
             }));
