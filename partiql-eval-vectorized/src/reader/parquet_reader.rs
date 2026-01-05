@@ -32,6 +32,12 @@ pub struct ParquetReader {
     file_path: String,
     /// Batch size for reading
     batch_size: usize,
+    /// Cached schema built from projection (reused across batches)
+    cached_schema: Option<SourceTypeDef>,
+    /// Cached column indices (reused in initialize_reader)
+    column_indices: Vec<usize>,
+    /// Reusable batch structure (pre-allocated in set_projection)
+    reusable_batch: Option<VectorizedBatch>,
 }
 
 impl ParquetReader {
@@ -55,6 +61,9 @@ impl ParquetReader {
             projection_spec: None,
             file_path: path_str,
             batch_size,
+            cached_schema: None,
+            column_indices: Vec::new(),
+            reusable_batch: None,
         })
     }
 
@@ -128,35 +137,29 @@ impl ParquetReader {
 
     /// Convert Arrow RecordBatch to VectorizedBatch
     fn convert_record_batch(
-        &self,
+        &mut self,
         record_batch: RecordBatch,
     ) -> Result<VectorizedBatch, EvalError> {
         let projection_spec = self.projection_spec.as_ref().unwrap();
         let batch_size = record_batch.num_rows();
 
-        // Create schema from projection
-        let fields: Vec<Field> = projection_spec
-            .projections
-            .iter()
-            .enumerate()
-            .map(|(_proj_idx, p)| Field {
-                name: match &p.source {
-                    ProjectionSource::ColumnIndex(idx) => {
-                        // Get field name from Arrow schema if available
-                        if let Some(field) = record_batch.schema().fields().get(*idx) {
-                            field.name().clone()
-                        } else {
-                            format!("col_{}", idx)
-                        }
-                    }
-                    _ => unreachable!("FieldPath should have been rejected earlier"),
-                },
-                type_info: p.logical_type,
-            })
-            .collect();
+        // Use cached schema (built in set_projection) - verify it exists but don't use it directly
+        let _schema = self.cached_schema.as_ref().ok_or_else(|| {
+            EvalError::General("Schema not cached. set_projection must be called first.".to_string())
+        })?;
 
-        let schema = SourceTypeDef::new(fields);
-        let mut batch = VectorizedBatch::new(schema, batch_size);
+        // Get or create reusable batch
+        let batch = self.reusable_batch.as_mut().ok_or_else(|| {
+            EvalError::General("Reusable batch should have been initialized in set_projection".to_string())
+        })?;
+
+        // Reset batch metadata (don't clear vectors - they maintain capacity and we'll overwrite data)
+        batch.set_row_count(0);
+        batch.set_selection(None);
+
+        // Handle variable batch size: if record_batch is smaller than pre-allocated size, that's fine
+        // If larger, we need to handle it (for now, we'll use the actual size)
+        let actual_batch_size = std::cmp::min(batch_size, self.batch_size);
 
         // Process each projection
         for (proj_idx, projection) in projection_spec.projections.iter().enumerate() {
@@ -179,37 +182,48 @@ impl ParquetReader {
             match projection.logical_type {
                 LogicalType::Int64 => {
                     if let crate::batch::PhysicalVectorEnum::Int64(v) = &mut vector.physical {
-                        self.convert_arrow_to_int64(arrow_array, v.as_mut_slice())?;
+                        Self::convert_arrow_to_int64(arrow_array, v.as_mut_slice())?;
                     }
                 }
                 LogicalType::Float64 => {
                     if let crate::batch::PhysicalVectorEnum::Float64(v) = &mut vector.physical {
-                        self.convert_arrow_to_float64(arrow_array, v.as_mut_slice())?;
+                        Self::convert_arrow_to_float64(arrow_array, v.as_mut_slice())?;
                     }
                 }
                 LogicalType::Boolean => {
                     if let crate::batch::PhysicalVectorEnum::Boolean(v) = &mut vector.physical {
-                        self.convert_arrow_to_boolean(arrow_array, v.as_mut_slice())?;
+                        Self::convert_arrow_to_boolean(arrow_array, v.as_mut_slice())?;
                     }
                 }
                 LogicalType::String => {
                     if let crate::batch::PhysicalVectorEnum::String(v) = &mut vector.physical {
-                        self.convert_arrow_to_string(arrow_array, v.as_mut_slice())?;
+                        Self::convert_arrow_to_string(arrow_array, v.as_mut_slice())?;
                     }
                 }
             }
         }
 
-        batch.set_row_count(batch_size);
-        Ok(batch)
+        batch.set_row_count(actual_batch_size);
+        
+        // Clone the batch to return (the reusable batch stays in the reader for next iteration)
+        Ok(batch.clone())
     }
 
     /// Convert Arrow array to Int64 slice
     fn convert_arrow_to_int64(
-        &self,
         array: &dyn Array,
         target: &mut [i64],
     ) -> Result<(), EvalError> {
+        let array_len = array.len();
+        // Verify capacity in debug builds
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            target.len() >= array_len,
+            "Int64 vector buffer too small: expected {}, got {}",
+            array_len,
+            target.len()
+        );
+        
         match array.data_type() {
             arrow::datatypes::DataType::Int64 => {
                 let int_array = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
@@ -271,10 +285,19 @@ impl ParquetReader {
 
     /// Convert Arrow array to Float64 slice
     fn convert_arrow_to_float64(
-        &self,
         array: &dyn Array,
         target: &mut [f64],
     ) -> Result<(), EvalError> {
+        let array_len = array.len();
+        // Verify capacity in debug builds
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            target.len() >= array_len,
+            "Float64 vector buffer too small: expected {}, got {}",
+            array_len,
+            target.len()
+        );
+        
         match array.data_type() {
             arrow::datatypes::DataType::Float64 => {
                 let float_array =
@@ -334,10 +357,19 @@ impl ParquetReader {
 
     /// Convert Arrow array to Boolean slice
     fn convert_arrow_to_boolean(
-        &self,
         array: &dyn Array,
         target: &mut [bool],
     ) -> Result<(), EvalError> {
+        let array_len = array.len();
+        // Verify capacity in debug builds
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            target.len() >= array_len,
+            "Boolean vector buffer too small: expected {}, got {}",
+            array_len,
+            target.len()
+        );
+        
         match array.data_type() {
             arrow::datatypes::DataType::Boolean => {
                 let bool_array =
@@ -379,10 +411,19 @@ impl ParquetReader {
 
     /// Convert Arrow array to String slice
     fn convert_arrow_to_string(
-        &self,
         array: &dyn Array,
         target: &mut [String],
     ) -> Result<(), EvalError> {
+        let array_len = array.len();
+        // Verify capacity in debug builds
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            target.len() >= array_len,
+            "String vector buffer too small: expected {}, got {}",
+            array_len,
+            target.len()
+        );
+        
         match array.data_type() {
             arrow::datatypes::DataType::Utf8 => {
                 let string_array =
@@ -561,6 +602,36 @@ impl BatchReader for ParquetReader {
                 }
             }
         }
+
+        // Build and cache schema from projection
+        let fields: Vec<Field> = spec
+            .projections
+            .iter()
+            .map(|p| Field {
+                name: match &p.source {
+                    ProjectionSource::ColumnIndex(idx) => format!("col_{}", idx),
+                    ProjectionSource::FieldPath(_) => unreachable!("FieldPath should have been rejected earlier"),
+                },
+                type_info: p.logical_type,
+            })
+            .collect();
+        let schema = SourceTypeDef::new(fields);
+        self.cached_schema = Some(schema);
+
+        // Cache column indices for reuse in initialize_reader
+        let mut column_indices = Vec::new();
+        for projection in &spec.projections {
+            if let ProjectionSource::ColumnIndex(idx) = &projection.source {
+                column_indices.push(*idx);
+            }
+        }
+        self.column_indices = column_indices;
+
+        // Pre-allocate reusable batch structure
+        self.reusable_batch = Some(VectorizedBatch::new(
+            self.cached_schema.as_ref().unwrap().clone(),
+            self.batch_size,
+        ));
 
         self.projection_spec = Some(spec);
         Ok(())
