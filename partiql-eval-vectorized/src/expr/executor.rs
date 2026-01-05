@@ -218,13 +218,19 @@ impl ExpressionExecutor {
         let batch_size = input.row_count();
 
         // Ensure scratch vectors have correct size
-        // If batch is larger than scratch capacity, recreate scratch vectors
+        // Optimization: Only recreate if batch is larger than current capacity
+        // For smaller batches, we can reuse existing vectors (they're already large enough)
+        // This avoids unnecessary allocations when processing smaller batches after larger ones
         for scratch_vec in &mut self.scratch {
             if scratch_vec.len() < batch_size {
                 // Recreate vector with correct size
+                // Note: We could potentially extend in-place if PhysicalVector supported it,
+                // but for now, recreating is simpler and the cost is amortized over many batches
                 let ty = scratch_vec.logical_type();
                 *scratch_vec = Vector::new(ty, batch_size);
             }
+            // If batch_size <= scratch_vec.len(), we can reuse it as-is
+            // The actual data will be overwritten by the expression execution
         }
 
         // Get selection vector from input (if present)
@@ -232,6 +238,8 @@ impl ExpressionExecutor {
 
         // Phase 1: Execute all expressions (writes to scratch only)
         // Pass selection vector to enable scalar/SIMD path selection
+        // Note: We clone exprs here because execute_op needs &mut self
+        // The CompiledExpr structs are small (just metadata), so this is cheap
         let exprs = self.exprs.clone();
         for compiled in &exprs {
             self.execute_op(compiled, input, selection)?;
@@ -421,10 +429,13 @@ impl ExpressionExecutor {
     ) -> Result<&mut [T], EvalError> {
         let output_vec = self.get_output_mut(output_idx)?;
 
-        // Ensure output has correct type and length
-        if output_vec.logical_type() != logical_type {
+        // Optimization: Only recreate if type mismatch OR capacity insufficient
+        // This avoids unnecessary reallocations when the vector already has the right type and capacity
+        if output_vec.logical_type() != logical_type || output_vec.len() < len {
             *output_vec = Vector::new(logical_type, len);
         }
+        // If type matches and capacity is sufficient, we can reuse the existing vector
+        // The data will be overwritten by the expression execution
 
         // Get mutable slice via type-specific accessor
         // The match compiles to a jump table or gets optimized away entirely
