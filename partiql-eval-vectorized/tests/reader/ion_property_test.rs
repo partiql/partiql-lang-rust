@@ -2,7 +2,7 @@ use partiql_eval_vectorized::batch::LogicalType;
 /// Property test for Ion data conversion integrity
 /// Validates that Ion values convert correctly to LogicalTypes without data loss
 use partiql_eval_vectorized::reader::{
-    BatchReader, IonReader, Projection, ProjectionSource, ProjectionSpec,
+    BatchReader, PIonReader, Projection, ProjectionSource, ProjectionSpec,
 };
 use proptest::prelude::*;
 
@@ -46,7 +46,7 @@ proptest! {
     #[test]
     fn test_ion_data_conversion_integrity(ion_data in arb_ion_data()) {
         // Create Ion reader
-        let mut reader = IonReader::from_ion_text(&ion_data, 10)?;
+        let mut reader = PIonReader::from_ion_text(&ion_data, 10)?;
 
         // Test different projection types
         let test_cases = vec![
@@ -82,7 +82,7 @@ proptest! {
             }
 
             // Reset reader for next test
-            reader = IonReader::from_ion_text(&ion_data, 10)?;
+            reader = PIonReader::from_ion_text(&ion_data, 10)?;
         }
     }
 
@@ -97,7 +97,7 @@ proptest! {
         prop_assume!(existing_field != missing_field);
 
         let ion_data = format!("{{{}: {}}}", existing_field, value);
-        let mut reader = IonReader::from_ion_text(&ion_data, 10)?;
+        let mut reader = PIonReader::from_ion_text(&ion_data, 10)?;
 
         // Project both existing and missing fields
         let projections = vec![
@@ -128,7 +128,7 @@ mod unit_tests {
     #[test]
     fn test_ion_conversion_basic_types() {
         let ion_data = r#"{name: "Alice", age: 30, score: 95.5, active: true}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
+        let mut reader = PIonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![
             Projection::new(
@@ -168,7 +168,7 @@ mod unit_tests {
     fn test_ion_conversion_decimal_to_float() {
         // Ion parses 95.5 as Decimal, should convert to Float64
         let ion_data = r#"{score: 95.5}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
+        let mut reader = PIonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![Projection::new(
             ProjectionSource::FieldPath("score".to_string()),
@@ -191,7 +191,7 @@ mod unit_tests {
     fn test_ion_conversion_int_to_float() {
         // Ion integers should convert to Float64 when requested
         let ion_data = r#"{value: 42}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
+        let mut reader = PIonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![Projection::new(
             ProjectionSource::FieldPath("value".to_string()),
@@ -214,7 +214,7 @@ mod unit_tests {
     fn test_ion_conversion_symbol_to_string() {
         // Ion symbols should convert to String when requested
         let ion_data = r#"{status: active}"#; // 'active' is a symbol, not a string
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
+        let mut reader = PIonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![Projection::new(
             ProjectionSource::FieldPath("status".to_string()),
@@ -239,7 +239,7 @@ mod unit_tests {
             {name: "Alice", age: 30}
             {name: "Bob", score: 87.2}
         "#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
+        let mut reader = PIonReader::from_ion_text(ion_data, 10).unwrap();
 
         let projections = vec![
             Projection::new(
