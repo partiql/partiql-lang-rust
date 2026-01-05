@@ -6,6 +6,7 @@ pub mod ge_i64;
 pub mod gt_i64;
 pub mod le_i64;
 pub mod lt_i64;
+pub mod mod_i64;
 pub mod mul_i64;
 pub mod ne_i64;
 pub mod not_bool;

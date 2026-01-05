@@ -242,6 +242,7 @@ impl<'a> ExpressionCompiler<'a> {
             (BinaryOp::Sub, LogicalType::Int64, LogicalType::Int64) => Ok(ExprOp::SubI64),
             (BinaryOp::Mul, LogicalType::Int64, LogicalType::Int64) => Ok(ExprOp::MulI64),
             (BinaryOp::Div, LogicalType::Int64, LogicalType::Int64) => Ok(ExprOp::DivI64),
+            (BinaryOp::Mod, LogicalType::Int64, LogicalType::Int64) => Ok(ExprOp::ModI64),
 
             // Comparison operations (i64 → boolean)
             (BinaryOp::Lt, LogicalType::Int64, LogicalType::Int64) => Ok(ExprOp::LtI64),
