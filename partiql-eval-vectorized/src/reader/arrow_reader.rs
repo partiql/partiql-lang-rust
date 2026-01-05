@@ -23,6 +23,13 @@ pub struct ArrowReader {
     
     projection: Option<ProjectionSpec>,
     finished: bool,
+    
+    /// Cached schema built from projection (reused across batches)
+    cached_schema: Option<crate::batch::SourceTypeDef>,
+    /// Batch size for pre-allocation (defaults to first batch size)
+    batch_size: usize,
+    /// Reusable batch structure (pre-allocated in set_projection)
+    reusable_batch: Option<VectorizedBatch>,
 }
 
 impl ArrowReader {
@@ -36,6 +43,9 @@ impl ArrowReader {
             schema: None,
             projection: None,
             finished: false,
+            cached_schema: None,
+            batch_size: 0,
+            reusable_batch: None,
         }
     }
 
@@ -78,6 +88,9 @@ impl ArrowReader {
             schema: Some(schema),
             projection: None,
             finished: false,
+            cached_schema: None,
+            batch_size: 0,
+            reusable_batch: None,
         })
     }
 }
@@ -154,15 +167,54 @@ impl BatchReader for ArrowReader {
             }
         }
 
+        // Build and cache schema from projection
+        use crate::batch::{Field, SourceTypeDef};
+        let fields: Vec<Field> = spec
+            .projections
+            .iter()
+            .map(|p| Field {
+                name: match &p.source {
+                    ProjectionSource::ColumnIndex(idx) => {
+                        // Get field name from Arrow schema if available
+                        if let Some(field) = schema.field(*idx).name().get(0..) {
+                            field.to_string()
+                        } else {
+                            format!("col_{}", idx)
+                        }
+                    }
+                    ProjectionSource::FieldPath(path) => path.clone(),
+                },
+                type_info: p.logical_type,
+            })
+            .collect();
+        let cached_schema = SourceTypeDef::new(fields);
+        self.cached_schema = Some(cached_schema.clone());
+
+        // Determine batch size from first available batch (if any)
+        // For file readers, we'll use a default size and adjust on first read
+        let batch_size = if let Some(ref batches) = self.batches {
+            if !batches.is_empty() {
+                batches[0].num_rows()
+            } else {
+                1024 // Default batch size
+            }
+        } else {
+            1024 // Default batch size for file readers
+        };
+        self.batch_size = batch_size;
+
+        // Pre-allocate reusable batch structure
+        self.reusable_batch = Some(VectorizedBatch::new(cached_schema, batch_size));
+
         self.projection = Some(spec);
         Ok(())
     }
 
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
         // Check if projection has been set
-        let projection = self.projection.as_ref().ok_or_else(|| {
-            EvalError::General("set_projection must be called before next_batch".to_string())
-        })?;
+        if self.projection.is_none() {
+            return Err(EvalError::General("set_projection must be called before next_batch".to_string()));
+        }
 
         // Check if we're already finished
         if self.finished {
@@ -201,8 +253,8 @@ impl BatchReader for ArrowReader {
             return Err(EvalError::General("ArrowReader not properly initialized".to_string()));
         };
 
-        // Convert Arrow RecordBatch to PartiQL VectorizedBatch
-        let batch = convert_arrow_to_vectorized_batch(&arrow_batch, projection)?;
+        // Convert Arrow RecordBatch to PartiQL VectorizedBatch using cached schema and reusable batch
+        let batch = self.convert_arrow_to_vectorized_batch(&arrow_batch)?;
         Ok(Some(batch))
     }
 
@@ -212,37 +264,40 @@ impl BatchReader for ArrowReader {
     }
 }
 
-/// Convert an Arrow RecordBatch to a PartiQL VectorizedBatch
-fn convert_arrow_to_vectorized_batch(
-    arrow_batch: &RecordBatch,
-    projection: &ProjectionSpec,
-) -> Result<VectorizedBatch, EvalError> {
-    use crate::batch::{Field, LogicalType, PhysicalVectorEnum, SourceTypeDef};
+impl ArrowReader {
+    /// Convert an Arrow RecordBatch to a PartiQL VectorizedBatch using cached schema and reusable batch
+    fn convert_arrow_to_vectorized_batch(
+        &mut self,
+        arrow_batch: &RecordBatch,
+    ) -> Result<VectorizedBatch, EvalError> {
+        use crate::batch::{LogicalType, PhysicalVectorEnum};
 
-    let batch_size = arrow_batch.num_rows();
+        let batch_size = arrow_batch.num_rows();
+        let projection = self.projection.as_ref().unwrap(); // Safe: checked in next_batch
 
-    // Create schema from projection
-    let fields: Vec<Field> = projection
-        .projections
-        .iter()
-        .map(|p| Field {
-            name: match &p.source {
-                ProjectionSource::ColumnIndex(idx) => {
-                    // Get field name from Arrow schema if available
-                    if let Some(field) = arrow_batch.schema().field(*idx).name().get(0..) {
-                        field.to_string()
-                    } else {
-                        format!("col_{}", idx)
-                    }
-                }
-                ProjectionSource::FieldPath(path) => path.clone(),
-            },
-            type_info: p.logical_type,
-        })
-        .collect();
+        // Use cached schema (built in set_projection)
+        let schema = self.cached_schema.as_ref().ok_or_else(|| {
+            EvalError::General("Schema not cached. set_projection must be called first.".to_string())
+        })?;
 
-    let schema = SourceTypeDef::new(fields);
-    let mut batch = VectorizedBatch::new(schema, batch_size);
+        // Handle variable batch size: if arrow_batch is larger than pre-allocated size,
+        // we need to reallocate the batch with the correct size
+        if batch_size > self.batch_size {
+            // Reallocate batch with larger size
+            self.batch_size = batch_size;
+            self.reusable_batch = Some(VectorizedBatch::new(schema.clone(), batch_size));
+        }
+
+        // Get or create reusable batch
+        let batch = self.reusable_batch.as_mut().ok_or_else(|| {
+            EvalError::General("Reusable batch should have been initialized in set_projection".to_string())
+        })?;
+
+        // Reset batch metadata (don't clear vectors - they maintain capacity and we'll overwrite data)
+        batch.set_row_count(0);
+        batch.set_selection(None);
+
+        let actual_batch_size = batch_size;
 
     // Convert each projected column from Arrow to PartiQL
     for proj in &projection.projections {
@@ -286,12 +341,24 @@ fn convert_arrow_to_vectorized_batch(
         }
     }
 
-    batch.set_row_count(batch_size);
-    Ok(batch)
+        batch.set_row_count(actual_batch_size);
+        
+        // Clone the batch to return (the reusable batch stays in the reader for next iteration)
+        Ok(batch.clone())
+    }
 }
 
 /// Convert Arrow array to Int64 vector
 fn convert_arrow_to_int64(arrow_array: &ArrayRef, target: &mut [i64]) -> Result<(), EvalError> {
+    let array_len = arrow_array.len();
+    // Verify capacity in debug builds
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        target.len() >= array_len,
+        "Int64 vector buffer too small: expected {}, got {}",
+        array_len,
+        target.len()
+    );
     // Try different Arrow array types that can convert to Int64
     if let Some(int64_array) = arrow_array.as_any().downcast_ref::<Int64Array>() {
         // Direct Int64 conversion
@@ -320,6 +387,15 @@ fn convert_arrow_to_int64(arrow_array: &ArrayRef, target: &mut [i64]) -> Result<
 
 /// Convert Arrow array to Float64 vector
 fn convert_arrow_to_float64(arrow_array: &ArrayRef, target: &mut [f64]) -> Result<(), EvalError> {
+    let array_len = arrow_array.len();
+    // Verify capacity in debug builds
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        target.len() >= array_len,
+        "Float64 vector buffer too small: expected {}, got {}",
+        array_len,
+        target.len()
+    );
     // Try different Arrow array types that can convert to Float64
     if let Some(float64_array) = arrow_array.as_any().downcast_ref::<Float64Array>() {
         // Direct Float64 conversion
@@ -348,6 +424,15 @@ fn convert_arrow_to_float64(arrow_array: &ArrayRef, target: &mut [f64]) -> Resul
 
 /// Convert Arrow array to Boolean vector
 fn convert_arrow_to_boolean(arrow_array: &ArrayRef, target: &mut [bool]) -> Result<(), EvalError> {
+    let array_len = arrow_array.len();
+    // Verify capacity in debug builds
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        target.len() >= array_len,
+        "Boolean vector buffer too small: expected {}, got {}",
+        array_len,
+        target.len()
+    );
     if let Some(bool_array) = arrow_array.as_any().downcast_ref::<BooleanArray>() {
         for (i, value) in bool_array.iter().enumerate() {
             if i >= target.len() {
@@ -366,6 +451,15 @@ fn convert_arrow_to_boolean(arrow_array: &ArrayRef, target: &mut [bool]) -> Resu
 
 /// Convert Arrow array to String vector
 fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Result<(), EvalError> {
+    let array_len = arrow_array.len();
+    // Verify capacity in debug builds
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        target.len() >= array_len,
+        "String vector buffer too small: expected {}, got {}",
+        array_len,
+        target.len()
+    );
     if let Some(string_array) = arrow_array.as_any().downcast_ref::<StringArray>() {
         for (i, value) in string_array.iter().enumerate() {
             if i >= target.len() {
