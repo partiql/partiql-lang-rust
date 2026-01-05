@@ -20,4 +20,4 @@ pub use error::{EvalError, PlanError};
 pub use expr::{ColumnRef, FnCallExpr, LiteralExpr, VectorizedExpr};
 pub use functions::{BinaryOp, FnId, OpType, UnaryOp, VectorizedFn, VectorizedFnRegistry};
 pub use operators::{VectorizedFilter, VectorizedOperator, VectorizedProject, VectorizedScan};
-pub use reader::{ArrowReader, BatchReader, InMemoryGeneratedReader, IonReader, ParquetReader};
+pub use reader::{ArrowReader, BatchReader, InMemoryGeneratedReader, PIonReader, ParquetReader};

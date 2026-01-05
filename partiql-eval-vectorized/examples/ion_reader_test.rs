@@ -1,6 +1,6 @@
 use partiql_eval_vectorized::batch::LogicalType;
 use partiql_eval_vectorized::reader::{
-    BatchReader, IonReader, Projection, ProjectionSource, ProjectionSpec,
+    BatchReader, PIonReader, Projection, ProjectionSource, ProjectionSpec,
 };
 
 // ANSI color codes
@@ -68,7 +68,7 @@ fn test_basic_ion_reading() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", ion_data.trim());
     println!();
 
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![
         Projection::new(
@@ -143,7 +143,7 @@ fn test_ion_type_conversions() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", ion_data.trim());
     println!();
 
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![
         Projection::new(
@@ -199,7 +199,7 @@ fn test_missing_fields() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", ion_data.trim());
     println!();
 
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![
         Projection::new(
@@ -248,7 +248,7 @@ fn test_single_level_nesting() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", ion_data.trim());
     println!();
 
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![
         Projection::new(
@@ -294,7 +294,7 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
     // Test 5a: Deep nesting rejection
     println!("5a. Testing deep nesting rejection...");
     let ion_data = r#"{person: {details: {name: "Alice"}}}"#;
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![Projection::new(
         ProjectionSource::FieldPath("person.details.name".to_string()),
@@ -323,7 +323,7 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
     // Test 5b: ColumnIndex rejection
     println!("5b. Testing ColumnIndex rejection...");
     let ion_data = r#"{name: "Alice"}"#;
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![Projection::new(
         ProjectionSource::ColumnIndex(0),
@@ -350,7 +350,7 @@ fn test_error_cases() -> Result<(), Box<dyn std::error::Error>> {
     // Test 5c: Type mismatch
     println!("5c. Testing type mismatch...");
     let ion_data = r#"{name: "Alice", age: "thirty"}"#;
-    let mut reader = IonReader::from_ion_text(ion_data, 10)?;
+    let mut reader = PIonReader::from_ion_text(ion_data, 10)?;
 
     let projections = vec![Projection::new(
         ProjectionSource::FieldPath("age".to_string()),

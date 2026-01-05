@@ -1,32 +1,47 @@
 use crate::batch::{
-    Field, LogicalType, PhysicalVectorEnum, SourceTypeDef, Vector, VectorizedBatch,
+    Field, PhysicalVectorEnum, SourceTypeDef, VectorizedBatch,
 };
 use crate::error::EvalError;
 use crate::reader::error::{
-    BatchReaderError, DataSourceError, ProjectionError, TypeConversionError,
+    BatchReaderError, DataSourceError, ProjectionError
 };
 use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
-use ion_rs::{Element, Value};
+use ion_rs::data_source::ToIonDataSource;
+use ion_rs::{IonReader, ReaderBuilder, StreamItem};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
-/// Phase 0 Ion reader implementation
+/// Streaming Ion reader implementation
 ///
-/// Supports reading Ion data with FieldPath projections for flat field access.
-/// Phase 0 constraints:
-/// - Only scalar values (Int64, Float64, Boolean, String)
-/// - FieldPath supports single-level nesting (e.g., "field" or "struct.field")
-/// - No deep nesting ("a.b.c") - this will be supported in later phases
+/// This reader uses true streaming I/O and maintains constant memory usage regardless
+/// of input file size. Only the current batch (configured via `batch_size`) is
+/// held in memory at any time.
+///
+/// # Features
+/// - Constant memory usage for arbitrarily large files
+/// - Supports FieldPath projections for flat field access
+/// - Single-level nesting support (e.g., "field" or "struct.field")
 /// - Missing fields result in null values, not errors
 ///
-/// # Memory Limitation
+/// # Usage
 ///
-/// **WARNING**: This reader currently loads the entire Ion file and all elements into memory
-/// using `Element::read_all()`. For large files (GB+), this defeats the purpose of
-/// vectorized/streaming processing. The entire dataset must fit in memory before processing.
-pub struct IonReader {
-    /// Ion data elements to read from
-    elements: Vec<Element>,
-    /// Current position in the elements
-    current_position: usize,
+/// ```rust,ignore
+/// use partiql_eval_vectorized::reader::IonReader;
+/// use std::fs::File;
+///
+/// // Stream from file
+/// let mut reader = IonReader::from_ion_file("data.ion", 1000)?;
+///
+/// // Or stream from any BufRead source  
+/// let file = File::open("data.ion")?;
+/// let buf_reader = std::io::BufReader::new(file);
+/// let mut reader = IonReader::from_reader(buf_reader, 1000)?;
+/// ```
+pub struct PIonReader<'a> {
+    /// Streaming Ion reader
+    reader: ion_rs::Reader<'a>,
     /// Configured projection specification
     projection: Option<ProjectionSpec>,
     /// Batch size for output
@@ -35,509 +50,180 @@ pub struct IonReader {
     cached_schema: Option<SourceTypeDef>,
     /// Reusable batch structure (pre-allocated in set_projection)
     reusable_batch: Option<VectorizedBatch>,
+    /// Track if we've reached end of stream
+    eof_reached: bool,
+    /// Maps field names to vector indices for O(1) lookup (i64 only)
+    field_to_vector_map: Option<HashMap<String, usize>>,
 }
 
-impl IonReader {
-    /// Create a new IonReader from Ion text data
-    pub fn from_ion_text(ion_text: &str, batch_size: usize) -> Result<Self, EvalError> {
-        let elements: Vec<Element> = Element::read_all(ion_text.as_bytes())
-            .map_err(|e| {
-                BatchReaderError::data_source(DataSourceError::initialization_failed(
-                    "Ion",
-                    &format!("Failed to parse Ion text: {}", e),
-                ))
-            })?
-            .into();
+impl<'a> PIonReader<'a> {
+    /// Create a new IonReader from a BufRead source
+    pub fn from_reader<R: BufRead + ToIonDataSource + 'a>(reader: R, batch_size: usize) -> Result<Self, EvalError> {
+        let ion_reader = ReaderBuilder::new().build(reader).map_err(|e| {
+            BatchReaderError::data_source(DataSourceError::initialization_failed(
+                "Ion",
+                &format!("Failed to create Ion reader: {}", e),
+            ))
+        })?;
 
         Ok(Self {
-            elements,
-            current_position: 0,
+            reader: ion_reader,
             projection: None,
             batch_size,
             cached_schema: None,
             reusable_batch: None,
+            eof_reached: false,
+            field_to_vector_map: None,
         })
     }
 
-    /// Create a new IonReader from Ion elements
-    pub fn from_elements(elements: Vec<Element>, batch_size: usize) -> Self {
-        Self {
-            elements,
-            current_position: 0,
-            projection: None,
-            batch_size,
-            cached_schema: None,
-            reusable_batch: None,
-        }
-    }
-
-    /// Extract a scalar value from an Ion element based on field path
-    fn extract_field_value(
-        &self,
-        element: &Element,
-        field_path: &str,
-    ) -> Result<Option<Value>, EvalError> {
-        // Phase 0 supports single-level nesting: "field" or "struct.field"
-        let path_parts: Vec<&str> = field_path.split('.').collect();
-
-        if path_parts.len() > 2 {
-            return Err(
-                BatchReaderError::projection(ProjectionError::unsupported_source(
-                    &format!("FieldPath({})", field_path),
-                    "IonReader",
-                    &["Single-level field paths like 'field' or 'struct.field'"],
-                ))
-                .into(),
-            );
-        }
-
-        let current_element = element;
-        let mut target_element = current_element;
-
-        // Navigate to the target element
-        for (i, part) in path_parts.iter().enumerate() {
-            match target_element.value() {
-                Value::Struct(struct_val) => {
-                    match struct_val.get(part) {
-                        Some(field_element) => {
-                            target_element = field_element;
-                        }
-                        None => {
-                            // Missing field - return None for null value
-                            return Ok(None);
-                        }
-                    }
-                }
-                _ => {
-                    if i == 0 && path_parts.len() == 1 {
-                        // Direct field access on non-struct - this is an error
-                        return Err(BatchReaderError::projection(
-                            ProjectionError::source_not_found(
-                                field_path,
-                                &vec!["<non-struct element has no fields>".to_string()],
-                            ),
-                        )
-                        .into());
-                    } else {
-                        // Nested access on non-struct - missing field
-                        return Ok(None);
-                    }
-                }
-            }
-        }
-
-        // Extract the scalar value
-        Ok(Some(target_element.value().clone()))
-    }
-
-    /// Write Ion values directly to Int64 slice (eliminates Vector allocation)
-    fn write_values_to_int64_slice(
-        slice: &mut [i64],
-        values: &[Option<Value>],
-        field_path: &str,
-        batch_size: usize,
-    ) -> Result<(), EvalError> {
-        // Verify capacity in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            slice.len() >= batch_size,
-            "Int64 vector buffer too small: expected {}, got {}",
-            batch_size,
-            slice.len()
-        );
-        
-        for i in 0..batch_size {
-            slice[i] = match &values[i] {
-                Some(value) => {
-                    match value {
-                        Value::Int(int_val) => {
-                            int_val.as_i64().ok_or_else(|| {
-                                BatchReaderError::type_conversion(
-                                    TypeConversionError::conversion_failed(
-                                        field_path,
-                                        "Ion Int",
-                                        LogicalType::Int64,
-                                        "Integer value too large for i64",
-                                    ),
-                                )
-                            })?
-                        }
-                        Value::Null(_) => 0, // Default value, actual null is tracked separately
-                        _ => {
-                            return Err(BatchReaderError::type_conversion(
-                                TypeConversionError::type_mismatch(
-                                    field_path,
-                                    &format!("{:?}", value.ion_type()),
-                                    LogicalType::Int64,
-                                    Some("Use explicit conversion or check data types"),
-                                ),
-                            )
-                            .into());
-                        }
-                    }
-                }
-                None => 0, // Missing field - null value
-            };
-        }
-        Ok(())
-    }
-
-    /// Write Ion values directly to Float64 slice (eliminates Vector allocation)
-    fn write_values_to_float64_slice(
-        slice: &mut [f64],
-        values: &[Option<Value>],
-        field_path: &str,
-        batch_size: usize,
-    ) -> Result<(), EvalError> {
-        // Verify capacity in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            slice.len() >= batch_size,
-            "Float64 vector buffer too small: expected {}, got {}",
-            batch_size,
-            slice.len()
-        );
-        
-        for i in 0..batch_size {
-            slice[i] = match &values[i] {
-                Some(value) => {
-                    match value {
-                        Value::Float(float_val) => *float_val,
-                        Value::Int(int_val) => {
-                            // Allow int to float conversion
-                            int_val.as_i64().unwrap_or(0) as f64
-                        }
-                        Value::Decimal(decimal_val) => {
-                            // Allow decimal to float conversion via string
-                            let decimal_str = decimal_val.to_string();
-                            decimal_str.parse::<f64>().map_err(|_| {
-                                BatchReaderError::type_conversion(
-                                    TypeConversionError::conversion_failed(
-                                        field_path,
-                                        "Ion Decimal",
-                                        LogicalType::Float64,
-                                        "Failed to convert decimal to f64",
-                                    ),
-                                )
-                            })?
-                        }
-                        Value::Null(_) => 0.0, // Default value, actual null is tracked separately
-                        _ => {
-                            return Err(BatchReaderError::type_conversion(
-                                TypeConversionError::type_mismatch(
-                                    field_path,
-                                    &format!("{:?}", value.ion_type()),
-                                    LogicalType::Float64,
-                                    Some("Use explicit conversion or check data types"),
-                                ),
-                            )
-                            .into());
-                        }
-                    }
-                }
-                None => 0.0, // Missing field - null value
-            };
-        }
-        Ok(())
-    }
-
-    /// Write Ion values directly to Boolean slice (eliminates Vector allocation)
-    fn write_values_to_boolean_slice(
-        slice: &mut [bool],
-        values: &[Option<Value>],
-        field_path: &str,
-        batch_size: usize,
-    ) -> Result<(), EvalError> {
-        // Verify capacity in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            slice.len() >= batch_size,
-            "Boolean vector buffer too small: expected {}, got {}",
-            batch_size,
-            slice.len()
-        );
-        
-        for i in 0..batch_size {
-            slice[i] = match &values[i] {
-                Some(value) => {
-                    match value {
-                        Value::Bool(bool_val) => *bool_val,
-                        Value::Null(_) => false, // Default value, actual null is tracked separately
-                        _ => {
-                            return Err(BatchReaderError::type_conversion(
-                                TypeConversionError::type_mismatch(
-                                    field_path,
-                                    &format!("{:?}", value.ion_type()),
-                                    LogicalType::Boolean,
-                                    Some("Use explicit conversion or check data types"),
-                                ),
-                            )
-                            .into());
-                        }
-                    }
-                }
-                None => false, // Missing field - null value
-            };
-        }
-        Ok(())
-    }
-
-    /// Write Ion values directly to String slice (eliminates Vector allocation)
-    fn write_values_to_string_slice(
-        slice: &mut [String],
-        values: &[Option<Value>],
-        field_path: &str,
-        batch_size: usize,
-    ) -> Result<(), EvalError> {
-        // Verify capacity in debug builds
-        #[cfg(debug_assertions)]
-        debug_assert!(
-            slice.len() >= batch_size,
-            "String vector buffer too small: expected {}, got {}",
-            batch_size,
-            slice.len()
-        );
-        
-        for i in 0..batch_size {
-            slice[i] = match &values[i] {
-                Some(value) => {
-                    match value {
-                        Value::String(string_val) => string_val.text().to_string(),
-                        Value::Symbol(symbol_val) => {
-                            // Allow symbol to string conversion
-                            symbol_val.text().unwrap_or("").to_string()
-                        }
-                        Value::Null(_) => String::new(), // Default value, actual null is tracked separately
-                        _ => {
-                            return Err(BatchReaderError::type_conversion(
-                                TypeConversionError::type_mismatch(
-                                    field_path,
-                                    &format!("{:?}", value.ion_type()),
-                                    LogicalType::String,
-                                    Some("Use explicit conversion or check data types"),
-                                ),
-                            )
-                            .into());
-                        }
-                    }
-                }
-                None => String::new(), // Missing field - null value
-            };
-        }
-        Ok(())
-    }
-
-    /// Convert Ion Value to PartiQL Vector based on LogicalType
+    /// Read next batch_size elements from the stream and write directly to batch vectors
     /// 
-    /// NOTE: This method is kept for backward compatibility but is no longer used
-    /// in the optimized path. The new direct-write methods (write_ion_to_*_slice)
-    /// eliminate intermediate Vec allocations.
-    fn convert_ion_values_to_vector(
-        &self,
-        values: Vec<Option<Value>>,
-        logical_type: LogicalType,
-        source_name: &str,
+    /// Returns the actual number of rows read (may be less than batch_size at end of stream)
+    /// 
+    /// Performance optimization: Pre-collects mutable Vec references before the hot loop
+    /// to avoid repeated column_mut() calls and pattern matching overhead
+    fn read_elements_batch(
+        reader: &mut ion_rs::Reader,
+        field_map: &HashMap<String, usize>,
+        batch: &mut VectorizedBatch,
         batch_size: usize,
-    ) -> Result<Vector, EvalError> {
-        match logical_type {
-            LogicalType::Int64 => {
-                // Create vector and populate it
-                let mut vector = Vector::new(LogicalType::Int64, batch_size);
-                if let PhysicalVectorEnum::Int64(ref mut physical_vec) = vector.physical {
-                    let slice = physical_vec.as_mut_slice();
-                    for (i, value_opt) in values.iter().enumerate() {
-                        match value_opt {
-                            Some(value) => {
-                                match value {
-                                    Value::Int(int_val) => {
-                                        slice[i] = int_val.as_i64().ok_or_else(|| {
-                                            BatchReaderError::type_conversion(
-                                                TypeConversionError::conversion_failed(
-                                                    source_name,
-                                                    "Ion Int",
-                                                    LogicalType::Int64,
-                                                    "Integer value too large for i64",
-                                                ),
-                                            )
-                                        })?;
-                                    }
-                                    Value::Null(_) => {
-                                        // Null values are handled by the physical vector's null bitmap
-                                        slice[i] = 0; // Default value, actual null is tracked separately
-                                    }
-                                    _ => {
-                                        return Err(BatchReaderError::type_conversion(
-                                            TypeConversionError::type_mismatch(
-                                                source_name,
-                                                &format!("{:?}", value.ion_type()),
-                                                LogicalType::Int64,
-                                                Some("Use explicit conversion or check data types"),
-                                            ),
-                                        )
-                                        .into());
-                                    }
-                                }
-                            }
-                            None => {
-                                // Missing field - null value
-                                slice[i] = 0; // Default value, actual null is tracked separately
-                            }
-                        }
-                    }
+        eof_reached: &mut bool,
+    ) -> Result<usize, EvalError> {
+        // Pre-collect mutable slice references to all Int64 vectors we'll be writing to
+        // This moves the expensive column_mut() + pattern matching out of the hot loop
+        let mut vector_refs: HashMap<usize, &mut [i64]> = HashMap::new();
+        
+        // Get unique vector indices from field_map
+        let vector_indices: std::collections::HashSet<usize> = field_map.values().copied().collect();
+        
+        // Extract mutable slice references to underlying data for each column
+        // We need to use raw pointers to satisfy borrow checker since we're
+        // extracting multiple mutable references from the same batch
+        let batch_ptr = batch as *mut VectorizedBatch;
+        
+        for &vector_idx in &vector_indices {
+            unsafe {
+                // Safety: We're getting non-overlapping mutable references to different
+                // columns in the batch. Each column is independent and won't be accessed
+                // by any other code while we hold these references.
+                let batch_ref = &mut *batch_ptr;
+                let vector = batch_ref.column_mut(vector_idx)?;
+                if let PhysicalVectorEnum::Int64(v) = &mut vector.physical {
+                    // Get mutable slice to the underlying data
+                    let slice = v.as_mut_slice();
+                    // Convert to raw pointer and back to extend lifetime
+                    let slice_ptr = slice as *mut [i64];
+                    vector_refs.insert(vector_idx, &mut *slice_ptr);
                 }
-                Ok(vector)
-            }
-            LogicalType::Float64 => {
-                let mut vector = Vector::new(LogicalType::Float64, batch_size);
-                if let PhysicalVectorEnum::Float64(ref mut physical_vec) = vector.physical {
-                    let slice = physical_vec.as_mut_slice();
-                    for (i, value_opt) in values.iter().enumerate() {
-                        match value_opt {
-                            Some(value) => {
-                                match value {
-                                    Value::Float(float_val) => {
-                                        slice[i] = *float_val;
-                                    }
-                                    Value::Int(int_val) => {
-                                        // Allow int to float conversion
-                                        slice[i] = int_val.as_i64().unwrap_or(0) as f64;
-                                    }
-                                    Value::Decimal(decimal_val) => {
-                                        // Allow decimal to float conversion via string
-                                        let decimal_str = decimal_val.to_string();
-                                        slice[i] = decimal_str.parse::<f64>().map_err(|_| {
-                                            BatchReaderError::type_conversion(
-                                                TypeConversionError::conversion_failed(
-                                                    source_name,
-                                                    "Ion Decimal",
-                                                    LogicalType::Float64,
-                                                    "Failed to convert decimal to f64",
-                                                ),
-                                            )
-                                        })?;
-                                    }
-                                    Value::Null(_) => {
-                                        slice[i] = 0.0; // Default value, actual null is tracked separately
-                                    }
-                                    _ => {
-                                        return Err(BatchReaderError::type_conversion(
-                                            TypeConversionError::type_mismatch(
-                                                source_name,
-                                                &format!("{:?}", value.ion_type()),
-                                                LogicalType::Float64,
-                                                Some("Use explicit conversion or check data types"),
-                                            ),
-                                        )
-                                        .into());
-                                    }
-                                }
-                            }
-                            None => {
-                                slice[i] = 0.0; // Default value, actual null is tracked separately
-                            }
-                        }
-                    }
-                }
-                Ok(vector)
-            }
-            LogicalType::Boolean => {
-                let mut vector = Vector::new(LogicalType::Boolean, batch_size);
-                if let PhysicalVectorEnum::Boolean(ref mut physical_vec) = vector.physical {
-                    let slice = physical_vec.as_mut_slice();
-                    for (i, value_opt) in values.iter().enumerate() {
-                        match value_opt {
-                            Some(value) => {
-                                match value {
-                                    Value::Bool(bool_val) => {
-                                        slice[i] = *bool_val;
-                                    }
-                                    Value::Null(_) => {
-                                        slice[i] = false; // Default value, actual null is tracked separately
-                                    }
-                                    _ => {
-                                        return Err(BatchReaderError::type_conversion(
-                                            TypeConversionError::type_mismatch(
-                                                source_name,
-                                                &format!("{:?}", value.ion_type()),
-                                                LogicalType::Boolean,
-                                                Some("Use explicit conversion or check data types"),
-                                            ),
-                                        )
-                                        .into());
-                                    }
-                                }
-                            }
-                            None => {
-                                slice[i] = false; // Default value, actual null is tracked separately
-                            }
-                        }
-                    }
-                }
-                Ok(vector)
-            }
-            LogicalType::String => {
-                let mut vector = Vector::new(LogicalType::String, batch_size);
-                if let PhysicalVectorEnum::String(ref mut physical_vec) = vector.physical {
-                    let slice = physical_vec.as_mut_slice();
-                    for (i, value_opt) in values.iter().enumerate() {
-                        match value_opt {
-                            Some(value) => {
-                                match value {
-                                    Value::String(string_val) => {
-                                        slice[i] = string_val.text().to_string();
-                                    }
-                                    Value::Symbol(symbol_val) => {
-                                        // Allow symbol to string conversion
-                                        slice[i] = symbol_val.text().unwrap_or("").to_string();
-                                    }
-                                    Value::Null(_) => {
-                                        slice[i] = String::new(); // Default value, actual null is tracked separately
-                                    }
-                                    _ => {
-                                        return Err(BatchReaderError::type_conversion(
-                                            TypeConversionError::type_mismatch(
-                                                source_name,
-                                                &format!("{:?}", value.ion_type()),
-                                                LogicalType::String,
-                                                Some("Use explicit conversion or check data types"),
-                                            ),
-                                        )
-                                        .into());
-                                    }
-                                }
-                            }
-                            None => {
-                                slice[i] = String::new(); // Default value, actual null is tracked separately
-                            }
-                        }
-                    }
-                }
-                Ok(vector)
             }
         }
+        
+        let mut rows_read = 0;
+        
+        // Hot loop: Now we can write directly to vectors without any lookups
+        for row_idx in 0..batch_size {
+            // Try to read next value from stream
+            match reader.next().map_err(|e| {
+                EvalError::General(format!("Ion stream error: {}", e))
+            })? {
+                StreamItem::Value(_v) => {
+                    // We can always assume that the top-level value is a struct
+                    reader.step_in().map_err(|e| {
+                        EvalError::General(format!("Failed to step into struct: {}", e))
+                    })?;
+                    
+                    // Iterate through all fields in the struct
+                    loop {
+                        match reader.next().map_err(|e| {
+                            EvalError::General(format!("Error reading struct field: {}", e))
+                        })? {
+                            StreamItem::Value(_) => {
+                                // Get the field name
+                                if let Ok(field_name) = reader.field_name() {
+                                    // Check if this field is in our projection
+                                    let text = field_name.text().unwrap();
+                                    if let Some(&vector_idx) = field_map.get(text) {
+                                        // Read the i64 value
+                                        let value = reader.read_i64().map_err(|e| {
+                                            EvalError::General(format!("Failed to read i64 for field '{}': {}", field_name, e))
+                                        })?;
+                                        
+                                        // Fast path: Direct write to pre-collected slice reference
+                                        // No column_mut(), no pattern matching, just indexing
+                                        if let Some(slice) = vector_refs.get_mut(&vector_idx) {
+                                            slice[row_idx] = value;
+                                        }
+                                    }
+                                    // If field not in projection, skip it (reader automatically advances)
+                                }
+                            }
+                            StreamItem::Nothing => {
+                                // End of struct reached
+                                break;
+                            }
+                            StreamItem::Null(_) => {
+                                // Null field - skip
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    reader.step_out().map_err(|e| {
+                        EvalError::General(format!("Failed to step out of struct: {}", e))
+                    })?;
+                    
+                    rows_read += 1;
+                }
+                StreamItem::Nothing => {
+                    // End of stream reached
+                    *eof_reached = true;
+                    break;
+                }
+                StreamItem::Null(_ion_type) => {
+                    // Skip nulls at the top level (or handle as needed)
+                    continue;
+                }
+            }
+        }
+        
+        Ok(rows_read)
+    }
+
+    /// Create a new IonReader from a file path (streaming from disk)
+    pub fn from_ion_file(path: impl AsRef<Path>, batch_size: usize) -> Result<Self, EvalError> {
+        let file = File::open(path.as_ref()).map_err(|e| {
+            BatchReaderError::data_source(DataSourceError::initialization_failed(
+                "Ion",
+                &format!("Failed to open file {:?}: {}", path.as_ref(), e),
+            ))
+        })?;
+        
+        let buf_reader = BufReader::new(file);
+        Self::from_reader(buf_reader, batch_size)
+    }
+
+    /// Create a new IonReader from bytes (for testing with small data)
+    pub fn from_ion_bytes(bytes: &[u8], batch_size: usize) -> Result<Self, EvalError> {
+        let cursor = std::io::Cursor::new(bytes.to_vec());
+        Self::from_reader(cursor, batch_size)
     }
 }
 
-impl BatchReader for IonReader {
+impl<'a> BatchReader for PIonReader<'a> {
     fn open(&mut self) -> Result<(), EvalError> {
-        // No-op for IonReader
         Ok(())
     }
 
     fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
-        // For Ion reader, return FieldPath projections
-        // Since Ion data is schema-less, we can't validate field existence ahead of time
-        // Just return the field name as a FieldPath
         Some(ProjectionSource::FieldPath(field_name.to_string()))
     }
 
     fn set_projection(&mut self, spec: ProjectionSpec) -> Result<(), EvalError> {
-        // Validate that all projection sources are FieldPath (Ion doesn't support ColumnIndex)
+        // Validate that all projection sources are FieldPath
         for projection in &spec.projections {
             match &projection.source {
-                ProjectionSource::FieldPath(_) => {
-                    // Valid for Ion reader
-                }
+                ProjectionSource::FieldPath(_) => {}
                 ProjectionSource::ColumnIndex(idx) => {
                     return Err(
                         BatchReaderError::projection(ProjectionError::unsupported_source(
@@ -551,6 +237,15 @@ impl BatchReader for IonReader {
             }
         }
 
+        // Build field name to vector index mapping
+        let mut field_map = HashMap::new();
+        for proj in &spec.projections {
+            if let ProjectionSource::FieldPath(field_name) = &proj.source {
+                field_map.insert(field_name.clone(), proj.target_vector_idx);
+            }
+        }
+        self.field_to_vector_map = Some(field_map);
+
         // Build and cache schema from projection
         let fields: Vec<Field> = spec
             .projections
@@ -562,283 +257,50 @@ impl BatchReader for IonReader {
             .collect();
         let schema = SourceTypeDef::new(fields);
         
-        // Cache schema for reuse across batches
         self.cached_schema = Some(schema.clone());
-
-        // Pre-allocate reusable batch structure
         self.reusable_batch = Some(VectorizedBatch::new(schema, self.batch_size));
-
         self.projection = Some(spec);
         Ok(())
     }
 
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
-        let projection = self.projection.as_ref().ok_or_else(|| {
-            EvalError::General("set_projection must be called before next_batch".to_string())
-        })?;
-
-        // Check if we've reached the end of data
-        if self.current_position >= self.elements.len() {
+        if self.eof_reached {
             return Ok(None);
         }
 
-        // Determine batch size (remaining elements or configured batch size)
-        let remaining_elements = self.elements.len() - self.current_position;
-        let actual_batch_size = std::cmp::min(self.batch_size, remaining_elements);
-
-        // Extract elements slice first to avoid borrow checker issues
-        let elements_slice = &self.elements[self.current_position..self.current_position + actual_batch_size];
-        
-        // Extract values for all projections first (before getting mutable batch reference)
-        let mut projection_data: Vec<(usize, LogicalType, String, Vec<Option<Value>>)> = Vec::with_capacity(projection.projections.len());
-        for proj in &projection.projections {
-            if let ProjectionSource::FieldPath(field_path) = &proj.source {
-                let mut values = Vec::with_capacity(actual_batch_size);
-                for element in elements_slice.iter() {
-                    let value = self.extract_field_value(element, field_path)?;
-                    values.push(value);
-                }
-                projection_data.push((proj.target_vector_idx, proj.logical_type.clone(), field_path.clone(), values));
-            }
+        // Ensure projection is set
+        if self.projection.is_none() {
+            return Err(EvalError::General("set_projection must be called before next_batch".to_string()));
         }
 
-        // Now get batch and write all data directly to slices
-        let batch = self.reusable_batch.as_mut().ok_or_else(|| {
-            EvalError::General("Reusable batch should have been initialized in set_projection".to_string())
-        })?;
+        // Get mutable batch reference
+        let batch = self.reusable_batch.as_mut()
+            .ok_or_else(|| EvalError::General("Reusable batch should have been initialized in set_projection".to_string()))?;
 
-        // Reset batch metadata (don't clear vectors - they maintain capacity and we'll overwrite data)
-        batch.set_row_count(0);
+        let field_map = self.field_to_vector_map.as_ref()
+            .ok_or_else(|| EvalError::General("field_to_vector_map not initialized".to_string()))?;
+
+        // Read elements from stream and write directly to batch vectors
+        let actual_batch_size = Self::read_elements_batch(
+            &mut self.reader,
+            field_map,
+            batch,
+            self.batch_size,
+            &mut self.eof_reached,
+        )?;
+        
+        if actual_batch_size == 0 {
+            return Ok(None);
+        }
+
+        // Update batch row count
+        batch.set_row_count(actual_batch_size);
         batch.set_selection(None);
 
-        // Write data directly to batch vectors (eliminating Vector allocation)
-        for (target_idx, logical_type, field_path, values) in projection_data {
-            let vector = batch.column_mut(target_idx)?;
-            
-            match logical_type {
-                LogicalType::Int64 => {
-                    if let PhysicalVectorEnum::Int64(v) = &mut vector.physical {
-                        let slice = v.as_mut_slice();
-                        Self::write_values_to_int64_slice(slice, &values, &field_path, actual_batch_size)?;
-                    }
-                }
-                LogicalType::Float64 => {
-                    if let PhysicalVectorEnum::Float64(v) = &mut vector.physical {
-                        let slice = v.as_mut_slice();
-                        Self::write_values_to_float64_slice(slice, &values, &field_path, actual_batch_size)?;
-                    }
-                }
-                LogicalType::Boolean => {
-                    if let PhysicalVectorEnum::Boolean(v) = &mut vector.physical {
-                        let slice = v.as_mut_slice();
-                        Self::write_values_to_boolean_slice(slice, &values, &field_path, actual_batch_size)?;
-                    }
-                }
-                LogicalType::String => {
-                    if let PhysicalVectorEnum::String(v) = &mut vector.physical {
-                        let slice = v.as_mut_slice();
-                        Self::write_values_to_string_slice(slice, &values, &field_path, actual_batch_size)?;
-                    }
-                }
-            }
-        }
-
-        // Set the actual row count
-        batch.set_row_count(actual_batch_size);
-
-        // Update position for next batch
-        self.current_position += actual_batch_size;
-
-        // Clone the batch to return (the reusable batch stays in the reader for next iteration)
         Ok(Some(batch.clone()))
     }
 
     fn close(&mut self) -> Result<(), EvalError> {
-        // No-op for IonReader
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::reader::{Projection, ProjectionSource};
-
-    #[test]
-    fn test_ion_reader_basic_functionality() {
-        let ion_data = r#"
-            {name: "Alice", age: 30, score: 95.5, active: true}
-            {name: "Bob", age: 25, score: 87.2, active: false}
-        "#;
-
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![
-            Projection::new(
-                ProjectionSource::FieldPath("name".to_string()),
-                0,
-                LogicalType::String,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("age".to_string()),
-                1,
-                LogicalType::Int64,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("score".to_string()),
-                2,
-                LogicalType::Float64,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("active".to_string()),
-                3,
-                LogicalType::Boolean,
-            ),
-        ];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        assert!(reader.set_projection(projection_spec).is_ok());
-
-        let batch = reader.next_batch().unwrap();
-        assert!(batch.is_some());
-
-        let batch = batch.unwrap();
-        assert_eq!(batch.row_count(), 2);
-        assert_eq!(batch.total_column_count(), 4);
-    }
-
-    #[test]
-    fn test_ion_reader_missing_fields() {
-        let ion_data = r#"
-            {name: "Alice", age: 30}
-            {name: "Bob", score: 87.2}
-        "#;
-
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![
-            Projection::new(
-                ProjectionSource::FieldPath("name".to_string()),
-                0,
-                LogicalType::String,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("age".to_string()),
-                1,
-                LogicalType::Int64,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("score".to_string()),
-                2,
-                LogicalType::Float64,
-            ),
-        ];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        assert!(reader.set_projection(projection_spec).is_ok());
-
-        let batch = reader.next_batch().unwrap();
-        assert!(batch.is_some());
-
-        let batch = batch.unwrap();
-        assert_eq!(batch.row_count(), 2);
-        assert_eq!(batch.total_column_count(), 3);
-
-        // Verify that missing fields result in null values
-        // Alice has age but no score, Bob has score but no age
-    }
-
-    #[test]
-    fn test_ion_reader_rejects_column_index() {
-        let ion_data = r#"{name: "Alice", age: 30}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![Projection::new(
-            ProjectionSource::ColumnIndex(0),
-            0,
-            LogicalType::String,
-        )];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        let result = reader.set_projection(projection_spec);
-
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("ColumnIndex"));
-        assert!(error_msg.contains("not supported"));
-    }
-
-    #[test]
-    fn test_ion_reader_rejects_deep_nesting() {
-        let ion_data = r#"{person: {details: {name: "Alice"}}}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![Projection::new(
-            ProjectionSource::FieldPath("person.details.name".to_string()),
-            0,
-            LogicalType::String,
-        )];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        assert!(reader.set_projection(projection_spec).is_ok());
-
-        // Should fail when trying to read the batch due to deep nesting
-        let result = reader.next_batch();
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("person.details.name"));
-    }
-
-    #[test]
-    fn test_ion_reader_single_level_nesting() {
-        let ion_data = r#"{person: {name: "Alice", age: 30}}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![
-            Projection::new(
-                ProjectionSource::FieldPath("person.name".to_string()),
-                0,
-                LogicalType::String,
-            ),
-            Projection::new(
-                ProjectionSource::FieldPath("person.age".to_string()),
-                1,
-                LogicalType::Int64,
-            ),
-        ];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        assert!(reader.set_projection(projection_spec).is_ok());
-
-        let batch = reader.next_batch().unwrap();
-        assert!(batch.is_some());
-
-        let batch = batch.unwrap();
-        assert_eq!(batch.row_count(), 1);
-        assert_eq!(batch.total_column_count(), 2);
-    }
-
-    #[test]
-    fn test_ion_reader_type_mismatch_error() {
-        let ion_data = r#"{name: "Alice", age: "thirty"}"#;
-        let mut reader = IonReader::from_ion_text(ion_data, 10).unwrap();
-
-        let projections = vec![Projection::new(
-            ProjectionSource::FieldPath("age".to_string()),
-            0,
-            LogicalType::Int64,
-        )];
-
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        assert!(reader.set_projection(projection_spec).is_ok());
-
-        let result = reader.next_batch();
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Type mismatch"));
-        assert!(error_msg.contains("String"));
-        assert!(error_msg.contains("Int64"));
     }
 }

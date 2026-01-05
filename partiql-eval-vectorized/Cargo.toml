@@ -16,7 +16,7 @@ indexmap = "2"
 memmap2 = "0.9"
 smallvec = "1.13"
 wide = "0.7"
-ion-rs = { version = "1.0.0-rc.11", features = ["experimental"] }
+ion-rs = "0.18.1"
 arrow = "53.0"
 arrow-array = "53.0"
 arrow-ipc = "53.0"
@@ -26,6 +26,7 @@ partiql-logical = { path = "../partiql-logical" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-eval = { path = "../partiql-eval" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
 partiql-types = { path = "../partiql-types" }
