@@ -9,6 +9,9 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+// Ion writer imports
+use ion_rs::IonWriter;
+
 /// Generate mock data in Arrow, Parquet, and Ion formats
 /// 
 /// Usage:
@@ -193,21 +196,37 @@ fn generate_parquet(output_dir: &str, batch_size: usize, num_batches: usize) -> 
 }
 
 fn generate_ion(output_dir: &str, batch_size: usize, num_batches: usize) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Generating Ion format...");
+    println!("Generating Ion format (binary)...");
     
-    let file_path = Path::new(output_dir).join(format!("data_b{}_n{}.ion", batch_size, num_batches));
-    let mut file = File::create(&file_path)?;
+    // Use .10n extension for binary Ion format
+    let file_path = Path::new(output_dir).join(format!("data_b{}_n{}.10n", batch_size, num_batches));
+    let file = File::create(&file_path)?;
+    
+    // CRITICAL: Use binary writer for symbol IDs
+    // BinaryWriterBuilder creates binary Ion format (not text)
+    let mut writer = ion_rs::BinaryWriterBuilder::new()
+        .build(file)?;
 
     let mut current_row = 0i64;
-    for batch_idx in 0..num_batches {
+    for _batch_idx in 0..num_batches {
         for i in 0..batch_size {
             let row_num = current_row + i as i64;
-            writeln!(file, "{{a: {}, b: {}}}", row_num, row_num + 100)?;
+            
+            // Write struct with field names (encoded as symbol IDs in binary format)
+            writer.step_in(ion_rs::IonType::Struct)?;
+            
+            writer.set_field_name("a");
+            writer.write_i64(row_num)?;
+            
+            writer.set_field_name("b");
+            writer.write_i64(row_num + 100)?;
+            
+            writer.step_out()?;
         }
         current_row += batch_size as i64;
     }
-
-    println!("  Created: {}", file_path.display());
+    
+    writer.flush()?;
+    println!("  Created: {} (binary format with symbol IDs)", file_path.display());
     Ok(())
 }
-
