@@ -31,8 +31,10 @@ wide = "0.7"
 ion-rs = "0.18.1"
 arrow = "53.0"
 arrow-array = "53.0"
+arrow-buffer = "53.0"
 arrow-ipc = "53.0"
 arrow-schema = "53.0"
+bytes = "1.9"
 parquet = "53.0"
 partiql-logical = { path = "../partiql-logical" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }

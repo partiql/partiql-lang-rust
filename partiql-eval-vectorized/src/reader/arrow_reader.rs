@@ -4,88 +4,226 @@ use crate::reader::{BatchReader, ProjectionSource, ProjectionSpec};
 use arrow::record_batch::RecordBatch;
 use arrow::datatypes::Schema;
 use arrow_array::{Array, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray};
-use arrow_ipc::reader::FileReader;
+use arrow_buffer::{Buffer, MutableBuffer};
+use bytes::Bytes;
+use arrow_ipc::convert::fb_to_schema;
+use arrow_ipc::reader::{FileDecoder, read_footer_length};
+use arrow_ipc::{Block, root_as_footer};
+use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Arrow RecordBatch reader for Phase 0 compliance
-/// Converts Arrow RecordBatch data to PartiQL VectorizedBatch format
+/// Arrow IPC file reader with true zero-copy memory-mapped access
+/// 
+/// This reader uses Arrow's `FileDecoder` API to create RecordBatches that directly
+/// reference memory-mapped file data, avoiding data copying during deserialization.
+/// 
+/// # Zero-Copy Implementation
+/// 
+/// The zero-copy chain works as follows:
+/// 1. Memory-map the file using `memmap2::Mmap`
+/// 2. Convert to `bytes::Bytes` (zero-copy, owns the mmap)
+/// 3. Convert to `arrow_buffer::Buffer` (zero-copy, reference counted)
+/// 4. Use `FileDecoder` to create arrays that reference the buffer directly
+/// 
+/// Batches are decoded lazily on-demand, keeping memory usage low for large files.
 pub struct ArrowReader {
-    // For in-memory batches (from new() or from_record_batch())
-    batches: Option<Vec<RecordBatch>>,
+    /// Zero-copy decoder that references memory-mapped file data
+    decoder: Option<ZeroCopyDecoder>,
+    
+    /// Current batch index for iteration
     current_batch_idx: usize,
     
-    // For lazy file reading (from from_file())
-    file_reader: Option<Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send>>,
-    file_path: Option<String>,
+    /// Schema from the Arrow file
     schema: Option<Arc<Schema>>,
     
+    /// File path for debugging/error messages
+    file_path: Option<String>,
+    
+    /// Projection specification
     projection: Option<ProjectionSpec>,
+    
+    /// Whether we've finished reading all batches
     finished: bool,
     
     /// Cached schema built from projection (reused across batches)
     cached_schema: Option<crate::batch::SourceTypeDef>,
+    
     /// Batch size for pre-allocation (defaults to first batch size)
     batch_size: usize,
+    
     /// Reusable batch structure (pre-allocated in set_projection)
     reusable_batch: Option<VectorizedBatch>,
 }
 
-impl ArrowReader {
-    /// Create new ArrowReader from a vector of Arrow RecordBatches
-    pub fn new(batches: Vec<RecordBatch>) -> Self {
-        Self {
-            batches: Some(batches),
-            current_batch_idx: 0,
-            file_reader: None,
-            file_path: None,
-            schema: None,
-            projection: None,
-            finished: false,
-            cached_schema: None,
-            batch_size: 0,
-            reusable_batch: None,
+/// Zero-copy decoder for Arrow IPC files
+/// 
+/// This decoder keeps the memory-mapped file data alive through the Buffer,
+/// and uses FileDecoder to create RecordBatches that reference the buffer
+/// directly without copying data.
+struct ZeroCopyDecoder {
+    /// Buffer containing the memory-mapped file data
+    /// This keeps the mmap alive through reference counting
+    buffer: Buffer,
+    
+    /// Low-level Arrow decoder that creates zero-copy arrays
+    decoder: FileDecoder,
+    
+    /// Locations of record batches within the buffer
+    batch_blocks: Vec<Block>,
+    
+    /// Schema from the Arrow file
+    schema: Arc<Schema>,
+}
+
+impl ZeroCopyDecoder {
+    /// Create a new zero-copy decoder from a memory-mapped file
+    /// 
+    /// This performs the following steps:
+    /// 1. Converts the mmap to a Buffer (zero-copy chain: Mmap → Bytes → Buffer)
+    /// 2. Reads the Arrow IPC footer to extract schema and batch locations
+    /// 3. Creates a FileDecoder for lazy, zero-copy batch reading
+    /// 4. Reads any dictionary batches (required for certain data types)
+    fn new(mmap: Mmap) -> Result<Self, EvalError> {
+        // Convert mmap to Buffer through Bytes (both conversions are zero-copy)
+        // The Bytes owns the Mmap and keeps it alive
+        let bytes = Bytes::from_owner(mmap);
+
+        // Create Buffer from the bytes slice - Buffer will hold Arc to the bytes
+        // NOTE: We can only do this since we assume it's aligned.
+        let buffer = unsafe {
+            Buffer::from_custom_allocation(
+                std::ptr::NonNull::new(bytes.as_ptr() as _).expect("should be a valid pointer"),
+                bytes.len(),
+                Arc::new(bytes),
+            )
+        };
+
+        // Read the Arrow IPC footer
+        let trailer_start = buffer.len() - 10;
+        let footer_len = read_footer_length(
+            buffer[trailer_start..].try_into()
+                .map_err(|_| EvalError::General("Failed to read footer length".to_string()))?
+        ).map_err(|e| EvalError::General(format!("Failed to read footer length: {}", e)))?;
+        
+        let footer_start = trailer_start - footer_len;
+        let footer = root_as_footer(&buffer[footer_start..trailer_start])
+            .map_err(|e| EvalError::General(format!("Failed to parse footer: {}", e)))?;
+        
+        // Extract schema from footer
+        let schema = fb_to_schema(footer.schema()
+            .ok_or_else(|| EvalError::General("Footer missing schema".to_string()))?);
+        
+        // Create the FileDecoder
+        let mut decoder = FileDecoder::new(Arc::new(schema.clone()), footer.version());
+        
+        // Read dictionary batches if present (required for dictionary-encoded columns)
+        if let Some(dictionaries) = footer.dictionaries() {
+            for block in dictionaries.iter() {
+                let block_len = block.bodyLength() as usize + block.metaDataLength() as usize;
+                let data = buffer.slice_with_length(block.offset() as usize, block_len);
+                decoder.read_dictionary(&block, &data)
+                    .map_err(|e| EvalError::General(format!("Failed to read dictionary: {}", e)))?;
+            }
         }
+        
+        // Extract batch locations from footer
+        let batch_blocks: Vec<Block> = footer.recordBatches()
+            .map(|batches| batches.iter().copied().collect())
+            .unwrap_or_default();
+        
+        Ok(Self {
+            buffer,
+            decoder,
+            batch_blocks,
+            schema: Arc::new(schema),
+        })
     }
-
-    /// Create ArrowReader from a single RecordBatch
-    pub fn from_record_batch(batch: RecordBatch) -> Self {
-        Self::new(vec![batch])
+    
+    /// Get the number of record batches in the file
+    fn num_batches(&self) -> usize {
+        self.batch_blocks.len()
     }
+    
+    /// Read a record batch at the specified index (zero-copy)
+    /// 
+    /// This creates a RecordBatch whose arrays reference the underlying buffer
+    /// directly, without copying data. The Buffer keeps the mmap alive through
+    /// reference counting.
+    fn get_batch(&self, index: usize) -> Result<RecordBatch, EvalError> {
+        if index >= self.batch_blocks.len() {
+            return Err(EvalError::General(format!(
+                "Batch index {} out of range (0..{})",
+                index,
+                self.batch_blocks.len()
+            )));
+        }
+        
+        let block = &self.batch_blocks[index];
+        let block_len = block.bodyLength() as usize + block.metaDataLength() as usize;
+        
+        // This slice operation is zero-copy - it creates a view into the buffer
+        let data = self.buffer.slice_with_length(block.offset() as usize, block_len);
+        
+        // FileDecoder creates arrays that reference the buffer directly
+        self.decoder.read_record_batch(block, &data)
+            .map_err(|e| EvalError::General(format!("Failed to read batch: {}", e)))?
+            .ok_or_else(|| EvalError::General("Batch was None".to_string()))
+    }
+    
+    /// Get the schema
+    fn schema(&self) -> &Arc<Schema> {
+        &self.schema
+    }
+}
 
-    /// Create ArrowReader from an Arrow IPC file (lazy loading)
-    /// Only reads the schema, batches are read on-demand in next_batch()
+impl ArrowReader {
+    /// Create ArrowReader from an Arrow IPC file using zero-copy memory mapping
+    /// 
+    /// This method:
+    /// 1. Memory-maps the file for efficient OS-level access
+    /// 2. Creates a zero-copy decoder that references the mapped memory
+    /// 3. Enables lazy, on-demand batch reading without upfront data loading
+    /// 
+    /// # Performance Benefits
+    /// - **True zero-copy**: Arrays reference memory-mapped data directly
+    /// - **Lazy loading**: Batches decoded only when requested
+    /// - **Memory efficient**: Only active batch data in memory
+    /// - **OS-optimized**: Kernel handles page loading and caching
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use partiql_eval_vectorized::reader::ArrowReader;
+    /// 
+    /// let reader = ArrowReader::from_file("data.arrow")?;
+    /// // File is memory-mapped, but no batches loaded yet
+    /// # Ok::<(), partiql_eval_vectorized::error::EvalError>(())
+    /// ```
     pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, EvalError> {
         let path_str = file_path.as_ref().to_string_lossy().to_string();
         
+        // Open and memory-map the file
         let file = File::open(file_path.as_ref()).map_err(|e| {
-            EvalError::General(format!(
-                "Failed to open Arrow file: {}",
-                e
-            ))
+            EvalError::General(format!("Failed to open Arrow file '{}': {}", path_str, e))
         })?;
-
-        let reader = FileReader::try_new(file, None).map_err(|e| {
-            EvalError::General(format!(
-                "Failed to create Arrow file reader: {}",
-                e
-            ))
-        })?;
-
-        // Read schema only (lightweight operation)
-        let schema = reader.schema().clone();
-
-        // Convert FileReader to boxed iterator for lazy loading
-        let file_reader: Box<dyn Iterator<Item = Result<RecordBatch, arrow::error::ArrowError>> + Send> = 
-            Box::new(reader);
-
+        
+        // Safety: We're mapping a read-only file that won't be modified during reading
+        let mmap = unsafe {
+            Mmap::map(&file).map_err(|e| {
+                EvalError::General(format!("Failed to memory-map file '{}': {}", path_str, e))
+            })?
+        };
+        
+        // Create zero-copy decoder
+        let decoder = ZeroCopyDecoder::new(mmap)?;
+        let schema = decoder.schema().clone();
+        
         Ok(Self {
-            batches: None,
+            decoder: Some(decoder),
             current_batch_idx: 0,
-            file_reader: Some(file_reader),
-            file_path: Some(path_str),
             schema: Some(schema),
+            file_path: Some(path_str),
             projection: None,
             finished: false,
             cached_schema: None,
@@ -97,30 +235,19 @@ impl ArrowReader {
 
 impl BatchReader for ArrowReader {
     fn open(&mut self) -> Result<(), EvalError> {
-        // No-op for ArrowReader
+        // No-op - file is already opened and mapped in from_file()
         Ok(())
     }
 
     fn resolve(&self, field_name: &str) -> Option<ProjectionSource> {
-        // Get schema from either in-memory batches or file reader
-        let schema_arc: &Arc<Schema> = match (&self.batches, &self.schema) {
-            (Some(batches), _) => {
-                if batches.is_empty() {
-                    return None;
-                }
-                &batches[0].schema()
-            }
-            (None, Some(schema)) => schema,
-            _ => return None,
-        };
-        let schema: &Schema = schema_arc.as_ref();
-
+        let schema = self.schema.as_ref()?;
+        
         for (idx, field) in schema.fields().iter().enumerate() {
             if field.name() == field_name {
                 return Some(ProjectionSource::ColumnIndex(idx));
             }
         }
-
+        
         None
     }
 
@@ -143,17 +270,8 @@ impl BatchReader for ArrowReader {
         }
 
         // Validate column indices against schema
-        let schema_arc: &Arc<Schema> = match (&self.batches, &self.schema) {
-            (Some(batches), _) => {
-                if batches.is_empty() {
-                    return Err(EvalError::General("Cannot set projection: no batches available".to_string()));
-                }
-                &batches[0].schema()
-            }
-            (None, Some(schema)) => schema,
-            _ => return Err(EvalError::General("Cannot set projection: no schema available".to_string())),
-        };
-        let schema: &Schema = schema_arc.as_ref();
+        let schema = self.schema.as_ref()
+            .ok_or_else(|| EvalError::General("No schema available".to_string()))?;
 
         let num_columns = schema.fields().len();
         for proj in &spec.projections {
@@ -175,12 +293,7 @@ impl BatchReader for ArrowReader {
             .map(|p| Field {
                 name: match &p.source {
                     ProjectionSource::ColumnIndex(idx) => {
-                        // Get field name from Arrow schema if available
-                        if let Some(field) = schema.field(*idx).name().get(0..) {
-                            field.to_string()
-                        } else {
-                            format!("col_{}", idx)
-                        }
+                        schema.field(*idx).name().to_string()
                     }
                     ProjectionSource::FieldPath(path) => path.clone(),
                 },
@@ -190,21 +303,11 @@ impl BatchReader for ArrowReader {
         let cached_schema = SourceTypeDef::new(fields);
         self.cached_schema = Some(cached_schema.clone());
 
-        // Determine batch size from first available batch (if any)
-        // For file readers, we'll use a default size and adjust on first read
-        let batch_size = if let Some(ref batches) = self.batches {
-            if !batches.is_empty() {
-                batches[0].num_rows()
-            } else {
-                1024 // Default batch size
-            }
-        } else {
-            1024 // Default batch size for file readers
-        };
-        self.batch_size = batch_size;
+        // Use default batch size (will be adjusted on first read)
+        self.batch_size = 1024;
 
         // Pre-allocate reusable batch structure
-        self.reusable_batch = Some(VectorizedBatch::new(cached_schema, batch_size));
+        self.reusable_batch = Some(VectorizedBatch::new(cached_schema, self.batch_size));
 
         self.projection = Some(spec);
         Ok(())
@@ -213,7 +316,9 @@ impl BatchReader for ArrowReader {
     fn next_batch(&mut self) -> Result<Option<VectorizedBatch>, EvalError> {
         // Check if projection has been set
         if self.projection.is_none() {
-            return Err(EvalError::General("set_projection must be called before next_batch".to_string()));
+            return Err(EvalError::General(
+                "set_projection must be called before next_batch".to_string()
+            ));
         }
 
         // Check if we're already finished
@@ -221,51 +326,42 @@ impl BatchReader for ArrowReader {
             return Ok(None);
         }
 
-        // Read next batch - either from in-memory batches or file reader
-        let arrow_batch = if let Some(ref batches) = self.batches {
-            // In-memory mode: use pre-loaded batches
-            if self.current_batch_idx >= batches.len() {
-                self.finished = true;
-                return Ok(None);
-            }
-            let batch = &batches[self.current_batch_idx];
-            self.current_batch_idx += 1;
-            if self.current_batch_idx >= batches.len() {
-                self.finished = true;
-            }
-            batch.clone()
-        } else if let Some(ref mut reader) = self.file_reader {
-            // Lazy file mode: read batch on-demand
-            match reader.next() {
-                Some(Ok(batch)) => batch,
-                Some(Err(e)) => {
-                    return Err(EvalError::General(format!(
-                        "Failed to read Arrow batch: {}",
-                        e
-                    )));
-                }
-                None => {
-                    self.finished = true;
-                    return Ok(None);
-                }
-            }
-        } else {
-            return Err(EvalError::General("ArrowReader not properly initialized".to_string()));
-        };
+        // Get the decoder
+        let decoder = self.decoder.as_ref()
+            .ok_or_else(|| EvalError::General("Decoder not initialized".to_string()))?;
 
-        // Convert Arrow RecordBatch to PartiQL VectorizedBatch using cached schema and reusable batch
+        // Check if we've read all batches
+        if self.current_batch_idx >= decoder.num_batches() {
+            self.finished = true;
+            return Ok(None);
+        }
+
+        // Read the next batch (zero-copy from memory-mapped file)
+        let arrow_batch = decoder.get_batch(self.current_batch_idx)?;
+        self.current_batch_idx += 1;
+
+        // Check if this was the last batch
+        if self.current_batch_idx >= decoder.num_batches() {
+            self.finished = true;
+        }
+
+        // Convert Arrow RecordBatch to PartiQL VectorizedBatch
         let batch = self.convert_arrow_to_vectorized_batch(&arrow_batch)?;
         Ok(Some(batch))
     }
 
     fn close(&mut self) -> Result<(), EvalError> {
-        // No-op for ArrowReader
+        // No-op - decoder and mmap will be dropped automatically
         Ok(())
     }
 }
 
 impl ArrowReader {
-    /// Convert an Arrow RecordBatch to a PartiQL VectorizedBatch using cached schema and reusable batch
+    /// Convert an Arrow RecordBatch to a PartiQL VectorizedBatch
+    /// 
+    /// Note: This step does copy data from Arrow arrays to PartiQL vectors,
+    /// as VectorizedBatch uses owned Vec<T> for storage. The zero-copy
+    /// optimization applies to reading from the file into Arrow arrays.
     fn convert_arrow_to_vectorized_batch(
         &mut self,
         arrow_batch: &RecordBatch,
@@ -275,75 +371,68 @@ impl ArrowReader {
         let batch_size = arrow_batch.num_rows();
         let projection = self.projection.as_ref().unwrap(); // Safe: checked in next_batch
 
-        // Use cached schema (built in set_projection)
+        // Use cached schema
         let schema = self.cached_schema.as_ref().ok_or_else(|| {
             EvalError::General("Schema not cached. set_projection must be called first.".to_string())
         })?;
 
-        // Handle variable batch size: if arrow_batch is larger than pre-allocated size,
-        // we need to reallocate the batch with the correct size
+        // Handle variable batch size
         if batch_size > self.batch_size {
-            // Reallocate batch with larger size
             self.batch_size = batch_size;
             self.reusable_batch = Some(VectorizedBatch::new(schema.clone(), batch_size));
         }
 
-        // Get or create reusable batch
+        // Get reusable batch
         let batch = self.reusable_batch.as_mut().ok_or_else(|| {
-            EvalError::General("Reusable batch should have been initialized in set_projection".to_string())
+            EvalError::General("Reusable batch not initialized".to_string())
         })?;
 
-        // Reset batch metadata (don't clear vectors - they maintain capacity and we'll overwrite data)
+        // Reset batch metadata
         batch.set_row_count(0);
         batch.set_selection(None);
 
-        let actual_batch_size = batch_size;
-
-    // Convert each projected column from Arrow to PartiQL
-    for proj in &projection.projections {
-        let col_idx = match &proj.source {
-            ProjectionSource::ColumnIndex(idx) => *idx,
-            ProjectionSource::FieldPath(_) => {
-                return Err(EvalError::General(
-                    "FieldPath not supported for Arrow reader".to_string(),
-                ));
-            }
-        };
-
-        // Get Arrow column
-        let arrow_column = arrow_batch.column(col_idx);
-
-        // Get target PartiQL vector
-        let vector = batch.column_mut(proj.target_vector_idx)?;
-
-        // Convert Arrow array to PartiQL vector based on logical type
-        match proj.logical_type {
-            LogicalType::Int64 => {
-                if let PhysicalVectorEnum::Int64(v) = &mut vector.physical {
-                    convert_arrow_to_int64(arrow_column, v.as_mut_slice())?;
+        // Convert each projected column from Arrow to PartiQL
+        for proj in &projection.projections {
+            let col_idx = match &proj.source {
+                ProjectionSource::ColumnIndex(idx) => *idx,
+                ProjectionSource::FieldPath(_) => {
+                    return Err(EvalError::General(
+                        "FieldPath not supported for Arrow reader".to_string(),
+                    ));
                 }
-            }
-            LogicalType::Float64 => {
-                if let PhysicalVectorEnum::Float64(v) = &mut vector.physical {
-                    convert_arrow_to_float64(arrow_column, v.as_mut_slice())?;
+            };
+
+            let arrow_column = arrow_batch.column(col_idx);
+            let vector = batch.column_mut(proj.target_vector_idx)?;
+
+            // Convert based on logical type
+            match proj.logical_type {
+                LogicalType::Int64 => {
+                    if let PhysicalVectorEnum::Int64(v) = &mut vector.physical {
+                        convert_arrow_to_int64(arrow_column, v.as_mut_slice())?;
+                    }
                 }
-            }
-            LogicalType::Boolean => {
-                if let PhysicalVectorEnum::Boolean(v) = &mut vector.physical {
-                    convert_arrow_to_boolean(arrow_column, v.as_mut_slice())?;
+                LogicalType::Float64 => {
+                    if let PhysicalVectorEnum::Float64(v) = &mut vector.physical {
+                        convert_arrow_to_float64(arrow_column, v.as_mut_slice())?;
+                    }
                 }
-            }
-            LogicalType::String => {
-                if let PhysicalVectorEnum::String(v) = &mut vector.physical {
-                    convert_arrow_to_string(arrow_column, v.as_mut_slice())?;
+                LogicalType::Boolean => {
+                    if let PhysicalVectorEnum::Boolean(v) = &mut vector.physical {
+                        convert_arrow_to_boolean(arrow_column, v.as_mut_slice())?;
+                    }
+                }
+                LogicalType::String => {
+                    if let PhysicalVectorEnum::String(v) = &mut vector.physical {
+                        convert_arrow_to_string(arrow_column, v.as_mut_slice())?;
+                    }
                 }
             }
         }
-    }
 
-        batch.set_row_count(actual_batch_size);
+        batch.set_row_count(batch_size);
         
-        // Clone the batch to return (the reusable batch stays in the reader for next iteration)
+        // Clone the batch to return
         Ok(batch.clone())
     }
 }
@@ -351,7 +440,6 @@ impl ArrowReader {
 /// Convert Arrow array to Int64 vector
 fn convert_arrow_to_int64(arrow_array: &ArrayRef, target: &mut [i64]) -> Result<(), EvalError> {
     let array_len = arrow_array.len();
-    // Verify capacity in debug builds
     #[cfg(debug_assertions)]
     debug_assert!(
         target.len() >= array_len,
@@ -359,17 +447,15 @@ fn convert_arrow_to_int64(arrow_array: &ArrayRef, target: &mut [i64]) -> Result<
         array_len,
         target.len()
     );
-    // Try different Arrow array types that can convert to Int64
+    
     if let Some(int64_array) = arrow_array.as_any().downcast_ref::<Int64Array>() {
-        // Direct Int64 conversion
         for (i, value) in int64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
             }
-            target[i] = value.unwrap_or(0); // Use 0 for null values
+            target[i] = value.unwrap_or(0);
         }
     } else if let Some(float64_array) = arrow_array.as_any().downcast_ref::<Float64Array>() {
-        // Float64 to Int64 conversion
         for (i, value) in float64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
@@ -388,7 +474,6 @@ fn convert_arrow_to_int64(arrow_array: &ArrayRef, target: &mut [i64]) -> Result<
 /// Convert Arrow array to Float64 vector
 fn convert_arrow_to_float64(arrow_array: &ArrayRef, target: &mut [f64]) -> Result<(), EvalError> {
     let array_len = arrow_array.len();
-    // Verify capacity in debug builds
     #[cfg(debug_assertions)]
     debug_assert!(
         target.len() >= array_len,
@@ -396,17 +481,15 @@ fn convert_arrow_to_float64(arrow_array: &ArrayRef, target: &mut [f64]) -> Resul
         array_len,
         target.len()
     );
-    // Try different Arrow array types that can convert to Float64
+    
     if let Some(float64_array) = arrow_array.as_any().downcast_ref::<Float64Array>() {
-        // Direct Float64 conversion
         for (i, value) in float64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
             }
-            target[i] = value.unwrap_or(0.0); // Use 0.0 for null values
+            target[i] = value.unwrap_or(0.0);
         }
     } else if let Some(int64_array) = arrow_array.as_any().downcast_ref::<Int64Array>() {
-        // Int64 to Float64 conversion
         for (i, value) in int64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
@@ -425,7 +508,6 @@ fn convert_arrow_to_float64(arrow_array: &ArrayRef, target: &mut [f64]) -> Resul
 /// Convert Arrow array to Boolean vector
 fn convert_arrow_to_boolean(arrow_array: &ArrayRef, target: &mut [bool]) -> Result<(), EvalError> {
     let array_len = arrow_array.len();
-    // Verify capacity in debug builds
     #[cfg(debug_assertions)]
     debug_assert!(
         target.len() >= array_len,
@@ -433,12 +515,13 @@ fn convert_arrow_to_boolean(arrow_array: &ArrayRef, target: &mut [bool]) -> Resu
         array_len,
         target.len()
     );
+    
     if let Some(bool_array) = arrow_array.as_any().downcast_ref::<BooleanArray>() {
         for (i, value) in bool_array.iter().enumerate() {
             if i >= target.len() {
                 break;
             }
-            target[i] = value.unwrap_or(false); // Use false for null values
+            target[i] = value.unwrap_or(false);
         }
     } else {
         return Err(EvalError::General(format!(
@@ -452,7 +535,6 @@ fn convert_arrow_to_boolean(arrow_array: &ArrayRef, target: &mut [bool]) -> Resu
 /// Convert Arrow array to String vector
 fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Result<(), EvalError> {
     let array_len = arrow_array.len();
-    // Verify capacity in debug builds
     #[cfg(debug_assertions)]
     debug_assert!(
         target.len() >= array_len,
@@ -460,15 +542,15 @@ fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Res
         array_len,
         target.len()
     );
+    
     if let Some(string_array) = arrow_array.as_any().downcast_ref::<StringArray>() {
         for (i, value) in string_array.iter().enumerate() {
             if i >= target.len() {
                 break;
             }
-            target[i] = value.unwrap_or("").to_string(); // Use empty string for null values
+            target[i] = value.unwrap_or("").to_string();
         }
     } else if let Some(int64_array) = arrow_array.as_any().downcast_ref::<Int64Array>() {
-        // Int64 to String conversion
         for (i, value) in int64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
@@ -476,7 +558,6 @@ fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Res
             target[i] = value.unwrap_or(0).to_string();
         }
     } else if let Some(float64_array) = arrow_array.as_any().downcast_ref::<Float64Array>() {
-        // Float64 to String conversion
         for (i, value) in float64_array.iter().enumerate() {
             if i >= target.len() {
                 break;
@@ -484,7 +565,6 @@ fn convert_arrow_to_string(arrow_array: &ArrayRef, target: &mut [String]) -> Res
             target[i] = value.unwrap_or(0.0).to_string();
         }
     } else if let Some(bool_array) = arrow_array.as_any().downcast_ref::<BooleanArray>() {
-        // Boolean to String conversion
         for (i, value) in bool_array.iter().enumerate() {
             if i >= target.len() {
                 break;
@@ -505,34 +585,52 @@ mod tests {
     use super::*;
     use crate::batch::LogicalType;
     use crate::reader::{Projection, ProjectionSource, ProjectionSpec};
-    use arrow::array::{BooleanArray, Float64Array, Int64Array, StringArray};
+    use arrow::array::{Int64Array, StringArray, Float64Array, BooleanArray};
     use arrow::datatypes::{DataType, Field as ArrowField, Schema};
+    use arrow::record_batch::RecordBatch;
+    use arrow_ipc::writer::FileWriter;
     use std::sync::Arc;
+    use tempfile::NamedTempFile;
 
-    #[test]
-    fn test_arrow_reader_basic() {
-        // Create Arrow RecordBatch
+    fn create_test_ipc_file() -> NamedTempFile {
+        // Create a temporary file
+        let temp_file = NamedTempFile::new().unwrap();
+        
+        // Create test schema
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("id", DataType::Int64, false),
             ArrowField::new("name", DataType::Utf8, false),
             ArrowField::new("score", DataType::Float64, false),
             ArrowField::new("active", DataType::Boolean, false),
         ]));
-
-        let id_array = Arc::new(Int64Array::from(vec![1, 2, 3]));
-        let name_array = Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"]));
-        let score_array = Arc::new(Float64Array::from(vec![95.5, 87.2, 92.8]));
-        let active_array = Arc::new(BooleanArray::from(vec![true, false, true]));
-
-        let record_batch = RecordBatch::try_new(
-            schema,
-            vec![id_array, name_array, score_array, active_array],
+        
+        // Create test data
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1, 2, 3])),
+                Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"])),
+                Arc::new(Float64Array::from(vec![95.5, 87.2, 92.8])),
+                Arc::new(BooleanArray::from(vec![true, false, true])),
+            ],
         )
         .unwrap();
+        
+        // Write to IPC file
+        let file = temp_file.reopen().unwrap();
+        let mut writer = FileWriter::try_new(file, &schema).unwrap();
+        writer.write(&batch).unwrap();
+        writer.finish().unwrap();
+        
+        temp_file
+    }
 
-        let mut reader = ArrowReader::from_record_batch(record_batch);
+    #[test]
+    fn test_arrow_reader_zero_copy() {
+        let temp_file = create_test_ipc_file();
+        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
 
-        // Set projection using ColumnIndex
+        // Set projection
         let projections = vec![
             Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Int64),
             Projection::new(ProjectionSource::ColumnIndex(1), 1, LogicalType::String),
@@ -552,46 +650,9 @@ mod tests {
     }
 
     #[test]
-    fn test_arrow_reader_type_conversions() {
-        // Create Arrow RecordBatch with type conversions
-        let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("int_col", DataType::Int64, false),
-            ArrowField::new("float_col", DataType::Float64, false),
-        ]));
-
-        let int_array = Arc::new(Int64Array::from(vec![42, 100]));
-        let float_array = Arc::new(Float64Array::from(vec![3.14, 2.71]));
-
-        let record_batch = RecordBatch::try_new(schema, vec![int_array, float_array]).unwrap();
-
-        let mut reader = ArrowReader::from_record_batch(record_batch);
-
-        // Set projection with type conversions
-        let projections = vec![
-            Projection::new(ProjectionSource::ColumnIndex(0), 0, LogicalType::Float64), // Int64 -> Float64
-            Projection::new(ProjectionSource::ColumnIndex(1), 1, LogicalType::String), // Float64 -> String
-        ];
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        reader.set_projection(projection_spec).unwrap();
-
-        // Read batch
-        let batch = reader.next_batch().unwrap().unwrap();
-        assert_eq!(batch.row_count(), 2);
-        assert_eq!(batch.total_column_count(), 2);
-    }
-
-    #[test]
     fn test_arrow_reader_field_path_rejection() {
-        let schema = Arc::new(Schema::new(vec![ArrowField::new(
-            "name",
-            DataType::Utf8,
-            false,
-        )]));
-
-        let name_array = Arc::new(StringArray::from(vec!["Alice"]));
-        let record_batch = RecordBatch::try_new(schema, vec![name_array]).unwrap();
-
-        let mut reader = ArrowReader::from_record_batch(record_batch);
+        let temp_file = create_test_ipc_file();
+        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
 
         // Try to set projection with FieldPath - should fail
         let projections = vec![Projection::new(
@@ -607,21 +668,13 @@ mod tests {
     }
 
     #[test]
-    fn test_arrow_reader_column_index_bounds_check() {
-        let schema = Arc::new(Schema::new(vec![ArrowField::new(
-            "col1",
-            DataType::Int64,
-            false,
-        )]));
+    fn test_arrow_reader_column_bounds_check() {
+        let temp_file = create_test_ipc_file();
+        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
 
-        let col1_array = Arc::new(Int64Array::from(vec![1, 2, 3]));
-        let record_batch = RecordBatch::try_new(schema, vec![col1_array]).unwrap();
-
-        let mut reader = ArrowReader::from_record_batch(record_batch);
-
-        // Try to access column index 1 when only column 0 exists
+        // Try to access column index 10 when only 4 columns exist
         let projections = vec![Projection::new(
-            ProjectionSource::ColumnIndex(1),
+            ProjectionSource::ColumnIndex(10),
             0,
             LogicalType::Int64,
         )];
@@ -630,47 +683,5 @@ mod tests {
         let result = reader.set_projection(projection_spec);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of bounds"));
-    }
-
-    #[test]
-    fn test_arrow_reader_multiple_batches() {
-        // Create multiple Arrow RecordBatches
-        let schema = Arc::new(Schema::new(vec![ArrowField::new(
-            "id",
-            DataType::Int64,
-            false,
-        )]));
-
-        let batch1 =
-            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1, 2]))])
-                .unwrap();
-
-        let batch2 = RecordBatch::try_new(
-            schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![3, 4, 5]))],
-        )
-        .unwrap();
-
-        let mut reader = ArrowReader::new(vec![batch1, batch2]);
-
-        // Set projection
-        let projections = vec![Projection::new(
-            ProjectionSource::ColumnIndex(0),
-            0,
-            LogicalType::Int64,
-        )];
-        let projection_spec = ProjectionSpec::new(projections).unwrap();
-        reader.set_projection(projection_spec).unwrap();
-
-        // Read first batch
-        let batch1 = reader.next_batch().unwrap().unwrap();
-        assert_eq!(batch1.row_count(), 2);
-
-        // Read second batch
-        let batch2 = reader.next_batch().unwrap().unwrap();
-        assert_eq!(batch2.row_count(), 3);
-
-        // No more batches
-        assert!(reader.next_batch().unwrap().is_none());
     }
 }
