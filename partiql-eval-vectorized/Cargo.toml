@@ -11,6 +11,18 @@ path = "src/bin/main.rs"
 name = "generate-data"
 path = "src/bin/generate_data.rs"
 
+[[bin]]
+name = "partiql-vectorized"
+path = "src/bin/partiql_vectorized.rs"
+
+[[bin]]
+name = "partiql-legacy"
+path = "src/bin/partiql_legacy.rs"
+
+[[bin]]
+name = "partiql-comparison"
+path = "src/bin/partiql_comparison.rs"
+
 [dependencies]
 indexmap = "2"
 memmap2 = "0.9"
