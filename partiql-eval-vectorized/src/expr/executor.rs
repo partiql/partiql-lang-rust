@@ -1,7 +1,7 @@
 use crate::batch::{LogicalType, PhysicalVector, PhysicalVectorEnum, Vector, VectorizedBatch};
 use crate::error::EvalError;
 use crate::expr::operators::{
-    add_i64, and_bool, div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mul_i64, ne_i64,
+    add_i64, and_bool, div_i64, eq_i64, ge_i64, gt_i64, le_i64, lt_i64, mod_i64, mul_i64, ne_i64,
     not_bool, or_bool, sub_i64,
 };
 use smallvec::{smallvec, SmallVec};
@@ -132,6 +132,7 @@ pub enum ExprOp {
     DivI32,
     DivI64,
     DivF64,
+    ModI64,
 
     // Comparison operations
     GtI32,
@@ -729,6 +730,14 @@ impl ExpressionExecutor {
                     selection,
                 )?;
             }
+            ExprOp::ModI64 => {
+                self.execute_binary_i64_to_i64(
+                    mod_i64::kernel_mod_i64,
+                    compiled,
+                    input,
+                    selection,
+                )?;
+            }
             ExprOp::GtI64 => {
                 self.execute_binary_i64_to_bool(gt_i64::kernel_gt_i64, compiled, input, selection)?;
             }
@@ -1113,5 +1122,104 @@ mod tests {
         }
 
         assert_eq!(out.len(), 0);
+    }
+
+    #[test]
+    fn test_mod_i64_kernel() {
+        // Test the ModI64 kernel directly
+        let lhs_data = vec![10i64, 21, 30, 47, 55];
+        let rhs_data = vec![3i64, 4, 7, 5, 10];
+        let mut out = vec![0i64; 5];
+
+        unsafe {
+            mod_i64::kernel_mod_i64(
+                ExecInput {
+                    data: lhs_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: rhs_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None,
+                5,
+            );
+        }
+
+        // 10 % 3 = 1, 21 % 4 = 1, 30 % 7 = 2, 47 % 5 = 2, 55 % 10 = 5
+        assert_eq!(out, vec![1, 1, 2, 2, 5]);
+    }
+
+    #[test]
+    fn test_mod_i64_with_constant() {
+        // Test ModI64 with constant (vector % constant)
+        let vec_data = vec![10i64, 21, 30, 47, 55];
+        let constant = 7i64;
+        let mut out = vec![0i64; 5];
+
+        unsafe {
+            mod_i64::kernel_mod_i64(
+                ExecInput {
+                    data: vec_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: &constant as *const i64,
+                    selection: None,
+                    len: 5,
+                    is_constant: true,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None,
+                5,
+            );
+        }
+
+        // 10 % 7 = 3, 21 % 7 = 0, 30 % 7 = 2, 47 % 7 = 5, 55 % 7 = 6
+        assert_eq!(out, vec![3, 0, 2, 5, 6]);
+    }
+
+    #[test]
+    fn test_mod_i64_constant_mod_vector() {
+        // Test ModI64 with constant % vector
+        let constant = 100i64;
+        let vec_data = vec![7i64, 9, 11, 13, 17];
+        let mut out = vec![0i64; 5];
+
+        unsafe {
+            mod_i64::kernel_mod_i64(
+                ExecInput {
+                    data: &constant as *const i64,
+                    selection: None,
+                    len: 5,
+                    is_constant: true,
+                    _marker: PhantomData,
+                },
+                ExecInput {
+                    data: vec_data.as_ptr(),
+                    selection: None,
+                    len: 5,
+                    is_constant: false,
+                    _marker: PhantomData,
+                },
+                &mut out,
+                None,
+                5,
+            );
+        }
+
+        // 100 % 7 = 2, 100 % 9 = 1, 100 % 11 = 1, 100 % 13 = 9, 100 % 17 = 15
+        assert_eq!(out, vec![2, 1, 1, 9, 15]);
     }
 }
