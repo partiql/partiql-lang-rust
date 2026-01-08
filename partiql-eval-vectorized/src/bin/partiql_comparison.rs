@@ -331,7 +331,7 @@ fn compile_vectorized(
     data_source: &str,
     data_path: Option<&str>,
 ) -> partiql_eval_vectorized::VectorizedPlan {
-    use partiql_eval_vectorized::reader::{ArrowReader, InMemoryGeneratedReader, PIonReader, ParquetReader};
+    use partiql_eval_vectorized::reader::{ArrowReader, InMemoryGeneratedReader, PIonReader, PIonTextReader, ParquetReader};
 
     let reader: Box<dyn partiql_eval_vectorized::BatchReader> = match data_source {
         "mem" => {
@@ -358,12 +358,22 @@ fn compile_vectorized(
             Box::new(ParquetReader::from_file(path, batch_size).expect("Failed to create ParquetReader"))
         }
         "ion" => {
+            // Text Ion - uses string-based field names
             let path = data_path.expect("--data-path-new required for ion data source");
             let batch_size = std::env::var("BATCH_SIZE")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1024);
-            Box::new(PIonReader::from_ion_file(path, batch_size).expect("Failed to create IonReader"))
+            Box::new(PIonTextReader::from_ion_file(path, batch_size).expect("Failed to create IonTextReader"))
+        }
+        "ionb" => {
+            // Binary Ion - uses symbol IDs for optimal performance
+            let path = data_path.expect("--data-path-new required for ionb data source");
+            let batch_size = std::env::var("BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1024);
+            Box::new(PIonReader::from_ion_file(path, batch_size).expect("Failed to create IonBinaryReader"))
         }
         _ => {
             panic!("Unknown data source: {}", data_source);

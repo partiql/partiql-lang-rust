@@ -99,13 +99,13 @@ pub fn count_rows_from_file(data_source: &str, file_path: &str) -> usize {
             }
             0
         }
-        "ion" => {
-            // For Ion, try to parse the filename pattern first (e.g., data_b4096_n244.ion)
+        "ion" | "ionb" => {
+            // For Ion (text or binary), try to parse the filename pattern first (e.g., data_b4096_n244.ion or .10n)
             // If that fails, parse the Ion file to count rows
             if let Some(filename) = std::path::Path::new(file_path).file_name() {
                 if let Some(name_str) = filename.to_str() {
                     // Try to extract batch_size and num_batches from filename
-                    // Pattern: data_b<batch_size>_n<num_batches>.ion
+                    // Pattern: data_b<batch_size>_n<num_batches>.ion or .10n
                     if let Some(b_pos) = name_str.find("_b") {
                         if let Some(n_pos) = name_str.find("_n") {
                             if let Some(ext_pos) = name_str.rfind('.') {
@@ -120,17 +120,37 @@ pub fn count_rows_from_file(data_source: &str, file_path: &str) -> usize {
                 }
             }
             // Fallback: parse Ion file to count rows (more expensive)
-            if let Ok(contents) = std::fs::read_to_string(file_path) {
-                if let Ok(reader) = ReaderBuilder::new().build(contents) {
-                    if let Ok(mut decoder) = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
-                        .build(reader) {
-                        let mut count = 0;
-                        while let Some(result) = decoder.next() {
-                            if result.is_ok() {
-                                count += 1;
+            // For text Ion, use read_to_string; for binary Ion, use read (handles both)
+            if data_source == "ion" {
+                // Text Ion
+                if let Ok(contents) = std::fs::read_to_string(file_path) {
+                    if let Ok(reader) = ReaderBuilder::new().build(contents) {
+                        if let Ok(mut decoder) = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
+                            .build(reader) {
+                            let mut count = 0;
+                            while let Some(result) = decoder.next() {
+                                if result.is_ok() {
+                                    count += 1;
+                                }
                             }
+                            return count;
                         }
-                        return count;
+                    }
+                }
+            } else {
+                // Binary Ion
+                if let Ok(contents) = std::fs::read(file_path) {
+                    if let Ok(reader) = ReaderBuilder::new().build(contents) {
+                        if let Ok(mut decoder) = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
+                            .build(reader) {
+                            let mut count = 0;
+                            while let Some(result) = decoder.next() {
+                                if result.is_ok() {
+                                    count += 1;
+                                }
+                            }
+                            return count;
+                        }
                     }
                 }
             }
@@ -229,7 +249,7 @@ impl BaseTableExpr for DataTableExpr {
                 Ok(Box::new(iter))
             }
             "ion" => {
-                // Read from Ion file - streaming approach
+                // Read from Ion text file - streaming approach
                 let file_path = self.data_path.as_ref()
                     .expect("Ion data source requires --data-path");
 
@@ -256,9 +276,230 @@ impl BaseTableExpr for DataTableExpr {
                     ))))
                 })))
             }
+            "ionb" => {
+                // Read from Ion binary file - streaming approach
+                let file_path = self.data_path.as_ref()
+                    .expect("Ion binary data source requires --data-path");
+
+                // Open the file
+                let file = File::open(file_path)
+                    .expect(&format!("Failed to open Ion binary file: {}", file_path));
+                
+                let buf_reader = BufReader::new(file);
+
+                // Create Ion reader from the file (automatically detects binary format)
+                let reader = ReaderBuilder::new().build(buf_reader)
+                    .expect("Failed to create Ion reader");
+
+                // Create Ion decoder - this will stream values lazily
+                let decoder = IonDecoderBuilder::new(IonDecoderConfig::default().with_mode(Encoding::Ion))
+                    .build(reader)
+                    .expect("Failed to create Ion decoder");
+
+                // Return the decoder directly as an iterator (lazy evaluation)
+                Ok(Box::new(decoder.map(|result| {
+                    result.map_err(|e| ExtensionResultError::ReadError(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Ion decode error: {:?}", e)
+                    ))))
+                })))
+            }
+            "arrow" => {
+                // Read from Arrow IPC file - streaming approach
+                use arrow_ipc::reader::FileReader;
+                
+                let file_path = self.data_path.as_ref()
+                    .expect("Arrow data source requires --data-path");
+
+                // Open the file
+                let file = File::open(file_path)
+                    .expect(&format!("Failed to open Arrow file: {}", file_path));
+
+                // Create Arrow file reader
+                let reader = FileReader::try_new(file, None)
+                    .expect("Failed to create Arrow reader");
+
+                // Create an iterator that converts Arrow batches to PartiQL tuples
+                let iter = ArrowBatchIterator::new(reader);
+                
+                Ok(Box::new(iter))
+            }
+            "parquet" => {
+                // Read from Parquet file - streaming approach
+                use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+                
+                let file_path = self.data_path.as_ref()
+                    .expect("Parquet data source requires --data-path");
+
+                // Open the file
+                let file = File::open(file_path)
+                    .expect(&format!("Failed to open Parquet file: {}", file_path));
+
+                // Create Parquet reader
+                let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+                    .expect("Failed to create Parquet reader");
+                
+                let reader = builder.build()
+                    .expect("Failed to build Parquet reader");
+
+                // Create an iterator that converts Parquet batches to PartiQL tuples
+                let iter = ParquetBatchIterator::new(reader);
+                
+                Ok(Box::new(iter))
+            }
             _ => {
                 // Unsupported data source
-                panic!("Unsupported data source: {}. Only 'mem' and 'ion' are supported for non-vectorized evaluator.", self.data_source)
+                panic!("Unsupported data source: {}. Only 'mem', 'ion', 'ionb', 'arrow', and 'parquet' are supported for non-vectorized evaluator.", self.data_source)
+            }
+        }
+    }
+}
+
+/// Iterator that converts Arrow record batches to PartiQL tuples
+struct ArrowBatchIterator {
+    reader: arrow_ipc::reader::FileReader<File>,
+    current_batch: Option<arrow::record_batch::RecordBatch>,
+    current_row: usize,
+}
+
+impl ArrowBatchIterator {
+    fn new(reader: arrow_ipc::reader::FileReader<File>) -> Self {
+        Self {
+            reader,
+            current_batch: None,
+            current_row: 0,
+        }
+    }
+}
+
+impl Iterator for ArrowBatchIterator {
+    type Item = Result<Value, ExtensionResultError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // If we have a current batch, try to get the next row
+            if let Some(batch) = &self.current_batch {
+                if self.current_row < batch.num_rows() {
+                    // Extract values from columns 0 (a) and 1 (b)
+                    let col_a = batch.column(0);
+                    let col_b = batch.column(1);
+                    
+                    // Downcast to Int64Array
+                    let a_array = col_a.as_any().downcast_ref::<arrow::array::Int64Array>()
+                        .expect("Column 'a' should be Int64");
+                    let b_array = col_b.as_any().downcast_ref::<arrow::array::Int64Array>()
+                        .expect("Column 'b' should be Int64");
+                    
+                    // Get values at current row
+                    let a_val = a_array.value(self.current_row);
+                    let b_val = b_array.value(self.current_row);
+                    
+                    self.current_row += 1;
+                    
+                    // Create tuple
+                    let tuple = Tuple::from([
+                        ("a", Value::Integer(a_val)),
+                        ("b", Value::Integer(b_val)),
+                    ]);
+                    
+                    return Some(Ok(Value::Tuple(Box::new(tuple))));
+                }
+            }
+            
+            // Need to fetch next batch
+            match self.reader.next() {
+                Some(Ok(batch)) => {
+                    self.current_batch = Some(batch);
+                    self.current_row = 0;
+                    // Continue loop to process first row of new batch
+                }
+                Some(Err(e)) => {
+                    return Some(Err(ExtensionResultError::ReadError(Box::new(
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Arrow read error: {}", e)
+                        )
+                    ))));
+                }
+                None => {
+                    // No more batches
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Iterator that converts Parquet record batches to PartiQL tuples
+struct ParquetBatchIterator {
+    reader: parquet::arrow::arrow_reader::ParquetRecordBatchReader,
+    current_batch: Option<arrow::record_batch::RecordBatch>,
+    current_row: usize,
+}
+
+impl ParquetBatchIterator {
+    fn new(reader: parquet::arrow::arrow_reader::ParquetRecordBatchReader) -> Self {
+        Self {
+            reader,
+            current_batch: None,
+            current_row: 0,
+        }
+    }
+}
+
+impl Iterator for ParquetBatchIterator {
+    type Item = Result<Value, ExtensionResultError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // If we have a current batch, try to get the next row
+            if let Some(batch) = &self.current_batch {
+                if self.current_row < batch.num_rows() {
+                    // Extract values from columns 0 (a) and 1 (b)
+                    let col_a = batch.column(0);
+                    let col_b = batch.column(1);
+                    
+                    // Downcast to Int64Array
+                    let a_array = col_a.as_any().downcast_ref::<arrow::array::Int64Array>()
+                        .expect("Column 'a' should be Int64");
+                    let b_array = col_b.as_any().downcast_ref::<arrow::array::Int64Array>()
+                        .expect("Column 'b' should be Int64");
+                    
+                    // Get values at current row
+                    let a_val = a_array.value(self.current_row);
+                    let b_val = b_array.value(self.current_row);
+                    
+                    self.current_row += 1;
+                    
+                    // Create tuple
+                    let tuple = Tuple::from([
+                        ("a", Value::Integer(a_val)),
+                        ("b", Value::Integer(b_val)),
+                    ]);
+                    
+                    return Some(Ok(Value::Tuple(Box::new(tuple))));
+                }
+            }
+            
+            // Need to fetch next batch
+            match self.reader.next() {
+                Some(Ok(batch)) => {
+                    self.current_batch = Some(batch);
+                    self.current_row = 0;
+                    // Continue loop to process first row of new batch
+                }
+                Some(Err(e)) => {
+                    return Some(Err(ExtensionResultError::ReadError(Box::new(
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Parquet read error: {}", e)
+                        )
+                    ))));
+                }
+                None => {
+                    // No more batches
+                    return None;
+                }
             }
         }
     }

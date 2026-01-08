@@ -23,7 +23,12 @@ path = "src/bin/partiql_legacy.rs"
 name = "partiql-comparison"
 path = "src/bin/partiql_comparison.rs"
 
+[[bin]]
+name = "partiql-benchmarks"
+path = "src/bin/partiql_benchmarks.rs"
+
 [dependencies]
+glob = "0.3"
 indexmap = "2"
 memmap2 = "0.9"
 smallvec = "1.13"
