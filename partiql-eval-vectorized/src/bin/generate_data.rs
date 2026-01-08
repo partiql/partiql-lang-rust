@@ -5,12 +5,13 @@ use arrow_ipc::writer::FileWriter;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
 // Ion writer imports
 use ion_rs::IonWriter;
+use ion_rs::element::writer::TextKind;
 
 /// Generate mock data in Arrow, Parquet, and Ion formats
 /// 
@@ -92,14 +93,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match format.as_str() {
         "arrow" => generate_arrow(&output_dir, batch_size, num_batches)?,
         "parquet" => generate_parquet(&output_dir, batch_size, num_batches)?,
-        "ion" => generate_ion(&output_dir, batch_size, num_batches)?,
+        "ion" | "iont" => generate_ion_text(&output_dir, batch_size, num_batches)?,
+        "ionb" => generate_ion(&output_dir, batch_size, num_batches)?,
         "all" => {
             generate_arrow(&output_dir, batch_size, num_batches)?;
             generate_parquet(&output_dir, batch_size, num_batches)?;
             generate_ion(&output_dir, batch_size, num_batches)?;
+            generate_ion_text(&output_dir, batch_size, num_batches)?;
         }
         _ => {
-            eprintln!("Error: Unknown format '{}'. Use: arrow, parquet, ion, or all", format);
+            eprintln!("Error: Unknown format '{}'. Use: arrow, parquet, ion, ionb, or all", format);
             std::process::exit(1);
         }
     }
@@ -228,5 +231,29 @@ fn generate_ion(output_dir: &str, batch_size: usize, num_batches: usize) -> Resu
     
     writer.flush()?;
     println!("  Created: {} (binary format with symbol IDs)", file_path.display());
+    Ok(())
+}
+
+fn generate_ion_text(output_dir: &str, batch_size: usize, num_batches: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Generating Ion format (text)...");
+    
+    // Use .ion extension for text Ion format
+    let file_path = Path::new(output_dir).join(format!("data_b{}_n{}.ion", batch_size, num_batches));
+    let file = File::create(&file_path)?;
+    let mut writer = BufWriter::new(file);
+    
+    let mut current_row = 0i64;
+    for _batch_idx in 0..num_batches {
+        for i in 0..batch_size {
+            let row_num = current_row + i as i64;
+            
+            // Write struct in compact text Ion format with newline after each struct
+            writeln!(writer, "{{a: {}, b: {}}}", row_num, row_num + 100)?;
+        }
+        current_row += batch_size as i64;
+    }
+    
+    writer.flush()?;
+    println!("  Created: {} (compact text format)", file_path.display());
     Ok(())
 }

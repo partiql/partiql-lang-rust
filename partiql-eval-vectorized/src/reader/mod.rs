@@ -11,7 +11,7 @@ pub use batch_reader::BatchReader;
 pub use error::{
     BatchReaderError, DataSourceError, ErrorSeverity, ProjectionError, TypeConversionError,
 };
-pub use ion_reader::PIonReader;
+pub use ion_reader::{PIonReader, PIonTextReader};
 pub use parquet_reader::ParquetReader;
 pub use projection::{Projection, ProjectionBuilder, ProjectionSource, ProjectionSpec};
 pub use mem_reader::InMemoryGeneratedReader;

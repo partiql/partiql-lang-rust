@@ -13,17 +13,17 @@ echo ""
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-# Configuration 1: BATCH_SIZE=4096 NUM_BATCHES=244 (≈1M rows)
-echo "=== Configuration 1: 4096 batch_size, 244 batches (≈1M rows) ==="
+# Configuration 1: batch_size=1024, num_batches=10000 (1M rows - default)
+echo "=== Configuration 1: 1024 batch_size, 1000 batches (~1M rows) ==="
 cargo run --release --bin generate-data -- \
   --format all \
   --output-dir "$OUTPUT_DIR" \
-  --batch-size 4096 \
-  --num-batches 244
+  --batch-size 1024 \
+  --num-batches 1000
 echo ""
 
 # Configuration 2: batch_size=1024, num_batches=10000 (10.24M rows - default)
-echo "=== Configuration 2: 1024 batch_size, 10000 batches (10.24M rows) ==="
+echo "=== Configuration 2: 1024 batch_size, 10000 batches (~100M rows) ==="
 cargo run --release --bin generate-data -- \
   --format all \
   --output-dir "$OUTPUT_DIR" \
@@ -32,7 +32,7 @@ cargo run --release --bin generate-data -- \
 echo ""
 
 # Configuration 3: BATCH_SIZE=1024 NUM_BATCHES=100000 (102.4M rows)
-echo "=== Configuration 3: 1024 batch_size, 100000 batches (102.4M rows) ==="
+echo "=== Configuration 3: 1024 batch_size, 100000 batches (~100M rows) ==="
 cargo run --release --bin generate-data -- \
   --format all \
   --output-dir "$OUTPUT_DIR" \
