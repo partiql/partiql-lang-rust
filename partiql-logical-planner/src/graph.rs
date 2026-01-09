@@ -383,6 +383,7 @@ impl GraphToLogical {
 
         // third, clean-up; delete duplicated anonymous edges and merge
         let paths = paths.into_iter();
+        #[allow(clippy::result_large_err)]
         let path_patterns = paths
             .coalesce(|mut previous, current| {
                 if current.head.binder.is_anon() {

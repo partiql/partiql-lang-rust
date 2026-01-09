@@ -185,7 +185,7 @@ pub struct BasicContext<'u> {
     pub bindings: MapBindings<Value>,
 
     pub sys: SystemContext,
-    pub user: FxHashMap<UniCase<String>, &'u (dyn Any)>,
+    pub user: FxHashMap<UniCase<String>, &'u dyn Any>,
 
     pub errors: RefCell<Vec<EvaluationError>>,
 }
@@ -207,7 +207,7 @@ impl SessionContext for BasicContext<'_> {
         &self.sys
     }
 
-    fn user_context(&self, name: &str) -> Option<&(dyn Any)> {
+    fn user_context(&self, name: &str) -> Option<&dyn Any> {
         let key = name.into();
         self.user.get(&key).copied()
     }
@@ -249,7 +249,7 @@ impl SessionContext for NestedContext<'_> {
     delegate! {
         to self.parent {
             fn system_context(&self) -> &SystemContext;
-            fn user_context(&self, name: &str) -> Option<& (dyn Any )>;
+            fn user_context(&self, name: &str) -> Option<&dyn Any>;
         }
     }
 }
