@@ -35,5 +35,5 @@ pub struct SystemContext {
 pub trait SessionContext: Debug {
     fn system_context(&self) -> &SystemContext;
 
-    fn user_context(&self, name: &str) -> Option<&(dyn Any)>;
+    fn user_context(&self, name: &str) -> Option<&dyn Any>;
 }

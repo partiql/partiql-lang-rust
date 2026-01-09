@@ -7,6 +7,9 @@ env:
   RUST_TEST_TIME_INTEGRATION: 150,5000
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and Test
