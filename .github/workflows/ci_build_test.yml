@@ -166,7 +166,7 @@ jobs:
         continue-on-error: true
         run: |
           cd ${{ github.event.pull_request.base.sha }}
-          cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${GITHUB_SHA} ${{ env.CONFORMANCE_REPORT_NAME }}
+          cargo run --features report_tool --bin generate_cts_report ${{ env.CARGO_TEST_RESULT_NAME }} ${{ github.event.pull_request.base.sha }} ${{ env.CONFORMANCE_REPORT_NAME }}
       - name: (If download of target branch conformance report fails) Move conformance test report of target branch to ./artifact directory
         if: ${{ steps.download-report.outcome == 'failure' }}
         continue-on-error: true
