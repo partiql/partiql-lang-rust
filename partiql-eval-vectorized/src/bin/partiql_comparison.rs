@@ -7,6 +7,9 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_value::{DateTime, Value};
 use std::time::Instant;
 
+const BATCH_SIZE: usize = 1;
+const NUM_BATCHES: usize = 10_000;
+
 fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -112,17 +115,9 @@ fn main() {
     
     // Calculate total rows and set environment variable for non-vectorized evaluator
     let total_rows = if data_source_old == "mem" {
-        let batch_size = std::env::var("BATCH_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1024);
-        let num_batches = std::env::var("NUM_BATCHES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10_000);
-        let total = batch_size * num_batches;
+        let total = BATCH_SIZE * NUM_BATCHES;
         println!("Reader Config (Old):  batch_size={}, num_batches={}, total_rows={}", 
-                 batch_size, num_batches, common::format_with_commas(total));
+                 BATCH_SIZE, NUM_BATCHES, common::format_with_commas(total));
         total
     } else if let Some(ref path) = data_path_old {
         let total = count_rows_from_file(&data_source_old, path);
@@ -134,17 +129,9 @@ fn main() {
     
     // Calculate total rows for vectorized evaluator
     if data_source_new == "mem" {
-        let batch_size = std::env::var("BATCH_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1024);
-        let num_batches = std::env::var("NUM_BATCHES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10_000);
-        let total = batch_size * num_batches;
+        let total = BATCH_SIZE * NUM_BATCHES;
         println!("Reader Config (New):  batch_size={}, num_batches={}, total_rows={}", 
-                 batch_size, num_batches, common::format_with_commas(total));
+                 BATCH_SIZE, NUM_BATCHES, common::format_with_commas(total));
     } else if let Some(ref path) = data_path_new {
         let total = count_rows_from_file(&data_source_new, path);
         println!("Reader Config (New):  total_rows={} (from file)", common::format_with_commas(total));
@@ -335,14 +322,8 @@ fn compile_vectorized(
 
     let reader: Box<dyn partiql_eval_vectorized::BatchReader> = match data_source {
         "mem" => {
-            let batch_size = std::env::var("BATCH_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1024);
-            let num_batches = std::env::var("NUM_BATCHES")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(10_000);
+            let batch_size = BATCH_SIZE;
+            let num_batches = NUM_BATCHES;
             Box::new(InMemoryGeneratedReader::with_config(batch_size, num_batches))
         }
         "arrow" => {
@@ -351,28 +332,19 @@ fn compile_vectorized(
         }
         "parquet" => {
             let path = data_path.expect("--data-path-new required for parquet data source");
-            let batch_size = std::env::var("BATCH_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1024);
+            let batch_size = BATCH_SIZE;
             Box::new(ParquetReader::from_file(path, batch_size).expect("Failed to create ParquetReader"))
         }
         "ion" => {
             // Text Ion - uses string-based field names
             let path = data_path.expect("--data-path-new required for ion data source");
-            let batch_size = std::env::var("BATCH_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1024);
+            let batch_size = BATCH_SIZE;
             Box::new(PIonTextReader::from_ion_file(path, batch_size).expect("Failed to create IonTextReader"))
         }
         "ionb" => {
             // Binary Ion - uses symbol IDs for optimal performance
             let path = data_path.expect("--data-path-new required for ionb data source");
-            let batch_size = std::env::var("BATCH_SIZE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1024);
+            let batch_size = BATCH_SIZE;
             Box::new(PIonReader::from_ion_file(path, batch_size).expect("Failed to create IonBinaryReader"))
         }
         _ => {

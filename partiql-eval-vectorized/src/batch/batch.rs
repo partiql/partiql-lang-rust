@@ -97,8 +97,7 @@ impl VectorizedBatch {
     /// Allocate a scratch column for intermediate expression results
     /// Returns the column index where the scratch column was added
     pub fn add_scratch_column(&mut self, type_info: LogicalType) -> usize {
-        let capacity = self.columns.first().map(|c| c.len()).unwrap_or(1024);
-        let scratch_col = Vector::new(type_info, capacity);
+        let scratch_col = Vector::new(type_info, self.row_count);
         self.columns.push(scratch_col);
         self.columns.len() - 1
     }

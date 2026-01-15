@@ -8,7 +8,7 @@ use partiql_value::{DateTime, Value};
 use std::{io::{self, Write}, time::{Duration, Instant}};
 
 /// Batch size for all data operations
-const BATCH_SIZE: usize = 1024;
+const BATCH_SIZE: usize = 1;
 
 /// Represents a benchmark query
 #[derive(Clone)]

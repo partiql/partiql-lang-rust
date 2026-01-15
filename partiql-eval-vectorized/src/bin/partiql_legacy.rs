@@ -7,6 +7,9 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_value::{DateTime, Value};
 use std::time::Instant;
 
+const BATCH_SIZE: usize = 1;
+const NUM_BATCHES: usize = 10_000;
+
 fn main() {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -83,14 +86,8 @@ fn main() {
 
     // Calculate and display total rows
     let total_rows = if data_source == "mem" {
-        let batch_size = std::env::var("BATCH_SIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1024);
-        let num_batches = std::env::var("NUM_BATCHES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10_000);
+        let batch_size = BATCH_SIZE;
+        let num_batches = NUM_BATCHES;
         let total = batch_size * num_batches;
         println!("Reader Config: batch_size={}, num_batches={}, total_rows={}", 
                  batch_size, num_batches, common::format_with_commas(total));
