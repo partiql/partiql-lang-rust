@@ -24,15 +24,15 @@ pub struct InMemoryGeneratedReader {
 impl InMemoryGeneratedReader {
     /// Create a new fake data generator
     /// 
-    /// Default configuration:
-    /// - batch_size: 1024 rows per batch
-    /// - num_batches: 10,000 batches (10,240,000 total rows)
-    pub fn new() -> Self {
+    /// Configuration:
+    /// - batch_size: rows per batch (passed as parameter)
+    /// - num_batches: 10,000 batches
+    pub fn new(batch_size: usize) -> Self {
         Self {
             current_row: 0,
             current_batch: 0,
             num_batches: 10_000,
-            batch_size: 1024,
+            batch_size,
             projection: None,
             finished: false,
             cached_schema: None,
@@ -57,7 +57,7 @@ impl InMemoryGeneratedReader {
 
 impl Default for InMemoryGeneratedReader {
     fn default() -> Self {
-        Self::new()
+        Self::new(1024)
     }
 }
 
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_default_configuration() {
-        let reader = InMemoryGeneratedReader::new();
+        let reader = InMemoryGeneratedReader::new(1024);
         assert_eq!(reader.batch_size, 1024);
         assert_eq!(reader.num_batches, 10_000);
         assert_eq!(reader.current_row, 0);
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_resolve() {
-        let reader = InMemoryGeneratedReader::new();
+        let reader = InMemoryGeneratedReader::new(1024);
         
         // Should resolve "a" and "b"
         assert!(reader.resolve("a").is_some());

@@ -328,7 +328,7 @@ fn compile_vectorized(
         }
         "arrow" => {
             let path = data_path.expect("--data-path-new required for arrow data source");
-            Box::new(ArrowReader::from_file(path).expect("Failed to create ArrowReader"))
+            Box::new(ArrowReader::from_file(path, BATCH_SIZE).expect("Failed to create ArrowReader"))
         }
         "parquet" => {
             let path = data_path.expect("--data-path-new required for parquet data source");

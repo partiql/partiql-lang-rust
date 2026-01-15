@@ -195,9 +195,10 @@ impl ExpressionExecutor {
         outputs: Vec<usize>,
     ) -> Self {
         // Pre-allocate scratch vectors with specified types
+        // Initialize with size 0 - will be dynamically resized in execute() based on input batch size
         let scratch: Vec<Vector> = scratch_types
             .iter()
-            .map(|&ty| Vector::new(ty, 1024)) // TODO: Either pass in, or handle globally.
+            .map(|&ty| Vector::new(ty, 0))
             .collect();
 
         Self {

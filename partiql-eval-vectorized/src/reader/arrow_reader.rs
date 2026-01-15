@@ -50,11 +50,17 @@ pub struct ArrowReader {
     /// Cached schema built from projection (reused across batches)
     cached_schema: Option<crate::batch::SourceTypeDef>,
     
-    /// Batch size for pre-allocation (defaults to first batch size)
+    /// Batch size for output batches (controls re-batching)
     batch_size: usize,
     
     /// Reusable batch structure (pre-allocated in set_projection)
     reusable_batch: Option<VectorizedBatch>,
+    
+    /// Current Arrow batch being sliced for re-batching
+    current_arrow_batch: Option<RecordBatch>,
+    
+    /// Current offset within the Arrow batch for re-batching
+    current_offset: usize,
 }
 
 /// Zero-copy decoder for Arrow IPC files
@@ -196,11 +202,11 @@ impl ArrowReader {
     /// ```no_run
     /// use partiql_eval_vectorized::reader::ArrowReader;
     /// 
-    /// let reader = ArrowReader::from_file("data.arrow")?;
+    /// let reader = ArrowReader::from_file("data.arrow", 1024)?;
     /// // File is memory-mapped, but no batches loaded yet
     /// # Ok::<(), partiql_eval_vectorized::error::EvalError>(())
     /// ```
-    pub fn from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, EvalError> {
+    pub fn from_file<P: AsRef<Path>>(file_path: P, batch_size: usize) -> Result<Self, EvalError> {
         let path_str = file_path.as_ref().to_string_lossy().to_string();
         
         // Open and memory-map the file
@@ -227,8 +233,10 @@ impl ArrowReader {
             projection: None,
             finished: false,
             cached_schema: None,
-            batch_size: 0,
+            batch_size,
             reusable_batch: None,
+            current_arrow_batch: None,
+            current_offset: 0,
         })
     }
 }
@@ -303,9 +311,6 @@ impl BatchReader for ArrowReader {
         let cached_schema = SourceTypeDef::new(fields);
         self.cached_schema = Some(cached_schema.clone());
 
-        // Use default batch size (will be adjusted on first read)
-        self.batch_size = 1024;
-
         // Pre-allocate reusable batch structure
         self.reusable_batch = Some(VectorizedBatch::new(cached_schema, self.batch_size));
 
@@ -330,24 +335,39 @@ impl BatchReader for ArrowReader {
         let decoder = self.decoder.as_ref()
             .ok_or_else(|| EvalError::General("Decoder not initialized".to_string()))?;
 
-        // Check if we've read all batches
-        if self.current_batch_idx >= decoder.num_batches() {
-            self.finished = true;
-            return Ok(None);
+        loop {
+            // If we have a current Arrow batch with remaining rows
+            if let Some(arrow_batch) = &self.current_arrow_batch {
+                let remaining = arrow_batch.num_rows() - self.current_offset;
+                
+                if remaining > 0 {
+                    // Calculate slice size (min of batch_size and remaining)
+                    let slice_size = remaining.min(self.batch_size);
+                    
+                    // Zero-copy slice the Arrow batch
+                    let sliced = arrow_batch.slice(self.current_offset, slice_size);
+                    self.current_offset += slice_size;
+                    
+                    // Convert slice to VectorizedBatch
+                    let batch = self.convert_arrow_to_vectorized_batch(&sliced)?;
+                    return Ok(Some(batch));
+                }
+            }
+            
+            // Need to read next Arrow batch from file
+            if self.current_batch_idx >= decoder.num_batches() {
+                self.finished = true;
+                return Ok(None);  // All done
+            }
+            
+            // Read next Arrow RecordBatch (zero-copy from memory-mapped file)
+            let arrow_batch = decoder.get_batch(self.current_batch_idx)?;
+            self.current_batch_idx += 1;
+            self.current_arrow_batch = Some(arrow_batch);
+            self.current_offset = 0;
+            
+            // Loop back to slice it
         }
-
-        // Read the next batch (zero-copy from memory-mapped file)
-        let arrow_batch = decoder.get_batch(self.current_batch_idx)?;
-        self.current_batch_idx += 1;
-
-        // Check if this was the last batch
-        if self.current_batch_idx >= decoder.num_batches() {
-            self.finished = true;
-        }
-
-        // Convert Arrow RecordBatch to PartiQL VectorizedBatch
-        let batch = self.convert_arrow_to_vectorized_batch(&arrow_batch)?;
-        Ok(Some(batch))
     }
 
     fn close(&mut self) -> Result<(), EvalError> {
@@ -628,7 +648,7 @@ mod tests {
     #[test]
     fn test_arrow_reader_zero_copy() {
         let temp_file = create_test_ipc_file();
-        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
+        let mut reader = ArrowReader::from_file(temp_file.path(), 1024).unwrap();
 
         // Set projection
         let projections = vec![
@@ -652,7 +672,7 @@ mod tests {
     #[test]
     fn test_arrow_reader_field_path_rejection() {
         let temp_file = create_test_ipc_file();
-        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
+        let mut reader = ArrowReader::from_file(temp_file.path(), 1024).unwrap();
 
         // Try to set projection with FieldPath - should fail
         let projections = vec![Projection::new(
@@ -670,7 +690,7 @@ mod tests {
     #[test]
     fn test_arrow_reader_column_bounds_check() {
         let temp_file = create_test_ipc_file();
-        let mut reader = ArrowReader::from_file(temp_file.path()).unwrap();
+        let mut reader = ArrowReader::from_file(temp_file.path(), 1024).unwrap();
 
         // Try to access column index 10 when only 4 columns exist
         let projections = vec![Projection::new(

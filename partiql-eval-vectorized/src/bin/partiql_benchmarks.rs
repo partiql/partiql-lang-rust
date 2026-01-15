@@ -607,7 +607,7 @@ fn compile_vectorized(
             Box::new(InMemoryGeneratedReader::with_config(BATCH_SIZE, *num_batches))
         }
         DataFormat::Arrow { path } => {
-            Box::new(ArrowReader::from_file(path).expect("Failed to create ArrowReader"))
+            Box::new(ArrowReader::from_file(path, BATCH_SIZE).expect("Failed to create ArrowReader"))
         }
         DataFormat::Parquet { path } => {
             Box::new(ParquetReader::from_file(path, BATCH_SIZE).expect("Failed to create ParquetReader"))

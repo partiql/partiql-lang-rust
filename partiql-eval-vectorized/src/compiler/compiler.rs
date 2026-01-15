@@ -102,7 +102,7 @@ mod tests {
 
         // Create a dummy reader (Phase 0 - no schema in constructor)
         let reader: Box<dyn BatchReader> =
-            Box::new(InMemoryGeneratedReader::new());
+            Box::new(InMemoryGeneratedReader::new(1024));
 
         // Create compiler context with data source
         let context = CompilerContext::new().with_data_source("data".to_string(), reader);
