@@ -2,7 +2,7 @@ mod common;
 
 use common::{create_catalog, parse, lower, compile, count_rows_from_file};
 use partiql_eval::engine::{
-    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory,
+    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider,
 };
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
@@ -10,9 +10,6 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_logical::Scan;
 use partiql_value::{tuple, DateTime, Value};
 use std::{io::{self, Write}, time::{Duration, Instant}};
-
-/// Batch size for all data operations
-const BATCH_SIZE: usize = 1;
 
 /// Represents a benchmark query
 #[derive(Clone)]
@@ -54,7 +51,10 @@ impl DataFormat {
     
     fn row_count(&self) -> usize {
         match self {
-            DataFormat::InMemory { num_batches } => BATCH_SIZE * num_batches,
+            DataFormat::InMemory { num_batches } => {
+                // Batch size 1 for legacy compatibility in row counting
+                1 * num_batches
+            }
             DataFormat::Ion { path } => count_rows_from_file("ion", path),
             DataFormat::IonBinary { path } => count_rows_from_file("ionb", path),
             DataFormat::Arrow { path } => count_rows_from_file("arrow", path),
@@ -183,6 +183,9 @@ fn main() {
         }
     }
 
+    // Define batch size for in-memory data generation
+    let batch_size = 1;
+
     // Build list of data formats
     let mut data_formats = Vec::new();
     
@@ -216,7 +219,7 @@ fn main() {
         // Collect unique batch counts from file formats
         for format in file_based_formats {
             let row_count = format.row_count();
-            let num_batches = row_count / BATCH_SIZE;
+            let num_batches = row_count / batch_size;
             unique_batch_counts.insert(num_batches);
         }
         
@@ -256,13 +259,13 @@ fn main() {
 
     // Define benchmark queries
     let queries = vec![
-        BenchmarkQuery {
-            name: "Simple Projection".to_string(),
-            query: "SELECT a FROM ~input~".to_string(),
-        },
+        // BenchmarkQuery {
+        //     name: "Simple Projection".to_string(),
+        //     query: "SELECT a FROM ~input~".to_string(),
+        // },
         BenchmarkQuery {
             name: "Simple Projection with filter".to_string(),
-            query: "SELECT a, b FROM ~input~ WHERE a % 10 = 0".to_string(),
+            query: "SELECT a, b FROM ~input~ WHERE a % 100000 = 0".to_string(),
         },
     ];
 
@@ -295,14 +298,36 @@ fn main() {
         }
 
         println!();
-        println!("Running Vectorized Engine benchmarks...");
-        // Vectorized engine: all formats
+        println!("Running Vectorized-1 Engine benchmarks...");
+        // Vectorized engine with batch size 1: all formats
         for format in &data_formats {
             print!("  {} with {} ({} rows)... ", query.name, format.name(), format_number(format.row_count()));
             io::stdout().flush().unwrap();
             let result = run_vectorized_benchmark(
                 query,
                 format,
+                1, // batch_size
+                iterations,
+                warmup_iterations,
+            );
+            if result.error.is_none() {
+                println!("✓ (avg: {:.2}ms)", result.avg_ms);
+            } else {
+                println!("✗ ({})", result.error.as_ref().unwrap());
+            }
+            all_results.push(result);
+        }
+
+        println!();
+        println!("Running Vectorized-1024 Engine benchmarks...");
+        // Vectorized engine with batch size 1024: all formats
+        for format in &data_formats {
+            print!("  {} with {} ({} rows)... ", query.name, format.name(), format_number(format.row_count()));
+            io::stdout().flush().unwrap();
+            let result = run_vectorized_benchmark(
+                query,
+                format,
+                1024, // batch_size
                 iterations,
                 warmup_iterations,
             );
@@ -348,10 +373,13 @@ fn run_legacy_benchmark(
 ) -> BenchmarkResult {
     let non_vec_query = query.query.replace("~input~", "data()");
     
+    // Batch size for legacy engine (always 1)
+    let batch_size = 1;
+    
     // Calculate total rows and get path
     let (total_rows, path) = match format {
         DataFormat::InMemory { num_batches } => {
-            (BATCH_SIZE * num_batches, None)
+            (batch_size * num_batches, None)
         }
         DataFormat::Ion { path } => {
             (count_rows_from_file("ion", path), Some(path.clone()))
@@ -502,6 +530,7 @@ fn run_legacy_benchmark(
 fn run_vectorized_benchmark(
     query: &BenchmarkQuery,
     format: &DataFormat,
+    batch_size: usize,
     iterations: usize,
     warmup_iterations: usize,
 ) -> BenchmarkResult {
@@ -509,6 +538,9 @@ fn run_vectorized_benchmark(
     
     // Get the data source size
     let data_source_rows = format.row_count();
+
+    // Engine name includes batch size
+    let engine_name = format!("Vectorized-{}", batch_size);
 
     // Create catalog (needed for parsing/lowering)
     let catalog = create_catalog("mem".to_string(), None);
@@ -519,7 +551,7 @@ fn run_vectorized_benchmark(
         Err(e) => {
             return BenchmarkResult {
                 query_name: query.name.clone(),
-                engine: "Vectorized".to_string(),
+                engine: engine_name,
                 data_format: format.name().to_string(),
                 data_source_rows,
                 output_rows: 0,
@@ -537,7 +569,7 @@ fn run_vectorized_benchmark(
         Err(e) => {
             return BenchmarkResult {
                 query_name: query.name.clone(),
-                engine: "Vectorized".to_string(),
+                engine: engine_name,
                 data_format: format.name().to_string(),
                 data_source_rows,
                 output_rows: 0,
@@ -552,7 +584,7 @@ fn run_vectorized_benchmark(
 
     // Warmup iterations
     for _ in 0..warmup_iterations {
-        let mut plan = compile_vectorized(&logical, format);
+        let mut plan = compile_vectorized(&logical, format, batch_size);
         for batch_result in plan.execute() {
             if let Err(_) = batch_result {
                 // Ignore warmup errors
@@ -566,7 +598,7 @@ fn run_vectorized_benchmark(
     let mut total_rows = 0;
 
     for _ in 0..iterations {
-        let mut plan = compile_vectorized(&logical, format);
+        let mut plan = compile_vectorized(&logical, format, batch_size);
 
         let start = Instant::now();
         let mut row_count = 0;
@@ -584,7 +616,7 @@ fn run_vectorized_benchmark(
                 Err(e) => {
                     return BenchmarkResult {
                         query_name: query.name.clone(),
-                        engine: "Vectorized".to_string(),
+                        engine: engine_name.clone(),
                         data_format: format.name().to_string(),
                         data_source_rows,
                         output_rows: 0,
@@ -607,7 +639,7 @@ fn run_vectorized_benchmark(
 
     BenchmarkResult {
         query_name: query.name.clone(),
-        engine: "Vectorized".to_string(),
+        engine: engine_name,
         data_format: format.name().to_string(),
         data_source_rows,
         output_rows: total_rows,
@@ -744,26 +776,27 @@ fn run_hybrid_benchmark(
 fn compile_vectorized(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     format: &DataFormat,
+    batch_size: usize,
 ) -> partiql_eval_vectorized::VectorizedPlan {
     use partiql_eval_vectorized::reader::{ArrowReader, InMemoryGeneratedReader, PIonReader, PIonTextReader, ParquetReader};
 
     let reader: Box<dyn partiql_eval_vectorized::BatchReader> = match format {
         DataFormat::InMemory { num_batches } => {
-            Box::new(InMemoryGeneratedReader::with_config(BATCH_SIZE, *num_batches))
+            Box::new(InMemoryGeneratedReader::with_config(batch_size, *num_batches))
         }
         DataFormat::Arrow { path } => {
-            Box::new(ArrowReader::from_file(path, BATCH_SIZE).expect("Failed to create ArrowReader"))
+            Box::new(ArrowReader::from_file(path, batch_size).expect("Failed to create ArrowReader"))
         }
         DataFormat::Parquet { path } => {
-            Box::new(ParquetReader::from_file(path, BATCH_SIZE).expect("Failed to create ParquetReader"))
+            Box::new(ParquetReader::from_file(path, batch_size).expect("Failed to create ParquetReader"))
         }
         DataFormat::Ion { path } => {
             // Text Ion - uses string-based field names
-            Box::new(PIonTextReader::from_ion_file(path, BATCH_SIZE).expect("Failed to create IonTextReader"))
+            Box::new(PIonTextReader::from_ion_file(path, batch_size).expect("Failed to create IonTextReader"))
         }
         DataFormat::IonBinary { path } => {
             // Binary Ion - uses symbol IDs for optimal performance
-            Box::new(PIonReader::from_ion_file(path, BATCH_SIZE).expect("Failed to create IonBinaryReader"))
+            Box::new(PIonReader::from_ion_file(path, batch_size).expect("Failed to create IonBinaryReader"))
         }
     };
 
@@ -790,7 +823,7 @@ fn compile_hybrid(
 struct HybridScanProvider {
     data_source: String,
     data_path: Option<String>,
-    rows: Option<Vec<Value>>,
+    num_rows: Option<usize>,
 }
 
 impl HybridScanProvider {
@@ -799,22 +832,22 @@ impl HybridScanProvider {
             DataFormat::InMemory { .. } => HybridScanProvider {
                 data_source: "mem".to_string(),
                 data_path: None,
-                rows: Some(generate_rows(total_rows)),
+                num_rows: Some(total_rows),
             },
             DataFormat::Ion { path } => HybridScanProvider {
                 data_source: "ion".to_string(),
                 data_path: Some(path.clone()),
-                rows: None,
+                num_rows: None,
             },
             DataFormat::IonBinary { path } => HybridScanProvider {
                 data_source: "ionb".to_string(),
                 data_path: Some(path.clone()),
-                rows: None,
+                num_rows: None,
             },
             _ => HybridScanProvider {
                 data_source: "unsupported".to_string(),
                 data_path: None,
-                rows: None,
+                num_rows: None,
             },
         }
     }
@@ -824,8 +857,12 @@ impl ScanProvider for HybridScanProvider {
     fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
         match self.data_source.as_str() {
             "mem" => {
-                let rows = self.rows.clone().unwrap_or_default();
-                Ok(Box::new(ValueRowReaderFactory::new(rows)))
+                let num_rows = self.num_rows.ok_or_else(|| {
+                    partiql_eval::engine::EngineError::ReaderError(
+                        "num_rows required for mem source".to_string(),
+                    )
+                })?;
+                Ok(Box::new(partiql_eval::engine::InMemGeneratedReaderFactory::new(num_rows)))
             }
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {
@@ -840,16 +877,6 @@ impl ScanProvider for HybridScanProvider {
             )),
         }
     }
-}
-
-fn generate_rows(total: usize) -> Vec<Value> {
-    let mut rows = Vec::with_capacity(total);
-    for idx in 0..total {
-        let a = idx as i64;
-        let b = (idx as i64) + 100;
-        rows.push(tuple![("a", a), ("b", b)].into());
-    }
-    rows
 }
 
 fn calculate_stats(timings: &[Duration]) -> (f64, f64, f64) {
@@ -983,9 +1010,12 @@ fn print_cross_engine_analysis(results: &[&BenchmarkResult]) {
         formats.dedup();
 
         let engine_pairs = [
-            ("Legacy", "Vectorized"),
+            ("Legacy", "Vectorized-1"),
+            ("Legacy", "Vectorized-1024"),
             ("Legacy", "Hybrid"),
-            ("Hybrid", "Vectorized"),
+            ("Hybrid", "Vectorized-1"),
+            ("Hybrid", "Vectorized-1024"),
+            ("Vectorized-1", "Vectorized-1024"),
         ];
 
         let mut found_any = false;
@@ -1048,7 +1078,7 @@ fn print_cross_format_analysis(results: &[&BenchmarkResult]) {
 
         let size_results: Vec<_> = results.iter().filter(|r| r.data_source_rows == size).copied().collect();
 
-        for engine in &["Legacy", "Vectorized", "Hybrid"] {
+        for engine in &["Legacy", "Vectorized-1", "Vectorized-1024", "Hybrid"] {
             // Filter to only file-based formats (exclude in-memory)
             let file_results: Vec<_> = size_results.iter()
                 .filter(|r| r.engine == *engine && r.data_format != "In-Memory")
@@ -1139,7 +1169,7 @@ fn print_best_case_analysis(results: &[&BenchmarkResult]) {
         
         println!("   Data Size: {} rows", format_number(size));
 
-        let engines = ["Legacy", "Vectorized", "Hybrid"];
+        let engines = ["Legacy", "Vectorized-1", "Vectorized-1024", "Hybrid"];
         let mut best_by_engine: std::collections::HashMap<&str, BenchmarkResult> =
             std::collections::HashMap::new();
 
@@ -1171,13 +1201,23 @@ fn print_best_case_analysis(results: &[&BenchmarkResult]) {
             }
         }
 
-        if let (Some(best_leg), Some(best_vec)) =
-            (best_by_engine.get("Legacy"), best_by_engine.get("Vectorized"))
+        if let (Some(best_leg), Some(best_vec1)) =
+            (best_by_engine.get("Legacy"), best_by_engine.get("Vectorized-1"))
         {
-            let speedup = best_leg.avg_ms / best_vec.avg_ms;
+            let speedup = best_leg.avg_ms / best_vec1.avg_ms;
             println!(
-                "     Best Legacy ({}) → Best Vectorized ({}): {:.2}x",
-                best_leg.data_format, best_vec.data_format, speedup
+                "     Best Legacy ({}) → Best Vectorized-1 ({}): {:.2}x",
+                best_leg.data_format, best_vec1.data_format, speedup
+            );
+        }
+
+        if let (Some(best_leg), Some(best_vec1024)) =
+            (best_by_engine.get("Legacy"), best_by_engine.get("Vectorized-1024"))
+        {
+            let speedup = best_leg.avg_ms / best_vec1024.avg_ms;
+            println!(
+                "     Best Legacy ({}) → Best Vectorized-1024 ({}): {:.2}x",
+                best_leg.data_format, best_vec1024.data_format, speedup
             );
         }
 
@@ -1191,13 +1231,33 @@ fn print_best_case_analysis(results: &[&BenchmarkResult]) {
             );
         }
 
-        if let (Some(best_hybrid), Some(best_vec)) =
-            (best_by_engine.get("Hybrid"), best_by_engine.get("Vectorized"))
+        if let (Some(best_hybrid), Some(best_vec1)) =
+            (best_by_engine.get("Hybrid"), best_by_engine.get("Vectorized-1"))
         {
-            let speedup = best_hybrid.avg_ms / best_vec.avg_ms;
+            let speedup = best_hybrid.avg_ms / best_vec1.avg_ms;
             println!(
-                "     Best Hybrid ({}) → Best Vectorized ({}): {:.2}x",
-                best_hybrid.data_format, best_vec.data_format, speedup
+                "     Best Hybrid ({}) → Best Vectorized-1 ({}): {:.2}x",
+                best_hybrid.data_format, best_vec1.data_format, speedup
+            );
+        }
+
+        if let (Some(best_hybrid), Some(best_vec1024)) =
+            (best_by_engine.get("Hybrid"), best_by_engine.get("Vectorized-1024"))
+        {
+            let speedup = best_hybrid.avg_ms / best_vec1024.avg_ms;
+            println!(
+                "     Best Hybrid ({}) → Best Vectorized-1024 ({}): {:.2}x",
+                best_hybrid.data_format, best_vec1024.data_format, speedup
+            );
+        }
+
+        if let (Some(best_vec1), Some(best_vec1024)) =
+            (best_by_engine.get("Vectorized-1"), best_by_engine.get("Vectorized-1024"))
+        {
+            let speedup = best_vec1.avg_ms / best_vec1024.avg_ms;
+            println!(
+                "     Best Vectorized-1 ({}) → Best Vectorized-1024 ({}): {:.2}x",
+                best_vec1.data_format, best_vec1024.data_format, speedup
             );
         }
 
@@ -1295,18 +1355,31 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
         let indent = if multiple_sizes { "     " } else { "   " };
 
         // Print table header
-        println!("{}┌─────────────┬──────────────────┬──────────────────┬────────────────────┬────────────────────┐", indent);
-        println!("{}│ Format      │ Legacy Avg (ms)  │ Hybrid Avg (ms)  │ Vectorized Avg (ms)│ Vectorized Speedup │", indent);
-        println!("{}├─────────────┼──────────────────┼──────────────────┼────────────────────┼────────────────────┤", indent);
+        println!("{}┌─────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┬──────────────────┐", indent);
+        println!("{}│ Format      │ Legacy Avg (ms)  │ Vec-1 Avg (ms)   │ Vec-1024 Avg(ms) │ Hybrid Avg (ms)  │ Vec-1 Speedup    │ Vec-1024 Speedup │ Hybrid Speedup   │", indent);
+        println!("{}├─────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┼──────────────────┤", indent);
 
         // Print table rows
         for format in formats {
             let legacy = size_results.iter().find(|r| r.engine == "Legacy" && r.data_format == format);
+            let vec1 = size_results.iter().find(|r| r.engine == "Vectorized-1" && r.data_format == format);
+            let vec1024 = size_results.iter().find(|r| r.engine == "Vectorized-1024" && r.data_format == format);
             let hybrid = size_results.iter().find(|r| r.engine == "Hybrid" && r.data_format == format);
-            let vectorized = size_results.iter().find(|r| r.engine == "Vectorized" && r.data_format == format);
 
             let legacy_str = if let Some(leg) = legacy {
                 format!("{:.2}", leg.avg_ms)
+            } else {
+                "N/A".to_string()
+            };
+
+            let vec1_str = if let Some(v) = vec1 {
+                format!("{:.2}", v.avg_ms)
+            } else {
+                "N/A".to_string()
+            };
+
+            let vec1024_str = if let Some(v) = vec1024 {
+                format!("{:.2}", v.avg_ms)
             } else {
                 "N/A".to_string()
             };
@@ -1317,15 +1390,9 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
                 "N/A".to_string()
             };
 
-            let vectorized_str = if let Some(vec) = vectorized {
-                format!("{:.2}", vec.avg_ms)
-            } else {
-                "N/A".to_string()
-            };
-
-            let speedup_str = if let (Some(leg), Some(vec)) = (legacy, vectorized) {
-                if leg.avg_ms > 0.0 && vec.avg_ms > 0.0 {
-                    let speedup = leg.avg_ms / vec.avg_ms;
+            let vec1_speedup_str = if let (Some(leg), Some(v)) = (legacy, vec1) {
+                if leg.avg_ms > 0.0 && v.avg_ms > 0.0 {
+                    let speedup = leg.avg_ms / v.avg_ms;
                     format_speedup(speedup)
                 } else {
                     "N/A".to_string()
@@ -1334,16 +1401,41 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
                 "N/A".to_string()
             };
 
-            println!("{}│ {:11} │ {:>16} │ {:>16} │ {:>18} │ {:>18} │",
+            let vec1024_speedup_str = if let (Some(leg), Some(v)) = (legacy, vec1024) {
+                if leg.avg_ms > 0.0 && v.avg_ms > 0.0 {
+                    let speedup = leg.avg_ms / v.avg_ms;
+                    format_speedup(speedup)
+                } else {
+                    "N/A".to_string()
+                }
+            } else {
+                "N/A".to_string()
+            };
+
+            let hybrid_speedup_str = if let (Some(leg), Some(hyb)) = (legacy, hybrid) {
+                if leg.avg_ms > 0.0 && hyb.avg_ms > 0.0 {
+                    let speedup = leg.avg_ms / hyb.avg_ms;
+                    format_speedup(speedup)
+                } else {
+                    "N/A".to_string()
+                }
+            } else {
+                "N/A".to_string()
+            };
+
+            println!("{}│ {:11} │ {:>16} │ {:>16} │ {:>16} │ {:>16} │ {:>16} │ {:>16} │ {:>16} │",
                      indent,
                      format,
                      legacy_str,
+                     vec1_str,
+                     vec1024_str,
                      hybrid_str,
-                     vectorized_str,
-                     speedup_str);
+                     vec1_speedup_str,
+                     vec1024_speedup_str,
+                     hybrid_speedup_str);
         }
 
-        println!("{}└─────────────┴──────────────────┴──────────────────┴────────────────────┴────────────────────┘", indent);
+        println!("{}└─────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┴──────────────────┘", indent);
 
         if multiple_sizes {
             println!();

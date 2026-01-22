@@ -2,7 +2,7 @@ mod common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::engine::{
-    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory,
+    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider, InMemGeneratedReaderFactory,
 };
 use partiql_logical::Scan;
 use partiql_value::{tuple, Tuple, Value};
@@ -205,8 +205,7 @@ impl ScanProvider for HybridScanProvider {
     ) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
         match self.data_source.as_str() {
             "mem" => {
-                let rows = generate_rows(self.total_rows);
-                Ok(Box::new(ValueRowReaderFactory::new(rows)))
+                Ok(Box::new(InMemGeneratedReaderFactory::new(self.total_rows)))
             }
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {
@@ -221,16 +220,6 @@ impl ScanProvider for HybridScanProvider {
             ))),
         }
     }
-}
-
-fn generate_rows(total: usize) -> Vec<Value> {
-    let mut rows = Vec::with_capacity(total);
-    for idx in 0..total {
-        let a = idx as i64;
-        let b = (idx as i64) + 100;
-        rows.push(tuple![("a", a), ("b", b)].into());
-    }
-    rows
 }
 
 fn row_to_value(row: &partiql_eval::engine::RowView<'_>, schema: &partiql_eval::engine::Schema) -> Value {

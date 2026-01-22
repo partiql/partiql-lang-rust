@@ -76,27 +76,33 @@ pub trait RowReaderFactory {
     fn create(&self) -> Result<Box<dyn RowReader>>;
 }
 
-pub struct ValueRowReader {
-    rows: Vec<Value>,
-    pos: usize,
+/// In-memory row reader that generates rows on-the-fly
+/// 
+/// Similar to InMemoryGeneratedReader in vectorized evaluation, but operates on single rows.
+/// Generates fake columnar data with two Int64 columns:
+/// - Column "a": starts at 0, increments by 1
+/// - Column "b": starts at 100, increments by 1
+pub struct InMemGeneratedReader {
+    current_row: i64,
+    total_rows: usize,
     layout: ScanLayout,
     caps: ReaderCaps,
 }
 
 #[derive(Clone)]
-pub struct ValueRowReaderFactory {
-    rows: Vec<Value>,
+pub struct InMemGeneratedReaderFactory {
+    total_rows: usize,
 }
 
-impl ValueRowReaderFactory {
-    pub fn new(rows: Vec<Value>) -> Self {
-        ValueRowReaderFactory { rows }
+impl InMemGeneratedReaderFactory {
+    pub fn new(total_rows: usize) -> Self {
+        InMemGeneratedReaderFactory { total_rows }
     }
 }
 
-impl RowReaderFactory for ValueRowReaderFactory {
+impl RowReaderFactory for InMemGeneratedReaderFactory {
     fn create(&self) -> Result<Box<dyn RowReader>> {
-        Ok(Box::new(ValueRowReader::new(self.rows.clone())))
+        Ok(Box::new(InMemGeneratedReader::new(self.total_rows)))
     }
 }
 
@@ -338,14 +344,14 @@ fn extend_value_ref<'a>(value: ValueRef<'_>) -> ValueRef<'a> {
     unsafe { std::mem::transmute(value) }
 }
 
-impl ValueRowReader {
-    pub fn new(rows: Vec<Value>) -> Self {
-        ValueRowReader {
-            rows,
-            pos: 0,
+impl InMemGeneratedReader {
+    pub fn new(total_rows: usize) -> Self {
+        InMemGeneratedReader {
+            current_row: 0,
+            total_rows,
             layout: ScanLayout::base_row(),
             caps: ReaderCaps {
-                stability: BufferStability::UntilClose,
+                stability: BufferStability::UntilNext,
                 can_project: true,
                 can_return_opaque: false,
             },
@@ -353,7 +359,7 @@ impl ValueRowReader {
     }
 }
 
-impl RowReader for ValueRowReader {
+impl RowReader for InMemGeneratedReader {
     fn caps(&self) -> ReaderCaps {
         self.caps
     }
@@ -369,38 +375,67 @@ impl RowReader for ValueRowReader {
     }
 
     fn open(&mut self) -> Result<()> {
-        self.pos = 0;
+        self.current_row = 0;
         Ok(())
     }
 
     fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool> {
-        if self.pos >= self.rows.len() {
+        // Check if we've generated all rows
+        if self.current_row >= self.total_rows as i64 {
             return Ok(false);
         }
-        let row = &self.rows[self.pos];
-        self.pos += 1;
 
+        // Generate row values on-the-fly
+        let a_value = self.current_row;
+        let b_value = self.current_row + 100;
+
+        // Populate slots based on projection layout
         for proj in &self.layout.projections {
             let target = proj.target_slot as usize;
             if target >= out.slots.len() {
                 continue;
             }
-            let value = match &proj.source {
-                ScanSource::BaseRow => Some(row),
-                ScanSource::FieldPath(path) => get_field_path(row, path),
-                ScanSource::ColumnIndex(index) => get_column_index(row, *index),
+            
+            let value_ref = match &proj.source {
+                ScanSource::BaseRow => {
+                    // For BaseRow, we need to materialize the entire row as a Value
+                    use partiql_value::tuple;
+                    let row_value = tuple![("a", a_value), ("b", b_value)].into();
+                    value_ref_from_value_in_arena(&row_value, out.arena)
+                }
+                ScanSource::FieldPath(path) => {
+                    // Generate value based on field name
+                    match path.as_str() {
+                        "a" => ValueRef::I64(a_value),
+                        "b" => ValueRef::I64(b_value),
+                        _ => ValueRef::Missing,
+                    }
+                }
+                ScanSource::ColumnIndex(index) => {
+                    // Column index 0 = "a", 1 = "b"
+                    match index {
+                        0 => ValueRef::I64(a_value),
+                        1 => ValueRef::I64(b_value),
+                        _ => ValueRef::Missing,
+                    }
+                }
             };
-            let value = match value {
-                Some(value) => value_ref_from_value_in_arena(value, out.arena),
-                None => ValueRef::Missing,
-            };
-            out.slots[target] = SlotValue::Val(value);
+            
+            out.slots[target] = SlotValue::Val(value_ref);
         }
+
+        // Increment current row for next call
+        self.current_row += 1;
         Ok(true)
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
-        Some(ScanSource::FieldPath(field_name.to_string()))
+        // Only support fields "a" and "b"
+        if field_name == "a" || field_name == "b" {
+            Some(ScanSource::FieldPath(field_name.to_string()))
+        } else {
+            None
+        }
     }
 
     fn close(&mut self) -> Result<()> {
