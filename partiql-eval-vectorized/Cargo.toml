@@ -2,10 +2,11 @@
 name = "partiql-eval-vectorized"
 version = "0.1.0"
 edition = "2021"
+autobins = false
 
 [[bin]]
 name = "partiql-metal-cli"
-path = "src/bin/main.rs"
+path = "src/bin/partiql_vectorized.rs"
 
 [[bin]]
 name = "generate-data"

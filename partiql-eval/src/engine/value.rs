@@ -1,0 +1,91 @@
+use ordered_float::OrderedFloat;
+use partiql_value::Value;
+
+pub type ValueOwned = Value;
+
+#[derive(Clone, Copy, Debug)]
+pub enum ValueRef<'a> {
+    Missing,
+    Null,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Str(&'a str),
+    Bytes(&'a [u8]),
+    Owned(&'a ValueOwned),
+}
+
+impl<'a> ValueRef<'a> {
+    pub fn from_owned(value: &'a ValueOwned) -> Self {
+        match value {
+            Value::Missing => ValueRef::Missing,
+            Value::Null => ValueRef::Null,
+            Value::Boolean(v) => ValueRef::Bool(*v),
+            Value::Integer(v) => ValueRef::I64(*v),
+            Value::Real(v) => ValueRef::F64(v.0),
+            Value::String(v) => ValueRef::Str(v.as_str()),
+            Value::Blob(v) => ValueRef::Bytes(v.as_slice()),
+            _ => ValueRef::Owned(value),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ValueView<'a> {
+    Missing,
+    Null,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Str(&'a str),
+    Bytes(&'a [u8]),
+    Owned(&'a ValueOwned),
+}
+
+impl<'a> ValueView<'a> {
+    pub fn from_owned(value: &'a ValueOwned) -> Self {
+        ValueRef::from_owned(value).into()
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match *self {
+            ValueView::I64(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&'a str> {
+        match *self {
+            ValueView::Str(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn to_owned(self) -> ValueOwned {
+        match self {
+            ValueView::Missing => Value::Missing,
+            ValueView::Null => Value::Null,
+            ValueView::Bool(v) => Value::Boolean(v),
+            ValueView::I64(v) => Value::Integer(v),
+            ValueView::F64(v) => Value::Real(OrderedFloat(v)),
+            ValueView::Str(v) => Value::String(Box::new(v.to_string())),
+            ValueView::Bytes(v) => Value::Blob(Box::new(v.to_vec())),
+            ValueView::Owned(v) => v.clone(),
+        }
+    }
+}
+
+impl<'a> From<ValueRef<'a>> for ValueView<'a> {
+    fn from(value: ValueRef<'a>) -> Self {
+        match value {
+            ValueRef::Missing => ValueView::Missing,
+            ValueRef::Null => ValueView::Null,
+            ValueRef::Bool(v) => ValueView::Bool(v),
+            ValueRef::I64(v) => ValueView::I64(v),
+            ValueRef::F64(v) => ValueView::F64(v),
+            ValueRef::Str(v) => ValueView::Str(v),
+            ValueRef::Bytes(v) => ValueView::Bytes(v),
+            ValueRef::Owned(v) => ValueView::Owned(v),
+        }
+    }
+}

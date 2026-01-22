@@ -2,6 +2,7 @@
 #![deny(clippy::all)]
 
 pub mod env;
+pub mod engine;
 pub mod error;
 pub mod eval;
 pub mod plan;
