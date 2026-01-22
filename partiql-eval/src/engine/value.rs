@@ -1,6 +1,8 @@
 use ordered_float::OrderedFloat;
 use partiql_value::Value;
 
+use crate::engine::row::RowArena;
+
 pub type ValueOwned = Value;
 
 #[derive(Clone, Copy, Debug)]
@@ -27,6 +29,28 @@ impl<'a> ValueRef<'a> {
             Value::Blob(v) => ValueRef::Bytes(v.as_slice()),
             _ => ValueRef::Owned(value),
         }
+    }
+}
+
+pub fn value_ref_from_value<'a>(value: &'a Value) -> ValueRef<'a> {
+    ValueRef::from_owned(value)
+}
+
+pub fn value_ref_from_value_in_arena<'a>(value: &Value, arena: &'a mut RowArena) -> ValueRef<'a> {
+    let owned = arena.alloc(value.clone());
+    ValueRef::from_owned(owned)
+}
+
+pub fn value_owned_from_ref(value: ValueRef<'_>) -> ValueOwned {
+    match value {
+        ValueRef::Missing => Value::Missing,
+        ValueRef::Null => Value::Null,
+        ValueRef::Bool(v) => Value::Boolean(v),
+        ValueRef::I64(v) => Value::Integer(v),
+        ValueRef::F64(v) => Value::Real(OrderedFloat(v)),
+        ValueRef::Str(v) => Value::String(Box::new(v.to_string())),
+        ValueRef::Bytes(v) => Value::Blob(Box::new(v.to_vec())),
+        ValueRef::Owned(v) => v.clone(),
     }
 }
 
