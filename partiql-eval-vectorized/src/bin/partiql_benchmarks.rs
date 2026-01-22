@@ -1,10 +1,12 @@
 mod common;
 
 use common::{create_catalog, parse, lower, compile, count_rows_from_file};
+use partiql_eval::engine::{PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_value::{DateTime, Value};
+use partiql_logical::Scan;
+use partiql_value::{tuple, DateTime, Value};
 use std::{io::{self, Write}, time::{Duration, Instant}};
 
 /// Batch size for all data operations
@@ -311,6 +313,25 @@ fn main() {
         }
 
         println!();
+        println!("Running Hybrid Engine benchmarks...");
+        for format in &data_formats {
+            print!("  {} with {} ({} rows)... ", query.name, format.name(), format_number(format.row_count()));
+            io::stdout().flush().unwrap();
+            let result = run_hybrid_benchmark(
+                query,
+                format,
+                iterations,
+                warmup_iterations,
+            );
+            if result.error.is_none() {
+                println!("✓ (avg: {:.2}ms)", result.avg_ms);
+            } else {
+                println!("✗ ({})", result.error.as_ref().unwrap());
+            }
+            all_results.push(result);
+        }
+
+        println!();
     }
 
     // Print results table
@@ -596,6 +617,141 @@ fn run_vectorized_benchmark(
     }
 }
 
+fn run_hybrid_benchmark(
+    query: &BenchmarkQuery,
+    format: &DataFormat,
+    iterations: usize,
+    warmup_iterations: usize,
+) -> BenchmarkResult {
+    if !matches!(format, DataFormat::InMemory { .. }) {
+        return BenchmarkResult {
+            query_name: query.name.clone(),
+            engine: "Hybrid".to_string(),
+            data_format: format.name().to_string(),
+            data_source_rows: format.row_count(),
+            output_rows: 0,
+            min_ms: 0.0,
+            max_ms: 0.0,
+            avg_ms: 0.0,
+            iterations: 0,
+            error: Some("Hybrid supports mem only".to_string()),
+        };
+    }
+
+    let hybrid_query = query.query.replace("~input~", "data");
+    let data_source_rows = format.row_count();
+    let catalog = create_catalog("mem".to_string(), None);
+
+    let parsed = match parse(&hybrid_query) {
+        Ok(p) => p,
+        Err(e) => {
+            return BenchmarkResult {
+                query_name: query.name.clone(),
+                engine: "Hybrid".to_string(),
+                data_format: format.name().to_string(),
+                data_source_rows,
+                output_rows: 0,
+                min_ms: 0.0,
+                max_ms: 0.0,
+                avg_ms: 0.0,
+                iterations: 0,
+                error: Some(format!("Parse error: {:?}", e)),
+            };
+        }
+    };
+
+    let logical = match lower(&*catalog, &parsed) {
+        Ok(l) => l,
+        Err(e) => {
+            return BenchmarkResult {
+                query_name: query.name.clone(),
+                engine: "Hybrid".to_string(),
+                data_format: format.name().to_string(),
+                data_source_rows,
+                output_rows: 0,
+                min_ms: 0.0,
+                max_ms: 0.0,
+                avg_ms: 0.0,
+                iterations: 0,
+                error: Some(format!("Lower error: {:?}", e)),
+            };
+        }
+    };
+
+    for _ in 0..warmup_iterations {
+        if let Ok(mut stream) = compile_hybrid(&logical, data_source_rows)
+            .and_then(|plan| plan.execute())
+        {
+            while let Ok(Some(_row)) = stream.next_row() {}
+        }
+    }
+
+    let mut timings = Vec::new();
+    let mut total_rows = 0;
+
+    for _ in 0..iterations {
+        let mut stream = match compile_hybrid(&logical, data_source_rows).and_then(|plan| plan.execute()) {
+            Ok(s) => s,
+            Err(e) => {
+                return BenchmarkResult {
+                    query_name: query.name.clone(),
+                    engine: "Hybrid".to_string(),
+                    data_format: format.name().to_string(),
+                    data_source_rows,
+                    output_rows: 0,
+                    min_ms: 0.0,
+                    max_ms: 0.0,
+                    avg_ms: 0.0,
+                    iterations: 0,
+                    error: Some(format!("Compile error: {:?}", e)),
+                };
+            }
+        };
+
+        let start = Instant::now();
+        let mut row_count = 0;
+        loop {
+            match stream.next_row() {
+                Ok(Some(_row)) => row_count += 1,
+                Ok(None) => break,
+                Err(e) => {
+                    return BenchmarkResult {
+                        query_name: query.name.clone(),
+                        engine: "Hybrid".to_string(),
+                        data_format: format.name().to_string(),
+                        data_source_rows,
+                        output_rows: 0,
+                        min_ms: 0.0,
+                        max_ms: 0.0,
+                        avg_ms: 0.0,
+                        iterations: 0,
+                        error: Some(format!("Execution error: {:?}", e)),
+                    };
+                }
+            }
+        }
+
+        let elapsed = start.elapsed();
+        timings.push(elapsed);
+        total_rows = row_count;
+    }
+
+    let (min_ms, max_ms, avg_ms) = calculate_stats(&timings);
+
+    BenchmarkResult {
+        query_name: query.name.clone(),
+        engine: "Hybrid".to_string(),
+        data_format: format.name().to_string(),
+        data_source_rows,
+        output_rows: total_rows,
+        min_ms,
+        max_ms,
+        avg_ms,
+        iterations,
+        error: None,
+    }
+}
+
 fn compile_vectorized(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     format: &DataFormat,
@@ -629,6 +785,43 @@ fn compile_vectorized(
     compiler
         .compile(logical)
         .expect("Vectorized compilation failed")
+}
+
+fn compile_hybrid(
+    logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
+    total_rows: usize,
+) -> partiql_eval::engine::Result<partiql_eval::engine::PlanInstance> {
+    let rows = generate_rows(total_rows);
+    let provider = HybridScanProvider::new(rows);
+    let compiler = PlanCompiler::new(&provider);
+    let compiled = compiler.compile(logical)?;
+    compiler.instantiate(compiled, None)
+}
+
+struct HybridScanProvider {
+    rows: Vec<Value>,
+}
+
+impl HybridScanProvider {
+    fn new(rows: Vec<Value>) -> Self {
+        HybridScanProvider { rows }
+    }
+}
+
+impl ScanProvider for HybridScanProvider {
+    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
+        Ok(Box::new(ValueRowReaderFactory::new(self.rows.clone())))
+    }
+}
+
+fn generate_rows(total: usize) -> Vec<Value> {
+    let mut rows = Vec::with_capacity(total);
+    for idx in 0..total {
+        let a = idx as i64;
+        let b = (idx as i64) + 100;
+        rows.push(tuple![("a", a), ("b", b)].into());
+    }
+    rows
 }
 
 fn calculate_stats(timings: &[Duration]) -> (f64, f64, f64) {
@@ -761,17 +954,32 @@ fn print_cross_engine_analysis(results: &[&BenchmarkResult]) {
         formats.sort();
         formats.dedup();
 
+        let engine_pairs = [
+            ("Legacy", "Vectorized"),
+            ("Legacy", "Hybrid"),
+            ("Hybrid", "Vectorized"),
+        ];
+
         let mut found_any = false;
         for format in formats {
-            let legacy = size_results.iter().find(|r| r.engine == "Legacy" && r.data_format == format);
-            let vectorized = size_results.iter().find(|r| r.engine == "Vectorized" && r.data_format == format);
+            for (left, right) in engine_pairs {
+                let left_res = size_results
+                    .iter()
+                    .find(|r| r.engine == left && r.data_format == format);
+                let right_res = size_results
+                    .iter()
+                    .find(|r| r.engine == right && r.data_format == format);
 
-            if let (Some(leg), Some(vec)) = (legacy, vectorized) {
-                if leg.avg_ms > 0.0 && vec.avg_ms > 0.0 {
-                    let speedup = leg.avg_ms / vec.avg_ms;
-                    let indent = if multiple_sizes { "     " } else { "   " };
-                    println!("{}Legacy {} → Vectorized {}: {:.2}x", indent, format, format, speedup);
-                    found_any = true;
+                if let (Some(l), Some(r)) = (left_res, right_res) {
+                    if l.avg_ms > 0.0 && r.avg_ms > 0.0 {
+                        let speedup = l.avg_ms / r.avg_ms;
+                        let indent = if multiple_sizes { "     " } else { "   " };
+                        println!(
+                            "{}{} {} → {} {}: {:.2}x",
+                            indent, left, format, right, format, speedup
+                        );
+                        found_any = true;
+                    }
                 }
             }
         }
@@ -812,7 +1020,7 @@ fn print_cross_format_analysis(results: &[&BenchmarkResult]) {
 
         let size_results: Vec<_> = results.iter().filter(|r| r.data_source_rows == size).copied().collect();
 
-        for engine in &["Legacy", "Vectorized"] {
+        for engine in &["Legacy", "Vectorized", "Hybrid"] {
             // Filter to only file-based formats (exclude in-memory)
             let file_results: Vec<_> = size_results.iter()
                 .filter(|r| r.engine == *engine && r.data_format != "In-Memory")
@@ -901,55 +1109,68 @@ fn print_best_case_analysis(results: &[&BenchmarkResult]) {
     for size in sizes {
         let size_results = &size_groups[&size];
         
-        let legacy_results: Vec<_> = size_results.iter()
-            .filter(|r| r.engine == "Legacy")
-            .copied()
-            .collect();
-        let vectorized_results: Vec<_> = size_results.iter()
-            .filter(|r| r.engine == "Vectorized")
-            .copied()
-            .collect();
-
-        if legacy_results.is_empty() || vectorized_results.is_empty() {
-            continue;
-        }
-
         println!("   Data Size: {} rows", format_number(size));
 
-        let best_legacy = legacy_results.iter().min_by(|a, b| 
-            a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
-        );
-        let best_vectorized = vectorized_results.iter().min_by(|a, b| 
-            a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
-        );
+        let engines = ["Legacy", "Vectorized", "Hybrid"];
+        let mut best_by_engine: std::collections::HashMap<&str, BenchmarkResult> =
+            std::collections::HashMap::new();
 
-        if let (Some(best_leg), Some(best_vec)) = (best_legacy, best_vectorized) {
+        for engine in engines {
+            let engine_results: Vec<_> = size_results
+                .iter()
+                .filter(|r| r.engine == engine)
+                .copied()
+                .collect();
+            if engine_results.is_empty() {
+                continue;
+            }
+            let best = engine_results.iter().min_by(|a, b| {
+                a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let worst = engine_results.iter().max_by(|a, b| {
+                a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            if let (Some(best), Some(worst)) = (best, worst) {
+                best_by_engine.insert(engine, (*best).clone());
+                if engine_results.len() > 1 {
+                    let ratio = worst.avg_ms / best.avg_ms;
+                    println!(
+                        "     {} format range: {} (best) to {} (worst) = {:.2}x difference",
+                        engine, best.data_format, worst.data_format, ratio
+                    );
+                }
+            }
+        }
+
+        if let (Some(best_leg), Some(best_vec)) =
+            (best_by_engine.get("Legacy"), best_by_engine.get("Vectorized"))
+        {
             let speedup = best_leg.avg_ms / best_vec.avg_ms;
-            println!("     Best Legacy ({}) → Best Vectorized ({}): {:.2}x",
-                     best_leg.data_format, best_vec.data_format, speedup);
+            println!(
+                "     Best Legacy ({}) → Best Vectorized ({}): {:.2}x",
+                best_leg.data_format, best_vec.data_format, speedup
+            );
         }
 
-        // Within-engine format comparisons at this size
-        if legacy_results.len() > 1 {
-            let worst_legacy = legacy_results.iter().max_by(|a, b| 
-                a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
+        if let (Some(best_leg), Some(best_hybrid)) =
+            (best_by_engine.get("Legacy"), best_by_engine.get("Hybrid"))
+        {
+            let speedup = best_leg.avg_ms / best_hybrid.avg_ms;
+            println!(
+                "     Best Legacy ({}) → Best Hybrid ({}): {:.2}x",
+                best_leg.data_format, best_hybrid.data_format, speedup
             );
-            if let (Some(best), Some(worst)) = (best_legacy, worst_legacy) {
-                let ratio = worst.avg_ms / best.avg_ms;
-                println!("     Legacy format range: {} (best) to {} (worst) = {:.2}x difference",
-                         best.data_format, worst.data_format, ratio);
-            }
         }
 
-        if vectorized_results.len() > 1 {
-            let worst_vectorized = vectorized_results.iter().max_by(|a, b| 
-                a.avg_ms.partial_cmp(&b.avg_ms).unwrap_or(std::cmp::Ordering::Equal)
+        if let (Some(best_hybrid), Some(best_vec)) =
+            (best_by_engine.get("Hybrid"), best_by_engine.get("Vectorized"))
+        {
+            let speedup = best_hybrid.avg_ms / best_vec.avg_ms;
+            println!(
+                "     Best Hybrid ({}) → Best Vectorized ({}): {:.2}x",
+                best_hybrid.data_format, best_vec.data_format, speedup
             );
-            if let (Some(best), Some(worst)) = (best_vectorized, worst_vectorized) {
-                let ratio = worst.avg_ms / best.avg_ms;
-                println!("     Vectorized format range: {} (best) to {} (worst) = {:.2}x difference",
-                         best.data_format, worst.data_format, ratio);
-            }
         }
 
         println!();
@@ -1005,11 +1226,11 @@ fn has_multiple_data_sizes(results: &[&BenchmarkResult]) -> bool {
     sizes.len() > 1
 }
 
-/// Format comparison table showing Legacy vs Vectorized performance
+/// Format comparison table showing Legacy vs other engine performance
 fn print_format_comparison_table(results: &[&BenchmarkResult]) {
     println!();
     println!("6. Format Performance Comparison");
-    println!("   Shows Legacy vs Vectorized performance by format");
+    println!("   Shows Legacy vs other engines by format");
     println!();
 
     // Group by data size
@@ -1046,17 +1267,24 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
         let indent = if multiple_sizes { "     " } else { "   " };
 
         // Print table header
-        println!("{}┌─────────────┬──────────────────┬────────────────────┬────────────────────┐", indent);
-        println!("{}│ Format      │ Legacy Avg (ms)  │ Vectorized Avg (ms)│ Vectorized Speedup │", indent);
-        println!("{}├─────────────┼──────────────────┼────────────────────┼────────────────────┤", indent);
+        println!("{}┌─────────────┬──────────────────┬──────────────────┬────────────────────┬────────────────────┐", indent);
+        println!("{}│ Format      │ Legacy Avg (ms)  │ Hybrid Avg (ms)  │ Vectorized Avg (ms)│ Vectorized Speedup │", indent);
+        println!("{}├─────────────┼──────────────────┼──────────────────┼────────────────────┼────────────────────┤", indent);
 
         // Print table rows
         for format in formats {
             let legacy = size_results.iter().find(|r| r.engine == "Legacy" && r.data_format == format);
+            let hybrid = size_results.iter().find(|r| r.engine == "Hybrid" && r.data_format == format);
             let vectorized = size_results.iter().find(|r| r.engine == "Vectorized" && r.data_format == format);
 
             let legacy_str = if let Some(leg) = legacy {
                 format!("{:.2}", leg.avg_ms)
+            } else {
+                "N/A".to_string()
+            };
+
+            let hybrid_str = if let Some(hyb) = hybrid {
+                format!("{:.2}", hyb.avg_ms)
             } else {
                 "N/A".to_string()
             };
@@ -1078,15 +1306,16 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
                 "N/A".to_string()
             };
 
-            println!("{}│ {:11} │ {:>16} │ {:>18} │ {:>18} │",
+            println!("{}│ {:11} │ {:>16} │ {:>16} │ {:>18} │ {:>18} │",
                      indent,
                      format,
                      legacy_str,
+                     hybrid_str,
                      vectorized_str,
                      speedup_str);
         }
 
-        println!("{}└─────────────┴──────────────────┴────────────────────┴────────────────────┘", indent);
+        println!("{}└─────────────┴──────────────────┴──────────────────┴────────────────────┴────────────────────┘", indent);
 
         if multiple_sizes {
             println!();
@@ -1101,7 +1330,7 @@ fn print_format_comparison_table(results: &[&BenchmarkResult]) {
 /// Generate comprehensive speedup matrix
 fn print_speedup_matrix(results: &[&BenchmarkResult]) {
     println!("5. Comprehensive Speedup Matrix");
-    println!("   Legacy (rows) → Vectorized (columns) speedup comparisons");
+    println!("   Legacy (rows) → Other Engines (columns) speedup comparisons");
     println!();
 
     // Group by data size
@@ -1119,7 +1348,7 @@ fn print_speedup_matrix(results: &[&BenchmarkResult]) {
 
         let size_results: Vec<_> = results.iter().filter(|r| r.data_source_rows == size).copied().collect();
 
-        // Separate Legacy and Vectorized configurations for this size
+        // Separate Legacy configurations and other engine configurations for this size
         let mut legacy_configs: Vec<&str> = size_results.iter()
             .filter(|r| r.engine == "Legacy")
             .map(|r| r.data_format.as_str())
@@ -1127,16 +1356,17 @@ fn print_speedup_matrix(results: &[&BenchmarkResult]) {
         legacy_configs.sort();
         legacy_configs.dedup();
 
-        let mut vec_configs: Vec<&str> = size_results.iter()
-            .filter(|r| r.engine == "Vectorized")
-            .map(|r| r.data_format.as_str())
+        let mut other_configs: Vec<(String, String)> = size_results
+            .iter()
+            .filter(|r| r.engine != "Legacy")
+            .map(|r| (r.engine.clone(), r.data_format.clone()))
             .collect();
-        vec_configs.sort();
-        vec_configs.dedup();
+        other_configs.sort();
+        other_configs.dedup();
 
-        if legacy_configs.is_empty() || vec_configs.is_empty() {
+        if legacy_configs.is_empty() || other_configs.is_empty() {
             let indent = if multiple_sizes { "     " } else { "   " };
-            println!("{}(Need both Legacy and Vectorized results for matrix)", indent);
+            println!("{}(Need both Legacy and other engine results for matrix)", indent);
             if multiple_sizes {
                 println!();
             }
@@ -1144,22 +1374,28 @@ fn print_speedup_matrix(results: &[&BenchmarkResult]) {
         }
 
         // Create labels
-        let create_label = |fmt: &str| -> String {
-            match fmt {
-                "In-Memory" => "Mem".to_string(),
-                "Ion" => "Ion".to_string(),
-                "Ion Binary" => "IonB".to_string(),
-                "Arrow" => "Arr".to_string(),
-                "Parquet" => "Pqt".to_string(),
-                _ => fmt.to_string(),
-            }
+        let create_label = |engine: &str, fmt: &str| -> String {
+            let fmt_label = match fmt {
+                "In-Memory" => "Mem",
+                "Ion" => "Ion",
+                "Ion Binary" => "IonB",
+                "Arrow" => "Arr",
+                "Parquet" => "Pqt",
+                other => other,
+            };
+            let eng_label = match engine {
+                "Vectorized" => "Vec",
+                "Hybrid" => "Hy",
+                other => other,
+            };
+            format!("{}-{}", eng_label, fmt_label)
         };
 
         let row_labels: Vec<String> = legacy_configs.iter()
-            .map(|fmt| create_label(fmt))
+            .map(|fmt| create_label("Legacy", fmt))
             .collect();
-        let col_labels: Vec<String> = vec_configs.iter()
-            .map(|fmt| create_label(fmt))
+        let col_labels: Vec<String> = other_configs.iter()
+            .map(|(engine, fmt)| create_label(engine, fmt))
             .collect();
 
         let max_label_len = row_labels.iter().map(|l| l.len()).max().unwrap_or(10);
@@ -1189,15 +1425,15 @@ fn print_speedup_matrix(results: &[&BenchmarkResult]) {
                 r.data_format == *legacy_fmt
             );
 
-            for vec_fmt in &vec_configs {
-                let vec_result = size_results.iter().find(|r| 
-                    r.engine == "Vectorized" && 
-                    r.data_format == *vec_fmt
+            for (engine, fmt) in &other_configs {
+                let other_result = size_results.iter().find(|r| 
+                    r.engine == *engine && 
+                    r.data_format == *fmt
                 );
 
-                let speedup_str = if let (Some(legacy), Some(vec)) = (legacy_result, vec_result) {
-                    if legacy.avg_ms > 0.0 && vec.avg_ms > 0.0 {
-                        let speedup = legacy.avg_ms / vec.avg_ms;
+                let speedup_str = if let (Some(legacy), Some(other)) = (legacy_result, other_result) {
+                    if legacy.avg_ms > 0.0 && other.avg_ms > 0.0 {
+                        let speedup = legacy.avg_ms / other.avg_ms;
                         format_speedup(speedup)
                     } else {
                         "N/A".to_string()
@@ -1220,9 +1456,9 @@ fn print_speedup_matrix(results: &[&BenchmarkResult]) {
     if !multiple_sizes {
         println!();
     }
-    println!("   Legend: >1.0x = Legacy faster, <1.0x = Vectorized faster");
-    println!("   Rows = Legacy configurations, Columns = Vectorized configurations");
-    println!("   Abbreviations: Mem=In-Memory, IonB=Ion Binary, Arr=Arrow, Pqt=Parquet");
+    println!("   Legend: >1.0x = Legacy faster, <1.0x = Other engine faster");
+    println!("   Rows = Legacy configurations, Columns = Other engine configurations");
+    println!("   Abbreviations: Vec=Vectorized, Hy=Hybrid, Mem=In-Memory, IonB=Ion Binary, Arr=Arrow, Pqt=Parquet");
 }
 
 /// Format speedup value with appropriate precision
