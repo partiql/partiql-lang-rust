@@ -1,8 +1,10 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::{RowFrame, SlotId, SlotValue};
-use crate::engine::value::{value_get_field_ref, value_ref_from_value_in_arena, ValueRef};
-use partiql_extension_ion::boxed_ion::BoxedIonType;
+use crate::engine::value::{value_ref_from_value_in_arena, ValueRef};
+use ion_rs_old::data_source::ToIonDataSource;
+use ion_rs_old::{IonReader, IonType, ReaderBuilder};
 use partiql_value::{BindingsName, Value};
+use rustc_hash::FxHashMap;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -98,28 +100,46 @@ impl RowReaderFactory for ValueRowReaderFactory {
     }
 }
 
+/// High-performance streaming Ion text reader with projection pushdown
+///
+/// This reader uses the ion_rs streaming API to read Ion data directly into
+/// row slots, avoiding materialization to Value objects. Similar to the
+/// vectorized PIonTextReader but operates on single rows.
+///
+/// # Performance Characteristics
+/// - Zero-copy for primitives (i64, f64, bool)
+/// - Minimal string allocations (only for projected string fields)
+/// - True projection pushdown (only reads requested fields)
+/// - Uses FxHashMap for O(1) field lookups
+///
+/// # Limitations
+/// - Single-level field paths only (no nested navigation like "a.b.c")
+/// - Dynamic type dispatch (may optimize to i64-only in future)
 pub struct IonRowReader {
     path: String,
-    iter: Option<partiql_extension_ion::boxed_ion::BoxedIonIterator>,
+    reader: Option<Box<ion_rs_old::Reader<'static>>>,
     layout: ScanLayout,
     caps: ReaderCaps,
-    projections: Vec<IonProjection>,
-    current_row: Option<Value>,
+    /// Maps field names to target slot IDs for O(1) lookup during reading
+    field_to_slot: FxHashMap<String, SlotId>,
+    /// Storage for string values to satisfy UntilNext lifetime guarantee
+    /// Cleared on each next_row, populated during reading
+    string_storage: Vec<String>,
 }
 
 impl IonRowReader {
     pub fn new(path: String) -> Self {
         IonRowReader {
             path,
-            iter: None,
+            reader: None,
             layout: ScanLayout::base_row(),
             caps: ReaderCaps {
                 stability: BufferStability::UntilNext,
                 can_project: true,
-                can_return_opaque: true,
+                can_return_opaque: false,
             },
-            projections: Vec::new(),
-            current_row: None,
+            field_to_slot: FxHashMap::default(),
+            string_storage: Vec::new(),
         }
     }
 }
@@ -135,23 +155,25 @@ impl RowReader for IonRowReader {
                 "reader does not support projection",
             ));
         }
-        self.projections = layout
-            .projections
-            .iter()
-            .map(|proj| match &proj.source {
-                ScanSource::BaseRow => IonProjection::BaseRow {
-                    target: proj.target_slot,
-                },
-                ScanSource::FieldPath(path) => IonProjection::FieldPath {
-                    target: proj.target_slot,
-                    keys: path.split('.').map(|s| s.to_string()).collect(),
-                },
-                ScanSource::ColumnIndex(index) => IonProjection::ColumnIndex {
-                    target: proj.target_slot,
-                    index: *index,
-                },
-            })
-            .collect();
+
+        // Build field name to slot mapping for O(1) lookup during reading
+        self.field_to_slot.clear();
+        for proj in &layout.projections {
+            match &proj.source {
+                ScanSource::FieldPath(field_name) => {
+                    // NOTE: Only single-level field paths supported (no "a.b.c")
+                    self.field_to_slot.insert(field_name.clone(), proj.target_slot);
+                }
+                ScanSource::BaseRow => {
+                    // BaseRow projection not supported with projection pushdown
+                    // Would require materializing entire row to Value
+                }
+                ScanSource::ColumnIndex(_) => {
+                    // ColumnIndex not applicable to Ion structs
+                }
+            }
+        }
+
         self.layout = layout;
         Ok(())
     }
@@ -159,59 +181,127 @@ impl RowReader for IonRowReader {
     fn open(&mut self) -> Result<()> {
         let file = File::open(&self.path)
             .map_err(|e| EngineError::ReaderError(format!("ion open failed: {e}")))?;
-        let reader = BufReader::new(file);
-        let boxed = BoxedIonType {}
-            .stream_from_read(reader)
-            .map_err(|e| EngineError::ReaderError(format!("ion parse failed: {e}")))?;
-        let iter = boxed
-            .try_into_iter()
-            .map_err(|e| EngineError::ReaderError(format!("ion iter failed: {e}")))?;
-        self.iter = Some(iter);
+        let buf_reader = BufReader::new(file);
+        
+        let ion_reader = ReaderBuilder::new()
+            .build(buf_reader)
+            .map_err(|e| EngineError::ReaderError(format!("ion reader creation failed: {e}")))?;
+        
+        // Box the reader to work around lifetime constraints
+        let boxed_reader: Box<ion_rs_old::Reader<'static>> = unsafe {
+            std::mem::transmute(Box::new(ion_reader))
+        };
+        
+        self.reader = Some(boxed_reader);
         Ok(())
     }
 
     fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool> {
-        let iter = match self.iter.as_mut() {
-            Some(iter) => iter,
-            None => return Ok(false),
-        };
-        let boxed = match iter.next() {
-            Some(Ok(value)) => value,
-            Some(Err(err)) => {
-                return Err(EngineError::ReaderError(format!(
-                    "ion read failed: {err}"
-                )))
-            }
+        let reader = match self.reader.as_mut() {
+            Some(r) => r,
             None => return Ok(false),
         };
 
-        let base_value = boxed.into_value();
-        self.current_row = Some(base_value);
-        let base_ref = match self.current_row.as_ref() {
-            Some(value) => ValueRef::from_owned(value),
-            None => ValueRef::Missing,
-        };
+        // Clear string storage from previous row (UntilNext stability)
+        self.string_storage.clear();
 
-        for proj in &self.projections {
-            let target = proj.target_slot() as usize;
-            if target >= out.slots.len() {
-                continue;
-            }
-            let value = match proj {
-                IonProjection::BaseRow { .. } => base_ref,
-                IonProjection::FieldPath { keys, .. } => {
-                    let mut current = base_ref;
-                    for key in keys {
-                        current = value_get_field_ref(current, key, out.arena);
+        // Read next Ion value (should be a struct)
+        let stream_item = reader
+            .next()
+            .map_err(|e| EngineError::ReaderError(format!("ion read failed: {e}")))?;
+
+        match stream_item {
+            ion_rs_old::StreamItem::Value(_ion_type) => {
+                // Step into the struct
+                reader
+                    .step_in()
+                    .map_err(|e| EngineError::ReaderError(format!("failed to step into struct: {e}")))?;
+
+                // Read struct fields and populate requested slots
+                loop {
+                    match reader
+                        .next()
+                        .map_err(|e| EngineError::ReaderError(format!("error reading struct field: {e}")))?
+                    {
+                        ion_rs_old::StreamItem::Value(ion_type) => {
+                            // Get field name
+                            let field_name = reader
+                                .field_name()
+                                .map_err(|e| {
+                                    EngineError::ReaderError(format!("failed to get field name: {e}"))
+                                })?;
+                            
+                            let field_text = field_name.text().ok_or_else(|| {
+                                EngineError::ReaderError("field name has no text".to_string())
+                            })?;
+
+                            // Check if this field is projected
+                            if let Some(&target_slot) = self.field_to_slot.get(field_text) {
+                                let target_idx = target_slot as usize;
+                                if target_idx < out.slots.len() {
+                                    // NOTE: Dynamic type dispatch - may optimize to i64-only in future
+                                    let value_ref = match ion_type {
+                                        IonType::Int => {
+                                            let val = reader.read_i64().map_err(|e| {
+                                                EngineError::ReaderError(format!("failed to read i64: {e}"))
+                                            })?;
+                                            ValueRef::I64(val)
+                                        }
+                                        IonType::Float => {
+                                            let val = reader.read_f64().map_err(|e| {
+                                                EngineError::ReaderError(format!("failed to read f64: {e}"))
+                                            })?;
+                                            ValueRef::F64(val)
+                                        }
+                                        IonType::Bool => {
+                                            let val = reader.read_bool().map_err(|e| {
+                                                EngineError::ReaderError(format!("failed to read bool: {e}"))
+                                            })?;
+                                            ValueRef::Bool(val)
+                                        }
+                                        IonType::String => {
+                                            let val = reader.read_str().map_err(|e| {
+                                                EngineError::ReaderError(format!("failed to read string: {e}"))
+                                            })?;
+                                            // Store owned string, return borrowed reference
+                                            self.string_storage.push(val.to_string());
+                                            let idx = self.string_storage.len() - 1;
+                                            ValueRef::Str(self.string_storage[idx].as_str())
+                                        }
+                                        IonType::Null => ValueRef::Null,
+                                        other_type => {
+                                            // For other types, skip for now
+                                            // Could materialize to Value via arena if needed
+                                            return Err(EngineError::ReaderError(format!(
+                                                "unsupported ion type for projection: {:?}",
+                                                other_type
+                                            )));
+                                        }
+                                    };
+                                    
+                                    out.slots[target_idx] = SlotValue::Val(extend_value_ref(value_ref));
+                                }
+                            }
+                            // If field not projected, it's automatically skipped (projection pushdown!)
+                        }
+                        ion_rs_old::StreamItem::Nothing => break,
+                        ion_rs_old::StreamItem::Null(_) => continue,
                     }
-                    current
                 }
-                IonProjection::ColumnIndex { .. } => ValueRef::Missing,
-            };
-            out.slots[target] = SlotValue::Val(extend_value_ref(value));
-        }
 
-        Ok(true)
+                // Step out of the struct
+                reader
+                    .step_out()
+                    .map_err(|e| EngineError::ReaderError(format!("failed to step out of struct: {e}")))?;
+
+                Ok(true)
+            }
+            ion_rs_old::StreamItem::Nothing => Ok(false),
+            ion_rs_old::StreamItem::Null(_) => {
+                // Skip null at top level, try next value
+                self.next_row(out)
+            }
+        }
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
@@ -219,8 +309,9 @@ impl RowReader for IonRowReader {
     }
 
     fn close(&mut self) -> Result<()> {
-        self.iter = None;
-        self.current_row = None;
+        self.reader = None;
+        self.string_storage.clear();
+        self.field_to_slot.clear();
         Ok(())
     }
 }
@@ -241,24 +332,9 @@ impl RowReaderFactory for IonRowReaderFactory {
     }
 }
 
-enum IonProjection {
-    BaseRow { target: SlotId },
-    FieldPath { target: SlotId, keys: Vec<String> },
-    ColumnIndex { target: SlotId, index: usize },
-}
-
-impl IonProjection {
-    fn target_slot(&self) -> SlotId {
-        match self {
-            IonProjection::BaseRow { target } => *target,
-            IonProjection::FieldPath { target, .. } => *target,
-            IonProjection::ColumnIndex { target, .. } => *target,
-        }
-    }
-}
-
 fn extend_value_ref<'a>(value: ValueRef<'_>) -> ValueRef<'a> {
     // Safety: IonRowReader guarantees the borrowed data outlives the row (UntilNext).
+    // String references point to string_storage which is cleared only on next next_row call.
     unsafe { std::mem::transmute(value) }
 }
 
