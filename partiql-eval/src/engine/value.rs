@@ -1,5 +1,7 @@
 use ordered_float::OrderedFloat;
+use partiql_value::datum::{DatumCategory, DatumCategoryRef, RefTupleView};
 use partiql_value::Value;
+use std::borrow::Cow;
 
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::RowArena;
@@ -76,6 +78,34 @@ pub fn value_get_field<'a>(value: ValueRef<'a>, key: &str) -> ValueRef<'a> {
             let name = BindingsName::CaseInsensitive(key.into());
             tuple.get(&name).map(ValueRef::from_owned).unwrap_or(ValueRef::Missing)
         }
+        _ => ValueRef::Missing,
+    }
+}
+
+pub fn value_get_field_ref<'a>(
+    value: ValueRef<'a>,
+    key: &str,
+    arena: &'a RowArena,
+) -> ValueRef<'a> {
+    match value {
+        ValueRef::Owned(Value::Tuple(tuple)) => {
+            let name = BindingsName::CaseInsensitive(key.into());
+            tuple
+                .get(&name)
+                .map(ValueRef::from_owned)
+                .unwrap_or(ValueRef::Missing)
+        }
+        ValueRef::Owned(Value::Variant(variant)) => match variant.category() {
+            DatumCategoryRef::Tuple(tuple_ref) => {
+                let name = BindingsName::CaseInsensitive(key.into());
+                match tuple_ref.get_val(&name) {
+                    Some(Cow::Borrowed(v)) => ValueRef::from_owned(v),
+                    Some(Cow::Owned(v)) => ValueRef::from_owned(arena.alloc(v)),
+                    None => ValueRef::Missing,
+                }
+            }
+            _ => ValueRef::Missing,
+        },
         _ => ValueRef::Missing,
     }
 }

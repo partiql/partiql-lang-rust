@@ -1,6 +1,6 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::{RowArena, RowFrame, SlotId, SlotValue};
-use crate::engine::value::{value_get_field, ValueOwned, ValueRef};
+use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
 use partiql_value::Value;
@@ -106,7 +106,8 @@ impl Program {
                         .keys
                         .get(*key_idx as usize)
                         .ok_or_else(|| EngineError::IllegalState("invalid key index".to_string()))?;
-                    regs[*dst as usize] = value_get_field(regs[*base as usize], key);
+                    regs[*dst as usize] =
+                        value_get_field_ref(regs[*base as usize], key, frame.arena);
                 }
                 Inst::StoreSlot { slot, src } => {
                     frame.slots[*slot as usize] = SlotValue::Val(regs[*src as usize]);

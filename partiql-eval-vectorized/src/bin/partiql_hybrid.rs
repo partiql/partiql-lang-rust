@@ -1,7 +1,9 @@
 mod common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse};
-use partiql_eval::engine::{PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory};
+use partiql_eval::engine::{
+    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory,
+};
 use partiql_logical::Scan;
 use partiql_value::{tuple, Tuple, Value};
 use std::time::Instant;
@@ -134,7 +136,7 @@ fn main() {
 
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
-    let provider = ValueScanProvider::new(total_rows);
+    let provider = HybridScanProvider::new(data_source.clone(), data_path.clone(), total_rows);
     let compiler = PlanCompiler::new(&provider);
     let compiled = match compiler.compile(&logical) {
         Ok(p) => p,
@@ -180,20 +182,44 @@ fn main() {
     println!("Rows returned:     {}", row_count);
 }
 
-struct ValueScanProvider {
+struct HybridScanProvider {
+    data_source: String,
+    data_path: Option<String>,
     total_rows: usize,
 }
 
-impl ValueScanProvider {
-    fn new(total_rows: usize) -> Self {
-        ValueScanProvider { total_rows }
+impl HybridScanProvider {
+    fn new(data_source: String, data_path: Option<String>, total_rows: usize) -> Self {
+        HybridScanProvider {
+            data_source,
+            data_path,
+            total_rows,
+        }
     }
 }
 
-impl ScanProvider for ValueScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
-        let rows = generate_rows(self.total_rows);
-        Ok(Box::new(ValueRowReaderFactory::new(rows)))
+impl ScanProvider for HybridScanProvider {
+    fn reader_factory(
+        &self,
+        _scan: &Scan,
+    ) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
+        match self.data_source.as_str() {
+            "mem" => {
+                let rows = generate_rows(self.total_rows);
+                Ok(Box::new(ValueRowReaderFactory::new(rows)))
+            }
+            "ion" | "ionb" => {
+                let path = self.data_path.clone().ok_or_else(|| {
+                    partiql_eval::engine::EngineError::ReaderError(
+                        "ion path required".to_string(),
+                    )
+                })?;
+                Ok(Box::new(IonRowReaderFactory::new(path)))
+            }
+            other => Err(partiql_eval::engine::EngineError::ReaderError(format!(
+                "unsupported data source: {other}"
+            ))),
+        }
     }
 }
 

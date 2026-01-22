@@ -13,7 +13,7 @@ pub use plan::{CompiledPlan, PlanInstance, RelOp, RelOpSpec, ResultStream, Schem
 pub use plan::{StepSpec};
 pub use reader::{
     BufferStability, ReaderCaps, RowReader, RowReaderFactory, ScanLayout, ScanProjection,
-    ScanSource, TypeHint, ValueRowReader, ValueRowReaderFactory,
+    ScanSource, TypeHint, IonRowReader, IonRowReaderFactory, ValueRowReader, ValueRowReaderFactory,
 };
 pub use row::{RowArena, RowFrame, RowView, SlotValue};
 pub use value::{ValueOwned, ValueRef, ValueView};

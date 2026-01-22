@@ -16,6 +16,8 @@ pub enum EngineError {
     UdfNotFound(String),
     #[error("invalid plan: {0}")]
     InvalidPlan(String),
+    #[error("reader error: {0}")]
+    ReaderError(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

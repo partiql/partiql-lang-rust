@@ -1,7 +1,9 @@
 mod common;
 
 use common::{create_catalog, parse, lower, compile, count_rows_from_file};
-use partiql_eval::engine::{PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory};
+use partiql_eval::engine::{
+    IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider, ValueRowReaderFactory,
+};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
@@ -623,21 +625,6 @@ fn run_hybrid_benchmark(
     iterations: usize,
     warmup_iterations: usize,
 ) -> BenchmarkResult {
-    if !matches!(format, DataFormat::InMemory { .. }) {
-        return BenchmarkResult {
-            query_name: query.name.clone(),
-            engine: "Hybrid".to_string(),
-            data_format: format.name().to_string(),
-            data_source_rows: format.row_count(),
-            output_rows: 0,
-            min_ms: 0.0,
-            max_ms: 0.0,
-            avg_ms: 0.0,
-            iterations: 0,
-            error: Some("Hybrid supports mem only".to_string()),
-        };
-    }
-
     let hybrid_query = query.query.replace("~input~", "data");
     let data_source_rows = format.row_count();
     let catalog = create_catalog("mem".to_string(), None);
@@ -679,7 +666,7 @@ fn run_hybrid_benchmark(
     };
 
     for _ in 0..warmup_iterations {
-        if let Ok(mut stream) = compile_hybrid(&logical, data_source_rows)
+        if let Ok(mut stream) = compile_hybrid(&logical, format, data_source_rows)
             .and_then(|plan| plan.execute())
         {
             while let Ok(Some(_row)) = stream.next_row() {}
@@ -690,7 +677,9 @@ fn run_hybrid_benchmark(
     let mut total_rows = 0;
 
     for _ in 0..iterations {
-        let mut stream = match compile_hybrid(&logical, data_source_rows).and_then(|plan| plan.execute()) {
+        let mut stream =
+            match compile_hybrid(&logical, format, data_source_rows).and_then(|plan| plan.execute())
+            {
             Ok(s) => s,
             Err(e) => {
                 return BenchmarkResult {
@@ -789,28 +778,67 @@ fn compile_vectorized(
 
 fn compile_hybrid(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
+    format: &DataFormat,
     total_rows: usize,
 ) -> partiql_eval::engine::Result<partiql_eval::engine::PlanInstance> {
-    let rows = generate_rows(total_rows);
-    let provider = HybridScanProvider::new(rows);
+    let provider = HybridScanProvider::new(format, total_rows);
     let compiler = PlanCompiler::new(&provider);
     let compiled = compiler.compile(logical)?;
     compiler.instantiate(compiled, None)
 }
 
 struct HybridScanProvider {
-    rows: Vec<Value>,
+    data_source: String,
+    data_path: Option<String>,
+    rows: Option<Vec<Value>>,
 }
 
 impl HybridScanProvider {
-    fn new(rows: Vec<Value>) -> Self {
-        HybridScanProvider { rows }
+    fn new(format: &DataFormat, total_rows: usize) -> Self {
+        match format {
+            DataFormat::InMemory { .. } => HybridScanProvider {
+                data_source: "mem".to_string(),
+                data_path: None,
+                rows: Some(generate_rows(total_rows)),
+            },
+            DataFormat::Ion { path } => HybridScanProvider {
+                data_source: "ion".to_string(),
+                data_path: Some(path.clone()),
+                rows: None,
+            },
+            DataFormat::IonBinary { path } => HybridScanProvider {
+                data_source: "ionb".to_string(),
+                data_path: Some(path.clone()),
+                rows: None,
+            },
+            _ => HybridScanProvider {
+                data_source: "unsupported".to_string(),
+                data_path: None,
+                rows: None,
+            },
+        }
     }
 }
 
 impl ScanProvider for HybridScanProvider {
     fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
-        Ok(Box::new(ValueRowReaderFactory::new(self.rows.clone())))
+        match self.data_source.as_str() {
+            "mem" => {
+                let rows = self.rows.clone().unwrap_or_default();
+                Ok(Box::new(ValueRowReaderFactory::new(rows)))
+            }
+            "ion" | "ionb" => {
+                let path = self.data_path.clone().ok_or_else(|| {
+                    partiql_eval::engine::EngineError::ReaderError(
+                        "ion path required".to_string(),
+                    )
+                })?;
+                Ok(Box::new(partiql_eval::engine::IonRowReaderFactory::new(path)))
+            }
+            _ => Err(partiql_eval::engine::EngineError::ReaderError(
+                "Hybrid supports mem/ion/ionb only".to_string(),
+            )),
+        }
     }
 }
 
