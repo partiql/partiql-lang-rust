@@ -1,6 +1,6 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::{RowFrame, SlotId, SlotValue};
-use crate::engine::value::{value_ref_from_value, ValueRef};
+use crate::engine::value::{value_ref_from_value_in_arena, ValueRef};
 use partiql_value::{BindingsName, Value};
 
 #[derive(Clone, Copy, Debug)]
@@ -62,9 +62,13 @@ pub trait RowReader {
     fn caps(&self) -> ReaderCaps;
     fn set_projection(&mut self, layout: ScanLayout) -> Result<()>;
     fn open(&mut self) -> Result<()>;
-    fn next_row<'a>(&'a mut self, out: &mut RowFrame<'a>) -> Result<bool>;
+    fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool>;
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
     fn close(&mut self) -> Result<()>;
+}
+
+pub trait RowReaderFactory {
+    fn create(&self) -> Result<Box<dyn RowReader>>;
 }
 
 pub struct ValueRowReader {
@@ -72,6 +76,23 @@ pub struct ValueRowReader {
     pos: usize,
     layout: ScanLayout,
     caps: ReaderCaps,
+}
+
+#[derive(Clone)]
+pub struct ValueRowReaderFactory {
+    rows: Vec<Value>,
+}
+
+impl ValueRowReaderFactory {
+    pub fn new(rows: Vec<Value>) -> Self {
+        ValueRowReaderFactory { rows }
+    }
+}
+
+impl RowReaderFactory for ValueRowReaderFactory {
+    fn create(&self) -> Result<Box<dyn RowReader>> {
+        Ok(Box::new(ValueRowReader::new(self.rows.clone())))
+    }
 }
 
 impl ValueRowReader {
@@ -109,7 +130,7 @@ impl RowReader for ValueRowReader {
         Ok(())
     }
 
-    fn next_row<'a>(&'a mut self, out: &mut RowFrame<'a>) -> Result<bool> {
+    fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool> {
         if self.pos >= self.rows.len() {
             return Ok(false);
         }
@@ -122,9 +143,13 @@ impl RowReader for ValueRowReader {
                 continue;
             }
             let value = match &proj.source {
-                ScanSource::BaseRow => value_ref_from_value(row),
+                ScanSource::BaseRow => Some(row),
                 ScanSource::FieldPath(path) => get_field_path(row, path),
                 ScanSource::ColumnIndex(index) => get_column_index(row, *index),
+            };
+            let value = match value {
+                Some(value) => value_ref_from_value_in_arena(value, out.arena),
+                None => ValueRef::Missing,
             };
             out.slots[target] = SlotValue::Val(value);
         }
@@ -140,7 +165,7 @@ impl RowReader for ValueRowReader {
     }
 }
 
-fn get_field_path<'a>(row: &'a Value, path: &str) -> ValueRef<'a> {
+fn get_field_path<'a>(row: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = row;
     for part in path.split('.') {
         let key = BindingsName::CaseInsensitive(part.into());
@@ -149,22 +174,18 @@ fn get_field_path<'a>(row: &'a Value, path: &str) -> ValueRef<'a> {
                 if let Some(value) = tuple.get(&key) {
                     current = value;
                 } else {
-                    return ValueRef::Missing;
+                    return None;
                 }
             }
-            _ => return ValueRef::Missing,
+            _ => return None,
         }
     }
-    value_ref_from_value(current)
+    Some(current)
 }
 
-fn get_column_index<'a>(row: &'a Value, index: usize) -> ValueRef<'a> {
+fn get_column_index<'a>(row: &'a Value, index: usize) -> Option<&'a Value> {
     match row {
-        Value::Tuple(tuple) => tuple
-            .values()
-            .nth(index)
-            .map(value_ref_from_value)
-            .unwrap_or(ValueRef::Missing),
-        _ => ValueRef::Missing,
+        Value::Tuple(tuple) => tuple.values().nth(index),
+        _ => None,
     }
 }

@@ -1,7 +1,9 @@
 use ordered_float::OrderedFloat;
 use partiql_value::Value;
 
+use crate::engine::error::{EngineError, Result};
 use crate::engine::row::RowArena;
+use partiql_value::BindingsName;
 
 pub type ValueOwned = Value;
 
@@ -30,13 +32,27 @@ impl<'a> ValueRef<'a> {
             _ => ValueRef::Owned(value),
         }
     }
+
+    pub fn as_i64(&self) -> Result<i64> {
+        match *self {
+            ValueRef::I64(v) => Ok(v),
+            _ => Err(EngineError::TypeError("expected i64".to_string())),
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool> {
+        match *self {
+            ValueRef::Bool(v) => Ok(v),
+            _ => Err(EngineError::TypeError("expected bool".to_string())),
+        }
+    }
 }
 
 pub fn value_ref_from_value<'a>(value: &'a Value) -> ValueRef<'a> {
     ValueRef::from_owned(value)
 }
 
-pub fn value_ref_from_value_in_arena<'a>(value: &Value, arena: &'a mut RowArena) -> ValueRef<'a> {
+pub fn value_ref_from_value_in_arena<'a>(value: &Value, arena: &'a RowArena) -> ValueRef<'a> {
     let owned = arena.alloc(value.clone());
     ValueRef::from_owned(owned)
 }
@@ -51,6 +67,16 @@ pub fn value_owned_from_ref(value: ValueRef<'_>) -> ValueOwned {
         ValueRef::Str(v) => Value::String(Box::new(v.to_string())),
         ValueRef::Bytes(v) => Value::Blob(Box::new(v.to_vec())),
         ValueRef::Owned(v) => v.clone(),
+    }
+}
+
+pub fn value_get_field<'a>(value: ValueRef<'a>, key: &str) -> ValueRef<'a> {
+    match value {
+        ValueRef::Owned(Value::Tuple(tuple)) => {
+            let name = BindingsName::CaseInsensitive(key.into());
+            tuple.get(&name).map(ValueRef::from_owned).unwrap_or(ValueRef::Missing)
+        }
+        _ => ValueRef::Missing,
     }
 }
 
@@ -74,6 +100,13 @@ impl<'a> ValueView<'a> {
     pub fn as_i64(&self) -> Option<i64> {
         match *self {
             ValueView::I64(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match *self {
+            ValueView::Bool(v) => Some(v),
             _ => None,
         }
     }

@@ -21,6 +21,10 @@ name = "partiql-legacy"
 path = "src/bin/partiql_legacy.rs"
 
 [[bin]]
+name = "partiql-hybrid"
+path = "src/bin/partiql_hybrid.rs"
+
+[[bin]]
 name = "partiql-comparison"
 path = "src/bin/partiql_comparison.rs"
 
