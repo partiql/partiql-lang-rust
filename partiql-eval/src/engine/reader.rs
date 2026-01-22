@@ -103,6 +103,8 @@ pub struct IonRowReader {
     iter: Option<partiql_extension_ion::boxed_ion::BoxedIonIterator>,
     layout: ScanLayout,
     caps: ReaderCaps,
+    projections: Vec<IonProjection>,
+    current_row: Option<Value>,
 }
 
 impl IonRowReader {
@@ -116,6 +118,8 @@ impl IonRowReader {
                 can_project: true,
                 can_return_opaque: true,
             },
+            projections: Vec::new(),
+            current_row: None,
         }
     }
 }
@@ -131,6 +135,23 @@ impl RowReader for IonRowReader {
                 "reader does not support projection",
             ));
         }
+        self.projections = layout
+            .projections
+            .iter()
+            .map(|proj| match &proj.source {
+                ScanSource::BaseRow => IonProjection::BaseRow {
+                    target: proj.target_slot,
+                },
+                ScanSource::FieldPath(path) => IonProjection::FieldPath {
+                    target: proj.target_slot,
+                    keys: path.split('.').map(|s| s.to_string()).collect(),
+                },
+                ScanSource::ColumnIndex(index) => IonProjection::ColumnIndex {
+                    target: proj.target_slot,
+                    index: *index,
+                },
+            })
+            .collect();
         self.layout = layout;
         Ok(())
     }
@@ -165,25 +186,29 @@ impl RowReader for IonRowReader {
         };
 
         let base_value = boxed.into_value();
-        let base_ref = value_ref_from_value_in_arena(&base_value, out.arena);
+        self.current_row = Some(base_value);
+        let base_ref = match self.current_row.as_ref() {
+            Some(value) => ValueRef::from_owned(value),
+            None => ValueRef::Missing,
+        };
 
-        for proj in &self.layout.projections {
-            let target = proj.target_slot as usize;
+        for proj in &self.projections {
+            let target = proj.target_slot() as usize;
             if target >= out.slots.len() {
                 continue;
             }
-            let value = match &proj.source {
-                ScanSource::BaseRow => base_ref,
-                ScanSource::FieldPath(path) => {
+            let value = match proj {
+                IonProjection::BaseRow { .. } => base_ref,
+                IonProjection::FieldPath { keys, .. } => {
                     let mut current = base_ref;
-                    for part in path.split('.') {
-                        current = value_get_field_ref(current, part, out.arena);
+                    for key in keys {
+                        current = value_get_field_ref(current, key, out.arena);
                     }
                     current
                 }
-                ScanSource::ColumnIndex(_) => ValueRef::Missing,
+                IonProjection::ColumnIndex { .. } => ValueRef::Missing,
             };
-            out.slots[target] = SlotValue::Val(value);
+            out.slots[target] = SlotValue::Val(extend_value_ref(value));
         }
 
         Ok(true)
@@ -195,6 +220,7 @@ impl RowReader for IonRowReader {
 
     fn close(&mut self) -> Result<()> {
         self.iter = None;
+        self.current_row = None;
         Ok(())
     }
 }
@@ -213,6 +239,27 @@ impl RowReaderFactory for IonRowReaderFactory {
     fn create(&self) -> Result<Box<dyn RowReader>> {
         Ok(Box::new(IonRowReader::new(self.path.clone())))
     }
+}
+
+enum IonProjection {
+    BaseRow { target: SlotId },
+    FieldPath { target: SlotId, keys: Vec<String> },
+    ColumnIndex { target: SlotId, index: usize },
+}
+
+impl IonProjection {
+    fn target_slot(&self) -> SlotId {
+        match self {
+            IonProjection::BaseRow { target } => *target,
+            IonProjection::FieldPath { target, .. } => *target,
+            IonProjection::ColumnIndex { target, .. } => *target,
+        }
+    }
+}
+
+fn extend_value_ref<'a>(value: ValueRef<'_>) -> ValueRef<'a> {
+    // Safety: IonRowReader guarantees the borrowed data outlives the row (UntilNext).
+    unsafe { std::mem::transmute(value) }
 }
 
 impl ValueRowReader {
