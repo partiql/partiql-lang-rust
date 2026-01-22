@@ -10,6 +10,7 @@ pub enum Expr {
     Literal(ValueOwned),
     SlotRef(SlotId),
     Add(Box<Expr>, Box<Expr>),
+    Mod(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
@@ -23,6 +24,7 @@ pub enum Inst {
     LoadSlot { dst: u16, slot: SlotId },
     LoadConst { dst: u16, const_idx: u16 },
     AddI64 { dst: u16, a: u16, b: u16 },
+    ModI64 { dst: u16, a: u16, b: u16 },
     EqI64 { dst: u16, a: u16, b: u16 },
     AndBool { dst: u16, a: u16, b: u16 },
     OrBool { dst: u16, a: u16, b: u16 },
@@ -68,6 +70,12 @@ impl Program {
                     let av = regs[*a as usize].as_i64()?;
                     let bv = regs[*b as usize].as_i64()?;
                     let owned = frame.arena.alloc(Value::Integer(av + bv));
+                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                }
+                Inst::ModI64 { dst, a, b } => {
+                    let av = regs[*a as usize].as_i64()?;
+                    let bv = regs[*b as usize].as_i64()?;
+                    let owned = frame.arena.alloc(Value::Integer(av % bv));
                     regs[*dst as usize] = ValueRef::from_owned(owned);
                 }
                 Inst::EqI64 { dst, a, b } => {
@@ -212,6 +220,13 @@ impl ExprCompiler {
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg();
                 self.builder.insts.push(Inst::AddI64 { dst, a: l, b: r });
+                Ok(dst)
+            }
+            Expr::Mod(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::ModI64 { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Eq(left, right) => {
@@ -392,6 +407,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 let right = self.lower_expr(right)?;
                 match op {
                     partiql_logical::BinaryOp::Add => Ok(Expr::Add(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Mod => Ok(Expr::Mod(left.into(), right.into())),
                     partiql_logical::BinaryOp::Eq => Ok(Expr::Eq(left.into(), right.into())),
                     partiql_logical::BinaryOp::And => Ok(Expr::And(left.into(), right.into())),
                     partiql_logical::BinaryOp::Or => Ok(Expr::Or(left.into(), right.into())),
