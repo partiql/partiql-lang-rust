@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
 use crate::engine::plan::{
-    Column, CompiledPlan, PipelineOp, PipelineSpec, PlanInstance, RelOp, RelOpSpec, Schema,
-    Step, StepSpec,
+    Column, CompiledPlan, PartiQLVM, PipelineSpec, ReaderFactoryEnum, RelOpSpec, Schema,
+    StepSpec,
 };
-use crate::engine::reader::{RowReaderFactory, ScanLayout, ScanProjection, ScanSource, TypeHint};
+use crate::engine::reader::{ScanLayout, ScanProjection, ScanSource, TypeHint};
 use crate::engine::row::SlotId;
 use crate::engine::{SlotResolver, UdfRegistry};
 use partiql_logical::{
@@ -16,7 +16,7 @@ use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub trait ScanProvider {
-    fn reader_factory(&self, scan: &Scan) -> Result<Box<dyn RowReaderFactory>>;
+    fn reader_factory(&self, scan: &Scan) -> Result<ReaderFactoryEnum>;
 }
 
 pub struct PlanCompiler<'a> {
@@ -125,9 +125,12 @@ impl<'a> PlanCompiler<'a> {
         let expr_compiler = LogicalExprCompiler::new(&resolver);
 
         let mut steps: Vec<StepSpec> = Vec::new();
+        let mut max_registers = 0usize;
+        
         if let Some(predicate_slot) = predicate_slot {
             for filter_expr in filters {
-                let program = expr_compiler.compile_to_program(filter_expr, predicate_slot)?;
+                let program = expr_compiler.compile_to_program(filter_expr, predicate_slot, slot_count as u16)?;
+                max_registers = max_registers.max(program.reg_count as usize);
                 steps.push(StepSpec::Filter {
                     program,
                     predicate_slot,
@@ -142,7 +145,8 @@ impl<'a> PlanCompiler<'a> {
                 exprs.push((idx as SlotId, expr.clone()));
                 columns.push(Column { name: name.clone() });
             }
-            let program = expr_compiler.compile_to_program_multi(&exprs)?;
+            let program = expr_compiler.compile_to_program_multi(&exprs, slot_count as u16)?;
+            max_registers = max_registers.max(program.reg_count as usize);
             steps.push(StepSpec::Project { program });
             Schema { columns }
         } else {
@@ -168,43 +172,19 @@ impl<'a> PlanCompiler<'a> {
             root: 0,
             schema,
             slot_count,
+            max_registers,
         })
     }
 
+    /// Create a PartiQLVM from a compiled plan
+    /// 
+    /// This is a convenience method that wraps PartiQLVM::new().
     pub fn instantiate(
         &self,
         compiled: CompiledPlan,
         udf: Option<Arc<dyn UdfRegistry>>,
-    ) -> Result<PlanInstance> {
-        let compiled = Arc::new(compiled);
-        let mut operators = Vec::with_capacity(compiled.nodes.len());
-
-        for node in &compiled.nodes {
-            match node {
-                RelOpSpec::Pipeline(spec) => {
-                    let reader = spec.reader_factory.create()?;
-                    let steps = spec
-                        .steps
-                        .iter()
-                        .cloned()
-                        .map(Step::from_spec)
-                        .collect();
-                    operators.push(RelOp::Pipeline(PipelineOp::new(
-                        spec.layout.clone(),
-                        steps,
-                        reader,
-                        udf.clone(),
-                    )));
-                }
-                _ => {
-                    return Err(EngineError::InvalidPlan(
-                        "unsupported operator spec".to_string(),
-                    ));
-                }
-            }
-        }
-
-        Ok(PlanInstance { compiled, operators })
+    ) -> Result<PartiQLVM> {
+        PartiQLVM::new(compiled, udf)
     }
 }
 

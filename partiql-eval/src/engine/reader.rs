@@ -1,7 +1,6 @@
 use crate::engine::error::{EngineError, Result};
-use crate::engine::row::{RowFrame, SlotId, SlotValue};
-use crate::engine::value::{value_ref_from_value_in_arena, ValueRef};
-use ion_rs_old::data_source::ToIonDataSource;
+use crate::engine::row::SlotId;
+use crate::engine::value::ValueRef;
 use ion_rs_old::{IonReader, IonType, ReaderBuilder};
 use partiql_value::{BindingsName, Value};
 use rustc_hash::FxHashMap;
@@ -67,12 +66,12 @@ pub trait RowReader {
     fn caps(&self) -> ReaderCaps;
     fn set_projection(&mut self, layout: ScanLayout) -> Result<()>;
     fn open(&mut self) -> Result<()>;
-    fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool>;
+    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool>;
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
     fn close(&mut self) -> Result<()>;
 }
 
-pub trait RowReaderFactory {
+pub trait RowReaderFactory: Clone {
     fn create(&self) -> Result<Box<dyn RowReader>>;
 }
 
@@ -82,6 +81,8 @@ pub trait RowReaderFactory {
 /// Generates fake columnar data with two Int64 columns:
 /// - Column "a": starts at 0, increments by 1
 /// - Column "b": starts at 100, increments by 1
+/// 
+/// Note: Does not support BaseRow projection - only field-level projections
 pub struct InMemGeneratedReader {
     current_row: i64,
     total_rows: usize,
@@ -202,7 +203,7 @@ impl RowReader for IonRowReader {
         Ok(())
     }
 
-    fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool> {
+    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool> {
         let reader = match self.reader.as_mut() {
             Some(r) => r,
             None => return Ok(false),
@@ -223,7 +224,7 @@ impl RowReader for IonRowReader {
                     .step_in()
                     .map_err(|e| EngineError::ReaderError(format!("failed to step into struct: {e}")))?;
 
-                // Read struct fields and populate requested slots
+                // Read struct fields and populate requested slot registers
                 loop {
                     match reader
                         .next()
@@ -244,7 +245,7 @@ impl RowReader for IonRowReader {
                             // Check if this field is projected
                             if let Some(&target_slot) = self.field_to_slot.get(field_text) {
                                 let target_idx = target_slot as usize;
-                                if target_idx < out.slots.len() {
+                                if target_idx < regs.len() {
                                     // NOTE: Dynamic type dispatch - may optimize to i64-only in future
                                     let value_ref = match ion_type {
                                         IonType::Int => {
@@ -285,7 +286,7 @@ impl RowReader for IonRowReader {
                                         }
                                     };
                                     
-                                    out.slots[target_idx] = SlotValue::Val(extend_value_ref(value_ref));
+                                    regs[target_idx] = extend_value_ref(value_ref);
                                 }
                             }
                             // If field not projected, it's automatically skipped (projection pushdown!)
@@ -305,7 +306,7 @@ impl RowReader for IonRowReader {
             ion_rs_old::StreamItem::Nothing => Ok(false),
             ion_rs_old::StreamItem::Null(_) => {
                 // Skip null at top level, try next value
-                self.next_row(out)
+                self.next_row(regs)
             }
         }
     }
@@ -322,6 +323,7 @@ impl RowReader for IonRowReader {
     }
 }
 
+#[derive(Clone)]
 pub struct IonRowReaderFactory {
     path: String,
 }
@@ -379,7 +381,7 @@ impl RowReader for InMemGeneratedReader {
         Ok(())
     }
 
-    fn next_row(&mut self, out: &mut RowFrame<'_>) -> Result<bool> {
+    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool> {
         // Check if we've generated all rows
         if self.current_row >= self.total_rows as i64 {
             return Ok(false);
@@ -389,19 +391,19 @@ impl RowReader for InMemGeneratedReader {
         let a_value = self.current_row;
         let b_value = self.current_row + 100;
 
-        // Populate slots based on projection layout
+        // Populate slot registers based on projection layout
         for proj in &self.layout.projections {
             let target = proj.target_slot as usize;
-            if target >= out.slots.len() {
+            if target >= regs.len() {
                 continue;
             }
             
             let value_ref = match &proj.source {
                 ScanSource::BaseRow => {
-                    // For BaseRow, we need to materialize the entire row as a Value
-                    use partiql_value::tuple;
-                    let row_value = tuple![("a", a_value), ("b", b_value)].into();
-                    value_ref_from_value_in_arena(&row_value, out.arena)
+                    // BaseRow not supported - readers don't have access to arena for materialization
+                    return Err(EngineError::UnsupportedExpr(
+                        "BaseRow projection not supported by reader".to_string(),
+                    ));
                 }
                 ScanSource::FieldPath(path) => {
                     // Generate value based on field name
@@ -421,7 +423,7 @@ impl RowReader for InMemGeneratedReader {
                 }
             };
             
-            out.slots[target] = SlotValue::Val(value_ref);
+            regs[target] = value_ref;
         }
 
         // Increment current row for next call
@@ -440,30 +442,5 @@ impl RowReader for InMemGeneratedReader {
 
     fn close(&mut self) -> Result<()> {
         Ok(())
-    }
-}
-
-fn get_field_path<'a>(row: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut current = row;
-    for part in path.split('.') {
-        let key = BindingsName::CaseInsensitive(part.into());
-        match current {
-            Value::Tuple(tuple) => {
-                if let Some(value) = tuple.get(&key) {
-                    current = value;
-                } else {
-                    return None;
-                }
-            }
-            _ => return None,
-        }
-    }
-    Some(current)
-}
-
-fn get_column_index<'a>(row: &'a Value, index: usize) -> Option<&'a Value> {
-    match row {
-        Value::Tuple(tuple) => tuple.values().nth(index),
-        _ => None,
     }
 }

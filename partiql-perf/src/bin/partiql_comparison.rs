@@ -1,4 +1,4 @@
-mod common;
+use partiql_perf::common;
 
 use common::{parse, lower, compile, count_rows_from_file, create_catalog};
 use partiql_eval::env::basic::MapBindings;

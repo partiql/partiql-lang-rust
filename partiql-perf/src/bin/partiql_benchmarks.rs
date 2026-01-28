@@ -1,9 +1,10 @@
-mod common;
+use partiql_perf::common;
 
 use common::{create_catalog, parse, lower, compile, count_rows_from_file};
 use partiql_eval::engine::{
     IonRowReaderFactory, PlanCompiler, RowReaderFactory, ScanProvider,
 };
+use partiql_eval::engine::ReaderFactoryEnum;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
@@ -265,7 +266,7 @@ fn main() {
         // },
         BenchmarkQuery {
             name: "Simple Projection with filter".to_string(),
-            query: "SELECT a, b FROM ~input~ WHERE a % 100000 = 0".to_string(),
+            query: "SELECT a, b FROM ~input~ WHERE ((a - a + b - b + a - a + b - b) + a % 100000) = 0".to_string(),
         },
     ];
 
@@ -697,42 +698,39 @@ fn run_hybrid_benchmark(
         }
     };
 
-    for _ in 0..warmup_iterations {
-        if let Ok(mut stream) = compile_hybrid(&logical, format, data_source_rows)
-            .and_then(|plan| plan.execute())
-        {
-            while let Ok(Some(_row)) = stream.next_row() {}
+    // Compile once outside the timing loop
+    let mut vm = match compile_hybrid(&logical, format, data_source_rows) {
+        Ok(v) => v,
+        Err(e) => {
+            return BenchmarkResult {
+                query_name: query.name.clone(),
+                engine: "Hybrid".to_string(),
+                data_format: format.name().to_string(),
+                data_source_rows,
+                output_rows: 0,
+                min_ms: 0.0,
+                max_ms: 0.0,
+                avg_ms: 0.0,
+                iterations: 0,
+                error: Some(format!("Compile error: {:?}", e)),
+            };
         }
+    };
+
+    // Warmup iterations
+    for _ in 0..warmup_iterations {
+        while let Ok(Some(_row)) = vm.next_row() {}
+        vm.reset().ok();
     }
 
     let mut timings = Vec::new();
     let mut total_rows = 0;
 
     for _ in 0..iterations {
-        let mut stream =
-            match compile_hybrid(&logical, format, data_source_rows).and_then(|plan| plan.execute())
-            {
-            Ok(s) => s,
-            Err(e) => {
-                return BenchmarkResult {
-                    query_name: query.name.clone(),
-                    engine: "Hybrid".to_string(),
-                    data_format: format.name().to_string(),
-                    data_source_rows,
-                    output_rows: 0,
-                    min_ms: 0.0,
-                    max_ms: 0.0,
-                    avg_ms: 0.0,
-                    iterations: 0,
-                    error: Some(format!("Compile error: {:?}", e)),
-                };
-            }
-        };
-
         let start = Instant::now();
         let mut row_count = 0;
         loop {
-            match stream.next_row() {
+            match vm.next_row() {
                 Ok(Some(_row)) => row_count += 1,
                 Ok(None) => break,
                 Err(e) => {
@@ -755,6 +753,22 @@ fn run_hybrid_benchmark(
         let elapsed = start.elapsed();
         timings.push(elapsed);
         total_rows = row_count;
+        
+        // Reset for next iteration
+        if let Err(e) = vm.reset() {
+            return BenchmarkResult {
+                query_name: query.name.clone(),
+                engine: "Hybrid".to_string(),
+                data_format: format.name().to_string(),
+                data_source_rows,
+                output_rows: 0,
+                min_ms: 0.0,
+                max_ms: 0.0,
+                avg_ms: 0.0,
+                iterations: 0,
+                error: Some(format!("Reset error: {:?}", e)),
+            };
+        }
     }
 
     let (min_ms, max_ms, avg_ms) = calculate_stats(&timings);
@@ -813,7 +827,7 @@ fn compile_hybrid(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     format: &DataFormat,
     total_rows: usize,
-) -> partiql_eval::engine::Result<partiql_eval::engine::PlanInstance> {
+) -> partiql_eval::engine::Result<partiql_eval::engine::PartiQLVM> {
     let provider = HybridScanProvider::new(format, total_rows);
     let compiler = PlanCompiler::new(&provider);
     let compiled = compiler.compile(logical)?;
@@ -854,7 +868,7 @@ impl HybridScanProvider {
 }
 
 impl ScanProvider for HybridScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<Box<dyn RowReaderFactory>> {
+    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::engine::Result<ReaderFactoryEnum> {
         match self.data_source.as_str() {
             "mem" => {
                 let num_rows = self.num_rows.ok_or_else(|| {
@@ -862,7 +876,7 @@ impl ScanProvider for HybridScanProvider {
                         "num_rows required for mem source".to_string(),
                     )
                 })?;
-                Ok(Box::new(partiql_eval::engine::InMemGeneratedReaderFactory::new(num_rows)))
+                Ok(ReaderFactoryEnum::InMem(partiql_eval::engine::InMemGeneratedReaderFactory::new(num_rows)))
             }
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {
@@ -870,7 +884,7 @@ impl ScanProvider for HybridScanProvider {
                         "ion path required".to_string(),
                     )
                 })?;
-                Ok(Box::new(partiql_eval::engine::IonRowReaderFactory::new(path)))
+                Ok(ReaderFactoryEnum::Ion(partiql_eval::engine::IonRowReaderFactory::new(path)))
             }
             _ => Err(partiql_eval::engine::EngineError::ReaderError(
                 "Hybrid supports mem/ion/ionb only".to_string(),

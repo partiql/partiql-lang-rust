@@ -1,0 +1,93 @@
+[package]
+name = "partiql-perf"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+autobenches = false
+
+[lib]
+name = "partiql_perf"
+path = "src/lib.rs"
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "partiql-metal-cli"
+path = "src/bin/partiql_vectorized.rs"
+bench = false
+
+[[bin]]
+name = "generate-data"
+path = "src/bin/generate_data.rs"
+bench = false
+
+[[bin]]
+name = "partiql-vectorized"
+path = "src/bin/partiql_vectorized.rs"
+bench = false
+
+[[bin]]
+name = "partiql-legacy"
+path = "src/bin/partiql_legacy.rs"
+bench = false
+
+[[bin]]
+name = "partiql-hybrid"
+path = "src/bin/partiql_hybrid.rs"
+bench = false
+
+[[bin]]
+name = "partiql-comparison"
+path = "src/bin/partiql_comparison.rs"
+bench = false
+
+[[bin]]
+name = "partiql-benchmarks"
+path = "src/bin/partiql_benchmarks.rs"
+bench = false
+
+[[bin]]
+name = "partiql-profile"
+path = "src/bin/partiql_profile.rs"
+bench = false
+
+[[bin]]
+name = "engine_profiler"
+path = "src/bin/engine_profiler.rs"
+bench = false
+
+[dependencies]
+glob = "0.3"
+indexmap = "2"
+memmap2 = "0.9"
+smallvec = "1.13"
+wide = "0.7"
+rustc-hash = "2.0"
+ion-rs = "0.18.1"
+arrow = "53.0"
+arrow-array = "53.0"
+arrow-buffer = "53.0"
+arrow-ipc = "53.0"
+arrow-schema = "53.0"
+bytes = "1.9"
+parquet = "53.0"
+partiql-logical = { path = "../partiql-logical" }
+partiql-ast-passes = { path = "../partiql-ast-passes" }
+partiql-catalog = { path = "../partiql-catalog" }
+partiql-eval = { path = "../partiql-eval" }
+partiql-eval-vectorized = { path = "../partiql-eval-vectorized" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
+partiql-parser = { path = "../partiql-parser" }
+partiql-types = { path = "../partiql-types" }
+partiql-value = { path = "../partiql-value" }
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.0"
+tempfile = "3.0"
+
+[[bench]]
+name = "simple_comparison"
+harness = false

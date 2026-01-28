@@ -9,11 +9,11 @@ pub mod value;
 pub use error::{EngineError, Result};
 pub use compiler::{PlanCompiler, ScanProvider};
 pub use expr::{Expr, ExprCompiler, Inst, LogicalExprCompiler, Program, SlotResolver, UdfRegistry};
-pub use plan::{CompiledPlan, PlanInstance, RelOp, RelOpSpec, ResultStream, Schema};
+pub use plan::{CompiledPlan, PartiQLVM, ReaderFactoryEnum, RelOp, RelOpSpec, ResultStream, Schema};
 pub use plan::{StepSpec};
 pub use reader::{
     BufferStability, ReaderCaps, RowReader, RowReaderFactory, ScanLayout, ScanProjection,
     ScanSource, TypeHint, IonRowReader, IonRowReaderFactory, InMemGeneratedReader, InMemGeneratedReaderFactory,
 };
-pub use row::{RowArena, RowFrame, RowView, SlotValue};
+pub use row::{Arena, RowView};
 pub use value::{ValueOwned, ValueRef, ValueView};

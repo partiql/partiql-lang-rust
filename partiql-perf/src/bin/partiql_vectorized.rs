@@ -1,4 +1,4 @@
-mod common;
+use partiql_perf::common;
 
 use common::{parse, lower, count_rows_from_file, create_catalog};
 use partiql_eval_vectorized::batch::VectorizedBatch;

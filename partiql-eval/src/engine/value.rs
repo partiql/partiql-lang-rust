@@ -4,7 +4,7 @@ use partiql_value::Value;
 use std::borrow::Cow;
 
 use crate::engine::error::{EngineError, Result};
-use crate::engine::row::RowArena;
+use crate::engine::row::Arena;
 use partiql_value::BindingsName;
 
 pub type ValueOwned = Value;
@@ -54,7 +54,7 @@ pub fn value_ref_from_value<'a>(value: &'a Value) -> ValueRef<'a> {
     ValueRef::from_owned(value)
 }
 
-pub fn value_ref_from_value_in_arena<'a>(value: &Value, arena: &'a RowArena) -> ValueRef<'a> {
+pub fn value_ref_from_value_in_arena<'a>(value: &Value, arena: &'a Arena) -> ValueRef<'a> {
     let owned = arena.alloc(value.clone());
     ValueRef::from_owned(owned)
 }
@@ -85,7 +85,7 @@ pub fn value_get_field<'a>(value: ValueRef<'a>, key: &str) -> ValueRef<'a> {
 pub fn value_get_field_ref<'a>(
     value: ValueRef<'a>,
     key: &str,
-    arena: &'a RowArena,
+    arena: &'a Arena,
 ) -> ValueRef<'a> {
     match value {
         ValueRef::Owned(Value::Tuple(tuple)) => {

@@ -1,5 +1,5 @@
 use crate::engine::error::{EngineError, Result};
-use crate::engine::row::{RowArena, RowFrame, SlotId, SlotValue};
+use crate::engine::row::{Arena, SlotId};
 use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
@@ -10,6 +10,7 @@ pub enum Expr {
     Literal(ValueOwned),
     SlotRef(SlotId),
     Add(Box<Expr>, Box<Expr>),
+    Sub(Box<Expr>, Box<Expr>),
     Mod(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -21,9 +22,9 @@ pub enum Expr {
 
 #[derive(Clone, Debug)]
 pub enum Inst {
-    LoadSlot { dst: u16, slot: SlotId },
     LoadConst { dst: u16, const_idx: u16 },
     AddI64 { dst: u16, a: u16, b: u16 },
+    SubI64 { dst: u16, a: u16, b: u16 },
     ModI64 { dst: u16, a: u16, b: u16 },
     EqI64 { dst: u16, a: u16, b: u16 },
     AndBool { dst: u16, a: u16, b: u16 },
@@ -40,66 +41,81 @@ pub struct Program {
     pub consts: Vec<ValueOwned>,
     pub keys: Vec<String>,
     pub reg_count: u16,
+    pub slot_count: u16,
 }
 
 impl Program {
+    /// Evaluate the program using borrowed registers from the VM
+    /// 
+    /// # Arguments
+    /// * `frame` - Row frame with arena for value storage
+    /// * `regs` - Pre-allocated register array from VM (first N are slots, rest are temporaries)
+    /// * `udf` - Optional UDF registry for function calls
+    /// 
+    /// The register array is borrowed from PartiQLVM and reused across all rows,
+    /// eliminating heap allocations during expression evaluation.
+    /// The first `slot_count` registers are reserved for slot data.
     pub fn eval<'a>(
         &self,
-        frame: &mut RowFrame<'a>,
+        arena: &'a Arena,
+        regs: &mut [ValueRef<'a>],
         udf: Option<&'a dyn UdfRegistry>,
     ) -> Result<()> {
-        let mut regs = vec![ValueRef::Missing; self.reg_count as usize];
-
         for inst in &self.insts {
             match inst {
-                Inst::LoadSlot { dst, slot } => {
-                    regs[*dst as usize] = match frame.slots[*slot as usize] {
-                        SlotValue::Val(v) => v,
-                        SlotValue::Owned(v) => ValueRef::from_owned(v),
-                    };
-                }
                 Inst::LoadConst { dst, const_idx } => {
                     let value = self
                         .consts
                         .get(*const_idx as usize)
                         .ok_or_else(|| EngineError::IllegalState("invalid const index".to_string()))?;
-                    let owned = frame.arena.alloc(value.clone());
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Safety: Constants are owned by Program which lives as long as the operator pipeline.
+                    // The operator pipeline lives for the entire query execution, which is longer than
+                    // any individual row ('a lifetime). Therefore it's safe to extend the lifetime.
+                    let value_ref: ValueRef<'a> = unsafe {
+                        std::mem::transmute(ValueRef::from_owned(value))
+                    };
+                    regs[*dst as usize] = value_ref;
                 }
                 Inst::AddI64 { dst, a, b } => {
                     let av = regs[*a as usize].as_i64()?;
                     let bv = regs[*b as usize].as_i64()?;
-                    let owned = frame.arena.alloc(Value::Integer(av + bv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::I64(av + bv);
+                }
+                Inst::SubI64 { dst, a, b } => {
+                    let av = regs[*a as usize].as_i64()?;
+                    let bv = regs[*b as usize].as_i64()?;
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::I64(av - bv);
                 }
                 Inst::ModI64 { dst, a, b } => {
                     let av = regs[*a as usize].as_i64()?;
                     let bv = regs[*b as usize].as_i64()?;
-                    let owned = frame.arena.alloc(Value::Integer(av % bv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::I64(av % bv);
                 }
                 Inst::EqI64 { dst, a, b } => {
                     let av = regs[*a as usize].as_i64()?;
                     let bv = regs[*b as usize].as_i64()?;
-                    let owned = frame.arena.alloc(Value::Boolean(av == bv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::Bool(av == bv);
                 }
                 Inst::AndBool { dst, a, b } => {
                     let av = regs[*a as usize].as_bool()?;
                     let bv = regs[*b as usize].as_bool()?;
-                    let owned = frame.arena.alloc(Value::Boolean(av && bv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::Bool(av && bv);
                 }
                 Inst::OrBool { dst, a, b } => {
                     let av = regs[*a as usize].as_bool()?;
                     let bv = regs[*b as usize].as_bool()?;
-                    let owned = frame.arena.alloc(Value::Boolean(av || bv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::Bool(av || bv);
                 }
                 Inst::NotBool { dst, src } => {
                     let sv = regs[*src as usize].as_bool()?;
-                    let owned = frame.arena.alloc(Value::Boolean(!sv));
-                    regs[*dst as usize] = ValueRef::from_owned(owned);
+                    // Zero-copy: store primitive directly in register
+                    regs[*dst as usize] = ValueRef::Bool(!sv);
                 }
                 Inst::GetField { dst, base, key_idx } => {
                     let key = self
@@ -107,10 +123,11 @@ impl Program {
                         .get(*key_idx as usize)
                         .ok_or_else(|| EngineError::IllegalState("invalid key index".to_string()))?;
                     regs[*dst as usize] =
-                        value_get_field_ref(regs[*base as usize], key, frame.arena);
+                        value_get_field_ref(regs[*base as usize], key, arena);
                 }
                 Inst::StoreSlot { slot, src } => {
-                    frame.slots[*slot as usize] = SlotValue::Val(regs[*src as usize]);
+                    // Copy from computation register to slot register
+                    regs[*slot as usize] = regs[*src as usize];
                 }
                 Inst::CallUdf {
                     dst,
@@ -126,7 +143,7 @@ impl Program {
                     for arg in args {
                         argv.push(regs[*arg as usize]);
                     }
-                    let result = registry.call(name, &argv, frame.arena)?;
+                    let result = registry.call(name, &argv, arena)?;
                     regs[*dst as usize] = result;
                 }
             }
@@ -137,7 +154,7 @@ impl Program {
 }
 
 pub trait UdfRegistry {
-    fn call(&self, name: &str, args: &[ValueRef<'_>], arena: &RowArena) -> Result<ValueRef<'_>>;
+    fn call(&self, name: &str, args: &[ValueRef<'_>], arena: &Arena) -> Result<ValueRef<'_>>;
 }
 
 pub trait SlotResolver {
@@ -153,15 +170,27 @@ pub struct ProgramBuilder {
     consts: Vec<ValueOwned>,
     keys: Vec<String>,
     next_reg: u16,
+    slot_count: u16,
 }
 
 impl ProgramBuilder {
+    pub fn new(slot_count: u16) -> Self {
+        ProgramBuilder {
+            insts: Vec::new(),
+            consts: Vec::new(),
+            keys: Vec::new(),
+            next_reg: slot_count,
+            slot_count,
+        }
+    }
+
     pub fn build(self) -> Program {
         Program {
             insts: self.insts,
             consts: self.consts,
             keys: self.keys,
             reg_count: self.next_reg,
+            slot_count: self.slot_count,
         }
     }
 
@@ -193,9 +222,9 @@ pub struct ExprCompiler {
 }
 
 impl ExprCompiler {
-    pub fn new() -> Self {
+    pub fn new(slot_count: u16) -> Self {
         ExprCompiler {
-            builder: ProgramBuilder::default(),
+            builder: ProgramBuilder::new(slot_count),
         }
     }
 
@@ -210,17 +239,22 @@ impl ExprCompiler {
                 Ok(reg)
             }
             Expr::SlotRef(slot) => {
-                let reg = self.builder.alloc_reg();
-                self.builder
-                    .insts
-                    .push(Inst::LoadSlot { dst: reg, slot: *slot });
-                Ok(reg)
+                // Slots are already in registers at indices [0..slot_count]
+                // No LoadSlot instruction needed!
+                Ok(*slot)
             }
             Expr::Add(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
                 let dst = self.builder.alloc_reg();
                 self.builder.insts.push(Inst::AddI64 { dst, a: l, b: r });
+                Ok(dst)
+            }
+            Expr::Sub(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::SubI64 { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Mod(left, right) => {
@@ -307,9 +341,9 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
         LogicalExprCompiler { resolver }
     }
 
-    pub fn compile_to_program(&self, expr: &ValueExpr, slot: SlotId) -> Result<Program> {
+    pub fn compile_to_program(&self, expr: &ValueExpr, slot: SlotId, slot_count: u16) -> Result<Program> {
         let expr = self.lower_expr(expr)?;
-        let mut compiler = ExprCompiler::new();
+        let mut compiler = ExprCompiler::new(slot_count);
         compiler.compile_to_slot(&expr, slot)?;
         Ok(compiler.finish())
     }
@@ -317,8 +351,9 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
     pub fn compile_to_program_multi(
         &self,
         exprs: &[(SlotId, ValueExpr)],
+        slot_count: u16,
     ) -> Result<Program> {
-        let mut compiler = ExprCompiler::new();
+        let mut compiler = ExprCompiler::new(slot_count);
         for (slot, expr) in exprs {
             let lowered = self.lower_expr(expr)?;
             compiler.compile_to_slot(&lowered, *slot)?;
@@ -408,6 +443,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 let right = self.lower_expr(right)?;
                 match op {
                     partiql_logical::BinaryOp::Add => Ok(Expr::Add(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Sub => Ok(Expr::Sub(left.into(), right.into())),
                     partiql_logical::BinaryOp::Mod => Ok(Expr::Mod(left.into(), right.into())),
                     partiql_logical::BinaryOp::Eq => Ok(Expr::Eq(left.into(), right.into())),
                     partiql_logical::BinaryOp::And => Ok(Expr::And(left.into(), right.into())),

@@ -34,6 +34,8 @@ members = [
     "extension/partiql-extension-visualize",
     "extension/partiql-extension-csv",
     "partiql-eval-vectorized",
+    "partiql-perf",
+    "partiql-benchmarks",
 ]
 
 [profile.dev.build-override]
@@ -49,3 +51,6 @@ similar.opt-level = 3
 [profile.bench]
 debug = true
 lto = true
+
+[profile.release]
+debug = true
