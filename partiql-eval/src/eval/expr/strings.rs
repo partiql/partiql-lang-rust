@@ -54,7 +54,7 @@ impl BindEvalExpr for EvalStringFn {
             EvalStringFn::Upper => create::<{ STRICT }, _, _>(args, |s| s.to_uppercase()),
             EvalStringFn::CharLength => create::<{ STRICT }, _, _>(args, |s| s.chars().count()),
             EvalStringFn::OctetLength => create::<{ STRICT }, _, _>(args, |s| s.len()),
-            EvalStringFn::BitLength => create::<{ STRICT }, _, _>(args, |s| (s.len() * 8)),
+            EvalStringFn::BitLength => create::<{ STRICT }, _, _>(args, |s| s.len() * 8),
         }
     }
 }

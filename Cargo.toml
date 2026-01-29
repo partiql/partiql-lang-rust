@@ -25,6 +25,7 @@ members = [
     "partiql-irgen",
     "partiql-parser",
     "partiql-rewriter",
+    "partiql-tools",
     "partiql-types",
     "partiql-value",
     "extension/partiql-extension-ddl",

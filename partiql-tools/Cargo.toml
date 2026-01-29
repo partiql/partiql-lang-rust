@@ -1,0 +1,60 @@
+[package]
+name = "partiql-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+autobins = false
+autobenches = false
+
+[lib]
+name = "partiql_tools"
+path = "src/lib.rs"
+
+[[bin]]
+name = "partiql-legacy"
+path = "src/bin/partiql_legacy.rs"
+bench = false
+
+[[bin]]
+name = "partiql-hybrid"
+path = "src/bin/partiql_hybrid.rs"
+bench = false
+
+[[bin]]
+name = "partiql-benchmarks"
+path = "src/bin/partiql_benchmarks.rs"
+bench = false
+
+[[bin]]
+name = "partiql-profile"
+path = "src/bin/partiql_profile.rs"
+bench = false
+
+[[bin]]
+name = "engine_profiler"
+path = "src/bin/engine_profiler.rs"
+bench = false
+
+[dependencies]
+glob = "0.3"
+indexmap = "2"
+memmap2 = "0.9"
+smallvec = "1.13"
+wide = "0.7"
+rustc-hash = "2.0"
+ion-rs = "0.18.1"
+bytes = "1.9"
+partiql-logical = { path = "../partiql-logical" }
+partiql-ast-passes = { path = "../partiql-ast-passes" }
+partiql-catalog = { path = "../partiql-catalog" }
+partiql-eval = { path = "../partiql-eval" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
+partiql-parser = { path = "../partiql-parser" }
+partiql-types = { path = "../partiql-types" }
+partiql-value = { path = "../partiql-value" }
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.0"
+tempfile = "3.0"
