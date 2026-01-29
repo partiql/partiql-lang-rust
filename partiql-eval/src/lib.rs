@@ -1,11 +1,38 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
+mod engine;
 pub mod env;
 pub mod error;
 pub mod eval;
 pub mod plan;
 pub mod test_value;
+
+// Public API from engine module (as per design.md Section 5.9)
+
+// Compilation & Execution
+pub use engine::{
+    CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, ScanProvider, Schema,
+};
+
+// Result Views (zero-copy accessors)
+// TODO: Where should this be exposed? At what module? Maybe a `value` module?
+// TODO: Where will ValueProvider/ValueWriter/RowProvider live publicly?
+pub use engine::{RowView, ValueView};
+
+// Owned Values (for serialization and legacy API conversion)
+// TODO: Remove.
+pub use engine::ValueOwned;
+
+// Reader Contract (for custom data sources)
+// TODO: Move all to a `reader`` module.
+pub use engine::{
+    BufferStability, ReaderCaps, ReaderFactory, RowReader, RowReaderFactory, ScanLayout,
+    ScanProjection, ScanSource, TypeHint,
+};
+
+// Error Handling
+pub use engine::{EngineError, Result};
 
 #[cfg(test)]
 mod tests {

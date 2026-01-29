@@ -1,0 +1,15 @@
+# Test data
+test_data/
+data/
+*.ion
+*.10n
+*.arrow
+*.parquet
+
+# Profiling outputs
+flamegraph*.svg
+perf.data*
+*.perfdata
+
+# Build artifacts
+target/
