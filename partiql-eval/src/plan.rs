@@ -53,7 +53,7 @@ macro_rules! correct_num_args_or_err {
     };
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum EvaluationMode {
     Strict,
     Permissive,
@@ -437,6 +437,15 @@ impl<'c> EvaluatorPlanner<'c> {
                 }
                 .bind::<{ STRICT }>(vec![]),
             ),
+            ValueExpr::DBRef(_) => {
+                // TODO: Convert DBReg to VarRef for legacy evaluator.
+                // DBRef should be resolved at compile time by PlanCompiler, not during evaluation
+                self.errors.push(PlanningError::IllegalState(
+                    "DBRef expressions must be resolved by PlanCompiler before evaluation planning"
+                        .to_string(),
+                ));
+                return Box::new(ErrorNode::new());
+            }
             ValueExpr::TupleExpr(expr) => {
                 let attrs: Vec<Box<dyn EvalExpr>> = expr
                     .attrs

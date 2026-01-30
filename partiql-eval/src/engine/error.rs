@@ -18,6 +18,8 @@ pub enum EngineError {
     InvalidPlan(String),
     #[error("reader error: {0}")]
     ReaderError(String),
+    #[error("slot index out of bounds: {0}")]
+    SlotOutOfBounds(u16),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

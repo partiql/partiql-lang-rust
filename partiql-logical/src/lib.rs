@@ -449,6 +449,22 @@ pub struct ExprQuery {
     pub expr: ValueExpr,
 }
 
+/// Represents a database object reference with a catalog name and path.
+/// Used for qualified table references like `my_catalog.schema.table`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DBRef {
+    /// Name of the catalog
+    pub catalog: String,
+
+    /// Path to the database object - each component with case sensitivity
+    /// Examples:
+    /// - Single table: vec![BindingsName("users")]
+    /// - Schema.table: vec![BindingsName("public"), BindingsName("users")]
+    /// - Schema.schema.table: vec![BindingsName("db"), BindingsName("public"), BindingsName("users")]
+    pub path: Vec<BindingsName<'static>>,
+}
+
 /// Represents a `PartiQL` value expression. Evaluation of a [`ValueExpr`] leads to a `PartiQL` value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -460,6 +476,7 @@ pub enum ValueExpr {
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
     VarRef(BindingsName<'static>, VarRefType),
+    DBRef(DBRef),
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),

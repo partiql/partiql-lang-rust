@@ -31,12 +31,10 @@ use partiql_catalog::call_defs::{CallArgument, CallDef};
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 
 use crate::functions::Function;
-use partiql_ast_passes::name_resolver::NameRef;
 use partiql_catalog::catalog::SharedCatalog;
 use partiql_common::node::{IdAnnotated, NodeId};
 
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
-use partiql_logical::ValueExpr::DynamicLookup;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -306,195 +304,123 @@ impl<'a> AstToLogical<'a> {
             .unwrap_or_else(|| self.gen_id())
     }
 
-    fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
-        fn binding_to_static<'a>(binding: &'a BindingsName<'a>) -> BindingsName<'static> {
-            match binding {
-                BindingsName::CaseSensitive(n) => {
-                    BindingsName::CaseSensitive(Cow::Owned(n.as_ref().to_string()))
-                }
-                BindingsName::CaseInsensitive(n) => {
-                    BindingsName::CaseInsensitive(Cow::Owned(n.as_ref().to_string()))
-                }
+    /// Convert a `SymbolPrimitive` into a `BindingsName`
+    fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
+        match sym.case {
+            CaseSensitivity::CaseSensitive => {
+                BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
+            }
+            CaseSensitivity::CaseInsensitive => {
+                BindingsName::CaseInsensitive(Cow::Owned(sym.value.clone()))
             }
         }
+    }
 
-        // Convert a `SymbolPrimitive` into a `BindingsName`
-        fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
-            match sym.case {
-                CaseSensitivity::CaseSensitive => {
-                    BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
-                }
-                CaseSensitivity::CaseInsensitive => {
-                    BindingsName::CaseInsensitive(Cow::Owned(sym.value.clone()))
-                }
-            }
+    /// Check if two variable names match (considering case sensitivity)
+    fn names_match(a: &str, a_case: &CaseSensitivity, b: &str, b_case: &CaseSensitivity) -> bool {
+        match (a_case, b_case) {
+            (CaseSensitivity::CaseSensitive, CaseSensitivity::CaseSensitive) => a == b,
+            _ => unicase::eq(a, b),
         }
-        // Convert a `name_resolver::Symbol` into a `BindingsName`
-        fn sym_to_binding(sym: &name_resolver::Symbol) -> Option<BindingsName<'static>> {
-            match sym {
-                name_resolver::Symbol::Known(sym) => Some(symprim_to_binding(sym)),
-                name_resolver::Symbol::Unknown(_) => None,
-            }
-        }
+    }
 
+    /// Search for a variable in local scope (schema variables)
+    fn search_locals(&self, varref: &ast::VarRef) -> Option<logical::ValueExpr> {
+        // Walk up the id_stack to find variables in scope
         for id in self.id_stack.iter().rev() {
-            if let Some(key_schema) = self.key_registry.schema.get(id) {
-                let key_schema: &name_resolver::KeySchema = key_schema;
+            if let Some(scope_ids) = self.key_registry.in_scope.get(id) {
+                // Collect all variables produced in this scope
+                let mut scope_vars: Vec<String> = Vec::new();
+                for scope_id in scope_ids {
+                    if let Some(schema) = self.key_registry.schema.get(scope_id) {
+                        for produce in &schema.produce {
+                            if let name_resolver::Symbol::Known(sym) = produce {
+                                scope_vars.push(sym.value.clone());
+                            }
+                        }
+                    }
+                }
 
-                let name_ref: &NameRef = key_schema
-                    .consume
-                    .iter()
-                    .find(|name_ref| name_ref.sym == varref.name)
-                    .expect("NameRef");
+                if scope_vars.is_empty() {
+                    continue;
+                }
 
-                let var_binding = symprim_to_binding(&name_ref.sym);
-                let mut lookups = vec![];
-
-                if matches!(self.current_ctx(), Some(QueryContext::Order)) {
-                    if let Some(renames) = self.projection_renames.last() {
-                        let binding = renames
-                            .iter()
-                            .find(|(k, _)| {
-                                let SymbolPrimitive { value, case } = &name_ref.sym;
-                                match case {
-                                    CaseSensitivity::CaseSensitive => value == *k,
-                                    CaseSensitivity::CaseInsensitive => unicase::eq(value, *k),
-                                }
-                            })
-                            .map_or_else(
-                                || symprim_to_binding(&name_ref.sym),
-                                |(_k, v)| binding_to_static(v),
-                            );
-
-                        lookups.push(DynamicLookup(Box::new(vec![ValueExpr::VarRef(
-                            binding,
+                // If multiple variables in scope, names must match exactly
+                if scope_vars.len() > 1 {
+                    for var_name in &scope_vars {
+                        if Self::names_match(
+                            &varref.name.value,
+                            &varref.name.case,
+                            var_name,
+                            &CaseSensitivity::CaseInsensitive, // scope vars are case-insensitive
+                        ) {
+                            return Some(ValueExpr::VarRef(
+                                Self::symprim_to_binding(&varref.name),
+                                VarRefType::Local,
+                            ));
+                        }
+                    }
+                }
+                // If single variable in scope
+                else if let Some(single_var_name) = scope_vars.first() {
+                    if Self::names_match(
+                        &varref.name.value,
+                        &varref.name.case,
+                        single_var_name,
+                        &CaseSensitivity::CaseInsensitive,
+                    ) {
+                        // Names match - return the variable reference
+                        return Some(ValueExpr::VarRef(
+                            Self::symprim_to_binding(&varref.name),
                             VarRefType::Local,
-                        )])));
+                        ));
+                    } else {
+                        // Names don't match - assume path on that variable
+                        let single_var_binding =
+                            BindingsName::CaseInsensitive(Cow::Owned(single_var_name.clone()));
+                        return Some(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(single_var_binding, VarRefType::Local)),
+                            vec![PathComponent::Key(Self::symprim_to_binding(&varref.name))],
+                        ));
                     }
                 }
-
-                for lookup in &name_ref.lookup {
-                    match lookup {
-                        name_resolver::NameLookup::Global => {
-                            let var_ref_expr =
-                                ValueExpr::VarRef(var_binding.clone(), VarRefType::Global);
-                            if !lookups.contains(&var_ref_expr) {
-                                lookups.push(var_ref_expr.clone());
-                            }
-                        }
-                        name_resolver::NameLookup::Local => {
-                            if let Some(scope_ids) = self.key_registry.in_scope.get(id) {
-                                let scopes: Vec<&name_resolver::KeySchema> = scope_ids
-                                    .iter()
-                                    .filter_map(|scope_id| self.key_registry.schema.get(scope_id))
-                                    .collect();
-
-                                let mut exact = scopes.iter().filter(|key_schema| {
-                                    key_schema.produce.contains(&name_resolver::Symbol::Known(
-                                        name_ref.sym.clone(),
-                                    ))
-                                });
-
-                                if let Some(_matching) = exact.next() {
-                                    let var_ref_expr =
-                                        ValueExpr::VarRef(var_binding.clone(), VarRefType::Local);
-                                    lookups.push(var_ref_expr);
-                                    continue;
-                                }
-
-                                for schema in scopes {
-                                    for produce in &schema.produce {
-                                        if let name_resolver::Symbol::Known(sym) = produce {
-                                            if (sym == &varref.name)
-                                                || (sym.value.to_lowercase()
-                                                    == varref.name.value.to_lowercase()
-                                                    && varref.name.case
-                                                        == ast::CaseSensitivity::CaseInsensitive)
-                                            {
-                                                let expr = ValueExpr::VarRef(
-                                                    sym_to_binding(produce).unwrap_or_else(|| {
-                                                        symprim_to_binding(&self.gen_id())
-                                                    }),
-                                                    VarRefType::Local,
-                                                );
-                                                if !lookups.contains(&expr) {
-                                                    lookups.push(expr);
-                                                }
-
-                                                continue;
-                                            } else if let Some(_type_entry) = self
-                                                .catalog
-                                                .resolve_type(name_ref.sym.value.as_ref())
-                                            {
-                                                let expr = ValueExpr::VarRef(
-                                                    var_binding.clone(),
-                                                    VarRefType::Global,
-                                                );
-                                                if !lookups.contains(&expr) {
-                                                    lookups.push(expr);
-                                                }
-                                                continue;
-                                            } else {
-                                                let path = logical::ValueExpr::Path(
-                                                    Box::new(ValueExpr::VarRef(
-                                                        sym_to_binding(produce).unwrap_or_else(
-                                                            || symprim_to_binding(&self.gen_id()),
-                                                        ),
-                                                        VarRefType::Local,
-                                                    )),
-                                                    vec![PathComponent::Key(var_binding.clone())],
-                                                );
-
-                                                if !lookups.contains(&path) {
-                                                    lookups.push(path);
-                                                }
-                                            }
-                                        } else if let name_resolver::Symbol::Unknown(num) = produce
-                                        {
-                                            let formatted_num = format!("_{num}");
-                                            if formatted_num == varref.name.value {
-                                                let expr = ValueExpr::VarRef(
-                                                    BindingsName::CaseInsensitive(Cow::Owned(
-                                                        formatted_num,
-                                                    )),
-                                                    VarRefType::Local,
-                                                );
-                                                if !lookups.contains(&expr) {
-                                                    lookups.push(expr);
-                                                    continue;
-                                                }
-                                            } else {
-                                                let path = logical::ValueExpr::Path(
-                                                    Box::new(ValueExpr::VarRef(
-                                                        sym_to_binding(produce).unwrap_or({
-                                                            BindingsName::CaseInsensitive(
-                                                                Cow::Owned(formatted_num),
-                                                            )
-                                                        }),
-                                                        VarRefType::Local,
-                                                    )),
-                                                    vec![PathComponent::Key(var_binding.clone())],
-                                                );
-
-                                                if !lookups.contains(&path) {
-                                                    lookups.push(path);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                return ValueExpr::DynamicLookup(Box::new(lookups));
             }
         }
 
-        // TODO in the presence of schema, error if the variable reference doesn't correspond to a data table
+        None
+    }
 
-        // assume global
-        ValueExpr::VarRef(symprim_to_binding(&varref.name), VarRefType::Global)
+    /// Search for a variable in global scope (catalog)
+    fn search_globals(&self, varref: &ast::VarRef) -> Option<logical::ValueExpr> {
+        // Check if catalog has this as a type entry (table/view)
+        if self.catalog.resolve_type(&varref.name.value).is_some() {
+            // Return a DBRef for catalog-registered database objects
+            return Some(ValueExpr::DBRef(logical::DBRef {
+                catalog: self.catalog.name().to_string(),
+                path: vec![Self::symprim_to_binding(&varref.name)],
+            }));
+        }
+
+        None
+    }
+
+    fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
+        // Resolution order depends on qualifier:
+        // - Unqualified (no @): search globals first, then locals
+        // - Qualified (with @): search locals first, then globals
+        let resolved = match varref.qualifier {
+            ast::ScopeQualifier::Unqualified => self
+                .search_globals(varref)
+                .or_else(|| self.search_locals(varref)),
+            ast::ScopeQualifier::Qualified => self
+                .search_locals(varref)
+                .or_else(|| self.search_globals(varref)),
+        };
+
+        // If not found in either scope, assume global (for backward compatibility)
+        resolved.unwrap_or_else(|| {
+            ValueExpr::VarRef(Self::symprim_to_binding(&varref.name), VarRefType::Global)
+        })
     }
 
     #[inline]
@@ -2121,27 +2047,26 @@ mod tests {
     fn test_plan_type_entry_in_catalog() {
         // Expected Logical Plan
         let mut expected_logical = LogicalPlan::new();
+
+        // c.id resolves to VarRef(Local) since c is a local alias
         let my_id = ValueExpr::Path(
-            Box::new(ValueExpr::DynamicLookup(Box::new(vec![
-                ValueExpr::VarRef(
-                    BindingsName::CaseInsensitive("c".to_string().into()),
-                    VarRefType::Local,
-                ),
-                ValueExpr::VarRef(
-                    BindingsName::CaseInsensitive("c".to_string().into()),
-                    VarRefType::Global,
-                ),
-            ]))),
+            Box::new(ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("c".to_string().into()),
+                VarRefType::Local,
+            )),
             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                 "id".to_string().into(),
             ))],
         );
 
+        // customers.name resolves to DBRef since customers is in the catalog
         let my_name = ValueExpr::Path(
-            Box::new(ValueExpr::DynamicLookup(Box::new(vec![ValueExpr::VarRef(
-                BindingsName::CaseInsensitive("customers".to_string().into()),
-                VarRefType::Global,
-            )]))),
+            Box::new(ValueExpr::DBRef(logical::DBRef {
+                catalog: "default".to_string(),
+                path: vec![BindingsName::CaseInsensitive(
+                    "customers".to_string().into(),
+                )],
+            })),
             vec![PathComponent::Key(BindingsName::CaseInsensitive(
                 "name".to_string().into(),
             ))],
@@ -2154,11 +2079,14 @@ mod tests {
             ]),
         }));
 
+        // Scan expr resolves to DBRef since customers is in the catalog
         let scan = expected_logical.add_operator(BindingsOp::Scan(logical::Scan {
-            expr: ValueExpr::DynamicLookup(Box::new(vec![ValueExpr::VarRef(
-                BindingsName::CaseInsensitive("customers".to_string().into()),
-                VarRefType::Global,
-            )])),
+            expr: ValueExpr::DBRef(logical::DBRef {
+                catalog: "default".to_string(),
+                path: vec![BindingsName::CaseInsensitive(
+                    "customers".to_string().into(),
+                )],
+            }),
             as_key: "c".to_string(),
             at_key: None,
         }));

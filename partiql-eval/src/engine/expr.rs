@@ -407,6 +407,26 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 .resolve_var(name, scope.clone())
                 .map(Expr::SlotRef)
                 .ok_or_else(|| EngineError::UnsupportedExpr(format!("unresolved var {name:?}"))),
+            ValueExpr::DBRef(db_ref) => {
+                // DBRef represents a catalog-registered database object (table/view)
+                // Resolve the first component of the path as a global variable
+                if let Some(name) = db_ref.path.first() {
+                    self.resolver
+                        .resolve_var(name, VarRefType::Global)
+                        .map(Expr::SlotRef)
+                        .ok_or_else(|| {
+                            EngineError::UnsupportedExpr(format!(
+                                "unresolved DB object {}.{}",
+                                db_ref.catalog,
+                                bindings_name_to_string(name)
+                            ))
+                        })
+                } else {
+                    Err(EngineError::UnsupportedExpr(
+                        "DBRef with empty path".to_string(),
+                    ))
+                }
+            }
             ValueExpr::DynamicLookup(lookups) => {
                 for lookup in lookups.iter() {
                     if let Ok(expr) = self.lower_expr(lookup) {
@@ -416,15 +436,18 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 Err(EngineError::UnsupportedExpr("dynamic lookup".to_string()))
             }
             ValueExpr::Path(base, components) => {
-                if let Some((is_alias, base_slot)) = resolve_alias_info(self.resolver, base) {
-                    if let Some(PathComponent::Key(name)) = components.first() {
-                        if let Some(slot) = self.resolver.resolve_field(name) {
-                            return Ok(Expr::SlotRef(slot));
-                        }
+                // First, try to resolve the first component directly as a field
+                if let Some(PathComponent::Key(name)) = components.first() {
+                    if let Some(slot) = self.resolver.resolve_field(name) {
+                        return Ok(Expr::SlotRef(slot));
                     }
+                }
 
+                // Check if base is an alias with a resolvable slot
+                if let Some((is_alias, base_slot)) = resolve_alias_info(self.resolver, base) {
                     if is_alias {
                         if let Some(base_slot) = base_slot {
+                            // We have a resolved base slot - build GetField chain
                             let mut current = Expr::SlotRef(base_slot);
                             for component in components {
                                 match component {
@@ -435,40 +458,36 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                                         );
                                     }
                                     _ => {
-                                        return Err(EngineError::UnsupportedExpr(
-                                            "unsupported path component".to_string(),
-                                        ));
+                                        return Err(EngineError::UnsupportedExpr(format!(
+                                            "unsupported path component: {:?}",
+                                            component
+                                        )));
                                     }
                                 }
                             }
-                            Ok(current)
-                        } else {
-                            Err(EngineError::UnsupportedExpr(
-                                "alias path requires base row slot".to_string(),
-                            ))
+                            return Ok(current);
                         }
-                    } else {
-                        Err(EngineError::UnsupportedExpr(
-                            "unsupported path base".to_string(),
-                        ))
+                        // is_alias=true but base_slot=None means VarRef(Local) that can't be resolved yet
+                        // This can happen for table names in FROM clause - fall through to generic handling
                     }
-                } else {
-                    let mut current = self.lower_expr(base)?;
-                    for component in components {
-                        match component {
-                            PathComponent::Key(name) => {
-                                current =
-                                    Expr::GetField(current.into(), bindings_name_to_string(name));
-                            }
-                            _ => {
-                                return Err(EngineError::UnsupportedExpr(
-                                    "unsupported path component".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                    Ok(current)
                 }
+
+                // Generic path handling - lower the base expression and build GetField chain
+                let mut current = self.lower_expr(base)?;
+                for component in components {
+                    match component {
+                        PathComponent::Key(name) => {
+                            current = Expr::GetField(current.into(), bindings_name_to_string(name));
+                        }
+                        _ => {
+                            return Err(EngineError::UnsupportedExpr(format!(
+                                "unsupported path component: {:?}",
+                                component
+                            )));
+                        }
+                    }
+                }
+                Ok(current)
             }
             ValueExpr::BinaryExpr(op, left, right) => {
                 let left = self.lower_expr(left)?;
@@ -534,16 +553,22 @@ fn resolve_alias_info<R: SlotResolver>(
     base: &ValueExpr,
 ) -> Option<(bool, Option<SlotId>)> {
     match base {
-        ValueExpr::VarRef(name, _) => {
-            if resolver.is_alias(name) {
+        ValueExpr::VarRef(name, scope) => {
+            // For Local scope VarRefs, treat them as aliases
+            // This handles cases like "FROM data" where "data" is both table and alias
+            if *scope == VarRefType::Local {
+                Some((true, resolver.resolve_var(name, scope.clone())))
+            } else if resolver.is_alias(name) {
                 Some((true, resolver.resolve_alias(name)))
             } else {
                 Some((false, None))
             }
         }
         ValueExpr::DynamicLookup(lookups) => lookups.iter().find_map(|lookup| {
-            if let ValueExpr::VarRef(name, _) = lookup {
-                if resolver.is_alias(name) {
+            if let ValueExpr::VarRef(name, scope) = lookup {
+                if *scope == VarRefType::Local {
+                    Some((true, resolver.resolve_var(name, scope.clone())))
+                } else if resolver.is_alias(name) {
                     Some((true, resolver.resolve_alias(name)))
                 } else {
                     None

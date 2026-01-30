@@ -11,13 +11,15 @@ use partiql_catalog::table_fn::{
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
+use partiql_eval::{DataCatalog, ReaderFactory};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::LogicalPlan;
 use partiql_logical_planner::LogicalPlanner;
 use partiql_parser::{Parsed, Parser, ParserError};
 use partiql_types::{PartiqlShapeBuilder, Static, StructConstraint, StructField, StructType};
-use partiql_value::{Tuple, Value};
+use partiql_value::{BindingsName, Tuple, Value};
+use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
@@ -330,4 +332,85 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
         .expect("Failed to add type entry");
 
     Box::new(catalog.to_shared_catalog())
+}
+
+/// Simple catalog implementation for demonstration and testing
+///
+/// This catalog allows registering tables with ReaderFactory instances,
+/// making it easy to test catalog-based scans without complex setup.
+pub struct SimpleDataCatalog {
+    catalog_name: String,
+    tables: FxHashMap<String, ReaderFactory>,
+}
+
+impl SimpleDataCatalog {
+    /// Create a new SimpleDataCatalog with the given name
+    pub fn new(name: impl Into<String>) -> Self {
+        SimpleDataCatalog {
+            catalog_name: name.into(),
+            tables: FxHashMap::default(),
+        }
+    }
+
+    /// Add a table to this catalog
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut catalog = SimpleDataCatalog::new("my_catalog");
+    /// catalog.add_table("users", ReaderFactory::mem(1000));
+    /// catalog.add_table("orders", ReaderFactory::ion("data/orders.ion".to_string()));
+    /// ```
+    pub fn add_table(&mut self, name: impl Into<String>, reader_factory: ReaderFactory) {
+        self.tables.insert(name.into(), reader_factory);
+    }
+
+    /// Builder-style method to add a table
+    pub fn with_table(mut self, name: impl Into<String>, reader_factory: ReaderFactory) -> Self {
+        self.add_table(name, reader_factory);
+        self
+    }
+}
+
+impl DataCatalog for SimpleDataCatalog {
+    fn name(&self) -> &str {
+        &self.catalog_name
+    }
+
+    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<ReaderFactory> {
+        // Support simple single-component paths like "table_name"
+        if path.len() == 1 {
+            let table_name = match &path[0] {
+                BindingsName::CaseSensitive(s) => s.as_ref(),
+                BindingsName::CaseInsensitive(s) => s.as_ref(),
+            };
+
+            // Case-insensitive lookup
+            return self
+                .tables
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
+                .map(|(_, factory)| factory.clone());
+        }
+
+        // For multi-component paths, try joining with dots
+        // e.g., ["schema", "table"] -> "schema.table"
+        if path.len() > 1 {
+            let full_path = path
+                .iter()
+                .map(|component| match component {
+                    BindingsName::CaseSensitive(s) => s.as_ref(),
+                    BindingsName::CaseInsensitive(s) => s.as_ref(),
+                })
+                .collect::<Vec<_>>()
+                .join(".");
+
+            return self
+                .tables
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&full_path))
+                .map(|(_, factory)| factory.clone());
+        }
+
+        None
+    }
 }
