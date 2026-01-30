@@ -203,7 +203,6 @@ impl RelOp {
 }
 
 pub struct PipelineOp {
-    layout: ScanLayout,
     steps: Vec<Step>,
     reader: ReaderImpl,
     opened: bool,
@@ -230,13 +229,11 @@ pub(crate) struct LegacyState {
 
 impl PipelineOp {
     pub(crate) fn new(
-        layout: ScanLayout,
         steps: Vec<Step>,
         reader: ReaderImpl,
         udf: Option<Arc<dyn UdfRegistry>>,
     ) -> Self {
         PipelineOp {
-            layout,
             steps,
             reader,
             opened: false,
@@ -246,7 +243,6 @@ impl PipelineOp {
 
     pub fn open(&mut self) -> Result<()> {
         if !self.opened {
-            self.reader.set_projection(self.layout.clone())?;
             self.reader.open()?;
             self.opened = true;
         }
@@ -540,10 +536,9 @@ impl PartiQLVM {
         for node in &compiled.nodes {
             match node {
                 RelOpSpec::Pipeline(spec) => {
-                    let reader = spec.reader_factory.create_impl()?;
+                    let reader = spec.reader_factory.create_impl(spec.layout.clone())?;
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(
-                        spec.layout.clone(),
                         steps,
                         reader,
                         udf_registry.clone(),

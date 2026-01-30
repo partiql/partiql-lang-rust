@@ -62,16 +62,15 @@ pub enum TypeHint {
 }
 
 pub trait RowReader {
-    fn caps(&self) -> ReaderCaps;
-    fn set_projection(&mut self, layout: ScanLayout) -> Result<()>;
     fn open(&mut self) -> Result<()>;
     fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool>;
-    fn resolve(&self, field_name: &str) -> Option<ScanSource>;
     fn close(&mut self) -> Result<()>;
 }
 
 pub trait RowReaderFactory: Send + Sync {
-    fn create(&self) -> Result<Box<dyn RowReader>>;
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>>;
+    fn caps(&self) -> ReaderCaps;
+    fn resolve(&self, field_name: &str) -> Option<ScanSource>;
 }
 
 /// Internal enum for row reader implementations
@@ -86,24 +85,6 @@ pub(crate) enum ReaderImpl {
 }
 
 impl ReaderImpl {
-    // TODO: Actually use this! But, it will probably need to move to a compilation stage instead.
-    #[allow(dead_code)]
-    pub fn caps(&self) -> ReaderCaps {
-        match self {
-            ReaderImpl::InMem(r) => r.caps(),
-            ReaderImpl::Ion(r) => r.caps(),
-            ReaderImpl::Custom(r) => r.caps(),
-        }
-    }
-
-    pub fn set_projection(&mut self, layout: ScanLayout) -> Result<()> {
-        match self {
-            ReaderImpl::InMem(r) => r.set_projection(layout),
-            ReaderImpl::Ion(r) => r.set_projection(layout),
-            ReaderImpl::Custom(r) => r.set_projection(layout),
-        }
-    }
-
     pub fn open(&mut self) -> Result<()> {
         match self {
             ReaderImpl::InMem(r) => r.open(),
@@ -120,16 +101,6 @@ impl ReaderImpl {
             ReaderImpl::InMem(r) => r.next_row(writer),
             ReaderImpl::Ion(r) => r.next_row(writer),
             ReaderImpl::Custom(r) => r.next_row(writer),
-        }
-    }
-
-    // TODO: Actually use this! But, it will probably need to move to a compilation stage instead.
-    #[allow(dead_code)]
-    pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
-        match self {
-            ReaderImpl::InMem(r) => r.resolve(field_name),
-            ReaderImpl::Ion(r) => r.resolve(field_name),
-            ReaderImpl::Custom(r) => r.resolve(field_name),
         }
     }
 
@@ -150,8 +121,8 @@ impl ReaderImpl {
 ///
 /// # Examples
 /// ```ignore
-/// // In-memory generated reader
-/// let reader = ReaderFactory::mem(100);
+/// // In-memory generated reader with custom column names
+/// let reader = ReaderFactory::mem(100, vec!["id".to_string(), "value".to_string()]);
 ///
 /// // Ion file reader
 /// let reader = ReaderFactory::ion("data.ion".to_string());
@@ -167,10 +138,18 @@ pub struct ReaderFactory {
 impl ReaderFactory {
     /// Create a reader factory for in-memory generated data
     ///
-    /// Generates rows with two Int64 columns (a, b) on-the-fly.
-    pub fn mem(total_rows: usize) -> Self {
+    /// Generates rows with Int64 columns on-the-fly. All column values start at 0
+    /// and increment by 1 for each row.
+    ///
+    /// # Arguments
+    /// * `total_rows` - Number of rows to generate
+    /// * `column_names` - Names of the columns in order
+    pub fn mem(total_rows: usize, column_names: Vec<String>) -> Self {
         ReaderFactory {
-            inner: ReaderFactoryInner::InMem(InMemGeneratedReaderFactory::new(total_rows)),
+            inner: ReaderFactoryInner::InMem(InMemGeneratedReaderFactory::new(
+                total_rows,
+                column_names,
+            )),
         }
     }
 
@@ -201,21 +180,40 @@ impl ReaderFactory {
 }
 
 impl ReaderFactory {
+    /// Get reader capabilities at compile time
+    ///
+    /// Returns information about what the reader supports, such as projection pushdown.
+    /// This allows the compiler to make informed decisions about query optimization.
+    pub fn caps(&self) -> ReaderCaps {
+        self.inner.caps()
+    }
+
+    /// Resolve a field name to a ScanSource at compile time
+    ///
+    /// Returns Some(ScanSource) if the reader can provide the field, None otherwise.
+    /// This enables compile-time validation of field references.
+    pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.inner.resolve(field_name)
+    }
+
     /// Internal method for creating a ReaderImpl with static dispatch
     ///
     /// This method is used internally by PipelineOp to get a ReaderImpl enum
     /// which enables static dispatch for InMem and Ion readers.
-    pub(crate) fn create_impl(&self) -> Result<ReaderImpl> {
+    pub(crate) fn create_impl(&self, layout: ScanLayout) -> Result<ReaderImpl> {
         match &self.inner {
             ReaderFactoryInner::InMem(factory) => Ok(ReaderImpl::InMem(InMemGeneratedReader::new(
                 factory.total_rows,
+                factory.column_names.len(),
+                layout,
             ))),
-            ReaderFactoryInner::Ion(factory) => {
-                Ok(ReaderImpl::Ion(IonRowReader::new(factory.path.clone())))
-            }
+            ReaderFactoryInner::Ion(factory) => Ok(ReaderImpl::Ion(IonRowReader::new(
+                factory.path.clone(),
+                layout,
+            ))),
             ReaderFactoryInner::Custom(factory) => {
                 // Wrap the Box<dyn RowReader> in ReaderImpl::Custom
-                Ok(ReaderImpl::Custom(factory.create()?))
+                Ok(ReaderImpl::Custom(factory.create(layout)?))
             }
         }
     }
@@ -229,35 +227,91 @@ enum ReaderFactoryInner {
     Custom(Arc<dyn RowReaderFactory>),
 }
 
+impl ReaderFactoryInner {
+    pub(crate) fn caps(&self) -> ReaderCaps {
+        match self {
+            ReaderFactoryInner::InMem(factory) => factory.caps(),
+            ReaderFactoryInner::Ion(factory) => factory.caps(),
+            ReaderFactoryInner::Custom(factory) => factory.caps(),
+        }
+    }
+
+    pub(crate) fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        match self {
+            ReaderFactoryInner::InMem(factory) => factory.resolve(field_name),
+            ReaderFactoryInner::Ion(factory) => factory.resolve(field_name),
+            ReaderFactoryInner::Custom(factory) => factory.resolve(field_name),
+        }
+    }
+}
+
 /// In-memory row reader that generates rows on-the-fly
 ///
 /// Similar to InMemoryGeneratedReader in vectorized evaluation, but operates on single rows.
-/// Generates fake columnar data with two Int64 columns:
-/// - Column "a": starts at 0, increments by 1
-/// - Column "b": starts at 100, increments by 1
+/// Generates fake columnar data with Int64 columns. All columns start at 0 and increment
+/// by 1 for each row.
 ///
 /// Note: Does not support BaseRow projection - only field-level projections
 pub struct InMemGeneratedReader {
     current_row: i64,
     total_rows: usize,
     layout: ScanLayout,
-    caps: ReaderCaps,
+    num_columns: usize,
 }
 
 #[derive(Clone)]
 pub struct InMemGeneratedReaderFactory {
     total_rows: usize,
+    column_names: Vec<String>,
 }
 
 impl InMemGeneratedReaderFactory {
-    pub fn new(total_rows: usize) -> Self {
-        InMemGeneratedReaderFactory { total_rows }
+    pub fn new(total_rows: usize, column_names: Vec<String>) -> Self {
+        InMemGeneratedReaderFactory {
+            total_rows,
+            column_names,
+        }
     }
 }
 
 impl RowReaderFactory for InMemGeneratedReaderFactory {
-    fn create(&self) -> Result<Box<dyn RowReader>> {
-        Ok(Box::new(InMemGeneratedReader::new(self.total_rows)))
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>> {
+        // Validate that all projections are ColumnIndex (not FieldPath)
+        for proj in &layout.projections {
+            match &proj.source {
+                ScanSource::ColumnIndex(_) => {
+                    // Valid for InMem reader
+                }
+                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                    return Err(EngineError::ProjectionNotSupported(
+                        "InMem reader only supports ColumnIndex projections",
+                    ));
+                }
+            }
+        }
+
+        Ok(Box::new(InMemGeneratedReader::new(
+            self.total_rows,
+            self.column_names.len(),
+            layout,
+        )))
+    }
+
+    fn caps(&self) -> ReaderCaps {
+        ReaderCaps {
+            stability: BufferStability::UntilNext,
+            can_project: true,
+            can_return_opaque: false,
+        }
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        // InMem reader only supports column indexes, not field paths
+        // Map field names to their column indexes based on position in column_names
+        self.column_names
+            .iter()
+            .position(|name| name == field_name)
+            .map(ScanSource::ColumnIndex)
     }
 }
 
@@ -279,8 +333,6 @@ impl RowReaderFactory for InMemGeneratedReaderFactory {
 pub struct IonRowReader {
     path: String,
     reader: Option<Box<ion_rs_old::Reader<'static>>>,
-    layout: ScanLayout,
-    caps: ReaderCaps,
     /// Maps field names to target slot IDs for O(1) lookup during reading
     field_to_slot: FxHashMap<String, SlotId>,
     /// Storage for string values to satisfy UntilNext lifetime guarantee
@@ -289,57 +341,25 @@ pub struct IonRowReader {
 }
 
 impl IonRowReader {
-    pub fn new(path: String) -> Self {
+    pub fn new(path: String, layout: ScanLayout) -> Self {
+        // Build field name to slot mapping for O(1) lookup during reading
+        let mut field_to_slot = FxHashMap::default();
+        for proj in &layout.projections {
+            if let ScanSource::FieldPath(field_name) = &proj.source {
+                field_to_slot.insert(field_name.clone(), proj.target_slot);
+            }
+        }
+
         IonRowReader {
             path,
             reader: None,
-            layout: ScanLayout::base_row(),
-            caps: ReaderCaps {
-                stability: BufferStability::UntilNext,
-                can_project: true,
-                can_return_opaque: false,
-            },
-            field_to_slot: FxHashMap::default(),
+            field_to_slot,
             string_storage: Vec::new(),
         }
     }
 }
 
 impl RowReader for IonRowReader {
-    fn caps(&self) -> ReaderCaps {
-        self.caps
-    }
-
-    fn set_projection(&mut self, layout: ScanLayout) -> Result<()> {
-        if !self.caps.can_project && !layout.is_base_row_only() {
-            return Err(EngineError::ProjectionNotSupported(
-                "reader does not support projection",
-            ));
-        }
-
-        // Build field name to slot mapping for O(1) lookup during reading
-        self.field_to_slot.clear();
-        for proj in &layout.projections {
-            match &proj.source {
-                ScanSource::FieldPath(field_name) => {
-                    // NOTE: Only single-level field paths supported (no "a.b.c")
-                    self.field_to_slot
-                        .insert(field_name.clone(), proj.target_slot);
-                }
-                ScanSource::BaseRow => {
-                    // BaseRow projection not supported with projection pushdown
-                    // Would require materializing entire row to Value
-                }
-                ScanSource::ColumnIndex(_) => {
-                    // ColumnIndex not applicable to Ion structs
-                }
-            }
-        }
-
-        self.layout = layout;
-        Ok(())
-    }
-
     fn open(&mut self) -> Result<()> {
         let file = File::open(&self.path)
             .map_err(|e| EngineError::ReaderError(format!("ion open failed: {e}")))?;
@@ -473,10 +493,6 @@ impl RowReader for IonRowReader {
         }
     }
 
-    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
-        Some(ScanSource::FieldPath(field_name.to_string()))
-    }
-
     fn close(&mut self) -> Result<()> {
         self.reader = None;
         self.string_storage.clear();
@@ -497,41 +513,56 @@ impl IonRowReaderFactory {
 }
 
 impl RowReaderFactory for IonRowReaderFactory {
-    fn create(&self) -> Result<Box<dyn RowReader>> {
-        Ok(Box::new(IonRowReader::new(self.path.clone())))
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>> {
+        // Validate that all projections are FieldPath (not ColumnIndex)
+        for proj in &layout.projections {
+            match &proj.source {
+                ScanSource::FieldPath(_) => {
+                    // Valid for Ion reader
+                }
+                ScanSource::ColumnIndex(_) => {
+                    return Err(EngineError::ProjectionNotSupported(
+                        "Ion reader only supports FieldPath projections, not ColumnIndex",
+                    ));
+                }
+                ScanSource::BaseRow => {
+                    return Err(EngineError::ProjectionNotSupported(
+                        "Ion reader only supports FieldPath projections, not BaseRow",
+                    ));
+                }
+            }
+        }
+
+        Ok(Box::new(IonRowReader::new(self.path.clone(), layout)))
+    }
+
+    fn caps(&self) -> ReaderCaps {
+        ReaderCaps {
+            stability: BufferStability::UntilNext,
+            can_project: true,
+            can_return_opaque: false,
+        }
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        // Ion reader accepts any field name at compile time
+        // Runtime validation happens during actual reading
+        Some(ScanSource::FieldPath(field_name.to_string()))
     }
 }
 
 impl InMemGeneratedReader {
-    pub fn new(total_rows: usize) -> Self {
+    pub fn new(total_rows: usize, num_columns: usize, layout: ScanLayout) -> Self {
         InMemGeneratedReader {
             current_row: 0,
             total_rows,
-            layout: ScanLayout::base_row(),
-            caps: ReaderCaps {
-                stability: BufferStability::UntilNext,
-                can_project: true,
-                can_return_opaque: false,
-            },
+            layout,
+            num_columns,
         }
     }
 }
 
 impl RowReader for InMemGeneratedReader {
-    fn caps(&self) -> ReaderCaps {
-        self.caps
-    }
-
-    fn set_projection(&mut self, layout: ScanLayout) -> Result<()> {
-        if !self.caps.can_project && !layout.is_base_row_only() {
-            return Err(EngineError::ProjectionNotSupported(
-                "reader does not support projection",
-            ));
-        }
-        self.layout = layout;
-        Ok(())
-    }
-
     fn open(&mut self) -> Result<()> {
         self.current_row = 0;
         Ok(())
@@ -544,35 +575,31 @@ impl RowReader for InMemGeneratedReader {
         }
 
         // Generate row values on-the-fly
-        let a_value = self.current_row;
-        let b_value = self.current_row + 100;
+        // All columns start at 0 and increment by 1 for each row
+        let row_value = self.current_row;
 
         // Populate slot registers based on projection layout
+        // InMem reader ONLY supports ColumnIndex projections
         for proj in &self.layout.projections {
             let target = proj.target_slot;
 
             match &proj.source {
-                ScanSource::BaseRow => {
-                    // BaseRow not supported - readers don't have access to arena for materialization
-                    return Err(EngineError::UnsupportedExpr(
-                        "BaseRow projection not supported by reader".to_string(),
-                    ));
-                }
-                ScanSource::FieldPath(path) => {
-                    // Generate value based on field name
-                    match path.as_str() {
-                        "a" => writer.put_i64(target, a_value)?,
-                        "b" => writer.put_i64(target, b_value)?,
-                        _ => writer.put_missing(target)?,
-                    }
-                }
                 ScanSource::ColumnIndex(index) => {
-                    // Column index 0 = "a", 1 = "b"
-                    match index {
-                        0 => writer.put_i64(target, a_value)?,
-                        1 => writer.put_i64(target, b_value)?,
-                        _ => writer.put_missing(target)?,
+                    // All columns get the same value: current_row (starting at 0)
+                    if *index < self.num_columns {
+                        writer.put_i64(target, row_value)?;
+                    } else {
+                        return Err(EngineError::ReaderError(format!(
+                            "Column index {} is out of bounds (max: {})",
+                            index,
+                            self.num_columns - 1
+                        )));
                     }
+                }
+                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                    return Err(EngineError::UnsupportedExpr(
+                        "InMem reader only supports ColumnIndex projections".to_string(),
+                    ));
                 }
             };
         }
@@ -580,15 +607,6 @@ impl RowReader for InMemGeneratedReader {
         // Increment current row for next call
         self.current_row += 1;
         Ok(true)
-    }
-
-    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
-        // Only support fields "a" and "b"
-        if field_name == "a" || field_name == "b" {
-            Some(ScanSource::FieldPath(field_name.to_string()))
-        } else {
-            None
-        }
     }
 
     fn close(&mut self) -> Result<()> {

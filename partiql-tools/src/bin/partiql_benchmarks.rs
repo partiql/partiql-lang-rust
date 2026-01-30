@@ -662,7 +662,10 @@ impl ScanProvider for HybridScanProvider {
                         "num_rows required for mem source".to_string(),
                     )
                 })?;
-                Ok(ReaderFactory::mem(num_rows))
+                Ok(ReaderFactory::mem(
+                    num_rows,
+                    vec!["a".to_string(), "b".to_string()],
+                ))
             }
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {

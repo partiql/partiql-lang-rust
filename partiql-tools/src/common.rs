@@ -357,7 +357,7 @@ impl SimpleDataCatalog {
     /// # Example
     /// ```ignore
     /// let mut catalog = SimpleDataCatalog::new("my_catalog");
-    /// catalog.add_table("users", ReaderFactory::mem(1000));
+    /// catalog.add_table("users", ReaderFactory::mem(1000, vec!["a".to_string(), "b".to_string()]));
     /// catalog.add_table("orders", ReaderFactory::ion("data/orders.ion".to_string()));
     /// ```
     pub fn add_table(&mut self, name: impl Into<String>, reader_factory: ReaderFactory) {

@@ -254,7 +254,10 @@ struct HybridScanProvider {
 impl ScanProvider for HybridScanProvider {
     fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
         match self.format.as_str() {
-            "mem" => Ok(ReaderFactory::mem(self.num_rows)),
+            "mem" => Ok(ReaderFactory::mem(
+                self.num_rows,
+                vec!["a".to_string(), "b".to_string()],
+            )),
             "ion" => {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())
