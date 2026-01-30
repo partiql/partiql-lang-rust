@@ -1,9 +1,10 @@
 use partiql_tools::common;
 
-use common::{count_rows_from_file, create_catalog, lower, parse};
-use partiql_eval::{PlanCompiler, ReaderFactory, ScanProvider};
+use common::{count_rows_from_file, create_catalog, lower, parse, SimpleDataCatalog};
+use partiql_eval::{CatalogRegistry, PlanCompiler, ReaderFactory, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{Tuple, Value};
+use std::sync::Arc;
 use std::time::Instant;
 
 const BATCH_SIZE: usize = 1;
@@ -141,7 +142,19 @@ fn main() {
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
     let provider = HybridScanProvider::new(data_source.clone(), data_path.clone(), total_rows);
-    let compiler = PlanCompiler::new(&provider);
+
+    // Set up catalog registry with a simple data catalog using builder pattern
+    let mut registry = CatalogRegistry::new();
+    let reader_factory = match data_source.as_str() {
+        "mem" => ReaderFactory::mem(total_rows),
+        "ion" | "ionb" => ReaderFactory::ion(data_path.clone().unwrap_or_default()),
+        _ => ReaderFactory::mem(total_rows),
+    };
+    let data_catalog =
+        Arc::new(SimpleDataCatalog::new(catalog.name()).with_table("data", reader_factory));
+    registry.register_catalog(data_catalog);
+
+    let compiler = PlanCompiler::with_catalogs(&provider, Some(&registry));
     let compiled = match compiler.compile(&logical) {
         Ok(p) => p,
         Err(e) => {

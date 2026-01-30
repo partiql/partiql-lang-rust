@@ -1,6 +1,5 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::SlotId;
-use crate::engine::value::ValueRef;
 use ion_rs_old::{IonReader, IonType, ReaderBuilder};
 use rustc_hash::FxHashMap;
 use std::fs::File;
@@ -66,13 +65,81 @@ pub trait RowReader {
     fn caps(&self) -> ReaderCaps;
     fn set_projection(&mut self, layout: ScanLayout) -> Result<()>;
     fn open(&mut self) -> Result<()>;
-    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool>;
+    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool>;
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
     fn close(&mut self) -> Result<()>;
 }
 
 pub trait RowReaderFactory: Send + Sync {
     fn create(&self) -> Result<Box<dyn RowReader>>;
+}
+
+/// Internal enum for row reader implementations
+///
+/// This enum enables static dispatch for known reader types (InMem, Ion)
+/// while still supporting custom readers via dynamic dispatch.
+/// This avoids vtable overhead for the common cases.
+pub(crate) enum ReaderImpl {
+    InMem(InMemGeneratedReader),
+    Ion(IonRowReader),
+    Custom(Box<dyn RowReader>),
+}
+
+impl ReaderImpl {
+    // TODO: Actually use this! But, it will probably need to move to a compilation stage instead.
+    #[allow(dead_code)]
+    pub fn caps(&self) -> ReaderCaps {
+        match self {
+            ReaderImpl::InMem(r) => r.caps(),
+            ReaderImpl::Ion(r) => r.caps(),
+            ReaderImpl::Custom(r) => r.caps(),
+        }
+    }
+
+    pub fn set_projection(&mut self, layout: ScanLayout) -> Result<()> {
+        match self {
+            ReaderImpl::InMem(r) => r.set_projection(layout),
+            ReaderImpl::Ion(r) => r.set_projection(layout),
+            ReaderImpl::Custom(r) => r.set_projection(layout),
+        }
+    }
+
+    pub fn open(&mut self) -> Result<()> {
+        match self {
+            ReaderImpl::InMem(r) => r.open(),
+            ReaderImpl::Ion(r) => r.open(),
+            ReaderImpl::Custom(r) => r.open(),
+        }
+    }
+
+    pub fn next_row(
+        &mut self,
+        writer: &mut crate::engine::row::ValueWriter<'_, '_>,
+    ) -> Result<bool> {
+        match self {
+            ReaderImpl::InMem(r) => r.next_row(writer),
+            ReaderImpl::Ion(r) => r.next_row(writer),
+            ReaderImpl::Custom(r) => r.next_row(writer),
+        }
+    }
+
+    // TODO: Actually use this! But, it will probably need to move to a compilation stage instead.
+    #[allow(dead_code)]
+    pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        match self {
+            ReaderImpl::InMem(r) => r.resolve(field_name),
+            ReaderImpl::Ion(r) => r.resolve(field_name),
+            ReaderImpl::Custom(r) => r.resolve(field_name),
+        }
+    }
+
+    pub fn close(&mut self) -> Result<()> {
+        match self {
+            ReaderImpl::InMem(r) => r.close(),
+            ReaderImpl::Ion(r) => r.close(),
+            ReaderImpl::Custom(r) => r.close(),
+        }
+    }
 }
 
 /// Public facade for creating row readers
@@ -133,12 +200,23 @@ impl ReaderFactory {
     }
 }
 
-impl RowReaderFactory for ReaderFactory {
-    fn create(&self) -> Result<Box<dyn RowReader>> {
+impl ReaderFactory {
+    /// Internal method for creating a ReaderImpl with static dispatch
+    ///
+    /// This method is used internally by PipelineOp to get a ReaderImpl enum
+    /// which enables static dispatch for InMem and Ion readers.
+    pub(crate) fn create_impl(&self) -> Result<ReaderImpl> {
         match &self.inner {
-            ReaderFactoryInner::InMem(factory) => factory.create(),
-            ReaderFactoryInner::Ion(factory) => factory.create(),
-            ReaderFactoryInner::Custom(factory) => factory.create(),
+            ReaderFactoryInner::InMem(factory) => Ok(ReaderImpl::InMem(InMemGeneratedReader::new(
+                factory.total_rows,
+            ))),
+            ReaderFactoryInner::Ion(factory) => {
+                Ok(ReaderImpl::Ion(IonRowReader::new(factory.path.clone())))
+            }
+            ReaderFactoryInner::Custom(factory) => {
+                // Wrap the Box<dyn RowReader> in ReaderImpl::Custom
+                Ok(ReaderImpl::Custom(factory.create()?))
+            }
         }
     }
 }
@@ -279,7 +357,7 @@ impl RowReader for IonRowReader {
         Ok(())
     }
 
-    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool> {
+    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool> {
         let reader = match self.reader.as_mut() {
             Some(r) => r,
             None => return Ok(false),
@@ -317,57 +395,60 @@ impl RowReader for IonRowReader {
 
                             // Check if this field is projected
                             if let Some(&target_slot) = self.field_to_slot.get(field_text) {
-                                let target_idx = target_slot as usize;
-                                if target_idx < regs.len() {
-                                    // NOTE: Dynamic type dispatch - may optimize to i64-only in future
-                                    let value_ref = match ion_type {
-                                        IonType::Int => {
-                                            let val = reader.read_i64().map_err(|e| {
-                                                EngineError::ReaderError(format!(
-                                                    "failed to read i64: {e}"
-                                                ))
-                                            })?;
-                                            ValueRef::I64(val)
-                                        }
-                                        IonType::Float => {
-                                            let val = reader.read_f64().map_err(|e| {
-                                                EngineError::ReaderError(format!(
-                                                    "failed to read f64: {e}"
-                                                ))
-                                            })?;
-                                            ValueRef::F64(val)
-                                        }
-                                        IonType::Bool => {
-                                            let val = reader.read_bool().map_err(|e| {
-                                                EngineError::ReaderError(format!(
-                                                    "failed to read bool: {e}"
-                                                ))
-                                            })?;
-                                            ValueRef::Bool(val)
-                                        }
-                                        IonType::String => {
-                                            let val = reader.read_str().map_err(|e| {
-                                                EngineError::ReaderError(format!(
-                                                    "failed to read string: {e}"
-                                                ))
-                                            })?;
-                                            // Store owned string, return borrowed reference
-                                            self.string_storage.push(val.to_string());
-                                            let idx = self.string_storage.len() - 1;
-                                            ValueRef::Str(self.string_storage[idx].as_str())
-                                        }
-                                        IonType::Null => ValueRef::Null,
-                                        other_type => {
-                                            // For other types, skip for now
-                                            // Could materialize to Value via arena if needed
-                                            return Err(EngineError::ReaderError(format!(
-                                                "unsupported ion type for projection: {:?}",
-                                                other_type
-                                            )));
-                                        }
-                                    };
-
-                                    regs[target_idx] = extend_value_ref(value_ref);
+                                // NOTE: Dynamic type dispatch - may optimize to i64-only in future
+                                match ion_type {
+                                    IonType::Int => {
+                                        let val = reader.read_i64().map_err(|e| {
+                                            EngineError::ReaderError(format!(
+                                                "failed to read i64: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_i64(target_slot, val)?;
+                                    }
+                                    IonType::Float => {
+                                        let val = reader.read_f64().map_err(|e| {
+                                            EngineError::ReaderError(format!(
+                                                "failed to read f64: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_f64(target_slot, val)?;
+                                    }
+                                    IonType::Bool => {
+                                        let val = reader.read_bool().map_err(|e| {
+                                            EngineError::ReaderError(format!(
+                                                "failed to read bool: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_bool(target_slot, val)?;
+                                    }
+                                    IonType::String => {
+                                        let val = reader.read_str().map_err(|e| {
+                                            EngineError::ReaderError(format!(
+                                                "failed to read string: {e}"
+                                            ))
+                                        })?;
+                                        // Store owned string
+                                        self.string_storage.push(val.to_string());
+                                        let idx = self.string_storage.len() - 1;
+                                        // Get reference to stored string (safety: string_storage won't be modified until next next_row call)
+                                        let str_ref = unsafe {
+                                            std::mem::transmute::<&str, &str>(
+                                                self.string_storage[idx].as_str(),
+                                            )
+                                        };
+                                        writer.put_str(target_slot, str_ref)?;
+                                    }
+                                    IonType::Null => {
+                                        writer.put_null(target_slot)?;
+                                    }
+                                    other_type => {
+                                        // For other types, skip for now
+                                        // Could materialize to Value via arena if needed
+                                        return Err(EngineError::ReaderError(format!(
+                                            "unsupported ion type for projection: {:?}",
+                                            other_type
+                                        )));
+                                    }
                                 }
                             }
                             // If field not projected, it's automatically skipped (projection pushdown!)
@@ -387,7 +468,7 @@ impl RowReader for IonRowReader {
             ion_rs_old::StreamItem::Nothing => Ok(false),
             ion_rs_old::StreamItem::Null(_) => {
                 // Skip null at top level, try next value
-                self.next_row(regs)
+                self.next_row(writer)
             }
         }
     }
@@ -419,12 +500,6 @@ impl RowReaderFactory for IonRowReaderFactory {
     fn create(&self) -> Result<Box<dyn RowReader>> {
         Ok(Box::new(IonRowReader::new(self.path.clone())))
     }
-}
-
-fn extend_value_ref<'a>(value: ValueRef<'_>) -> ValueRef<'a> {
-    // Safety: IonRowReader guarantees the borrowed data outlives the row (UntilNext).
-    // String references point to string_storage which is cleared only on next next_row call.
-    unsafe { std::mem::transmute(value) }
 }
 
 impl InMemGeneratedReader {
@@ -462,7 +537,7 @@ impl RowReader for InMemGeneratedReader {
         Ok(())
     }
 
-    fn next_row(&mut self, regs: &mut [ValueRef<'_>]) -> Result<bool> {
+    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool> {
         // Check if we've generated all rows
         if self.current_row >= self.total_rows as i64 {
             return Ok(false);
@@ -474,12 +549,9 @@ impl RowReader for InMemGeneratedReader {
 
         // Populate slot registers based on projection layout
         for proj in &self.layout.projections {
-            let target = proj.target_slot as usize;
-            if target >= regs.len() {
-                continue;
-            }
+            let target = proj.target_slot;
 
-            let value_ref = match &proj.source {
+            match &proj.source {
                 ScanSource::BaseRow => {
                     // BaseRow not supported - readers don't have access to arena for materialization
                     return Err(EngineError::UnsupportedExpr(
@@ -489,22 +561,20 @@ impl RowReader for InMemGeneratedReader {
                 ScanSource::FieldPath(path) => {
                     // Generate value based on field name
                     match path.as_str() {
-                        "a" => ValueRef::I64(a_value),
-                        "b" => ValueRef::I64(b_value),
-                        _ => ValueRef::Missing,
+                        "a" => writer.put_i64(target, a_value)?,
+                        "b" => writer.put_i64(target, b_value)?,
+                        _ => writer.put_missing(target)?,
                     }
                 }
                 ScanSource::ColumnIndex(index) => {
                     // Column index 0 = "a", 1 = "b"
                     match index {
-                        0 => ValueRef::I64(a_value),
-                        1 => ValueRef::I64(b_value),
-                        _ => ValueRef::Missing,
+                        0 => writer.put_i64(target, a_value)?,
+                        1 => writer.put_i64(target, b_value)?,
+                        _ => writer.put_missing(target)?,
                     }
                 }
             };
-
-            regs[target] = value_ref;
         }
 
         // Increment current row for next call

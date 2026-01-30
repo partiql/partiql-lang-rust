@@ -355,6 +355,20 @@ impl<'c> PlanTyper<'c> {
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
                 self.type_env_stack.push(ty_ctx![(&new_type_env, &ty)]);
             }
+            ValueExpr::DBRef(db_ref) => {
+                // DBRef represents a catalog-registered database object (table/view)
+                // TODO: Handle multi-part paths (e.g., schema.table) more comprehensively
+                // For now, resolve using the first component in the path
+                if let Some(first_component) = db_ref.path.first() {
+                    let key = binding_to_sym(first_component);
+                    let ty = self.resolve_global(&key);
+                    self.type_varef(&key, &ty);
+                } else {
+                    self.errors.push(TypingError::IllegalState(
+                        "DBRef with empty path".to_string(),
+                    ));
+                }
+            }
             ValueExpr::DynamicLookup(v) => {
                 if v.is_empty() {
                     self.errors.push(TypingError::IllegalState(format!(

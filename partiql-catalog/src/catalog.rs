@@ -50,6 +50,7 @@ pub trait MutableCatalog: Debug {
 }
 
 pub trait ReadOnlyCatalog: Debug {
+    fn name(&self) -> &str;
     fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
     fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>>;
     fn resolve_type(&self, name: &str) -> Option<TypeEntry>;
@@ -122,6 +123,7 @@ impl<'a> FunctionEntry<'a> {
 
 #[derive(Debug)]
 pub struct PartiqlCatalog {
+    name: String,
     functions: CatalogEntrySet<FunctionEntryFunction>,
     types: CatalogEntrySet<PartiqlShape>,
     id: CatalogId,
@@ -133,6 +135,7 @@ pub struct PartiqlSharedCatalog(PartiqlCatalog);
 impl Default for PartiqlCatalog {
     fn default() -> Self {
         PartiqlCatalog {
+            name: "default".to_string(),
             functions: Default::default(),
             types: Default::default(),
             id: 1.into(),
@@ -196,6 +199,10 @@ impl MutableCatalog for PartiqlCatalog {
 }
 
 impl ReadOnlyCatalog for PartiqlCatalog {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>> {
         self.functions
             .find_by_name(name)
@@ -220,6 +227,7 @@ impl ReadOnlyCatalog for PartiqlCatalog {
 impl ReadOnlyCatalog for PartiqlSharedCatalog {
     delegate! {
         to self.0 {
+            fn name(&self) -> &str;
             fn get_function(&self, name: &str) -> Option<FunctionEntry<'_>>;
             fn get_function_by_id(&self, id: ObjectId) -> Option<FunctionEntry<'_>>;
             fn resolve_type(&self, name: &str) -> Option<TypeEntry>;

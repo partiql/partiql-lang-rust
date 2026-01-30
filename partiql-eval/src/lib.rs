@@ -10,15 +10,19 @@ pub mod test_value;
 
 // Public API from engine module (as per design.md Section 5.9)
 
+// Catalog Support
+pub use engine::{CatalogRegistry, DataCatalog};
+
 // Compilation & Execution
 pub use engine::{
     CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, ScanProvider, Schema,
 };
 
 // Result Views (zero-copy accessors)
-// TODO: Where should this be exposed? At what module? Maybe a `value` module?
-// TODO: Where will ValueProvider/ValueWriter/RowProvider live publicly?
 pub use engine::{RowView, ValueView};
+
+// ValueWriter (for custom reader implementations)
+pub use engine::ValueWriter;
 
 // Owned Values (for serialization and legacy API conversion)
 // TODO: Remove.

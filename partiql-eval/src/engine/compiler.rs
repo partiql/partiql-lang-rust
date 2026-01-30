@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::engine::catalog::CatalogRegistry;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
 use crate::engine::plan::{
@@ -9,7 +10,8 @@ use crate::engine::reader::{ReaderFactory, ScanLayout, ScanProjection, ScanSourc
 use crate::engine::row::SlotId;
 use crate::engine::{SlotResolver, UdfRegistry};
 use partiql_logical::{
-    BindingsOp, LimitOffset, LogicalPlan, OpId, PathComponent, Project, Scan, ValueExpr, VarRefType,
+    BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, PathComponent, Project, Scan, ValueExpr,
+    VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -20,11 +22,26 @@ pub trait ScanProvider {
 
 pub struct PlanCompiler<'a> {
     scan_provider: &'a dyn ScanProvider,
+    catalog_registry: Option<&'a CatalogRegistry>,
 }
 
 impl<'a> PlanCompiler<'a> {
     pub fn new(scan_provider: &'a dyn ScanProvider) -> Self {
-        PlanCompiler { scan_provider }
+        PlanCompiler {
+            scan_provider,
+            catalog_registry: None,
+        }
+    }
+
+    /// Create a new PlanCompiler with optional catalog registry support
+    pub fn with_catalogs(
+        scan_provider: &'a dyn ScanProvider,
+        catalog_registry: Option<&'a CatalogRegistry>,
+    ) -> Self {
+        PlanCompiler {
+            scan_provider,
+            catalog_registry,
+        }
     }
 
     pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
@@ -68,7 +85,7 @@ impl<'a> PlanCompiler<'a> {
         }
 
         let scan = scan.ok_or_else(|| EngineError::InvalidPlan("missing scan".to_string()))?;
-        let reader_factory = self.scan_provider.reader_factory(scan)?;
+        let reader_factory = self.resolve_reader_factory(scan)?;
 
         let has_project = project.is_some();
         let output_count = if has_project {
@@ -187,6 +204,55 @@ impl<'a> PlanCompiler<'a> {
     ) -> Result<PartiQLVM> {
         PartiQLVM::new(compiled, udf)
     }
+
+    /// Resolve a ReaderFactory for a scan, handling both VarRef and DBRef expressions
+    fn resolve_reader_factory(&self, scan: &Scan) -> Result<ReaderFactory> {
+        match &scan.expr {
+            // Catalog-based scan via DBRef - resolve through CatalogRegistry
+            ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
+
+            // TODO: VarRef and other expression types will be compiled differently in the future
+            // Traditional scan via VarRef - use ScanProvider for now
+            ValueExpr::VarRef(_, _) => self.scan_provider.reader_factory(scan),
+
+            // Other expression types - delegate to ScanProvider for now
+            _ => self.scan_provider.reader_factory(scan),
+        }
+    }
+
+    /// Resolve a table from a catalog using DBRef
+    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<ReaderFactory> {
+        // Ensure we have a catalog registry
+        let registry = self.catalog_registry.ok_or_else(|| {
+            EngineError::InvalidPlan(format!(
+                "Catalog '{}' referenced but no catalog registry configured",
+                db_ref.catalog
+            ))
+        })?;
+
+        // Look up the catalog by name
+        let catalog = registry.get_catalog(&db_ref.catalog).ok_or_else(|| {
+            EngineError::InvalidPlan(format!("Catalog '{}' not found", db_ref.catalog))
+        })?;
+
+        // Resolve the table within the catalog
+        catalog.get_table(&db_ref.path).ok_or_else(|| {
+            let path_str = db_ref
+                .path
+                .iter()
+                .map(|component| match component {
+                    BindingsName::CaseSensitive(s) => format!("\"{}\"", s),
+                    BindingsName::CaseInsensitive(s) => s.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(".");
+
+            EngineError::InvalidPlan(format!(
+                "Table '{}' not found in catalog '{}'",
+                path_str, db_ref.catalog
+            ))
+        })
+    }
 }
 
 struct PipelineSlotResolver {
@@ -270,17 +336,45 @@ fn extract_column_refs(
                     .unwrap_or_else(|| lookups.first().unwrap()),
                 other => other,
             };
-            if let ValueExpr::VarRef(name, _) = base_expr {
-                if bindings_name_matches(name, binding_name) {
-                    if let Some(PathComponent::Key(key_name)) = components.first() {
-                        out.insert(bindings_name_to_string(key_name));
+
+            // Check if base references the scan binding (either exact match or VarRef(Local))
+            let is_scan_ref = match base_expr {
+                ValueExpr::VarRef(name, scope) => {
+                    // Match if name matches binding OR if it's a Local scope VarRef
+                    // (Local scope VarRefs to table names need column extraction)
+                    bindings_name_matches(name, binding_name) || *scope == VarRefType::Local
+                }
+                ValueExpr::DBRef(db_ref) => {
+                    // DBRef paths also need column extraction
+                    if let Some(first_component) = db_ref.path.first() {
+                        bindings_name_matches(first_component, binding_name)
+                    } else {
+                        false
                     }
+                }
+                _ => false,
+            };
+
+            if is_scan_ref {
+                if let Some(PathComponent::Key(key_name)) = components.first() {
+                    out.insert(bindings_name_to_string(key_name));
                 }
             }
         }
-        ValueExpr::VarRef(name, _) => {
-            if !bindings_name_matches(name, binding_name) {
+        ValueExpr::VarRef(name, scope) => {
+            // For VarRef(Local), always extract as a column reference
+            // For other scopes, only extract if it doesn't match the binding name
+            if *scope == VarRefType::Local || !bindings_name_matches(name, binding_name) {
                 out.insert(bindings_name_to_string(name));
+            }
+        }
+        ValueExpr::DBRef(db_ref) => {
+            // DBRef without path components - shouldn't happen in column context
+            // but handle gracefully
+            if let Some(first_component) = db_ref.path.first() {
+                if !bindings_name_matches(first_component, binding_name) {
+                    out.insert(bindings_name_to_string(first_component));
+                }
             }
         }
         ValueExpr::DynamicLookup(lookups) => {
