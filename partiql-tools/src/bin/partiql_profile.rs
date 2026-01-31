@@ -4,7 +4,7 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::ReaderFactory;
+use partiql_eval::reader::ReaderFactory;
 use partiql_eval::{PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{DateTime, Value};

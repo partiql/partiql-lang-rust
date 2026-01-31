@@ -12,9 +12,5 @@ pub use compiler::{PlanCompiler, ScanProvider};
 pub use error::{EngineError, Result};
 pub use expr::{SlotResolver, UdfRegistry};
 pub use plan::{CompiledPlan, ExecutionResult, PartiQLVM, QueryIterator, Schema};
-pub use reader::{
-    BufferStability, ReaderCaps, ReaderFactory, RowReader, RowReaderFactory, ScanLayout,
-    ScanProjection, ScanSource, TypeHint,
-};
 pub use row::{RowView, ValueWriter};
 pub use value::{ValueOwned, ValueView};

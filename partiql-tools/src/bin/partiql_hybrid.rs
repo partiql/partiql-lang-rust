@@ -1,7 +1,8 @@
 use partiql_tools::common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse, SimpleDataCatalog};
-use partiql_eval::{CatalogRegistry, PlanCompiler, ReaderFactory, ScanProvider};
+use partiql_eval::reader::ReaderFactory;
+use partiql_eval::{CatalogRegistry, PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{Tuple, Value};
 use std::sync::Arc;
