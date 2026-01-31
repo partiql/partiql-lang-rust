@@ -11,7 +11,7 @@ use partiql_catalog::table_fn::{
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
-use partiql_eval::reader::ReaderFactory;
+use partiql_eval::source::DataSourceHandle;
 use partiql_eval::DataCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
@@ -337,11 +337,11 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
 
 /// Simple catalog implementation for demonstration and testing
 ///
-/// This catalog allows registering tables with ReaderFactory instances,
+/// This catalog allows registering tables with DataSourceHandle instances,
 /// making it easy to test catalog-based scans without complex setup.
 pub struct SimpleDataCatalog {
     catalog_name: String,
-    tables: FxHashMap<String, ReaderFactory>,
+    tables: FxHashMap<String, DataSourceHandle>,
 }
 
 impl SimpleDataCatalog {
@@ -358,16 +358,16 @@ impl SimpleDataCatalog {
     /// # Example
     /// ```ignore
     /// let mut catalog = SimpleDataCatalog::new("my_catalog");
-    /// catalog.add_table("users", ReaderFactory::mem(1000, vec!["a".to_string(), "b".to_string()]));
-    /// catalog.add_table("orders", ReaderFactory::ion("data/orders.ion".to_string()));
+    /// catalog.add_table("users", DataSourceHandle::mem(1000, vec!["a".to_string(), "b".to_string()]));
+    /// catalog.add_table("orders", DataSourceHandle::ion("data/orders.ion".to_string()));
     /// ```
-    pub fn add_table(&mut self, name: impl Into<String>, reader_factory: ReaderFactory) {
-        self.tables.insert(name.into(), reader_factory);
+    pub fn add_table(&mut self, name: impl Into<String>, data_source: DataSourceHandle) {
+        self.tables.insert(name.into(), data_source);
     }
 
     /// Builder-style method to add a table
-    pub fn with_table(mut self, name: impl Into<String>, reader_factory: ReaderFactory) -> Self {
-        self.add_table(name, reader_factory);
+    pub fn with_table(mut self, name: impl Into<String>, data_source: DataSourceHandle) -> Self {
+        self.add_table(name, data_source);
         self
     }
 }
@@ -377,7 +377,7 @@ impl DataCatalog for SimpleDataCatalog {
         &self.catalog_name
     }
 
-    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<ReaderFactory> {
+    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
         // Support simple single-component paths like "table_name"
         if path.len() == 1 {
             let table_name = match &path[0] {

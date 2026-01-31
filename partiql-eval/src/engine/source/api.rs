@@ -8,7 +8,7 @@ pub enum BufferStability {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ReaderCaps {
+pub struct ScanCapabilities {
     pub stability: BufferStability,
     pub can_project: bool,
     pub can_return_opaque: bool,
@@ -56,14 +56,14 @@ pub enum TypeHint {
     Any,
 }
 
-pub trait RowReader {
+pub trait DataSource {
     fn open(&mut self) -> Result<()>;
-    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool>;
+    fn next_row(&mut self, writer: &mut super::RegisterWriter<'_, '_>) -> Result<bool>;
     fn close(&mut self) -> Result<()>;
 }
 
-pub trait RowReaderFactory: Send + Sync {
-    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>>;
-    fn caps(&self) -> ReaderCaps;
+pub trait DataSourceFactory: Send + Sync {
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>>;
+    fn caps(&self) -> ScanCapabilities;
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
 }
