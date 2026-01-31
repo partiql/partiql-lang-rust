@@ -12,7 +12,7 @@ use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
 use partiql_eval::source::DataSourceHandle;
-use partiql_eval::DataCatalog;
+use partiql_eval::CompilationCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::LogicalPlan;
@@ -24,6 +24,7 @@ use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
+use std::sync::Arc;
 
 /// Format a number with comma separators (e.g., 1000000 -> "1,000,000")
 pub fn format_with_commas(n: usize) -> String {
@@ -335,83 +336,395 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
     Box::new(catalog.to_shared_catalog())
 }
 
-/// Simple catalog implementation for demonstration and testing
+/// Simple compilation catalog for mem/ion data sources
 ///
-/// This catalog allows registering tables with DataSourceHandle instances,
-/// making it easy to test catalog-based scans without complex setup.
-pub struct SimpleDataCatalog {
-    catalog_name: String,
-    tables: FxHashMap<String, DataSourceHandle>,
+/// Provides compile-time metadata using the two-phase catalog pattern.
+pub struct SimpleCompilationCatalog {
+    tables: FxHashMap<String, (EntryId, Arc<dyn DataSourceConfig>)>,
 }
 
-impl SimpleDataCatalog {
-    /// Create a new SimpleDataCatalog with the given name
-    pub fn new(name: impl Into<String>) -> Self {
-        SimpleDataCatalog {
-            catalog_name: name.into(),
-            tables: FxHashMap::default(),
+/// Wrapper to make CompiledSourceFactory implement DataSourceConfig
+struct FactoryConfigWrapper {
+    factory: CompiledSourceFactory,
+}
+
+impl DataSourceConfig for FactoryConfigWrapper {
+    fn caps(&self) -> ScanCapabilities {
+        self.factory.caps()
+    }
+    
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.factory.resolve(field_name)
+    }
+}
+
+impl SimpleCompilationCatalog {
+    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
+        let mut table_map = FxHashMap::default();
+        
+        for (idx, (name, factory)) in tables.into_iter().enumerate() {
+            // Wrap the factory to implement DataSourceConfig
+            let config: Arc<dyn DataSourceConfig> = Arc::new(FactoryConfigWrapper { factory });
+            table_map.insert(name, (EntryId::from(idx as u64), config));
+        }
+        
+        SimpleCompilationCatalog {
+            tables: table_map,
         }
     }
-
-    /// Add a table to this catalog
-    ///
-    /// # Example
-    /// ```ignore
-    /// let mut catalog = SimpleDataCatalog::new("my_catalog");
-    /// catalog.add_table("users", DataSourceHandle::mem(1000, vec!["a".to_string(), "b".to_string()]));
-    /// catalog.add_table("orders", DataSourceHandle::ion("data/orders.ion".to_string()));
-    /// ```
-    pub fn add_table(&mut self, name: impl Into<String>, data_source: DataSourceHandle) {
-        self.tables.insert(name.into(), data_source);
-    }
-
-    /// Builder-style method to add a table
-    pub fn with_table(mut self, name: impl Into<String>, data_source: DataSourceHandle) -> Self {
-        self.add_table(name, data_source);
-        self
-    }
 }
 
-impl DataCatalog for SimpleDataCatalog {
-    fn name(&self) -> &str {
-        &self.catalog_name
-    }
-
+impl CompilationCatalog for SimpleCompilationCatalog {
     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-        // Support simple single-component paths like "table_name"
-        if path.len() == 1 {
-            let table_name = match &path[0] {
-                BindingsName::CaseSensitive(s) => s.as_ref(),
-                BindingsName::CaseInsensitive(s) => s.as_ref(),
-            };
-
-            // Case-insensitive lookup
-            return self
-                .tables
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
-                .map(|(_, factory)| factory.clone());
+        if path.len() != 1 {
+            return None;
         }
-
-        // For multi-component paths, try joining with dots
-        // e.g., ["schema", "table"] -> "schema.table"
-        if path.len() > 1 {
-            let full_path = path
-                .iter()
-                .map(|component| match component {
-                    BindingsName::CaseSensitive(s) => s.as_ref(),
-                    BindingsName::CaseInsensitive(s) => s.as_ref(),
-                })
-                .collect::<Vec<_>>()
-                .join(".");
-
-            return self
-                .tables
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case(&full_path))
-                .map(|(_, factory)| factory.clone());
-        }
-
-        None
+        
+        let table_name = match &path[0] {
+            BindingsName::CaseSensitive(s) => s.as_ref(),
+            BindingsName::CaseInsensitive(s) => s.as_ref(),
+        };
+        
+        self.tables
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
+            .map(|(_, (entry_id, config))| {
+                // Return DataSourceHandle with EntryId and config
+                DataSourceHandle::new(*entry_id, config.clone())
+            })
     }
+}
+
+/// Simple execution catalog for mem/ion data sources
+///
+/// Creates actual DataSource instances at execution time.
+/// Stores the CompiledSourceFactory that can create DataSources.
+pub struct SimpleExecutionCatalog {
+    tables: FxHashMap<EntryId, CompiledSourceFactory>,
+}
+
+impl SimpleExecutionCatalog {
+    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
+        let mut table_map = FxHashMap::default();
+        
+        for (idx, (_name, factory)) in tables.into_iter().enumerate() {
+            table_map.insert(EntryId::from(idx as u64), factory);
+        }
+        
+        SimpleExecutionCatalog { tables: table_map }
+    }
+}
+
+impl ExecutionCatalog for SimpleExecutionCatalog {
+    fn create(
+        &self,
+        entry_id: EntryId,
+        layout: ScanLayout,
+    ) -> EvalResult<Box<dyn DataSource>> {
+        let factory = self.tables.get(&entry_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "Table with entry_id {:?} not found",
+                entry_id
+            ))
+        })?;
+        
+        // Use the factory to create the DataSource
+        factory.create(layout)
+    }
+}
+
+/// Create compilation and execution catalogs for simple data sources (mem/ion)
+///
+/// This provides the same two-phase catalog pattern as random_catalog,
+/// enabling uniform architecture across all data source types.
+///
+/// # Arguments
+/// * `tables` - Vector of (table_name, CompiledSourceFactory) tuples
+///
+/// # Returns
+/// A tuple of (CompilationCatalog, ExecutionCatalog)
+///
+/// # Example
+/// ```ignore
+/// use partiql_eval::source::CompiledSourceFactory;
+/// 
+/// let (comp_catalog, exec_catalog) = simple_catalog(
+///     vec![
+///         ("data".to_string(), CompiledSourceFactory::mem(10_000, vec!["a".to_string(), "b".to_string()])),
+///     ]
+/// );
+/// ```
+pub fn simple_catalog(
+    tables: Vec<(String, CompiledSourceFactory)>,
+) -> (
+    Arc<dyn CompilationCatalog>,
+    Arc<dyn ExecutionCatalog>,
+) {
+    let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
+    let exec_catalog = Arc::new(SimpleExecutionCatalog::new(tables));
+    (comp_catalog, exec_catalog)
+}
+
+// =============================================================================
+// Random Data Source - Customer-Provided Reader Example
+// =============================================================================
+//
+// This implementation demonstrates the two-phase catalog pattern for custom
+// data sources. It shows how customers can:
+// 1. Implement DataSource trait for their custom reader
+// 2. Implement DataSourceConfig for compile-time metadata
+// 3. Implement CompilationCatalog + ExecutionCatalog traits
+// 4. Use ObjectId to enable catalog swapping
+//
+// This is a complete example using ONLY public APIs from partiql-eval.
+
+use partiql_common::catalog::EntryId;
+use partiql_eval::source::{
+    BufferStability, CompiledSourceFactory, DataSource, DataSourceConfig, RegisterWriter,
+    ScanCapabilities, ScanLayout, ScanSource,
+};
+use partiql_eval::{ExecutionCatalog, Result as EvalResult};
+use rand::Rng;
+
+/// Custom DataSource that generates random integer data
+///
+/// Demonstrates how customers implement the DataSource trait for their custom readers.
+struct RandomDataSource {
+    current_row: usize,
+    total_rows: usize,
+    layout: ScanLayout,
+    num_columns: usize,
+}
+
+impl RandomDataSource {
+    fn new(total_rows: usize, num_columns: usize, layout: ScanLayout) -> Self {
+        RandomDataSource {
+            current_row: 0,
+            total_rows,
+            layout,
+            num_columns,
+        }
+    }
+}
+
+impl DataSource for RandomDataSource {
+    fn open(&mut self) -> EvalResult<()> {
+        self.current_row = 0;
+        Ok(())
+    }
+
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<bool> {
+        if self.current_row >= self.total_rows {
+            return Ok(false);
+        }
+
+        let mut rng = rand::thread_rng();
+
+        // Generate random values for each projected column
+        for proj in &self.layout.projections {
+            let target = proj.target_slot;
+
+            match &proj.source {
+                ScanSource::ColumnIndex(index) => {
+                    if *index < self.num_columns {
+                        let random_value: i64 = rng.gen();
+                        writer.put_i64(target, random_value)?;
+                    } else {
+                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                            "Column index {} out of bounds (max: {})",
+                            index,
+                            self.num_columns - 1
+                        )));
+                    }
+                }
+                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                        "Random reader only supports ColumnIndex projections".to_string(),
+                    ));
+                }
+            }
+        }
+
+        self.current_row += 1;
+        Ok(true)
+    }
+
+    fn close(&mut self) -> EvalResult<()> {
+        Ok(())
+    }
+}
+
+/// Compile-time configuration for random data tables
+///
+/// Provides metadata about the table without needing access to actual data.
+struct RandomTableConfig {
+    column_names: Vec<String>,
+}
+
+impl RandomTableConfig {
+    fn new(column_names: Vec<String>) -> Self {
+        RandomTableConfig { column_names }
+    }
+}
+
+impl DataSourceConfig for RandomTableConfig {
+    fn caps(&self) -> ScanCapabilities {
+        ScanCapabilities {
+            stability: BufferStability::UntilNext,
+            can_project: true,
+            can_return_opaque: false,
+        }
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.column_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(field_name))
+            .map(ScanSource::ColumnIndex)
+    }
+}
+
+/// Table metadata for random data source
+#[derive(Clone)]
+struct RandomTableMeta {
+    entry_id: EntryId,
+    num_rows: usize,
+    column_names: Vec<String>,
+}
+
+/// Compilation catalog for random data sources
+///
+/// Provides compile-time metadata and assigns EntryIds for execution-time resolution.
+pub struct RandomCompilationCatalog {
+    tables: FxHashMap<String, RandomTableMeta>,
+}
+
+impl RandomCompilationCatalog {
+    fn new(tables: Vec<(String, usize, Vec<String>)>) -> Self {
+        let mut table_map = FxHashMap::default();
+
+        for (idx, (name, num_rows, columns)) in tables.into_iter().enumerate() {
+            table_map.insert(
+                name,
+                RandomTableMeta {
+                    entry_id: EntryId::from(idx as u64),
+                    num_rows,
+                    column_names: columns,
+                },
+            );
+        }
+
+        RandomCompilationCatalog {
+            tables: table_map,
+        }
+    }
+}
+
+impl CompilationCatalog for RandomCompilationCatalog {
+    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
+        if path.len() != 1 {
+            return None;
+        }
+
+        let table_name = match &path[0] {
+            BindingsName::CaseSensitive(s) => s.as_ref(),
+            BindingsName::CaseInsensitive(s) => s.as_ref(),
+        };
+
+        self.tables
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
+            .map(|(_, meta)| {
+                let config = Arc::new(RandomTableConfig::new(meta.column_names.clone()));
+                // Return DataSourceHandle with EntryId only (CatalogId comes from compiler)
+                DataSourceHandle::new(meta.entry_id, config)
+            })
+    }
+}
+
+/// Execution catalog for random data sources
+///
+/// Creates actual DataSource instances at execution time, enabling different
+/// data for the same compiled plan (catalog swapping).
+pub struct RandomExecutionCatalog {
+    tables: FxHashMap<EntryId, RandomTableMeta>,
+}
+
+impl RandomExecutionCatalog {
+    fn new(tables: Vec<(String, usize, Vec<String>)>) -> Self {
+        let mut table_map = FxHashMap::default();
+
+        for (idx, (_name, num_rows, columns)) in tables.into_iter().enumerate() {
+            table_map.insert(
+                EntryId::from(idx as u64),
+                RandomTableMeta {
+                    entry_id: EntryId::from(idx as u64),
+                    num_rows,
+                    column_names: columns,
+                },
+            );
+        }
+
+        RandomExecutionCatalog { tables: table_map }
+    }
+}
+
+impl ExecutionCatalog for RandomExecutionCatalog {
+    fn create(
+        &self,
+        entry_id: EntryId,
+        layout: ScanLayout,
+    ) -> EvalResult<Box<dyn DataSource>> {
+        let meta = self.tables.get(&entry_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "Table with entry_id {:?} not found",
+                entry_id
+            ))
+        })?;
+
+        Ok(Box::new(RandomDataSource::new(
+            meta.num_rows,
+            meta.column_names.len(),
+            layout,
+        )))
+    }
+}
+
+/// Create compilation and execution catalogs for random data sources
+///
+/// This demonstrates the complete two-phase catalog pattern for custom readers.
+///
+/// # Arguments
+/// * `tables` - Vector of (table_name, num_rows, column_names) tuples
+///
+/// # Returns
+/// A tuple of (CompilationCatalog, ExecutionCatalog) that can be used with
+/// CompilationContext and ExecutionContext respectively.
+///
+/// # Example
+/// ```ignore
+/// let (comp_catalog, exec_catalog) = random_catalog(
+///     vec![
+///         ("users".to_string(), 10_000, vec!["id".to_string(), "age".to_string()]),
+///         ("orders".to_string(), 50_000, vec!["order_id".to_string(), "amount".to_string()]),
+///     ]
+/// );
+///
+/// // Use in compilation - add_catalog returns the catalog_id
+/// let mut comp_context = CompilationContext::new();
+/// let catalog_id = comp_context.add_catalog("main", comp_catalog);
+///
+/// // Use in execution with the returned catalog_id
+/// let mut exec_context = ExecutionContext::new();
+/// exec_context.add_catalog(catalog_id, exec_catalog);
+/// ```
+pub fn random_catalog(
+    tables: Vec<(String, usize, Vec<String>)>,
+) -> (
+    Arc<dyn CompilationCatalog>,
+    Arc<dyn ExecutionCatalog>,
+) {
+    let comp_catalog = Arc::new(RandomCompilationCatalog::new(tables.clone()));
+    let exec_catalog = Arc::new(RandomExecutionCatalog::new(tables));
+    (comp_catalog, exec_catalog)
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::Program;
 use crate::engine::row::{Arena, SlotId};
@@ -121,10 +122,20 @@ impl RelOpSpec {
     }
 }
 
+/// Compiled data source handle with catalog context.
+///
+/// Wraps a DataSourceHandle with its CatalogId, enabling execution-time
+/// resolution without baking the catalog ID into the handle itself.
+#[derive(Clone)]
+pub(crate) struct CompiledDataSourceHandle {
+    pub(crate) catalog_id: partiql_common::catalog::CatalogId,
+    pub(crate) handle: crate::engine::source::DataSourceHandle,
+}
+
 pub struct PipelineSpec {
     pub layout: ScanLayout,
     pub steps: Vec<StepSpec>,
-    pub data_source: crate::engine::source::DataSourceHandle,
+    pub data_source: CompiledDataSourceHandle,
 }
 
 impl PipelineSpec {
@@ -521,14 +532,15 @@ pub struct PartiQLVM {
 }
 
 impl PartiQLVM {
-    /// Create a new VM instance from a compiled plan
+    /// Create a new VM instance from a compiled plan with ExecutionContext
     ///
     /// # Arguments
     /// * `compiled` - The compiled query plan to execute
+    /// * `exec_context` - ExecutionContext for resolving catalog-based data sources
     ///
     /// # Returns
     /// A new PartiQLVM ready to execute the plan
-    pub fn new(compiled: CompiledPlan) -> Result<Self> {
+    pub fn new(compiled: CompiledPlan, exec_context: &ExecutionContext) -> Result<Self> {
         let compiled = Arc::new(compiled);
         let slot_count = compiled.slot_count;
         let root = compiled.root;
@@ -538,7 +550,14 @@ impl PartiQLVM {
         for node in &compiled.nodes {
             match node {
                 RelOpSpec::Pipeline(spec) => {
-                    let reader = spec.data_source.create_impl(spec.layout.clone())?;
+                    // Resolve DataSource from handle - single path for ALL data sources
+                    // Extract catalog_id from CompiledDataSourceHandle and pass to create_impl
+                    let reader = spec.data_source.handle.create_impl(
+                        spec.data_source.catalog_id,
+                        spec.layout.clone(),
+                        exec_context,
+                    )?;
+
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(
                         steps, reader, None, // UDF registry not supported yet

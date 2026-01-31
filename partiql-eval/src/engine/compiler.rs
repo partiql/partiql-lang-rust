@@ -1,4 +1,4 @@
-use crate::engine::catalog::CatalogRegistry;
+use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
 use crate::engine::plan::{Column, CompiledPlan, PipelineSpec, RelOpSpec, Schema, StepSpec};
@@ -12,31 +12,17 @@ use partiql_logical::{
 use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-pub trait ScanProvider {
-    fn data_source(&self, scan: &Scan) -> Result<DataSourceHandle>;
-}
-
 pub struct PlanCompiler<'a> {
-    scan_provider: &'a dyn ScanProvider,
-    catalog_registry: Option<&'a CatalogRegistry>,
+    compilation_context: &'a CompilationContext,
 }
 
 impl<'a> PlanCompiler<'a> {
-    pub fn new(scan_provider: &'a dyn ScanProvider) -> Self {
+    /// Create a new PlanCompiler with a compilation context.
+    ///
+    /// The compilation context provides access to catalogs for resolving table references.
+    pub fn new(compilation_context: &'a CompilationContext) -> Self {
         PlanCompiler {
-            scan_provider,
-            catalog_registry: None,
-        }
-    }
-
-    /// Create a new PlanCompiler with optional catalog registry support
-    pub fn with_catalogs(
-        scan_provider: &'a dyn ScanProvider,
-        catalog_registry: Option<&'a CatalogRegistry>,
-    ) -> Self {
-        PlanCompiler {
-            scan_provider,
-            catalog_registry,
+            compilation_context,
         }
     }
 
@@ -81,7 +67,7 @@ impl<'a> PlanCompiler<'a> {
         }
 
         let scan = scan.ok_or_else(|| EngineError::InvalidPlan("missing scan".to_string()))?;
-        let reader_factory = self.resolve_reader_factory(scan)?;
+        let (catalog_id, reader_factory) = self.resolve_reader_factory(scan)?;
 
         // Check reader capabilities at compile time
         let reader_caps = reader_factory.caps();
@@ -193,10 +179,17 @@ impl<'a> PlanCompiler<'a> {
             steps.push(StepSpec::Limit { limit });
         }
 
+        use crate::engine::plan::CompiledDataSourceHandle;
+        
+        let compiled_data_source = CompiledDataSourceHandle {
+            catalog_id,
+            handle: reader_factory,
+        };
+        
         let pipeline = PipelineSpec {
             layout,
             steps,
-            data_source: reader_factory,
+            data_source: compiled_data_source,
         };
 
         Ok(CompiledPlan {
@@ -208,38 +201,42 @@ impl<'a> PlanCompiler<'a> {
         })
     }
 
-    /// Resolve a DataSourceHandle for a scan, handling both VarRef and DBRef expressions
-    fn resolve_reader_factory(&self, scan: &Scan) -> Result<DataSourceHandle> {
+    /// Resolve a DataSourceHandle for a scan, returning (CatalogId, DataSourceHandle)
+    /// 
+    /// Resolves table references through the CompilationContext's catalog system.
+    fn resolve_reader_factory(&self, scan: &Scan) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
         match &scan.expr {
             // Catalog-based scan via DBRef - resolve through CatalogRegistry
             ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
 
-            // TODO: VarRef and other expression types will be compiled differently in the future
-            // Traditional scan via VarRef - use ScanProvider for now
-            ValueExpr::VarRef(_, _) => self.scan_provider.data_source(scan),
+            // Unqualified table reference (VarRef) - resolve through default catalog
+            ValueExpr::VarRef(table_name, _) => {
+                // Treat unqualified table names as belonging to the "default" catalog
+                let db_ref = DBRef {
+                    catalog: "default".to_string(),
+                    path: vec![table_name.clone()],
+                };
+                self.resolve_catalog_table(&db_ref)
+            }
 
-            // Other expression types - delegate to ScanProvider for now
-            _ => self.scan_provider.data_source(scan),
+            // Other expression types are not supported for scans
+            _ => {
+                Err(EngineError::InvalidPlan(
+                    "Unsupported scan expression type - expected DBRef or VarRef".to_string()
+                ))
+            }
         }
     }
 
-    /// Resolve a table from a catalog using DBRef
-    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<DataSourceHandle> {
-        // Ensure we have a catalog registry
-        let registry = self.catalog_registry.ok_or_else(|| {
-            EngineError::InvalidPlan(format!(
-                "Catalog '{}' referenced but no catalog registry configured",
-                db_ref.catalog
-            ))
-        })?;
-
-        // Look up the catalog by name
-        let catalog = registry.get_catalog(&db_ref.catalog).ok_or_else(|| {
+    /// Resolve a table from a catalog using DBRef, returning (CatalogId, DataSourceHandle)
+    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
+        // Look up the catalog by name - returns (CatalogId, &dyn CompilationCatalog)
+        let (catalog_id, catalog) = self.compilation_context.get_catalog(&db_ref.catalog).ok_or_else(|| {
             EngineError::InvalidPlan(format!("Catalog '{}' not found", db_ref.catalog))
         })?;
 
         // Resolve the table within the catalog
-        catalog.get_table(&db_ref.path).ok_or_else(|| {
+        let handle = catalog.get_table(&db_ref.path).ok_or_else(|| {
             let path_str = db_ref
                 .path
                 .iter()
@@ -254,7 +251,9 @@ impl<'a> PlanCompiler<'a> {
                 "Table '{}' not found in catalog '{}'",
                 path_str, db_ref.catalog
             ))
-        })
+        })?;
+        
+        Ok((catalog_id, handle))
     }
 }
 

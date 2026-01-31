@@ -62,6 +62,18 @@ pub trait DataSource {
     fn close(&mut self) -> Result<()>;
 }
 
+/// Compile-time metadata for a data source.
+///
+/// Provides capabilities and field resolution without coupling to execution-time data access.
+/// Used by DataSourceHandle to enable compile-time optimizations and validations.
+pub trait DataSourceConfig: Send + Sync {
+    /// Get the data source capabilities for optimization
+    fn caps(&self) -> ScanCapabilities;
+    
+    /// Resolve a field name to ScanSource at compile time
+    fn resolve(&self, field_name: &str) -> Option<ScanSource>;
+}
+
 pub trait DataSourceFactory: Send + Sync {
     fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>>;
     fn caps(&self) -> ScanCapabilities;

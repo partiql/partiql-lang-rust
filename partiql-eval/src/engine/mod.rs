@@ -7,8 +7,8 @@ pub mod row;
 pub mod source;
 pub mod value;
 
-pub use catalog::{CatalogRegistry, DataCatalog};
-pub use compiler::{PlanCompiler, ScanProvider};
+pub use catalog::{CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext};
+pub use compiler::PlanCompiler;
 pub use error::{EngineError, Result};
 pub use expr::SlotResolver;
 pub(crate) use expr::UdfRegistry;

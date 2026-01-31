@@ -275,7 +275,8 @@ fn compile_hybrid(
     let provider = HybridScanProvider::new(format, total_rows);
     let compiler = PlanCompiler::new(&provider);
     let compiled = compiler.compile(logical)?;
-    partiql_eval::PartiQLVM::new(compiled)
+    let exec_context = partiql_eval::ExecutionContext::new();
+    partiql_eval::PartiQLVM::new(compiled, &exec_context)
 }
 
 struct HybridScanProvider {

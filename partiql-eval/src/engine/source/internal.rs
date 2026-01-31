@@ -6,13 +6,13 @@ use crate::engine::source::mem_reader::InMemGeneratedReader;
 
 /// Internal enum for row reader implementations
 ///
-/// This enum enables static dispatch for known reader types (InMem, Ion)
-/// while still supporting custom readers via dynamic dispatch.
-/// This avoids vtable overhead for the common cases.
+/// This enum enables static dispatch for known reader types (InMem, Ion).
+/// For custom data sources, use the two-phase catalog pattern with
+/// CompilationCatalog + ExecutionCatalog instead.
 pub(crate) enum DataSourceImpl {
     InMem(InMemGeneratedReader),
     Ion(IonDataSource),
-    Custom(Box<dyn crate::engine::source::api::DataSource>),
+    Catalog(Box<dyn DataSource>),
 }
 
 impl DataSourceImpl {
@@ -20,7 +20,7 @@ impl DataSourceImpl {
         match self {
             DataSourceImpl::InMem(r) => r.open(),
             DataSourceImpl::Ion(r) => r.open(),
-            DataSourceImpl::Custom(r) => r.open(),
+            DataSourceImpl::Catalog(r) => r.open(),
         }
     }
 
@@ -28,7 +28,7 @@ impl DataSourceImpl {
         match self {
             DataSourceImpl::InMem(r) => r.next_row(writer),
             DataSourceImpl::Ion(r) => r.next_row(writer),
-            DataSourceImpl::Custom(r) => r.next_row(writer),
+            DataSourceImpl::Catalog(r) => r.next_row(writer),
         }
     }
 
@@ -36,7 +36,7 @@ impl DataSourceImpl {
         match self {
             DataSourceImpl::InMem(r) => r.close(),
             DataSourceImpl::Ion(r) => r.close(),
-            DataSourceImpl::Custom(r) => r.close(),
+            DataSourceImpl::Catalog(r) => r.close(),
         }
     }
 }
@@ -46,7 +46,6 @@ impl DataSourceImpl {
 pub(crate) enum DataSourceFactoryInner {
     InMem(crate::engine::source::mem_reader::InMemGeneratedDataSourceHandle),
     Ion(crate::engine::source::ion_reader::IonDataSourceFactory),
-    Custom(std::sync::Arc<dyn crate::engine::source::api::DataSourceFactory>),
 }
 
 impl DataSourceFactoryInner {
@@ -54,7 +53,6 @@ impl DataSourceFactoryInner {
         match self {
             DataSourceFactoryInner::InMem(factory) => factory.caps(),
             DataSourceFactoryInner::Ion(factory) => factory.caps(),
-            DataSourceFactoryInner::Custom(factory) => factory.caps(),
         }
     }
 
@@ -62,7 +60,6 @@ impl DataSourceFactoryInner {
         match self {
             DataSourceFactoryInner::InMem(factory) => factory.resolve(field_name),
             DataSourceFactoryInner::Ion(factory) => factory.resolve(field_name),
-            DataSourceFactoryInner::Custom(factory) => factory.resolve(field_name),
         }
     }
 }
