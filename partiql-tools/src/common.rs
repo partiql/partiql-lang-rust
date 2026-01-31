@@ -11,7 +11,8 @@ use partiql_catalog::table_fn::{
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
-use partiql_eval::{DataCatalog, ReaderFactory};
+use partiql_eval::reader::ReaderFactory;
+use partiql_eval::DataCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::LogicalPlan;
@@ -357,7 +358,7 @@ impl SimpleDataCatalog {
     /// # Example
     /// ```ignore
     /// let mut catalog = SimpleDataCatalog::new("my_catalog");
-    /// catalog.add_table("users", ReaderFactory::mem(1000));
+    /// catalog.add_table("users", ReaderFactory::mem(1000, vec!["a".to_string(), "b".to_string()]));
     /// catalog.add_table("orders", ReaderFactory::ion("data/orders.ion".to_string()));
     /// ```
     pub fn add_table(&mut self, name: impl Into<String>, reader_factory: ReaderFactory) {

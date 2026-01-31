@@ -2,7 +2,8 @@ use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::{PlanCompiler, ReaderFactory, ScanProvider};
+use partiql_eval::reader::ReaderFactory;
+use partiql_eval::{PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_tools::common::{compile, create_catalog, lower, parse};
 use partiql_value::{DateTime, Value};
@@ -254,7 +255,10 @@ struct HybridScanProvider {
 impl ScanProvider for HybridScanProvider {
     fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
         match self.format.as_str() {
-            "mem" => Ok(ReaderFactory::mem(self.num_rows)),
+            "mem" => Ok(ReaderFactory::mem(
+                self.num_rows,
+                vec!["a".to_string(), "b".to_string()],
+            )),
             "ion" => {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())

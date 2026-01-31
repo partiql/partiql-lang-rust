@@ -29,11 +29,9 @@ pub use engine::ValueWriter;
 pub use engine::ValueOwned;
 
 // Reader Contract (for custom data sources)
-// TODO: Move all to a `reader`` module.
-pub use engine::{
-    BufferStability, ReaderCaps, ReaderFactory, RowReader, RowReaderFactory, ScanLayout,
-    ScanProjection, ScanSource, TypeHint,
-};
+pub mod reader {
+    pub use crate::engine::reader::*;
+}
 
 // Error Handling
 pub use engine::{EngineError, Result};

@@ -4,7 +4,8 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::{PlanCompiler, ReaderFactory, ScanProvider};
+use partiql_eval::reader::ReaderFactory;
+use partiql_eval::{PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{DateTime, Value};
 use std::{
@@ -662,7 +663,10 @@ impl ScanProvider for HybridScanProvider {
                         "num_rows required for mem source".to_string(),
                     )
                 })?;
-                Ok(ReaderFactory::mem(num_rows))
+                Ok(ReaderFactory::mem(
+                    num_rows,
+                    vec!["a".to_string(), "b".to_string()],
+                ))
             }
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {

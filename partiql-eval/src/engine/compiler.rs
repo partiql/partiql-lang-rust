@@ -87,6 +87,10 @@ impl<'a> PlanCompiler<'a> {
         let scan = scan.ok_or_else(|| EngineError::InvalidPlan("missing scan".to_string()))?;
         let reader_factory = self.resolve_reader_factory(scan)?;
 
+        // Check reader capabilities at compile time
+        let reader_caps = reader_factory.caps();
+        let can_project = reader_caps.can_project;
+
         let has_project = project.is_some();
         let output_count = if has_project {
             project.map(|proj| proj.exprs.len()).unwrap_or_default()
@@ -98,14 +102,45 @@ impl<'a> PlanCompiler<'a> {
         let mut columns: Vec<String> = required_columns.into_iter().collect();
         columns.sort_unstable();
 
-        let base_row_slot = if has_project { None } else { Some(0) };
+        // Build scan layout based on reader capabilities
         let input_start = output_count;
         let mut column_slots = FxHashMap::default();
-        for (idx, name) in columns.iter().enumerate() {
-            column_slots.insert(name.clone(), (input_start + idx) as SlotId);
-        }
+        let mut projections = Vec::new();
 
-        let mut slot_count = input_start + columns.len();
+        if can_project && !columns.is_empty() {
+            // Projection pushdown: resolve and project only required columns
+            for (idx, name) in columns.iter().enumerate() {
+                if let Some(source) = reader_factory.resolve(name) {
+                    let slot = (input_start + idx) as SlotId;
+                    column_slots.insert(name.clone(), slot);
+                    projections.push(ScanProjection {
+                        source,
+                        target_slot: slot,
+                        type_hint: TypeHint::Any,
+                    });
+                }
+                // If resolve returns None, column doesn't exist in reader
+            }
+        } else if !can_project {
+            // Reader doesn't support projection - fall back to base row
+            projections.push(ScanProjection {
+                source: ScanSource::BaseRow,
+                target_slot: input_start as SlotId,
+                type_hint: TypeHint::Any,
+            });
+            // Note: When using BaseRow, column_slots remains empty and
+            // expression evaluation will work directly on the base row slot
+        }
+        // else: can_project but no columns needed - empty projection is fine
+
+        let layout = ScanLayout { projections };
+        let base_row_slot = if !can_project {
+            Some(input_start as SlotId)
+        } else {
+            None
+        };
+
+        let mut slot_count = input_start + if can_project { columns.len() } else { 1 };
         let predicate_slot = if filters.is_empty() {
             None
         } else {
@@ -113,23 +148,6 @@ impl<'a> PlanCompiler<'a> {
             slot_count += 1;
             Some(slot)
         };
-
-        let mut projections = Vec::new();
-        if let Some(base_row_slot) = base_row_slot {
-            projections.push(ScanProjection {
-                source: ScanSource::BaseRow,
-                target_slot: base_row_slot,
-                type_hint: TypeHint::Any,
-            });
-        }
-        for (name, slot) in &column_slots {
-            projections.push(ScanProjection {
-                source: ScanSource::FieldPath(name.clone()),
-                target_slot: *slot,
-                type_hint: TypeHint::Any,
-            });
-        }
-        let layout = ScanLayout { projections };
 
         let resolver = PipelineSlotResolver {
             base_row_slot,

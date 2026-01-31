@@ -1,7 +1,8 @@
 use partiql_tools::common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse, SimpleDataCatalog};
-use partiql_eval::{CatalogRegistry, PlanCompiler, ReaderFactory, ScanProvider};
+use partiql_eval::reader::ReaderFactory;
+use partiql_eval::{CatalogRegistry, PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{Tuple, Value};
 use std::sync::Arc;
@@ -117,6 +118,9 @@ fn main() {
 
     let catalog = create_catalog(data_source.clone(), data_path.clone());
 
+    // Default column names for in-memory reader
+    let column_names = vec!["a".to_string(), "b".to_string()];
+
     // Phase 1: Parse
     let parse_start = Instant::now();
     let parsed = match parse(&query) {
@@ -146,9 +150,9 @@ fn main() {
     // Set up catalog registry with a simple data catalog using builder pattern
     let mut registry = CatalogRegistry::new();
     let reader_factory = match data_source.as_str() {
-        "mem" => ReaderFactory::mem(total_rows),
+        "mem" => ReaderFactory::mem(total_rows, column_names.clone()),
         "ion" | "ionb" => ReaderFactory::ion(data_path.clone().unwrap_or_default()),
-        _ => ReaderFactory::mem(total_rows),
+        _ => ReaderFactory::mem(total_rows, column_names.clone()),
     };
     let data_catalog =
         Arc::new(SimpleDataCatalog::new(catalog.name()).with_table("data", reader_factory));
@@ -247,7 +251,10 @@ impl HybridScanProvider {
 impl ScanProvider for HybridScanProvider {
     fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
         match self.data_source.as_str() {
-            "mem" => Ok(ReaderFactory::mem(self.total_rows)),
+            "mem" => Ok(ReaderFactory::mem(
+                self.total_rows,
+                vec!["a".to_string(), "b".to_string()],
+            )),
             "ion" | "ionb" => {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())
