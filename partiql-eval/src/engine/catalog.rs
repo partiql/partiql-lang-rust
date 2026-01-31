@@ -1,10 +1,10 @@
 //! Database catalog support for PartiQL
 //!
 //! This module provides the infrastructure for registering and querying data catalogs.
-//! Catalogs provide table access via `ReaderFactory` instances, enabling qualified table
+//! Catalogs provide table access via `DataSourceHandle` instances, enabling qualified table
 //! references like `my_catalog.schema.table`.
 
-use crate::engine::reader::ReaderFactory;
+use crate::engine::source::DataSourceHandle;
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 /// A data catalog provides table access by name/path.
 ///
 /// Catalogs are registered with `CatalogRegistry` and queried during plan compilation.
-/// Each catalog has a simple string name and can provide `ReaderFactory` instances for tables
+/// Each catalog has a simple string name and can provide `DataSourceHandle` instances for tables
 /// identified by multi-part paths (where path components use `BindingsName` for case sensitivity).
 ///
 /// # Examples
@@ -31,7 +31,7 @@ use std::sync::Arc;
 ///         &self.name
 ///     }
 ///     
-///     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<ReaderFactory> {
+///     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
 ///         // Look up table by path
 ///         // ...
 ///         None
@@ -44,7 +44,7 @@ pub trait DataCatalog: Send + Sync {
     /// The name is used for catalog lookup in the registry.
     fn name(&self) -> &str;
 
-    /// Gets a `ReaderFactory` for a table by path.
+    /// Gets a `DataSourceHandle` for a table by path.
     ///
     /// Each path component has case sensitivity information via `BindingsName`.
     ///
@@ -56,9 +56,9 @@ pub trait DataCatalog: Send + Sync {
     ///
     /// # Returns
     ///
-    /// - `Some(ReaderFactory)` if the table exists
+    /// - `Some(DataSourceHandle)` if the table exists
     /// - `None` if the table is not found
-    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<ReaderFactory>;
+    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle>;
 }
 
 /// Registry for managing multiple data catalogs.
@@ -169,7 +169,7 @@ mod tests {
             &self.name
         }
 
-        fn get_table(&self, _path: &[BindingsName<'_>]) -> Option<ReaderFactory> {
+        fn get_table(&self, _path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
             None
         }
     }

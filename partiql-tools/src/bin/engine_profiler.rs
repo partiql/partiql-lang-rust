@@ -2,13 +2,12 @@ use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::reader::ReaderFactory;
+use partiql_eval::source::DataSourceHandle;
 use partiql_eval::{PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_tools::common::{compile, create_catalog, lower, parse};
 use partiql_value::{DateTime, Value};
 use std::hint::black_box;
-use std::rc::Rc;
 use std::time::Instant;
 
 /// Available engines
@@ -175,7 +174,6 @@ impl LegacyPlan {
 /// Compiled plan for Hybrid engine
 struct HybridPlan {
     compiled: std::sync::Arc<partiql_eval::CompiledPlan>,
-    compiler: Rc<PlanCompiler<'static>>,
 }
 
 impl HybridPlan {
@@ -195,14 +193,11 @@ impl HybridPlan {
 
         Self {
             compiled: std::sync::Arc::new(compiled),
-            compiler: Rc::new(compiler),
         }
     }
 
     fn create_vm(&self) -> partiql_eval::PartiQLVM {
-        self.compiler
-            .instantiate((*self.compiled).clone(), None)
-            .expect("Instantiate failed")
+        partiql_eval::PartiQLVM::new((*self.compiled).clone()).expect("VM creation failed")
     }
 }
 
@@ -253,9 +248,9 @@ struct HybridScanProvider {
 }
 
 impl ScanProvider for HybridScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
+    fn data_source(&self, _scan: &Scan) -> partiql_eval::Result<DataSourceHandle> {
         match self.format.as_str() {
-            "mem" => Ok(ReaderFactory::mem(
+            "mem" => Ok(DataSourceHandle::mem(
                 self.num_rows,
                 vec!["a".to_string(), "b".to_string()],
             )),
@@ -263,7 +258,7 @@ impl ScanProvider for HybridScanProvider {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())
                 })?;
-                Ok(ReaderFactory::ion(path))
+                Ok(DataSourceHandle::ion(path))
             }
             other => Err(partiql_eval::EngineError::ReaderError(format!(
                 "unsupported format: {}",

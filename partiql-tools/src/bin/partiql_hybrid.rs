@@ -1,7 +1,7 @@
 use partiql_tools::common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse, SimpleDataCatalog};
-use partiql_eval::reader::ReaderFactory;
+use partiql_eval::source::DataSourceHandle;
 use partiql_eval::{CatalogRegistry, PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{Tuple, Value};
@@ -149,13 +149,13 @@ fn main() {
 
     // Set up catalog registry with a simple data catalog using builder pattern
     let mut registry = CatalogRegistry::new();
-    let reader_factory = match data_source.as_str() {
-        "mem" => ReaderFactory::mem(total_rows, column_names.clone()),
-        "ion" | "ionb" => ReaderFactory::ion(data_path.clone().unwrap_or_default()),
-        _ => ReaderFactory::mem(total_rows, column_names.clone()),
+    let data_source_handle = match data_source.as_str() {
+        "mem" => DataSourceHandle::mem(total_rows, column_names.clone()),
+        "ion" | "ionb" => DataSourceHandle::ion(data_path.clone().unwrap_or_default()),
+        _ => DataSourceHandle::mem(total_rows, column_names.clone()),
     };
     let data_catalog =
-        Arc::new(SimpleDataCatalog::new(catalog.name()).with_table("data", reader_factory));
+        Arc::new(SimpleDataCatalog::new(catalog.name()).with_table("data", data_source_handle));
     registry.register_catalog(data_catalog);
 
     let compiler = PlanCompiler::with_catalogs(&provider, Some(&registry));
@@ -170,7 +170,7 @@ fn main() {
 
     // Phase 4: Execute
     let exec_start = Instant::now();
-    let mut vm = match compiler.instantiate(compiled, None) {
+    let mut vm = match partiql_eval::PartiQLVM::new(compiled) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Execution setup error: {:?}", e);
@@ -249,9 +249,9 @@ impl HybridScanProvider {
 }
 
 impl ScanProvider for HybridScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
+    fn data_source(&self, _scan: &Scan) -> partiql_eval::Result<DataSourceHandle> {
         match self.data_source.as_str() {
-            "mem" => Ok(ReaderFactory::mem(
+            "mem" => Ok(DataSourceHandle::mem(
                 self.total_rows,
                 vec!["a".to_string(), "b".to_string()],
             )),
@@ -259,7 +259,7 @@ impl ScanProvider for HybridScanProvider {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())
                 })?;
-                Ok(ReaderFactory::ion(path))
+                Ok(DataSourceHandle::ion(path))
             }
             other => Err(partiql_eval::EngineError::ReaderError(format!(
                 "unsupported data source: {other}"
@@ -268,7 +268,10 @@ impl ScanProvider for HybridScanProvider {
     }
 }
 
-fn row_to_value(row: &partiql_eval::RowView<'_>, schema: &partiql_eval::Schema) -> Value {
+fn row_to_value(
+    row: &partiql_eval::value::RegisterReader<'_>,
+    schema: &partiql_eval::Schema,
+) -> Value {
     if schema.columns.len() == 1 {
         row.get_value(0).into()
     } else {

@@ -1,6 +1,6 @@
 use crate::engine::error::{EngineError, Result};
-use crate::engine::reader::api::{
-    BufferStability, ReaderCaps, RowReader, RowReaderFactory, ScanLayout, ScanSource,
+use crate::engine::source::api::{
+    BufferStability, DataSource, DataSourceFactory, ScanCapabilities, ScanLayout, ScanSource,
 };
 
 /// In-memory row reader that generates rows on-the-fly
@@ -28,13 +28,13 @@ impl InMemGeneratedReader {
     }
 }
 
-impl RowReader for InMemGeneratedReader {
+impl DataSource for InMemGeneratedReader {
     fn open(&mut self) -> Result<()> {
         self.current_row = 0;
         Ok(())
     }
 
-    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool> {
+    fn next_row(&mut self, writer: &mut super::RegisterWriter<'_, '_>) -> Result<bool> {
         // Check if we've generated all rows
         if self.current_row >= self.total_rows as i64 {
             return Ok(false);
@@ -81,22 +81,22 @@ impl RowReader for InMemGeneratedReader {
 }
 
 #[derive(Clone)]
-pub struct InMemGeneratedReaderFactory {
+pub struct InMemGeneratedDataSourceHandle {
     pub(crate) total_rows: usize,
     pub(crate) column_names: Vec<String>,
 }
 
-impl InMemGeneratedReaderFactory {
+impl InMemGeneratedDataSourceHandle {
     pub fn new(total_rows: usize, column_names: Vec<String>) -> Self {
-        InMemGeneratedReaderFactory {
+        InMemGeneratedDataSourceHandle {
             total_rows,
             column_names,
         }
     }
 }
 
-impl RowReaderFactory for InMemGeneratedReaderFactory {
-    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>> {
+impl DataSourceFactory for InMemGeneratedDataSourceHandle {
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
         // Validate that all projections are ColumnIndex (not FieldPath)
         for proj in &layout.projections {
             match &proj.source {
@@ -118,8 +118,8 @@ impl RowReaderFactory for InMemGeneratedReaderFactory {
         )))
     }
 
-    fn caps(&self) -> ReaderCaps {
-        ReaderCaps {
+    fn caps(&self) -> ScanCapabilities {
+        ScanCapabilities {
             stability: BufferStability::UntilNext,
             can_project: true,
             can_return_opaque: false,

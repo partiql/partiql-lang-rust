@@ -4,7 +4,7 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::reader::ReaderFactory;
+use partiql_eval::source::DataSourceHandle;
 use partiql_eval::{PlanCompiler, ScanProvider};
 use partiql_logical::Scan;
 use partiql_value::{DateTime, Value};
@@ -623,7 +623,7 @@ fn compile_hybrid(
     let provider = HybridScanProvider::new(format, total_rows);
     let compiler = PlanCompiler::new(&provider);
     let compiled = compiler.compile(logical)?;
-    compiler.instantiate(compiled, None)
+    partiql_eval::PartiQLVM::new(compiled)
 }
 
 struct HybridScanProvider {
@@ -655,7 +655,7 @@ impl HybridScanProvider {
 }
 
 impl ScanProvider for HybridScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
+    fn data_source(&self, _scan: &Scan) -> partiql_eval::Result<DataSourceHandle> {
         match self.data_source.as_str() {
             "mem" => {
                 let num_rows = self.num_rows.ok_or_else(|| {
@@ -663,7 +663,7 @@ impl ScanProvider for HybridScanProvider {
                         "num_rows required for mem source".to_string(),
                     )
                 })?;
-                Ok(ReaderFactory::mem(
+                Ok(DataSourceHandle::mem(
                     num_rows,
                     vec!["a".to_string(), "b".to_string()],
                 ))
@@ -672,7 +672,7 @@ impl ScanProvider for HybridScanProvider {
                 let path = self.data_path.clone().ok_or_else(|| {
                     partiql_eval::EngineError::ReaderError("ion path required".to_string())
                 })?;
-                Ok(ReaderFactory::ion(path))
+                Ok(DataSourceHandle::ion(path))
             }
             _ => Err(partiql_eval::EngineError::ReaderError(
                 "Hybrid supports mem/ion/ionb only".to_string(),

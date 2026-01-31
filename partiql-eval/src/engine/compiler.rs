@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
 use crate::engine::catalog::CatalogRegistry;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
-use crate::engine::plan::{
-    Column, CompiledPlan, PartiQLVM, PipelineSpec, RelOpSpec, Schema, StepSpec,
-};
-use crate::engine::reader::{ReaderFactory, ScanLayout, ScanProjection, ScanSource, TypeHint};
+use crate::engine::plan::{Column, CompiledPlan, PipelineSpec, RelOpSpec, Schema, StepSpec};
 use crate::engine::row::SlotId;
-use crate::engine::{SlotResolver, UdfRegistry};
+use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TypeHint};
+use crate::engine::SlotResolver;
 use partiql_logical::{
     BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, PathComponent, Project, Scan, ValueExpr,
     VarRefType,
@@ -17,7 +13,7 @@ use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub trait ScanProvider {
-    fn reader_factory(&self, scan: &Scan) -> Result<ReaderFactory>;
+    fn data_source(&self, scan: &Scan) -> Result<DataSourceHandle>;
 }
 
 pub struct PlanCompiler<'a> {
@@ -200,7 +196,7 @@ impl<'a> PlanCompiler<'a> {
         let pipeline = PipelineSpec {
             layout,
             steps,
-            reader_factory,
+            data_source: reader_factory,
         };
 
         Ok(CompiledPlan {
@@ -212,34 +208,23 @@ impl<'a> PlanCompiler<'a> {
         })
     }
 
-    /// Create a PartiQLVM from a compiled plan
-    ///
-    /// This is a convenience method that wraps PartiQLVM::new().
-    pub fn instantiate(
-        &self,
-        compiled: CompiledPlan,
-        udf: Option<Arc<dyn UdfRegistry>>,
-    ) -> Result<PartiQLVM> {
-        PartiQLVM::new(compiled, udf)
-    }
-
-    /// Resolve a ReaderFactory for a scan, handling both VarRef and DBRef expressions
-    fn resolve_reader_factory(&self, scan: &Scan) -> Result<ReaderFactory> {
+    /// Resolve a DataSourceHandle for a scan, handling both VarRef and DBRef expressions
+    fn resolve_reader_factory(&self, scan: &Scan) -> Result<DataSourceHandle> {
         match &scan.expr {
             // Catalog-based scan via DBRef - resolve through CatalogRegistry
             ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
 
             // TODO: VarRef and other expression types will be compiled differently in the future
             // Traditional scan via VarRef - use ScanProvider for now
-            ValueExpr::VarRef(_, _) => self.scan_provider.reader_factory(scan),
+            ValueExpr::VarRef(_, _) => self.scan_provider.data_source(scan),
 
             // Other expression types - delegate to ScanProvider for now
-            _ => self.scan_provider.reader_factory(scan),
+            _ => self.scan_provider.data_source(scan),
         }
     }
 
     /// Resolve a table from a catalog using DBRef
-    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<ReaderFactory> {
+    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<DataSourceHandle> {
         // Ensure we have a catalog registry
         let registry = self.catalog_registry.ok_or_else(|| {
             EngineError::InvalidPlan(format!(

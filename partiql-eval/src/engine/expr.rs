@@ -82,6 +82,7 @@ pub struct Program {
     pub consts: Vec<ValueOwned>,
     pub keys: Vec<String>,
     pub reg_count: u16,
+    #[allow(dead_code)]
     pub slot_count: u16,
 }
 
@@ -96,7 +97,7 @@ impl Program {
     /// The register array is borrowed from PartiQLVM and reused across all rows,
     /// eliminating heap allocations during expression evaluation.
     /// The first `slot_count` registers are reserved for slot data.
-    pub fn eval<'a>(
+    pub(crate) fn eval<'a>(
         &self,
         arena: &'a Arena,
         regs: &mut [ValueRef<'a>],
@@ -190,7 +191,7 @@ impl Program {
     }
 }
 
-pub trait UdfRegistry {
+pub(crate) trait UdfRegistry {
     fn call(&self, name: &str, args: &[ValueRef<'_>], arena: &Arena) -> Result<ValueRef<'_>>;
 }
 

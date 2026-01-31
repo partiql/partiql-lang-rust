@@ -18,19 +18,14 @@ pub use engine::{
     CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, ScanProvider, Schema,
 };
 
-// Result Views (zero-copy accessors)
-pub use engine::{RowView, ValueView};
-
-// ValueWriter (for custom reader implementations)
-pub use engine::ValueWriter;
-
-// Owned Values (for serialization and legacy API conversion)
-// TODO: Remove.
-pub use engine::ValueOwned;
-
 // Reader Contract (for custom data sources)
-pub mod reader {
-    pub use crate::engine::reader::*;
+pub mod source {
+    pub use crate::engine::source::*;
+}
+
+// Value types for query results
+pub mod value {
+    pub use crate::engine::value::*;
 }
 
 // Error Handling
