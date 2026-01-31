@@ -1,11 +1,9 @@
 use partiql_tools::common;
 
-use common::{count_rows_from_file, create_catalog, lower, parse, SimpleDataCatalog};
-use partiql_eval::reader::ReaderFactory;
-use partiql_eval::{CatalogRegistry, PlanCompiler, ScanProvider};
-use partiql_logical::Scan;
+use common::{count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog};
+use partiql_eval::source::CompiledSourceFactory;
+use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
-use std::sync::Arc;
 use std::time::Instant;
 
 const BATCH_SIZE: usize = 1;
@@ -16,12 +14,13 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "Usage: {} <query> --data-source <mem|ion> [--data-path <path>]",
+            "Usage: {} <query> --data-source <mem|ion|rand> [--data-path <path>]",
             args[0]
         );
         eprintln!("\nExamples:");
         eprintln!("  {} \"SELECT a, b FROM !input WHERE a % 1000 = 0\" --data-source ion --data-path test_data/data_b1024_n10000.ion", args[0]);
         eprintln!("  {} \"SELECT * FROM !input\" --data-source mem", args[0]);
+        eprintln!("  {} \"SELECT * FROM data WHERE a > 0 LIMIT 10\" --data-source rand", args[0]);
         eprintln!("\nNote: !input will be replaced with 'data' in the query");
         std::process::exit(1);
     }
@@ -73,7 +72,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    if data_source != "mem" && data_path.is_none() {
+    if data_source != "mem" && data_source != "rand" && data_path.is_none() {
         eprintln!(
             "Error: --data-path is required for file-based data source '{}'",
             data_source
@@ -90,7 +89,7 @@ fn main() {
         println!("Data Path:   {}", path);
     }
 
-    let total_rows = if data_source == "mem" {
+    let total_rows = if data_source == "mem" || data_source == "rand" {
         let batch_size = BATCH_SIZE;
         let num_batches = NUM_BATCHES;
         let total = batch_size * num_batches;
@@ -145,20 +144,39 @@ fn main() {
 
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
-    let provider = HybridScanProvider::new(data_source.clone(), data_path.clone(), total_rows);
 
-    // Set up catalog registry with a simple data catalog using builder pattern
-    let mut registry = CatalogRegistry::new();
-    let reader_factory = match data_source.as_str() {
-        "mem" => ReaderFactory::mem(total_rows, column_names.clone()),
-        "ion" | "ionb" => ReaderFactory::ion(data_path.clone().unwrap_or_default()),
-        _ => ReaderFactory::mem(total_rows, column_names.clone()),
+    // Set up compilation context - use two-phase catalog pattern for ALL data sources
+    let mut context = CompilationContext::new();
+    
+    // Create appropriate catalog based on data source - all use two-phase pattern
+    let (comp_catalog, exec_catalog) = match data_source.as_str() {
+        "rand" => {
+            // Random catalog for custom reader demonstration
+            random_catalog(
+                vec![("data".to_string(), total_rows, column_names.clone())],
+            )
+        }
+        "mem" | "ion" | "ionb" => {
+            // Simple catalog for mem/ion data sources - use CompiledSourceFactory
+            let factory = match data_source.as_str() {
+                "mem" => CompiledSourceFactory::mem(total_rows, column_names.clone()),
+                "ion" | "ionb" => CompiledSourceFactory::ion(data_path.clone().unwrap_or_default()),
+                _ => unreachable!(),
+            };
+            simple_catalog(
+                vec![("data".to_string(), factory)],
+            )
+        }
+        _ => {
+            eprintln!("Unsupported data source: {}", data_source);
+            std::process::exit(1);
+        }
     };
-    let data_catalog =
-        Arc::new(SimpleDataCatalog::new(catalog.name()).with_table("data", reader_factory));
-    registry.register_catalog(data_catalog);
+    
+    // Add catalog and CAPTURE the returned catalog_id - this is the ONLY place catalog_id is assigned
+    let catalog_id = context.add_catalog("default", comp_catalog);
 
-    let compiler = PlanCompiler::with_catalogs(&provider, Some(&registry));
+    let compiler = PlanCompiler::new(&context);
     let compiled = match compiler.compile(&logical) {
         Ok(p) => p,
         Err(e) => {
@@ -170,7 +188,12 @@ fn main() {
 
     // Phase 4: Execute
     let exec_start = Instant::now();
-    let mut vm = match compiler.instantiate(compiled, None) {
+    
+    // Create ExecutionContext and ALWAYS populate it with execution catalog
+    let mut exec_context = ExecutionContext::new();
+    exec_context.add_catalog(catalog_id, exec_catalog);
+    
+    let mut vm = match partiql_eval::PartiQLVM::new(compiled, &exec_context) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Execution setup error: {:?}", e);
@@ -232,43 +255,10 @@ fn main() {
     println!("Rows returned:     {}", row_count);
 }
 
-struct HybridScanProvider {
-    data_source: String,
-    data_path: Option<String>,
-    total_rows: usize,
-}
-
-impl HybridScanProvider {
-    fn new(data_source: String, data_path: Option<String>, total_rows: usize) -> Self {
-        HybridScanProvider {
-            data_source,
-            data_path,
-            total_rows,
-        }
-    }
-}
-
-impl ScanProvider for HybridScanProvider {
-    fn reader_factory(&self, _scan: &Scan) -> partiql_eval::Result<ReaderFactory> {
-        match self.data_source.as_str() {
-            "mem" => Ok(ReaderFactory::mem(
-                self.total_rows,
-                vec!["a".to_string(), "b".to_string()],
-            )),
-            "ion" | "ionb" => {
-                let path = self.data_path.clone().ok_or_else(|| {
-                    partiql_eval::EngineError::ReaderError("ion path required".to_string())
-                })?;
-                Ok(ReaderFactory::ion(path))
-            }
-            other => Err(partiql_eval::EngineError::ReaderError(format!(
-                "unsupported data source: {other}"
-            ))),
-        }
-    }
-}
-
-fn row_to_value(row: &partiql_eval::RowView<'_>, schema: &partiql_eval::Schema) -> Value {
+fn row_to_value(
+    row: &partiql_eval::value::RegisterReader<'_>,
+    schema: &partiql_eval::Schema,
+) -> Value {
     if schema.columns.len() == 1 {
         row.get_value(0).into()
     } else {

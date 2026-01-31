@@ -1,8 +1,8 @@
 use crate::engine::error::{EngineError, Result};
-use crate::engine::reader::api::{
-    BufferStability, ReaderCaps, RowReader, RowReaderFactory, ScanLayout, ScanSource,
-};
 use crate::engine::row::SlotId;
+use crate::engine::source::api::{
+    BufferStability, DataSource, DataSourceFactory, ScanCapabilities, ScanLayout, ScanSource,
+};
 use ion_rs_old::{IonReader, IonType, ReaderBuilder};
 use rustc_hash::FxHashMap;
 use std::fs::File;
@@ -23,7 +23,7 @@ use std::io::BufReader;
 /// # Limitations
 /// - Single-level field paths only (no nested navigation like "a.b.c")
 /// - Dynamic type dispatch (may optimize to i64-only in future)
-pub struct IonRowReader {
+pub struct IonDataSource {
     path: String,
     reader: Option<Box<ion_rs_old::Reader<'static>>>,
     /// Maps field names to target slot IDs for O(1) lookup during reading
@@ -33,7 +33,7 @@ pub struct IonRowReader {
     string_storage: Vec<String>,
 }
 
-impl IonRowReader {
+impl IonDataSource {
     pub fn new(path: String, layout: ScanLayout) -> Self {
         // Build field name to slot mapping for O(1) lookup during reading
         let mut field_to_slot = FxHashMap::default();
@@ -43,7 +43,7 @@ impl IonRowReader {
             }
         }
 
-        IonRowReader {
+        IonDataSource {
             path,
             reader: None,
             field_to_slot,
@@ -52,7 +52,7 @@ impl IonRowReader {
     }
 }
 
-impl RowReader for IonRowReader {
+impl DataSource for IonDataSource {
     fn open(&mut self) -> Result<()> {
         let file = File::open(&self.path)
             .map_err(|e| EngineError::ReaderError(format!("ion open failed: {e}")))?;
@@ -70,7 +70,7 @@ impl RowReader for IonRowReader {
         Ok(())
     }
 
-    fn next_row(&mut self, writer: &mut crate::engine::row::ValueWriter<'_, '_>) -> Result<bool> {
+    fn next_row(&mut self, writer: &mut super::RegisterWriter<'_, '_>) -> Result<bool> {
         let reader = match self.reader.as_mut() {
             Some(r) => r,
             None => return Ok(false),
@@ -195,18 +195,18 @@ impl RowReader for IonRowReader {
 }
 
 #[derive(Clone)]
-pub struct IonRowReaderFactory {
+pub struct IonDataSourceFactory {
     pub(crate) path: String,
 }
 
-impl IonRowReaderFactory {
+impl IonDataSourceFactory {
     pub fn new(path: String) -> Self {
-        IonRowReaderFactory { path }
+        IonDataSourceFactory { path }
     }
 }
 
-impl RowReaderFactory for IonRowReaderFactory {
-    fn create(&self, layout: ScanLayout) -> Result<Box<dyn RowReader>> {
+impl DataSourceFactory for IonDataSourceFactory {
+    fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
         // Validate that all projections are FieldPath (not ColumnIndex)
         for proj in &layout.projections {
             match &proj.source {
@@ -226,11 +226,11 @@ impl RowReaderFactory for IonRowReaderFactory {
             }
         }
 
-        Ok(Box::new(IonRowReader::new(self.path.clone(), layout)))
+        Ok(Box::new(IonDataSource::new(self.path.clone(), layout)))
     }
 
-    fn caps(&self) -> ReaderCaps {
-        ReaderCaps {
+    fn caps(&self) -> ScanCapabilities {
+        ScanCapabilities {
             stability: BufferStability::UntilNext,
             can_project: true,
             can_return_opaque: false,

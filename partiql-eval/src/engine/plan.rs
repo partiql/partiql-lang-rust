@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::Program;
-use crate::engine::reader::{ReaderImpl, ScanLayout};
 use crate::engine::row::{Arena, SlotId};
-use crate::engine::value::{ValueOwned, ValueRef};
+use crate::engine::source::RegisterWriter;
+use crate::engine::source::{DataSourceImpl, ScanLayout};
+use crate::engine::value::{RegisterReader, ValueOwned, ValueRef};
 use crate::engine::UdfRegistry;
 use crate::env::basic::MapBindings;
 use crate::eval::BasicContext;
@@ -81,9 +83,9 @@ impl CompiledPlan {
     }
 }
 
-// TODO: Actually implement HashJoin and whatnot. Make pub(crate)
+// TODO: Actually implement HashJoin and whatnot.
 #[allow(dead_code)]
-pub enum RelOpSpec {
+pub(crate) enum RelOpSpec {
     Pipeline(PipelineSpec),
     HashJoin(HashJoinSpec),
     HashAgg(HashAggSpec),
@@ -120,10 +122,20 @@ impl RelOpSpec {
     }
 }
 
+/// Compiled data source handle with catalog context.
+///
+/// Wraps a DataSourceHandle with its CatalogId, enabling execution-time
+/// resolution without baking the catalog ID into the handle itself.
+#[derive(Clone)]
+pub(crate) struct CompiledDataSourceHandle {
+    pub(crate) catalog_id: partiql_common::catalog::CatalogId,
+    pub(crate) handle: crate::engine::source::DataSourceHandle,
+}
+
 pub struct PipelineSpec {
     pub layout: ScanLayout,
     pub steps: Vec<StepSpec>,
-    pub reader_factory: crate::engine::reader::ReaderFactory,
+    pub data_source: CompiledDataSourceHandle,
 }
 
 impl PipelineSpec {
@@ -131,7 +143,7 @@ impl PipelineSpec {
         Self {
             layout: self.layout.clone(),
             steps: self.steps.clone(),
-            reader_factory: self.reader_factory.clone(),
+            data_source: self.data_source.clone(),
         }
     }
 }
@@ -139,11 +151,13 @@ pub struct HashJoinSpec;
 pub struct HashAggSpec;
 pub struct SortSpec;
 
-pub trait BlockingOperatorSpec: Send + Sync {
+pub(crate) trait BlockingOperatorSpec: Send + Sync {
+    #[allow(dead_code)]
     fn instantiate(&self) -> Box<dyn BlockingOperator>;
 }
 
-pub trait BlockingOperator {
+pub(crate) trait BlockingOperator {
+    #[allow(dead_code)]
     fn next_row(&mut self, arena: &Arena, regs: &mut [ValueRef<'_>]) -> Result<bool>;
     fn open(&mut self) -> Result<()>;
     fn close(&mut self) -> Result<()>;
@@ -166,7 +180,7 @@ impl RelOp {
         arena: &'a Arena,
         regs: &'a mut [ValueRef<'a>],
         slot_count: usize,
-    ) -> Result<Option<crate::engine::row::RowView<'a>>> {
+    ) -> Result<Option<RegisterReader<'a>>> {
         match self {
             RelOp::Pipeline(op) => op.next_row(arena, regs, slot_count),
             RelOp::Legacy(op) => op.next_row(arena, regs, slot_count),
@@ -204,7 +218,7 @@ impl RelOp {
 
 pub struct PipelineOp {
     steps: Vec<Step>,
-    reader: ReaderImpl,
+    reader: DataSourceImpl,
     opened: bool,
     udf: Option<Arc<dyn UdfRegistry>>,
 }
@@ -230,7 +244,7 @@ pub(crate) struct LegacyState {
 impl PipelineOp {
     pub(crate) fn new(
         steps: Vec<Step>,
-        reader: ReaderImpl,
+        reader: DataSourceImpl,
         udf: Option<Arc<dyn UdfRegistry>>,
     ) -> Self {
         PipelineOp {
@@ -268,15 +282,15 @@ impl PipelineOp {
         arena: &'a Arena,
         regs: &'a mut [ValueRef<'a>],
         slot_count: usize,
-    ) -> Result<Option<crate::engine::row::RowView<'a>>> {
+    ) -> Result<Option<RegisterReader<'a>>> {
         let udf = self.udf.as_deref();
         loop {
-            // Read next row into registers via ValueWriter
+            // Read next row into registers via RegisterWriter
             // Use a shorter-lived reborrow to ensure the mutable borrow ends
             let has_row = {
                 // Reborrow with shorter lifetime to prevent lifetime extension
                 let regs_reborrow = &mut *regs;
-                let mut writer = crate::engine::row::ValueWriter::new(regs_reborrow);
+                let mut writer = RegisterWriter::new(regs_reborrow);
                 self.reader.next_row(&mut writer)?
             };
 
@@ -289,7 +303,7 @@ impl PipelineOp {
                 StepOutcome::Emit => {
                     // Return immutable view of slot region
                     let slots = &regs[0..slot_count];
-                    return Ok(Some(crate::engine::row::RowView::new(slots)));
+                    return Ok(Some(RegisterReader::new(slots)));
                 }
                 StepOutcome::Skip => continue,
                 StepOutcome::Halt => return Ok(None),
@@ -412,7 +426,7 @@ impl LegacyState {
         arena: &'a Arena,
         regs: &'a mut [ValueRef<'a>],
         slot_count: usize,
-    ) -> Result<Option<crate::engine::row::RowView<'a>>> {
+    ) -> Result<Option<RegisterReader<'a>>> {
         let results = match &self.cached_results {
             Some(r) => r,
             None => {
@@ -434,7 +448,7 @@ impl LegacyState {
 
         // Return view of slot region
         let slots = &regs[0..slot_count];
-        Ok(Some(crate::engine::row::RowView::new(slots)))
+        Ok(Some(RegisterReader::new(slots)))
     }
 
     /// Convert a partiql_value::Value to ValueRef in registers
@@ -518,15 +532,15 @@ pub struct PartiQLVM {
 }
 
 impl PartiQLVM {
-    /// Create a new VM instance from a compiled plan
+    /// Create a new VM instance from a compiled plan with ExecutionContext
     ///
     /// # Arguments
     /// * `compiled` - The compiled query plan to execute
-    /// * `udf_registry` - Optional registry for user-defined functions
+    /// * `exec_context` - ExecutionContext for resolving catalog-based data sources
     ///
     /// # Returns
     /// A new PartiQLVM ready to execute the plan
-    pub fn new(compiled: CompiledPlan, udf_registry: Option<Arc<dyn UdfRegistry>>) -> Result<Self> {
+    pub fn new(compiled: CompiledPlan, exec_context: &ExecutionContext) -> Result<Self> {
         let compiled = Arc::new(compiled);
         let slot_count = compiled.slot_count;
         let root = compiled.root;
@@ -536,12 +550,17 @@ impl PartiQLVM {
         for node in &compiled.nodes {
             match node {
                 RelOpSpec::Pipeline(spec) => {
-                    let reader = spec.reader_factory.create_impl(spec.layout.clone())?;
+                    // Resolve DataSource from handle - single path for ALL data sources
+                    // Extract catalog_id from CompiledDataSourceHandle and pass to create_impl
+                    let reader = spec.data_source.handle.create_impl(
+                        spec.data_source.catalog_id,
+                        spec.layout.clone(),
+                        exec_context,
+                    )?;
+
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(
-                        steps,
-                        reader,
-                        udf_registry.clone(),
+                        steps, reader, None, // UDF registry not supported yet
                     )));
                 }
                 RelOpSpec::Legacy(spec) => {
@@ -671,7 +690,7 @@ impl<'vm> QueryIterator<'vm> {
     ///
     /// Returns `Some(Ok(row))` if a row is available, `None` if complete,
     /// or `Some(Err(...))` if an error occurred.
-    fn next_row_internal(&mut self) -> Option<Result<crate::engine::row::RowView<'_>>> {
+    fn next_row_internal(&mut self) -> Option<Result<RegisterReader<'_>>> {
         // Lazy open on first iteration
         if !self.opened {
             if let Err(e) = self.vm.open_operators() {
@@ -699,7 +718,7 @@ impl<'vm> QueryIterator<'vm> {
             }
         };
 
-        // Call next_row - it now returns Option<RowView> directly
+        // Call next_row - it now returns Option<RegisterReader> directly
         match op.next_row(&self.vm.arena, regs, self.vm.slot_count) {
             Ok(Some(row)) => Some(Ok(row)),
             Ok(None) => None,
@@ -709,7 +728,7 @@ impl<'vm> QueryIterator<'vm> {
 }
 
 impl<'vm> Iterator for QueryIterator<'vm> {
-    type Item = Result<crate::engine::row::RowView<'vm>>;
+    type Item = Result<RegisterReader<'vm>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Delegate to the lending next_row_internal() method
@@ -719,12 +738,8 @@ impl<'vm> Iterator for QueryIterator<'vm> {
         // 3. Callers must not hold references across next() calls (standard iterator contract)
         match self.next_row_internal() {
             Some(Ok(row)) => {
-                let row = unsafe {
-                    std::mem::transmute::<
-                        crate::engine::row::RowView<'_>,
-                        crate::engine::row::RowView<'vm>,
-                    >(row)
-                };
+                let row =
+                    unsafe { std::mem::transmute::<RegisterReader<'_>, RegisterReader<'vm>>(row) };
                 Some(Ok(row))
             }
             Some(Err(e)) => Some(Err(e)),
