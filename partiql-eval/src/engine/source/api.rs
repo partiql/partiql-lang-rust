@@ -69,7 +69,7 @@ pub trait DataSource {
 pub trait DataSourceConfig: Send + Sync {
     /// Get the data source capabilities for optimization
     fn caps(&self) -> ScanCapabilities;
-    
+
     /// Resolve a field name to ScanSource at compile time
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
 }

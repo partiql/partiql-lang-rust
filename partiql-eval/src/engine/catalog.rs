@@ -136,7 +136,11 @@ impl CompilationContext {
     ///
     /// If a catalog with this name already exists, it will be replaced and
     /// a new CatalogId will be generated.
-    pub fn add_catalog(&mut self, name: impl Into<String>, catalog: Arc<dyn CompilationCatalog>) -> CatalogId {
+    pub fn add_catalog(
+        &mut self,
+        name: impl Into<String>,
+        catalog: Arc<dyn CompilationCatalog>,
+    ) -> CatalogId {
         let id = CatalogId::from(self.next_catalog_id);
         self.next_catalog_id += 1;
         let name = name.into();

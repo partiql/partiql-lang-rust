@@ -6,8 +6,8 @@ pub(crate) mod mem_reader;
 
 // Re-export ONLY public API types from api.rs - these are the only types visible outside the crate
 pub use api::{
-    BufferStability, DataSource, DataSourceConfig, DataSourceFactory, ScanCapabilities,
-    ScanLayout, ScanProjection, ScanSource, TypeHint,
+    BufferStability, DataSource, DataSourceConfig, DataSourceFactory, ScanCapabilities, ScanLayout,
+    ScanProjection, ScanSource, TypeHint,
 };
 
 // Internal types - re-exported as pub(crate) for use within the engine
@@ -163,9 +163,10 @@ impl DataSourceHandle {
                 DataSourceFactoryInner::InMem(f) => Ok(DataSourceImpl::InMem(
                     InMemGeneratedReader::new(f.total_rows, f.column_names.len(), layout),
                 )),
-                DataSourceFactoryInner::Ion(f) => {
-                    Ok(DataSourceImpl::Ion(IonDataSource::new(f.path.clone(), layout)))
-                }
+                DataSourceFactoryInner::Ion(f) => Ok(DataSourceImpl::Ion(IonDataSource::new(
+                    f.path.clone(),
+                    layout,
+                ))),
             },
             DataSourceHandleInner::Catalog { entry_id, .. } => {
                 // Catalog-based: resolve via ExecutionContext using provided catalog_id
@@ -175,7 +176,7 @@ impl DataSourceHandle {
                         catalog_id
                     ))
                 })?;
-                
+
                 let data_source = catalog.create(*entry_id, layout)?;
                 Ok(DataSourceImpl::Catalog(data_source))
             }
@@ -231,9 +232,10 @@ impl CompiledSourceFactory {
     /// All columns have the same value for each row.
     pub fn mem(total_rows: usize, column_names: Vec<String>) -> Self {
         Self {
-            inner: CompiledSourceFactoryInner::InMem(
-                InMemGeneratedDataSourceHandle::new(total_rows, column_names),
-            ),
+            inner: CompiledSourceFactoryInner::InMem(InMemGeneratedDataSourceHandle::new(
+                total_rows,
+                column_names,
+            )),
         }
     }
 

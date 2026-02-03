@@ -180,12 +180,12 @@ impl<'a> PlanCompiler<'a> {
         }
 
         use crate::engine::plan::CompiledDataSourceHandle;
-        
+
         let compiled_data_source = CompiledDataSourceHandle {
             catalog_id,
             handle: reader_factory,
         };
-        
+
         let pipeline = PipelineSpec {
             layout,
             steps,
@@ -202,9 +202,12 @@ impl<'a> PlanCompiler<'a> {
     }
 
     /// Resolve a DataSourceHandle for a scan, returning (CatalogId, DataSourceHandle)
-    /// 
+    ///
     /// Resolves table references through the CompilationContext's catalog system.
-    fn resolve_reader_factory(&self, scan: &Scan) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
+    fn resolve_reader_factory(
+        &self,
+        scan: &Scan,
+    ) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
         match &scan.expr {
             // Catalog-based scan via DBRef - resolve through CatalogRegistry
             ValueExpr::DBRef(db_ref) => self.resolve_catalog_table(db_ref),
@@ -220,20 +223,24 @@ impl<'a> PlanCompiler<'a> {
             }
 
             // Other expression types are not supported for scans
-            _ => {
-                Err(EngineError::InvalidPlan(
-                    "Unsupported scan expression type - expected DBRef or VarRef".to_string()
-                ))
-            }
+            _ => Err(EngineError::InvalidPlan(
+                "Unsupported scan expression type - expected DBRef or VarRef".to_string(),
+            )),
         }
     }
 
     /// Resolve a table from a catalog using DBRef, returning (CatalogId, DataSourceHandle)
-    fn resolve_catalog_table(&self, db_ref: &DBRef) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
+    fn resolve_catalog_table(
+        &self,
+        db_ref: &DBRef,
+    ) -> Result<(partiql_common::catalog::CatalogId, DataSourceHandle)> {
         // Look up the catalog by name - returns (CatalogId, &dyn CompilationCatalog)
-        let (catalog_id, catalog) = self.compilation_context.get_catalog(&db_ref.catalog).ok_or_else(|| {
-            EngineError::InvalidPlan(format!("Catalog '{}' not found", db_ref.catalog))
-        })?;
+        let (catalog_id, catalog) = self
+            .compilation_context
+            .get_catalog(&db_ref.catalog)
+            .ok_or_else(|| {
+                EngineError::InvalidPlan(format!("Catalog '{}' not found", db_ref.catalog))
+            })?;
 
         // Resolve the table within the catalog
         let handle = catalog.get_table(&db_ref.path).ok_or_else(|| {
@@ -252,7 +259,7 @@ impl<'a> PlanCompiler<'a> {
                 path_str, db_ref.catalog
             ))
         })?;
-        
+
         Ok((catalog_id, handle))
     }
 }

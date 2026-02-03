@@ -198,7 +198,8 @@ impl HybridPlan {
 
     fn create_vm(&self) -> partiql_eval::PartiQLVM {
         let exec_context = partiql_eval::ExecutionContext::new();
-        partiql_eval::PartiQLVM::new((*self.compiled).clone(), &exec_context).expect("VM creation failed")
+        partiql_eval::PartiQLVM::new((*self.compiled).clone(), &exec_context)
+            .expect("VM creation failed")
     }
 }
 
