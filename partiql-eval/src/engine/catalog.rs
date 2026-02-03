@@ -228,7 +228,7 @@ impl Default for ExecutionContext {
 mod tests {
     use super::*;
     use crate::engine::source::{DataSourceConfig, ScanCapabilities, ScanSource};
-    use partiql_common::catalog::{CatalogId, EntryId, ObjectId};
+    use partiql_common::catalog::EntryId;
     use std::sync::Arc;
 
     // Mock DataSourceConfig for testing
@@ -248,13 +248,17 @@ mod tests {
 
     // Mock CompilationCatalog for testing
     struct MockCompilationCatalog {
-        catalog_id: CatalogId,
         entry_id: EntryId,
     }
 
     impl CompilationCatalog for MockCompilationCatalog {
         fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-            if path.get(0)?.as_str() == "test_table" {
+            let table_name = match path.get(0)? {
+                BindingsName::CaseSensitive(s) => s.as_ref(),
+                BindingsName::CaseInsensitive(s) => s.as_ref(),
+            };
+
+            if table_name == "test_table" {
                 let config = Arc::new(MockConfig {
                     caps: ScanCapabilities {
                         stability: crate::engine::source::BufferStability::UntilNext,
@@ -262,8 +266,7 @@ mod tests {
                         can_return_opaque: false,
                     },
                 });
-                let object_id = ObjectId::new(self.catalog_id, self.entry_id);
-                Some(DataSourceHandle::new(object_id, config))
+                Some(DataSourceHandle::new(self.entry_id, config))
             } else {
                 None
             }
@@ -273,7 +276,6 @@ mod tests {
     #[test]
     fn test_compilation_catalog_basic() {
         let catalog = MockCompilationCatalog {
-            catalog_id: CatalogId::from(1),
             entry_id: EntryId::from(1),
         };
 
@@ -296,13 +298,12 @@ mod tests {
             },
         });
 
-        let object_id = ObjectId::new(CatalogId::from(1), EntryId::from(42));
-        let handle = DataSourceHandle::new(object_id, config);
+        let entry_id = EntryId::from(42);
+        let handle = DataSourceHandle::new(entry_id, config);
 
-        // Test object_id accessor
-        let retrieved_id = handle.object_id().unwrap();
-        assert_eq!(retrieved_id.catalog_id(), CatalogId::from(1));
-        assert_eq!(retrieved_id.entry_id(), EntryId::from(42));
+        // Test entry_id accessor
+        let retrieved_id = handle.entry_id().unwrap();
+        assert_eq!(retrieved_id, EntryId::from(42));
 
         // Test caps delegation
         let caps = handle.caps();

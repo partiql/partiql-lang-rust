@@ -2,9 +2,7 @@ use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::source::DataSourceHandle;
-use partiql_eval::{PlanCompiler, ScanProvider};
-use partiql_logical::Scan;
+use partiql_eval::PlanCompiler;
 use partiql_tools::common::{compile, create_catalog, lower, parse};
 use partiql_value::{DateTime, Value};
 use std::hint::black_box;
@@ -177,18 +175,13 @@ struct HybridPlan {
 }
 
 impl HybridPlan {
-    fn new(query: &str, format: &str, size: usize, data_path: Option<String>) -> Self {
+    fn new(query: &str, _format: &str, _size: usize, _data_path: Option<String>) -> Self {
         let catalog = create_catalog("mem".to_string(), None);
         let parsed = parse(query).expect("Parse failed");
         let logical = lower(&*catalog, &parsed).expect("Lower failed");
 
-        let provider = Box::leak(Box::new(HybridScanProvider {
-            format: format.to_string(),
-            data_path,
-            num_rows: size,
-        }));
-
-        let compiler = PlanCompiler::new(provider as &'static dyn ScanProvider);
+        let compilation_ctx = partiql_eval::CompilationContext::new();
+        let compiler = PlanCompiler::new(&compilation_ctx);
         let compiled = compiler.compile(&logical).expect("Compile failed");
 
         Self {
@@ -239,33 +232,6 @@ impl Plan {
 
                 row_count
             }
-        }
-    }
-}
-
-struct HybridScanProvider {
-    format: String,
-    data_path: Option<String>,
-    num_rows: usize,
-}
-
-impl ScanProvider for HybridScanProvider {
-    fn data_source(&self, _scan: &Scan) -> partiql_eval::Result<DataSourceHandle> {
-        match self.format.as_str() {
-            "mem" => Ok(DataSourceHandle::mem(
-                self.num_rows,
-                vec!["a".to_string(), "b".to_string()],
-            )),
-            "ion" => {
-                let path = self.data_path.clone().ok_or_else(|| {
-                    partiql_eval::EngineError::ReaderError("ion path required".to_string())
-                })?;
-                Ok(DataSourceHandle::ion(path))
-            }
-            other => Err(partiql_eval::EngineError::ReaderError(format!(
-                "unsupported format: {}",
-                other
-            ))),
         }
     }
 }
