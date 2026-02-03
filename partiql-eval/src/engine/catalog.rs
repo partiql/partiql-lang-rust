@@ -1,52 +1,60 @@
 //! Database catalog support for PartiQL
 //!
-//! This module provides the infrastructure for registering and querying data catalogs.
-//! Catalogs provide table access via `DataSourceHandle` instances, enabling qualified table
-//! references like `my_catalog.schema.table`.
+//! This module provides a two-phase catalog architecture that separates compilation-time
+//! metadata from execution-time data access, enabling query plan reuse across different datasets.
+//!
+//! # Two-Phase Catalog Design
+//!
+//! ## CompilationCatalog
+//! Used during query compilation to provide table metadata (schema, capabilities) and assign
+//! EntryIds. The same CompilationCatalog can be used for multiple datasets with the same schema.
+//!
+//! ## ExecutionCatalog  
+//! Used during query execution to create actual DataSource instances from EntryIds.
+//! Different ExecutionCatalogs can provide different data for the same EntryIds, enabling
+//! compiled plan reuse across datasets.
+//!
+//! # Example
+//!
+//! ```ignore
+//! // Compile once with metadata
+//! let compilation_catalog = MyCompilationCatalog::new();
+//! let compiled = compiler.compile(&logical, &compilation_catalog)?;
+//!
+//! // Execute with dataset A
+//! let exec_catalog_a = MyExecutionCatalog::new(dataset_a);
+//! let mut vm = PartiQLVM::new(compiled.clone(), Arc::new(exec_catalog_a))?;
+//! vm.execute()?;
+//!
+//! // Execute with dataset B (reuse compiled plan!)
+//! let exec_catalog_b = MyExecutionCatalog::new(dataset_b);
+//! let mut vm = PartiQLVM::new(compiled.clone(), Arc::new(exec_catalog_b))?;
+//! vm.execute()?;
+//! ```
 
-use crate::engine::source::DataSourceHandle;
+use crate::engine::error::Result;
+use crate::engine::source::{DataSource, DataSourceHandle, ScanLayout};
+use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
-use rustc_hash::FxHashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-/// A data catalog provides table access by name/path.
+/// Compilation-time catalog that provides table metadata and EntryIds.
 ///
-/// Catalogs are registered with `CatalogRegistry` and queried during plan compilation.
-/// Each catalog has a simple string name and can provide `DataSourceHandle` instances for tables
-/// identified by multi-part paths (where path components use `BindingsName` for case sensitivity).
+/// Used during query compilation to:
+/// - Validate table existence
+/// - Provide schema information (via DataSourceHandle)
+/// - Assign EntryIds for execution-time resolution
+/// - Enable optimization decisions (projection pushdown, etc.)
 ///
-/// # Examples
-///
-/// ```ignore
-/// use partiql_eval::engine::catalog::DataCatalog;
-/// use partiql_value::BindingsName;
-///
-/// struct MyCatalog {
-///     name: String,
-///     // ... table storage
-/// }
-///
-/// impl DataCatalog for MyCatalog {
-///     fn name(&self) -> &str {
-///         &self.name
-///     }
-///     
-///     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-///         // Look up table by path
-///         // ...
-///         None
-///     }
-/// }
-/// ```
-pub trait DataCatalog: Send + Sync {
-    /// Returns the catalog's name as a string.
+/// The CompilationCatalog is data-independent - it only provides metadata.
+/// Multiple datasets with the same schema can share the same CompilationCatalog.
+pub trait CompilationCatalog: Send + Sync {
+    /// Get table metadata by path.
     ///
-    /// The name is used for catalog lookup in the registry.
-    fn name(&self) -> &str;
-
-    /// Gets a `DataSourceHandle` for a table by path.
-    ///
-    /// Each path component has case sensitivity information via `BindingsName`.
+    /// Returns a `DataSourceHandle` containing:
+    /// - EntryId for execution-time resolution
+    /// - DataSourceConfig for compile-time metadata (caps, field resolution)
     ///
     /// # Path Examples
     ///
@@ -61,161 +69,248 @@ pub trait DataCatalog: Send + Sync {
     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle>;
 }
 
-/// Registry for managing multiple data catalogs.
+/// Execution-time catalog that creates DataSource instances from EntryIds.
 ///
-/// The registry stores catalogs by their string names and provides lookup functionality.
+/// Used during query execution to:
+/// - Resolve EntryIds to actual data sources
+/// - Provide access to the underlying data
+/// - Enable data swapping without recompilation
 ///
-/// # Thread Safety
-///
-/// `CatalogRegistry` is `Send + Sync` since `DataCatalog` instances are
-/// wrapped in `Arc` and the internal `FxHashMap` uses string keys.
-///
-/// # Examples
-///
-/// ```ignore
-/// use partiql_eval::engine::catalog::CatalogRegistry;
-/// use std::sync::Arc;
-///
-/// let mut registry = CatalogRegistry::new();
-/// registry.register_catalog(Arc::new(my_catalog));
-///
-/// // Look up catalog by name
-/// if let Some(catalog) = registry.get_catalog("my_catalog") {
-///     if let Some(reader) = catalog.get_table(&table_path) {
-///         // Use reader...
-///     }
-/// }
-/// ```
-#[derive(Clone, Default)]
-pub struct CatalogRegistry {
-    /// Maps catalog names to catalog instances.
-    catalogs: FxHashMap<String, Arc<dyn DataCatalog>>,
-}
-
-impl CatalogRegistry {
-    /// Creates a new empty catalog registry.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Registers a catalog in the registry.
+/// Each ExecutionCatalog instance represents a specific dataset.
+/// Different ExecutionCatalogs can provide different data for the same EntryIds.
+pub trait ExecutionCatalog: Send + Sync {
+    /// Create a DataSource for the given entry and layout.
     ///
-    /// The catalog's name is used as the lookup key.
-    /// If a catalog with the same name already exists, it will be replaced.
+    /// # Arguments
     ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let mut registry = CatalogRegistry::new();
-    /// registry.register_catalog(Arc::new(my_catalog));
-    /// ```
-    pub fn register_catalog(&mut self, catalog: Arc<dyn DataCatalog>) {
-        let name = catalog.name().to_string();
-        self.catalogs.insert(name, catalog);
-    }
-
-    /// Gets a catalog by name.
+    /// * `entry_id` - The entry ID within this catalog (assigned during compilation)
+    /// * `layout` - The scan layout specifying projection and optimization hints
     ///
     /// # Returns
     ///
-    /// - `Some(&Arc<dyn DataCatalog>)` if the catalog exists
-    /// - `None` if no catalog with the given name is registered
+    /// A boxed DataSource instance ready to read data.
     ///
-    /// # Examples
+    /// # Errors
     ///
-    /// ```ignore
-    /// if let Some(catalog) = registry.get_catalog("my_catalog") {
-    ///     // Use catalog...
-    /// }
-    /// ```
-    #[must_use]
-    pub fn get_catalog(&self, name: &str) -> Option<&Arc<dyn DataCatalog>> {
-        self.catalogs.get(name)
+    /// Returns an error if:
+    /// - The entry_id is not found in this catalog
+    /// - The data source cannot be created (e.g., file not found, connection failed)
+    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> Result<Box<dyn DataSource>>;
+}
+
+/// Registry that maps catalog names to CompilationCatalog instances.
+///
+/// Used during compilation to resolve catalog names in queries (e.g., `FROM catalog.table`)
+/// to actual CompilationCatalog instances. Returns CatalogIds that can be used to set up
+/// ExecutionContext for execution-time catalog resolution.
+///
+/// # Example
+/// ```ignore
+/// let mut context = CompilationContext::new();
+/// let catalog_id = context.add_catalog("main", Arc::new(main_catalog));
+///
+/// // Save catalog_id for execution time
+/// // Query: SELECT * FROM main.users
+/// // Compiler uses context to find "main" catalog
+/// ```
+pub struct CompilationContext {
+    next_catalog_id: u64,
+    catalogs: HashMap<CatalogId, Arc<dyn CompilationCatalog>>,
+    name_to_id: HashMap<String, CatalogId>,
+}
+
+impl CompilationContext {
+    /// Create a new empty CompilationContext.
+    pub fn new() -> Self {
+        CompilationContext {
+            next_catalog_id: 0,
+            catalogs: HashMap::new(),
+            name_to_id: HashMap::new(),
+        }
     }
 
-    /// Returns the number of registered catalogs.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.catalogs.len()
+    /// Add a catalog with the given name and return its CatalogId.
+    ///
+    /// The returned CatalogId should be used when setting up ExecutionContext
+    /// to map the same catalog ID to an ExecutionCatalog instance.
+    ///
+    /// If a catalog with this name already exists, it will be replaced and
+    /// a new CatalogId will be generated.
+    pub fn add_catalog(
+        &mut self,
+        name: impl Into<String>,
+        catalog: Arc<dyn CompilationCatalog>,
+    ) -> CatalogId {
+        let id = CatalogId::from(self.next_catalog_id);
+        self.next_catalog_id += 1;
+        let name = name.into();
+        self.catalogs.insert(id, catalog);
+        self.name_to_id.insert(name, id);
+        id
     }
 
-    /// Returns `true` if no catalogs are registered.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.catalogs.is_empty()
+    /// Get a catalog by name, returning both its ID and reference.
+    ///
+    /// Returns `None` if no catalog with this name exists.
+    pub fn get_catalog(&self, name: &str) -> Option<(CatalogId, &dyn CompilationCatalog)> {
+        let id = self.name_to_id.get(name)?;
+        let catalog = self.catalogs.get(id)?;
+        Some((*id, catalog.as_ref()))
+    }
+}
+
+impl Default for CompilationContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Registry that maps CatalogIds to ExecutionCatalog instances.
+///
+/// Used during query execution to resolve CatalogIds (from ObjectIds in the compiled plan)
+/// to ExecutionCatalog instances that provide access to actual data.
+///
+/// # Thread Safety
+///
+/// ExecutionContext can be created per-thread to provide different datasets
+/// for the same compiled plan. Each thread maintains its own catalog mappings.
+///
+/// # Example
+/// ```ignore
+/// // Thread 1 - Dataset A
+/// let mut exec_context = ExecutionContext::new();
+/// exec_context.add_catalog(catalog_id, Arc::new(MyExecutionCatalog::new(dataset_a)));
+/// vm.execute(&exec_context)?;
+///
+/// // Thread 2 - Dataset B (same catalog_id, different data)
+/// let mut exec_context = ExecutionContext::new();
+/// exec_context.add_catalog(catalog_id, Arc::new(MyExecutionCatalog::new(dataset_b)));
+/// vm.execute(&exec_context)?;
+/// ```
+pub struct ExecutionContext {
+    catalogs: HashMap<CatalogId, Arc<dyn ExecutionCatalog>>,
+}
+
+impl ExecutionContext {
+    /// Create a new empty ExecutionContext.
+    pub fn new() -> Self {
+        ExecutionContext {
+            catalogs: HashMap::new(),
+        }
+    }
+
+    /// Add an execution catalog with the given CatalogId.
+    ///
+    /// The CatalogId should match the one returned by CompilationContext::add_catalog()
+    /// during compilation. This allows the execution context to resolve the same
+    /// logical catalog to a different physical dataset.
+    ///
+    /// If a catalog with this ID already exists, it will be replaced.
+    pub fn add_catalog(&mut self, catalog_id: CatalogId, catalog: Arc<dyn ExecutionCatalog>) {
+        self.catalogs.insert(catalog_id, catalog);
+    }
+
+    /// Get an execution catalog by its CatalogId.
+    ///
+    /// Returns `None` if no catalog with this ID exists in this context.
+    pub fn get_catalog(&self, catalog_id: CatalogId) -> Option<&dyn ExecutionCatalog> {
+        self.catalogs.get(&catalog_id).map(|arc| arc.as_ref())
+    }
+}
+
+impl Default for ExecutionContext {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::source::{DataSourceConfig, ScanCapabilities, ScanSource};
+    use partiql_common::catalog::EntryId;
+    use std::sync::Arc;
 
-    // Mock catalog for testing
-    struct MockCatalog {
-        name: String,
+    // Mock DataSourceConfig for testing
+    struct MockConfig {
+        caps: ScanCapabilities,
     }
 
-    impl MockCatalog {
-        fn new(name: &str) -> Self {
-            MockCatalog {
-                name: name.to_string(),
+    impl DataSourceConfig for MockConfig {
+        fn caps(&self) -> ScanCapabilities {
+            self.caps
+        }
+
+        fn resolve(&self, _field_name: &str) -> Option<ScanSource> {
+            Some(ScanSource::ColumnIndex(0))
+        }
+    }
+
+    // Mock CompilationCatalog for testing
+    struct MockCompilationCatalog {
+        entry_id: EntryId,
+    }
+
+    impl CompilationCatalog for MockCompilationCatalog {
+        fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
+            let table_name = match path.get(0)? {
+                BindingsName::CaseSensitive(s) => s.as_ref(),
+                BindingsName::CaseInsensitive(s) => s.as_ref(),
+            };
+
+            if table_name == "test_table" {
+                let config = Arc::new(MockConfig {
+                    caps: ScanCapabilities {
+                        stability: crate::engine::source::BufferStability::UntilNext,
+                        can_project: true,
+                        can_return_opaque: false,
+                    },
+                });
+                Some(DataSourceHandle::new(self.entry_id, config))
+            } else {
+                None
             }
         }
     }
 
-    impl DataCatalog for MockCatalog {
-        fn name(&self) -> &str {
-            &self.name
-        }
+    #[test]
+    fn test_compilation_catalog_basic() {
+        let catalog = MockCompilationCatalog {
+            entry_id: EntryId::from(1),
+        };
 
-        fn get_table(&self, _path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-            None
-        }
+        // Should find existing table
+        let handle = catalog.get_table(&[BindingsName::CaseInsensitive("test_table".into())]);
+        assert!(handle.is_some());
+
+        // Should not find non-existent table
+        let handle = catalog.get_table(&[BindingsName::CaseInsensitive("missing_table".into())]);
+        assert!(handle.is_none());
     }
 
     #[test]
-    fn test_registry_basic() {
-        let mut registry = CatalogRegistry::new();
-        let catalog = Arc::new(MockCatalog::new("my_catalog"));
-        registry.register_catalog(catalog);
+    fn test_data_source_handle() {
+        let config = Arc::new(MockConfig {
+            caps: ScanCapabilities {
+                stability: crate::engine::source::BufferStability::UntilNext,
+                can_project: true,
+                can_return_opaque: false,
+            },
+        });
 
-        // Should find with exact name
-        assert!(registry.get_catalog("my_catalog").is_some());
+        let entry_id = EntryId::from(42);
+        let handle = DataSourceHandle::new(entry_id, config);
 
-        // Should not find with different name
-        assert!(registry.get_catalog("other_catalog").is_none());
-    }
+        // Test entry_id accessor
+        let retrieved_id = handle.entry_id().unwrap();
+        assert_eq!(retrieved_id, EntryId::from(42));
 
-    #[test]
-    fn test_registry_empty() {
-        let registry = CatalogRegistry::new();
-        assert!(registry.is_empty());
-        assert_eq!(registry.len(), 0);
-    }
+        // Test caps delegation
+        let caps = handle.caps();
+        assert!(caps.can_project);
+        assert!(!caps.can_return_opaque);
 
-    #[test]
-    fn test_registry_len() {
-        let mut registry = CatalogRegistry::new();
-        assert_eq!(registry.len(), 0);
-
-        registry.register_catalog(Arc::new(MockCatalog::new("catalog1")));
-        assert_eq!(registry.len(), 1);
-
-        registry.register_catalog(Arc::new(MockCatalog::new("catalog2")));
-        assert_eq!(registry.len(), 2);
-    }
-
-    #[test]
-    fn test_registry_replace() {
-        let mut registry = CatalogRegistry::new();
-        let catalog1 = Arc::new(MockCatalog::new("my_catalog"));
-        registry.register_catalog(catalog1);
-        assert_eq!(registry.len(), 1);
-
-        // Register another catalog with same name
-        let catalog2 = Arc::new(MockCatalog::new("my_catalog"));
-        registry.register_catalog(catalog2);
-        assert_eq!(registry.len(), 1); // Should replace, not add
+        // Test resolve delegation
+        assert!(handle.resolve("any_field").is_some());
     }
 }

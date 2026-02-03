@@ -11,12 +11,10 @@ pub mod test_value;
 // Public API from engine module (as per design.md Section 5.9)
 
 // Catalog Support
-pub use engine::{CatalogRegistry, DataCatalog};
+pub use engine::{CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext};
 
 // Compilation & Execution
-pub use engine::{
-    CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, ScanProvider, Schema,
-};
+pub use engine::{CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, Schema};
 
 // Reader Contract (for custom data sources)
 pub mod source {

@@ -4,9 +4,7 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::source::DataSourceHandle;
-use partiql_eval::{PlanCompiler, ScanProvider};
-use partiql_logical::Scan;
+use partiql_eval::PlanCompiler;
 use partiql_value::{DateTime, Value};
 use std::time::Instant;
 
@@ -269,68 +267,14 @@ fn run_hybrid_profile(format: &DataFormat, query: &str, iterations: usize) -> us
 
 fn compile_hybrid(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
-    format: &DataFormat,
-    total_rows: usize,
+    _format: &DataFormat,
+    _total_rows: usize,
 ) -> partiql_eval::Result<partiql_eval::PartiQLVM> {
-    let provider = HybridScanProvider::new(format, total_rows);
-    let compiler = PlanCompiler::new(&provider);
+    let compilation_context = partiql_eval::CompilationContext::new();
+    let compiler = PlanCompiler::new(&compilation_context);
     let compiled = compiler.compile(logical)?;
-    partiql_eval::PartiQLVM::new(compiled)
-}
-
-struct HybridScanProvider {
-    data_source: String,
-    data_path: Option<String>,
-    num_rows: Option<usize>,
-}
-
-impl HybridScanProvider {
-    fn new(format: &DataFormat, total_rows: usize) -> Self {
-        match format {
-            DataFormat::InMemory { .. } => HybridScanProvider {
-                data_source: "mem".to_string(),
-                data_path: None,
-                num_rows: Some(total_rows),
-            },
-            DataFormat::Ion { path } => HybridScanProvider {
-                data_source: "ion".to_string(),
-                data_path: Some(path.clone()),
-                num_rows: None,
-            },
-            DataFormat::IonBinary { path } => HybridScanProvider {
-                data_source: "ionb".to_string(),
-                data_path: Some(path.clone()),
-                num_rows: None,
-            },
-        }
-    }
-}
-
-impl ScanProvider for HybridScanProvider {
-    fn data_source(&self, _scan: &Scan) -> partiql_eval::Result<DataSourceHandle> {
-        match self.data_source.as_str() {
-            "mem" => {
-                let num_rows = self.num_rows.ok_or_else(|| {
-                    partiql_eval::EngineError::ReaderError(
-                        "num_rows required for mem source".to_string(),
-                    )
-                })?;
-                Ok(DataSourceHandle::mem(
-                    num_rows,
-                    vec!["a".to_string(), "b".to_string()],
-                ))
-            }
-            "ion" | "ionb" => {
-                let path = self.data_path.clone().ok_or_else(|| {
-                    partiql_eval::EngineError::ReaderError("ion path required".to_string())
-                })?;
-                Ok(DataSourceHandle::ion(path))
-            }
-            _ => Err(partiql_eval::EngineError::ReaderError(
-                "Hybrid supports mem/ion/ionb only".to_string(),
-            )),
-        }
-    }
+    let exec_context = partiql_eval::ExecutionContext::new();
+    partiql_eval::PartiQLVM::new(compiled, &exec_context)
 }
 
 fn format_number(n: usize) -> String {
