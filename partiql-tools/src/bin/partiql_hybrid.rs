@@ -20,7 +20,10 @@ fn main() {
         eprintln!("\nExamples:");
         eprintln!("  {} \"SELECT a, b FROM !input WHERE a % 1000 = 0\" --data-source ion --data-path test_data/data_b1024_n10000.ion", args[0]);
         eprintln!("  {} \"SELECT * FROM !input\" --data-source mem", args[0]);
-        eprintln!("  {} \"SELECT * FROM data WHERE a > 0 LIMIT 10\" --data-source rand", args[0]);
+        eprintln!(
+            "  {} \"SELECT * FROM data WHERE a > 0 LIMIT 10\" --data-source rand",
+            args[0]
+        );
         eprintln!("\nNote: !input will be replaced with 'data' in the query");
         std::process::exit(1);
     }
@@ -147,14 +150,12 @@ fn main() {
 
     // Set up compilation context - use two-phase catalog pattern for ALL data sources
     let mut context = CompilationContext::new();
-    
+
     // Create appropriate catalog based on data source - all use two-phase pattern
     let (comp_catalog, exec_catalog) = match data_source.as_str() {
         "rand" => {
             // Random catalog for custom reader demonstration
-            random_catalog(
-                vec![("data".to_string(), total_rows, column_names.clone())],
-            )
+            random_catalog(vec![("data".to_string(), total_rows, column_names.clone())])
         }
         "mem" | "ion" | "ionb" => {
             // Simple catalog for mem/ion data sources - use CompiledSourceFactory
@@ -163,16 +164,14 @@ fn main() {
                 "ion" | "ionb" => CompiledSourceFactory::ion(data_path.clone().unwrap_or_default()),
                 _ => unreachable!(),
             };
-            simple_catalog(
-                vec![("data".to_string(), factory)],
-            )
+            simple_catalog(vec![("data".to_string(), factory)])
         }
         _ => {
             eprintln!("Unsupported data source: {}", data_source);
             std::process::exit(1);
         }
     };
-    
+
     // Add catalog and CAPTURE the returned catalog_id - this is the ONLY place catalog_id is assigned
     let catalog_id = context.add_catalog("default", comp_catalog);
 
@@ -188,11 +187,11 @@ fn main() {
 
     // Phase 4: Execute
     let exec_start = Instant::now();
-    
+
     // Create ExecutionContext and ALWAYS populate it with execution catalog
     let mut exec_context = ExecutionContext::new();
     exec_context.add_catalog(catalog_id, exec_catalog);
-    
+
     let mut vm = match partiql_eval::PartiQLVM::new(compiled, &exec_context) {
         Ok(p) => p,
         Err(e) => {

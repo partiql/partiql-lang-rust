@@ -352,7 +352,7 @@ impl DataSourceConfig for FactoryConfigWrapper {
     fn caps(&self) -> ScanCapabilities {
         self.factory.caps()
     }
-    
+
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         self.factory.resolve(field_name)
     }
@@ -361,16 +361,14 @@ impl DataSourceConfig for FactoryConfigWrapper {
 impl SimpleCompilationCatalog {
     fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
         let mut table_map = FxHashMap::default();
-        
+
         for (idx, (name, factory)) in tables.into_iter().enumerate() {
             // Wrap the factory to implement DataSourceConfig
             let config: Arc<dyn DataSourceConfig> = Arc::new(FactoryConfigWrapper { factory });
             table_map.insert(name, (EntryId::from(idx as u64), config));
         }
-        
-        SimpleCompilationCatalog {
-            tables: table_map,
-        }
+
+        SimpleCompilationCatalog { tables: table_map }
     }
 }
 
@@ -379,12 +377,12 @@ impl CompilationCatalog for SimpleCompilationCatalog {
         if path.len() != 1 {
             return None;
         }
-        
+
         let table_name = match &path[0] {
             BindingsName::CaseSensitive(s) => s.as_ref(),
             BindingsName::CaseInsensitive(s) => s.as_ref(),
         };
-        
+
         self.tables
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
@@ -406,28 +404,24 @@ pub struct SimpleExecutionCatalog {
 impl SimpleExecutionCatalog {
     fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
         let mut table_map = FxHashMap::default();
-        
+
         for (idx, (_name, factory)) in tables.into_iter().enumerate() {
             table_map.insert(EntryId::from(idx as u64), factory);
         }
-        
+
         SimpleExecutionCatalog { tables: table_map }
     }
 }
 
 impl ExecutionCatalog for SimpleExecutionCatalog {
-    fn create(
-        &self,
-        entry_id: EntryId,
-        layout: ScanLayout,
-    ) -> EvalResult<Box<dyn DataSource>> {
+    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> EvalResult<Box<dyn DataSource>> {
         let factory = self.tables.get(&entry_id).ok_or_else(|| {
             partiql_eval::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
                 entry_id
             ))
         })?;
-        
+
         // Use the factory to create the DataSource
         factory.create(layout)
     }
@@ -447,7 +441,7 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
 /// # Example
 /// ```ignore
 /// use partiql_eval::source::CompiledSourceFactory;
-/// 
+///
 /// let (comp_catalog, exec_catalog) = simple_catalog(
 ///     vec![
 ///         ("data".to_string(), CompiledSourceFactory::mem(10_000, vec!["a".to_string(), "b".to_string()])),
@@ -456,10 +450,7 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
 /// ```
 pub fn simple_catalog(
     tables: Vec<(String, CompiledSourceFactory)>,
-) -> (
-    Arc<dyn CompilationCatalog>,
-    Arc<dyn ExecutionCatalog>,
-) {
+) -> (Arc<dyn CompilationCatalog>, Arc<dyn ExecutionCatalog>) {
     let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
     let exec_catalog = Arc::new(SimpleExecutionCatalog::new(tables));
     (comp_catalog, exec_catalog)
@@ -614,9 +605,7 @@ impl RandomCompilationCatalog {
             );
         }
 
-        RandomCompilationCatalog {
-            tables: table_map,
-        }
+        RandomCompilationCatalog { tables: table_map }
     }
 }
 
@@ -670,11 +659,7 @@ impl RandomExecutionCatalog {
 }
 
 impl ExecutionCatalog for RandomExecutionCatalog {
-    fn create(
-        &self,
-        entry_id: EntryId,
-        layout: ScanLayout,
-    ) -> EvalResult<Box<dyn DataSource>> {
+    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> EvalResult<Box<dyn DataSource>> {
         let meta = self.tables.get(&entry_id).ok_or_else(|| {
             partiql_eval::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
@@ -720,10 +705,7 @@ impl ExecutionCatalog for RandomExecutionCatalog {
 /// ```
 pub fn random_catalog(
     tables: Vec<(String, usize, Vec<String>)>,
-) -> (
-    Arc<dyn CompilationCatalog>,
-    Arc<dyn ExecutionCatalog>,
-) {
+) -> (Arc<dyn CompilationCatalog>, Arc<dyn ExecutionCatalog>) {
     let comp_catalog = Arc::new(RandomCompilationCatalog::new(tables.clone()));
     let exec_catalog = Arc::new(RandomExecutionCatalog::new(tables));
     (comp_catalog, exec_catalog)
