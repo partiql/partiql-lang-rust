@@ -9,8 +9,8 @@ build/
 .gradle-daemon/
 
 # Rust build artifacts
-target/
-Cargo.lock
+rust/target/
+rust/Cargo.lock
 
 # Native libraries (generated during build)
 src/main/resources/native/

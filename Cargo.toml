@@ -23,7 +23,7 @@ members = [
     "partiql-eval",
     "partiql-ir",
     "partiql-irgen",
-    "partiql-jni",
+    "partiql-jni/rust",
     "partiql-parser",
     "partiql-rewriter",
     "partiql-tools",

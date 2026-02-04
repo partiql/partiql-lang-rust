@@ -7,34 +7,14 @@ group = "org.partiql"
 version = "0.14.0"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
     withSourcesJar()
     withJavadocJar()
 }
 
 repositories {
     mavenCentral()
-}
-
-// Configure source sets
-sourceSets {
-    main {
-        java {
-            srcDir("java")
-        }
-        resources {
-            srcDir("src/main/resources")
-        }
-    }
-    test {
-        java {
-            srcDir("src/test/java")
-        }
-        resources {
-            srcDir("src/test/resources")
-        }
-    }
 }
 
 dependencies {
@@ -58,10 +38,10 @@ val buildRustLib = tasks.register<Exec>("buildRustLib") {
     description = "Build the Rust native library using Cargo"
     group = "build"
     
-    workingDir = projectDir
+    workingDir = file("rust")
     commandLine = listOf("cargo", "build", "--release")
     
-    // Outputs for up-to-date checking
+    // Outputs for up-to-date checking (builds to workspace root target/)
     outputs.file(file("../target/release/$nativeLibName"))
 }
 
@@ -72,6 +52,7 @@ val copyNativeLib = tasks.register<Copy>("copyNativeLib") {
     
     dependsOn(buildRustLib)
     
+    // Workspace member builds to workspace root target/
     val targetDir = file("../target/release")
     val resourceDir = file("src/main/resources/native")
     
@@ -112,7 +93,7 @@ val cleanRust = tasks.register<Exec>("cleanRust") {
     description = "Clean Rust build artifacts"
     group = "build"
     
-    workingDir = projectDir
+    workingDir = file("rust")
     commandLine = listOf("cargo", "clean")
     
     // Ignore exit value in case cargo is not available
