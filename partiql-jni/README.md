@@ -416,8 +416,34 @@ Apache License 2.0 - See LICENSE file for details.
 - Mutation/Definition result types
 - Comprehensive test suite
 
+## Benchmarks
+
+JMH (Java Microbenchmark Harness) benchmarks are available to compare partiql-jni performance against the reference partiql-eval implementation.
+
+### Quick Start
+
+```bash
+# Run all benchmarks
+./gradlew jmh
+
+# Run specific benchmark
+./gradlew jmh --includes='PartiQLJniBenchmark'
+```
+
+### Benchmark Details
+
+The benchmarks test query execution time for:
+```sql
+SELECT a, b FROM data WHERE a % 2 = 0
+```
+
+With dataset sizes: 100, 1000, and 10000 rows.
+
+For complete documentation, see [BENCHMARK.md](BENCHMARK.md).
+
 ## Related Documentation
 
 - [PartiQL Specification](https://partiql.org/docs.html)
 - [PartiQL Rust Engine Design](../docs/final/design.md)
 - [JNI Implementation Plan](../docs/scratch/jni_plan.md)
+- [Benchmark Guide](BENCHMARK.md)

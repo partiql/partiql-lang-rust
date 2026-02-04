@@ -47,6 +47,7 @@ public final class PartiQLVM implements AutoCloseable {
     
     private static native long nativeNew(long planHandle, long contextHandle) throws PartiQLException;
     private static native long nativeExecute(long handle) throws PartiQLException;
+    private static native void nativeSetContext(long handle, long contextHandle) throws PartiQLException;
     private static native void nativeLoadPlan(long handle, long planHandle) throws PartiQLException;
     private static native void nativeClose(long handle);
     
@@ -87,6 +88,28 @@ public final class PartiQLVM implements AutoCloseable {
         checkNotClosed();
         long resultHandle = nativeExecute(nativeHandle);
         return new ExecutionResult(resultHandle);
+    }
+    
+    /**
+     * Updates the ExecutionContext for this VM.
+     * 
+     * <p>This allows reusing the same VM instance with different data sources
+     * by updating the catalog mappings, avoiding the overhead of creating new VMs.
+     * 
+     * <p>The VM must not have an active iterator when updating the context.
+     * 
+     * @param context The new ExecutionContext with updated catalog mappings
+     * @throws PartiQLException if context update fails
+     * @throws IllegalStateException if the VM has been closed or has an active iterator
+     * @throws NullPointerException if context is null
+     */
+    public void setContext(ExecutionContext context) throws PartiQLException {
+        checkNotClosed();
+        if (context == null) {
+            throw new NullPointerException("ExecutionContext cannot be null");
+        }
+        
+        nativeSetContext(nativeHandle, context.getNativeHandle());
     }
     
     /**

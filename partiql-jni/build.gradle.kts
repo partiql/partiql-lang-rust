@@ -1,6 +1,7 @@
 plugins {
     `java-library`
     `maven-publish`
+    id("me.champeau.jmh") version "0.7.2"
 }
 
 group = "org.partiql"
@@ -21,6 +22,16 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation("org.assertj:assertj-core:3.24.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    
+    // JMH dependencies
+    jmh("org.openjdk.jmh:jmh-core:1.37")
+    jmh("org.openjdk.jmh:jmh-generator-annprocess:1.37")
+    
+    // Comparison library for benchmarks (transitively includes partiql-spi, partiql-plan, etc.)
+    jmh("org.partiql:partiql-eval:1.3.3")
+    jmh("org.partiql:partiql-parser:1.3.3")
+    jmh("org.partiql:partiql-planner:1.3.3")
+    jmh("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
 }
 
 // Determine OS-specific library name
@@ -156,6 +167,34 @@ publishing {
             }
         }
     }
+}
+
+// JMH configuration
+val jmhIncludes = findProperty("jmhIncludes").toString()
+jmh {
+    if (jmhIncludes != null) {
+        includes.add(jmhIncludes)
+    } else {
+        includes.add(".*Benchmark*")
+    }
+    jvmArgs.add("-Djava.library.path=src/main/resources/native")
+    
+    warmupIterations.set(5)
+    iterations.set(10)
+    fork.set(2)
+    threads.set(1)
+    
+    resultFormat.set("JSON")
+    resultsFile.set(project.file("${layout.buildDirectory.get()}/reports/jmh/results.json"))
+}
+
+// Make jmh tasks depend on native library
+tasks.named("jmhCompileGeneratedClasses") {
+    dependsOn("copyNativeLib")
+}
+
+tasks.named("jmh") {
+    dependsOn("copyNativeLib")
 }
 
 // Task to display build info

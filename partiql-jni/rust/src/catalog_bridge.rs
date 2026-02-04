@@ -202,11 +202,46 @@ fn convert_scan_source_to_java<'a>(
 
             Ok(source_obj)
         }
+        ScanSource::FieldPath(path) => {
+            // Create Java string for the field path
+            let path_str: &str = path.as_ref();
+            let java_path = env
+                .new_string(path_str)
+                .map_err(|e| {
+                    EngineError::IllegalState(format!("Failed to create Java string: {}", e))
+                })?;
+
+            // Create ScanSource.FieldPath
+            let source_class = env
+                .find_class("org/partiql/jni/ScanSource$FieldPath")
+                .map_err(|e| {
+                    EngineError::IllegalState(format!(
+                        "Failed to find ScanSource.FieldPath class: {}",
+                        e
+                    ))
+                })?;
+
+            let source_obj = env
+                .new_object(
+                    source_class,
+                    "(Ljava/lang/String;)V",
+                    &[jni::objects::JValue::Object(&java_path)],
+                )
+                .map_err(|e| {
+                    EngineError::IllegalState(format!(
+                        "Failed to create ScanSource.FieldPath: {}",
+                        e
+                    ))
+                })?;
+
+            Ok(source_obj)
+        }
         _ => {
-            // For now, only support ColumnIndex
-            Err(EngineError::IllegalState(
-                "Unsupported ScanSource type".to_string(),
-            ))
+            // Other ScanSource types not yet supported
+            Err(EngineError::IllegalState(format!(
+                "Unsupported ScanSource type: {:?}",
+                source
+            )))
         }
     }
 }
