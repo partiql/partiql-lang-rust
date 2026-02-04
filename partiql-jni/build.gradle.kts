@@ -179,6 +179,11 @@ jmh {
     }
     jvmArgs.add("-Djava.library.path=src/main/resources/native")
     
+    val async = "async:libPath=/Users/johqunn/Downloads/async-profiler-4.3-macos/lib/libasyncProfiler.dylib;output=flamegraph"
+    profilers.add(async)
+    // jvmArgsAppend.add("-XX:+UnlockCommercialFeatures")
+    // jvmArgsAppend.add("-XX:+FlightRecorder")
+    // jvmArgsAppend.add("-XX:StartFlightRecording=filename=benchmark.jfr,settings=profile'")
     warmupIterations.set(5)
     iterations.set(10)
     fork.set(2)

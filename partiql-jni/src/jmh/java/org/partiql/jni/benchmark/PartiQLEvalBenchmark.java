@@ -1,6 +1,5 @@
 package org.partiql.jni.benchmark;
 
-import com.amazon.ion.IonValue;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.partiql.eval.Mode;
@@ -15,7 +14,6 @@ import org.partiql.spi.catalog.Table;
 import org.partiql.spi.value.Datum;
 import org.partiql.spi.types.PType;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -25,14 +23,14 @@ import java.util.concurrent.TimeUnit;
  */
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
-@Warmup(iterations = 5, time = 1)
-@Measurement(iterations = 10, time = 1)
-@Fork(2)
+@Warmup(iterations = 1, time = 1)
+@Measurement(iterations = 3, time = 1)
+@Fork(1)
 @State(Scope.Benchmark)
 public class PartiQLEvalBenchmark {
     
     // @Param({"100", "1000", "10000"})
-    @Param({"100"})
+    @Param({"1"})
     private int rowCount;
     
     private PartiQLCompiler compiler;
@@ -89,7 +87,7 @@ public class PartiQLEvalBenchmark {
         
         try {
             // Execute query
-            Datum result = compiler.prepare(plan, Mode.PERMISSIVE()).execute();
+            Datum result = compiler.prepare(plan, Mode.STRICT()).execute();
             
             // Iterate through results
             for (Datum row : result) {

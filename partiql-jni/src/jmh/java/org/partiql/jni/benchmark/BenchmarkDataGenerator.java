@@ -1,11 +1,7 @@
 package org.partiql.jni.benchmark;
 
-import com.amazon.ion.IonStruct;
-import com.amazon.ion.IonValue;
-import com.amazon.ion.system.IonSystemBuilder;
-import org.partiql.jni.Value;
+import org.partiql.spi.types.PType;
 import org.partiql.spi.value.Datum;
-import org.partiql.spi.value.Field;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,44 +15,40 @@ import java.util.Map;
 public class BenchmarkDataGenerator {
     
     /**
-     * Generates a list of maps for use with partiql-jni.
-     * Each row has: {a: Int, b: String}
+     * Generates optimized columnar data for use with partiql-jni.
+     * Uses primitive arrays to avoid boxing overhead.
      * 
      * @param rowCount Number of rows to generate
-     * @return List of maps representing rows
+     * @return Columnar data structure with primitive arrays
      */
-    public static List<Map<String, Object>> generateDataForJni(int rowCount) {
-        List<Map<String, Object>> data = new ArrayList<>(rowCount);
+    public static BenchmarkData generateDataForJni(int rowCount) {
+        long[] columnA = new long[rowCount];
+        long[] columnB = new long[rowCount];
         
         for (int i = 0; i < rowCount; i++) {
-            Map<String, Object> row = new HashMap<>();
-            row.put("a", i);
-            row.put("b", i);
-            data.add(row);
+            columnA[i] = i;
+            columnB[i] = i;
         }
         
-        return data;
+        return new BenchmarkData(columnA, columnB);
     }
     
     /**
-     * Generates Ion-encoded data for use with partiql-eval.
-     * Each row has: {a: Int, b: String}
-     * 
-     * @param rowCount Number of rows to generate
-     * @return List of IonStruct representing rows
+     * Column-oriented data structure for benchmark.
+     * Uses primitive arrays to avoid boxing overhead.
      */
-    public static List<IonValue> generateDataForEval(int rowCount) {
-        var ion = IonSystemBuilder.standard().build();
-        List<IonValue> data = new ArrayList<>(rowCount);
+    public static class BenchmarkData {
+        public final long[] columnA;
+        public final long[] columnB;
         
-        for (int i = 0; i < rowCount; i++) {
-            IonStruct row = ion.newEmptyStruct();
-            row.add("a", ion.newInt(i));
-            row.add("b", ion.newString("value_" + i));
-            data.add(row);
+        public BenchmarkData(long[] columnA, long[] columnB) {
+            this.columnA = columnA;
+            this.columnB = columnB;
         }
         
-        return data;
+        public int size() {
+            return columnA.length;
+        }
     }
     
     /**
@@ -68,15 +60,37 @@ public class BenchmarkDataGenerator {
      */
     public static List<Datum> generateDatumRows(int rowCount) {
         List<Datum> data = new ArrayList<>(rowCount);
-        
         for (int i = 0; i < rowCount; i++) {
-            Datum row = Datum.struct(
-                Field.of("a", Datum.integer(i)),
-                Field.of("b", Datum.string("value_" + i))
-            );
-            data.add(row);
+            Map<String, Integer> delegate = new HashMap<>();
+            delegate.put("a", i);
+            delegate.put("b", i);
+            data.add(new DatumWrapper(delegate));
         }
-        
         return data;
+    }
+
+    static class DatumWrapper implements Datum {
+        private final Map<String, Integer> _map;
+
+        DatumWrapper(Map<String, Integer> input) {
+            _map = input;
+        }
+
+        @Override
+        public PType getType() {
+            return PType.struct();
+        }
+
+        @Override
+        public Datum get(String name) {
+            Integer result = _map.get(name);
+            return Datum.integer(result);
+        }
+
+        @Override
+        public Datum getInsensitive(String name) {
+            Integer result = _map.get(name);
+            return Datum.integer(result);
+        }
     }
 }

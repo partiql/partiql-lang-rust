@@ -12,9 +12,10 @@
 
 use dashmap::DashMap;
 use jni::objects::GlobalRef;
+use jni::sys::jmethodID;
 use jni::JavaVM;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_eval::source::{
@@ -31,6 +32,21 @@ use std::sync::RwLock;
 /// Initialized once when library loads, used for thread attachment
 static JAVA_VM: Lazy<RwLock<Option<Arc<JavaVM>>>> = Lazy::new(|| RwLock::new(None));
 
+/// Cached RegisterWriter class and method IDs
+///
+/// These are cached globally to avoid expensive find_class/get_method_id calls
+/// on every nextRow() invocation (saves ~1-2μs per row)
+static REGISTER_WRITER_CACHE: Lazy<Mutex<Option<RegisterWriterCache>>> =
+    Lazy::new(|| Mutex::new(None));
+
+struct RegisterWriterCache {
+    class_ref: GlobalRef,
+    constructor_id: jmethodID,
+}
+
+unsafe impl Send for RegisterWriterCache {}
+unsafe impl Sync for RegisterWriterCache {}
+
 /// Initialize the JavaVM pointer for catalog callbacks
 ///
 /// Must be called once during library initialization
@@ -38,6 +54,44 @@ pub fn init_java_vm(vm: JavaVM) {
     if let Ok(mut guard) = JAVA_VM.write() {
         *guard = Some(Arc::new(vm));
     }
+}
+
+/// Initialize RegisterWriter class cache
+///
+/// Should be called once during initialization to cache class and method references
+fn init_register_writer_cache(env: &mut jni::JNIEnv<'_>) -> Result<()> {
+    let mut cache_guard = REGISTER_WRITER_CACHE
+        .lock()
+        .map_err(|e| EngineError::IllegalState(format!("Failed to lock cache: {}", e)))?;
+
+    if cache_guard.is_none() {
+        // Find RegisterWriter class
+        let writer_class = env
+            .find_class("org/partiql/jni/RegisterWriter")
+            .map_err(|e| {
+                EngineError::IllegalState(format!("Failed to find RegisterWriter class: {}", e))
+            })?;
+
+        // Create global reference
+        let class_ref = env.new_global_ref(&writer_class).map_err(|e| {
+            EngineError::IllegalState(format!("Failed to create GlobalRef: {}", e))
+        })?;
+
+        // Get constructor method ID: (J)V
+        let constructor_id = env
+            .get_method_id(writer_class, "<init>", "(J)V")
+            .map_err(|e| {
+                EngineError::IllegalState(format!("Failed to get constructor ID: {}", e))
+            })?
+            .into_raw();
+
+        *cache_guard = Some(RegisterWriterCache {
+            class_ref,
+            constructor_id,
+        });
+    }
+
+    Ok(())
 }
 
 /// Global storage for Java CompilationCatalog references
@@ -451,6 +505,7 @@ impl ExecutionCatalog for JavaExecutionCatalog {
 struct JavaDataSource {
     data_source_ref: GlobalRef,
     vm: Arc<JavaVM>,
+    writer_obj: Option<GlobalRef>,  // Cached RegisterWriter object for reuse
 }
 
 impl JavaDataSource {
@@ -458,6 +513,7 @@ impl JavaDataSource {
         JavaDataSource {
             data_source_ref,
             vm,
+            writer_obj: None,
         }
     }
 }
@@ -480,45 +536,78 @@ impl DataSource for JavaDataSource {
         &mut self,
         writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
     ) -> Result<bool> {
+        
+        // 1. Thread attachment
         let mut env = self
             .vm
             .attach_current_thread()
             .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
 
-        // Create a handle for the RegisterWriter
+        // 2. Initialize cache if needed (first call only)
+        init_register_writer_cache(&mut env)?;
+
+        // 3. Create a handle for the RegisterWriter
         let writer_ptr = writer as *mut partiql_eval::source::RegisterWriter<'_, '_>;
         let writer_handle = writer_ptr as i64;
 
-        // Create a RegisterWriter Java object
-        let writer_class = env
-            .find_class("org/partiql/jni/RegisterWriter")
-            .map_err(|e| {
-                EngineError::IllegalState(format!("Failed to find RegisterWriter class: {}", e))
+        // 4. Create or reuse RegisterWriter object
+        if self.writer_obj.is_none() {
+            // First call: create the object
+            let cache_guard = REGISTER_WRITER_CACHE
+                .lock()
+                .map_err(|e| EngineError::IllegalState(format!("Failed to lock cache: {}", e)))?;
+
+            let cache = cache_guard
+                .as_ref()
+                .ok_or_else(|| EngineError::IllegalState("Cache not initialized".to_string()))?;
+
+            let writer_obj = unsafe {
+                let method_id = jni::objects::JMethodID::from_raw(cache.constructor_id);
+                let args = [jni::sys::jvalue { j: writer_handle }];
+                env.new_object_unchecked(&cache.class_ref, method_id, &args)
+                    .map_err(|e| {
+                        EngineError::IllegalState(format!("Failed to create RegisterWriter: {}", e))
+                    })?
+            };
+
+            // Store as global reference for reuse
+            let global_ref = env.new_global_ref(writer_obj).map_err(|e| {
+                EngineError::IllegalState(format!("Failed to create GlobalRef: {}", e))
             })?;
 
-        let writer_obj = env
-            .new_object(
-                writer_class,
-                "(J)V",
-                &[jni::objects::JValue::Long(writer_handle)],
+            self.writer_obj = Some(global_ref);
+        } else {
+            // Subsequent calls: update the handle in existing object
+            let writer_obj = self.writer_obj.as_ref().unwrap();
+            env.set_field(
+                writer_obj.as_obj(),
+                "nativeHandle",
+                "J",
+                jni::objects::JValue::Long(writer_handle),
             )
             .map_err(|e| {
-                EngineError::IllegalState(format!("Failed to create RegisterWriter: {}", e))
+                EngineError::IllegalState(format!("Failed to update nativeHandle: {}", e))
             })?;
+        }
 
-        // Call Java method: boolean nextRow(RegisterWriter writer)
-        let has_next = env
+        let writer_obj = self.writer_obj.as_ref().unwrap();
+
+        // 5. Call Java method: boolean nextRow(RegisterWriter writer)
+        let result = env
             .call_method(
                 self.data_source_ref.as_obj(),
                 "nextRow",
                 "(Lorg/partiql/jni/RegisterWriter;)Z",
-                &[jni::objects::JValue::Object(&writer_obj)],
+                &[jni::objects::JValue::Object(writer_obj.as_obj())],
             )
-            .map_err(|e| EngineError::IllegalState(format!("Failed to call nextRow(): {}", e)))?
-            .z()
+            .map_err(|e| EngineError::IllegalState(format!("Failed to call nextRow(): {}", e)))?;
+
+        // 6. Extract result
+        let has_next = result.z()
             .map_err(|e| {
                 EngineError::IllegalState(format!("Failed to get boolean result: {}", e))
             })?;
+
 
         Ok(has_next)
     }

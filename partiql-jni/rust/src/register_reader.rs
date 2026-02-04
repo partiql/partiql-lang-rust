@@ -1,9 +1,54 @@
-use jni::objects::{JClass, JObject};
-use jni::sys::{jint, jlong, jobject};
+use jni::objects::{JClass, JObject, GlobalRef};
+use jni::sys::{jint, jlong, jobject, jmethodID};
 use jni::JNIEnv;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
+use crate::error::JniError;
 use crate::jni_guard;
 use crate::result::get_iterator_mut;
+
+/// Cached Long class and method IDs
+///
+/// Cached globally to avoid expensive find_class calls on every getI64() invocation
+static LONG_CLASS_CACHE: Lazy<Mutex<Option<LongClassCache>>> = Lazy::new(|| Mutex::new(None));
+
+struct LongClassCache {
+    class_ref: GlobalRef,
+    constructor_id: jmethodID,
+}
+
+unsafe impl Send for LongClassCache {}
+unsafe impl Sync for LongClassCache {}
+
+/// Initialize Long class cache
+///
+/// Should be called once during initialization to cache class and method references
+fn init_long_class_cache(env: &mut jni::JNIEnv<'_>) -> Result<(), JniError> {
+    let mut cache_guard = LONG_CLASS_CACHE
+        .lock()
+        .map_err(|_| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+
+    if cache_guard.is_none() {
+        // Find Long class
+        let long_class = env.find_class("java/lang/Long")?;
+
+        // Create global reference
+        let class_ref = env.new_global_ref(&long_class)?;
+
+        // Get constructor method ID: (J)V
+        let constructor_id = env
+            .get_method_id(long_class, "<init>", "(J)V")?
+            .into_raw();
+
+        *cache_guard = Some(LongClassCache {
+            class_ref,
+            constructor_id,
+        });
+    }
+
+    Ok(())
+}
 
 /// Get i64 value from current row at specified column
 ///
@@ -19,15 +64,30 @@ pub extern "system" fn Java_org_partiql_jni_RegisterReader_nativeGetI64(
     col: jint,
 ) -> jobject {
     jni_guard!(env, {
+        // Initialize cache if needed (first call only)
+        init_long_class_cache(&mut env)?;
+        
         let state = get_iterator_mut(iterator_handle as u64)?;
 
         if let Some(ref row) = state.current_row {
             // Use RegisterReader's get_i64 method
             if let Some(value) = row.get_i64(col as usize) {
-                // Create Java Long object
-                let long_class = env.find_class("java/lang/Long")?;
-                let long_obj =
-                    env.new_object(long_class, "(J)V", &[jni::objects::JValue::Long(value)])?;
+                // Use cached class reference and constructor
+                let cache_guard = LONG_CLASS_CACHE
+                    .lock()
+                    .map_err(|_| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+
+                let cache = cache_guard
+                    .as_ref()
+                    .ok_or_else(|| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+
+                // Create Java Long object using cached class and method
+                let long_obj = unsafe {
+                    let method_id = jni::objects::JMethodID::from_raw(cache.constructor_id);
+                    let args = [jni::sys::jvalue { j: value }];
+                    env.new_object_unchecked(&cache.class_ref, method_id, &args)?
+                };
+
                 Ok(long_obj.into_raw())
             } else {
                 // Column doesn't contain an i64, return null

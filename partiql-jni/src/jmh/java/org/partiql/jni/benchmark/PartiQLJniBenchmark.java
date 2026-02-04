@@ -20,12 +20,12 @@ import java.util.concurrent.TimeUnit;
 @State(Scope.Benchmark)
 public class PartiQLJniBenchmark {
     
-    @Param({"100"})
+    @Param({"1"})
     private int rowCount;
     
     private CompiledPlan compiledPlan;
     private long catalogId;
-    private List<Map<String, Object>> data;
+    private BenchmarkDataGenerator.BenchmarkData data;
     private PartiQLVM vm;  // VM created once in setup and reused
     private ExecutionContext execContext;  // Execution context created once
     
@@ -53,10 +53,6 @@ public class PartiQLJniBenchmark {
             
             // Create VM once with the context
             vm = new PartiQLVM(compiledPlan, execContext);
-            
-            System.out.println("=== BENCHMARK SETUP COMPLETE ===");
-            System.out.println("Row count: " + rowCount);
-            System.out.println("Data size: " + data.size());
         } catch (Exception e) {
             throw new RuntimeException("Setup failed", e);
         }
@@ -134,9 +130,9 @@ public class PartiQLJniBenchmark {
     }
     
     private static class BenchmarkExecutionCatalog implements ExecutionCatalog {
-        private final List<Map<String, Object>> data;
+        private final BenchmarkDataGenerator.BenchmarkData data;
         
-        BenchmarkExecutionCatalog(List<Map<String, Object>> data) {
+        BenchmarkExecutionCatalog(BenchmarkDataGenerator.BenchmarkData data) {
             this.data = data;
         }
         
@@ -147,11 +143,11 @@ public class PartiQLJniBenchmark {
     }
     
     private static class BenchmarkDataSource implements DataSource {
-        private final List<Map<String, Object>> data;
+        private final BenchmarkDataGenerator.BenchmarkData data;
         private final ScanLayout layout;
         private int currentRow = 0;
         
-        BenchmarkDataSource(List<Map<String, Object>> data, ScanLayout layout) {
+        BenchmarkDataSource(BenchmarkDataGenerator.BenchmarkData data, ScanLayout layout) {
             this.data = data;
             this.layout = layout;
         }
@@ -167,9 +163,7 @@ public class PartiQLJniBenchmark {
                 return false;
             }
             
-            Map<String, Object> row = data.get(currentRow);
-            
-            // Write projected columns to registers
+            // Write projected columns to registers (no boxing!)
             for (ScanProjection proj : layout.getProjections()) {
                 int targetSlot = proj.getTargetSlot();
                 ScanSource source = proj.getSource();
@@ -177,16 +171,17 @@ public class PartiQLJniBenchmark {
                 if (source instanceof ScanSource.ColumnIndex) {
                     int colIndex = ((ScanSource.ColumnIndex) source).getIndex();
                     
-                    // Column 0 = 'a' (integer), Column 1 = 'b' (string)
+                    // Direct access to primitive arrays - no boxing overhead
                     if (colIndex == 0) {
-                        Integer value = (Integer) row.get("a");
-                        writer.putLong(targetSlot, value.longValue());
+                        writer.putLong(targetSlot, data.columnA[currentRow]);
                     } else if (colIndex == 1) {
-                        Integer value = (Integer) row.get("b");
-                        writer.putLong(targetSlot, value.longValue());
+                        writer.putLong(targetSlot, data.columnB[currentRow]);
                     }
                 }
             }
+            
+            // Flush buffered writes to Rust in single JNI call
+            writer.flush();
             
             currentRow++;
             return true;
