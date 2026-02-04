@@ -14,7 +14,7 @@ public interface DataSourceConfig {
     /**
      * Get the data source capabilities for optimization.
      */
-    ScanCapabilities getCapabilities();
+    ScanCapabilities getCaps();
     
     /**
      * Resolve a field name to ScanSource at compile time.
@@ -22,5 +22,5 @@ public interface DataSourceConfig {
      * @param fieldName The field name to resolve
      * @return ScanSource if the field exists, null otherwise
      */
-    ScanSource resolveField(String fieldName);
+    ScanSource resolve(String fieldName);
 }

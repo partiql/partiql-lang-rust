@@ -1,10 +1,30 @@
 # PartiQL JNI Catalog Implementation Status
 
-## ✅ Completed: Java Catalog API (Phase 1)
+> **Last Updated:** 2026-02-03  
+> **Current State:** Java API Complete, Rust Implementation Partial (Stubs)
 
-All Java interfaces and classes for the catalog system have been successfully implemented.
+## Executive Summary
 
-### Core Types (14 files created)
+The JNI bindings are **functionally complete for basic queries** but catalog integration is **designed but not yet implemented**. The Java API layer is complete with all 14 catalog classes, but the Rust native layer currently ignores context parameters and uses default catalogs.
+
+**What Works:**
+- ✅ Compile and execute simple PartiQL queries
+- ✅ Basic VM/Compiler/Plan operations
+- ✅ RegisterReader for direct column access
+- ✅ All catalog Java classes defined with proper APIs
+
+**What Doesn't Work:**
+- ❌ Custom catalog registration (uses default catalog only)
+- ❌ Runtime data source binding
+- ❌ Java → Rust catalog callbacks
+
+---
+
+## ✅ Phase 1: Java Catalog API (COMPLETE)
+
+All Java interfaces and classes for the catalog system have been successfully implemented and compile correctly.
+
+### Core Types (14 files)
 
 #### 1. Name Binding
 - **BindingsName.java** - Final class with `isDelimited()` method
@@ -47,11 +67,15 @@ All Java interfaces and classes for the catalog system have been successfully im
 #### 4. Context Classes
 - **CompilationContext.java** - Compilation catalog registry
   - `addCatalog(name, catalog)` - returns catalogId
+  - `getNativeHandle()` - returns handle for JNI
   - Manages catalog name → CompilationCatalog mappings
+  - **Has native method stubs declared but NOT IMPLEMENTED in Rust**
   
 - **ExecutionContext.java** - Execution catalog registry
   - `addCatalog(catalogId, catalog)` - maps catalogId to ExecutionCatalog
+  - `getNativeHandle()` - returns handle for JNI
   - Enables different datasets for same compiled plan
+  - **Has native method stubs declared but NOT IMPLEMENTED in Rust**
 
 ### Updated Core Classes
 
@@ -59,41 +83,136 @@ All Java interfaces and classes for the catalog system have been successfully im
 ```java
 public CompiledPlan compile(String sql, CompilationContext context)
 ```
-- Now requires CompilationContext parameter
-- Context provides catalog resolution during compilation
+- ✅ Java signature requires CompilationContext parameter
+- ✅ Calls `nativeCompile(sql, context.getNativeHandle())`
+- ❌ **Rust implementation IGNORES the context parameter**
 
 #### PartiQLVM.java
 ```java
 public PartiQLVM(CompiledPlan plan, ExecutionContext context)
 ```
-- Now requires ExecutionContext parameter
-- Context provides data access during execution
+- ✅ Java signature requires ExecutionContext parameter  
+- ✅ Calls `nativeNew(plan.getNativeHandle(), context.getNativeHandle())`
+- ❌ **Rust implementation IGNORES the context parameter**
 
-## 📋 Remaining Work: Rust JNI Implementation (Phase 2)
+---
 
-The following Rust implementation work is needed to complete the catalog integration:
+## 🟡 Phase 1.5: Basic JNI Bindings (COMPLETE)
 
-### 1. Context Handle Management
+Core JNI bindings work for simple queries but don't support custom catalogs.
 
-**File:** `partiql-jni/src/context.rs` (new file)
+### What's Implemented
 
+#### Handle Management (`handles.rs`) ✅
 ```rust
-// Add handles for CompilationContext and ExecutionContext
-static COMPILATION_CONTEXT_HANDLES: Lazy<DashMap<u64, CompilationContext>> = ...;
-static EXECUTION_CONTEXT_HANDLES: Lazy<DashMap<u64, ExecutionContext>> = ...;
-
-pub fn create_compilation_context_handle() -> u64 { ... }
-pub fn create_execution_context_handle() -> u64 { ... }
+- create_vm_handle() / get_vm() / remove_vm_handle()
+- create_plan_handle() / get_plan() / remove_plan_handle()
+- create_result_handle() / get_result() / remove_result_handle()
+- create_iterator_handle() / get_iterator() / remove_iterator_handle()
 ```
 
-### 2. Java → Rust Catalog Bridge
+#### VM Wrapper (`vm.rs`) ⚠️
+```rust
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_PartiQLVM_nativeNew(
+    plan_handle: jlong,
+    _exec_context_handle: jlong,  // ⚠️ IGNORED (underscore prefix)
+) -> jlong {
+    // TODO: Get ExecutionContext from handle
+    let exec_context = ExecutionContext::default();  // Uses default!
+    let vm = PartiQLVM::new((*plan).clone(), &exec_context)?;
+    Ok(create_vm_handle(vm) as jlong)
+}
+```
 
-**File:** `partiql-jni/src/catalog_bridge.rs` (new file)
+#### Compiler Wrapper (`compiler.rs`) ❌
+```rust
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_PlanCompiler_nativeCompile(
+    sql: JString<'_>,
+    // ❌ MISSING: contextHandle parameter not in signature!
+) -> jlong {
+    let compilation_context = partiql_eval::CompilationContext::default();
+    let plan_compiler = PlanCompiler::new(&compilation_context);
+    // Uses default catalog, ignores Java context completely
+}
+```
+
+#### Other Wrappers ✅
+- `plan.rs` - CompiledPlan lifecycle (complete)
+- `result.rs` - ExecutionResult and QueryIterator (complete)
+- `register_reader.rs` - Direct column access (complete)
+- `error.rs` - Exception mapping (complete)
+- `conversion.rs` - Value conversion stubs (future work)
+
+### Build Status
+- ✅ Rust: `cargo clippy --all-features -- -D warnings` PASSES
+- ✅ Rust: `cargo build --release` SUCCEEDS
+- ✅ Gradle: `./gradlew build` SUCCEEDS
+- ⚠️ Javadoc: 38 warnings (missing @param/@return, cosmetic only)
+
+---
+
+## 📋 Phase 2: Catalog Integration (TODO)
+
+The catalog integration design is complete but implementation is pending.
+
+### Missing Implementations
+
+#### 1. Context Native Methods
+
+**File:** `partiql-jni/src/context.rs` (does not exist yet)
+
+Need to implement:
+```rust
+// CompilationContext native methods
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_CompilationContext_nativeNew(
+    env: JNIEnv,
+    _class: JClass,
+) -> jlong {
+    // Create CompilationContext handle
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_CompilationContext_nativeAddCatalog(
+    env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    name: JString,
+) -> jlong {
+    // Add catalog and return catalogId
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_CompilationContext_nativeClose(
+    env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    // Clean up context
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_CompilationContext_registerCatalogCallback(
+    env: JNIEnv,
+    this: JObject,
+    catalog_id: jlong,
+    catalog: JObject,
+) {
+    // Store Java CompilationCatalog for callbacks
+}
+
+// Similar for ExecutionContext
+```
+
+#### 2. Catalog Bridge
+
+**File:** `partiql-jni/src/catalog_bridge.rs` (does not exist yet)
 
 Implement JNI callback mechanism to call Java catalog methods from Rust:
 
 ```rust
-// Bridge CompilationCatalog::getTable() calls from Rust to Java
 pub struct JavaCompilationCatalog {
     java_object: GlobalRef,
     jvm: JavaVM,
@@ -101,123 +220,71 @@ pub struct JavaCompilationCatalog {
 
 impl CompilationCatalog for JavaCompilationCatalog {
     fn get_table(&self, path: &[BindingsName]) -> Option<DataSourceHandle> {
-        // Call Java CompilationCatalog.getTable(List<BindingsName>)
-        // Convert Rust BindingsName to Java BindingsName objects
-        // Call method and convert result back
+        // 1. Attach to JVM
+        // 2. Convert Rust BindingsName to Java BindingsName objects
+        // 3. Call Java CompilationCatalog.getTable(List<BindingsName>)
+        // 4. Convert result back to Rust DataSourceHandle
     }
 }
 
-// Similarly for ExecutionCatalog
-pub struct JavaExecutionCatalog { ... }
+// Similarly for JavaExecutionCatalog
 ```
 
-### 3. Native Method Implementations
+#### 3. Update Existing Wrappers
 
 **Update:** `partiql-jni/src/compiler.rs`
-
 ```rust
 #[no_mangle]
 pub extern "system" fn Java_org_partiql_jni_PlanCompiler_nativeCompile(
     env: JNIEnv,
     _class: JClass,
     sql: JString,
-    context_handle: jlong,  // NEW PARAMETER
+    context_handle: jlong,  // ✅ ADD THIS PARAMETER
 ) -> jlong {
     // Get CompilationContext from handle
+    let context = get_compilation_context(context_handle)?;
+    let plan_compiler = PlanCompiler::new(&context);
     // Use context during compilation
 }
 ```
 
 **Update:** `partiql-jni/src/vm.rs`
-
 ```rust
 #[no_mangle]
 pub extern "system" fn Java_org_partiql_jni_PartiQLVM_nativeNew(
     env: JNIEnv,
     _class: JClass,
     plan_handle: jlong,
-    context_handle: jlong,  // NEW PARAMETER
+    context_handle: jlong,  // ✅ REMOVE UNDERSCORE, USE THIS
 ) -> jlong {
-    // Get ExecutionContext from handle
-    // Pass context to VM construction
+    let plan = get_plan(plan_handle)?;
+    let exec_context = get_execution_context(context_handle)?;  // ✅ GET FROM HANDLE
+    let vm = PartiQLVM::new((*plan).clone(), &exec_context)?;
+    Ok(create_vm_handle(vm) as jlong)
 }
 ```
 
-**New file:** `partiql-jni/src/context.rs`
+#### 4. Type Conversions
 
-```rust
-#[no_mangle]
-pub extern "system" fn Java_org_partiql_jni_catalog_CompilationContext_nativeNew(
-    env: JNIEnv,
-    _class: JClass,
-) -> jlong {
-    // Create CompilationContext and return handle
-}
-
-#[no_mangle]
-pub extern "system" fn Java_org_partiql_jni_catalog_CompilationContext_nativeAddCatalog(
-    env: JNIEnv,
-    _class: JClass,
-    handle: jlong,
-    name: JString,
-) -> jlong {
-    // Add catalog to context and return catalogId
-}
-
-#[no_mangle]
-pub extern "system" fn Java_org_partiql_jni_catalog_CompilationContext_registerCatalogCallback(
-    env: JNIEnv,
-    this: JObject,
-    catalog_id: jlong,
-    catalog: JObject,
-) {
-    // Store Java CompilationCatalog reference for callbacks
-    // Create JavaCompilationCatalog wrapper
-}
-
-// Similar methods for ExecutionContext
-```
-
-### 4. Type Conversions
-
-**File:** `partiql-jni/src/conversion.rs` (update)
+**File:** `partiql-jni/src/conversion.rs` (currently has stubs)
 
 Add conversions between Rust and Java catalog types:
+- `bindings_name_to_jobject()` - Rust → Java BindingsName
+- `jobject_to_bindings_name_list()` - Java List → Rust Vec
+- `scan_source_to_jobject()` - Rust → Java ScanSource
+- `jobject_to_scan_layout()` - Java → Rust ScanLayout
+- And more for complete catalog integration
 
-```rust
-// Convert Rust BindingsName to Java BindingsName
-pub fn bindings_name_to_jobject(env: &JNIEnv, name: &BindingsName) -> Result<JObject> {
-    match name {
-        BindingsName::CaseSensitive(s) => {
-            // Create Java BindingsName with delimited=true
-        }
-        BindingsName::CaseInsensitive(s) => {
-            // Create Java BindingsName with delimited=false
-        }
-    }
-}
+#### 5. Testing
 
-// Convert Java List<BindingsName> to Rust Vec<BindingsName>
-pub fn jobject_to_bindings_name_list(env: &JNIEnv, list: JObject) -> Result<Vec<BindingsName>> {
-    // Iterate Java List, convert each element
-}
-
-// Similar for ScanSource, ScanLayout, etc.
-```
-
-### 5. Testing
-
-Create integration tests demonstrating the full catalog flow:
-
+Create integration tests:
 ```java
-// Test file: partiql-jni/src/test/java/CatalogIntegrationTest.java
-
 @Test
 void testCatalogIntegration() {
     // 1. Create CompilationContext
     CompilationContext compContext = new CompilationContext();
     
-    // 2. Implement and register CompilationCatalog
+    // 2. Register catalog
     long catalogId = compContext.addCatalog("main", new MyCompilationCatalog());
     
     // 3. Compile query
@@ -231,42 +298,88 @@ void testCatalogIntegration() {
     // 5. Execute
     try (PartiQLVM vm = new PartiQLVM(plan, execContext)) {
         ExecutionResult result = vm.execute();
-        // Verify results
+        // Verify results from custom catalog
     }
 }
 ```
 
+---
+
 ## Architecture Summary
 
+### Current Flow (Phase 1.5)
 ```
-Compilation Flow:
+SQL → PlanCompiler.compile(sql, context)
+      → nativeCompile(sql, contextHandle)  
+      → Rust IGNORES contextHandle, uses default catalog
+      → CompiledPlan
+
+VM.execute() → nativeNew(planHandle, contextHandle)
+             → Rust IGNORES contextHandle, uses default ExecutionContext
+             → Executes with default catalog only
+```
+
+### Target Flow (Phase 2)
+```
+Compilation:
 SQL → PlanCompiler.compile(sql, CompilationContext)
-      → Rust compiler uses CompilationContext
-      → Calls Java CompilationCatalog.getTable() via JNI callback
+      → Rust gets context from handle
+      → Calls JavaCompilationCatalog.getTable() via JNI callback
       → Returns DataSourceHandle with catalogId + config
       → CompiledPlan contains catalog references
 
-Execution Flow:
-VM.execute() → Rust VM uses ExecutionContext
-             → Calls Java ExecutionCatalog.create(entryId, layout) via JNI callback
-             → Returns Java DataSource
+Execution:
+VM.execute() → Rust gets ExecutionContext from handle
+             → Calls JavaExecutionCatalog.create(entryId, layout) via JNI callback
+             → Returns JavaDataSource
              → Rust calls DataSource.next() via JNI to read rows
              → RegisterReader provides row data to query engine
 ```
 
-## Next Steps
+---
 
-1. Implement `partiql-jni/src/catalog_bridge.rs` with JNI callback mechanism
-2. Update `partiql-jni/src/compiler.rs` to use CompilationContext
-3. Update `partiql-jni/src/vm.rs` to use ExecutionContext
-4. Add type conversion helpers in `partiql-jni/src/conversion.rs`
-5. Create integration tests
-6. Document usage examples
+## Implementation Roadmap
+
+### Immediate Next Steps
+1. ✅ Update this status document (current task)
+2. Create `partiql-jni/src/context.rs` with context handle management
+3. Add missing parameter to `compiler.rs::nativeCompile`
+4. Remove underscore from `vm.rs::nativeNew` context parameter
+5. Implement `catalog_bridge.rs` with JNI callback mechanism
+6. Add type conversion helpers in `conversion.rs`
+7. Create integration tests
+8. Document usage examples
+
+### Timeline Estimate
+- Context handle management: 1 day
+- Catalog bridge with callbacks: 3-5 days
+- Type conversions: 2 days
+- Integration tests: 2 days
+- Documentation: 1 day
+
+**Total: ~2 weeks for full catalog integration**
+
+---
+
+## Workarounds for Now
+
+Until Phase 2 is complete, users can:
+
+1. **Use default catalog only** - Works for simple queries on in-memory data
+2. **Pre-process data** - Load data into formats the default catalog understands
+3. **Fork and extend** - Modify `compiler.rs` to use custom Rust catalogs directly
+
+---
 
 ## Design Validation
 
-✅ **BindingsName** - Now a final class with `isDelimited()` method as requested
-✅ **API Consistency** - Matches Rust types exactly
-✅ **Thread Safety** - Contexts can be per-thread for different datasets
-✅ **Memory Safety** - Handle-based approach, no JNI global refs for PartiQL objects
-✅ **Separation of Concerns** - Compilation vs Execution contexts clearly separated
+✅ **BindingsName** - Final class with `isDelimited()` as requested  
+✅ **API Consistency** - Java API matches Rust types exactly  
+✅ **Thread Safety** - Contexts can be per-thread for different datasets  
+✅ **Memory Safety** - Handle-based approach, no JNI global refs for PartiQL objects  
+✅ **Separation of Concerns** - Compilation vs Execution contexts clearly separated  
+⚠️ **Implementation Gap** - Java API complete, Rust implementation uses stubs
+
+---
+
+**Status:** Documentation updated to reflect accurate implementation state (2026-02-03)

@@ -44,8 +44,8 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionResult_nativeIsQuery(
 ) -> jboolean {
     jni_guard!(env, {
         let _result = get_result(result_handle as u64)?;
-        // TODO: Implement once ExecutionResult API is finalized
-        // For now, assume all results are queries
+        // ExecutionResult currently only has Query variant
+        // When Mutation/Definition variants are added, implement type checking here
         Ok(1 as jboolean)
     })
 }

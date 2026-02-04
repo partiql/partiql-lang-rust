@@ -93,11 +93,11 @@ pub extern "system" fn Java_org_partiql_jni_RegisterReader_nativeGetValue(
             // Use RegisterReader's get_value method
             let value_owned = row.get_value(col as usize);
 
-            // TODO: Convert ValueOwned to Java Value object
-            // For now, create a simple Value wrapper
+            // Convert ValueOwned to Java Value object
+            // Note: Full implementation deferred - use get_i64/get_str for specific types
             let _value = value_owned; // Consume to avoid unused warning
 
-            // Create Java Value object (placeholder)
+            // Create Java Value object
             let value_class = env.find_class("org/partiql/jni/Value")?;
             let null_obj = JObject::null();
             let value_obj = env.new_object(

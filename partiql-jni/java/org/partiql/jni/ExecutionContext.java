@@ -42,11 +42,8 @@ public final class ExecutionContext implements AutoCloseable {
             throw new IllegalArgumentException("ExecutionCatalog cannot be null");
         }
         
-        // Register catalog ID in Rust
-        nativeAddCatalog(nativeHandle, catalogId);
-        
-        // Store Java catalog reference for callbacks
-        registerCatalogCallback(catalogId, catalog);
+        // Pass catalog object to Rust for registration
+        nativeAddCatalog(nativeHandle, catalogId, catalog);
     }
     
     @Override
@@ -69,7 +66,6 @@ public final class ExecutionContext implements AutoCloseable {
     
     // Native methods
     private static native long nativeNew();
-    private static native void nativeAddCatalog(long handle, long catalogId);
+    private static native void nativeAddCatalog(long handle, long catalogId, ExecutionCatalog catalog);
     private static native void nativeClose(long handle);
-    private native void registerCatalogCallback(long catalogId, ExecutionCatalog catalog);
 }
