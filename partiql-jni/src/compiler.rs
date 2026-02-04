@@ -13,13 +13,14 @@ use crate::{create_plan_handle, jni_guard};
 ///
 /// Java signature:
 /// ```java
-/// public native long nativeCompile(String sql) throws PartiQLException;
+/// public native long nativeCompile(String sql, long contextHandle) throws PartiQLException;
 /// ```
 #[no_mangle]
 pub extern "system" fn Java_org_partiql_jni_PlanCompiler_nativeCompile(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     sql: JString<'_>,
+    context_handle: jlong,
 ) -> jlong {
     jni_guard!(env, {
         // Get SQL string from Java
@@ -52,8 +53,8 @@ pub extern "system" fn Java_org_partiql_jni_PlanCompiler_nativeCompile(
         };
 
         // 3. LogicalPlan -> CompiledPlan
-        // Create a simple compilation context with the default catalog
-        let compilation_context = partiql_eval::CompilationContext::default();
+        // Get CompilationContext from handle (wrapped in Arc)
+        let compilation_context = crate::context::get_compilation_context(context_handle as u64)?;
 
         let plan_compiler = PlanCompiler::new(&compilation_context);
         let compiled = plan_compiler.compile(&logical)?;

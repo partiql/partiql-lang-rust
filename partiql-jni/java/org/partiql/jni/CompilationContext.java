@@ -45,12 +45,8 @@ public final class CompilationContext implements AutoCloseable {
         }
         
         // Register catalog in Rust and get back the catalog ID
-        long catalogId = nativeAddCatalog(nativeHandle, name);
-        
-        // Store Java catalog reference for callbacks
-        registerCatalogCallback(catalogId, catalog);
-        
-        return catalogId;
+        // The catalog object is stored in Rust via GlobalRef
+        return nativeAddCatalog(nativeHandle, name, catalog);
     }
     
     @Override
@@ -73,7 +69,6 @@ public final class CompilationContext implements AutoCloseable {
     
     // Native methods
     private static native long nativeNew();
-    private static native long nativeAddCatalog(long handle, String name);
+    private static native long nativeAddCatalog(long handle, String name, CompilationCatalog catalog);
     private static native void nativeClose(long handle);
-    private native void registerCatalogCallback(long catalogId, CompilationCatalog catalog);
 }

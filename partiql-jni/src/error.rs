@@ -53,26 +53,30 @@ pub fn throw_jni_error(env: &mut JNIEnv<'_>, err: JniError) {
 // Macro for exception handling in JNI functions that return a value
 #[macro_export]
 macro_rules! jni_guard {
-    ($env:expr, $body:expr) => {
-        match (|| -> Result<_, $crate::error::JniError> { $body })() {
+    ($env:expr, $body:expr) => {{
+        #[allow(clippy::redundant_closure_call)]
+        let result: Result<_, $crate::error::JniError> = (|| $body)();
+        match result {
             Ok(v) => v,
             Err(e) => {
                 $crate::error::throw_jni_error(&mut $env, e);
                 return Default::default();
             }
         }
-    };
+    }};
 }
 
 // Macro for exception handling in JNI functions that return void
 #[macro_export]
 macro_rules! jni_guard_void {
-    ($env:expr, $body:expr) => {
-        match { $body } {
+    ($env:expr, $body:expr) => {{
+        #[allow(clippy::redundant_closure_call)]
+        let result: Result<_, $crate::error::JniError> = (|| $body)();
+        match result {
             Ok(_) => {}
             Err(e) => {
                 $crate::error::throw_jni_error(&mut $env, e);
             }
         }
-    };
+    }};
 }

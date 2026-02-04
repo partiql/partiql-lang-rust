@@ -1,6 +1,5 @@
 package org.partiql.jni;
 
-import org.partiql.jni.RegisterReader;
 import org.partiql.jni.exceptions.PartiQLException;
 
 /**
@@ -8,22 +7,33 @@ import org.partiql.jni.exceptions.PartiQLException;
  * 
  * Provides row-by-row data access with projection support.
  * Matches the Rust DataSource trait.
+ * 
+ * Custom DataSource implementations write values directly to VM registers
+ * using the RegisterWriter for optimal performance.
  */
 public interface DataSource extends AutoCloseable {
     /**
-     * Get the next row.
+     * Initialize the data source for reading.
+     * Called once before the first row is requested.
      * 
-     * @return RegisterReader for the next row, or null when no more rows
-     * @throws PartiQLException if an error occurs during reading
+     * @throws PartiQLException if an error occurs during initialization
      */
-    RegisterReader next() throws PartiQLException;
+    void open() throws PartiQLException;
     
     /**
-     * Check if more rows are available.
+     * Fetch the next row and write values to registers.
      * 
-     * @return true if next() will return a row, false otherwise
+     * The implementation should:
+     * 1. Check if more rows are available
+     * 2. For each projection in the ScanLayout, write the appropriate value
+     *    to the target register slot using RegisterWriter methods
+     * 3. Return true if a row was written, false if no more rows
+     * 
+     * @param writer RegisterWriter for writing values to VM registers
+     * @return true if a row was written, false if no more rows
+     * @throws PartiQLException if an error occurs during reading
      */
-    boolean hasNext();
+    boolean nextRow(RegisterWriter writer) throws PartiQLException;
     
     /**
      * Close the data source and release resources.

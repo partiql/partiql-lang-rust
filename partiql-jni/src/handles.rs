@@ -1,10 +1,19 @@
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use partiql_eval::{CompiledPlan, PartiQLVM};
 
 use crate::error::JniError;
+
+// Global handle counter
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+
+/// Generate next unique handle ID
+pub fn next_handle() -> u64 {
+    NEXT_HANDLE.fetch_add(1, Ordering::Relaxed)
+}
 
 // Global handle storage for CompiledPlan (which is Send + Sync)
 #[allow(dead_code)]
