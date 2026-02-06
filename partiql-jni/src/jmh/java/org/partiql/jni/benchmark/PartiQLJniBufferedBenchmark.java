@@ -33,6 +33,7 @@ public class PartiQLJniBufferedBenchmark {
     @Param({"1"})
     private int rowCount;
     
+    private String[] fieldNames = {"a", "b"};
     private CompiledPlan compiledPlan;
     private long catalogId;
     private PartiQLVM vm;  // VM created once in Trial setup and reused
@@ -75,7 +76,7 @@ public class PartiQLJniBufferedBenchmark {
     @Setup(Level.Invocation)
     public void setupInvocation() {
         try {
-
+            this.backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, nextValue++, rowCount);
         } catch (Exception e) {
             throw new RuntimeException("Invocation setup failed", e);
         }
@@ -83,7 +84,6 @@ public class PartiQLJniBufferedBenchmark {
     
     public BufferedExecutionCatalog createBufferedExecutionCatalog() {
         // Generate new HashMap data for this iteration
-        String[] fieldNames = {"a", "b"};
         this.backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, nextValue++, rowCount);
 
         // Use the pool for efficient buffer reuse across iterations
