@@ -249,7 +249,7 @@ impl SessionContext for NestedContext<'_> {
     delegate! {
         to self.parent {
             fn system_context(&self) -> &SystemContext;
-            fn user_context(&self, name: &str) -> Option<& dyn Any >;
+            fn user_context(&self, name: &str) -> Option<&dyn Any>;
         }
     }
 }
