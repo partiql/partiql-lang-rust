@@ -41,6 +41,9 @@ public final class PartiQLVM implements AutoCloseable {
     private long nativeHandle;
     private boolean closed = false;
     
+    // Internal memory pool for amortizing DirectByteBuffer allocation costs
+    private final CrossLanguageMemoryPool memoryPool;
+    
     static {
         NativeLibrary.ensureLoaded();
     }
@@ -54,6 +57,9 @@ public final class PartiQLVM implements AutoCloseable {
     /**
      * Creates a new PartiQLVM from a compiled plan with an execution context.
      * 
+     * <p>An internal memory pool is automatically created to amortize the cost
+     * of DirectByteBuffer allocation across multiple query executions.
+     * 
      * @param plan The compiled plan to execute
      * @param context ExecutionContext with catalog mappings for data access
      * @throws PartiQLException if VM creation fails
@@ -66,6 +72,9 @@ public final class PartiQLVM implements AutoCloseable {
         if (context == null) {
             throw new NullPointerException("ExecutionContext cannot be null");
         }
+        
+        // Create internal memory pool for buffer reuse
+        this.memoryPool = new CrossLanguageMemoryPool();
         
         this.nativeHandle = nativeNew(plan.getNativeHandle(), context.getNativeHandle());
     }
@@ -87,7 +96,8 @@ public final class PartiQLVM implements AutoCloseable {
     public ExecutionResult execute() throws PartiQLException {
         checkNotClosed();
         long resultHandle = nativeExecute(nativeHandle);
-        return new ExecutionResult(resultHandle);
+        // Pass internal memory pool and VM handle to result for buffer caching
+        return new ExecutionResult(resultHandle, memoryPool, nativeHandle);
     }
     
     /**
@@ -146,6 +156,10 @@ public final class PartiQLVM implements AutoCloseable {
     public void close() {
         if (!closed) {
             nativeClose(nativeHandle);
+            
+            // Clear the internal memory pool
+            memoryPool.clear();
+            
             closed = true;
             nativeHandle = 0;
         }

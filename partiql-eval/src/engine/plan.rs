@@ -652,9 +652,7 @@ impl PartiQLVM {
                         exec_context,
                     )?;
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
-                    operators.push(RelOp::Pipeline(PipelineOp::new(
-                        steps, reader, None,
-                    )));
+                    operators.push(RelOp::Pipeline(PipelineOp::new(steps, reader, None)));
                 }
                 RelOpSpec::Legacy(spec) => {
                     let bindings = MapBindings::default();
@@ -676,7 +674,7 @@ impl PartiQLVM {
                 }
             }
         }
-        
+
         self.operators = operators;
         self.arena.reset();
         Ok(())

@@ -1,5 +1,5 @@
-use jni::objects::{JClass, JObject, GlobalRef};
-use jni::sys::{jint, jlong, jobject, jmethodID};
+use jni::objects::{GlobalRef, JClass, JObject};
+use jni::sys::{jint, jlong, jmethodID, jobject};
 use jni::JNIEnv;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -25,9 +25,11 @@ unsafe impl Sync for LongClassCache {}
 ///
 /// Should be called once during initialization to cache class and method references
 fn init_long_class_cache(env: &mut jni::JNIEnv<'_>) -> Result<(), JniError> {
-    let mut cache_guard = LONG_CLASS_CACHE
-        .lock()
-        .map_err(|_| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+    let mut cache_guard = LONG_CLASS_CACHE.lock().map_err(|_| {
+        JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(
+            -1,
+        )))
+    })?;
 
     if cache_guard.is_none() {
         // Find Long class
@@ -37,9 +39,7 @@ fn init_long_class_cache(env: &mut jni::JNIEnv<'_>) -> Result<(), JniError> {
         let class_ref = env.new_global_ref(&long_class)?;
 
         // Get constructor method ID: (J)V
-        let constructor_id = env
-            .get_method_id(long_class, "<init>", "(J)V")?
-            .into_raw();
+        let constructor_id = env.get_method_id(long_class, "<init>", "(J)V")?.into_raw();
 
         *cache_guard = Some(LongClassCache {
             class_ref,
@@ -66,20 +66,24 @@ pub extern "system" fn Java_org_partiql_jni_RegisterReader_nativeGetI64(
     jni_guard!(env, {
         // Initialize cache if needed (first call only)
         init_long_class_cache(&mut env)?;
-        
+
         let state = get_iterator_mut(iterator_handle as u64)?;
 
         if let Some(ref row) = state.current_row {
             // Use RegisterReader's get_i64 method
             if let Some(value) = row.get_i64(col as usize) {
                 // Use cached class reference and constructor
-                let cache_guard = LONG_CLASS_CACHE
-                    .lock()
-                    .map_err(|_| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+                let cache_guard = LONG_CLASS_CACHE.lock().map_err(|_| {
+                    JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(
+                        -1,
+                    )))
+                })?;
 
-                let cache = cache_guard
-                    .as_ref()
-                    .ok_or_else(|| JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(-1))))?;
+                let cache = cache_guard.as_ref().ok_or({
+                    JniError::Jni(jni::errors::Error::JniCall(jni::errors::JniError::Other(
+                        -1,
+                    )))
+                })?;
 
                 // Create Java Long object using cached class and method
                 let long_obj = unsafe {

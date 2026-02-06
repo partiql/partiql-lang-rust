@@ -36,7 +36,10 @@ impl<'a> ValueRef<'a> {
     pub fn as_i64(&self) -> Result<i64> {
         match *self {
             ValueRef::I64(v) => Ok(v),
-            _ => Err(EngineError::TypeError("expected i64".to_string())),
+            _ => Err(EngineError::TypeError(format!(
+                "expected i64, but received {:?}",
+                *self
+            ))),
         }
     }
 

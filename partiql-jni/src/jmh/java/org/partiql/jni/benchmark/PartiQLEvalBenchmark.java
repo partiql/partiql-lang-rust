@@ -8,13 +8,18 @@ import org.partiql.parser.PartiQLParser;
 import org.partiql.plan.Plan;
 import org.partiql.planner.PartiQLPlanner;
 import org.partiql.spi.catalog.Catalog;
+import org.partiql.spi.catalog.Identifier;
 import org.partiql.spi.catalog.Name;
 import org.partiql.spi.catalog.Session;
 import org.partiql.spi.catalog.Table;
+import org.partiql.spi.function.AggOverload;
+import org.partiql.spi.function.FnOverload;
 import org.partiql.spi.value.Datum;
-import org.partiql.spi.types.PType;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,9 +28,9 @@ import java.util.concurrent.TimeUnit;
  */
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
-@Warmup(iterations = 1, time = 1)
-@Measurement(iterations = 3, time = 1)
-@Fork(1)
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 10, time = 1)
+@Fork(2)
 @State(Scope.Benchmark)
 public class PartiQLEvalBenchmark {
     
@@ -33,6 +38,9 @@ public class PartiQLEvalBenchmark {
     @Param({"1"})
     private int rowCount;
     
+    private String[] fieldNames = {"a", "b"};
+    private List<Map<String, Integer>> backingData;
+    private Datum backingDatum;
     private PartiQLCompiler compiler;
     private Plan plan;
     private Session session;
@@ -40,24 +48,13 @@ public class PartiQLEvalBenchmark {
     @Setup(Level.Trial)
     public void setup() {
         try {
-            // Generate test data as Datum rows
-            List<Datum> datumList = BenchmarkDataGenerator.generateDatumRows(rowCount);
-            
-            // Create a bag of the data
-            Datum dataBag = Datum.bag(datumList);
-            
-            // Create table
-            Table dataTable = Table.standard(
-                Name.of("data"),
-                PType.dynamic(),
-                dataBag
-            );
+            // Create a bag of the generated data
+            BenchmarkDataGenerator.generateHashMapRow(fieldNames, rowCount);
+            backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, 0, rowCount);
+            backingDatum = createBackingDatum();
             
             // Create catalog
-            Catalog catalog = Catalog.builder()
-                .name("memory")
-                .define(dataTable)
-                .build();
+            Catalog catalog = new MutableCatalog("memory", backingDatum);
             
             // Create session
             session = Session.builder()
@@ -80,13 +77,19 @@ public class PartiQLEvalBenchmark {
             throw new RuntimeException("Setup failed", e);
         }
     }
-    
+
+    @Setup(Level.Invocation)
+    public void setupInvocation() {
+        backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, 0, rowCount);
+    }
+
     @Benchmark
     public int executeQuery(Blackhole blackhole) {
         int count = 0;
         
         try {
             // Execute query
+            backingDatum = createBackingDatum();
             Datum result = compiler.prepare(plan, Mode.STRICT()).execute();
             
             // Iterate through results
@@ -101,5 +104,51 @@ public class PartiQLEvalBenchmark {
         }
         
         return count;
+    }
+
+    Datum createBackingDatum() {
+        List<Datum> elements = new ArrayList<>();
+        for (Map<String, Integer> entry : backingData) {
+            elements.add(new BenchmarkDataGenerator.DatumWrapper(entry));
+        }
+        return Datum.bag(elements);
+    }
+
+    static class MutableCatalog implements Catalog {
+        private Datum delegate;
+        private final String catalogName;
+
+        MutableCatalog(String catalogName, Datum delegate) {
+            this.delegate = delegate;
+            this.catalogName = catalogName;
+        }
+
+        @Override
+        public String getName() {
+            return this.catalogName;
+        }
+
+        @Override
+        public Table getTable(Session arg0, Name arg1) {
+            return Table.standard(Name.of("data"), delegate);
+        }
+
+        @Override
+        public Name resolveTable(Session arg0, Identifier arg1) {
+            if (arg1.matches("data", false)) {
+                return Name.of("data");
+            }
+            return null;
+        }
+
+        @Override
+        public Collection<FnOverload> getFunctions(Session arg0, String arg1) {
+            return new ArrayList<>();
+        }
+
+        @Override
+        public Collection<AggOverload> getAggregations(Session arg0, String arg1) {
+            return new ArrayList<>();
+        }
     }
 }

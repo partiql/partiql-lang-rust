@@ -166,7 +166,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeFlush(
 
         // Convert JObject to JByteBuffer
         let byte_buffer = buffer.into();
-        
+
         // Get direct buffer address (zero-copy!)
         let buffer_addr = env.get_direct_buffer_address(&byte_buffer)?;
 
@@ -259,11 +259,9 @@ fn decode_buffer_to_registers(
                         "Buffer underflow reading string length".to_string(),
                     ));
                 }
-                let len_bytes: [u8; 4] = buffer[offset..offset + 4]
-                    .try_into()
-                    .map_err(|_| {
-                        EngineError::IllegalState("Failed to read string length".to_string())
-                    })?;
+                let len_bytes: [u8; 4] = buffer[offset..offset + 4].try_into().map_err(|_| {
+                    EngineError::IllegalState("Failed to read string length".to_string())
+                })?;
                 let len = i32::from_ne_bytes(len_bytes) as usize;
                 offset += 4;
 

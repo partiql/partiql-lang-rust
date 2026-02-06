@@ -170,24 +170,27 @@ publishing {
 }
 
 // JMH configuration
-val jmhIncludes = findProperty("jmhIncludes").toString()
+val jmhForks = findProperty("jmhForks")
+val jmhWarmupIterations = findProperty("jmhWarmupIterations")
+val jmhIterations = findProperty("jmhIterations")
+val jmhIncludes = findProperty("jmhIncludes") ?: ".*Benchmark*"
+val jmhProfileWall= findProperty("jmhProfileWall").toString() == "true"
+val asyncProfiler="async:libPath=/Users/johqunn/Downloads/async-profiler-4.3-macos/lib/libasyncProfiler.dylib;output=flamegraph;event=wall"
 jmh {
-    if (jmhIncludes != null) {
-        includes.add(jmhIncludes)
-    } else {
-        includes.add(".*Benchmark*")
-    }
     jvmArgs.add("-Djava.library.path=src/main/resources/native")
-    
-    val async = "async:libPath=/Users/johqunn/Downloads/async-profiler-4.3-macos/lib/libasyncProfiler.dylib;output=flamegraph"
-    profilers.add(async)
-    // jvmArgsAppend.add("-XX:+UnlockCommercialFeatures")
-    // jvmArgsAppend.add("-XX:+FlightRecorder")
-    // jvmArgsAppend.add("-XX:StartFlightRecording=filename=benchmark.jfr,settings=profile'")
-    warmupIterations.set(5)
-    iterations.set(10)
-    fork.set(2)
-    threads.set(1)
+
+    // Set benchmarks
+    includes.add(jmhIncludes.toString())
+
+    // Turn on profiling
+    if (jmhProfileWall) {
+        profilers.add(asyncProfiler)
+    }
+
+    if (jmhForks != null) fork = jmhForks.toString().toInt()
+    if (jmhWarmupIterations != null) warmupIterations = jmhWarmupIterations.toString().toInt()
+    if (jmhIterations != null) iterations = jmhIterations.toString().toInt()
+
     
     resultFormat.set("JSON")
     resultsFile.set(project.file("${layout.buildDirectory.get()}/reports/jmh/results.json"))

@@ -52,6 +52,34 @@ public class BenchmarkDataGenerator {
     }
     
     /**
+     * Generates HashMap rows for use with partiql-jni benchmarks.
+     * Each row is a HashMap with the specified field names mapped to integers.
+     * 
+     * @param fieldNames Array of field names for each row
+     * @param startValue Starting value for field values (increments per row)
+     * @param rowCount Number of rows to generate
+     * @return List of HashMaps representing rows
+     */
+    public static List<Map<String, Integer>> generateHashMapRows(
+            String[] fieldNames,
+            int startValue,
+            int rowCount) {
+        List<Map<String, Integer>> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(generateHashMapRow(fieldNames, startValue + i));
+        }
+        return rows;
+    }
+
+    public static Map<String, Integer> generateHashMapRow(String[] fieldNames, int value) {
+        Map<String, Integer> row = new HashMap<>();
+        for (String fieldName : fieldNames) {
+            row.put(fieldName, value);
+        }
+        return row;
+    }
+    
+    /**
      * Generates Datum rows for use with partiql-eval.
      * Each row has: {a: Int, b: String}
      * 
