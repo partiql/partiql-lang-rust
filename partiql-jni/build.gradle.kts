@@ -1,14 +1,15 @@
 plugins {
     `java-library`
     `maven-publish`
+    id("me.champeau.jmh") version "0.7.2"
 }
 
 group = "org.partiql"
 version = "0.14.0"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
     withSourcesJar()
     withJavadocJar()
 }
@@ -17,30 +18,20 @@ repositories {
     mavenCentral()
 }
 
-// Configure source sets
-sourceSets {
-    main {
-        java {
-            srcDir("java")
-        }
-        resources {
-            srcDir("src/main/resources")
-        }
-    }
-    test {
-        java {
-            srcDir("src/test/java")
-        }
-        resources {
-            srcDir("src/test/resources")
-        }
-    }
-}
-
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation("org.assertj:assertj-core:3.24.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    
+    // JMH dependencies
+    jmh("org.openjdk.jmh:jmh-core:1.37")
+    jmh("org.openjdk.jmh:jmh-generator-annprocess:1.37")
+    
+    // Comparison library for benchmarks (transitively includes partiql-spi, partiql-plan, etc.)
+    jmh("org.partiql:partiql-eval:1.3.3")
+    jmh("org.partiql:partiql-parser:1.3.3")
+    jmh("org.partiql:partiql-planner:1.3.3")
+    jmh("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
 }
 
 // Determine OS-specific library name
@@ -58,10 +49,10 @@ val buildRustLib = tasks.register<Exec>("buildRustLib") {
     description = "Build the Rust native library using Cargo"
     group = "build"
     
-    workingDir = projectDir
+    workingDir = file("rust")
     commandLine = listOf("cargo", "build", "--release")
     
-    // Outputs for up-to-date checking
+    // Outputs for up-to-date checking (builds to workspace root target/)
     outputs.file(file("../target/release/$nativeLibName"))
 }
 
@@ -72,6 +63,7 @@ val copyNativeLib = tasks.register<Copy>("copyNativeLib") {
     
     dependsOn(buildRustLib)
     
+    // Workspace member builds to workspace root target/
     val targetDir = file("../target/release")
     val resourceDir = file("src/main/resources/native")
     
@@ -112,7 +104,7 @@ val cleanRust = tasks.register<Exec>("cleanRust") {
     description = "Clean Rust build artifacts"
     group = "build"
     
-    workingDir = projectDir
+    workingDir = file("rust")
     commandLine = listOf("cargo", "clean")
     
     // Ignore exit value in case cargo is not available
@@ -175,6 +167,42 @@ publishing {
             }
         }
     }
+}
+
+// JMH configuration
+val jmhForks = findProperty("jmhForks")
+val jmhWarmupIterations = findProperty("jmhWarmupIterations")
+val jmhIterations = findProperty("jmhIterations")
+val jmhIncludes = findProperty("jmhIncludes") ?: ".*Benchmark*"
+val jmhProfileWall= findProperty("jmhProfileWall").toString() == "true"
+val asyncProfiler="async:libPath=/Users/johqunn/Downloads/async-profiler-4.3-macos/lib/libasyncProfiler.dylib;output=flamegraph;event=wall"
+jmh {
+    jvmArgs.add("-Djava.library.path=src/main/resources/native")
+
+    // Set benchmarks
+    includes.add(jmhIncludes.toString())
+
+    // Turn on profiling
+    if (jmhProfileWall) {
+        profilers.add(asyncProfiler)
+    }
+
+    if (jmhForks != null) fork = jmhForks.toString().toInt()
+    if (jmhWarmupIterations != null) warmupIterations = jmhWarmupIterations.toString().toInt()
+    if (jmhIterations != null) iterations = jmhIterations.toString().toInt()
+
+    
+    resultFormat.set("JSON")
+    resultsFile.set(project.file("${layout.buildDirectory.get()}/reports/jmh/results.json"))
+}
+
+// Make jmh tasks depend on native library
+tasks.named("jmhCompileGeneratedClasses") {
+    dependsOn("copyNativeLib")
+}
+
+tasks.named("jmh") {
+    dependsOn("copyNativeLib")
 }
 
 // Task to display build info

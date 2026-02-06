@@ -231,6 +231,61 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddCatalog(
     })
 }
 
+/// Add a buffered catalog to the ExecutionContext
+///
+/// Java signature:
+/// ```java
+/// private static native void nativeAddBufferedCatalog(long handle, long catalogId, long entryId, java.nio.ByteBuffer buffer, int bufferSize);
+/// ```
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCatalog(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    handle: jlong,
+    catalog_id: jlong,
+    entry_id: jlong,
+    buffer: JObject<'_>,
+    buffer_size: jni::sys::jint,
+) {
+    jni_guard_void!(env, {
+        // Check if buffer is null
+        if buffer.is_null() {
+            return Err(JniError::from(partiql_eval::EngineError::IllegalState(
+                "ByteBuffer cannot be null".to_string(),
+            )));
+        }
+
+        // Get mutable access to the ExecutionContext
+        let mut exec_context = get_execution_context_mut(handle as u64)?;
+
+        // Convert ByteBuffer to Vec<u8> by copying the data
+        let byte_buffer = buffer.into();
+
+        // Get direct buffer address
+        let buffer_addr = env.get_direct_buffer_address(&byte_buffer)?;
+
+        // Use the provided buffer_size (already passed from Java to avoid extra JNI call)
+        let buffer_size = buffer_size as usize;
+
+        // Copy buffer data to owned Vec<u8> using the actual data size
+        let buffer_data = unsafe { std::slice::from_raw_parts(buffer_addr, buffer_size) }.to_vec();
+
+        // Convert catalog_id and entry_id to typed IDs
+        let catalog_id_typed = CatalogId::from(catalog_id as u64);
+        let entry_id_typed = partiql_common::catalog::EntryId::from(entry_id as u64);
+
+        // Create JavaBufferedExecutionCatalog
+        let buffered_catalog: Arc<dyn partiql_eval::ExecutionCatalog> = Arc::new(
+            catalog_bridge::JavaBufferedExecutionCatalog::new(entry_id_typed, buffer_data),
+        );
+
+        // Add catalog to ExecutionContext
+        exec_context.add_catalog(catalog_id_typed, buffered_catalog);
+
+        Ok(())
+    })
+}
+
 /// Close the ExecutionContext and release resources
 ///
 /// Java signature:

@@ -41,21 +41,31 @@ public final class ExecutionResult implements AutoCloseable {
     private long nativeHandle;
     private boolean closed = false;
     
+    // Internal memory pool passed from PartiQLVM for buffer reuse
+    private final CrossLanguageMemoryPool memoryPool;
+    
+    // VM handle for buffer caching
+    private final long vmHandle;
+    
     static {
         NativeLibrary.ensureLoaded();
     }
     
     private static native boolean nativeIsQuery(long handle) throws PartiQLException;
-    private static native long nativeAsQueryIterator(long handle) throws PartiQLException;
+    private static native long nativeAsQueryIterator(long handle, long vmHandle) throws PartiQLException;
     private static native void nativeClose(long handle);
     
     /**
      * Package-private constructor. ExecutionResults are created by PartiQLVM.
      * 
      * @param nativeHandle The native handle to the execution result
+     * @param memoryPool The internal memory pool for buffer reuse
+     * @param vmHandle The VM handle for buffer caching
      */
-    ExecutionResult(long nativeHandle) {
+    ExecutionResult(long nativeHandle, CrossLanguageMemoryPool memoryPool, long vmHandle) {
         this.nativeHandle = nativeHandle;
+        this.memoryPool = memoryPool;
+        this.vmHandle = vmHandle;
     }
     
     /**
@@ -88,8 +98,9 @@ public final class ExecutionResult implements AutoCloseable {
      */
     public QueryIterator asQueryIterator() throws PartiQLException {
         checkNotClosed();
-        long iterHandle = nativeAsQueryIterator(nativeHandle);
-        return new QueryIterator(iterHandle);
+        long iterHandle = nativeAsQueryIterator(nativeHandle, vmHandle);
+        // Pass internal memory pool to iterator for buffer reuse
+        return new QueryIterator(iterHandle, memoryPool);
     }
     
     /**

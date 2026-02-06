@@ -31,6 +31,34 @@ You can also initialize the submodules as follows:
 $ git submodule update --init --recursive
 ```
 
+### Local CI Checks
+To run the same checks that GitHub Actions CI runs locally, you can use the provided Makefile:
+
+```bash
+# Run all core CI checks (build, test, format, clippy, security)
+make ci-check
+
+# Or run individual checks
+make build        # Build the workspace
+make test         # Run tests
+make fmt          # Check code formatting
+make clippy       # Run clippy lints
+make deny         # Run cargo-deny security/license checks
+make conformance  # Run conformance tests (slower)
+make coverage     # Generate code coverage report
+make help         # Show all available targets
+```
+
+The `ci-check` target runs the essential checks that must pass for CI, equivalent to:
+```bash
+cargo build --workspace && cargo test --workspace && cargo fmt --all -- --check && cargo clippy --all-features --workspace -- -D warnings && cargo deny check advisories && cargo deny check bans licenses sources
+```
+
+**Note:** The `deny` target requires [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) to be installed:
+```bash
+cargo install cargo-deny
+```
+
 ## Running the conformance tests
 Running `cargo test` from the `partiql-lang-rust` root will not run the conformance tests by default.
 

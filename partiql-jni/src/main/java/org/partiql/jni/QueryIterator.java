@@ -1,6 +1,7 @@
 package org.partiql.jni;
 
 import org.partiql.jni.exceptions.PartiQLException;
+import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -40,20 +41,31 @@ public final class QueryIterator implements Iterator<RegisterReader>, AutoClosea
     private boolean closed = false;
     private Boolean hasNextCache = null;  // Cache for hasNext result
     
+    // Internal memory pool for buffer reuse (passed from PartiQLVM)
+    private final CrossLanguageMemoryPool memoryPool;
+    
+    // Reusable buffer for zero-copy row access (obtained from pool)
+    private ByteBuffer rowBuffer;
+    
     static {
         NativeLibrary.ensureLoaded();
     }
     
-    private static native int nativeNext(long handle) throws PartiQLException;
+    private static native int nativeNextToBuffer(long handle, ByteBuffer buffer, int bufferId) throws PartiQLException;
     private static native void nativeClose(long handle);
     
     /**
      * Package-private constructor. QueryIterators are created by ExecutionResult.
      * 
      * @param nativeHandle The native handle to the query iterator
+     * @param memoryPool The internal memory pool for buffer reuse
      */
-    QueryIterator(long nativeHandle) {
+    QueryIterator(long nativeHandle, CrossLanguageMemoryPool memoryPool) {
         this.nativeHandle = nativeHandle;
+        this.memoryPool = memoryPool;
+        
+        // Checkout a buffer from the pool instead of allocating
+        this.rowBuffer = memoryPool.checkout();
     }
     
     /**
@@ -70,11 +82,43 @@ public final class QueryIterator implements Iterator<RegisterReader>, AutoClosea
     public boolean hasNext() {
         checkNotClosed();
         
-        // If we haven't checked yet, advance to the next row
+        // If we haven't checked yet, advance to the next row and write to buffer
         if (hasNextCache == null) {
             try {
-                int status = nativeNext(nativeHandle);
-                hasNextCache = (status != 0);
+                // Clear buffer for new row
+                rowBuffer.clear();
+                
+                // Get buffer ID for caching
+                int bufferId = memoryPool.getBufferId(rowBuffer);
+                
+                // Rust writes row to buffer and returns status
+                // Returns: bytes written (>0) if has next, 0 if no more rows, -1 if buffer too small
+                int bytesWritten = nativeNextToBuffer(nativeHandle, rowBuffer, bufferId);
+                
+                if (bytesWritten < 0) {
+                    // Buffer was too small, need to grow it
+                    // Double the buffer size and retry
+                    int requiredSize = rowBuffer.capacity() * 2;
+                    rowBuffer = memoryPool.ensureCapacity(rowBuffer, requiredSize);
+                    
+                    // Retry with larger buffer (get new buffer ID)
+                    rowBuffer.clear();
+                    bufferId = memoryPool.getBufferId(rowBuffer);
+                    bytesWritten = nativeNextToBuffer(nativeHandle, rowBuffer, bufferId);
+                    
+                    if (bytesWritten < 0) {
+                        // Still too small - this shouldn't happen with doubling
+                        throw new RuntimeException("Row buffer growth failed after resize");
+                    }
+                }
+                
+                hasNextCache = (bytesWritten > 0);
+                
+                if (hasNextCache) {
+                    // Set limit to the bytes written for RegisterReader to read
+                    rowBuffer.limit(bytesWritten);
+                    rowBuffer.position(0);
+                }
             } catch (PartiQLException e) {
                 // Wrap checked exception as unchecked for Iterator interface
                 throw new RuntimeException("Error checking for next row", e);
@@ -112,8 +156,14 @@ public final class QueryIterator implements Iterator<RegisterReader>, AutoClosea
         // Clear the cache so the next hasNext() call will advance
         hasNextCache = null;
         
-        // Return a RegisterReader that accesses the current row via the iterator handle
-        return new RegisterReader(nativeHandle);
+        // Return a RegisterReader that reads from the buffer (zero-copy!)
+        // Note: rowBuffer position is at 0, limit is set to bytes written
+        try {
+            return new RegisterReader(rowBuffer);
+        } catch (PartiQLException e) {
+            // Wrap checked exception as unchecked for Iterator interface
+            throw new RuntimeException("Error creating RegisterReader", e);
+        }
     }
     
     /**
@@ -128,6 +178,13 @@ public final class QueryIterator implements Iterator<RegisterReader>, AutoClosea
     public void close() {
         if (!closed) {
             nativeClose(nativeHandle);
+            
+            // Return buffer to pool for reuse
+            if (rowBuffer != null) {
+                memoryPool.returnBuffer(rowBuffer);
+                rowBuffer = null;
+            }
+            
             closed = true;
             nativeHandle = 0;
             hasNextCache = null;

@@ -52,6 +52,28 @@ pub extern "system" fn Java_org_partiql_jni_PartiQLVM_nativeExecute(
     })
 }
 
+/// Update the ExecutionContext for an existing VM
+///
+/// Java signature:
+/// ```java
+/// private static native void nativeSetContext(long vmHandle, long executionContextHandle)
+///     throws PartiQLException;
+/// ```
+#[no_mangle]
+pub extern "system" fn Java_org_partiql_jni_PartiQLVM_nativeSetContext(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    vm_handle: jlong,
+    exec_context_handle: jlong,
+) {
+    jni_guard_void!(env, {
+        let vm = get_vm(vm_handle as u64)?;
+        let exec_context = crate::context::get_execution_context(exec_context_handle as u64)?;
+        vm.set_context(&exec_context)?;
+        Ok(())
+    })
+}
+
 /// Close the VM and release resources
 ///
 /// Java signature:

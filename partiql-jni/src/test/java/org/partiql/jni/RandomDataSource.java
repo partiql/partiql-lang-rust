@@ -57,6 +57,7 @@ public class RandomDataSource implements DataSource {
             }
         }
 
+        writer.flush();
         currentRow++;
         return true;
     }

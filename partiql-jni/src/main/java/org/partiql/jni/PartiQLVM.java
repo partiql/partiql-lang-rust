@@ -41,17 +41,24 @@ public final class PartiQLVM implements AutoCloseable {
     private long nativeHandle;
     private boolean closed = false;
     
+    // Internal memory pool for amortizing DirectByteBuffer allocation costs
+    private final CrossLanguageMemoryPool memoryPool;
+    
     static {
         NativeLibrary.ensureLoaded();
     }
     
     private static native long nativeNew(long planHandle, long contextHandle) throws PartiQLException;
     private static native long nativeExecute(long handle) throws PartiQLException;
+    private static native void nativeSetContext(long handle, long contextHandle) throws PartiQLException;
     private static native void nativeLoadPlan(long handle, long planHandle) throws PartiQLException;
     private static native void nativeClose(long handle);
     
     /**
      * Creates a new PartiQLVM from a compiled plan with an execution context.
+     * 
+     * <p>An internal memory pool is automatically created to amortize the cost
+     * of DirectByteBuffer allocation across multiple query executions.
      * 
      * @param plan The compiled plan to execute
      * @param context ExecutionContext with catalog mappings for data access
@@ -65,6 +72,9 @@ public final class PartiQLVM implements AutoCloseable {
         if (context == null) {
             throw new NullPointerException("ExecutionContext cannot be null");
         }
+        
+        // Create internal memory pool for buffer reuse
+        this.memoryPool = new CrossLanguageMemoryPool();
         
         this.nativeHandle = nativeNew(plan.getNativeHandle(), context.getNativeHandle());
     }
@@ -86,7 +96,30 @@ public final class PartiQLVM implements AutoCloseable {
     public ExecutionResult execute() throws PartiQLException {
         checkNotClosed();
         long resultHandle = nativeExecute(nativeHandle);
-        return new ExecutionResult(resultHandle);
+        // Pass internal memory pool and VM handle to result for buffer caching
+        return new ExecutionResult(resultHandle, memoryPool, nativeHandle);
+    }
+    
+    /**
+     * Updates the ExecutionContext for this VM.
+     * 
+     * <p>This allows reusing the same VM instance with different data sources
+     * by updating the catalog mappings, avoiding the overhead of creating new VMs.
+     * 
+     * <p>The VM must not have an active iterator when updating the context.
+     * 
+     * @param context The new ExecutionContext with updated catalog mappings
+     * @throws PartiQLException if context update fails
+     * @throws IllegalStateException if the VM has been closed or has an active iterator
+     * @throws NullPointerException if context is null
+     */
+    public void setContext(ExecutionContext context) throws PartiQLException {
+        checkNotClosed();
+        if (context == null) {
+            throw new NullPointerException("ExecutionContext cannot be null");
+        }
+        
+        nativeSetContext(nativeHandle, context.getNativeHandle());
     }
     
     /**
@@ -123,6 +156,10 @@ public final class PartiQLVM implements AutoCloseable {
     public void close() {
         if (!closed) {
             nativeClose(nativeHandle);
+            
+            // Clear the internal memory pool
+            memoryPool.clear();
+            
             closed = true;
             nativeHandle = 0;
         }

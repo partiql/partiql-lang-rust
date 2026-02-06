@@ -629,6 +629,57 @@ impl PartiQLVM {
         Ok(ExecutionResult::Query(QueryIterator::new(self)))
     }
 
+    /// Update the ExecutionContext for this VM
+    ///
+    /// This allows reusing the same VM instance with different data sources
+    /// by updating the catalog mappings. The VM must not have any active
+    /// iterators when updating context.
+    ///
+    /// # Arguments
+    /// * `exec_context` - New ExecutionContext with updated catalog mappings
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn set_context(&mut self, exec_context: &ExecutionContext) -> Result<()> {
+        // Re-instantiate operators with new execution context
+        let mut operators = Vec::with_capacity(self.compiled.nodes.len());
+        for node in &self.compiled.nodes {
+            match node {
+                RelOpSpec::Pipeline(spec) => {
+                    let reader = spec.data_source.handle.create_impl(
+                        spec.data_source.catalog_id,
+                        spec.layout.clone(),
+                        exec_context,
+                    )?;
+                    let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
+                    operators.push(RelOp::Pipeline(PipelineOp::new(steps, reader, None)));
+                }
+                RelOpSpec::Legacy(spec) => {
+                    let bindings = MapBindings::default();
+                    let sys = SystemContext {
+                        now: DateTime::from_system_now_utc(),
+                    };
+                    let eval_context = Box::new(BasicContext::new(bindings, sys));
+                    operators.push(RelOp::Legacy(LegacyState::new(
+                        spec.catalog.clone(),
+                        spec.logical_plan.clone(),
+                        spec.mode,
+                        eval_context,
+                    )));
+                }
+                _ => {
+                    return Err(EngineError::InvalidPlan(
+                        "unsupported operator spec".to_string(),
+                    ));
+                }
+            }
+        }
+
+        self.operators = operators;
+        self.arena.reset();
+        Ok(())
+    }
+
     /// Open all operators in the execution tree
     fn open_operators(&mut self) -> Result<()> {
         for op in &mut self.operators {
