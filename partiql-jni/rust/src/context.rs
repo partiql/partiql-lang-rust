@@ -19,6 +19,11 @@ static COMPILATION_CONTEXT_HANDLES: Lazy<DashMap<u64, CompilationContext>> =
 
 static EXECUTION_CONTEXT_HANDLES: Lazy<DashMap<u64, ExecutionContext>> = Lazy::new(DashMap::new);
 
+// Buffer cache for avoiding expensive GetDirectBufferAddress JNI calls
+// Maps buffer_id -> (address as usize, capacity)
+// We store address as usize instead of *mut u8 for Send/Sync safety
+static BUFFER_ADDRESS_CACHE: Lazy<DashMap<i32, (usize, usize)>> = Lazy::new(DashMap::new);
+
 // CompilationContext handle operations
 pub fn create_compilation_context_handle(context: CompilationContext) -> u64 {
     let handle = crate::handles::next_handle();
@@ -235,7 +240,7 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddCatalog(
 ///
 /// Java signature:
 /// ```java
-/// private static native void nativeAddBufferedCatalog(long handle, long catalogId, long entryId, java.nio.ByteBuffer buffer, int bufferSize);
+/// private static native void nativeAddBufferedCatalog(long handle, long catalogId, long entryId, java.nio.ByteBuffer buffer, int bufferSize, int bufferId);
 /// ```
 #[no_mangle]
 pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCatalog(
@@ -246,6 +251,7 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCa
     entry_id: jlong,
     buffer: JObject<'_>,
     buffer_size: jni::sys::jint,
+    buffer_id: jni::sys::jint,
 ) {
     jni_guard_void!(env, {
         // Check if buffer is null
@@ -261,10 +267,23 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCa
         // Convert ByteBuffer to Vec<u8> by copying the data
         let byte_buffer = buffer.into();
 
-        // Get direct buffer address
-        let buffer_addr = env.get_direct_buffer_address(&byte_buffer)?;
+        // Check cache for buffer address/capacity to avoid expensive JNI call
+        let buffer_addr = if let Some(cached) = BUFFER_ADDRESS_CACHE.get(&buffer_id) {
+            // Cache hit - use cached address (convert usize back to pointer)
+            let (addr_as_usize, _capacity) = *cached.value();
+            addr_as_usize as *mut u8
+        } else {
+            // Cache miss - get direct buffer address (expensive JNI call)
+            let addr = env.get_direct_buffer_address(&byte_buffer)?;
+            let capacity = env.get_direct_buffer_capacity(&byte_buffer)?;
 
-        // Use the provided buffer_size (already passed from Java to avoid extra JNI call)
+            // Cache the address as usize and capacity for future use
+            BUFFER_ADDRESS_CACHE.insert(buffer_id, (addr as usize, capacity));
+
+            addr
+        };
+
+        // Use the provided buffer_size (actual data size, may be less than capacity)
         let buffer_size = buffer_size as usize;
 
         // Copy buffer data to owned Vec<u8> using the actual data size

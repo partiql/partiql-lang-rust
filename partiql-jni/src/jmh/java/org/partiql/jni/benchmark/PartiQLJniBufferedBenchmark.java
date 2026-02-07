@@ -64,9 +64,10 @@ public class PartiQLJniBufferedBenchmark {
             
             // Create VM without context initially - context will be set per iteration
             // We'll use setContext() in the Invocation setup
+            this.backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, nextValue++, rowCount);
             this.bufferedCatalog = createBufferedExecutionCatalog();
-            execContext = new ExecutionContext();
-            execContext.addBufferedCatalog(catalogId, bufferedCatalog);
+            this.execContext = new ExecutionContext();
+            this.execContext.addBufferedCatalog(catalogId, bufferedCatalog);
             vm = new PartiQLVM(compiledPlan, execContext);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -83,9 +84,6 @@ public class PartiQLJniBufferedBenchmark {
     }
     
     public BufferedExecutionCatalog createBufferedExecutionCatalog() {
-        // Generate new HashMap data for this iteration
-        this.backingData = BenchmarkDataGenerator.generateHashMapRows(fieldNames, nextValue++, rowCount);
-
         // Use the pool for efficient buffer reuse across iterations
         return BufferedExecutionCatalog.create(
                 1L, // entryId
@@ -94,7 +92,7 @@ public class PartiQLJniBufferedBenchmark {
                     // Loop through each row and write HashMap entries to buffer
                     // Buffer will auto-grow if needed
                     // TODO: We eventually need to incorporate the ScanLayout!
-                    for (Map<String, Integer> row : backingData) {
+                    for (Map<String, Integer> row : this.backingData) {
                         int registerIndex = 0;
                         // Write each field value to sequential registers
                         for (Map.Entry<String, Integer> entry : row.entrySet()) {
@@ -107,17 +105,7 @@ public class PartiQLJniBufferedBenchmark {
 
     @TearDown(Level.Invocation)
     public void teardownInvocation() {
-        // Close buffered catalog to return buffer to pool
-        if (bufferedCatalog != null) {
-            bufferedCatalog.clear();
-            bufferedCatalog = null;
-        }
-        
-        // Close execution context after each iteration
-        if (execContext != null) {
-            execContext.close();
-            execContext = null;
-        }
+        bufferedCatalog.close();
     }
     
     @TearDown(Level.Trial)
@@ -152,6 +140,8 @@ public class PartiQLJniBufferedBenchmark {
         try {
             // Execute query with the context that was set up in setupInvocation
             // This measures execution time with data already injected
+            this.bufferedCatalog = createBufferedExecutionCatalog();
+            execContext.addBufferedCatalog(catalogId, bufferedCatalog);
             ExecutionResult result = vm.execute();
             
             if (result.isQuery()) {

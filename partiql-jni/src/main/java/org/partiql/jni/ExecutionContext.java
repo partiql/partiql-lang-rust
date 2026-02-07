@@ -67,10 +67,14 @@ public final class ExecutionContext implements AutoCloseable {
             throw new IllegalArgumentException("BufferedExecutionCatalog cannot be null");
         }
         
-        // Pass catalog data to Rust for registration
-        // Pass buffer size directly to avoid extra JNI call
+        // Get buffer and its ID from the pool for caching in Rust
         java.nio.ByteBuffer buffer = catalog.getBuffer();
-        nativeAddBufferedCatalog(nativeHandle, catalogId, catalog.getEntryId(), buffer, buffer.limit());
+        BufferedMemoryPool pool = catalog.getPool();
+        int bufferId = pool.getBufferId(buffer);
+        
+        // Pass catalog data to Rust for registration
+        // Buffer ID enables Rust-side caching of address/capacity
+        nativeAddBufferedCatalog(nativeHandle, catalogId, catalog.getEntryId(), buffer, buffer.limit(), bufferId);
     }
     
     @Override
@@ -94,6 +98,6 @@ public final class ExecutionContext implements AutoCloseable {
     // Native methods
     private static native long nativeNew();
     private static native void nativeAddCatalog(long handle, long catalogId, ExecutionCatalog catalog);
-    private static native void nativeAddBufferedCatalog(long handle, long catalogId, long entryId, java.nio.ByteBuffer buffer, int bufferSize);
+    private static native void nativeAddBufferedCatalog(long handle, long catalogId, long entryId, java.nio.ByteBuffer buffer, int bufferSize, int bufferId);
     private static native void nativeClose(long handle);
 }

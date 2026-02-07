@@ -3,6 +3,8 @@ package org.partiql.jni;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.IdentityHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Memory pool for managing DirectByteBuffers used in BufferedExecutionCatalog.
@@ -44,6 +46,10 @@ public class BufferedMemoryPool {
     private final int maxPoolSize;
     private final ArrayDeque<ByteBuffer> availableBuffers;
     private int totalPooledBuffers = 0;
+    
+    // Buffer ID tracking for Rust-side caching
+    private final AtomicInteger nextBufferId = new AtomicInteger(1);
+    private final IdentityHashMap<ByteBuffer, Integer> bufferIds = new IdentityHashMap<>();
     
     // Tracking for debugging/metrics
     private int totalCheckouts = 0;
@@ -185,6 +191,20 @@ public class BufferedMemoryPool {
     }
     
     /**
+     * Gets or assigns a unique ID for the given buffer.
+     * 
+     * <p>Each buffer gets a unique integer ID that remains stable throughout
+     * its lifetime. This ID is used as a cache key in Rust to avoid repeated
+     * JNI calls for buffer metadata (address and capacity).
+     * 
+     * @param buffer The buffer to get an ID for
+     * @return Unique integer ID for this buffer
+     */
+    public int getBufferId(ByteBuffer buffer) {
+        return bufferIds.computeIfAbsent(buffer, b -> nextBufferId.getAndIncrement());
+    }
+    
+    /**
      * Clears the pool and releases all buffers.
      * 
      * <p>After calling clear(), the pool is empty and subsequent checkouts
@@ -192,6 +212,7 @@ public class BufferedMemoryPool {
      */
     public void clear() {
         availableBuffers.clear();
+        bufferIds.clear();
         totalPooledBuffers = 0;
     }
     
