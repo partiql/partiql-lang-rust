@@ -3,6 +3,9 @@ package org.partiql.jni;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.junit.jupiter.api.Disabled;
 
 /**
@@ -12,9 +15,12 @@ import org.junit.jupiter.api.Disabled;
  * Rust-to-Java callback overhead during query execution.
  */
 public class BufferedExecutionCatalogTest {
-    
+
     @Test
     public void testBasicUsage() throws Exception {
+        // 0. Create memory pool for buffer management
+        BufferedMemoryPool pool = new BufferedMemoryPool();
+
         // 1. Create compilation context and catalog
         CompilationContext compContext = new CompilationContext();
         CompilationCatalog compCatalog = new CompilationCatalog() {
@@ -27,11 +33,11 @@ public class BufferedExecutionCatalogTest {
                         public ScanCapabilities getCaps() {
                             return new ScanCapabilities(BufferStability.UNTIL_CLOSE, true, false);
                         }
-                        
+
                         @Override
                         public ScanSource resolve(String fieldName) {
                             if (fieldName.equalsIgnoreCase("id")) {
-                                return new ScanSource.ColumnIndex(0);
+                                return new ScanSource.FieldPath("id");
                             }
                             return null;
                         }
@@ -41,101 +47,105 @@ public class BufferedExecutionCatalogTest {
                 return null;
             }
         };
-        
+
         long catalogId = compContext.addCatalog("default", compCatalog);
-        
+
         // 2. Compile query
         PlanCompiler compiler = new PlanCompiler();
         CompiledPlan plan = compiler.compile("SELECT id FROM users", compContext);
-        
-        // 3. Create BufferedExecutionCatalog with pre-populated data
-        BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
-            1L, // entryId matching the compilation catalog
-            writer -> {
-                // Row 1: id=42, name="Alice"
-                writer.putLong(0, 42);
-                
-                // Row 2: id=43, name="Bob"
-                // writer.putLong(0, 43);
-                
-                // Row 3: id=44, name="Charlie"
-                // writer.putLong(0, 44);
+
+        // 3. Create BufferedExecutionCatalog with pre-populated data using pool
+        Map<String, Integer> delegate = new HashMap<>();
+        delegate.put("id", 42);
+        try (BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
+                1L, // entryId matching the compilation catalog
+                pool,
+                writer -> {
+                    int registerIndex = 0;
+                    for (Map.Entry<String, Integer> entry : delegate.entrySet()) {
+                        writer.putLong(registerIndex++, (long) entry.getValue());
+                    }
+                })) {
+            System.out.println("Buffer size: " + catalog.getBufferSize() + " bytes");
+
+            // 4. Register buffered catalog to execution context
+            ExecutionContext execContext = new ExecutionContext();
+            execContext.addBufferedCatalog(catalogId, catalog);
+
+            // 5. Execute query with zero JNI callback overhead!
+            PartiQLVM vm = new PartiQLVM(plan, execContext);
+            ExecutionResult result = vm.execute();
+
+            assertTrue(result.isQuery(), "Expected query result");
+
+            // 6. Read results
+            QueryIterator iterator = result.asQueryIterator();
+            int rowCount = 0;
+
+            while (iterator.hasNext()) {
+                RegisterReader row = iterator.next();
+                Long id = row.getI64(0);
+
+                rowCount++;
+
+                assertEquals(42, id);
+
+                System.out.println("Row " + rowCount + ": id=" + id);
             }
-        );
-        
-        System.out.println("Buffer size: " + catalog.getBufferSize() + " bytes");
-        
-        // 4. Register buffered catalog to execution context
-        ExecutionContext execContext = new ExecutionContext();
-        execContext.addBufferedCatalog(catalogId, catalog);
-        
-        // 5. Execute query with zero JNI callback overhead!
-        PartiQLVM vm = new PartiQLVM(plan, execContext);
-        ExecutionResult result = vm.execute();
-        
-        assertTrue(result.isQuery(), "Expected query result");
-        
-        // 6. Read results
-        QueryIterator iterator = result.asQueryIterator();
-        int rowCount = 0;
-        
-        while (iterator.hasNext()) {
-            RegisterReader row = iterator.next();
-            Long id = row.getI64(0);
-            
-            rowCount++;
-            
-            assertEquals(42, id);
-            
-            System.out.println("Row " + rowCount + ": id=" + id);
-        }
-        
-        assertEquals(1, rowCount, "Expected 1 rows");
-        
-        // Cleanup
-        // NOTE: Do NOT call result.close() after asQueryIterator()
-        // The iterator consumes the result
-        iterator.close();
-        vm.close();
-        plan.close();
-        execContext.close();
-        compContext.close();
+
+            assertEquals(1, rowCount, "Expected 1 rows");
+
+            // Cleanup
+            // NOTE: Do NOT call result.close() after asQueryIterator()
+            // The iterator consumes the result
+            iterator.close();
+            vm.close();
+            plan.close();
+            execContext.close();
+            compContext.close();
+        } // Buffer automatically returned to pool
     }
-    
+
     @Test
     public void testWithCustomBufferSize() throws Exception {
         // Test with custom buffer size
-        BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
-            1L,
-            10 * 1024, // 10KB buffer
-            writer -> {
-                for (int i = 0; i < 100; i++) {
-                    writer.putLong(0, i);
-                    writer.putString(1, "User" + i);
-                }
-            }
-        );
-        
-        assertTrue(catalog.getBufferSize() > 0);
-        assertTrue(catalog.getBufferSize() <= 10 * 1024);
+        BufferedMemoryPool pool = new BufferedMemoryPool();
+
+        try (BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
+                1L,
+                pool,
+                10 * 1024, // 10KB buffer
+                writer -> {
+                    for (int i = 0; i < 100; i++) {
+                        writer.putLong(0, i);
+                        writer.putString(1, "User" + i);
+                    }
+                })) {
+            assertTrue(catalog.getBufferSize() > 0);
+            assertTrue(catalog.getBufferSize() <= 10 * 1024);
+        }
     }
-    
+
     @Test
     public void testBufferOverflow() {
-        // Test that buffer overflow is detected
-        assertThrows(IllegalStateException.class, () -> {
-            BufferedExecutionCatalog.create(
+        // Test that buffer with auto-growth doesn't overflow
+        BufferedMemoryPool pool = new BufferedMemoryPool();
+
+        // With pooled buffers, auto-growth prevents overflow
+        try (BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
                 1L,
-                10, // Very small buffer - only 10 bytes
+                pool,
+                10, // Very small initial buffer - only 10 bytes
                 writer -> {
-                    // This should overflow
+                    // This will trigger auto-growth instead of overflow
                     writer.putLong(0, 12345678);
-                    writer.putString(1, "This will definitely overflow");
-                }
-            );
-        });
+                    writer.putString(1, "This will trigger buffer growth");
+                })) {
+            // Should succeed with auto-growth
+            assertTrue(catalog.getBufferSize() > 10);
+        }
     }
-    
+
     @Disabled
     @Test
     public void testDifferentDataTypes() throws Exception {
@@ -149,7 +159,7 @@ public class BufferedExecutionCatalogTest {
                     public ScanCapabilities getCaps() {
                         return new ScanCapabilities(BufferStability.UNTIL_NEXT, false, false);
                     }
-                    
+
                     @Override
                     public ScanSource resolve(String fieldName) {
                         return new ScanSource.ColumnIndex(0);
@@ -158,44 +168,47 @@ public class BufferedExecutionCatalogTest {
                 return new DataSourceHandle(entryId, config);
             }
         };
-        
+
         long catalogId = compContext.addCatalog("default", compCatalog);
-        
+
         PlanCompiler compiler = new PlanCompiler();
         CompiledPlan plan = compiler.compile("SELECT a, b FROM data", compContext);
-        
+
         // Test different data types
-        BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
-            1L,
-            writer -> {
-                // Row with various types
-                writer.putLong(0, 42);
-                writer.putString(1, "test");
-                writer.putNull(2);
-            }
-        );
-        
-        ExecutionContext execContext = new ExecutionContext();
-        execContext.addBufferedCatalog(catalogId, catalog);
-        
-        PartiQLVM vm = new PartiQLVM(plan, execContext);
-        ExecutionResult result = vm.execute();
-        QueryIterator iterator = result.asQueryIterator();
-        
-        assertTrue(iterator.hasNext());
-        RegisterReader row = iterator.next();
-        
-        assertEquals(42, row.getI64(0));
-        assertEquals("test", row.getStr(1));
-        // Note: RegisterReader doesn't have isNull() - would need to use getValue() for that
-        
-        assertFalse(iterator.hasNext());
-        
-        iterator.close();
-        result.close();
-        vm.close();
-        plan.close();
-        execContext.close();
-        compContext.close();
+        BufferedMemoryPool pool = new BufferedMemoryPool();
+
+        try (BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
+                1L,
+                pool,
+                writer -> {
+                    // Row with various types
+                    writer.putLong(0, 42);
+                    writer.putString(1, "test");
+                    writer.putNull(2);
+                })) {
+            ExecutionContext execContext = new ExecutionContext();
+            execContext.addBufferedCatalog(catalogId, catalog);
+
+            PartiQLVM vm = new PartiQLVM(plan, execContext);
+            ExecutionResult result = vm.execute();
+            QueryIterator iterator = result.asQueryIterator();
+
+            assertTrue(iterator.hasNext());
+            RegisterReader row = iterator.next();
+
+            assertEquals(42, row.getI64(0));
+            assertEquals("test", row.getStr(1));
+            // Note: RegisterReader doesn't have isNull() - would need to use getValue() for
+            // that
+
+            assertFalse(iterator.hasNext());
+
+            iterator.close();
+            result.close();
+            vm.close();
+            plan.close();
+            execContext.close();
+            compContext.close();
+        }
     }
 }

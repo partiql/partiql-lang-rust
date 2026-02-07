@@ -36,6 +36,7 @@ use crate::engine::error::Result;
 use crate::engine::source::{DataSource, DataSourceHandle, ScanLayout};
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -188,14 +189,14 @@ impl Default for CompilationContext {
 /// vm.execute(&exec_context)?;
 /// ```
 pub struct ExecutionContext {
-    catalogs: HashMap<CatalogId, Arc<dyn ExecutionCatalog>>,
+    catalogs: FxHashMap<CatalogId, Arc<dyn ExecutionCatalog>>,
 }
 
 impl ExecutionContext {
     /// Create a new empty ExecutionContext.
     pub fn new() -> Self {
         ExecutionContext {
-            catalogs: HashMap::new(),
+            catalogs: FxHashMap::default(),
         }
     }
 

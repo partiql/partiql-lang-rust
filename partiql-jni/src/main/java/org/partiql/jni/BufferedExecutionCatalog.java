@@ -11,25 +11,7 @@ import java.util.function.Consumer;
  * by having users populate all data upfront at registration time. The data is
  * stored in a DirectByteBuffer that Rust can read directly without JNI calls.
  * 
- * <h2>Usage Example (Non-Pooled):</h2>
- * <pre>{@code
- * BufferedExecutionCatalog catalog = BufferedExecutionCatalog.create(
- *     entryId,
- *     writer -> {
- *         // Row 1
- *         writer.putLong(0, 42);
- *         writer.putString(1, "Alice");
- *         
- *         // Row 2
- *         writer.putLong(0, 43);
- *         writer.putString(1, "Bob");
- *     }
- * );
- * 
- * executionContext.addBufferedCatalog(catalogId, catalog);
- * }</pre>
- * 
- * <h2>Usage Example (Pooled with Auto-Growth):</h2>
+ * <h2>Usage Example:</h2>
  * <pre>{@code
  * BufferedMemoryPool pool = new BufferedMemoryPool();
  * 
@@ -56,6 +38,7 @@ import java.util.function.Consumer;
  *   <li>All data transfer happens once at registration time</li>
  *   <li>Buffer pooling amortizes DirectByteBuffer allocation costs</li>
  *   <li>Automatic buffer growth eliminates manual size calculations</li>
+ *   <li>Buffer ID caching eliminates expensive GetDirectBufferAddress JNI calls</li>
  * </ul>
  * 
  * <h2>Limitations:</h2>
@@ -63,11 +46,11 @@ import java.util.function.Consumer;
  *   <li>All data must fit in memory at once</li>
  *   <li>Data is immutable after registration</li>
  *   <li>Currently supports single entry ID only (TODO: support multiple)</li>
+ *   <li>Requires BufferedMemoryPool - non-pooled usage is not supported</li>
  * </ul>
  * 
  * <h2>Thread Safety:</h2>
- * <p>When using BufferedMemoryPool, instances are NOT thread-safe. 
- * The pool and catalogs should be used from a single thread.
+ * <p>Instances are NOT thread-safe. The pool and catalogs should be used from a single thread.
  */
 public final class BufferedExecutionCatalog implements AutoCloseable {
     private final long entryId;
@@ -75,24 +58,7 @@ public final class BufferedExecutionCatalog implements AutoCloseable {
     private final BufferedMemoryPool pool;
     
     /**
-     * Default buffer size: 1MB
-     */
-    private static final int DEFAULT_BUFFER_SIZE = 1024 * 1024;
-    
-    /**
-     * Private constructor for non-pooled usage. Use {@link #create} factory methods.
-     * 
-     * @param entryId Entry ID for this data source
-     * @param buffer DirectByteBuffer containing the data
-     */
-    private BufferedExecutionCatalog(long entryId, ByteBuffer buffer) {
-        this.entryId = entryId;
-        this.buffer = buffer;
-        this.pool = null;
-    }
-    
-    /**
-     * Private constructor for pooled usage. Use {@link #create} factory methods.
+     * Private constructor. Use {@link #create} factory methods.
      * 
      * @param entryId Entry ID for this data source
      * @param buffer DirectByteBuffer containing the data
@@ -105,76 +71,16 @@ public final class BufferedExecutionCatalog implements AutoCloseable {
     }
     
     /**
-     * Create a buffered catalog with default buffer size (1MB).
-     * 
-     * <p>This method allocates a non-pooled buffer. For better performance with
-     * repeated catalog creation, use {@link #create(long, BufferedMemoryPool, Consumer)} instead.
-     * 
-     * The provided consumer receives a {@link BufferWriter} to populate the data.
-     * Write all rows using the writer's put* methods. No explicit flush() is needed.
-     * 
-     * @param entryId Entry ID assigned during compilation
-     * @param dataPopulator Consumer that writes data using BufferWriter
-     * @return BufferedExecutionCatalog ready for registration
-     * @throws IllegalStateException if buffer overflows during population
-     */
-    public static BufferedExecutionCatalog create(
-        long entryId,
-        Consumer<BufferWriter> dataPopulator
-    ) {
-        return create(entryId, DEFAULT_BUFFER_SIZE, dataPopulator);
-    }
-    
-    /**
-     * Create a buffered catalog with specified buffer size.
-     * 
-     * <p>This method allocates a non-pooled buffer. For better performance with
-     * repeated catalog creation, use {@link #create(long, BufferedMemoryPool, int, Consumer)} instead.
-     * 
-     * The provided consumer receives a {@link BufferWriter} to populate the data.
-     * Write all rows using the writer's put* methods. No explicit flush() is needed.
-     * 
-     * @param entryId Entry ID assigned during compilation
-     * @param bufferSize Buffer size in bytes
-     * @param dataPopulator Consumer that writes data using BufferWriter
-     * @return BufferedExecutionCatalog ready for registration
-     * @throws IllegalStateException if buffer overflows during population
-     */
-    public static BufferedExecutionCatalog create(
-        long entryId,
-        int bufferSize,
-        Consumer<BufferWriter> dataPopulator
-    ) {
-        if (bufferSize <= 0) {
-            throw new IllegalArgumentException("Buffer size must be positive");
-        }
-        
-        // Allocate DirectByteBuffer for zero-copy access from Rust
-        ByteBuffer buffer = ByteBuffer.allocateDirect(bufferSize)
-                                      .order(ByteOrder.nativeOrder());
-        
-        // Create BufferWriter and let user populate
-        BufferWriter writer = new BufferWriter(buffer);
-        dataPopulator.accept(writer);
-        
-        // Prepare buffer for reading by flipping it
-        buffer.flip();
-        
-        return new BufferedExecutionCatalog(entryId, buffer);
-    }
-    
-    /**
      * Create a buffered catalog using a memory pool with default initial buffer size.
      * 
-     * <p>This method enables buffer reuse and automatic growth. The buffer will be
-     * returned to the pool when the catalog is closed. Use try-with-resources to
-     * ensure proper cleanup.
+     * <p>The buffer will be returned to the pool when the catalog is closed. 
+     * Use try-with-resources to ensure proper cleanup.
      * 
      * <p>The buffer will automatically grow as needed during population, eliminating
      * the need to calculate buffer sizes manually.
      * 
      * @param entryId Entry ID assigned during compilation
-     * @param pool Memory pool for buffer management
+     * @param pool Memory pool for buffer management (required)
      * @param dataPopulator Consumer that writes data using BufferWriter
      * @return BufferedExecutionCatalog ready for registration (must be closed)
      */
@@ -208,16 +114,15 @@ public final class BufferedExecutionCatalog implements AutoCloseable {
     /**
      * Create a buffered catalog using a memory pool with specified initial buffer size.
      * 
-     * <p>This method enables buffer reuse and automatic growth. The buffer will be
-     * returned to the pool when the catalog is closed. Use try-with-resources to
-     * ensure proper cleanup.
+     * <p>The buffer will be returned to the pool when the catalog is closed. 
+     * Use try-with-resources to ensure proper cleanup.
      * 
      * <p>The buffer will automatically grow as needed during population, eliminating
      * the need to calculate buffer sizes manually. The specified bufferSize is only
      * a hint for the initial allocation.
      * 
      * @param entryId Entry ID assigned during compilation
-     * @param pool Memory pool for buffer management
+     * @param pool Memory pool for buffer management (required)
      * @param bufferSize Initial buffer size hint in bytes
      * @param dataPopulator Consumer that writes data using BufferWriter
      * @return BufferedExecutionCatalog ready for registration (must be closed)
@@ -272,6 +177,16 @@ public final class BufferedExecutionCatalog implements AutoCloseable {
      */
     ByteBuffer getBuffer() {
         return buffer;
+    }
+    
+    /**
+     * Get the memory pool.
+     * Package-private for use by ExecutionContext.
+     * 
+     * @return BufferedMemoryPool managing this catalog's buffer
+     */
+    BufferedMemoryPool getPool() {
+        return pool;
     }
     
     /**

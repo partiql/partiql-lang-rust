@@ -75,11 +75,16 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionResult_nativeAsQueryIterato
         // Extract QueryIterator from ExecutionResult
         match *result {
             partiql_eval::ExecutionResult::Query(iter) => {
+                // Get schema from VM for efficient slot reading
+                let vm_state = crate::get_vm_state(vm_handle as u64)?;
+                let schema = vm_state.vm.schema();
+
                 // Create IteratorState with VM handle for buffer caching
                 let state = IteratorState {
                     iter,
                     current_row: None,
                     vm_handle: vm_handle as u64,
+                    schema,
                 };
                 let boxed = Box::new(state);
                 Ok(Box::into_raw(boxed) as jlong)
@@ -110,16 +115,22 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionResult_nativeClose(
 pub struct IteratorState<'a> {
     pub iter: partiql_eval::QueryIterator<'a>,
     pub current_row: Option<RegisterReader<'a>>,
-    vm_handle: u64, // Link back to VM for accessing buffer cache
+    vm_handle: u64,               // Link back to VM for accessing buffer cache
+    schema: partiql_eval::Schema, // Output schema for efficient slot reading
 }
 
 // QueryIterator handle management
 #[allow(dead_code)]
-pub fn create_iterator_handle(iter: partiql_eval::QueryIterator<'static>, vm_handle: u64) -> u64 {
+pub fn create_iterator_handle(
+    iter: partiql_eval::QueryIterator<'static>,
+    vm_handle: u64,
+    schema: partiql_eval::Schema,
+) -> u64 {
     let state = IteratorState {
         iter,
         current_row: None,
         vm_handle,
+        schema,
     };
     let boxed = Box::new(state);
     Box::into_raw(boxed) as u64
@@ -248,8 +259,8 @@ pub extern "system" fn Java_org_partiql_jni_QueryIterator_nativeNextToBuffer(
             // Convert raw pointer to mutable slice
             let buffer_slice = unsafe { std::slice::from_raw_parts_mut(buffer_ptr, capacity) };
 
-            // Write row data to buffer in BufferWriter format
-            let bytes_written = write_row_to_buffer(&row, buffer_slice, capacity)?;
+            // Write row data to buffer in BufferWriter format using schema
+            let bytes_written = write_row_to_buffer(&row, &state.schema, buffer_slice, capacity)?;
 
             if bytes_written > capacity {
                 // Buffer too small
@@ -265,79 +276,43 @@ pub extern "system" fn Java_org_partiql_jni_QueryIterator_nativeNextToBuffer(
     })
 }
 
-/// Write a row to buffer in BufferWriter format
+/// Write a row to buffer in BufferWriter format using schema for efficient slot reading
 /// Returns number of bytes written
 fn write_row_to_buffer(
     row: &RegisterReader<'_>,
+    schema: &partiql_eval::Schema,
     buffer: &mut [u8],
     capacity: usize,
 ) -> Result<usize, crate::JniError> {
     let mut offset = 0;
 
-    // Type tags (must match BufferWriter and Java RegisterReader)
-    #[allow(dead_code)]
-    const TYPE_NULL: u8 = 0;
-    #[allow(dead_code)]
-    const TYPE_MISSING: u8 = 1;
-    #[allow(dead_code)]
-    const TYPE_BOOL: u8 = 2;
+    // Type tag for i64 (must match BufferWriter and Java RegisterReader)
     const TYPE_I64: u8 = 3;
-    #[allow(dead_code)]
-    const TYPE_F64: u8 = 4;
-    const TYPE_STRING: u8 = 5;
 
-    // Iterate through all register slots and write non-empty values
-    // TODO: Get actual register count from row metadata
-    // For now, try common slot range (0-100)
-    for slot in 0..100 {
-        // Try to get value from this slot
+    // Iterate only through schema-defined columns (no garbage data!)
+    // Schema index directly maps to slot index
+    for slot in 0..schema.columns.len() {
+        // Read value from slot (assuming i64 for now as confirmed)
         if let Some(value) = row.get_i64(slot) {
-            // Write: [slot: u16][type: u8][data: i64]
+            // Check if we have space: [slot: u16][type: u8][data: i64]
             if offset + 2 + 1 + 8 > capacity {
                 return Ok(offset); // Buffer full
             }
 
+            // Write slot index
             buffer[offset..offset + 2].copy_from_slice(&(slot as u16).to_ne_bytes());
             offset += 2;
 
+            // Write type tag
             buffer[offset] = TYPE_I64;
             offset += 1;
 
+            // Write i64 value
             buffer[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
             offset += 8;
-
-            continue;
         }
-
-        if let Some(value) = row.get_str(slot) {
-            // Write: [slot: u16][type: u8][length: i32][data: bytes]
-            let bytes = value.as_bytes();
-            let len = bytes.len();
-
-            if offset + 2 + 1 + 4 + len > capacity {
-                return Ok(offset); // Buffer full
-            }
-
-            buffer[offset..offset + 2].copy_from_slice(&(slot as u16).to_ne_bytes());
-            offset += 2;
-
-            buffer[offset] = TYPE_STRING;
-            offset += 1;
-
-            buffer[offset..offset + 4].copy_from_slice(&(len as i32).to_ne_bytes());
-            offset += 4;
-
-            buffer[offset..offset + len].copy_from_slice(bytes);
-            offset += len;
-
-            continue;
-        }
-
-        // If we've gone through many empty slots, assume we're done
-        // This is a heuristic to avoid checking all 100 slots
-        if slot > 10 && offset > 0 {
-            break;
-        }
+        // Note: If slot has no value, we skip it (sparse representation)
+        // This is correct behavior - missing values are not written
     }
 
     Ok(offset)
