@@ -349,8 +349,8 @@ struct FactoryConfigWrapper {
 }
 
 impl DataSourceConfig for FactoryConfigWrapper {
-    fn caps(&self) -> ScanCapabilities {
-        self.factory.caps()
+    fn buffer_stability(&self) -> BufferStability {
+        self.factory.buffer_stability()
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
@@ -500,7 +500,7 @@ pub fn simple_catalog(
 use partiql_common::catalog::EntryId;
 use partiql_eval::source::{
     BufferStability, CatalogScans, CompiledSourceFactory, DataSource, DataSourceConfig,
-    RegisterWriter, ScanCapabilities, ScanId, ScanLayout, ScanSource,
+    PhysicalType, RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
 use partiql_eval::{ExecutionCatalog, Result as EvalResult};
 use rand::Rng;
@@ -543,8 +543,8 @@ impl DataSource for RandomDataSource {
         for proj in &self.layout.projections {
             let target = proj.target_slot;
 
-            match &proj.source {
-                ScanSource::ColumnIndex(index) => {
+            match &proj.source.source_type {
+                ScanSourceType::ColumnIndex(index) => {
                     if *index < self.num_columns {
                         let random_value: i64 = rng.gen();
                         writer.put_i64(target, random_value)?;
@@ -556,7 +556,7 @@ impl DataSource for RandomDataSource {
                         )));
                     }
                 }
-                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
                     return Err(partiql_eval::EngineError::UnsupportedExpr(
                         "Random reader only supports ColumnIndex projections".to_string(),
                     ));
@@ -587,19 +587,15 @@ impl RandomTableConfig {
 }
 
 impl DataSourceConfig for RandomTableConfig {
-    fn caps(&self) -> ScanCapabilities {
-        ScanCapabilities {
-            stability: BufferStability::UntilNext,
-            can_project: true,
-            can_return_opaque: false,
-        }
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         self.column_names
             .iter()
             .position(|name| name.eq_ignore_ascii_case(field_name))
-            .map(ScanSource::ColumnIndex)
+            .map(|index| ScanSource::column(index, PhysicalType::I64))
     }
 }
 

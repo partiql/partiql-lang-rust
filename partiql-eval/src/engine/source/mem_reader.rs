@@ -1,6 +1,7 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::source::api::{
-    BufferStability, DataSource, DataSourceFactory, ScanCapabilities, ScanLayout, ScanSource,
+    BufferStability, DataSource, DataSourceFactory, PhysicalType, ScanLayout, ScanSource,
+    ScanSourceType,
 };
 
 /// In-memory row reader that generates rows on-the-fly
@@ -49,8 +50,8 @@ impl DataSource for InMemGeneratedReader {
         for proj in &self.layout.projections {
             let target = proj.target_slot;
 
-            match &proj.source {
-                ScanSource::ColumnIndex(index) => {
+            match &proj.source.source_type {
+                ScanSourceType::ColumnIndex(index) => {
                     // All columns get the same value: current_row (starting at 0)
                     if *index < self.num_columns {
                         writer.put_i64(target, row_value)?;
@@ -62,7 +63,7 @@ impl DataSource for InMemGeneratedReader {
                         )));
                     }
                 }
-                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
                     return Err(EngineError::UnsupportedExpr(
                         "InMem reader only supports ColumnIndex projections".to_string(),
                     ));
@@ -99,11 +100,11 @@ impl DataSourceFactory for InMemGeneratedDataSourceHandle {
     fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
         // Validate that all projections are ColumnIndex (not FieldPath)
         for proj in &layout.projections {
-            match &proj.source {
-                ScanSource::ColumnIndex(_) => {
+            match &proj.source.source_type {
+                ScanSourceType::ColumnIndex(_) => {
                     // Valid for InMem reader
                 }
-                ScanSource::BaseRow | ScanSource::FieldPath(_) => {
+                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
                     return Err(EngineError::ProjectionNotSupported(
                         "InMem reader only supports ColumnIndex projections",
                     ));
@@ -118,20 +119,17 @@ impl DataSourceFactory for InMemGeneratedDataSourceHandle {
         )))
     }
 
-    fn caps(&self) -> ScanCapabilities {
-        ScanCapabilities {
-            stability: BufferStability::UntilNext,
-            can_project: true,
-            can_return_opaque: false,
-        }
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         // InMem reader only supports column indexes, not field paths
         // Map field names to their column indexes based on position in column_names
+        // All columns are Int64 in the InMem reader
         self.column_names
             .iter()
             .position(|name| name == field_name)
-            .map(ScanSource::ColumnIndex)
+            .map(|index| ScanSource::column(index, PhysicalType::I64))
     }
 }

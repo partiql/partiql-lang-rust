@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex};
 
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_eval::source::{
-    BufferStability, CatalogScans, DataSource, DataSourceConfig, DataSourceHandle,
-    ScanCapabilities, ScanId, ScanLayout, ScanSource,
+    BufferStability, CatalogScans, DataSource, DataSourceConfig, DataSourceHandle, PhysicalType,
+    ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
 use partiql_eval::{CompilationCatalog, CompiledPlan, EngineError, ExecutionCatalog, Result};
 use partiql_value::BindingsName;
@@ -228,8 +228,8 @@ fn convert_scan_source_to_java<'a>(
     env: &mut jni::JNIEnv<'a>,
     source: &ScanSource,
 ) -> Result<jni::objects::JObject<'a>> {
-    match source {
-        ScanSource::ColumnIndex(idx) => {
+    match &source.source_type {
+        ScanSourceType::ColumnIndex(idx) => {
             // Create ScanSource.ColumnIndex
             let source_class = env
                 .find_class("org/partiql/jni/ScanSource$ColumnIndex")
@@ -255,7 +255,7 @@ fn convert_scan_source_to_java<'a>(
 
             Ok(source_obj)
         }
-        ScanSource::FieldPath(path) => {
+        ScanSourceType::FieldPath(path) => {
             // Create Java string for the field path
             let path_str: &str = path.as_ref();
             let java_path = env.new_string(path_str).map_err(|e| {
@@ -287,12 +287,22 @@ fn convert_scan_source_to_java<'a>(
 
             Ok(source_obj)
         }
-        _ => {
-            // Other ScanSource types not yet supported
-            Err(EngineError::IllegalState(format!(
-                "Unsupported ScanSource type: {:?}",
-                source
-            )))
+        ScanSourceType::WholeValue => {
+            // Create ScanSource.WholeValue
+            let source_class = env
+                .find_class("org/partiql/jni/ScanSource$WholeValue")
+                .map_err(|e| {
+                    EngineError::IllegalState(format!(
+                        "Failed to find ScanSource.WholeValue class: {}",
+                        e
+                    ))
+                })?;
+
+            let source_obj = env.new_object(source_class, "()V", &[]).map_err(|e| {
+                EngineError::IllegalState(format!("Failed to create ScanSource.WholeValue: {}", e))
+            })?;
+
+            Ok(source_obj)
         }
     }
 }
@@ -692,13 +702,13 @@ impl BufferDataSource {
                     .projections
                     .iter()
                     .find_map(|proj| {
-                        match &proj.source {
-                            ScanSource::ColumnIndex(col_idx) => {
+                        match &proj.source.source_type {
+                            ScanSourceType::ColumnIndex(col_idx) => {
                                 if *col_idx == buffer_slot as usize {
                                     return Some(proj.target_slot);
                                 }
                             }
-                            ScanSource::FieldPath(_) => {
+                            ScanSourceType::FieldPath(_) => {
                                 // For FieldPath: buffer slots are sequential (0, 1, 2, ...)
                                 // Map buffer_slot to the corresponding projection by index
                                 if (buffer_slot as usize) < self.layout.projections.len() {
@@ -709,7 +719,7 @@ impl BufferDataSource {
                                         .map(|p| p.target_slot);
                                 }
                             }
-                            _ => {}
+                            ScanSourceType::WholeValue => {}
                         }
                         None
                     })
@@ -968,62 +978,43 @@ impl JavaDataSourceConfig {
 }
 
 impl DataSourceConfig for JavaDataSourceConfig {
-    fn caps(&self) -> ScanCapabilities {
+    fn buffer_stability(&self) -> BufferStability {
         // Attach to JVM
         let mut env = match self.vm.attach_current_thread() {
             Ok(env) => env,
             Err(_) => {
-                // If JVM attachment fails, return conservative defaults
-                return ScanCapabilities {
-                    stability: BufferStability::UntilNext,
-                    can_project: false,
-                    can_return_opaque: false,
-                };
+                // If JVM attachment fails, return conservative default
+                return BufferStability::UntilNext;
             }
         };
 
-        // Call Java method: ScanCapabilities getCaps()
-        let caps_obj = match env.call_method(
+        // Call Java method: BufferStability getBufferStability()
+        let stability_obj = match env.call_method(
             self.config_ref.as_obj(),
-            "getCaps",
-            "()Lorg/partiql/jni/ScanCapabilities;",
+            "getBufferStability",
+            "()Lorg/partiql/jni/BufferStability;",
             &[],
         ) {
             Ok(result) => match result.l() {
                 Ok(obj) => obj,
-                Err(_) => {
-                    return ScanCapabilities {
-                        stability: BufferStability::UntilNext,
-                        can_project: false,
-                        can_return_opaque: false,
-                    }
-                }
+                Err(_) => return BufferStability::UntilNext,
             },
-            Err(_) => {
-                return ScanCapabilities {
-                    stability: BufferStability::UntilNext,
-                    can_project: false,
-                    can_return_opaque: false,
-                }
-            }
+            Err(_) => return BufferStability::UntilNext,
         };
 
-        // Extract capabilities from Java object
-        let can_project = env
-            .call_method(&caps_obj, "canProject", "()Z", &[])
-            .and_then(|v| v.z())
-            .unwrap_or(false);
+        // Check which stability value it is
+        let until_close_class = match env.find_class("org/partiql/jni/BufferStability$UntilClose") {
+            Ok(c) => c,
+            Err(_) => return BufferStability::UntilNext,
+        };
 
-        let can_return_opaque = env
-            .call_method(&caps_obj, "canReturnOpaque", "()Z", &[])
-            .and_then(|v| v.z())
-            .unwrap_or(false);
-
-        // For now, always use UntilNext stability (most conservative)
-        ScanCapabilities {
-            stability: BufferStability::UntilNext,
-            can_project,
-            can_return_opaque,
+        if env
+            .is_instance_of(&stability_obj, until_close_class)
+            .unwrap_or(false)
+        {
+            BufferStability::UntilClose
+        } else {
+            BufferStability::UntilNext
         }
     }
 
@@ -1059,7 +1050,11 @@ impl DataSourceConfig for JavaDataSourceConfig {
                 .ok()?
                 .i()
                 .ok()?;
-            return Some(ScanSource::ColumnIndex(column_index as usize));
+            // Default to Dynamic type for Java sources (type is determined at runtime)
+            return Some(ScanSource::column(
+                column_index as usize,
+                PhysicalType::Dynamic,
+            ));
         }
 
         // Check if it's a FieldPath
@@ -1073,9 +1068,16 @@ impl DataSourceConfig for JavaDataSourceConfig {
                 .l()
                 .ok()?;
             let path_str: String = env.get_string(&path_jstring.into()).ok()?.into();
-            // Leak the string to create a 'static reference (same pattern used elsewhere)
-            let leaked_path: &'static str = Box::leak(path_str.into_boxed_str());
-            return Some(ScanSource::FieldPath(leaked_path.into()));
+            // Default to Dynamic type for Java sources (type is determined at runtime)
+            return Some(ScanSource::field(path_str, PhysicalType::Dynamic));
+        }
+
+        // Check if it's a WholeValue
+        let whole_value_class = env
+            .find_class("org/partiql/jni/ScanSource$WholeValue")
+            .ok()?;
+        if env.is_instance_of(&source_obj, whole_value_class).ok()? {
+            return Some(ScanSource::whole_value());
         }
 
         // Unknown ScanSource type

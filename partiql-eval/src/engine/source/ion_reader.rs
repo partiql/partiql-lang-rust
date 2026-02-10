@@ -1,7 +1,8 @@
 use crate::engine::error::{EngineError, Result};
 use crate::engine::row::SlotId;
 use crate::engine::source::api::{
-    BufferStability, DataSource, DataSourceFactory, ScanCapabilities, ScanLayout, ScanSource,
+    BufferStability, DataSource, DataSourceFactory, PhysicalType, ScanLayout, ScanSource,
+    ScanSourceType,
 };
 use ion_rs_old::{IonReader, IonType, ReaderBuilder};
 use rustc_hash::FxHashMap;
@@ -38,7 +39,7 @@ impl IonDataSource {
         // Build field name to slot mapping for O(1) lookup during reading
         let mut field_to_slot = FxHashMap::default();
         for proj in &layout.projections {
-            if let ScanSource::FieldPath(field_name) = &proj.source {
+            if let ScanSourceType::FieldPath(field_name) = &proj.source.source_type {
                 field_to_slot.insert(field_name.clone(), proj.target_slot);
             }
         }
@@ -209,18 +210,18 @@ impl DataSourceFactory for IonDataSourceFactory {
     fn create(&self, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
         // Validate that all projections are FieldPath (not ColumnIndex)
         for proj in &layout.projections {
-            match &proj.source {
-                ScanSource::FieldPath(_) => {
+            match &proj.source.source_type {
+                ScanSourceType::FieldPath(_) => {
                     // Valid for Ion reader
                 }
-                ScanSource::ColumnIndex(_) => {
+                ScanSourceType::ColumnIndex(_) => {
                     return Err(EngineError::ProjectionNotSupported(
                         "Ion reader only supports FieldPath projections, not ColumnIndex",
                     ));
                 }
-                ScanSource::BaseRow => {
+                ScanSourceType::WholeValue => {
                     return Err(EngineError::ProjectionNotSupported(
-                        "Ion reader only supports FieldPath projections, not BaseRow",
+                        "Ion reader only supports FieldPath projections, not WholeValue",
                     ));
                 }
             }
@@ -229,17 +230,14 @@ impl DataSourceFactory for IonDataSourceFactory {
         Ok(Box::new(IonDataSource::new(self.path.clone(), layout)))
     }
 
-    fn caps(&self) -> ScanCapabilities {
-        ScanCapabilities {
-            stability: BufferStability::UntilNext,
-            can_project: true,
-            can_return_opaque: false,
-        }
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
     }
 
     fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         // Ion reader accepts any field name at compile time
         // Runtime validation happens during actual reading
-        Some(ScanSource::FieldPath(field_name.to_string()))
+        // Type is Dynamic since Ion is schemaless
+        Some(ScanSource::field(field_name, PhysicalType::Dynamic))
     }
 }
