@@ -6,8 +6,8 @@ pub(crate) mod mem_reader;
 
 // Re-export ONLY public API types from api.rs - these are the only types visible outside the crate
 pub use api::{
-    BufferStability, DataSource, DataSourceConfig, DataSourceFactory, ScanCapabilities, ScanLayout,
-    ScanProjection, ScanSource, TypeHint,
+    BufferStability, DataSource, DataSourceConfig, DataSourceFactory, PhysicalType, ScanLayout,
+    ScanProjection, ScanSource, ScanSourceType,
 };
 
 // Re-export ScanId and CatalogScans for catalog implementations
@@ -121,14 +121,14 @@ impl DataSourceHandle {
         }
     }
 
-    /// Get reader capabilities at compile time.
+    /// Get buffer stability at compile time.
     ///
-    /// Returns information about what the reader supports, such as projection pushdown.
+    /// Returns information about how long data in buffers remains valid.
     /// This allows the compiler to make informed decisions about query optimization.
-    pub fn caps(&self) -> ScanCapabilities {
+    pub fn buffer_stability(&self) -> BufferStability {
         match &self.inner {
-            DataSourceHandleInner::Catalog { config, .. } => config.caps(),
-            DataSourceHandleInner::Direct(factory) => factory.caps(),
+            DataSourceHandleInner::Catalog { config, .. } => config.buffer_stability(),
+            DataSourceHandleInner::Direct(factory) => factory.buffer_stability(),
         }
     }
 
@@ -230,12 +230,12 @@ impl CompiledSourceFactory {
         }
     }
 
-    /// Get capabilities of this data source factory.
-    pub fn caps(&self) -> ScanCapabilities {
+    /// Get buffer stability of this data source factory.
+    pub fn buffer_stability(&self) -> BufferStability {
         match &self.inner {
-            CompiledSourceFactoryInner::InMem(f) => f.caps(),
-            CompiledSourceFactoryInner::Ion(f) => f.caps(),
-            CompiledSourceFactoryInner::Custom(f) => f.caps(),
+            CompiledSourceFactoryInner::InMem(f) => f.buffer_stability(),
+            CompiledSourceFactoryInner::Ion(f) => f.buffer_stability(),
+            CompiledSourceFactoryInner::Custom(f) => f.buffer_stability(),
         }
     }
 

@@ -1,6 +1,6 @@
 use super::RegisterWriter;
 use crate::engine::error::Result;
-use crate::engine::source::api::{DataSource, DataSourceFactory, ScanCapabilities, ScanSource};
+use crate::engine::source::api::{BufferStability, DataSource, DataSourceFactory, ScanSource};
 
 /// Internal wrapper for data source implementations
 ///
@@ -37,10 +37,10 @@ pub(crate) enum DataSourceFactoryInner {
 }
 
 impl DataSourceFactoryInner {
-    pub(crate) fn caps(&self) -> ScanCapabilities {
+    pub(crate) fn buffer_stability(&self) -> BufferStability {
         match self {
-            DataSourceFactoryInner::InMem(factory) => factory.caps(),
-            DataSourceFactoryInner::Ion(factory) => factory.caps(),
+            DataSourceFactoryInner::InMem(factory) => factory.buffer_stability(),
+            DataSourceFactoryInner::Ion(factory) => factory.buffer_stability(),
         }
     }
 

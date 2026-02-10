@@ -315,22 +315,22 @@ impl Default for ExecutionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::source::{DataSourceConfig, ScanCapabilities, ScanSource};
+    use crate::engine::source::{BufferStability, DataSourceConfig, PhysicalType, ScanSource};
     use partiql_common::catalog::EntryId;
     use std::sync::Arc;
 
     // Mock DataSourceConfig for testing
     struct MockConfig {
-        caps: ScanCapabilities,
+        stability: BufferStability,
     }
 
     impl DataSourceConfig for MockConfig {
-        fn caps(&self) -> ScanCapabilities {
-            self.caps
+        fn buffer_stability(&self) -> BufferStability {
+            self.stability
         }
 
         fn resolve(&self, _field_name: &str) -> Option<ScanSource> {
-            Some(ScanSource::ColumnIndex(0))
+            Some(ScanSource::column(0, PhysicalType::I64))
         }
     }
 
@@ -348,11 +348,7 @@ mod tests {
 
             if table_name == "test_table" {
                 let config = Arc::new(MockConfig {
-                    caps: ScanCapabilities {
-                        stability: crate::engine::source::BufferStability::UntilNext,
-                        can_project: true,
-                        can_return_opaque: false,
-                    },
+                    stability: BufferStability::UntilNext,
                 });
                 Some(DataSourceHandle::new(self.entry_id, config))
             } else {
@@ -379,11 +375,7 @@ mod tests {
     #[test]
     fn test_data_source_handle() {
         let config = Arc::new(MockConfig {
-            caps: ScanCapabilities {
-                stability: crate::engine::source::BufferStability::UntilNext,
-                can_project: true,
-                can_return_opaque: false,
-            },
+            stability: BufferStability::UntilNext,
         });
 
         let entry_id = EntryId::from(42);
@@ -393,12 +385,16 @@ mod tests {
         let retrieved_id = handle.entry_id().unwrap();
         assert_eq!(retrieved_id, EntryId::from(42));
 
-        // Test caps delegation
-        let caps = handle.caps();
-        assert!(caps.can_project);
-        assert!(!caps.can_return_opaque);
+        // Test buffer_stability delegation
+        assert!(matches!(
+            handle.buffer_stability(),
+            BufferStability::UntilNext
+        ));
 
         // Test resolve delegation
-        assert!(handle.resolve("any_field").is_some());
+        let resolved = handle.resolve("any_field");
+        assert!(resolved.is_some());
+        let scan_source = resolved.unwrap();
+        assert_eq!(scan_source.physical_type, PhysicalType::I64);
     }
 }
