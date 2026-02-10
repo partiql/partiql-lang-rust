@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_eval::source::{
-    BufferStability, CatalogScans, DataSource, DataSourceConfig, DataSourceHandle, PhysicalType,
+    BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
     ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
 use partiql_eval::{CompilationCatalog, CompiledPlan, EngineError, ExecutionCatalog, Result};
@@ -977,7 +977,7 @@ impl JavaDataSourceConfig {
     }
 }
 
-impl DataSourceConfig for JavaDataSourceConfig {
+impl DataSourceMetadata for JavaDataSourceConfig {
     fn buffer_stability(&self) -> BufferStability {
         // Attach to JVM
         let mut env = match self.vm.attach_current_thread() {

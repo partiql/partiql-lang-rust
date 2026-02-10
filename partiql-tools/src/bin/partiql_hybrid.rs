@@ -1,7 +1,9 @@
 use partiql_tools::common;
 
-use common::{count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog};
-use partiql_eval::source::CompiledSourceFactory;
+use common::{
+    count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog,
+    CompiledSourceFactory,
+};
 use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
 use std::time::Instant;

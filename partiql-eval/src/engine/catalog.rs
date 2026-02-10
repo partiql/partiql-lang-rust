@@ -315,16 +315,16 @@ impl Default for ExecutionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::source::{BufferStability, DataSourceConfig, PhysicalType, ScanSource};
+    use crate::engine::source::{BufferStability, DataSourceMetadata, PhysicalType, ScanSource};
     use partiql_common::catalog::EntryId;
     use std::sync::Arc;
 
-    // Mock DataSourceConfig for testing
+    // Mock DataSourceMetadata for testing
     struct MockConfig {
         stability: BufferStability,
     }
 
-    impl DataSourceConfig for MockConfig {
+    impl DataSourceMetadata for MockConfig {
         fn buffer_stability(&self) -> BufferStability {
             self.stability
         }
@@ -382,7 +382,7 @@ mod tests {
         let handle = DataSourceHandle::new(entry_id, config);
 
         // Test entry_id accessor
-        let retrieved_id = handle.entry_id().unwrap();
+        let retrieved_id = handle.entry_id;
         assert_eq!(retrieved_id, EntryId::from(42));
 
         // Test buffer_stability delegation
