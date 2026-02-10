@@ -336,154 +336,6 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
     Box::new(catalog.to_shared_catalog())
 }
 
-/// Simple compilation catalog for mem/ion data sources
-///
-/// Provides compile-time metadata using the two-phase catalog pattern.
-pub struct SimpleCompilationCatalog {
-    tables: FxHashMap<String, (EntryId, Arc<dyn DataSourceConfig>)>,
-}
-
-/// Wrapper to make CompiledSourceFactory implement DataSourceConfig
-struct FactoryConfigWrapper {
-    factory: CompiledSourceFactory,
-}
-
-impl DataSourceConfig for FactoryConfigWrapper {
-    fn buffer_stability(&self) -> BufferStability {
-        self.factory.buffer_stability()
-    }
-
-    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
-        self.factory.resolve(field_name)
-    }
-}
-
-impl SimpleCompilationCatalog {
-    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
-        let mut table_map = FxHashMap::default();
-
-        for (idx, (name, factory)) in tables.into_iter().enumerate() {
-            // Wrap the factory to implement DataSourceConfig
-            let config: Arc<dyn DataSourceConfig> = Arc::new(FactoryConfigWrapper { factory });
-            table_map.insert(name, (EntryId::from(idx as u64), config));
-        }
-
-        SimpleCompilationCatalog { tables: table_map }
-    }
-}
-
-impl CompilationCatalog for SimpleCompilationCatalog {
-    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-        if path.len() != 1 {
-            return None;
-        }
-
-        let table_name = match &path[0] {
-            BindingsName::CaseSensitive(s) => s.as_ref(),
-            BindingsName::CaseInsensitive(s) => s.as_ref(),
-        };
-
-        self.tables
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
-            .map(|(_, (entry_id, config))| {
-                // Return DataSourceHandle with EntryId and config
-                DataSourceHandle::new(*entry_id, config.clone())
-            })
-    }
-}
-
-/// Simple execution catalog for mem/ion data sources
-///
-/// Creates actual DataSource instances at execution time.
-/// Uses the ScanId-based pattern: customers inspect CompiledPlan during setup
-/// and build internal mappings from ScanId to data sources.
-pub struct SimpleExecutionCatalog {
-    tables: FxHashMap<EntryId, CompiledSourceFactory>,
-    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
-    scan_mappings: FxHashMap<ScanId, (EntryId, ScanLayout)>,
-}
-
-impl SimpleExecutionCatalog {
-    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
-        let mut table_map = FxHashMap::default();
-
-        for (idx, (_name, factory)) in tables.into_iter().enumerate() {
-            table_map.insert(EntryId::from(idx as u64), factory);
-        }
-
-        SimpleExecutionCatalog {
-            tables: table_map,
-            scan_mappings: FxHashMap::default(),
-        }
-    }
-}
-
-impl ExecutionCatalog for SimpleExecutionCatalog {
-    fn prepare(&mut self, scans: &CatalogScans) {
-        self.scan_mappings.clear();
-        for (scan_id, entry_id, layout) in scans.iter() {
-            self.scan_mappings
-                .insert(scan_id, (entry_id, layout.clone()));
-        }
-    }
-
-    fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
-        // Look up the scan mapping
-        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
-                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
-                scan_id
-            ))
-        })?;
-
-        // Look up the factory by entry_id
-        let factory = self.tables.get(entry_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
-                "Table with entry_id {:?} not found",
-                entry_id
-            ))
-        })?;
-
-        // Use the factory to create the DataSource
-        factory.create(layout.clone())
-    }
-}
-
-/// Create compilation catalog and execution catalog factory for simple data sources (mem/ion)
-///
-/// This provides the same two-phase catalog pattern as random_catalog,
-/// enabling uniform architecture across all data source types.
-///
-/// # Arguments
-/// * `tables` - Vector of (table_name, CompiledSourceFactory) tuples
-///
-/// # Returns
-/// A tuple of (CompilationCatalog, SimpleExecutionCatalog)
-/// Note: The execution catalog must have `prepare()` called with the CompiledPlan
-/// before it can be used.
-///
-/// # Example
-/// ```ignore
-/// use partiql_eval::source::CompiledSourceFactory;
-///
-/// let (comp_catalog, mut exec_catalog) = simple_catalog(
-///     vec![
-///         ("data".to_string(), CompiledSourceFactory::mem(10_000, vec!["a".to_string(), "b".to_string()])),
-///     ]
-/// );
-///
-/// // After compilation, prepare the execution catalog
-/// exec_catalog.prepare(&compiled_plan);
-/// ```
-pub fn simple_catalog(
-    tables: Vec<(String, CompiledSourceFactory)>,
-) -> (Arc<dyn CompilationCatalog>, SimpleExecutionCatalog) {
-    let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
-    let exec_catalog = SimpleExecutionCatalog::new(tables);
-    (comp_catalog, exec_catalog)
-}
-
 // =============================================================================
 // Random Data Source - Customer-Provided Reader Example
 // =============================================================================
@@ -491,7 +343,7 @@ pub fn simple_catalog(
 // This implementation demonstrates the two-phase catalog pattern for custom
 // data sources. It shows how customers can:
 // 1. Implement DataSource trait for their custom reader
-// 2. Implement DataSourceConfig for compile-time metadata
+// 2. Implement DataSourceMetadata for compile-time metadata
 // 3. Implement CompilationCatalog + ExecutionCatalog traits
 // 4. Use ObjectId to enable catalog swapping
 //
@@ -499,8 +351,8 @@ pub fn simple_catalog(
 
 use partiql_common::catalog::EntryId;
 use partiql_eval::source::{
-    BufferStability, CatalogScans, CompiledSourceFactory, DataSource, DataSourceConfig,
-    PhysicalType, RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType,
+    BufferStability, CatalogScans, DataSource, DataSourceMetadata, PhysicalType, RegisterWriter,
+    ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
 use partiql_eval::{ExecutionCatalog, Result as EvalResult};
 use rand::Rng;
@@ -586,7 +438,7 @@ impl RandomTableConfig {
     }
 }
 
-impl DataSourceConfig for RandomTableConfig {
+impl DataSourceMetadata for RandomTableConfig {
     fn buffer_stability(&self) -> BufferStability {
         BufferStability::UntilNext
     }
@@ -648,9 +500,10 @@ impl CompilationCatalog for RandomCompilationCatalog {
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
             .map(|(_, meta)| {
-                let config = Arc::new(RandomTableConfig::new(meta.column_names.clone()));
+                let metadata: Arc<dyn DataSourceMetadata> =
+                    Arc::new(RandomTableConfig::new(meta.column_names.clone()));
                 // Return DataSourceHandle with EntryId only (CatalogId comes from compiler)
-                DataSourceHandle::new(meta.entry_id, config)
+                DataSourceHandle::new(meta.entry_id, metadata)
             })
     }
 }
@@ -763,5 +616,472 @@ pub fn random_catalog(
 ) -> (Arc<dyn CompilationCatalog>, RandomExecutionCatalog) {
     let comp_catalog = Arc::new(RandomCompilationCatalog::new(tables.clone()));
     let exec_catalog = RandomExecutionCatalog::new(tables);
+    (comp_catalog, exec_catalog)
+}
+
+// =============================================================================
+// In-Memory Generated Data Source
+// =============================================================================
+//
+// Generates sequential integer data on-the-fly. Demonstrates a simple DataSource
+// implementation that doesn't require external data.
+
+/// In-memory row reader that generates rows on-the-fly
+///
+/// Generates sequential integer data. All columns start at 0 and increment
+/// by 1 for each row.
+struct InMemGeneratedReader {
+    current_row: i64,
+    total_rows: usize,
+    layout: ScanLayout,
+    num_columns: usize,
+}
+
+impl InMemGeneratedReader {
+    fn new(total_rows: usize, num_columns: usize, layout: ScanLayout) -> Self {
+        InMemGeneratedReader {
+            current_row: 0,
+            total_rows,
+            layout,
+            num_columns,
+        }
+    }
+}
+
+impl DataSource for InMemGeneratedReader {
+    fn open(&mut self) -> EvalResult<()> {
+        self.current_row = 0;
+        Ok(())
+    }
+
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<bool> {
+        if self.current_row >= self.total_rows as i64 {
+            return Ok(false);
+        }
+
+        let row_value = self.current_row;
+
+        for proj in &self.layout.projections {
+            let target = proj.target_slot;
+
+            match &proj.source.source_type {
+                ScanSourceType::ColumnIndex(index) => {
+                    if *index < self.num_columns {
+                        writer.put_i64(target, row_value)?;
+                    } else {
+                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                            "Column index {} out of bounds (max: {})",
+                            index,
+                            self.num_columns - 1
+                        )));
+                    }
+                }
+                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
+                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                        "InMem reader only supports ColumnIndex projections".to_string(),
+                    ));
+                }
+            };
+        }
+
+        self.current_row += 1;
+        Ok(true)
+    }
+
+    fn close(&mut self) -> EvalResult<()> {
+        Ok(())
+    }
+}
+
+/// Compile-time configuration for in-memory generated tables
+struct InMemTableConfig {
+    column_names: Vec<String>,
+}
+
+impl InMemTableConfig {
+    fn new(column_names: Vec<String>) -> Self {
+        InMemTableConfig { column_names }
+    }
+}
+
+impl DataSourceMetadata for InMemTableConfig {
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.column_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(field_name))
+            .map(|index| ScanSource::column(index, PhysicalType::I64))
+    }
+}
+
+// =============================================================================
+// Ion Streaming Data Source
+// =============================================================================
+//
+// High-performance streaming Ion reader with projection pushdown.
+// Reads Ion data directly into row slots, avoiding materialization to Value objects.
+
+use ion_rs::{IonReader, IonType, ReaderBuilder as IonReaderBuilder};
+
+/// Streaming Ion text reader with projection pushdown
+///
+/// Uses the ion_rs streaming API to read Ion data directly into row slots.
+///
+/// # Performance Characteristics
+/// - Zero-copy for primitives (i64, f64, bool)
+/// - Minimal string allocations (only for projected string fields)
+/// - True projection pushdown (only reads requested fields)
+/// - Uses FxHashMap for O(1) field lookups
+pub struct IonDataSource {
+    path: String,
+    reader: Option<Box<ion_rs::Reader<'static>>>,
+    field_to_slot: FxHashMap<String, u16>,
+    string_storage: Vec<String>,
+}
+
+impl IonDataSource {
+    fn new(path: String, layout: ScanLayout) -> Self {
+        let mut field_to_slot = FxHashMap::default();
+        for proj in &layout.projections {
+            if let ScanSourceType::FieldPath(field_name) = &proj.source.source_type {
+                field_to_slot.insert(field_name.clone(), proj.target_slot);
+            }
+        }
+
+        IonDataSource {
+            path,
+            reader: None,
+            field_to_slot,
+            string_storage: Vec::new(),
+        }
+    }
+}
+
+impl DataSource for IonDataSource {
+    fn open(&mut self) -> EvalResult<()> {
+        let file = File::open(&self.path)
+            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion open failed: {e}")))?;
+        let buf_reader = BufReader::new(file);
+
+        let ion_reader = IonReaderBuilder::new().build(buf_reader).map_err(|e| {
+            partiql_eval::EngineError::ReaderError(format!("ion reader creation failed: {e}"))
+        })?;
+
+        let boxed_reader: Box<ion_rs::Reader<'static>> =
+            unsafe { std::mem::transmute(Box::new(ion_reader)) };
+
+        self.reader = Some(boxed_reader);
+        Ok(())
+    }
+
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<bool> {
+        let reader = match self.reader.as_mut() {
+            Some(r) => r,
+            None => return Ok(false),
+        };
+
+        self.string_storage.clear();
+
+        let stream_item = reader
+            .next()
+            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion read failed: {e}")))?;
+
+        match stream_item {
+            ion_rs::StreamItem::Value(_ion_type) => {
+                reader.step_in().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "failed to step into struct: {e}"
+                    ))
+                })?;
+
+                loop {
+                    match reader.next().map_err(|e| {
+                        partiql_eval::EngineError::ReaderError(format!(
+                            "error reading struct field: {e}"
+                        ))
+                    })? {
+                        ion_rs::StreamItem::Value(ion_type) => {
+                            let field_name = reader.field_name().map_err(|e| {
+                                partiql_eval::EngineError::ReaderError(format!(
+                                    "failed to get field name: {e}"
+                                ))
+                            })?;
+
+                            let field_text = field_name.text().ok_or_else(|| {
+                                partiql_eval::EngineError::ReaderError(
+                                    "field name has no text".to_string(),
+                                )
+                            })?;
+
+                            if let Some(&target_slot) = self.field_to_slot.get(field_text) {
+                                match ion_type {
+                                    IonType::Int => {
+                                        let val = reader.read_i64().map_err(|e| {
+                                            partiql_eval::EngineError::ReaderError(format!(
+                                                "failed to read i64: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_i64(target_slot, val)?;
+                                    }
+                                    IonType::Float => {
+                                        let val = reader.read_f64().map_err(|e| {
+                                            partiql_eval::EngineError::ReaderError(format!(
+                                                "failed to read f64: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_f64(target_slot, val)?;
+                                    }
+                                    IonType::Bool => {
+                                        let val = reader.read_bool().map_err(|e| {
+                                            partiql_eval::EngineError::ReaderError(format!(
+                                                "failed to read bool: {e}"
+                                            ))
+                                        })?;
+                                        writer.put_bool(target_slot, val)?;
+                                    }
+                                    IonType::String => {
+                                        let val = reader.read_str().map_err(|e| {
+                                            partiql_eval::EngineError::ReaderError(format!(
+                                                "failed to read string: {e}"
+                                            ))
+                                        })?;
+                                        self.string_storage.push(val.to_string());
+                                        let idx = self.string_storage.len() - 1;
+                                        let str_ref = unsafe {
+                                            std::mem::transmute::<&str, &str>(
+                                                self.string_storage[idx].as_str(),
+                                            )
+                                        };
+                                        writer.put_str(target_slot, str_ref)?;
+                                    }
+                                    IonType::Null => {
+                                        writer.put_null(target_slot)?;
+                                    }
+                                    other_type => {
+                                        return Err(partiql_eval::EngineError::ReaderError(
+                                            format!(
+                                                "unsupported ion type for projection: {:?}",
+                                                other_type
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        ion_rs::StreamItem::Nothing => break,
+                        ion_rs::StreamItem::Null(_) => continue,
+                    }
+                }
+
+                reader.step_out().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "failed to step out of struct: {e}"
+                    ))
+                })?;
+
+                Ok(true)
+            }
+            ion_rs::StreamItem::Nothing => Ok(false),
+            ion_rs::StreamItem::Null(_) => self.next_row(writer),
+        }
+    }
+
+    fn close(&mut self) -> EvalResult<()> {
+        self.reader = None;
+        self.string_storage.clear();
+        self.field_to_slot.clear();
+        Ok(())
+    }
+}
+
+/// Compile-time configuration for Ion data sources
+struct IonTableConfig {
+    // Ion is schemaless - all fields are accepted at compile time
+}
+
+impl IonTableConfig {
+    fn new() -> Self {
+        IonTableConfig {}
+    }
+}
+
+impl DataSourceMetadata for IonTableConfig {
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        // Ion reader accepts any field name at compile time
+        // Type is Dynamic since Ion is schemaless
+        Some(ScanSource::field(field_name, PhysicalType::Dynamic))
+    }
+}
+
+// =============================================================================
+// Simple Catalog - Unified Compilation/Execution Catalog
+// =============================================================================
+//
+// A simplified catalog that stores table metadata and creates data sources.
+// Supports both in-memory and Ion data sources.
+
+/// Factory configuration for creating data sources
+#[derive(Clone)]
+pub enum CompiledSourceFactory {
+    /// In-memory generated data
+    Mem {
+        total_rows: usize,
+        column_names: Vec<String>,
+    },
+    /// Ion file data
+    Ion { path: String },
+}
+
+impl CompiledSourceFactory {
+    /// Create a factory for in-memory generated data
+    pub fn mem(total_rows: usize, column_names: Vec<String>) -> Self {
+        CompiledSourceFactory::Mem {
+            total_rows,
+            column_names,
+        }
+    }
+
+    /// Create a factory for Ion file data
+    pub fn ion(path: String) -> Self {
+        CompiledSourceFactory::Ion { path }
+    }
+}
+
+/// Table metadata for simple catalog
+struct SimpleTableMeta {
+    entry_id: EntryId,
+    factory: CompiledSourceFactory,
+}
+
+/// Compilation catalog for simple data sources
+pub struct SimpleCompilationCatalog {
+    tables: FxHashMap<String, SimpleTableMeta>,
+}
+
+impl SimpleCompilationCatalog {
+    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
+        let mut table_map = FxHashMap::default();
+
+        for (idx, (name, factory)) in tables.into_iter().enumerate() {
+            table_map.insert(
+                name,
+                SimpleTableMeta {
+                    entry_id: EntryId::from(idx as u64),
+                    factory,
+                },
+            );
+        }
+
+        SimpleCompilationCatalog { tables: table_map }
+    }
+}
+
+impl CompilationCatalog for SimpleCompilationCatalog {
+    fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
+        if path.len() != 1 {
+            return None;
+        }
+
+        let table_name = match &path[0] {
+            BindingsName::CaseSensitive(s) => s.as_ref(),
+            BindingsName::CaseInsensitive(s) => s.as_ref(),
+        };
+
+        self.tables
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(table_name))
+            .map(|(_, meta)| {
+                let metadata: Arc<dyn DataSourceMetadata> = match &meta.factory {
+                    CompiledSourceFactory::Mem { column_names, .. } => {
+                        Arc::new(InMemTableConfig::new(column_names.clone()))
+                    }
+                    CompiledSourceFactory::Ion { .. } => Arc::new(IonTableConfig::new()),
+                };
+                DataSourceHandle::new(meta.entry_id, metadata)
+            })
+    }
+}
+
+/// Execution catalog for simple data sources
+pub struct SimpleExecutionCatalog {
+    tables: FxHashMap<EntryId, SimpleTableMeta>,
+    scan_mappings: FxHashMap<ScanId, (EntryId, ScanLayout)>,
+}
+
+impl SimpleExecutionCatalog {
+    fn new(tables: Vec<(String, CompiledSourceFactory)>) -> Self {
+        let mut table_map = FxHashMap::default();
+
+        for (idx, (_name, factory)) in tables.into_iter().enumerate() {
+            let entry_id = EntryId::from(idx as u64);
+            table_map.insert(entry_id, SimpleTableMeta { entry_id, factory });
+        }
+
+        SimpleExecutionCatalog {
+            tables: table_map,
+            scan_mappings: FxHashMap::default(),
+        }
+    }
+}
+
+impl ExecutionCatalog for SimpleExecutionCatalog {
+    fn prepare(&mut self, scans: &CatalogScans) {
+        self.scan_mappings.clear();
+        for (scan_id, entry_id, layout) in scans.iter() {
+            self.scan_mappings
+                .insert(scan_id, (entry_id, layout.clone()));
+        }
+    }
+
+    fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
+        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
+                scan_id
+            ))
+        })?;
+
+        let meta = self.tables.get(entry_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "Table with entry_id {:?} not found",
+                entry_id
+            ))
+        })?;
+
+        match &meta.factory {
+            CompiledSourceFactory::Mem {
+                total_rows,
+                column_names,
+            } => Ok(Box::new(InMemGeneratedReader::new(
+                *total_rows,
+                column_names.len(),
+                layout.clone(),
+            ))),
+            CompiledSourceFactory::Ion { path } => {
+                Ok(Box::new(IonDataSource::new(path.clone(), layout.clone())))
+            }
+        }
+    }
+}
+
+/// Create compilation and execution catalogs for simple data sources
+///
+/// # Arguments
+/// * `tables` - Vector of (table_name, CompiledSourceFactory) tuples
+///
+/// # Returns
+/// A tuple of (CompilationCatalog, SimpleExecutionCatalog)
+pub fn simple_catalog(
+    tables: Vec<(String, CompiledSourceFactory)>,
+) -> (Arc<dyn CompilationCatalog>, SimpleExecutionCatalog) {
+    let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
+    let exec_catalog = SimpleExecutionCatalog::new(tables);
     (comp_catalog, exec_catalog)
 }

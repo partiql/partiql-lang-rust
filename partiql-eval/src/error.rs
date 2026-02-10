@@ -7,13 +7,13 @@ use partiql_value::Value;
 use std::borrow::Cow;
 use thiserror::Error;
 
-/// All errors that occurred during [`partiql_logical::LogicalPlan`] to [`eval::EvalPlan`] creation.
+/// All errors that occurred during [`partiql_logical::LogicalPlan`] to [`crate::eval::EvalPlan`] creation.
 #[derive(Debug)]
 pub struct PlanErr {
     pub errors: Vec<PlanningError>,
 }
 
-/// An error that can happen during [`partiql_logical::LogicalPlan`] to [`eval::EvalPlan`] creation.
+/// An error that can happen during [`partiql_logical::LogicalPlan`] to [`crate::eval::EvalPlan`] creation.
 #[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PlanningError {

@@ -198,11 +198,7 @@ impl<'a> PlanCompiler<'a> {
 
         // Generate unique ScanId and build scan metadata
         let scan_id = self.alloc_scan_id();
-        let entry_id = reader_factory.entry_id().ok_or_else(|| {
-            EngineError::InvalidPlan(
-                "Direct data sources not supported in catalog-based compilation".to_string(),
-            )
-        })?;
+        let entry_id = reader_factory.entry_id;
 
         let object_id = ObjectId::new(catalog_id, entry_id);
         let scan_meta = ScanMetadata { layout, object_id };
