@@ -33,12 +33,52 @@
 //! ```
 
 use crate::engine::error::Result;
+use crate::engine::plan::ScanId;
 use crate::engine::source::{DataSource, DataSourceHandle, ScanLayout};
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Information about scans belonging to a specific catalog.
+///
+/// This is passed to `ExecutionCatalog::prepare()` and contains only the scans
+/// that belong to that catalog, pre-filtered by CatalogId.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogScans {
+    /// Mapping from ScanId to (EntryId, ScanLayout) for scans in this catalog
+    scans: Vec<(ScanId, EntryId, ScanLayout)>,
+}
+
+impl CatalogScans {
+    /// Create a new empty CatalogScans
+    pub fn new() -> Self {
+        CatalogScans { scans: Vec::new() }
+    }
+
+    /// Add a scan to this catalog's scans
+    pub fn add(&mut self, scan_id: ScanId, entry_id: EntryId, layout: ScanLayout) {
+        self.scans.push((scan_id, entry_id, layout));
+    }
+
+    /// Iterate over all scans
+    pub fn iter(&self) -> impl Iterator<Item = (ScanId, EntryId, &ScanLayout)> {
+        self.scans
+            .iter()
+            .map(|(scan_id, entry_id, layout)| (*scan_id, *entry_id, layout))
+    }
+
+    /// Check if this catalog has any scans
+    pub fn is_empty(&self) -> bool {
+        self.scans.is_empty()
+    }
+
+    /// Get the number of scans
+    pub fn len(&self) -> usize {
+        self.scans.len()
+    }
+}
 
 /// Compilation-time catalog that provides table metadata and EntryIds.
 ///
@@ -70,22 +110,60 @@ pub trait CompilationCatalog: Send + Sync {
     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle>;
 }
 
-/// Execution-time catalog that creates DataSource instances from EntryIds.
+/// Execution-time catalog that creates DataSource instances from ScanIds.
 ///
 /// Used during query execution to:
-/// - Resolve EntryIds to actual data sources
+/// - Resolve ScanIds to actual data sources
 /// - Provide access to the underlying data
 /// - Enable data swapping without recompilation
 ///
-/// Each ExecutionCatalog instance represents a specific dataset.
-/// Different ExecutionCatalogs can provide different data for the same EntryIds.
+/// # Pre-Processing Pattern
+///
+/// Customers are expected to inspect the `CompiledPlan` **before** execution and build
+/// their internal mappings from ScanId to data source implementations. Use
+/// `CompiledPlan::scans()` to iterate over all scans and `CompiledPlan::get_scan(scan_id)`
+/// to retrieve the `ScanMetadata` (layout, object_id) for each scan.
+///
+/// # Example
+/// ```ignore
+/// // Setup phase: inspect plan and prepare catalog
+/// let compiled = compiler.compile(&logical)?;
+/// let mut my_catalog = MyExecutionCatalog::new();
+///
+/// for (scan_id, scan_meta) in compiled.scans() {
+///     // Customer builds their own mapping based on scan metadata
+///     let layout = &scan_meta.layout;
+///     let object_id = &scan_meta.object_id;
+///     my_catalog.prepare_scan(scan_id, object_id.entry_id(), layout.clone());
+/// }
+///
+/// // Execution phase: VM calls create() with just the ScanId
+/// let exec_context = ExecutionContext::new();
+/// exec_context.add_catalog(catalog_id, Arc::new(my_catalog));
+/// let mut vm = PartiQLVM::new(compiled, &exec_context)?;
+/// ```
 pub trait ExecutionCatalog: Send + Sync {
-    /// Create a DataSource for the given entry and layout.
+    /// Prepare the catalog with its assigned scans.
+    ///
+    /// Called to build internal mappings from ScanId to data source implementations.
+    /// Must be called after compilation but before execution.
+    ///
+    /// Use `CompiledPlan::scans_for_catalog(catalog_id)` to extract the scans
+    /// that belong to this catalog.
     ///
     /// # Arguments
     ///
-    /// * `entry_id` - The entry ID within this catalog (assigned during compilation)
-    /// * `layout` - The scan layout specifying projection and optimization hints
+    /// * `scans` - The scans assigned to this catalog (pre-filtered by CatalogId)
+    fn prepare(&mut self, scans: &CatalogScans);
+
+    /// Create a DataSource for the given scan ID.
+    ///
+    /// The catalog is expected to have already been prepared via `prepare()`.
+    /// This method is called during VM instantiation for each scan in the plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `scan_id` - Unique identifier for this scan operation
     ///
     /// # Returns
     ///
@@ -94,9 +172,9 @@ pub trait ExecutionCatalog: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The entry_id is not found in this catalog
+    /// - The scan_id is not found in this catalog's mappings
     /// - The data source cannot be created (e.g., file not found, connection failed)
-    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> Result<Box<dyn DataSource>>;
+    fn create(&self, scan_id: ScanId) -> Result<Box<dyn DataSource>>;
 }
 
 /// Registry that maps catalog names to CompilationCatalog instances.
@@ -171,25 +249,19 @@ impl Default for CompilationContext {
 /// Used during query execution to resolve CatalogIds (from ObjectIds in the compiled plan)
 /// to ExecutionCatalog instances that provide access to actual data.
 ///
-/// # Thread Safety
+/// # Single-Threaded Design
 ///
-/// ExecutionContext can be created per-thread to provide different datasets
-/// for the same compiled plan. Each thread maintains its own catalog mappings.
+/// ExecutionContext is designed for single-threaded use. Each execution should have
+/// its own ExecutionContext instance with its own catalog instances.
 ///
 /// # Example
 /// ```ignore
-/// // Thread 1 - Dataset A
 /// let mut exec_context = ExecutionContext::new();
-/// exec_context.add_catalog(catalog_id, Arc::new(MyExecutionCatalog::new(dataset_a)));
-/// vm.execute(&exec_context)?;
-///
-/// // Thread 2 - Dataset B (same catalog_id, different data)
-/// let mut exec_context = ExecutionContext::new();
-/// exec_context.add_catalog(catalog_id, Arc::new(MyExecutionCatalog::new(dataset_b)));
+/// exec_context.add_catalog(catalog_id, Box::new(MyExecutionCatalog::new(dataset)));
 /// vm.execute(&exec_context)?;
 /// ```
 pub struct ExecutionContext {
-    catalogs: FxHashMap<CatalogId, Arc<dyn ExecutionCatalog>>,
+    catalogs: FxHashMap<CatalogId, Box<dyn ExecutionCatalog>>,
 }
 
 impl ExecutionContext {
@@ -207,7 +279,7 @@ impl ExecutionContext {
     /// logical catalog to a different physical dataset.
     ///
     /// If a catalog with this ID already exists, it will be replaced.
-    pub fn add_catalog(&mut self, catalog_id: CatalogId, catalog: Arc<dyn ExecutionCatalog>) {
+    pub fn add_catalog(&mut self, catalog_id: CatalogId, catalog: Box<dyn ExecutionCatalog>) {
         self.catalogs.insert(catalog_id, catalog);
     }
 
@@ -215,7 +287,22 @@ impl ExecutionContext {
     ///
     /// Returns `None` if no catalog with this ID exists in this context.
     pub fn get_catalog(&self, catalog_id: CatalogId) -> Option<&dyn ExecutionCatalog> {
-        self.catalogs.get(&catalog_id).map(|arc| arc.as_ref())
+        self.catalogs.get(&catalog_id).map(|b| b.as_ref())
+    }
+
+    /// Get mutable access to an execution catalog by its CatalogId.
+    ///
+    /// Returns `None` if no catalog with this ID exists in this context.
+    /// Use this to call `prepare()` on catalogs before execution.
+    pub fn get_catalog_mut(
+        &mut self,
+        catalog_id: CatalogId,
+    ) -> Option<&mut (dyn ExecutionCatalog + '_)> {
+        if let Some(b) = self.catalogs.get_mut(&catalog_id) {
+            Some(b.as_mut())
+        } else {
+            None
+        }
     }
 }
 

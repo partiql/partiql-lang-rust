@@ -19,11 +19,12 @@ use std::sync::{Arc, Mutex};
 
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_eval::source::{
-    BufferStability, DataSource, DataSourceConfig, DataSourceHandle, ScanCapabilities, ScanLayout,
-    ScanSource,
+    BufferStability, CatalogScans, DataSource, DataSourceConfig, DataSourceHandle,
+    ScanCapabilities, ScanId, ScanLayout, ScanSource,
 };
-use partiql_eval::{CompilationCatalog, EngineError, ExecutionCatalog, Result};
+use partiql_eval::{CompilationCatalog, CompiledPlan, EngineError, ExecutionCatalog, Result};
 use partiql_value::BindingsName;
+use std::collections::HashMap;
 
 use std::sync::RwLock;
 
@@ -428,13 +429,34 @@ impl CompilationCatalog for JavaCompilationCatalog {
 }
 
 /// Rust ExecutionCatalog that delegates to Java via JNI
+///
+/// TODO: This type will be deleted once we migrate to a pure-Rust catalog system.
+/// It exists for backward compatibility with Java-based catalog implementations.
+#[allow(dead_code)]
 pub struct JavaExecutionCatalog {
     catalog_id: CatalogId,
+    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
+    scan_mappings: HashMap<ScanId, (EntryId, ScanLayout)>,
 }
 
+#[allow(dead_code)]
 impl JavaExecutionCatalog {
     pub fn new(catalog_id: CatalogId) -> Self {
-        JavaExecutionCatalog { catalog_id }
+        JavaExecutionCatalog {
+            catalog_id,
+            scan_mappings: HashMap::new(),
+        }
+    }
+
+    /// Prepare the catalog by inspecting the CompiledPlan
+    pub fn prepare(&mut self, compiled: &CompiledPlan) {
+        self.scan_mappings.clear();
+        for (scan_id, scan_meta) in compiled.scans() {
+            self.scan_mappings.insert(
+                scan_id,
+                (scan_meta.object_id.entry_id(), scan_meta.layout.clone()),
+            );
+        }
     }
 }
 
@@ -445,33 +467,86 @@ impl JavaExecutionCatalog {
 pub struct JavaBufferedExecutionCatalog {
     entry_id: EntryId,
     buffer: Vec<u8>, // Owned copy of the buffer data
+    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
+    scan_mappings: HashMap<ScanId, (EntryId, ScanLayout)>,
 }
 
 impl JavaBufferedExecutionCatalog {
     /// Create a new buffered catalog from a DirectByteBuffer
     pub fn new(entry_id: EntryId, buffer: Vec<u8>) -> Self {
-        JavaBufferedExecutionCatalog { entry_id, buffer }
+        JavaBufferedExecutionCatalog {
+            entry_id,
+            buffer,
+            scan_mappings: HashMap::new(),
+        }
+    }
+
+    /// Prepare the catalog by inspecting the CompiledPlan
+    #[allow(dead_code)] // Part of public API, called by customers
+    pub fn prepare(&mut self, compiled: &CompiledPlan) {
+        self.scan_mappings.clear();
+        for (scan_id, scan_meta) in compiled.scans() {
+            self.scan_mappings.insert(
+                scan_id,
+                (scan_meta.object_id.entry_id(), scan_meta.layout.clone()),
+            );
+        }
     }
 }
 
 impl ExecutionCatalog for JavaBufferedExecutionCatalog {
-    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
+    fn prepare(&mut self, scans: &CatalogScans) {
+        self.scan_mappings.clear();
+        for (scan_id, entry_id, layout) in scans.iter() {
+            self.scan_mappings
+                .insert(scan_id, (entry_id, layout.clone()));
+        }
+    }
+
+    fn create(&self, scan_id: ScanId) -> Result<Box<dyn DataSource>> {
+        // Look up the scan mapping
+        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
+            EngineError::IllegalState(format!(
+                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
+                scan_id
+            ))
+        })?;
+
         // Verify entry_id matches (currently only support single entry ID)
-        if entry_id != self.entry_id {
+        if *entry_id != self.entry_id {
             return Err(EngineError::IllegalState(format!(
                 "Entry ID mismatch: expected {}, got {}. TODO: Support multiple entry IDs",
                 u64::from(self.entry_id),
-                u64::from(entry_id)
+                u64::from(*entry_id)
             )));
         }
 
         // Create BufferDataSource that reads from our buffer with the layout
-        Ok(Box::new(BufferDataSource::new(self.buffer.clone(), layout)))
+        Ok(Box::new(BufferDataSource::new(
+            self.buffer.clone(),
+            layout.clone(),
+        )))
     }
 }
 
 impl ExecutionCatalog for JavaExecutionCatalog {
-    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> Result<Box<dyn DataSource>> {
+    fn prepare(&mut self, scans: &CatalogScans) {
+        self.scan_mappings.clear();
+        for (scan_id, entry_id, layout) in scans.iter() {
+            self.scan_mappings
+                .insert(scan_id, (entry_id, layout.clone()));
+        }
+    }
+
+    fn create(&self, scan_id: ScanId) -> Result<Box<dyn DataSource>> {
+        // Look up the scan mapping
+        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
+            EngineError::IllegalState(format!(
+                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
+                scan_id
+            ))
+        })?;
+
         // Get the registered catalog
         let entry = EXECUTION_CATALOGS
             .get(&self.catalog_id)
@@ -484,10 +559,10 @@ impl ExecutionCatalog for JavaExecutionCatalog {
             .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
 
         // Convert EntryId to jlong
-        let entry_id_value = u64::from(entry_id) as i64;
+        let entry_id_value = u64::from(*entry_id) as i64;
 
         // Convert Rust ScanLayout to Java ScanLayout
-        let layout_obj = convert_scan_layout_to_java(&mut env, &layout)?;
+        let layout_obj = convert_scan_layout_to_java(&mut env, layout)?;
 
         // Call Java method: DataSource create(long entryId, ScanLayout layout)
         let result = env
@@ -521,7 +596,7 @@ impl ExecutionCatalog for JavaExecutionCatalog {
         Ok(Box::new(JavaDataSource::new(
             data_source_ref,
             vm.clone(),
-            layout,
+            layout.clone(),
         )))
     }
 }

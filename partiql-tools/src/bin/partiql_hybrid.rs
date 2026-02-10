@@ -2,7 +2,7 @@ use partiql_tools::common;
 
 use common::{count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog};
 use partiql_eval::source::CompiledSourceFactory;
-use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
+use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
 use std::time::Instant;
 
@@ -152,10 +152,18 @@ fn main() {
     let mut context = CompilationContext::new();
 
     // Create appropriate catalog based on data source - all use two-phase pattern
-    let (comp_catalog, exec_catalog) = match data_source.as_str() {
+    // The execution catalog is wrapped in an enum to handle different concrete types
+    enum ExecCatalog {
+        Random(common::RandomExecutionCatalog),
+        Simple(common::SimpleExecutionCatalog),
+    }
+
+    let (comp_catalog, mut exec_catalog_inner) = match data_source.as_str() {
         "rand" => {
             // Random catalog for custom reader demonstration
-            random_catalog(vec![("data".to_string(), total_rows, column_names.clone())])
+            let (comp, exec) =
+                random_catalog(vec![("data".to_string(), total_rows, column_names.clone())]);
+            (comp, ExecCatalog::Random(exec))
         }
         "mem" | "ion" | "ionb" => {
             // Simple catalog for mem/ion data sources - use CompiledSourceFactory
@@ -164,7 +172,8 @@ fn main() {
                 "ion" | "ionb" => CompiledSourceFactory::ion(data_path.clone().unwrap_or_default()),
                 _ => unreachable!(),
             };
-            simple_catalog(vec![("data".to_string(), factory)])
+            let (comp, exec) = simple_catalog(vec![("data".to_string(), factory)]);
+            (comp, ExecCatalog::Simple(exec))
         }
         _ => {
             eprintln!("Unsupported data source: {}", data_source);
@@ -175,7 +184,7 @@ fn main() {
     // Add catalog and CAPTURE the returned catalog_id - this is the ONLY place catalog_id is assigned
     let catalog_id = context.add_catalog("default", comp_catalog);
 
-    let compiler = PlanCompiler::new(&context);
+    let mut compiler = PlanCompiler::new(&context);
     let compiled = match compiler.compile(&logical) {
         Ok(p) => p,
         Err(e) => {
@@ -188,9 +197,19 @@ fn main() {
     // Phase 4: Execute
     let exec_start = Instant::now();
 
+    // Prepare execution catalog with catalog-specific scans (ScanId-based pattern)
+    let catalog_scans = compiled.scans_for_catalog(catalog_id);
+    match &mut exec_catalog_inner {
+        ExecCatalog::Random(exec) => exec.prepare(&catalog_scans),
+        ExecCatalog::Simple(exec) => exec.prepare(&catalog_scans),
+    }
+
     // Create ExecutionContext and ALWAYS populate it with execution catalog
     let mut exec_context = ExecutionContext::new();
-    exec_context.add_catalog(catalog_id, exec_catalog);
+    match exec_catalog_inner {
+        ExecCatalog::Random(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
+        ExecCatalog::Simple(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
+    }
 
     let mut vm = match partiql_eval::PartiQLVM::new(compiled, &exec_context) {
         Ok(p) => p,

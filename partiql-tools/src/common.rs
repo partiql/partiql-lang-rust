@@ -396,9 +396,12 @@ impl CompilationCatalog for SimpleCompilationCatalog {
 /// Simple execution catalog for mem/ion data sources
 ///
 /// Creates actual DataSource instances at execution time.
-/// Stores the CompiledSourceFactory that can create DataSources.
+/// Uses the ScanId-based pattern: customers inspect CompiledPlan during setup
+/// and build internal mappings from ScanId to data sources.
 pub struct SimpleExecutionCatalog {
     tables: FxHashMap<EntryId, CompiledSourceFactory>,
+    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
+    scan_mappings: FxHashMap<ScanId, (EntryId, ScanLayout)>,
 }
 
 impl SimpleExecutionCatalog {
@@ -409,13 +412,33 @@ impl SimpleExecutionCatalog {
             table_map.insert(EntryId::from(idx as u64), factory);
         }
 
-        SimpleExecutionCatalog { tables: table_map }
+        SimpleExecutionCatalog {
+            tables: table_map,
+            scan_mappings: FxHashMap::default(),
+        }
     }
 }
 
 impl ExecutionCatalog for SimpleExecutionCatalog {
-    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> EvalResult<Box<dyn DataSource>> {
-        let factory = self.tables.get(&entry_id).ok_or_else(|| {
+    fn prepare(&mut self, scans: &CatalogScans) {
+        self.scan_mappings.clear();
+        for (scan_id, entry_id, layout) in scans.iter() {
+            self.scan_mappings
+                .insert(scan_id, (entry_id, layout.clone()));
+        }
+    }
+
+    fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
+        // Look up the scan mapping
+        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
+                scan_id
+            ))
+        })?;
+
+        // Look up the factory by entry_id
+        let factory = self.tables.get(entry_id).ok_or_else(|| {
             partiql_eval::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
                 entry_id
@@ -423,11 +446,11 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
         })?;
 
         // Use the factory to create the DataSource
-        factory.create(layout)
+        factory.create(layout.clone())
     }
 }
 
-/// Create compilation and execution catalogs for simple data sources (mem/ion)
+/// Create compilation catalog and execution catalog factory for simple data sources (mem/ion)
 ///
 /// This provides the same two-phase catalog pattern as random_catalog,
 /// enabling uniform architecture across all data source types.
@@ -436,23 +459,28 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
 /// * `tables` - Vector of (table_name, CompiledSourceFactory) tuples
 ///
 /// # Returns
-/// A tuple of (CompilationCatalog, ExecutionCatalog)
+/// A tuple of (CompilationCatalog, SimpleExecutionCatalog)
+/// Note: The execution catalog must have `prepare()` called with the CompiledPlan
+/// before it can be used.
 ///
 /// # Example
 /// ```ignore
 /// use partiql_eval::source::CompiledSourceFactory;
 ///
-/// let (comp_catalog, exec_catalog) = simple_catalog(
+/// let (comp_catalog, mut exec_catalog) = simple_catalog(
 ///     vec![
 ///         ("data".to_string(), CompiledSourceFactory::mem(10_000, vec!["a".to_string(), "b".to_string()])),
 ///     ]
 /// );
+///
+/// // After compilation, prepare the execution catalog
+/// exec_catalog.prepare(&compiled_plan);
 /// ```
 pub fn simple_catalog(
     tables: Vec<(String, CompiledSourceFactory)>,
-) -> (Arc<dyn CompilationCatalog>, Arc<dyn ExecutionCatalog>) {
+) -> (Arc<dyn CompilationCatalog>, SimpleExecutionCatalog) {
     let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
-    let exec_catalog = Arc::new(SimpleExecutionCatalog::new(tables));
+    let exec_catalog = SimpleExecutionCatalog::new(tables);
     (comp_catalog, exec_catalog)
 }
 
@@ -471,8 +499,8 @@ pub fn simple_catalog(
 
 use partiql_common::catalog::EntryId;
 use partiql_eval::source::{
-    BufferStability, CompiledSourceFactory, DataSource, DataSourceConfig, RegisterWriter,
-    ScanCapabilities, ScanLayout, ScanSource,
+    BufferStability, CatalogScans, CompiledSourceFactory, DataSource, DataSourceConfig,
+    RegisterWriter, ScanCapabilities, ScanId, ScanLayout, ScanSource,
 };
 use partiql_eval::{ExecutionCatalog, Result as EvalResult};
 use rand::Rng;
@@ -635,8 +663,12 @@ impl CompilationCatalog for RandomCompilationCatalog {
 ///
 /// Creates actual DataSource instances at execution time, enabling different
 /// data for the same compiled plan (catalog swapping).
+/// Uses the ScanId-based pattern: customers inspect CompiledPlan during setup
+/// and build internal mappings from ScanId to data sources.
 pub struct RandomExecutionCatalog {
     tables: FxHashMap<EntryId, RandomTableMeta>,
+    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
+    scan_mappings: FxHashMap<ScanId, (EntryId, ScanLayout)>,
 }
 
 impl RandomExecutionCatalog {
@@ -654,13 +686,33 @@ impl RandomExecutionCatalog {
             );
         }
 
-        RandomExecutionCatalog { tables: table_map }
+        RandomExecutionCatalog {
+            tables: table_map,
+            scan_mappings: FxHashMap::default(),
+        }
     }
 }
 
 impl ExecutionCatalog for RandomExecutionCatalog {
-    fn create(&self, entry_id: EntryId, layout: ScanLayout) -> EvalResult<Box<dyn DataSource>> {
-        let meta = self.tables.get(&entry_id).ok_or_else(|| {
+    fn prepare(&mut self, scans: &CatalogScans) {
+        self.scan_mappings.clear();
+        for (scan_id, entry_id, layout) in scans.iter() {
+            self.scan_mappings
+                .insert(scan_id, (entry_id, layout.clone()));
+        }
+    }
+
+    fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
+        // Look up the scan mapping
+        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
+            partiql_eval::EngineError::IllegalState(format!(
+                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
+                scan_id
+            ))
+        })?;
+
+        // Look up the table metadata by entry_id
+        let meta = self.tables.get(entry_id).ok_or_else(|| {
             partiql_eval::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
                 entry_id
@@ -670,12 +722,12 @@ impl ExecutionCatalog for RandomExecutionCatalog {
         Ok(Box::new(RandomDataSource::new(
             meta.num_rows,
             meta.column_names.len(),
-            layout,
+            layout.clone(),
         )))
     }
 }
 
-/// Create compilation and execution catalogs for random data sources
+/// Create compilation catalog and execution catalog factory for random data sources
 ///
 /// This demonstrates the complete two-phase catalog pattern for custom readers.
 ///
@@ -683,12 +735,13 @@ impl ExecutionCatalog for RandomExecutionCatalog {
 /// * `tables` - Vector of (table_name, num_rows, column_names) tuples
 ///
 /// # Returns
-/// A tuple of (CompilationCatalog, ExecutionCatalog) that can be used with
-/// CompilationContext and ExecutionContext respectively.
+/// A tuple of (CompilationCatalog, RandomExecutionCatalog)
+/// Note: The execution catalog must have `prepare()` called with the CompiledPlan
+/// before it can be used.
 ///
 /// # Example
 /// ```ignore
-/// let (comp_catalog, exec_catalog) = random_catalog(
+/// let (comp_catalog, mut exec_catalog) = random_catalog(
 ///     vec![
 ///         ("users".to_string(), 10_000, vec!["id".to_string(), "age".to_string()]),
 ///         ("orders".to_string(), 50_000, vec!["order_id".to_string(), "amount".to_string()]),
@@ -699,14 +752,20 @@ impl ExecutionCatalog for RandomExecutionCatalog {
 /// let mut comp_context = CompilationContext::new();
 /// let catalog_id = comp_context.add_catalog("main", comp_catalog);
 ///
+/// // Compile the plan
+/// let compiled = compiler.compile(&logical)?;
+///
+/// // Prepare execution catalog with the compiled plan
+/// exec_catalog.prepare(&compiled);
+///
 /// // Use in execution with the returned catalog_id
 /// let mut exec_context = ExecutionContext::new();
-/// exec_context.add_catalog(catalog_id, exec_catalog);
+/// exec_context.add_catalog(catalog_id, Arc::new(exec_catalog));
 /// ```
 pub fn random_catalog(
     tables: Vec<(String, usize, Vec<String>)>,
-) -> (Arc<dyn CompilationCatalog>, Arc<dyn ExecutionCatalog>) {
+) -> (Arc<dyn CompilationCatalog>, RandomExecutionCatalog) {
     let comp_catalog = Arc::new(RandomCompilationCatalog::new(tables.clone()));
-    let exec_catalog = Arc::new(RandomExecutionCatalog::new(tables));
+    let exec_catalog = RandomExecutionCatalog::new(tables);
     (comp_catalog, exec_catalog)
 }

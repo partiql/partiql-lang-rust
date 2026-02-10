@@ -1,7 +1,9 @@
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
-use crate::engine::plan::{Column, CompiledPlan, PipelineSpec, RelOpSpec, Schema, StepSpec};
+use crate::engine::plan::{
+    Column, CompiledPlan, ObjectId, PipelineSpec, RelOpSpec, ScanId, ScanMetadata, Schema, StepSpec,
+};
 use crate::engine::row::SlotId;
 use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TypeHint};
 use crate::engine::SlotResolver;
@@ -11,9 +13,11 @@ use partiql_logical::{
 };
 use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::HashMap;
 
 pub struct PlanCompiler<'a> {
     compilation_context: &'a CompilationContext,
+    next_scan_id: u64,
 }
 
 impl<'a> PlanCompiler<'a> {
@@ -23,10 +27,18 @@ impl<'a> PlanCompiler<'a> {
     pub fn new(compilation_context: &'a CompilationContext) -> Self {
         PlanCompiler {
             compilation_context,
+            next_scan_id: 0,
         }
     }
 
-    pub fn compile(&self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
+    /// Allocate a new unique ScanId
+    fn alloc_scan_id(&mut self) -> ScanId {
+        let id = ScanId::new(self.next_scan_id);
+        self.next_scan_id += 1;
+        id
+    }
+
+    pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
         let order = linearize(plan)?;
 
         let mut scan: Option<&Scan> = None;
@@ -179,18 +191,22 @@ impl<'a> PlanCompiler<'a> {
             steps.push(StepSpec::Limit { limit });
         }
 
-        use crate::engine::plan::CompiledDataSourceHandle;
+        // Generate unique ScanId and build scan metadata
+        let scan_id = self.alloc_scan_id();
+        let entry_id = reader_factory.entry_id().ok_or_else(|| {
+            EngineError::InvalidPlan(
+                "Direct data sources not supported in catalog-based compilation".to_string(),
+            )
+        })?;
 
-        let compiled_data_source = CompiledDataSourceHandle {
-            catalog_id,
-            handle: reader_factory,
-        };
+        let object_id = ObjectId::new(catalog_id, entry_id);
+        let scan_meta = ScanMetadata { layout, object_id };
 
-        let pipeline = PipelineSpec {
-            layout,
-            steps,
-            data_source: compiled_data_source,
-        };
+        // Build scan_metadata map
+        let mut scan_metadata = HashMap::new();
+        scan_metadata.insert(scan_id, scan_meta);
+
+        let pipeline = PipelineSpec { scan_id, steps };
 
         Ok(CompiledPlan {
             nodes: vec![RelOpSpec::Pipeline(pipeline)],
@@ -198,6 +214,7 @@ impl<'a> PlanCompiler<'a> {
             schema,
             slot_count,
             max_registers,
+            scan_metadata,
         })
     }
 
