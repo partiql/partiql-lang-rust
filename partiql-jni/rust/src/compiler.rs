@@ -56,7 +56,7 @@ pub extern "system" fn Java_org_partiql_jni_PlanCompiler_nativeCompile(
         // Get CompilationContext from handle (wrapped in Arc)
         let compilation_context = crate::context::get_compilation_context(context_handle as u64)?;
 
-        let plan_compiler = PlanCompiler::new(&compilation_context);
+        let mut plan_compiler = PlanCompiler::new(&compilation_context);
         let compiled = plan_compiler.compile(&logical)?;
 
         Ok(create_plan_handle(compiled) as jlong)

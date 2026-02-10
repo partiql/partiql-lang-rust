@@ -271,7 +271,7 @@ fn compile_hybrid(
     _total_rows: usize,
 ) -> partiql_eval::Result<partiql_eval::PartiQLVM> {
     let compilation_context = partiql_eval::CompilationContext::new();
-    let compiler = PlanCompiler::new(&compilation_context);
+    let mut compiler = PlanCompiler::new(&compilation_context);
     let compiled = compiler.compile(logical)?;
     let exec_context = partiql_eval::ExecutionContext::new();
     partiql_eval::PartiQLVM::new(compiled, &exec_context)

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::engine::catalog::ExecutionContext;
@@ -15,6 +16,36 @@ use partiql_catalog::catalog::SharedCatalog;
 use partiql_catalog::context::SystemContext;
 use partiql_logical::{BindingsOp, LogicalPlan};
 use partiql_value::{DateTime, Value};
+
+/// Unique identifier for a scan operation within a compiled plan.
+///
+/// Each table scan gets a unique ScanId, even when scanning the same table
+/// multiple times (e.g., self-joins). This enables external data sources to
+/// provide different implementations for different scans of the same table.
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+pub struct ScanId(u64);
+
+impl ScanId {
+    pub(crate) fn new(id: u64) -> Self {
+        ScanId(id)
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+// Re-export ObjectId from partiql_common for convenience
+pub use partiql_common::catalog::ObjectId;
+
+/// Metadata for a scan operation, known at compile time.
+///
+/// Associates a scan with its layout and the table being scanned.
+#[derive(Clone, Debug)]
+pub struct ScanMetadata {
+    pub layout: ScanLayout,
+    pub object_id: ObjectId,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Schema {
@@ -46,6 +77,7 @@ pub struct CompiledPlan {
     pub(crate) schema: Schema,
     pub(crate) slot_count: usize,
     pub(crate) max_registers: usize,
+    pub(crate) scan_metadata: HashMap<ScanId, ScanMetadata>,
 }
 
 // Conditional bounds ensure CompiledPlan is only Send/Sync when all fields are.
@@ -73,6 +105,7 @@ impl Clone for CompiledPlan {
             schema: self.schema.clone(),
             slot_count: self.slot_count,
             max_registers: self.max_registers,
+            scan_metadata: self.scan_metadata.clone(),
         }
     }
 }
@@ -80,6 +113,48 @@ impl Clone for CompiledPlan {
 impl CompiledPlan {
     pub fn result_schema(&self) -> Schema {
         self.schema.clone()
+    }
+
+    /// Get metadata for a specific scan operation.
+    ///
+    /// Returns `None` if the scan_id is not found in this plan.
+    pub fn get_scan(&self, scan_id: ScanId) -> Option<&ScanMetadata> {
+        self.scan_metadata.get(&scan_id)
+    }
+
+    /// Iterate over all scans in this plan.
+    ///
+    /// This allows external catalogs to inspect the plan and prepare
+    /// their internal mappings during setup.
+    pub fn scans(&self) -> impl Iterator<Item = (ScanId, &ScanMetadata)> + '_ {
+        self.scan_metadata.iter().map(|(id, meta)| (*id, meta))
+    }
+
+    /// Extract scans for a specific catalog.
+    ///
+    /// Returns a `CatalogScans` containing only the scans that belong to the
+    /// specified catalog, ready to pass to `ExecutionCatalog::prepare()`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let catalog_scans = compiled.scans_for_catalog(catalog_id);
+    /// exec_catalog.prepare(&catalog_scans);
+    /// ```
+    pub fn scans_for_catalog(
+        &self,
+        catalog_id: partiql_common::catalog::CatalogId,
+    ) -> crate::engine::catalog::CatalogScans {
+        let mut scans = crate::engine::catalog::CatalogScans::new();
+        for (scan_id, scan_meta) in self.scan_metadata.iter() {
+            if scan_meta.object_id.catalog_id() == catalog_id {
+                scans.add(
+                    *scan_id,
+                    scan_meta.object_id.entry_id(),
+                    scan_meta.layout.clone(),
+                );
+            }
+        }
+        scans
     }
 }
 
@@ -122,28 +197,16 @@ impl RelOpSpec {
     }
 }
 
-/// Compiled data source handle with catalog context.
-///
-/// Wraps a DataSourceHandle with its CatalogId, enabling execution-time
-/// resolution without baking the catalog ID into the handle itself.
-#[derive(Clone)]
-pub(crate) struct CompiledDataSourceHandle {
-    pub(crate) catalog_id: partiql_common::catalog::CatalogId,
-    pub(crate) handle: crate::engine::source::DataSourceHandle,
-}
-
 pub struct PipelineSpec {
-    pub layout: ScanLayout,
+    pub scan_id: ScanId,
     pub steps: Vec<StepSpec>,
-    pub data_source: CompiledDataSourceHandle,
 }
 
 impl PipelineSpec {
     pub(crate) fn clone_pipeline(&self) -> Self {
         Self {
-            layout: self.layout.clone(),
+            scan_id: self.scan_id,
             steps: self.steps.clone(),
-            data_source: self.data_source.clone(),
         }
     }
 }
@@ -550,13 +613,25 @@ impl PartiQLVM {
         for node in &compiled.nodes {
             match node {
                 RelOpSpec::Pipeline(spec) => {
-                    // Resolve DataSource from handle - single path for ALL data sources
-                    // Extract catalog_id from CompiledDataSourceHandle and pass to create_impl
-                    let reader = spec.data_source.handle.create_impl(
-                        spec.data_source.catalog_id,
-                        spec.layout.clone(),
-                        exec_context,
-                    )?;
+                    // Get scan metadata for this scan_id
+                    let scan_meta = compiled.get_scan(spec.scan_id).ok_or_else(|| {
+                        EngineError::IllegalState(format!("Unknown scan_id: {:?}", spec.scan_id))
+                    })?;
+
+                    // Get the catalog for this scan's object
+                    let catalog = exec_context
+                        .get_catalog(scan_meta.object_id.catalog_id())
+                        .ok_or_else(|| {
+                            EngineError::IllegalState(format!(
+                                "Catalog {:?} not found in ExecutionContext",
+                                scan_meta.object_id.catalog_id()
+                            ))
+                        })?;
+
+                    // Catalog creates DataSource using just the ScanId
+                    // (catalog has already inspected CompiledPlan and built its mappings)
+                    let data_source = catalog.create(spec.scan_id)?;
+                    let reader = DataSourceImpl::Catalog(data_source);
 
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(
@@ -646,11 +721,25 @@ impl PartiQLVM {
         for node in &self.compiled.nodes {
             match node {
                 RelOpSpec::Pipeline(spec) => {
-                    let reader = spec.data_source.handle.create_impl(
-                        spec.data_source.catalog_id,
-                        spec.layout.clone(),
-                        exec_context,
-                    )?;
+                    // Get scan metadata for this scan_id
+                    let scan_meta = self.compiled.get_scan(spec.scan_id).ok_or_else(|| {
+                        EngineError::IllegalState(format!("Unknown scan_id: {:?}", spec.scan_id))
+                    })?;
+
+                    // Get the catalog for this scan's object
+                    let catalog = exec_context
+                        .get_catalog(scan_meta.object_id.catalog_id())
+                        .ok_or_else(|| {
+                            EngineError::IllegalState(format!(
+                                "Catalog {:?} not found in ExecutionContext",
+                                scan_meta.object_id.catalog_id()
+                            ))
+                        })?;
+
+                    // Catalog creates DataSource using just the ScanId
+                    let data_source = catalog.create(spec.scan_id)?;
+                    let reader = DataSourceImpl::Catalog(data_source);
+
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(steps, reader, None)));
                 }

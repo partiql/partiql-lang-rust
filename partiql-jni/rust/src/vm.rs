@@ -23,8 +23,24 @@ pub extern "system" fn Java_org_partiql_jni_PartiQLVM_nativeNew(
     jni_guard!(env, {
         let plan = get_plan(plan_handle as u64)?;
 
-        // Get ExecutionContext from handle (wrapped in Arc)
-        let exec_context = crate::context::get_execution_context(exec_context_handle as u64)?;
+        // Get mutable access to ExecutionContext to call prepare() on catalogs
+        let mut exec_context =
+            crate::context::get_execution_context_mut(exec_context_handle as u64)?;
+
+        // Prepare each catalog with its scans from the plan
+        // Collect catalog IDs first to avoid borrow issues
+        let catalog_ids: Vec<_> = plan
+            .scans()
+            .map(|(_, meta)| meta.object_id.catalog_id())
+            .collect();
+        let unique_catalog_ids: std::collections::HashSet<_> = catalog_ids.into_iter().collect();
+
+        for catalog_id in unique_catalog_ids {
+            let scans = plan.scans_for_catalog(catalog_id);
+            if let Some(catalog) = exec_context.get_catalog_mut(catalog_id) {
+                catalog.prepare(&scans);
+            }
+        }
 
         let vm = PartiQLVM::new((*plan).clone(), &exec_context)?;
         Ok(create_vm_handle(vm) as jlong)

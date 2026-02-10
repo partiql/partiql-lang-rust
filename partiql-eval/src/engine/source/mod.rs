@@ -10,12 +10,16 @@ pub use api::{
     ScanProjection, ScanSource, TypeHint,
 };
 
+// Re-export ScanId and CatalogScans for catalog implementations
+pub use crate::engine::catalog::CatalogScans;
+pub use crate::engine::plan::ScanId;
+
 // Internal types - re-exported as pub(crate) for use within the engine
 pub(crate) use internal::{DataSourceFactoryInner, DataSourceImpl};
 
 // Internal imports for use within this module only
-use ion_reader::{IonDataSource, IonDataSourceFactory};
-use mem_reader::{InMemGeneratedDataSourceHandle, InMemGeneratedReader};
+use ion_reader::IonDataSourceFactory;
+use mem_reader::InMemGeneratedDataSourceHandle;
 
 use crate::engine::error::Result;
 use partiql_common::catalog::EntryId;
@@ -136,50 +140,6 @@ impl DataSourceHandle {
         match &self.inner {
             DataSourceHandleInner::Catalog { config, .. } => config.resolve(field_name),
             DataSourceHandleInner::Direct(factory) => factory.resolve(field_name),
-        }
-    }
-
-    /// Create a DataSourceImpl from this handle with the given layout.
-    ///
-    /// This is the SINGLE method for resolving ALL data sources:
-    /// - Direct (ion/mem): Resolved immediately without ExecutionContext
-    /// - Catalog-based: Resolved via ExecutionContext using provided catalog_id
-    ///
-    /// # Arguments
-    /// * `catalog_id` - CatalogId from the compiler (for catalog-based handles)
-    /// * `layout` - The scan layout for projection pushdown
-    /// * `exec_context` - ExecutionContext for resolving catalog-based handles
-    ///
-    /// # Returns
-    /// A DataSourceImpl ready for execution (static dispatch for ion/mem, dynamic for catalog)
-    pub(crate) fn create_impl(
-        &self,
-        catalog_id: partiql_common::catalog::CatalogId,
-        layout: ScanLayout,
-        exec_context: &crate::engine::catalog::ExecutionContext,
-    ) -> Result<DataSourceImpl> {
-        match &self.inner {
-            DataSourceHandleInner::Direct(factory) => match factory {
-                DataSourceFactoryInner::InMem(f) => Ok(DataSourceImpl::InMem(
-                    InMemGeneratedReader::new(f.total_rows, f.column_names.len(), layout),
-                )),
-                DataSourceFactoryInner::Ion(f) => Ok(DataSourceImpl::Ion(IonDataSource::new(
-                    f.path.clone(),
-                    layout,
-                ))),
-            },
-            DataSourceHandleInner::Catalog { entry_id, .. } => {
-                // Catalog-based: resolve via ExecutionContext using provided catalog_id
-                let catalog = exec_context.get_catalog(catalog_id).ok_or_else(|| {
-                    crate::engine::error::EngineError::IllegalState(format!(
-                        "Catalog {:?} not found in ExecutionContext",
-                        catalog_id
-                    ))
-                })?;
-
-                let data_source = catalog.create(*entry_id, layout)?;
-                Ok(DataSourceImpl::Catalog(data_source))
-            }
         }
     }
 }

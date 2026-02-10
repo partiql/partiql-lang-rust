@@ -181,7 +181,7 @@ impl HybridPlan {
         let logical = lower(&*catalog, &parsed).expect("Lower failed");
 
         let compilation_ctx = partiql_eval::CompilationContext::new();
-        let compiler = PlanCompiler::new(&compilation_ctx);
+        let mut compiler = PlanCompiler::new(&compilation_ctx);
         let compiled = compiler.compile(&logical).expect("Compile failed");
 
         Self {

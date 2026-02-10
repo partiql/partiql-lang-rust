@@ -223,8 +223,8 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddCatalog(
         let catalog_id_typed = CatalogId::from(catalog_id as u64);
 
         // Create JavaExecutionCatalog wrapper
-        let java_exec_catalog: Arc<dyn partiql_eval::ExecutionCatalog> =
-            Arc::new(catalog_bridge::JavaExecutionCatalog::new(catalog_id_typed));
+        let java_exec_catalog: Box<dyn partiql_eval::ExecutionCatalog> =
+            Box::new(catalog_bridge::JavaExecutionCatalog::new(catalog_id_typed));
 
         // Add catalog to ExecutionContext
         exec_context.add_catalog(catalog_id_typed, java_exec_catalog);
@@ -294,7 +294,7 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCa
         let entry_id_typed = partiql_common::catalog::EntryId::from(entry_id as u64);
 
         // Create JavaBufferedExecutionCatalog
-        let buffered_catalog: Arc<dyn partiql_eval::ExecutionCatalog> = Arc::new(
+        let buffered_catalog: Box<dyn partiql_eval::ExecutionCatalog> = Box::new(
             catalog_bridge::JavaBufferedExecutionCatalog::new(entry_id_typed, buffer_data),
         );
 
