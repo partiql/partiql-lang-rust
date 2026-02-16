@@ -1,4 +1,4 @@
-use crate::engine::value::{TupleField, TupleRef, ValueOwned, ValueRef};
+use crate::engine::value::{TupleField, TupleRef, ValueRef};
 use std::cell::{Cell, UnsafeCell};
 
 pub type SlotId = u16;
@@ -39,84 +39,6 @@ impl Arena {
         }
     }
 
-    /// Allocate a value in the arena and return a reference to it
-    ///
-    /// All allocations are sequential in memory for perfect cache locality.
-    /// The returned reference is valid until the next reset() call.
-    pub fn alloc(&self, value: ValueOwned) -> &ValueOwned {
-        let size = std::mem::size_of::<ValueOwned>();
-        let align = std::mem::align_of::<ValueOwned>();
-
-        // Align the current offset
-        let offset = self.offset.get();
-        let aligned_offset = (offset + align - 1) & !(align - 1);
-
-        let buffer = unsafe { &mut *self.buffer.get() };
-
-        // Calculate new offset after this allocation
-        let new_offset = aligned_offset + size;
-
-        // Ensure we have enough capacity
-        if new_offset > buffer.capacity() {
-            // Double the capacity when we run out
-            let new_capacity = buffer
-                .capacity()
-                .max(size)
-                .checked_mul(2)
-                .expect("arena capacity overflow");
-            buffer.reserve(new_capacity - buffer.capacity());
-        }
-
-        // Extend buffer length if needed
-        if new_offset > buffer.len() {
-            buffer.resize(new_offset, 0);
-        }
-
-        // Write the value at the aligned offset
-        unsafe {
-            let ptr = buffer.as_mut_ptr().add(aligned_offset) as *mut ValueOwned;
-            std::ptr::write(ptr, value);
-            self.offset.set(new_offset);
-            &*ptr
-        }
-    }
-
-    /// Allocate a string slice in the arena
-    ///
-    /// Use this when you need to convert a non-string ValueRef to a string name.
-    #[allow(dead_code)]
-    pub fn alloc_str(&self, s: &str) -> &str {
-        let bytes = s.as_bytes();
-        let size = bytes.len();
-        let align = std::mem::align_of::<u8>();
-
-        let offset = self.offset.get();
-        let aligned_offset = (offset + align - 1) & !(align - 1);
-
-        let buffer = unsafe { &mut *self.buffer.get() };
-        let new_offset = aligned_offset + size;
-
-        if new_offset > buffer.capacity() {
-            let new_capacity = buffer
-                .capacity()
-                .max(size)
-                .checked_mul(2)
-                .expect("arena capacity overflow");
-            buffer.reserve(new_capacity - buffer.capacity());
-        }
-
-        if new_offset > buffer.len() {
-            buffer.resize(new_offset, 0);
-        }
-
-        unsafe {
-            let ptr = buffer.as_mut_ptr().add(aligned_offset);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, size);
-            self.offset.set(new_offset);
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, size))
-        }
-    }
-
     /// Allocate a tuple from name and value ValueRefs
     ///
     /// Takes pairs of (name ValueRef, value ValueRef) where:
@@ -148,8 +70,8 @@ impl Arena {
         self.alloc_tuple_ref(tuple_ref)
     }
 
-    /// Helper: allocate a slice
-    fn alloc_slice<T: Copy>(&self, items: &[T]) -> &[T] {
+    /// Allocate a slice in the arena
+    pub(crate) fn alloc_slice<T: Copy>(&self, items: &[T]) -> &[T] {
         if items.is_empty() {
             return &[];
         }
@@ -184,8 +106,8 @@ impl Arena {
         }
     }
 
-    /// Helper: allocate a TupleRef
-    fn alloc_tuple_ref<'a>(&'a self, tuple_ref: TupleRef<'a>) -> &'a TupleRef<'a> {
+    /// Allocate a TupleRef in the arena
+    pub(crate) fn alloc_tuple_ref<'a>(&'a self, tuple_ref: TupleRef<'a>) -> &'a TupleRef<'a> {
         let size = std::mem::size_of::<TupleRef<'_>>();
         let align = std::mem::align_of::<TupleRef<'_>>();
 

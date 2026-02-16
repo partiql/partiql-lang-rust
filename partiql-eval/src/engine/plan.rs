@@ -7,15 +7,8 @@ use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::Program;
 use crate::engine::source::RegisterWriter;
 use crate::engine::source::{DataSourceImpl, ScanLayout};
-use crate::engine::value::{RegisterReader, Shape, ValueOwned, ValueRef};
+use crate::engine::value::{RegisterReader, Shape, ValueRef};
 use crate::engine::UdfRegistry;
-use crate::env::basic::MapBindings;
-use crate::eval::BasicContext;
-use crate::plan::{EvaluationMode, EvaluatorPlanner};
-use partiql_catalog::catalog::SharedCatalog;
-use partiql_catalog::context::SystemContext;
-use partiql_logical::{BindingsOp, LogicalPlan};
-use partiql_value::{DateTime, Value};
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -158,18 +151,6 @@ pub(crate) enum RelOpSpec {
     HashAgg(HashAggSpec),
     Sort(SortSpec),
     Custom(Box<dyn BlockingOperatorSpec>),
-    Legacy(LegacySpec),
-}
-
-/// Specification for legacy operator support.
-///
-/// Stores the data needed to compile an old-style EvalPlan on-demand.
-/// This allows CompiledPlan to remain Send + Sync while each VM instance
-/// compiles its own EvalPlan (which contains non-Send types like Rc).
-pub struct LegacySpec {
-    pub catalog: Arc<dyn SharedCatalog>,
-    pub logical_plan: LogicalPlan<BindingsOp>,
-    pub mode: EvaluationMode,
 }
 
 impl RelOpSpec {
@@ -181,11 +162,6 @@ impl RelOpSpec {
             RelOpSpec::HashAgg(_) => RelOpSpec::HashAgg(HashAggSpec),
             RelOpSpec::Sort(_) => RelOpSpec::Sort(SortSpec),
             RelOpSpec::Custom(_) => panic!("Cannot clone custom operator spec"),
-            RelOpSpec::Legacy(spec) => RelOpSpec::Legacy(LegacySpec {
-                catalog: spec.catalog.clone(),
-                logical_plan: spec.logical_plan.clone(),
-                mode: spec.mode,
-            }),
         }
     }
 }
@@ -234,7 +210,6 @@ pub(crate) enum RelOp {
     HashAgg(HashAggState),
     Sort(SortState),
     Custom(Box<dyn BlockingOperator>),
-    Legacy(LegacyState),
 }
 
 impl RelOp {
@@ -247,7 +222,6 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.next_row(arena, regs, slot_count),
             RelOp::ExprQuery(op) => op.next_row(arena, regs, slot_count),
-            RelOp::Legacy(op) => op.next_row(arena, regs, slot_count),
             RelOp::HashJoin(_op) => Err(EngineError::NotImplemented),
             RelOp::HashAgg(_op) => Err(EngineError::NotImplemented),
             RelOp::Sort(_op) => Err(EngineError::NotImplemented),
@@ -260,7 +234,6 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.open(),
             RelOp::ExprQuery(op) => op.open(),
-            RelOp::Legacy(op) => op.open(),
             RelOp::HashJoin(op) => op.open(),
             RelOp::HashAgg(op) => op.open(),
             RelOp::Sort(op) => op.open(),
@@ -273,7 +246,6 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.close(),
             RelOp::ExprQuery(op) => op.close(),
-            RelOp::Legacy(op) => op.close(),
             RelOp::HashJoin(op) => op.close(),
             RelOp::HashAgg(op) => op.close(),
             RelOp::Sort(op) => op.close(),
@@ -340,21 +312,6 @@ impl ExprQueryOp {
 pub struct HashJoinState;
 pub struct HashAggState;
 pub struct SortState;
-
-/// Legacy operator state that compiles EvalPlan on-demand.
-///
-/// Each VM instance creates its own EvalPlan (with non-Send types like Rc),
-/// enabling thread-safe CompiledPlan while supporting legacy queries.
-pub(crate) struct LegacyState {
-    catalog: Arc<dyn SharedCatalog>,
-    logical_plan: LogicalPlan<BindingsOp>,
-    mode: EvaluationMode,
-    eval_plan: Option<crate::eval::EvalPlan>, // Compiled lazily on open()
-    eval_context: Box<dyn crate::eval::EvalContext>,
-    cached_results: Option<Vec<Value>>,
-    current_index: usize,
-    opened: bool,
-}
 
 impl PipelineOp {
     pub(crate) fn new(
@@ -473,142 +430,6 @@ impl SortState {
     }
 }
 
-impl LegacyState {
-    pub(crate) fn new(
-        catalog: Arc<dyn SharedCatalog>,
-        logical_plan: LogicalPlan<BindingsOp>,
-        mode: EvaluationMode,
-        eval_context: Box<dyn crate::eval::EvalContext>,
-    ) -> Self {
-        LegacyState {
-            catalog,
-            logical_plan,
-            mode,
-            eval_plan: None,
-            eval_context,
-            cached_results: None,
-            current_index: 0,
-            opened: false,
-        }
-    }
-
-    pub fn open(&mut self) -> Result<()> {
-        if !self.opened {
-            // Compile EvalPlan on first open (per VM instance)
-            if self.eval_plan.is_none() {
-                let mut planner = EvaluatorPlanner::new(self.mode, self.catalog.as_ref());
-                self.eval_plan = Some(planner.compile(&self.logical_plan).map_err(|e| {
-                    EngineError::IllegalState(format!("Legacy plan compilation failed: {:?}", e))
-                })?);
-            }
-
-            // Execute EvalPlan
-            let evaluated = self
-                .eval_plan
-                .as_ref()
-                .unwrap()
-                .execute(&*self.eval_context)
-                .map_err(|e| {
-                    EngineError::IllegalState(format!("Legacy plan execution failed: {:?}", e))
-                })?;
-
-            // Convert result to Vec<Value>
-            let results = match evaluated.result {
-                Value::Bag(bag) => bag.iter().cloned().collect(),
-                Value::List(list) => list.iter().cloned().collect(),
-                Value::Tuple(tuple) => vec![Value::Tuple(tuple)],
-                other => vec![other],
-            };
-
-            self.cached_results = Some(results);
-            self.current_index = 0;
-            self.opened = true;
-        }
-        Ok(())
-    }
-
-    pub fn close(&mut self) -> Result<()> {
-        if self.opened {
-            self.cached_results = None;
-            self.current_index = 0;
-            self.opened = false;
-        }
-        Ok(())
-    }
-
-    pub fn next_row<'a>(
-        &'a mut self,
-        arena: &'a Arena,
-        regs: &'a mut [ValueRef<'a>],
-        slot_count: usize,
-    ) -> Result<Option<RegisterReader<'a>>> {
-        let results = match &self.cached_results {
-            Some(r) => r,
-            None => {
-                return Err(EngineError::IllegalState(
-                    "LegacyState not opened".to_string(),
-                ))
-            }
-        };
-
-        if self.current_index >= results.len() {
-            return Ok(None);
-        }
-
-        // Get current value and convert to registers
-        let value = &results[self.current_index];
-        Self::value_to_registers(value, arena, regs, slot_count)?;
-
-        self.current_index += 1;
-
-        // Return view of slot region
-        let slots = &regs[0..slot_count];
-        Ok(Some(RegisterReader::new(slots)))
-    }
-
-    /// Convert a partiql_value::Value to ValueRef in registers
-    fn value_to_registers<'a>(
-        value: &Value,
-        arena: &'a Arena,
-        regs: &mut [ValueRef<'a>],
-        slot_count: usize,
-    ) -> Result<()> {
-        match value {
-            Value::Tuple(tuple) => {
-                // Map tuple fields to slot registers
-                for (i, (_key, val)) in tuple.pairs().enumerate() {
-                    if i < slot_count {
-                        regs[i] = Self::partiql_value_to_valueref(val, arena)?;
-                    }
-                }
-                Ok(())
-            }
-            _ => {
-                // For non-tuple values, put in first slot
-                regs[0] = Self::partiql_value_to_valueref(value, arena)?;
-                Ok(())
-            }
-        }
-    }
-
-    /// Convert partiql_value::Value to ValueRef
-    fn partiql_value_to_valueref<'a>(value: &Value, arena: &'a Arena) -> Result<ValueRef<'a>> {
-        match value {
-            Value::Null => Ok(ValueRef::Null),
-            Value::Missing => Ok(ValueRef::Missing),
-            Value::Boolean(b) => Ok(ValueRef::Bool(*b)),
-            Value::Integer(i) => Ok(ValueRef::I64(*i)),
-            Value::Real(r) => Ok(ValueRef::F64(r.into_inner())),
-            // For all other types including String, allocate in arena
-            other => {
-                let owned = ValueOwned::from(other.clone());
-                let ptr = arena.alloc(owned);
-                Ok(ValueRef::from_owned(ptr))
-            }
-        }
-    }
-}
-
 /// Single-threaded virtual machine for executing a compiled PartiQL plan
 ///
 /// The VM owns all execution state including:
@@ -693,21 +514,6 @@ impl PartiQLVM {
                     operators.push(RelOp::ExprQuery(ExprQueryOp::new(
                         spec.program.clone(),
                         None, // UDF registry not supported yet
-                    )));
-                }
-                RelOpSpec::Legacy(spec) => {
-                    // Create eval context for legacy execution
-                    let bindings = MapBindings::default();
-                    let sys = SystemContext {
-                        now: DateTime::from_system_now_utc(),
-                    };
-                    let eval_context = Box::new(BasicContext::new(bindings, sys));
-
-                    operators.push(RelOp::Legacy(LegacyState::new(
-                        spec.catalog.clone(),
-                        spec.logical_plan.clone(),
-                        spec.mode,
-                        eval_context,
                     )));
                 }
                 _ => {
@@ -804,19 +610,6 @@ impl PartiQLVM {
                     operators.push(RelOp::ExprQuery(ExprQueryOp::new(
                         spec.program.clone(),
                         None,
-                    )));
-                }
-                RelOpSpec::Legacy(spec) => {
-                    let bindings = MapBindings::default();
-                    let sys = SystemContext {
-                        now: DateTime::from_system_now_utc(),
-                    };
-                    let eval_context = Box::new(BasicContext::new(bindings, sys));
-                    operators.push(RelOp::Legacy(LegacyState::new(
-                        spec.catalog.clone(),
-                        spec.logical_plan.clone(),
-                        spec.mode,
-                        eval_context,
                     )));
                 }
                 _ => {

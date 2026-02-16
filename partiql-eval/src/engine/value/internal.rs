@@ -1,11 +1,6 @@
-use partiql_value::datum::{DatumCategory, DatumCategoryRef, RefTupleView};
-use partiql_value::Value;
-use std::borrow::Cow;
-
 use super::value_owned::ValueOwned;
 use crate::engine::arena::Arena;
 use crate::engine::error::{EngineError, Result};
-use partiql_value::BindingsName;
 
 /// Compact tuple representation stored in arena for zero-copy operations
 #[derive(Clone, Copy, Debug)]
@@ -30,20 +25,36 @@ pub(crate) enum ValueRef<'a> {
     Str(&'a str),
     Bytes(&'a [u8]),
     Tuple(&'a TupleRef<'a>),
-    Owned(&'a ValueOwned),
 }
 
 impl<'a> ValueRef<'a> {
-    pub fn from_owned(value: &'a ValueOwned) -> Self {
-        match value.as_ref() {
-            Value::Missing => ValueRef::Missing,
-            Value::Null => ValueRef::Null,
-            Value::Boolean(v) => ValueRef::Bool(*v),
-            Value::Integer(v) => ValueRef::I64(*v),
-            Value::Real(v) => ValueRef::F64(v.0),
-            Value::String(v) => ValueRef::Str(v.as_str()),
-            Value::Blob(v) => ValueRef::Bytes(v.as_slice()),
-            _ => ValueRef::Owned(value),
+    pub fn from_owned(value: &'a ValueOwned, arena: &'a Arena) -> Self {
+        match value {
+            ValueOwned::Missing => ValueRef::Missing,
+            ValueOwned::Null => ValueRef::Null,
+            ValueOwned::Bool(v) => ValueRef::Bool(*v),
+            ValueOwned::I64(v) => ValueRef::I64(*v),
+            ValueOwned::F64(v) => ValueRef::F64(v.0),
+            ValueOwned::String(v) => ValueRef::Str(v.as_str()),
+            ValueOwned::Bytes(v) => ValueRef::Bytes(v.as_slice()),
+            ValueOwned::Tuple(t) => {
+                // We still need arena for tuples because we need to convert
+                // Vec<TupleFieldOwned> to &[TupleField] with different memory layout
+                let fields: Vec<TupleField<'a>> = t
+                    .fields
+                    .iter()
+                    .map(|f| TupleField {
+                        name: f.name.as_str(),
+                        value: ValueRef::from_owned(&f.value, arena),
+                    })
+                    .collect();
+
+                let fields_slice = arena.alloc_slice(&fields);
+                let tuple_ref = arena.alloc_tuple_ref(TupleRef {
+                    fields: fields_slice,
+                });
+                ValueRef::Tuple(tuple_ref)
+            }
         }
     }
 
@@ -65,11 +76,7 @@ impl<'a> ValueRef<'a> {
     }
 }
 
-pub(crate) fn value_get_field_ref<'a>(
-    value: ValueRef<'a>,
-    key: &str,
-    arena: &'a Arena,
-) -> ValueRef<'a> {
+pub(crate) fn value_get_field_ref<'a>(value: ValueRef<'a>, key: &str) -> ValueRef<'a> {
     match value {
         ValueRef::Tuple(tuple_ref) => {
             // Fast path: direct field lookup in arena-allocated tuple
@@ -80,39 +87,6 @@ pub(crate) fn value_get_field_ref<'a>(
                 .map(|field| field.value)
                 .unwrap_or(ValueRef::Missing)
         }
-        ValueRef::Owned(owned) => match owned.as_ref() {
-            Value::Tuple(tuple) => {
-                let name = BindingsName::CaseInsensitive(key.into());
-                tuple
-                    .get(&name)
-                    .map(|v| {
-                        ValueRef::from_owned(unsafe {
-                            // Safety: ValueOwned is repr(transparent) and has the same layout as Value
-                            &*(v as *const Value as *const ValueOwned)
-                        })
-                    })
-                    .unwrap_or(ValueRef::Missing)
-            }
-            Value::Variant(variant) => match variant.category() {
-                DatumCategoryRef::Tuple(tuple_ref) => {
-                    let name = BindingsName::CaseInsensitive(key.into());
-                    match tuple_ref.get_val(&name) {
-                        Some(Cow::Borrowed(v)) => {
-                            ValueRef::from_owned(unsafe {
-                                // Safety: ValueOwned is repr(transparent) and has the same layout as Value
-                                &*(v as *const Value as *const ValueOwned)
-                            })
-                        }
-                        Some(Cow::Owned(v)) => {
-                            ValueRef::from_owned(arena.alloc(ValueOwned::from(v)))
-                        }
-                        None => ValueRef::Missing,
-                    }
-                }
-                _ => ValueRef::Missing,
-            },
-            _ => ValueRef::Missing,
-        },
         _ => ValueRef::Missing,
     }
 }
