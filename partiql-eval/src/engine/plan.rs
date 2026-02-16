@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::engine::arena::{Arena, SlotId};
 use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::Program;
-use crate::engine::row::{Arena, SlotId};
 use crate::engine::source::RegisterWriter;
 use crate::engine::source::{DataSourceImpl, ScanLayout};
-use crate::engine::value::{RegisterReader, ValueOwned, ValueRef};
+use crate::engine::value::{RegisterReader, Shape, ValueOwned, ValueRef};
 use crate::engine::UdfRegistry;
 use crate::env::basic::MapBindings;
 use crate::eval::BasicContext;
@@ -47,16 +47,6 @@ pub struct ScanMetadata {
     pub object_id: ObjectId,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct Schema {
-    pub columns: Vec<Column>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Column {
-    pub name: String,
-}
-
 /// Compiled query execution plan.
 ///
 /// # Thread Safety Warning
@@ -74,7 +64,7 @@ pub struct Column {
 pub struct CompiledPlan {
     pub(crate) nodes: Vec<RelOpSpec>,
     pub(crate) root: usize,
-    pub(crate) schema: Schema,
+    pub(crate) shape: Shape,
     pub(crate) slot_count: usize,
     pub(crate) max_registers: usize,
     pub(crate) scan_metadata: HashMap<ScanId, ScanMetadata>,
@@ -86,14 +76,14 @@ pub struct CompiledPlan {
 unsafe impl Send for CompiledPlan
 where
     Vec<RelOpSpec>: Send,
-    Schema: Send,
+    Shape: Send,
 {
 }
 
 unsafe impl Sync for CompiledPlan
 where
     Vec<RelOpSpec>: Sync,
-    Schema: Sync,
+    Shape: Sync,
 {
 }
 
@@ -102,7 +92,7 @@ impl Clone for CompiledPlan {
         Self {
             nodes: self.nodes.iter().map(|node| node.clone_spec()).collect(),
             root: self.root,
-            schema: self.schema.clone(),
+            shape: self.shape.clone(),
             slot_count: self.slot_count,
             max_registers: self.max_registers,
             scan_metadata: self.scan_metadata.clone(),
@@ -111,8 +101,9 @@ impl Clone for CompiledPlan {
 }
 
 impl CompiledPlan {
-    pub fn result_schema(&self) -> Schema {
-        self.schema.clone()
+    /// Get the shape describing the structure of query results.
+    pub fn result_shape(&self) -> &Shape {
+        &self.shape
     }
 
     /// Get metadata for a specific scan operation.
@@ -162,6 +153,7 @@ impl CompiledPlan {
 #[allow(dead_code)]
 pub(crate) enum RelOpSpec {
     Pipeline(PipelineSpec),
+    ExprQuery(ExprQuerySpec),
     HashJoin(HashJoinSpec),
     HashAgg(HashAggSpec),
     Sort(SortSpec),
@@ -184,6 +176,7 @@ impl RelOpSpec {
     pub(crate) fn clone_spec(&self) -> Self {
         match self {
             RelOpSpec::Pipeline(spec) => RelOpSpec::Pipeline(spec.clone_pipeline()),
+            RelOpSpec::ExprQuery(spec) => RelOpSpec::ExprQuery(spec.clone()),
             RelOpSpec::HashJoin(_) => RelOpSpec::HashJoin(HashJoinSpec),
             RelOpSpec::HashAgg(_) => RelOpSpec::HashAgg(HashAggSpec),
             RelOpSpec::Sort(_) => RelOpSpec::Sort(SortSpec),
@@ -210,6 +203,12 @@ impl PipelineSpec {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct ExprQuerySpec {
+    pub program: Program,
+}
+
 pub struct HashJoinSpec;
 pub struct HashAggSpec;
 pub struct SortSpec;
@@ -230,6 +229,7 @@ pub(crate) trait BlockingOperator {
 #[allow(dead_code)]
 pub(crate) enum RelOp {
     Pipeline(PipelineOp),
+    ExprQuery(ExprQueryOp),
     HashJoin(HashJoinState),
     HashAgg(HashAggState),
     Sort(SortState),
@@ -246,6 +246,7 @@ impl RelOp {
     ) -> Result<Option<RegisterReader<'a>>> {
         match self {
             RelOp::Pipeline(op) => op.next_row(arena, regs, slot_count),
+            RelOp::ExprQuery(op) => op.next_row(arena, regs, slot_count),
             RelOp::Legacy(op) => op.next_row(arena, regs, slot_count),
             RelOp::HashJoin(_op) => Err(EngineError::NotImplemented),
             RelOp::HashAgg(_op) => Err(EngineError::NotImplemented),
@@ -258,6 +259,7 @@ impl RelOp {
     pub fn open(&mut self) -> Result<()> {
         match self {
             RelOp::Pipeline(op) => op.open(),
+            RelOp::ExprQuery(op) => op.open(),
             RelOp::Legacy(op) => op.open(),
             RelOp::HashJoin(op) => op.open(),
             RelOp::HashAgg(op) => op.open(),
@@ -270,6 +272,7 @@ impl RelOp {
     pub fn close(&mut self) -> Result<()> {
         match self {
             RelOp::Pipeline(op) => op.close(),
+            RelOp::ExprQuery(op) => op.close(),
             RelOp::Legacy(op) => op.close(),
             RelOp::HashJoin(op) => op.close(),
             RelOp::HashAgg(op) => op.close(),
@@ -285,6 +288,55 @@ pub struct PipelineOp {
     opened: bool,
     udf: Option<Arc<dyn UdfRegistry>>,
 }
+
+/// Operator for expression-only queries (no scan)
+pub struct ExprQueryOp {
+    program: Program,
+    yielded: bool,
+    udf: Option<Arc<dyn UdfRegistry>>,
+}
+
+impl ExprQueryOp {
+    pub(crate) fn new(program: Program, udf: Option<Arc<dyn UdfRegistry>>) -> Self {
+        ExprQueryOp {
+            program,
+            yielded: false,
+            udf,
+        }
+    }
+
+    pub fn open(&mut self) -> Result<()> {
+        // No resources to open for expression queries
+        Ok(())
+    }
+
+    pub fn close(&mut self) -> Result<()> {
+        // Reset state for potential reuse
+        self.yielded = false;
+        Ok(())
+    }
+
+    pub fn next_row<'a>(
+        &'a mut self,
+        arena: &'a Arena,
+        regs: &'a mut [ValueRef<'a>],
+        slot_count: usize,
+    ) -> Result<Option<RegisterReader<'a>>> {
+        if self.yielded {
+            return Ok(None);
+        }
+
+        // Evaluate expression into register 0
+        let udf = self.udf.as_deref();
+        self.program.eval(arena, regs, udf)?;
+        self.yielded = true;
+
+        // Return view of slot region
+        let slots = &regs[0..slot_count];
+        Ok(Some(RegisterReader::new(slots)))
+    }
+}
+
 pub struct HashJoinState;
 pub struct HashAggState;
 pub struct SortState;
@@ -629,13 +681,18 @@ impl PartiQLVM {
                         })?;
 
                     // Catalog creates DataSource using just the ScanId
-                    // (catalog has already inspected CompiledPlan and built its mappings)
                     let data_source = catalog.create(spec.scan_id)?;
                     let reader = DataSourceImpl::Catalog(data_source);
 
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(
                         steps, reader, None, // UDF registry not supported yet
+                    )));
+                }
+                RelOpSpec::ExprQuery(spec) => {
+                    operators.push(RelOp::ExprQuery(ExprQueryOp::new(
+                        spec.program.clone(),
+                        None, // UDF registry not supported yet
                     )));
                 }
                 RelOpSpec::Legacy(spec) => {
@@ -677,9 +734,9 @@ impl PartiQLVM {
         })
     }
 
-    /// Get the result schema for this VM's query
-    pub fn schema(&self) -> Schema {
-        self.compiled.result_schema()
+    /// Get the result shape for this VM's query
+    pub fn shape(&self) -> &Shape {
+        self.compiled.result_shape()
     }
 
     /// Execute the plan and return streaming results
@@ -742,6 +799,12 @@ impl PartiQLVM {
 
                     let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
                     operators.push(RelOp::Pipeline(PipelineOp::new(steps, reader, None)));
+                }
+                RelOpSpec::ExprQuery(spec) => {
+                    operators.push(RelOp::ExprQuery(ExprQueryOp::new(
+                        spec.program.clone(),
+                        None,
+                    )));
                 }
                 RelOpSpec::Legacy(spec) => {
                     let bindings = MapBindings::default();

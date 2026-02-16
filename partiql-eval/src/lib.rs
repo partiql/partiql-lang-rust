@@ -14,7 +14,7 @@ pub mod test_value;
 pub use engine::{CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext};
 
 // Compilation & Execution
-pub use engine::{CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator, Schema};
+pub use engine::{CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator};
 
 // Reader Contract (for custom data sources)
 pub mod source {

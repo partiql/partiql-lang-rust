@@ -75,16 +75,16 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionResult_nativeAsQueryIterato
         // Extract QueryIterator from ExecutionResult
         match *result {
             partiql_eval::ExecutionResult::Query(iter) => {
-                // Get schema from VM for efficient slot reading
+                // Get shape from VM for efficient slot reading
                 let vm_state = crate::get_vm_state(vm_handle as u64)?;
-                let schema = vm_state.vm.schema();
+                let shape = vm_state.vm.shape().clone();
 
                 // Create IteratorState with VM handle for buffer caching
                 let state = IteratorState {
                     iter,
                     current_row: None,
                     vm_handle: vm_handle as u64,
-                    schema,
+                    shape,
                 };
                 let boxed = Box::new(state);
                 Ok(Box::into_raw(boxed) as jlong)
@@ -115,8 +115,8 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionResult_nativeClose(
 pub struct IteratorState<'a> {
     pub iter: partiql_eval::QueryIterator<'a>,
     pub current_row: Option<RegisterReader<'a>>,
-    vm_handle: u64,               // Link back to VM for accessing buffer cache
-    schema: partiql_eval::Schema, // Output schema for efficient slot reading
+    vm_handle: u64,                    // Link back to VM for accessing buffer cache
+    shape: partiql_eval::value::Shape, // Output shape for efficient slot reading
 }
 
 // QueryIterator handle management
@@ -124,13 +124,13 @@ pub struct IteratorState<'a> {
 pub fn create_iterator_handle(
     iter: partiql_eval::QueryIterator<'static>,
     vm_handle: u64,
-    schema: partiql_eval::Schema,
+    shape: partiql_eval::value::Shape,
 ) -> u64 {
     let state = IteratorState {
         iter,
         current_row: None,
         vm_handle,
-        schema,
+        shape,
     };
     let boxed = Box::new(state);
     Box::into_raw(boxed) as u64
@@ -259,8 +259,8 @@ pub extern "system" fn Java_org_partiql_jni_QueryIterator_nativeNextToBuffer(
             // Convert raw pointer to mutable slice
             let buffer_slice = unsafe { std::slice::from_raw_parts_mut(buffer_ptr, capacity) };
 
-            // Write row data to buffer in BufferWriter format using schema
-            let bytes_written = write_row_to_buffer(&row, &state.schema, buffer_slice, capacity)?;
+            // Write row data to buffer in BufferWriter format using shape
+            let bytes_written = write_row_to_buffer(&row, &state.shape, buffer_slice, capacity)?;
 
             if bytes_written > capacity {
                 // Buffer too small
@@ -276,22 +276,30 @@ pub extern "system" fn Java_org_partiql_jni_QueryIterator_nativeNextToBuffer(
     })
 }
 
-/// Write a row to buffer in BufferWriter format using schema for efficient slot reading
+/// Write a row to buffer in BufferWriter format using shape for efficient slot reading
 /// Returns number of bytes written
 fn write_row_to_buffer(
     row: &RegisterReader<'_>,
-    schema: &partiql_eval::Schema,
+    shape: &partiql_eval::value::Shape,
     buffer: &mut [u8],
     capacity: usize,
 ) -> Result<usize, crate::JniError> {
+    use partiql_eval::value::RowShape;
+
     let mut offset = 0;
 
     // Type tag for i64 (must match BufferWriter and Java RegisterReader)
     const TYPE_I64: u8 = 3;
 
-    // Iterate only through schema-defined columns (no garbage data!)
-    // Schema index directly maps to slot index
-    for slot in 0..schema.columns.len() {
+    // Get number of slots from shape
+    let slot_count = match shape.row_shape() {
+        RowShape::Struct(fields) => fields.len(),
+        RowShape::Register(_, _) => 1,
+    };
+
+    // Iterate only through shape-defined columns (no garbage data!)
+    // Shape index directly maps to slot index
+    for slot in 0..slot_count {
         // Read value from slot (assuming i64 for now as confirmed)
         if let Some(value) = row.get_i64(slot) {
             // Check if we have space: [slot: u16][type: u8][data: i64]

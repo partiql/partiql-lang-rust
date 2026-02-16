@@ -1,5 +1,5 @@
 use super::internal::ValueRef;
-use super::value_owned::ValueOwned;
+use super::value_owned::ValueView;
 
 pub struct RegisterReader<'a> {
     pub(crate) slots: &'a [ValueRef<'a>],
@@ -21,23 +21,23 @@ impl<'a> RegisterReader<'a> {
         })
     }
 
-    pub fn get_value(&self, col: usize) -> ValueOwned {
-        self.slots
-            .get(col)
-            .map(|v| match v {
-                ValueRef::Missing => ValueOwned::from(partiql_value::Value::Missing),
-                ValueRef::Null => ValueOwned::from(partiql_value::Value::Null),
-                ValueRef::Bool(b) => ValueOwned::from(partiql_value::Value::Boolean(*b)),
-                ValueRef::I64(i) => ValueOwned::from(partiql_value::Value::Integer(*i)),
-                ValueRef::F64(f) => ValueOwned::from(partiql_value::Value::Real((*f).into())),
-                ValueRef::Str(s) => {
-                    ValueOwned::from(partiql_value::Value::String(Box::new(s.to_string())))
-                }
-                ValueRef::Bytes(b) => {
-                    ValueOwned::from(partiql_value::Value::Blob(Box::new(b.to_vec())))
-                }
-                ValueRef::Owned(o) => (*o).clone(),
-            })
-            .unwrap_or(ValueOwned::from(partiql_value::Value::Missing))
+    /// Get a ValueView cursor for navigating the value at the specified column
+    ///
+    /// Returns None if the column index is out of bounds.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let view = reader.get_value_view(0)?;
+    /// if view.get_type() == ValueType::Tuple {
+    ///     let mut cursor = view.step_in()?;
+    ///     while let Some(next) = cursor.next()? {
+    ///         let name = cursor.get_field_name()?;
+    ///         let value = cursor.get_i64()?;
+    ///         cursor = next;
+    ///     }
+    /// }
+    /// ```
+    pub fn get_value_view(&self, col: usize) -> Option<ValueView<'a>> {
+        self.slots.get(col).map(|v| ValueView::from_ref(*v))
     }
 }

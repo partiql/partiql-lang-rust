@@ -3,9 +3,22 @@ use partiql_value::Value;
 use std::borrow::Cow;
 
 use super::value_owned::ValueOwned;
+use crate::engine::arena::Arena;
 use crate::engine::error::{EngineError, Result};
-use crate::engine::row::Arena;
 use partiql_value::BindingsName;
+
+/// Compact tuple representation stored in arena for zero-copy operations
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TupleRef<'a> {
+    pub fields: &'a [TupleField<'a>],
+}
+
+/// A single field in a tuple - name and value stored contiguously
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TupleField<'a> {
+    pub name: &'a str,
+    pub value: ValueRef<'a>,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ValueRef<'a> {
@@ -16,6 +29,7 @@ pub(crate) enum ValueRef<'a> {
     F64(f64),
     Str(&'a str),
     Bytes(&'a [u8]),
+    Tuple(&'a TupleRef<'a>),
     Owned(&'a ValueOwned),
 }
 
@@ -57,6 +71,15 @@ pub(crate) fn value_get_field_ref<'a>(
     arena: &'a Arena,
 ) -> ValueRef<'a> {
     match value {
+        ValueRef::Tuple(tuple_ref) => {
+            // Fast path: direct field lookup in arena-allocated tuple
+            tuple_ref
+                .fields
+                .iter()
+                .find(|field| field.name.eq_ignore_ascii_case(key))
+                .map(|field| field.value)
+                .unwrap_or(ValueRef::Missing)
+        }
         ValueRef::Owned(owned) => match owned.as_ref() {
             Value::Tuple(tuple) => {
                 let name = BindingsName::CaseInsensitive(key.into());

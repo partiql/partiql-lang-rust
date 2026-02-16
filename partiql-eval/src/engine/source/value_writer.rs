@@ -1,6 +1,6 @@
+use crate::engine::arena::SlotId;
 use crate::engine::error::Result;
-use crate::engine::row::SlotId;
-use crate::engine::value::{ValueOwned, ValueRef};
+use crate::engine::value::ValueRef;
 
 /// Type-safe interface for readers to populate row data
 ///
@@ -140,23 +140,6 @@ impl<'w, 'a> RegisterWriter<'w, 'a> {
             return Err(crate::engine::error::EngineError::SlotOutOfBounds(slot));
         }
         self.regs[idx] = ValueRef::Missing;
-        Ok(())
-    }
-
-    /// Write an owned value reference to the specified slot
-    ///
-    /// Used for complex values (tuples, lists, bags) that require
-    /// materialization to ValueOwned.
-    ///
-    /// # Errors
-    /// Returns error if slot index is out of bounds
-    #[inline]
-    pub fn put_owned(&mut self, slot: SlotId, value: &'a ValueOwned) -> Result<()> {
-        let idx = slot as usize;
-        if idx >= self.regs.len() {
-            return Err(crate::engine::error::EngineError::SlotOutOfBounds(slot));
-        }
-        self.regs[idx] = ValueRef::Owned(value);
         Ok(())
     }
 

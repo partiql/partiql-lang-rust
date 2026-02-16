@@ -1,4 +1,4 @@
-use jni::objects::{GlobalRef, JClass, JObject};
+use jni::objects::{GlobalRef, JClass};
 use jni::sys::{jint, jlong, jmethodID, jobject};
 use jni::JNIEnv;
 use once_cell::sync::Lazy;
@@ -148,28 +148,18 @@ pub extern "system" fn Java_org_partiql_jni_RegisterReader_nativeGetValue(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     iterator_handle: jlong,
-    col: jint,
+    _col: jint,
 ) -> jobject {
     jni_guard!(env, {
         let state = get_iterator_mut(iterator_handle as u64)?;
 
-        if let Some(ref row) = state.current_row {
-            // Use RegisterReader's get_value method
-            let value_owned = row.get_value(col as usize);
+        if let Some(ref _row) = state.current_row {
+            // TODO: Full implementation deferred - use get_i64/get_str for specific types
+            // The get_value method has been removed as part of hiding ValueOwned from public API
+            // This needs to be reimplemented using get_value_view or specific type accessors
 
-            // Convert ValueOwned to Java Value object
-            // Note: Full implementation deferred - use get_i64/get_str for specific types
-            let _value = value_owned; // Consume to avoid unused warning
-
-            // Create Java Value object
-            let value_class = env.find_class("org/partiql/jni/Value")?;
-            let null_obj = JObject::null();
-            let value_obj = env.new_object(
-                value_class,
-                "(Ljava/lang/Object;)V",
-                &[jni::objects::JValue::Object(&null_obj)],
-            )?;
-            Ok(value_obj.into_raw())
+            // For now, return null as placeholder
+            Ok(std::ptr::null_mut())
         } else {
             // No current row, return null
             Ok(std::ptr::null_mut())

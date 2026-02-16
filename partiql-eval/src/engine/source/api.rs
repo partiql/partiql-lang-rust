@@ -1,5 +1,5 @@
+use crate::engine::arena::SlotId;
 use crate::engine::error::Result;
-use crate::engine::row::SlotId;
 
 /// Indicates how long data in a buffer remains valid after a read operation.
 ///
