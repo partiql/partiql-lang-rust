@@ -42,7 +42,8 @@ pub struct ValueView<'a> {
 struct NavigationContext<'a> {
     kind: ContainerKind,
     data: ContainerData<'a>,
-    parent: ValueRef<'a>, // Original container reference for step_out()
+    parent: ValueRef<'a>, // Original container reference
+    parent_context: Option<Box<NavigationContext<'a>>>, // Parent's navigation state for nested step_out()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +93,8 @@ impl<'a> ValueView<'a> {
             ValueRef::Str(_) => ValueType::String,
             ValueRef::Bytes(_) => ValueType::Bytes,
             ValueRef::Tuple(_) => ValueType::Tuple,
+            ValueRef::List(_) => ValueType::List,
+            ValueRef::Bag(_) => ValueType::Bag,
         }
     }
 
@@ -214,22 +217,18 @@ impl<'a> ValueView<'a> {
         self.container_size()
     }
 
-    /// Step into a Tuple container, positioning at the first field
+    /// Step into a container (Tuple, List, or Bag), positioning at the first element
     ///
-    /// Consumes self and returns a new cursor positioned at the first field.
-    /// Only valid on Tuple types (ValueRef::Tuple).
+    /// Mutates self to position at the first field/element of the container.
+    /// Valid on Tuple, List, and Bag types.
+    ///
+    /// When called on a cursor that's already inside a container (from a previous step_in),
+    /// this allows stepping into nested containers while preserving the parent's iteration state.
     ///
     /// # Errors
-    /// - Returns error if current value is not a Tuple
-    /// - Returns error if already inside a container
-    /// - Returns error if tuple is empty
-    pub fn step_in(self) -> Result<Self> {
-        if self.context.is_some() {
-            return Err(EngineError::IllegalState(
-                "already inside a container".to_string(),
-            ));
-        }
-
+    /// - Returns error if current value is not a container
+    /// - Returns error if container is empty
+    pub fn step_in(&mut self) -> Result<()> {
         match self.current {
             ValueRef::Tuple(tuple_ref) => {
                 if tuple_ref.fields.is_empty() {
@@ -237,21 +236,65 @@ impl<'a> ValueView<'a> {
                         "cannot step into empty tuple".to_string(),
                     ));
                 }
-                let parent = self.current; // Store the tuple for step_out()
-                Ok(ValueView {
-                    current: tuple_ref.fields[0].value,
-                    context: Some(NavigationContext {
-                        kind: ContainerKind::Tuple,
-                        parent,
-                        data: ContainerData::Tuple {
-                            fields: tuple_ref.fields,
-                            index: 0,
-                        },
-                    }),
-                })
+                let parent = self.current;
+                let parent_context = self.context.take().map(Box::new);
+
+                self.current = tuple_ref.fields[0].value;
+                self.context = Some(NavigationContext {
+                    kind: ContainerKind::Tuple,
+                    parent,
+                    parent_context,
+                    data: ContainerData::Tuple {
+                        fields: tuple_ref.fields,
+                        index: 0,
+                    },
+                });
+                Ok(())
+            }
+            ValueRef::List(items) => {
+                if items.is_empty() {
+                    return Err(EngineError::IllegalState(
+                        "cannot step into empty list".to_string(),
+                    ));
+                }
+                let parent = self.current;
+                let parent_context = self.context.take().map(Box::new);
+
+                self.current = items[0];
+                self.context = Some(NavigationContext {
+                    kind: ContainerKind::List,
+                    parent,
+                    parent_context,
+                    data: ContainerData::List {
+                        items: items.to_vec(),
+                        index: 0,
+                    },
+                });
+                Ok(())
+            }
+            ValueRef::Bag(items) => {
+                if items.is_empty() {
+                    return Err(EngineError::IllegalState(
+                        "cannot step into empty bag".to_string(),
+                    ));
+                }
+                let parent = self.current;
+                let parent_context = self.context.take().map(Box::new);
+
+                self.current = items[0];
+                self.context = Some(NavigationContext {
+                    kind: ContainerKind::Bag,
+                    parent,
+                    parent_context,
+                    data: ContainerData::Bag {
+                        items: items.to_vec(),
+                        index: 0,
+                    },
+                });
+                Ok(())
             }
             _ => Err(EngineError::TypeError(format!(
-                "cannot step into {:?}, only Tuple supported",
+                "cannot step into {:?}, only containers supported",
                 self.get_type()
             ))),
         }
@@ -259,79 +302,111 @@ impl<'a> ValueView<'a> {
 
     /// Advance to the next field in the tuple
     ///
-    /// Consumes self and returns Some(cursor) if there is a next field,
-    /// or None if at the end of the tuple.
+    /// Mutates self to position at the next field.
+    /// Returns true if there is a next field, false if at the end.
     ///
     /// # Errors
     /// - Returns error if not currently inside a container
-    pub fn next(mut self) -> Result<Option<Self>> {
+    pub fn advance(&mut self) -> Result<bool> {
         let ctx = self.context.take().ok_or_else(|| {
-            EngineError::IllegalState("next() called outside container".to_string())
+            EngineError::IllegalState("advance() called outside container".to_string())
         })?;
 
         let parent = ctx.parent; // Preserve parent for step_out()
+        let parent_context = ctx.parent_context; // Preserve parent's navigation state
 
         match ctx.data {
             ContainerData::Tuple { fields, mut index } => {
                 index += 1;
                 if index >= fields.len() {
-                    return Ok(None);
-                }
-                Ok(Some(ValueView {
-                    current: fields[index].value,
-                    context: Some(NavigationContext {
+                    // Restore context before returning false
+                    self.context = Some(NavigationContext {
                         kind: ctx.kind,
                         parent,
-                        data: ContainerData::Tuple { fields, index },
-                    }),
-                }))
+                        parent_context,
+                        data: ContainerData::Tuple {
+                            fields,
+                            index: index - 1,
+                        },
+                    });
+                    return Ok(false);
+                }
+                // Mutate self to next field
+                self.current = fields[index].value;
+                self.context = Some(NavigationContext {
+                    kind: ctx.kind,
+                    parent,
+                    parent_context,
+                    data: ContainerData::Tuple { fields, index },
+                });
+                Ok(true)
             }
             ContainerData::List { items, mut index } => {
                 index += 1;
                 if index >= items.len() {
-                    return Ok(None);
-                }
-                Ok(Some(ValueView {
-                    current: items[index],
-                    context: Some(NavigationContext {
+                    self.context = Some(NavigationContext {
                         kind: ctx.kind,
                         parent,
-                        data: ContainerData::List { items, index },
-                    }),
-                }))
+                        parent_context,
+                        data: ContainerData::List {
+                            items,
+                            index: index - 1,
+                        },
+                    });
+                    return Ok(false);
+                }
+                self.current = items[index];
+                self.context = Some(NavigationContext {
+                    kind: ctx.kind,
+                    parent,
+                    parent_context,
+                    data: ContainerData::List { items, index },
+                });
+                Ok(true)
             }
             ContainerData::Bag { items, mut index } => {
                 index += 1;
                 if index >= items.len() {
-                    return Ok(None);
-                }
-                Ok(Some(ValueView {
-                    current: items[index],
-                    context: Some(NavigationContext {
+                    self.context = Some(NavigationContext {
                         kind: ctx.kind,
                         parent,
-                        data: ContainerData::Bag { items, index },
-                    }),
-                }))
+                        parent_context,
+                        data: ContainerData::Bag {
+                            items,
+                            index: index - 1,
+                        },
+                    });
+                    return Ok(false);
+                }
+                self.current = items[index];
+                self.context = Some(NavigationContext {
+                    kind: ctx.kind,
+                    parent,
+                    parent_context,
+                    data: ContainerData::Bag { items, index },
+                });
+                Ok(true)
             }
         }
     }
 
     /// Exit the current container and return to the parent level
     ///
-    /// Consumes self and returns a cursor positioned at the container itself.
+    /// Mutates self to position at the parent container field.
+    /// This allows continuing iteration at the parent level after exploring nested containers.
     ///
     /// # Errors
     /// - Returns error if not currently inside a container
-    pub fn step_out(mut self) -> Result<Self> {
+    pub fn step_out(&mut self) -> Result<()> {
         let ctx = self.context.take().ok_or_else(|| {
             EngineError::IllegalState("step_out() called outside container".to_string())
         })?;
 
-        // Return the stored parent container directly - no temporary creation
-        Ok(ValueView {
-            current: ctx.parent,
-            context: None,
-        })
+        // Restore parent's navigation state
+        // If parent_context is Some, we were navigating inside a parent container
+        // and should restore to that position. Otherwise, return to top level.
+        self.current = ctx.parent;
+        self.context = ctx.parent_context.map(|boxed| *boxed);
+        Ok(())
     }
 }

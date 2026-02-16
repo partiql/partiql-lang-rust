@@ -25,6 +25,10 @@ pub(crate) enum ValueRef<'a> {
     Str(&'a str),
     Bytes(&'a [u8]),
     Tuple(&'a TupleRef<'a>),
+    #[allow(dead_code)]
+    List(&'a [ValueRef<'a>]),
+    #[allow(dead_code)]
+    Bag(&'a [ValueRef<'a>]),
 }
 
 impl<'a> ValueRef<'a> {
@@ -54,6 +58,24 @@ impl<'a> ValueRef<'a> {
                     fields: fields_slice,
                 });
                 ValueRef::Tuple(tuple_ref)
+            }
+            ValueOwned::List(items) => {
+                // Convert Vec<ValueOwned> to &[ValueRef] by recursively converting each item
+                let refs: Vec<ValueRef<'a>> = items
+                    .iter()
+                    .map(|item| ValueRef::from_owned(item, arena))
+                    .collect();
+                let refs_slice = arena.alloc_slice(&refs);
+                ValueRef::List(refs_slice)
+            }
+            ValueOwned::Bag(items) => {
+                // Convert Vec<ValueOwned> to &[ValueRef] by recursively converting each item
+                let refs: Vec<ValueRef<'a>> = items
+                    .iter()
+                    .map(|item| ValueRef::from_owned(item, arena))
+                    .collect();
+                let refs_slice = arena.alloc_slice(&refs);
+                ValueRef::Bag(refs_slice)
             }
         }
     }

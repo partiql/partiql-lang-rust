@@ -10,7 +10,7 @@ mod internal;
 // Public exports
 pub use register_reader::RegisterReader;
 pub use shape::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
-pub(crate) use value_owned::ValueOwned;
+pub(crate) use value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};
 pub use value_view::{ValueType, ValueView};
 
 // Internal exports for use within the engine

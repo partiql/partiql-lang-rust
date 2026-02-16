@@ -30,4 +30,8 @@ pub(crate) enum ValueOwned {
     Bytes(Vec<u8>),
     #[allow(dead_code)]
     Tuple(TupleOwned),
+    #[allow(dead_code)]
+    List(Vec<ValueOwned>),
+    #[allow(dead_code)]
+    Bag(Vec<ValueOwned>),
 }
