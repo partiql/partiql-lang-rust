@@ -1,5 +1,5 @@
+use crate::engine::arena::{Arena, SlotId};
 use crate::engine::error::{EngineError, Result};
-use crate::engine::row::{Arena, SlotId};
 use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
@@ -18,6 +18,7 @@ pub enum Expr {
     Not(Box<Expr>),
     GetField(Box<Expr>, String),
     UdfCall { name: String, args: Vec<Expr> },
+    Tuple { attrs: Vec<Expr>, values: Vec<Expr> },
 }
 
 #[derive(Clone, Debug)]
@@ -74,12 +75,17 @@ pub enum Inst {
         func_idx: u16,
         args: Vec<u16>,
     },
+    MakeTuple {
+        dst: u16,
+        attr_regs: Vec<u16>,
+        value_regs: Vec<u16>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Program {
     pub insts: Vec<Inst>,
-    pub consts: Vec<ValueOwned>,
+    pub(crate) consts: Vec<ValueOwned>,
     pub keys: Vec<String>,
     pub reg_count: u16,
     #[allow(dead_code)]
@@ -183,6 +189,26 @@ impl Program {
                     }
                     let result = registry.call(name, &argv, arena)?;
                     regs[*dst as usize] = result;
+                }
+                Inst::MakeTuple {
+                    dst,
+                    attr_regs,
+                    value_regs,
+                } => {
+                    // Zero-copy tuple construction!
+                    // Build iterator of (name ValueRef, value ValueRef) pairs
+                    // Attribute names MUST be ValueRef::Str
+                    let fields =
+                        attr_regs
+                            .iter()
+                            .zip(value_regs.iter())
+                            .map(|(attr_reg, value_reg)| {
+                                (regs[*attr_reg as usize], regs[*value_reg as usize])
+                            });
+
+                    // Single arena allocation for entire tuple structure
+                    let tuple_ref = arena.alloc_tuple(fields);
+                    regs[*dst as usize] = ValueRef::Tuple(tuple_ref);
                 }
             }
         }
@@ -352,6 +378,25 @@ impl ExprCompiler {
                 });
                 Ok(dst)
             }
+            Expr::Tuple { attrs, values } => {
+                // Compile attribute expressions
+                let mut attr_regs = Vec::with_capacity(attrs.len());
+                for attr in attrs {
+                    attr_regs.push(self.compile_expr(attr)?);
+                }
+                // Compile value expressions
+                let mut value_regs = Vec::with_capacity(values.len());
+                for value in values {
+                    value_regs.push(self.compile_expr(value)?);
+                }
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::MakeTuple {
+                    dst,
+                    attr_regs,
+                    value_regs,
+                });
+                Ok(dst)
+            }
         }
     }
 
@@ -518,6 +563,19 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     .map(|arg| self.lower_expr(arg))
                     .collect::<Result<Vec<_>>>()?,
             }),
+            ValueExpr::TupleExpr(tuple_expr) => {
+                let attrs = tuple_expr
+                    .attrs
+                    .iter()
+                    .map(|attr| self.lower_expr(attr))
+                    .collect::<Result<Vec<_>>>()?;
+                let values = tuple_expr
+                    .values
+                    .iter()
+                    .map(|value| self.lower_expr(value))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Expr::Tuple { attrs, values })
+            }
             _ => Err(EngineError::UnsupportedExpr(format!("{:?}", *expr))),
         }
     }

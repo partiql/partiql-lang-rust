@@ -1,11 +1,12 @@
+use crate::engine::arena::SlotId;
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::LogicalExprCompiler;
 use crate::engine::plan::{
-    Column, CompiledPlan, ObjectId, PipelineSpec, RelOpSpec, ScanId, ScanMetadata, Schema, StepSpec,
+    CompiledPlan, ExprQuerySpec, ObjectId, PipelineSpec, RelOpSpec, ScanId, ScanMetadata, StepSpec,
 };
-use crate::engine::row::SlotId;
 use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource};
+use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
 use crate::engine::SlotResolver;
 use partiql_logical::{
     BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, PathComponent, Project, Scan, ValueExpr,
@@ -41,6 +42,16 @@ impl<'a> PlanCompiler<'a> {
     pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
         let order = linearize(plan)?;
 
+        // Check if this is an ExprQuery
+        if let Some(BindingsOp::ExprQuery(expr_query)) = order.first() {
+            if order.len() > 2 || (order.len() == 2 && !matches!(order[1], BindingsOp::Sink)) {
+                return Err(EngineError::InvalidPlan(
+                    "ExprQuery must be followed only by Sink".to_string(),
+                ));
+            }
+            return self.compile_expr_query(expr_query);
+        }
+
         let mut scan: Option<&Scan> = None;
         let mut filters: Vec<&ValueExpr> = Vec::new();
         let mut project: Option<&Project> = None;
@@ -71,9 +82,10 @@ impl<'a> PlanCompiler<'a> {
                 }
                 BindingsOp::Sink => {}
                 _ => {
-                    return Err(EngineError::InvalidPlan(
-                        "unsupported operator in streaming pipeline".to_string(),
-                    ));
+                    return Err(EngineError::InvalidPlan(format!(
+                        "unsupported operator in streaming pipeline: {:?}",
+                        op
+                    )));
                 }
             }
         }
@@ -173,23 +185,26 @@ impl<'a> PlanCompiler<'a> {
             }
         }
 
-        let schema = if let Some(project_op) = project {
+        let shape = if let Some(project_op) = project {
             let mut exprs = Vec::with_capacity(project_op.exprs.len());
-            let mut columns = Vec::with_capacity(project_op.exprs.len());
+            let mut fields = Vec::with_capacity(project_op.exprs.len());
             for (idx, (name, expr)) in project_op.exprs.iter().enumerate() {
                 exprs.push((idx as SlotId, expr.clone()));
-                columns.push(Column { name: name.clone() });
+                // For now, all projected columns are Dynamic type since we don't have
+                // type inference yet. The register index matches the output position.
+                fields.push(FieldShape {
+                    name: FieldName::Static(name.clone()),
+                    value: RowShape::Register(idx, PhysicalType::Dynamic),
+                });
             }
             let program = expr_compiler.compile_to_program_multi(&exprs, slot_count as u16)?;
             max_registers = max_registers.max(program.reg_count as usize);
             steps.push(StepSpec::Project { program });
-            Schema { columns }
+            // Scans typically produce bags of structs
+            Shape::Bag(RowShape::Struct(fields))
         } else {
-            Schema {
-                columns: vec![Column {
-                    name: "value".to_string(),
-                }],
-            }
+            // No projection - emit the whole value as a single dynamic column
+            Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic))
         };
 
         if let Some(limit) = limit {
@@ -199,7 +214,6 @@ impl<'a> PlanCompiler<'a> {
         // Generate unique ScanId and build scan metadata
         let scan_id = self.alloc_scan_id();
         let entry_id = reader_factory.entry_id;
-
         let object_id = ObjectId::new(catalog_id, entry_id);
         let scan_meta = ScanMetadata { layout, object_id };
 
@@ -212,7 +226,7 @@ impl<'a> PlanCompiler<'a> {
         Ok(CompiledPlan {
             nodes: vec![RelOpSpec::Pipeline(pipeline)],
             root: 0,
-            schema,
+            shape,
             slot_count,
             max_registers,
             scan_metadata,
@@ -279,6 +293,54 @@ impl<'a> PlanCompiler<'a> {
         })?;
 
         Ok((catalog_id, handle))
+    }
+
+    /// Compile an ExprQuery (expression-only query without a scan)
+    fn compile_expr_query(
+        &mut self,
+        expr_query: &partiql_logical::ExprQuery,
+    ) -> Result<CompiledPlan> {
+        let slot_count = 1; // Single output register
+
+        // Empty resolver - expression should be self-contained
+        let resolver = EmptySlotResolver;
+        let expr_compiler = LogicalExprCompiler::new(&resolver);
+
+        // Compile expression to register 0
+        let program = expr_compiler.compile_to_program(&expr_query.expr, 0, slot_count as u16)?;
+        let max_registers = program.reg_count as usize;
+
+        let expr_query_spec = ExprQuerySpec { program };
+
+        Ok(CompiledPlan {
+            nodes: vec![RelOpSpec::ExprQuery(expr_query_spec)],
+            root: 0,
+            shape: Shape::Single(RowShape::Register(0, PhysicalType::Dynamic)),
+            slot_count,
+            max_registers,
+            scan_metadata: HashMap::new(), // No scans in expression queries
+        })
+    }
+}
+
+/// Empty slot resolver for ExprQuery expressions that don't reference any variables
+struct EmptySlotResolver;
+
+impl SlotResolver for EmptySlotResolver {
+    fn resolve_var(&self, _name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
+        None // No variables in expression queries
+    }
+
+    fn resolve_alias(&self, _name: &BindingsName<'_>) -> Option<SlotId> {
+        None
+    }
+
+    fn resolve_field(&self, _name: &BindingsName<'_>) -> Option<SlotId> {
+        None
+    }
+
+    fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
+        false
     }
 }
 

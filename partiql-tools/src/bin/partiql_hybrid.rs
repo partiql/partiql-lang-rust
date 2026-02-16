@@ -221,7 +221,7 @@ fn main() {
         }
     };
 
-    let schema = vm.schema();
+    let shape = vm.shape().clone();
     let mut row_count = 0usize;
     let mut results: Vec<Value> = Vec::new();
 
@@ -231,7 +231,7 @@ fn main() {
                 match row_result {
                     Ok(row) => {
                         row_count += 1;
-                        results.push(row_to_value(&row, &schema));
+                        results.push(row_to_value(&row, &shape));
                     }
                     Err(e) => {
                         eprintln!("Execution error: {:?}", e);
@@ -277,15 +277,97 @@ fn main() {
 
 fn row_to_value(
     row: &partiql_eval::value::RegisterReader<'_>,
-    schema: &partiql_eval::Schema,
+    shape: &partiql_eval::value::Shape,
 ) -> Value {
-    if schema.columns.len() == 1 {
-        row.get_value(0).into()
-    } else {
-        let mut tuple = Tuple::new();
-        for (idx, col) in schema.columns.iter().enumerate() {
-            tuple.insert(&col.name, row.get_value(idx).into());
+    use partiql_eval::value::{FieldName, RowShape};
+
+    match shape.row_shape() {
+        RowShape::Struct(fields) => {
+            // Construct tuple with all fields (including single field case)
+            let mut tuple = Tuple::new();
+            for (idx, field) in fields.iter().enumerate() {
+                let name = match &field.name {
+                    FieldName::Static(s) => s.clone(),
+                    FieldName::Register(reg) => {
+                        // Dynamic name - get from register as string
+                        row.get_str(*reg).unwrap_or("?").to_string()
+                    }
+                };
+                let view = row.get_value_view(idx).expect("register should exist");
+                tuple.insert(&name, value_view_to_value(view));
+            }
+            Value::Tuple(Box::new(tuple))
         }
-        Value::Tuple(Box::new(tuple))
+        RowShape::Register(idx, _) => {
+            // Scalar - return value directly
+            let view = row.get_value_view(*idx).expect("register should exist");
+            value_view_to_value(view)
+        }
+    }
+}
+
+/// Convert a ValueView cursor to a Value
+fn value_view_to_value(view: partiql_eval::value::ValueView<'_>) -> Value {
+    use partiql_eval::value::ValueType;
+
+    match view.get_type() {
+        ValueType::Missing => Value::Missing,
+        ValueType::Null => Value::Null,
+        ValueType::Bool => Value::Boolean(view.get_bool().unwrap()),
+        ValueType::Integer => Value::Integer(view.get_i64().unwrap()),
+        ValueType::Float => Value::Real(view.get_f64().unwrap().into()),
+        ValueType::String => Value::String(Box::new(view.get_str().unwrap().to_string())),
+        ValueType::Bytes => Value::Blob(Box::new(view.get_bytes().unwrap().to_vec())),
+        ValueType::Tuple => {
+            // Navigate tuple fields
+            let mut tuple = Tuple::new();
+            if let Ok(mut cursor) = view.step_in() {
+                loop {
+                    // Get field name before any operations
+                    let field_name = cursor.get_field_name().unwrap().to_string();
+
+                    // Check if this is a nested tuple that requires recursion
+                    let is_nested_tuple = cursor.get_type() == ValueType::Tuple;
+
+                    if is_nested_tuple {
+                        // For nested tuples, we must consume cursor with recursion
+                        // This means we can't call next() after, so we handle it and break
+                        let nested_value = value_view_to_value(cursor);
+                        tuple.insert(&field_name, nested_value);
+                        break; // Cannot continue after consuming cursor
+                    } else {
+                        // For scalars, extract value without consuming cursor
+                        let field_value = match cursor.get_type() {
+                            ValueType::Missing => Value::Missing,
+                            ValueType::Null => Value::Null,
+                            ValueType::Bool => Value::Boolean(cursor.get_bool().unwrap()),
+                            ValueType::Integer => Value::Integer(cursor.get_i64().unwrap()),
+                            ValueType::Float => Value::Real(cursor.get_f64().unwrap().into()),
+                            ValueType::String => {
+                                Value::String(Box::new(cursor.get_str().unwrap().to_string()))
+                            }
+                            ValueType::Bytes => {
+                                Value::Blob(Box::new(cursor.get_bytes().unwrap().to_vec()))
+                            }
+                            ValueType::List | ValueType::Bag => Value::Null,
+                            ValueType::Tuple => unreachable!("handled above"),
+                        };
+
+                        tuple.insert(&field_name, field_value);
+
+                        // Move to next field
+                        cursor = match cursor.next() {
+                            Ok(Some(next)) => next,
+                            _ => break,
+                        };
+                    }
+                }
+            }
+            Value::Tuple(Box::new(tuple))
+        }
+        ValueType::List | ValueType::Bag => {
+            // For now, return Null - List/Bag navigation not yet implemented
+            Value::Null
+        }
     }
 }
