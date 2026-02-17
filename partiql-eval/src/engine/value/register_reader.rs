@@ -1,5 +1,5 @@
 use super::internal::ValueRef;
-use super::value_owned::ValueView;
+use super::value_view::ValueView;
 
 pub struct RegisterReader<'a> {
     pub(crate) slots: &'a [ValueRef<'a>],

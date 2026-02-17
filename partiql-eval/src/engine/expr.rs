@@ -3,7 +3,6 @@ use crate::engine::error::{EngineError, Result};
 use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
-use partiql_value::Value;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -82,14 +81,50 @@ pub enum Inst {
     },
 }
 
-#[derive(Clone, Debug, Default)]
 pub struct Program {
     pub insts: Vec<Inst>,
     pub(crate) consts: Vec<ValueOwned>,
+    #[allow(dead_code)] // Arena is used to back const_refs but not accessed directly
+    arena: Arena,
+    const_refs: Vec<ValueRef<'static>>,
     pub keys: Vec<String>,
     pub reg_count: u16,
     #[allow(dead_code)]
     pub slot_count: u16,
+}
+
+// Safety: Program is Sync despite containing an Arena because:
+// 1. The arena is only written to during Program::build() and Program::clone()
+// 2. After construction, the arena is never mutated - it only serves as backing storage
+// 3. All ValueRef references into the arena are read-only
+// 4. The arena and consts are co-owned by Program and dropped together
+unsafe impl Sync for Program {}
+
+impl Clone for Program {
+    fn clone(&self) -> Self {
+        // Create a new arena for the cloned program
+        let arena = Arena::default();
+
+        // Re-convert all constants to ValueRef using the new arena
+        let const_refs: Vec<ValueRef<'_>> = self
+            .consts
+            .iter()
+            .map(|c| ValueRef::from_owned(c, &arena))
+            .collect();
+
+        // Safety: Same as in build() - Program owns both consts and arena
+        let const_refs: Vec<ValueRef<'static>> = unsafe { std::mem::transmute(const_refs) };
+
+        Program {
+            insts: self.insts.clone(),
+            consts: self.consts.clone(),
+            arena,
+            const_refs,
+            keys: self.keys.clone(),
+            reg_count: self.reg_count,
+            slot_count: self.slot_count,
+        }
+    }
 }
 
 impl Program {
@@ -112,14 +147,13 @@ impl Program {
         for inst in &self.insts {
             match inst {
                 Inst::LoadConst { dst, const_idx } => {
-                    let value = self.consts.get(*const_idx as usize).ok_or_else(|| {
+                    // Zero-copy: Just index into pre-converted const_refs
+                    let value_ref = self.const_refs.get(*const_idx as usize).ok_or_else(|| {
                         EngineError::IllegalState("invalid const index".to_string())
                     })?;
-                    // Safety: Constants are owned by Program which lives as long as the operator pipeline.
-                    // The operator pipeline lives for the entire query execution, which is longer than
-                    // any individual row ('a lifetime). Therefore it's safe to extend the lifetime.
-                    let value_ref: ValueRef<'a> =
-                        unsafe { std::mem::transmute(ValueRef::from_owned(value)) };
+                    // Safety: Extend lifetime from 'static to 'a. This is safe because
+                    // Program (which owns the data) outlives the query execution lifetime 'a.
+                    let value_ref: ValueRef<'a> = unsafe { std::mem::transmute(*value_ref) };
                     regs[*dst as usize] = value_ref;
                 }
                 Inst::AddI64 { dst, a, b } => {
@@ -167,7 +201,7 @@ impl Program {
                     let key = self.keys.get(*key_idx as usize).ok_or_else(|| {
                         EngineError::IllegalState("invalid key index".to_string())
                     })?;
-                    regs[*dst as usize] = value_get_field_ref(regs[*base as usize], key, arena);
+                    regs[*dst as usize] = value_get_field_ref(regs[*base as usize], key);
                 }
                 Inst::StoreSlot { slot, src } => {
                     // Copy from computation register to slot register
@@ -249,9 +283,31 @@ impl ProgramBuilder {
     }
 
     pub fn build(self) -> Program {
+        // Create arena for tuple field arrays
+        let arena = Arena::default();
+
+        // Pre-convert all constants to ValueRef
+        let const_refs: Vec<ValueRef<'_>> = self
+            .consts
+            .iter()
+            .map(|c| ValueRef::from_owned(c, &arena))
+            .collect();
+
+        // Safety: This transmute extends the lifetime from the temporary borrow to 'static.
+        // This is safe because:
+        // 1. Program owns both `consts` (Vec<ValueOwned>) and `arena`
+        // 2. ValueRef references point into either:
+        //    - The owned data in `consts` (for String/Bytes via .as_str()/.as_slice())
+        //    - The arena (for tuple field arrays)
+        // 3. Both live for the entire lifetime of Program
+        // 4. They're dropped together when Program is dropped
+        let const_refs: Vec<ValueRef<'static>> = unsafe { std::mem::transmute(const_refs) };
+
         Program {
             insts: self.insts,
             consts: self.consts,
+            arena,
+            const_refs,
             keys: self.keys,
             reg_count: self.next_reg,
             slot_count: self.slot_count,
@@ -582,14 +638,14 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
 }
 
 fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
-    Ok(ValueOwned::from(match lit {
-        Lit::Missing => Value::Missing,
-        Lit::Null => Value::Null,
-        Lit::Int64(v) => Value::Integer(*v),
-        Lit::Bool(v) => Value::Boolean(*v),
-        Lit::String(v) => Value::String(Box::new(v.clone())),
+    Ok(match lit {
+        Lit::Missing => ValueOwned::Missing,
+        Lit::Null => ValueOwned::Null,
+        Lit::Int64(v) => ValueOwned::I64(*v),
+        Lit::Bool(v) => ValueOwned::Bool(*v),
+        Lit::String(v) => ValueOwned::String(v.clone()),
         _ => return Err(EngineError::UnsupportedExpr("literal".to_string())),
-    }))
+    })
 }
 
 fn call_name(call: &CallExpr) -> String {
