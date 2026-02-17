@@ -644,6 +644,37 @@ fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
         Lit::Int64(v) => ValueOwned::I64(*v),
         Lit::Bool(v) => ValueOwned::Bool(*v),
         Lit::String(v) => ValueOwned::String(v.clone()),
+        Lit::Struct(fields) => {
+            // Recursively convert each field in the struct
+            let tuple_fields = fields
+                .iter()
+                .map(|(name, field_lit)| {
+                    Ok(super::value::TupleFieldOwned {
+                        name: name.clone(),
+                        value: lit_to_value(field_lit)?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            ValueOwned::Tuple(super::value::TupleOwned {
+                fields: tuple_fields,
+            })
+        }
+        Lit::List(elements) => {
+            // Recursively convert each element in the list
+            let items = elements
+                .iter()
+                .map(lit_to_value)
+                .collect::<Result<Vec<_>>>()?;
+            ValueOwned::List(items)
+        }
+        Lit::Bag(elements) => {
+            // Recursively convert each element in the bag
+            let items = elements
+                .iter()
+                .map(lit_to_value)
+                .collect::<Result<Vec<_>>>()?;
+            ValueOwned::Bag(items)
+        }
         _ => return Err(EngineError::UnsupportedExpr("literal".to_string())),
     })
 }
