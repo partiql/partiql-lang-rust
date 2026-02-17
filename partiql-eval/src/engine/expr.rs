@@ -18,6 +18,8 @@ pub enum Expr {
     GetField(Box<Expr>, String),
     UdfCall { name: String, args: Vec<Expr> },
     Tuple { attrs: Vec<Expr>, values: Vec<Expr> },
+    List { elements: Vec<Expr> },
+    Bag { elements: Vec<Expr> },
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +80,14 @@ pub enum Inst {
         dst: u16,
         attr_regs: Vec<u16>,
         value_regs: Vec<u16>,
+    },
+    MakeList {
+        dst: u16,
+        element_regs: Vec<u16>,
+    },
+    MakeBag {
+        dst: u16,
+        element_regs: Vec<u16>,
     },
 }
 
@@ -243,6 +253,26 @@ impl Program {
                     // Single arena allocation for entire tuple structure
                     let tuple_ref = arena.alloc_tuple(fields);
                     regs[*dst as usize] = ValueRef::Tuple(tuple_ref);
+                }
+                Inst::MakeList { dst, element_regs } => {
+                    // Zero-copy list construction!
+                    // Collect ValueRefs from element registers
+                    let elements: Vec<ValueRef<'a>> =
+                        element_regs.iter().map(|reg| regs[*reg as usize]).collect();
+
+                    // Single arena allocation for the element slice
+                    let list_slice = arena.alloc_slice(&elements);
+                    regs[*dst as usize] = ValueRef::List(list_slice);
+                }
+                Inst::MakeBag { dst, element_regs } => {
+                    // Zero-copy bag construction!
+                    // Collect ValueRefs from element registers
+                    let elements: Vec<ValueRef<'a>> =
+                        element_regs.iter().map(|reg| regs[*reg as usize]).collect();
+
+                    // Single arena allocation for the element slice
+                    let bag_slice = arena.alloc_slice(&elements);
+                    regs[*dst as usize] = ValueRef::Bag(bag_slice);
                 }
             }
         }
@@ -453,6 +483,30 @@ impl ExprCompiler {
                 });
                 Ok(dst)
             }
+            Expr::List { elements } => {
+                let mut elements_regs = Vec::with_capacity(elements.len());
+                for element in elements {
+                    elements_regs.push(self.compile_expr(element)?);
+                }
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::MakeList {
+                    dst,
+                    element_regs: elements_regs,
+                });
+                Ok(dst)
+            }
+            Expr::Bag { elements } => {
+                let mut elements_regs = Vec::with_capacity(elements.len());
+                for element in elements {
+                    elements_regs.push(self.compile_expr(element)?);
+                }
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::MakeBag {
+                    dst,
+                    element_regs: elements_regs,
+                });
+                Ok(dst)
+            }
         }
     }
 
@@ -619,6 +673,22 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     .map(|arg| self.lower_expr(arg))
                     .collect::<Result<Vec<_>>>()?,
             }),
+            ValueExpr::ListExpr(list_expr) => {
+                let elements = list_expr
+                    .elements
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Expr::List { elements })
+            }
+            ValueExpr::BagExpr(bag_expr) => {
+                let elements = bag_expr
+                    .elements
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Expr::Bag { elements })
+            }
             ValueExpr::TupleExpr(tuple_expr) => {
                 let attrs = tuple_expr
                     .attrs
@@ -675,7 +745,12 @@ fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
                 .collect::<Result<Vec<_>>>()?;
             ValueOwned::Bag(items)
         }
-        _ => return Err(EngineError::UnsupportedExpr("literal".to_string())),
+        Lit::Int8(v) => ValueOwned::I64((*v).into()),
+        Lit::Int16(v) => ValueOwned::I64((*v).into()),
+        Lit::Int32(v) => ValueOwned::I64((*v).into()),
+        Lit::Decimal(d) => ValueOwned::Decimal(*d),
+        Lit::Double(f) => ValueOwned::F64(*f),
+        Lit::Variant(_, _) => todo!("Variant literals are not (yet) supported."),
     })
 }
 

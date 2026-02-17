@@ -1,4 +1,5 @@
 use ordered_float::OrderedFloat;
+use rust_decimal::Decimal as RustDecimal;
 
 /// Owned tuple representation for arena-allocated value storage
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -23,15 +24,12 @@ pub(crate) enum ValueOwned {
     Null,
     Bool(bool),
     I64(i64),
-    #[allow(dead_code)]
     F64(OrderedFloat<f64>),
+    Decimal(RustDecimal),
     String(String),
     #[allow(dead_code)]
     Bytes(Vec<u8>),
-    #[allow(dead_code)]
     Tuple(TupleOwned),
-    #[allow(dead_code)]
     List(Vec<ValueOwned>),
-    #[allow(dead_code)]
     Bag(Vec<ValueOwned>),
 }

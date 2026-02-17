@@ -9,6 +9,7 @@ pub enum ValueType {
     Bool,
     Integer,
     Float,
+    Decimal,
     String,
     Bytes,
     Tuple,
@@ -90,6 +91,7 @@ impl<'a> ValueView<'a> {
             ValueRef::Bool(_) => ValueType::Bool,
             ValueRef::I64(_) => ValueType::Integer,
             ValueRef::F64(_) => ValueType::Float,
+            ValueRef::Decimal(_) => ValueType::Decimal,
             ValueRef::Str(_) => ValueType::String,
             ValueRef::Bytes(_) => ValueType::Bytes,
             ValueRef::Tuple(_) => ValueType::Tuple,
@@ -139,6 +141,17 @@ impl<'a> ValueView<'a> {
             ValueRef::F64(v) => Ok(v),
             _ => Err(EngineError::TypeError(format!(
                 "expected Float, got {:?}",
+                self.get_type()
+            ))),
+        }
+    }
+
+    /// Get decimal value
+    pub fn get_decimal(&self) -> Result<rust_decimal::Decimal> {
+        match self.current {
+            ValueRef::Decimal(d) => Ok(d),
+            _ => Err(EngineError::TypeError(format!(
+                "expected Decimal, got {:?}",
                 self.get_type()
             ))),
         }

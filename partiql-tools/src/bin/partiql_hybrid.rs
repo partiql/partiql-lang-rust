@@ -315,6 +315,7 @@ fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
         ValueType::Null => Value::Null,
         ValueType::Bool => Value::Boolean(view.get_bool().unwrap()),
         ValueType::Integer => Value::Integer(view.get_i64().unwrap()),
+        ValueType::Decimal => Value::Decimal(Box::new(view.get_decimal().unwrap())),
         ValueType::Float => Value::Real(view.get_f64().unwrap().into()),
         ValueType::String => Value::String(Box::new(view.get_str().unwrap().to_string())),
         ValueType::Bytes => Value::Blob(Box::new(view.get_bytes().unwrap().to_vec())),

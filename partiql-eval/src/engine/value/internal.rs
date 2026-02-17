@@ -1,6 +1,7 @@
 use super::value_owned::ValueOwned;
 use crate::engine::arena::Arena;
 use crate::engine::error::{EngineError, Result};
+use rust_decimal::Decimal as RustDecimal;
 
 /// Compact tuple representation stored in arena for zero-copy operations
 #[derive(Clone, Copy, Debug)]
@@ -22,6 +23,7 @@ pub(crate) enum ValueRef<'a> {
     Bool(bool),
     I64(i64),
     F64(f64),
+    Decimal(RustDecimal),
     Str(&'a str),
     Bytes(&'a [u8]),
     Tuple(&'a TupleRef<'a>),
@@ -39,6 +41,7 @@ impl<'a> ValueRef<'a> {
             ValueOwned::Bool(v) => ValueRef::Bool(*v),
             ValueOwned::I64(v) => ValueRef::I64(*v),
             ValueOwned::F64(v) => ValueRef::F64(v.0),
+            ValueOwned::Decimal(d) => ValueRef::Decimal(*d),
             ValueOwned::String(v) => ValueRef::Str(v.as_str()),
             ValueOwned::Bytes(v) => ValueRef::Bytes(v.as_slice()),
             ValueOwned::Tuple(t) => {
@@ -94,6 +97,17 @@ impl<'a> ValueRef<'a> {
         match *self {
             ValueRef::Bool(v) => Ok(v),
             _ => Err(EngineError::TypeError("expected bool".to_string())),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_decimal(&self) -> Result<RustDecimal> {
+        match *self {
+            ValueRef::Decimal(d) => Ok(d),
+            _ => Err(EngineError::TypeError(format!(
+                "expected decimal, but received {:?}",
+                *self
+            ))),
         }
     }
 }
