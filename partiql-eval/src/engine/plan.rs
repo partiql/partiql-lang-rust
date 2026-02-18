@@ -362,7 +362,7 @@ impl PipelineOp {
             let has_row = {
                 // Reborrow with shorter lifetime to prevent lifetime extension
                 let regs_reborrow = &mut *regs;
-                let mut writer = RegisterWriter::new(regs_reborrow);
+                let mut writer = RegisterWriter::new(regs_reborrow, arena);
                 self.reader.next_row(&mut writer)?
             };
 

@@ -735,11 +735,11 @@ impl BufferDataSource {
             // Decode and write based on type, using target_slot
             match type_tag {
                 TYPE_NULL => {
-                    writer.put_null(target_slot)?;
+                    writer.write_null(target_slot)?;
                     has_fields = true;
                 }
                 TYPE_MISSING => {
-                    writer.put_missing(target_slot)?;
+                    writer.write_missing(target_slot)?;
                     has_fields = true;
                 }
                 TYPE_BOOL => {
@@ -750,7 +750,7 @@ impl BufferDataSource {
                     }
                     let value = self.buffer[self.offset] != 0;
                     self.offset += 1;
-                    writer.put_bool(target_slot, value)?;
+                    writer.write_bool(target_slot, value)?;
                     has_fields = true;
                 }
                 TYPE_I64 => {
@@ -764,7 +764,7 @@ impl BufferDataSource {
                         .map_err(|_| EngineError::IllegalState("Failed to read i64".to_string()))?;
                     let value = i64::from_ne_bytes(bytes);
                     self.offset += 8;
-                    writer.put_i64(target_slot, value)?;
+                    writer.write_i64(target_slot, value)?;
                     has_fields = true;
                 }
                 TYPE_F64 => {
@@ -778,7 +778,7 @@ impl BufferDataSource {
                         .map_err(|_| EngineError::IllegalState("Failed to read f64".to_string()))?;
                     let value = f64::from_ne_bytes(bytes);
                     self.offset += 8;
-                    writer.put_f64(target_slot, value)?;
+                    writer.write_f64(target_slot, value)?;
                     has_fields = true;
                 }
                 TYPE_STRING => {
@@ -812,7 +812,7 @@ impl BufferDataSource {
                     // TODO: Fix memory leak - strings need to be allocated in arena
                     // For now, leak the string (same as RegisterWriter)
                     let leaked_str: &'static str = Box::leak(s.to_string().into_boxed_str());
-                    writer.put_str(target_slot, leaked_str)?;
+                    writer.write_str(target_slot, leaked_str)?;
                     self.offset += len;
                     has_fields = true;
                 }

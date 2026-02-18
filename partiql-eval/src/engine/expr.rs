@@ -1850,7 +1850,11 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 .resolver
                 .resolve_var(name, scope.clone())
                 .map(Expr::SlotRef)
-                .ok_or_else(|| EngineError::UnsupportedExpr(format!("unresolved var {name:?}"))),
+                .ok_or_else(|| {
+                    EngineError::UnsupportedExpr(format!(
+                        "unresolved var {name:?} with scope {scope:?}"
+                    ))
+                }),
             ValueExpr::DBRef(db_ref) => {
                 // DBRef represents a catalog-registered database object (table/view)
                 // Resolve the first component of the path as a global variable
@@ -2020,7 +2024,33 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Expr::Tuple { attrs, values })
             }
-            _ => Err(EngineError::UnsupportedExpr(format!("{:?}", *expr))),
+            ValueExpr::BetweenExpr(_between_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::PatternMatchExpr(_pattern_match_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::SubQueryExpr(_sub_query_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::SimpleCase(_simple_case) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::SearchedCase(_searched_case) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::IsTypeExpr(_is_type_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::NullIfExpr(_null_if_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::CoalesceExpr(_coalesce_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
+            ValueExpr::GraphMatch(_graph_match_expr) => {
+                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            }
         }
     }
 }

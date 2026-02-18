@@ -9,8 +9,8 @@ use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSo
 use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
 use crate::engine::SlotResolver;
 use partiql_logical::{
-    BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, PathComponent, Project, Scan, ValueExpr,
-    VarRefType,
+    BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, PathComponent, Project, ProjectAllMode,
+    ProjectValue, Scan, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -55,6 +55,8 @@ impl<'a> PlanCompiler<'a> {
         let mut scan: Option<&Scan> = None;
         let mut filters: Vec<&ValueExpr> = Vec::new();
         let mut project: Option<&Project> = None;
+        let mut project_value: Option<&ProjectValue> = None;
+        let mut project_all: Option<&ProjectAllMode> = None;
         let mut limit: Option<usize> = None;
 
         for op in order {
@@ -69,10 +71,22 @@ impl<'a> PlanCompiler<'a> {
                     filters.push(&filter.expr);
                 }
                 BindingsOp::Project(project_op) => {
-                    if project.is_some() {
-                        return Err(EngineError::InvalidPlan("multiple projects".to_string()));
+                    if project.is_some() || project_value.is_some() || project_all.is_some() {
+                        return Err(EngineError::InvalidPlan("multiple projections".to_string()));
                     }
                     project = Some(project_op);
+                }
+                BindingsOp::ProjectValue(pv) => {
+                    if project.is_some() || project_value.is_some() || project_all.is_some() {
+                        return Err(EngineError::InvalidPlan("multiple projections".to_string()));
+                    }
+                    project_value = Some(pv);
+                }
+                BindingsOp::ProjectAll(mode) => {
+                    if project.is_some() || project_value.is_some() || project_all.is_some() {
+                        return Err(EngineError::InvalidPlan("multiple projections".to_string()));
+                    }
+                    project_all = Some(mode);
                 }
                 BindingsOp::LimitOffset(limit_op) => {
                     if limit.is_some() {
@@ -81,7 +95,15 @@ impl<'a> PlanCompiler<'a> {
                     limit = parse_limit(limit_op)?;
                 }
                 BindingsOp::Sink => {}
-                _ => {
+                BindingsOp::Pivot(_)
+                | BindingsOp::Unpivot(_)
+                | BindingsOp::OrderBy(_)
+                | BindingsOp::Join(_)
+                | BindingsOp::BagOp(_)
+                | BindingsOp::ExprQuery(_)
+                | BindingsOp::Distinct
+                | BindingsOp::GroupBy(_)
+                | BindingsOp::Having(_) => {
                     return Err(EngineError::InvalidPlan(format!(
                         "unsupported operator in streaming pipeline: {:?}",
                         op
@@ -93,16 +115,21 @@ impl<'a> PlanCompiler<'a> {
         let scan = scan.ok_or_else(|| EngineError::InvalidPlan("missing scan".to_string()))?;
         let (catalog_id, reader_factory) = self.resolve_reader_factory(scan)?;
 
-        let has_project = project.is_some();
-        let output_count = if has_project {
-            project.map(|proj| proj.exprs.len()).unwrap_or_default()
+        // Determine output slot count based on projection type
+        let output_count = if let Some(proj) = project {
+            proj.exprs.len()
         } else {
+            // ProjectValue, ProjectAll, and no-projection all use 1 output slot
             1
         };
 
-        let required_columns = collect_column_requirements(&filters, project, &scan.as_key)?;
+        let required_columns =
+            collect_column_requirements_extended(&filters, project, project_value, &scan.as_key)?;
         let mut columns: Vec<String> = required_columns.into_iter().collect();
         columns.sort_unstable();
+
+        // ProjectAll needs the whole row value when no specific columns are identified
+        let force_whole_value = project_all.is_some();
 
         // Build scan layout based on reader capabilities
         let input_start = output_count;
@@ -111,7 +138,7 @@ impl<'a> PlanCompiler<'a> {
 
         // Try to resolve all required columns
         let mut all_resolved = true;
-        if !columns.is_empty() {
+        if !columns.is_empty() && !force_whole_value {
             for (idx, name) in columns.iter().enumerate() {
                 if let Some(source) = reader_factory.resolve(name) {
                     let slot = (input_start + idx) as SlotId;
@@ -128,9 +155,13 @@ impl<'a> PlanCompiler<'a> {
             }
         }
 
-        // If any column couldn't be resolved, fall back to whole value
-        let can_project = all_resolved && !columns.is_empty();
-        if !can_project && !columns.is_empty() {
+        // Fall back to whole value if:
+        // - Any column couldn't be resolved
+        // - ProjectAll is used (always needs the whole row for SELECT *)
+        let needs_whole_value =
+            force_whole_value || (!all_resolved && !columns.is_empty()) || columns.is_empty();
+        let can_project = !needs_whole_value && all_resolved && !columns.is_empty();
+        if needs_whole_value {
             projections.clear();
             column_slots.clear();
             projections.push(ScanProjection {
@@ -140,18 +171,13 @@ impl<'a> PlanCompiler<'a> {
         }
 
         let layout = ScanLayout { projections };
-        let base_row_slot = if !can_project && !columns.is_empty() {
+        let base_row_slot = if needs_whole_value {
             Some(input_start as SlotId)
         } else {
             None
         };
 
-        let mut slot_count = input_start
-            + if can_project || columns.is_empty() {
-                columns.len().max(0)
-            } else {
-                1
-            };
+        let mut slot_count = input_start + if can_project { columns.len().max(0) } else { 1 };
         let predicate_slot = if filters.is_empty() {
             None
         } else {
@@ -163,7 +189,7 @@ impl<'a> PlanCompiler<'a> {
         let resolver = PipelineSlotResolver {
             base_row_slot,
             scan_alias: scan.as_key.clone(),
-            column_slots,
+            column_slots: column_slots.clone(),
         };
         let expr_compiler = LogicalExprCompiler::new(&resolver);
 
@@ -186,6 +212,7 @@ impl<'a> PlanCompiler<'a> {
         }
 
         let shape = if let Some(project_op) = project {
+            // SELECT a, b, ... — named column projection
             let mut exprs = Vec::with_capacity(project_op.exprs.len());
             let mut fields = Vec::with_capacity(project_op.exprs.len());
             for (idx, (name, expr)) in project_op.exprs.iter().enumerate() {
@@ -202,6 +229,58 @@ impl<'a> PlanCompiler<'a> {
             steps.push(StepSpec::Project { program });
             // Scans typically produce bags of structs
             Shape::Bag(RowShape::Struct(fields))
+        } else if let Some(pv) = project_value {
+            // SELECT VALUE <expr> — each row produces a single value
+            let program =
+                expr_compiler.compile_to_program(&pv.expr, 0 as SlotId, slot_count as u16)?;
+            max_registers = max_registers.max(program.reg_count as usize);
+            steps.push(StepSpec::Project { program });
+            Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic))
+        } else if let Some(_mode) = project_all {
+            // SELECT * — emit the whole row value
+            // For both Unwrap and PassThrough modes in the streaming engine,
+            // we need to pass through the scanned row as-is. The scan already
+            // places the whole value into `base_row_slot` (whole-value mode)
+            // or individual columns into `column_slots` (column-projected mode).
+            //
+            // In whole-value mode: copy base_row_slot to output slot 0
+            // In column-projected mode: pass through (no extra step needed,
+            //   but we still need the shape metadata)
+            if let Some(_base_slot) = base_row_slot {
+                // Whole-value mode: compile a trivial expression that copies
+                // the base row slot to output slot 0
+                let copy_expr = ValueExpr::VarRef(
+                    BindingsName::CaseInsensitive(scan.as_key.clone().into()),
+                    VarRefType::Local,
+                );
+                let program =
+                    expr_compiler.compile_to_program(&copy_expr, 0 as SlotId, slot_count as u16)?;
+                max_registers = max_registers.max(program.reg_count as usize);
+                steps.push(StepSpec::Project { program });
+                // Shape is a bag of dynamic values (the whole row tuples)
+                Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic))
+            } else {
+                // Column-projected mode or no columns: rows are already in slots.
+                // Build a struct shape from the column slots.
+                if !column_slots.is_empty() {
+                    let mut fields: Vec<FieldShape> = column_slots
+                        .iter()
+                        .map(|(name, slot)| FieldShape {
+                            name: FieldName::Static(name.clone()),
+                            value: RowShape::Register(*slot as usize, PhysicalType::Dynamic),
+                        })
+                        .collect();
+                    // Sort by slot index for deterministic ordering
+                    fields.sort_by_key(|f| match &f.value {
+                        RowShape::Register(idx, _) => *idx,
+                        _ => 0,
+                    });
+                    Shape::Bag(RowShape::Struct(fields))
+                } else {
+                    // No columns resolved - emit the whole value
+                    Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic))
+                }
+            }
         } else {
             // No projection - emit the whole value as a single dynamic column
             Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic))
@@ -389,9 +468,14 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
     }
 }
 
-fn collect_column_requirements(
+/// Column requirements collection that considers Project, ProjectValue, and filter expressions.
+///
+/// ProjectAll does not contribute column requirements because it needs the whole row
+/// (handled by `force_whole_value` in the caller).
+fn collect_column_requirements_extended(
     filters: &[&ValueExpr],
     project: Option<&Project>,
+    project_value: Option<&ProjectValue>,
     binding_name: &str,
 ) -> Result<FxHashSet<String>> {
     let mut columns = FxHashSet::default();
@@ -403,6 +487,9 @@ fn collect_column_requirements(
         for (_, expr) in &project.exprs {
             extract_column_refs(expr, binding_name, &mut columns)?;
         }
+    }
+    if let Some(pv) = project_value {
+        extract_column_refs(&pv.expr, binding_name, &mut columns)?;
     }
 
     Ok(columns)

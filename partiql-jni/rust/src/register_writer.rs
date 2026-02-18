@@ -37,7 +37,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeWriteNull(
 ) {
     jni_guard_void!(env, {
         let writer = unsafe { &mut *(writer_handle as *mut RegisterWriter<'_, '_>) };
-        writer.put_null(slot as u16)?;
+        writer.write_null(slot as u16)?;
         Ok(())
     })
 }
@@ -58,7 +58,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeWriteBoolean(
 ) {
     jni_guard_void!(env, {
         let writer = unsafe { &mut *(writer_handle as *mut RegisterWriter<'_, '_>) };
-        writer.put_bool(slot as u16, value != 0)?;
+        writer.write_bool(slot as u16, value != 0)?;
         Ok(())
     })
 }
@@ -79,7 +79,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeWriteLong(
 ) {
     jni_guard_void!(env, {
         let writer = unsafe { &mut *(writer_handle as *mut RegisterWriter<'_, '_>) };
-        writer.put_i64(slot as u16, value)?;
+        writer.write_i64(slot as u16, value)?;
         Ok(())
     })
 }
@@ -100,7 +100,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeWriteDouble(
 ) {
     jni_guard_void!(env, {
         let writer = unsafe { &mut *(writer_handle as *mut RegisterWriter<'_, '_>) };
-        writer.put_f64(slot as u16, value)?;
+        writer.write_f64(slot as u16, value)?;
         Ok(())
     })
 }
@@ -137,7 +137,7 @@ pub extern "system" fn Java_org_partiql_jni_RegisterWriter_nativeWriteString(
         // 3. The VM will not hold references past the row iteration
         let leaked_str: &'static str = Box::leak(rust_str.into_boxed_str());
 
-        writer.put_str(slot as u16, leaked_str)?;
+        writer.write_str(slot as u16, leaked_str)?;
         Ok(())
     })
 }
@@ -211,10 +211,10 @@ fn decode_buffer_to_registers(
         // Decode value based on type
         match type_tag {
             TYPE_NULL => {
-                writer.put_null(slot)?;
+                writer.write_null(slot)?;
             }
             TYPE_MISSING => {
-                writer.put_missing(slot)?;
+                writer.write_missing(slot)?;
             }
             TYPE_BOOL => {
                 if offset >= buffer.len() {
@@ -223,7 +223,7 @@ fn decode_buffer_to_registers(
                     ));
                 }
                 let value = buffer[offset] != 0;
-                writer.put_bool(slot, value)?;
+                writer.write_bool(slot, value)?;
                 offset += 1;
             }
             TYPE_I64 => {
@@ -236,7 +236,7 @@ fn decode_buffer_to_registers(
                     .try_into()
                     .map_err(|_| EngineError::IllegalState("Failed to read i64".to_string()))?;
                 let value = i64::from_ne_bytes(bytes);
-                writer.put_i64(slot, value)?;
+                writer.write_i64(slot, value)?;
                 offset += 8;
             }
             TYPE_F64 => {
@@ -249,7 +249,7 @@ fn decode_buffer_to_registers(
                     .try_into()
                     .map_err(|_| EngineError::IllegalState("Failed to read f64".to_string()))?;
                 let value = f64::from_ne_bytes(bytes);
-                writer.put_f64(slot, value)?;
+                writer.write_f64(slot, value)?;
                 offset += 8;
             }
             TYPE_STRING => {
@@ -281,7 +281,7 @@ fn decode_buffer_to_registers(
                 // TODO: Fix memory leak - strings need to be allocated in arena
                 // For now, leak the string (same as legacy API)
                 let leaked_str: &'static str = Box::leak(s.to_string().into_boxed_str());
-                writer.put_str(slot, leaked_str)?;
+                writer.write_str(slot, leaked_str)?;
                 offset += len;
             }
             _ => {
