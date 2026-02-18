@@ -92,6 +92,15 @@ impl<'a> ValueRef<'a> {
             ))),
         }
     }
+    pub fn as_f64(&self) -> Result<f64> {
+        match *self {
+            ValueRef::F64(v) => Ok(v),
+            _ => Err(EngineError::TypeError(format!(
+                "expected f64, but received {:?}",
+                *self
+            ))),
+        }
+    }
 
     pub fn as_bool(&self) -> Result<bool> {
         match *self {
@@ -100,7 +109,6 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_decimal(&self) -> Result<RustDecimal> {
         match *self {
             ValueRef::Decimal(d) => Ok(d),
