@@ -13,7 +13,7 @@ pub use crate::engine::plan::ScanId;
 
 // RegisterWriter module
 mod value_writer;
-pub use value_writer::RegisterWriter;
+pub use value_writer::{RegisterWriter, ValueWriter};
 
 use crate::engine::error::Result;
 use partiql_common::catalog::EntryId;

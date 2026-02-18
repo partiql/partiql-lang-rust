@@ -399,7 +399,7 @@ impl DataSource for RandomDataSource {
                 ScanSourceType::ColumnIndex(index) => {
                     if *index < self.num_columns {
                         let random_value: i64 = rng.gen();
-                        writer.put_i64(target, random_value)?;
+                        writer.write_i64(target, random_value)?;
                     } else {
                         return Err(partiql_eval::EngineError::ReaderError(format!(
                             "Column index {} out of bounds (max: {})",
@@ -408,7 +408,12 @@ impl DataSource for RandomDataSource {
                         )));
                     }
                 }
-                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
+                ScanSourceType::WholeValue => {
+                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                        "Random reader only supports ColumnIndex projections".to_string(),
+                    ));
+                }
+                ScanSourceType::FieldPath(_) => {
                     return Err(partiql_eval::EngineError::UnsupportedExpr(
                         "Random reader only supports ColumnIndex projections".to_string(),
                     ));
@@ -667,7 +672,7 @@ impl DataSource for InMemGeneratedReader {
             match &proj.source.source_type {
                 ScanSourceType::ColumnIndex(index) => {
                     if *index < self.num_columns {
-                        writer.put_i64(target, row_value)?;
+                        writer.write_i64(target, row_value)?;
                     } else {
                         return Err(partiql_eval::EngineError::ReaderError(format!(
                             "Column index {} out of bounds (max: {})",
@@ -676,9 +681,27 @@ impl DataSource for InMemGeneratedReader {
                         )));
                     }
                 }
-                ScanSourceType::WholeValue | ScanSourceType::FieldPath(_) => {
+                ScanSourceType::WholeValue => {
+                    // Build a tuple with all columns
+                    let target = proj.target_slot;
+                    let mut vw = writer.value_writer(target)?;
+                    vw.step_in_tuple()?;
+                    for col_idx in 0..self.num_columns {
+                        let col_name = match col_idx {
+                            0 => "a",
+                            1 => "b",
+                            _ => "unknown",
+                        };
+                        vw.put_field_name(col_name)?;
+                        vw.put_i64(row_value + col_idx as i64)?;
+                    }
+                    vw.step_out()?;
+                    vw.finish()?;
+                }
+                ScanSourceType::FieldPath(_) => {
                     return Err(partiql_eval::EngineError::UnsupportedExpr(
-                        "InMem reader only supports ColumnIndex projections".to_string(),
+                        "InMem reader only supports ColumnIndex and WholeValue projections"
+                            .to_string(),
                     ));
                 }
             };
@@ -824,7 +847,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read i64: {e}"
                                             ))
                                         })?;
-                                        writer.put_i64(target_slot, val)?;
+                                        writer.write_i64(target_slot, val)?;
                                     }
                                     IonType::Float => {
                                         let val = reader.read_f64().map_err(|e| {
@@ -832,7 +855,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read f64: {e}"
                                             ))
                                         })?;
-                                        writer.put_f64(target_slot, val)?;
+                                        writer.write_f64(target_slot, val)?;
                                     }
                                     IonType::Bool => {
                                         let val = reader.read_bool().map_err(|e| {
@@ -840,7 +863,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read bool: {e}"
                                             ))
                                         })?;
-                                        writer.put_bool(target_slot, val)?;
+                                        writer.write_bool(target_slot, val)?;
                                     }
                                     IonType::String => {
                                         let val = reader.read_str().map_err(|e| {
@@ -855,10 +878,10 @@ impl DataSource for IonDataSource {
                                                 self.string_storage[idx].as_str(),
                                             )
                                         };
-                                        writer.put_str(target_slot, str_ref)?;
+                                        writer.write_str(target_slot, str_ref)?;
                                     }
                                     IonType::Null => {
-                                        writer.put_null(target_slot)?;
+                                        writer.write_null(target_slot)?;
                                     }
                                     other_type => {
                                         return Err(partiql_eval::EngineError::ReaderError(
