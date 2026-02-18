@@ -12,11 +12,18 @@ pub enum Expr {
     SlotRef(SlotId),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Div(Box<Expr>, Box<Expr>),
     Mod(Box<Expr>, Box<Expr>),
+    Exp(Box<Expr>, Box<Expr>),
     Eq(Box<Expr>, Box<Expr>),
+    Gt(Box<Expr>, Box<Expr>),
+    Lt(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
+    Concat(Box<Expr>, Box<Expr>),
+    In(Box<Expr>, Box<Expr>),
     GetField(Box<Expr>, String),
     UdfCall { name: String, args: Vec<Expr> },
     Tuple { attrs: Vec<Expr>, values: Vec<Expr> },
@@ -145,6 +152,138 @@ pub enum Inst {
         b: u16,
         b_cast: u16,
     },
+    // --- Mul ---
+    MulI64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    MulF64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    MulDecimal {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    MulDynamic {
+        dst: u16,
+        a: u16,
+        a_cast: u16,
+        b: u16,
+        b_cast: u16,
+    },
+    // --- Div ---
+    DivI64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    DivF64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    DivDecimal {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    DivDynamic {
+        dst: u16,
+        a: u16,
+        a_cast: u16,
+        b: u16,
+        b_cast: u16,
+    },
+    // --- Exp ---
+    ExpF64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    ExpDynamic {
+        dst: u16,
+        a: u16,
+        a_cast: u16,
+        b: u16,
+        b_cast: u16,
+    },
+    // --- Gt ---
+    GtI64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    GtF64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    GtDecimal {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    GtStr {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    GtDynamic {
+        dst: u16,
+        a: u16,
+        a_cast: u16,
+        b: u16,
+        b_cast: u16,
+    },
+    // --- Lt ---
+    LtI64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    LtF64 {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    LtDecimal {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    LtStr {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    LtDynamic {
+        dst: u16,
+        a: u16,
+        a_cast: u16,
+        b: u16,
+        b_cast: u16,
+    },
+    // --- Concat ---
+    ConcatStr {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    ConcatDynamic {
+        dst: u16,
+        a: u16,
+        b: u16,
+    },
+    // --- In ---
+    InDynamic {
+        dst: u16,
+        value: u16,
+        collection: u16,
+    },
     AndBool {
         dst: u16,
         a: u16,
@@ -235,6 +374,61 @@ impl Inst {
 
     fn new_eq_decimal(dst: u16, a: u16, b: u16) -> Self {
         Inst::EqDecimal { dst, a, b }
+    }
+
+    // --- Mul constructors ---
+    fn new_mul_i64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::MulI64 { dst, a, b }
+    }
+    fn new_mul_f64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::MulF64 { dst, a, b }
+    }
+    fn new_mul_decimal(dst: u16, a: u16, b: u16) -> Self {
+        Inst::MulDecimal { dst, a, b }
+    }
+
+    // --- Div constructors ---
+    fn new_div_i64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::DivI64 { dst, a, b }
+    }
+    fn new_div_f64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::DivF64 { dst, a, b }
+    }
+    fn new_div_decimal(dst: u16, a: u16, b: u16) -> Self {
+        Inst::DivDecimal { dst, a, b }
+    }
+
+    // --- Exp constructors ---
+    fn new_exp_f64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::ExpF64 { dst, a, b }
+    }
+
+    // --- Gt constructors ---
+    fn new_gt_i64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::GtI64 { dst, a, b }
+    }
+    fn new_gt_f64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::GtF64 { dst, a, b }
+    }
+    fn new_gt_decimal(dst: u16, a: u16, b: u16) -> Self {
+        Inst::GtDecimal { dst, a, b }
+    }
+    fn new_gt_str(dst: u16, a: u16, b: u16) -> Self {
+        Inst::GtStr { dst, a, b }
+    }
+
+    // --- Lt constructors ---
+    fn new_lt_i64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::LtI64 { dst, a, b }
+    }
+    fn new_lt_f64(dst: u16, a: u16, b: u16) -> Self {
+        Inst::LtF64 { dst, a, b }
+    }
+    fn new_lt_decimal(dst: u16, a: u16, b: u16) -> Self {
+        Inst::LtDecimal { dst, a, b }
+    }
+    fn new_lt_str(dst: u16, a: u16, b: u16) -> Self {
+        Inst::LtStr { dst, a, b }
     }
 }
 
@@ -511,6 +705,176 @@ impl Program {
         Ok(())
     }
 
+    /// Evaluate a dynamic binary comparison (Gt or Lt) with numeric type coercion.
+    ///
+    /// Semantics:
+    /// - If either operand is Null or Missing, the result is Null.
+    /// - Numeric types (I64, F64, Decimal) are coerced to a common type before comparison.
+    /// - Same-type string comparisons are handled directly.
+    /// - Type mismatches between incompatible types return Null.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn eval_binary_comparison_dynamic<'a>(
+        &self,
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+        lhs_cast: u16,
+        rhs_cast: u16,
+        fn_i64: fn(u16, u16, u16) -> Inst,
+        fn_f64: fn(u16, u16, u16) -> Inst,
+        fn_decimal: fn(u16, u16, u16) -> Inst,
+        fn_str: fn(u16, u16, u16) -> Inst,
+        arena: &'a Arena,
+        regs: &mut [ValueRef<'a>],
+        udf: Option<&'a dyn UdfRegistry>,
+    ) -> Result<()> {
+        let av = regs[lhs as usize];
+        let bv = regs[rhs as usize];
+
+        // Null/Missing propagation
+        if matches!(av, ValueRef::Null | ValueRef::Missing)
+            || matches!(bv, ValueRef::Null | ValueRef::Missing)
+        {
+            regs[dst as usize] = ValueRef::Null;
+            return Ok(());
+        }
+
+        match (av, bv) {
+            // Numeric same-type
+            (ValueRef::I64(_), ValueRef::I64(_)) => {
+                self.eval_inst(&fn_i64(dst, lhs, rhs), arena, regs, udf)?
+            }
+            (ValueRef::F64(_), ValueRef::F64(_)) => {
+                self.eval_inst(&fn_f64(dst, lhs, rhs), arena, regs, udf)?
+            }
+            (ValueRef::Decimal(_), ValueRef::Decimal(_)) => {
+                self.eval_inst(&fn_decimal(dst, lhs, rhs), arena, regs, udf)?
+            }
+            // Numeric cross-type: I64 vs F64
+            (ValueRef::I64(_), ValueRef::F64(_)) => {
+                let cast = Inst::Cast {
+                    dst: lhs_cast,
+                    from: lhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_f64(dst, lhs_cast, rhs), arena, regs, udf)?
+            }
+            (ValueRef::F64(_), ValueRef::I64(_)) => {
+                let cast = Inst::Cast {
+                    dst: rhs_cast,
+                    from: rhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_f64(dst, lhs, rhs_cast), arena, regs, udf)?
+            }
+            // Numeric cross-type: I64 vs Decimal
+            (ValueRef::I64(_), ValueRef::Decimal(_)) => {
+                let cast = Inst::Cast {
+                    dst: lhs_cast,
+                    from: lhs,
+                    to: CastTarget::Decimal,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_decimal(dst, lhs_cast, rhs), arena, regs, udf)?
+            }
+            (ValueRef::Decimal(_), ValueRef::I64(_)) => {
+                let cast = Inst::Cast {
+                    dst: rhs_cast,
+                    from: rhs,
+                    to: CastTarget::Decimal,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_decimal(dst, lhs, rhs_cast), arena, regs, udf)?
+            }
+            // Numeric cross-type: F64 vs Decimal — cast Decimal to F64
+            (ValueRef::F64(_), ValueRef::Decimal(_)) => {
+                let cast = Inst::Cast {
+                    dst: rhs_cast,
+                    from: rhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_f64(dst, lhs, rhs_cast), arena, regs, udf)?
+            }
+            (ValueRef::Decimal(_), ValueRef::F64(_)) => {
+                let cast = Inst::Cast {
+                    dst: lhs_cast,
+                    from: lhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                self.eval_inst(&fn_f64(dst, lhs_cast, rhs), arena, regs, udf)?
+            }
+            // String comparison
+            (ValueRef::Str(_), ValueRef::Str(_)) => {
+                self.eval_inst(&fn_str(dst, lhs, rhs), arena, regs, udf)?
+            }
+            // Incompatible types
+            (_, _) => {
+                regs[dst as usize] = ValueRef::Null;
+            }
+        }
+        Ok(())
+    }
+
+    /// Evaluate dynamic exponentiation with type coercion to f64.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn eval_exp_dynamic<'a>(
+        &self,
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+        lhs_cast: u16,
+        rhs_cast: u16,
+        arena: &'a Arena,
+        regs: &mut [ValueRef<'a>],
+        udf: Option<&'a dyn UdfRegistry>,
+    ) -> Result<()> {
+        let av = regs[lhs as usize];
+        let bv = regs[rhs as usize];
+        // Cast both operands to f64 if needed, then use ExpF64
+        let a_reg = match av {
+            ValueRef::F64(_) => lhs,
+            ValueRef::I64(_) | ValueRef::Decimal(_) => {
+                let cast = Inst::Cast {
+                    dst: lhs_cast,
+                    from: lhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                lhs_cast
+            }
+            _ => {
+                return Err(EngineError::IllegalState(
+                    "Type mismatch for exp!".to_string(),
+                ));
+            }
+        };
+        let b_reg = match bv {
+            ValueRef::F64(_) => rhs,
+            ValueRef::I64(_) | ValueRef::Decimal(_) => {
+                let cast = Inst::Cast {
+                    dst: rhs_cast,
+                    from: rhs,
+                    to: CastTarget::F64,
+                };
+                self.eval_inst(&cast, arena, regs, udf)?;
+                rhs_cast
+            }
+            _ => {
+                return Err(EngineError::IllegalState(
+                    "Type mismatch for exp!".to_string(),
+                ));
+            }
+        };
+        self.eval_inst(&Inst::new_exp_f64(dst, a_reg, b_reg), arena, regs, udf)?;
+        Ok(())
+    }
+
     #[inline]
     fn eval_cast<'a>(
         &self,
@@ -714,6 +1078,260 @@ impl Program {
                 b_cast,
             } => {
                 self.eval_eq_dynamic(*dst, *a, *b, *a_cast, *b_cast, arena, regs, udf)?;
+            }
+            // --- Mul ---
+            Inst::MulI64 { dst, a, b } => {
+                let av = regs[*a as usize].as_i64()?;
+                let bv = regs[*b as usize].as_i64()?;
+                regs[*dst as usize] = ValueRef::I64(av * bv);
+            }
+            Inst::MulF64 { dst, a, b } => {
+                let av = regs[*a as usize].as_f64()?;
+                let bv = regs[*b as usize].as_f64()?;
+                regs[*dst as usize] = ValueRef::F64(av * bv);
+            }
+            Inst::MulDecimal { dst, a, b } => {
+                let av = regs[*a as usize].as_decimal()?;
+                let bv = regs[*b as usize].as_decimal()?;
+                regs[*dst as usize] = ValueRef::Decimal(av * bv);
+            }
+            Inst::MulDynamic {
+                dst,
+                a,
+                b,
+                a_cast,
+                b_cast,
+            } => {
+                self.eval_binary_arithmetic_dynamic(
+                    *dst,
+                    *a,
+                    *b,
+                    *a_cast,
+                    *b_cast,
+                    Inst::new_mul_i64,
+                    Inst::new_mul_f64,
+                    Inst::new_mul_decimal,
+                    arena,
+                    regs,
+                    udf,
+                )?;
+            }
+            // --- Div ---
+            Inst::DivI64 { dst, a, b } => {
+                let av = regs[*a as usize].as_i64()?;
+                let bv = regs[*b as usize].as_i64()?;
+                regs[*dst as usize] = ValueRef::I64(av / bv);
+            }
+            Inst::DivF64 { dst, a, b } => {
+                let av = regs[*a as usize].as_f64()?;
+                let bv = regs[*b as usize].as_f64()?;
+                regs[*dst as usize] = ValueRef::F64(av / bv);
+            }
+            Inst::DivDecimal { dst, a, b } => {
+                let av = regs[*a as usize].as_decimal()?;
+                let bv = regs[*b as usize].as_decimal()?;
+                regs[*dst as usize] = ValueRef::Decimal(av / bv);
+            }
+            Inst::DivDynamic {
+                dst,
+                a,
+                b,
+                a_cast,
+                b_cast,
+            } => {
+                self.eval_binary_arithmetic_dynamic(
+                    *dst,
+                    *a,
+                    *b,
+                    *a_cast,
+                    *b_cast,
+                    Inst::new_div_i64,
+                    Inst::new_div_f64,
+                    Inst::new_div_decimal,
+                    arena,
+                    regs,
+                    udf,
+                )?;
+            }
+            // --- Exp ---
+            Inst::ExpF64 { dst, a, b } => {
+                let av = regs[*a as usize].as_f64()?;
+                let bv = regs[*b as usize].as_f64()?;
+                regs[*dst as usize] = ValueRef::F64(av.powf(bv));
+            }
+            Inst::ExpDynamic {
+                dst,
+                a,
+                b,
+                a_cast,
+                b_cast,
+            } => {
+                self.eval_exp_dynamic(*dst, *a, *b, *a_cast, *b_cast, arena, regs, udf)?;
+            }
+            // --- Gt ---
+            Inst::GtI64 { dst, a, b } => {
+                let av = regs[*a as usize].as_i64()?;
+                let bv = regs[*b as usize].as_i64()?;
+                regs[*dst as usize] = ValueRef::Bool(av > bv);
+            }
+            Inst::GtF64 { dst, a, b } => {
+                let av = regs[*a as usize].as_f64()?;
+                let bv = regs[*b as usize].as_f64()?;
+                regs[*dst as usize] = ValueRef::Bool(av > bv);
+            }
+            Inst::GtDecimal { dst, a, b } => {
+                let av = regs[*a as usize].as_decimal()?;
+                let bv = regs[*b as usize].as_decimal()?;
+                regs[*dst as usize] = ValueRef::Bool(av > bv);
+            }
+            Inst::GtStr { dst, a, b } => {
+                let result = match (regs[*a as usize], regs[*b as usize]) {
+                    (ValueRef::Str(a), ValueRef::Str(b)) => a > b,
+                    _ => false,
+                };
+                regs[*dst as usize] = ValueRef::Bool(result);
+            }
+            Inst::GtDynamic {
+                dst,
+                a,
+                b,
+                a_cast,
+                b_cast,
+            } => {
+                self.eval_binary_comparison_dynamic(
+                    *dst,
+                    *a,
+                    *b,
+                    *a_cast,
+                    *b_cast,
+                    Inst::new_gt_i64,
+                    Inst::new_gt_f64,
+                    Inst::new_gt_decimal,
+                    Inst::new_gt_str,
+                    arena,
+                    regs,
+                    udf,
+                )?;
+            }
+            // --- Lt ---
+            Inst::LtI64 { dst, a, b } => {
+                let av = regs[*a as usize].as_i64()?;
+                let bv = regs[*b as usize].as_i64()?;
+                regs[*dst as usize] = ValueRef::Bool(av < bv);
+            }
+            Inst::LtF64 { dst, a, b } => {
+                let av = regs[*a as usize].as_f64()?;
+                let bv = regs[*b as usize].as_f64()?;
+                regs[*dst as usize] = ValueRef::Bool(av < bv);
+            }
+            Inst::LtDecimal { dst, a, b } => {
+                let av = regs[*a as usize].as_decimal()?;
+                let bv = regs[*b as usize].as_decimal()?;
+                regs[*dst as usize] = ValueRef::Bool(av < bv);
+            }
+            Inst::LtStr { dst, a, b } => {
+                let result = match (regs[*a as usize], regs[*b as usize]) {
+                    (ValueRef::Str(a), ValueRef::Str(b)) => a < b,
+                    _ => false,
+                };
+                regs[*dst as usize] = ValueRef::Bool(result);
+            }
+            Inst::LtDynamic {
+                dst,
+                a,
+                b,
+                a_cast,
+                b_cast,
+            } => {
+                self.eval_binary_comparison_dynamic(
+                    *dst,
+                    *a,
+                    *b,
+                    *a_cast,
+                    *b_cast,
+                    Inst::new_lt_i64,
+                    Inst::new_lt_f64,
+                    Inst::new_lt_decimal,
+                    Inst::new_lt_str,
+                    arena,
+                    regs,
+                    udf,
+                )?;
+            }
+            // --- Concat ---
+            Inst::ConcatStr { dst, a, b } => {
+                let result = match (regs[*a as usize], regs[*b as usize]) {
+                    (ValueRef::Str(a_str), ValueRef::Str(b_str)) => {
+                        let mut s = String::with_capacity(a_str.len() + b_str.len());
+                        s.push_str(a_str);
+                        s.push_str(b_str);
+                        let bytes = s.into_bytes();
+                        let slice = arena.alloc_slice(&bytes);
+                        // Safety: we just built this from valid UTF-8 strings
+                        let str_ref = unsafe { std::str::from_utf8_unchecked(slice) };
+                        ValueRef::Str(str_ref)
+                    }
+                    _ => {
+                        return Err(EngineError::TypeError(
+                            "concat requires string operands".to_string(),
+                        ));
+                    }
+                };
+                regs[*dst as usize] = result;
+            }
+            Inst::ConcatDynamic { dst, a, b } => {
+                let av = regs[*a as usize];
+                let bv = regs[*b as usize];
+                // Null/Missing propagation
+                if matches!(av, ValueRef::Null | ValueRef::Missing)
+                    || matches!(bv, ValueRef::Null | ValueRef::Missing)
+                {
+                    regs[*dst as usize] = ValueRef::Null;
+                } else {
+                    self.eval_inst(
+                        &Inst::ConcatStr {
+                            dst: *dst,
+                            a: *a,
+                            b: *b,
+                        },
+                        arena,
+                        regs,
+                        udf,
+                    )?;
+                }
+            }
+            // --- In ---
+            Inst::InDynamic {
+                dst,
+                value,
+                collection,
+            } => {
+                let val = regs[*value as usize];
+                let coll = regs[*collection as usize];
+                // Null/Missing propagation for value
+                if matches!(val, ValueRef::Null | ValueRef::Missing) {
+                    regs[*dst as usize] = ValueRef::Null;
+                } else {
+                    match coll {
+                        ValueRef::List(items) | ValueRef::Bag(items) => {
+                            let mut found = false;
+                            for item in items.iter() {
+                                if value_ref_eq(val, *item) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            regs[*dst as usize] = ValueRef::Bool(found);
+                        }
+                        ValueRef::Null | ValueRef::Missing => {
+                            regs[*dst as usize] = ValueRef::Null;
+                        }
+                        _ => {
+                            // Single value comparison: val IN non-collection
+                            regs[*dst as usize] = ValueRef::Bool(value_ref_eq(val, coll));
+                        }
+                    }
+                }
             }
             Inst::AndBool { dst, a, b } => {
                 let av = regs[*a as usize].as_bool()?;
@@ -1070,6 +1688,101 @@ impl ExprCompiler {
                 });
                 Ok(dst)
             }
+            Expr::Mul(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                let l_cast = self.builder.alloc_reg();
+                let r_cast = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::MulDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    a_cast: l_cast,
+                    b_cast: r_cast,
+                });
+                Ok(dst)
+            }
+            Expr::Div(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                let l_cast = self.builder.alloc_reg();
+                let r_cast = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::DivDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    a_cast: l_cast,
+                    b_cast: r_cast,
+                });
+                Ok(dst)
+            }
+            Expr::Exp(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                let l_cast = self.builder.alloc_reg();
+                let r_cast = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::ExpDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    a_cast: l_cast,
+                    b_cast: r_cast,
+                });
+                Ok(dst)
+            }
+            Expr::Gt(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                let l_cast = self.builder.alloc_reg();
+                let r_cast = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::GtDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    a_cast: l_cast,
+                    b_cast: r_cast,
+                });
+                Ok(dst)
+            }
+            Expr::Lt(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                let l_cast = self.builder.alloc_reg();
+                let r_cast = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::LtDynamic {
+                    dst,
+                    a: l,
+                    b: r,
+                    a_cast: l_cast,
+                    b_cast: r_cast,
+                });
+                Ok(dst)
+            }
+            Expr::Concat(left, right) => {
+                let l = self.compile_expr(left)?;
+                let r = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                self.builder
+                    .insts
+                    .push(Inst::ConcatDynamic { dst, a: l, b: r });
+                Ok(dst)
+            }
+            Expr::In(left, right) => {
+                let value = self.compile_expr(left)?;
+                let collection = self.compile_expr(right)?;
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::InDynamic {
+                    dst,
+                    value,
+                    collection,
+                });
+                Ok(dst)
+            }
             Expr::Bag { elements } => {
                 let mut elements_regs = Vec::with_capacity(elements.len());
                 for element in elements {
@@ -1233,15 +1946,34 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     partiql_logical::BinaryOp::Eq => Ok(Expr::Eq(left.into(), right.into())),
                     partiql_logical::BinaryOp::And => Ok(Expr::And(left.into(), right.into())),
                     partiql_logical::BinaryOp::Or => Ok(Expr::Or(left.into(), right.into())),
-                    partiql_logical::BinaryOp::Concat => todo!(),
-                    partiql_logical::BinaryOp::Gt => todo!(),
-                    partiql_logical::BinaryOp::Gteq => todo!(),
-                    partiql_logical::BinaryOp::Lt => todo!(),
-                    partiql_logical::BinaryOp::Lteq => todo!(),
-                    partiql_logical::BinaryOp::Mul => todo!(),
-                    partiql_logical::BinaryOp::Div => todo!(),
-                    partiql_logical::BinaryOp::Exp => todo!(),
-                    partiql_logical::BinaryOp::In => todo!(),
+                    partiql_logical::BinaryOp::Concat => {
+                        Ok(Expr::Concat(left.into(), right.into()))
+                    }
+                    partiql_logical::BinaryOp::Gt => Ok(Expr::Gt(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Gteq => {
+                        // Gteq(l, r) => Or(Gt(l, r), Eq(l', r'))
+                        // We clone left/right since they're used twice
+                        let left_clone = left.clone();
+                        let right_clone = right.clone();
+                        Ok(Expr::Or(
+                            Box::new(Expr::Gt(left.into(), right.into())),
+                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
+                        ))
+                    }
+                    partiql_logical::BinaryOp::Lt => Ok(Expr::Lt(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Lteq => {
+                        // Lteq(l, r) => Or(Lt(l, r), Eq(l', r'))
+                        let left_clone = left.clone();
+                        let right_clone = right.clone();
+                        Ok(Expr::Or(
+                            Box::new(Expr::Lt(left.into(), right.into())),
+                            Box::new(Expr::Eq(left_clone.into(), right_clone.into())),
+                        ))
+                    }
+                    partiql_logical::BinaryOp::Mul => Ok(Expr::Mul(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Div => Ok(Expr::Div(left.into(), right.into())),
+                    partiql_logical::BinaryOp::Exp => Ok(Expr::Exp(left.into(), right.into())),
+                    partiql_logical::BinaryOp::In => Ok(Expr::In(left.into(), right.into())),
                 }
             }
             ValueExpr::UnExpr(op, expr) => {
@@ -1385,5 +2117,30 @@ fn resolve_alias_info<R: SlotResolver>(
             }
         }),
         _ => None,
+    }
+}
+
+/// Shallow structural equality for ValueRef values.
+///
+/// Used by the `IN` operator to check membership in collections.
+/// Returns `false` for Null/Missing comparisons (following SQL semantics).
+fn value_ref_eq(a: ValueRef<'_>, b: ValueRef<'_>) -> bool {
+    match (a, b) {
+        (ValueRef::Null, ValueRef::Null) => false,
+        (ValueRef::Missing, _) | (_, ValueRef::Missing) => false,
+        (ValueRef::Null, _) | (_, ValueRef::Null) => false,
+        (ValueRef::Bool(a), ValueRef::Bool(b)) => a == b,
+        (ValueRef::I64(a), ValueRef::I64(b)) => a == b,
+        (ValueRef::F64(a), ValueRef::F64(b)) => a == b,
+        (ValueRef::Decimal(a), ValueRef::Decimal(b)) => a == b,
+        (ValueRef::I64(a), ValueRef::F64(b)) => (a as f64) == b,
+        (ValueRef::F64(a), ValueRef::I64(b)) => a == (b as f64),
+        (ValueRef::I64(a), ValueRef::Decimal(b)) => Decimal::new(a, 0) == b,
+        (ValueRef::Decimal(a), ValueRef::I64(b)) => a == Decimal::new(b, 0),
+        (ValueRef::F64(a), ValueRef::Decimal(b)) => a == b.to_f64().unwrap_or(f64::NAN),
+        (ValueRef::Decimal(a), ValueRef::F64(b)) => a.to_f64().unwrap_or(f64::NAN) == b,
+        (ValueRef::Str(a), ValueRef::Str(b)) => a == b,
+        (ValueRef::Bytes(a), ValueRef::Bytes(b)) => a == b,
+        _ => false,
     }
 }
