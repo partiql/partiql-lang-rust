@@ -9,6 +9,7 @@ use crate::engine::source::RegisterWriter;
 use crate::engine::source::{DataSourceImpl, ScanLayout};
 use crate::engine::value::{RegisterReader, Shape, ValueRef};
 use crate::engine::UdfRegistry;
+use partiql_logical::JoinKind;
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -83,7 +84,7 @@ where
 impl Clone for CompiledPlan {
     fn clone(&self) -> Self {
         Self {
-            nodes: self.nodes.iter().map(|node| node.clone_spec()).collect(),
+            nodes: self.nodes.to_vec(),
             root: self.root,
             shape: self.shape.clone(),
             slot_count: self.slot_count,
@@ -147,17 +148,19 @@ impl CompiledPlan {
 pub(crate) enum RelOpSpec {
     Pipeline(PipelineSpec),
     ExprQuery(ExprQuerySpec),
+    NestedLoopJoin(NestedLoopJoinSpec),
     HashJoin(HashJoinSpec),
     HashAgg(HashAggSpec),
     Sort(SortSpec),
     Custom(Box<dyn BlockingOperatorSpec>),
 }
 
-impl RelOpSpec {
-    pub(crate) fn clone_spec(&self) -> Self {
+impl Clone for RelOpSpec {
+    fn clone(&self) -> Self {
         match self {
             RelOpSpec::Pipeline(spec) => RelOpSpec::Pipeline(spec.clone_pipeline()),
             RelOpSpec::ExprQuery(spec) => RelOpSpec::ExprQuery(spec.clone()),
+            RelOpSpec::NestedLoopJoin(spec) => RelOpSpec::NestedLoopJoin(spec.clone()),
             RelOpSpec::HashJoin(_) => RelOpSpec::HashJoin(HashJoinSpec),
             RelOpSpec::HashAgg(_) => RelOpSpec::HashAgg(HashAggSpec),
             RelOpSpec::Sort(_) => RelOpSpec::Sort(SortSpec),
@@ -185,6 +188,31 @@ pub struct ExprQuerySpec {
     pub program: Program,
 }
 
+/// Specification for a nested-loop join operator.
+///
+/// Contains all compile-time information needed to instantiate a join at execution time.
+/// The left and right children are full operator specs (typically PipelineSpecs for scans),
+/// making the plan a composable tree of operators.
+#[derive(Clone)]
+pub struct NestedLoopJoinSpec {
+    /// Join type (Cross, Inner, Left, Right, Full)
+    pub kind: JoinKind,
+    /// Left (outer) child operator spec
+    pub left: Box<RelOpSpec>,
+    /// Right (inner) child operator spec
+    pub right: Box<RelOpSpec>,
+    /// Compiled join condition (ON clause), None for Cross join
+    pub condition: Option<Program>,
+    /// Register slot where the condition result is stored
+    pub condition_slot: Option<SlotId>,
+    /// Start of right-side input slots in the register array
+    pub right_input_start: usize,
+    /// Number of right-side input slots (1 for whole-value mode)
+    pub right_input_count: usize,
+    /// Post-join steps (projection, filter, limit)
+    pub steps: Vec<StepSpec>,
+}
+
 pub struct HashJoinSpec;
 pub struct HashAggSpec;
 pub struct SortSpec;
@@ -206,6 +234,7 @@ pub(crate) trait BlockingOperator {
 pub(crate) enum RelOp {
     Pipeline(PipelineOp),
     ExprQuery(ExprQueryOp),
+    NestedLoopJoin(NestedLoopJoinOp),
     HashJoin(HashJoinState),
     HashAgg(HashAggState),
     Sort(SortState),
@@ -222,6 +251,7 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.next_row(arena, regs, slot_count),
             RelOp::ExprQuery(op) => op.next_row(arena, regs, slot_count),
+            RelOp::NestedLoopJoin(op) => op.next_row(arena, regs, slot_count),
             RelOp::HashJoin(_op) => Err(EngineError::NotImplemented),
             RelOp::HashAgg(_op) => Err(EngineError::NotImplemented),
             RelOp::Sort(_op) => Err(EngineError::NotImplemented),
@@ -234,6 +264,7 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.open(),
             RelOp::ExprQuery(op) => op.open(),
+            RelOp::NestedLoopJoin(op) => op.open(),
             RelOp::HashJoin(op) => op.open(),
             RelOp::HashAgg(op) => op.open(),
             RelOp::Sort(op) => op.open(),
@@ -246,6 +277,7 @@ impl RelOp {
         match self {
             RelOp::Pipeline(op) => op.close(),
             RelOp::ExprQuery(op) => op.close(),
+            RelOp::NestedLoopJoin(op) => op.close(),
             RelOp::HashJoin(op) => op.close(),
             RelOp::HashAgg(op) => op.close(),
             RelOp::Sort(op) => op.close(),
@@ -430,6 +462,198 @@ impl SortState {
     }
 }
 
+/// Runtime state for a nested-loop join operator.
+///
+/// The left and right children are full `RelOp` operators (typically PipelineOps
+/// wrapping data source scans). This makes the operator tree composable —
+/// a join's child could be another join, a pipeline with filters, etc.
+///
+/// Implements lateral join semantics: for each LHS row, the RHS is iterated fully.
+/// Supports Cross, Inner, and Left joins.
+pub struct NestedLoopJoinOp {
+    kind: JoinKind,
+    left: Box<RelOp>,
+    right: Box<RelOp>,
+    condition: Option<Program>,
+    condition_slot: Option<SlotId>,
+    right_input_start: usize,
+    right_input_count: usize,
+    steps: Vec<Step>,
+    udf: Option<Arc<dyn UdfRegistry>>,
+    // Iteration state
+    opened: bool,
+    has_left_row: bool,
+    right_opened: bool,
+    left_had_match: bool,
+    #[allow(dead_code)]
+    slot_count: usize,
+}
+
+/// Configuration for constructing a `NestedLoopJoinOp`.
+pub(crate) struct NestedLoopJoinConfig {
+    pub kind: JoinKind,
+    pub left: Box<RelOp>,
+    pub right: Box<RelOp>,
+    pub condition: Option<Program>,
+    pub condition_slot: Option<SlotId>,
+    pub right_input_start: usize,
+    pub right_input_count: usize,
+    pub steps: Vec<Step>,
+    pub slot_count: usize,
+    pub udf: Option<Arc<dyn UdfRegistry>>,
+}
+
+impl NestedLoopJoinOp {
+    pub(crate) fn new(config: NestedLoopJoinConfig) -> Self {
+        NestedLoopJoinOp {
+            kind: config.kind,
+            left: config.left,
+            right: config.right,
+            condition: config.condition,
+            condition_slot: config.condition_slot,
+            right_input_start: config.right_input_start,
+            right_input_count: config.right_input_count,
+            steps: config.steps,
+            udf: config.udf,
+            opened: false,
+            has_left_row: false,
+            right_opened: false,
+            left_had_match: false,
+            slot_count: config.slot_count,
+        }
+    }
+
+    pub fn open(&mut self) -> Result<()> {
+        if !self.opened {
+            self.left.open()?;
+            self.opened = true;
+            self.has_left_row = false;
+            self.right_opened = false;
+            self.left_had_match = false;
+        }
+        Ok(())
+    }
+
+    pub fn close(&mut self) -> Result<()> {
+        if self.opened {
+            if self.right_opened {
+                let _ = self.right.close();
+                self.right_opened = false;
+            }
+            self.left.close()?;
+            self.opened = false;
+            self.has_left_row = false;
+            self.left_had_match = false;
+            for step in &mut self.steps {
+                if let Step::Limit { limit, remaining } = step {
+                    *remaining = *limit;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Produce next joined row.
+    ///
+    /// # Safety within this method
+    /// We use unsafe reborrows when calling child `next_row` in a loop.
+    /// This is safe because:
+    /// 1. We immediately discard the `RegisterReader` (`.is_some()`) — no aliased references persist
+    /// 2. Children write into `regs` via side effects; we only need to know if a row was produced
+    /// 3. The arena and regs remain valid for the full `'a` lifetime
+    pub fn next_row<'a>(
+        &'a mut self,
+        arena: &'a Arena,
+        regs: &'a mut [ValueRef<'a>],
+        slot_count: usize,
+    ) -> Result<Option<RegisterReader<'a>>> {
+        let udf = self.udf.as_deref();
+
+        loop {
+            // Step 1: Ensure we have a LHS row
+            if !self.has_left_row {
+                // Safety: We reborrow self.left, arena, regs with shorter lifetimes.
+                // The returned RegisterReader is immediately consumed (.is_some()),
+                // so no aliased references persist past this block.
+                let has_left = unsafe {
+                    let left_ptr = &mut *self.left as *mut RelOp;
+                    let regs_ptr = regs as *mut [ValueRef<'a>];
+                    (*left_ptr)
+                        .next_row(arena, &mut *regs_ptr, slot_count)?
+                        .is_some()
+                };
+                if !has_left {
+                    return Ok(None);
+                }
+                self.has_left_row = true;
+                self.left_had_match = false;
+
+                if self.right_opened {
+                    self.right.close()?;
+                }
+                self.right.open()?;
+                self.right_opened = true;
+            }
+
+            // Step 2: Try to read next RHS row
+            let has_right = unsafe {
+                let right_ptr = &mut *self.right as *mut RelOp;
+                let regs_ptr = regs as *mut [ValueRef<'a>];
+                (*right_ptr)
+                    .next_row(arena, &mut *regs_ptr, slot_count)?
+                    .is_some()
+            };
+
+            if !has_right {
+                // RHS exhausted for current LHS row
+                if matches!(self.kind, JoinKind::Left) && !self.left_had_match {
+                    for i in 0..self.right_input_count {
+                        regs[self.right_input_start + i] = ValueRef::Null;
+                    }
+                    self.has_left_row = false;
+
+                    match PipelineOp::run_steps(&mut self.steps, arena, regs, udf)? {
+                        StepOutcome::Emit => {
+                            let slots = &regs[0..slot_count];
+                            return Ok(Some(RegisterReader::new(slots)));
+                        }
+                        StepOutcome::Skip => continue,
+                        StepOutcome::Halt => return Ok(None),
+                    }
+                }
+
+                self.has_left_row = false;
+                continue;
+            }
+
+            // Step 3: Evaluate join condition (if any)
+            let pass = match (&self.condition, self.condition_slot) {
+                (Some(condition), Some(cond_slot)) => {
+                    condition.eval(arena, regs, udf)?;
+                    matches!(regs.get(cond_slot as usize), Some(&ValueRef::Bool(true)))
+                }
+                _ => true,
+            };
+
+            if !pass {
+                continue;
+            }
+
+            self.left_had_match = true;
+
+            // Step 4: Run post-join steps (projection, filter, limit)
+            match PipelineOp::run_steps(&mut self.steps, arena, regs, udf)? {
+                StepOutcome::Emit => {
+                    let slots = &regs[0..slot_count];
+                    return Ok(Some(RegisterReader::new(slots)));
+                }
+                StepOutcome::Skip => continue,
+                StepOutcome::Halt => return Ok(None),
+            }
+        }
+    }
+}
+
 /// Single-threaded virtual machine for executing a compiled PartiQL plan
 ///
 /// The VM owns all execution state including:
@@ -476,52 +700,68 @@ impl PartiQLVM {
     ///
     /// # Returns
     /// A new PartiQLVM ready to execute the plan
+    /// Recursively instantiate a RelOpSpec into a RelOp.
+    fn instantiate_op(
+        spec: &RelOpSpec,
+        compiled: &CompiledPlan,
+        exec_context: &ExecutionContext,
+    ) -> Result<RelOp> {
+        match spec {
+            RelOpSpec::Pipeline(pspec) => {
+                let scan_meta = compiled.get_scan(pspec.scan_id).ok_or_else(|| {
+                    EngineError::IllegalState(format!("Unknown scan_id: {:?}", pspec.scan_id))
+                })?;
+                let catalog = exec_context
+                    .get_catalog(scan_meta.object_id.catalog_id())
+                    .ok_or_else(|| {
+                        EngineError::IllegalState(format!(
+                            "Catalog {:?} not found",
+                            scan_meta.object_id.catalog_id()
+                        ))
+                    })?;
+                let data_source = catalog.create(pspec.scan_id)?;
+                let reader = DataSourceImpl::Catalog(data_source);
+                let steps = pspec.steps.iter().cloned().map(Step::from_spec).collect();
+                Ok(RelOp::Pipeline(PipelineOp::new(steps, reader, None)))
+            }
+            RelOpSpec::ExprQuery(espec) => Ok(RelOp::ExprQuery(ExprQueryOp::new(
+                espec.program.clone(),
+                None,
+            ))),
+            RelOpSpec::NestedLoopJoin(jspec) => {
+                // Recursively instantiate left and right children
+                let left = Box::new(Self::instantiate_op(&jspec.left, compiled, exec_context)?);
+                let right = Box::new(Self::instantiate_op(&jspec.right, compiled, exec_context)?);
+                let steps = jspec.steps.iter().cloned().map(Step::from_spec).collect();
+                Ok(RelOp::NestedLoopJoin(NestedLoopJoinOp::new(
+                    NestedLoopJoinConfig {
+                        kind: jspec.kind.clone(),
+                        left,
+                        right,
+                        condition: jspec.condition.clone(),
+                        condition_slot: jspec.condition_slot,
+                        right_input_start: jspec.right_input_start,
+                        right_input_count: jspec.right_input_count,
+                        steps,
+                        slot_count: compiled.slot_count,
+                        udf: None,
+                    },
+                )))
+            }
+            _ => Err(EngineError::InvalidPlan(
+                "unsupported operator spec".to_string(),
+            )),
+        }
+    }
+
     pub fn new(compiled: CompiledPlan, exec_context: &ExecutionContext) -> Result<Self> {
         let compiled = Arc::new(compiled);
         let slot_count = compiled.slot_count;
         let root = compiled.root;
 
-        // Instantiate operators from specs
         let mut operators = Vec::with_capacity(compiled.nodes.len());
         for node in &compiled.nodes {
-            match node {
-                RelOpSpec::Pipeline(spec) => {
-                    // Get scan metadata for this scan_id
-                    let scan_meta = compiled.get_scan(spec.scan_id).ok_or_else(|| {
-                        EngineError::IllegalState(format!("Unknown scan_id: {:?}", spec.scan_id))
-                    })?;
-
-                    // Get the catalog for this scan's object
-                    let catalog = exec_context
-                        .get_catalog(scan_meta.object_id.catalog_id())
-                        .ok_or_else(|| {
-                            EngineError::IllegalState(format!(
-                                "Catalog {:?} not found in ExecutionContext",
-                                scan_meta.object_id.catalog_id()
-                            ))
-                        })?;
-
-                    // Catalog creates DataSource using just the ScanId
-                    let data_source = catalog.create(spec.scan_id)?;
-                    let reader = DataSourceImpl::Catalog(data_source);
-
-                    let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
-                    operators.push(RelOp::Pipeline(PipelineOp::new(
-                        steps, reader, None, // UDF registry not supported yet
-                    )));
-                }
-                RelOpSpec::ExprQuery(spec) => {
-                    operators.push(RelOp::ExprQuery(ExprQueryOp::new(
-                        spec.program.clone(),
-                        None, // UDF registry not supported yet
-                    )));
-                }
-                _ => {
-                    return Err(EngineError::InvalidPlan(
-                        "unsupported operator spec".to_string(),
-                    ));
-                }
-            }
+            operators.push(Self::instantiate_op(node, &compiled, exec_context)?);
         }
 
         // Allocate unified register array: slot_count + max_registers
@@ -579,47 +819,11 @@ impl PartiQLVM {
     /// # Returns
     /// Result indicating success or error
     pub fn set_context(&mut self, exec_context: &ExecutionContext) -> Result<()> {
-        // Re-instantiate operators with new execution context
+        // Re-instantiate all operators using the same recursive helper
         let mut operators = Vec::with_capacity(self.compiled.nodes.len());
         for node in &self.compiled.nodes {
-            match node {
-                RelOpSpec::Pipeline(spec) => {
-                    // Get scan metadata for this scan_id
-                    let scan_meta = self.compiled.get_scan(spec.scan_id).ok_or_else(|| {
-                        EngineError::IllegalState(format!("Unknown scan_id: {:?}", spec.scan_id))
-                    })?;
-
-                    // Get the catalog for this scan's object
-                    let catalog = exec_context
-                        .get_catalog(scan_meta.object_id.catalog_id())
-                        .ok_or_else(|| {
-                            EngineError::IllegalState(format!(
-                                "Catalog {:?} not found in ExecutionContext",
-                                scan_meta.object_id.catalog_id()
-                            ))
-                        })?;
-
-                    // Catalog creates DataSource using just the ScanId
-                    let data_source = catalog.create(spec.scan_id)?;
-                    let reader = DataSourceImpl::Catalog(data_source);
-
-                    let steps = spec.steps.iter().cloned().map(Step::from_spec).collect();
-                    operators.push(RelOp::Pipeline(PipelineOp::new(steps, reader, None)));
-                }
-                RelOpSpec::ExprQuery(spec) => {
-                    operators.push(RelOp::ExprQuery(ExprQueryOp::new(
-                        spec.program.clone(),
-                        None,
-                    )));
-                }
-                _ => {
-                    return Err(EngineError::InvalidPlan(
-                        "unsupported operator spec".to_string(),
-                    ));
-                }
-            }
+            operators.push(Self::instantiate_op(node, &self.compiled, exec_context)?);
         }
-
         self.operators = operators;
         self.arena.reset();
         Ok(())
@@ -846,6 +1050,150 @@ impl Step {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Display implementations for plan debugging
+// ---------------------------------------------------------------------------
+
+impl std::fmt::Display for CompiledPlan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "CompiledPlan {{")?;
+        writeln!(f, "  slot_count: {}", self.slot_count)?;
+        writeln!(f, "  max_registers: {}", self.max_registers)?;
+        writeln!(f, "  total_regs: {}", self.slot_count + self.max_registers)?;
+        writeln!(f, "  root: {}", self.root)?;
+        writeln!(f, "  shape: {:?}", self.shape)?;
+        writeln!(f)?;
+
+        // Print nodes
+        for (i, node) in self.nodes.iter().enumerate() {
+            let marker = if i == self.root { " (ROOT)" } else { "" };
+            writeln!(f, "  Node[{}]{}:", i, marker)?;
+            write_relop_spec(f, node, 4)?;
+        }
+
+        // Print scan metadata
+        if !self.scan_metadata.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "  Scans:")?;
+            let mut scans: Vec<_> = self.scan_metadata.iter().collect();
+            scans.sort_by_key(|(id, _)| id.as_u64());
+            for (scan_id, meta) in scans {
+                writeln!(
+                    f,
+                    "    scan_id={} → object(catalog={:?}, entry={:?})",
+                    scan_id.as_u64(),
+                    meta.object_id.catalog_id(),
+                    meta.object_id.entry_id(),
+                )?;
+                for proj in &meta.layout.projections {
+                    writeln!(
+                        f,
+                        "      projection: source={:?} → slot {}",
+                        proj.source, proj.target_slot
+                    )?;
+                }
+            }
+        }
+
+        writeln!(f, "}}")
+    }
+}
+
+fn write_relop_spec(
+    f: &mut std::fmt::Formatter<'_>,
+    spec: &RelOpSpec,
+    indent: usize,
+) -> std::fmt::Result {
+    let pad = " ".repeat(indent);
+    match spec {
+        RelOpSpec::Pipeline(p) => {
+            writeln!(f, "{}Pipeline(scan_id={})", pad, p.scan_id.as_u64())?;
+            write_steps(f, &p.steps, indent + 2)?;
+        }
+        RelOpSpec::ExprQuery(eq) => {
+            writeln!(f, "{}ExprQuery", pad)?;
+            write_program(f, &eq.program, indent + 2)?;
+        }
+        RelOpSpec::NestedLoopJoin(j) => {
+            writeln!(
+                f,
+                "{}NestedLoopJoin(kind={:?}, cond_slot={:?}, right_start={}, right_count={})",
+                pad, j.kind, j.condition_slot, j.right_input_start, j.right_input_count
+            )?;
+            writeln!(f, "{}  Left:", pad)?;
+            write_relop_spec(f, &j.left, indent + 4)?;
+            writeln!(f, "{}  Right:", pad)?;
+            write_relop_spec(f, &j.right, indent + 4)?;
+            if let Some(ref cond) = j.condition {
+                writeln!(f, "{}  Condition program:", pad)?;
+                write_program(f, cond, indent + 4)?;
+            }
+            write_steps(f, &j.steps, indent + 2)?;
+        }
+        RelOpSpec::HashJoin(_) => writeln!(f, "{}HashJoin (not implemented)", pad)?,
+        RelOpSpec::HashAgg(_) => writeln!(f, "{}HashAgg (not implemented)", pad)?,
+        RelOpSpec::Sort(_) => writeln!(f, "{}Sort (not implemented)", pad)?,
+        RelOpSpec::Custom(_) => writeln!(f, "{}Custom", pad)?,
+    }
+    Ok(())
+}
+
+fn write_steps(
+    f: &mut std::fmt::Formatter<'_>,
+    steps: &[StepSpec],
+    indent: usize,
+) -> std::fmt::Result {
+    if steps.is_empty() {
+        return Ok(());
+    }
+    let pad = " ".repeat(indent);
+    writeln!(f, "{}Steps:", pad)?;
+    for (i, step) in steps.iter().enumerate() {
+        match step {
+            StepSpec::Filter {
+                program,
+                predicate_slot,
+            } => {
+                writeln!(
+                    f,
+                    "{}  [{}] Filter(predicate_slot={})",
+                    pad, i, predicate_slot
+                )?;
+                write_program(f, program, indent + 4)?;
+            }
+            StepSpec::Project { program } => {
+                writeln!(f, "{}  [{}] Project", pad, i)?;
+                write_program(f, program, indent + 4)?;
+            }
+            StepSpec::Limit { limit } => {
+                writeln!(f, "{}  [{}] Limit({})", pad, i, limit)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_program(
+    f: &mut std::fmt::Formatter<'_>,
+    program: &Program,
+    indent: usize,
+) -> std::fmt::Result {
+    let pad = " ".repeat(indent);
+    writeln!(
+        f,
+        "{}Program(reg_count={}, slot_count={}, consts={}, keys={:?})",
+        pad,
+        program.reg_count,
+        program.slot_count,
+        program.consts.len(),
+        program.keys,
+    )?;
+    for (i, inst) in program.insts.iter().enumerate() {
+        writeln!(f, "{}  [{}] {:?}", pad, i, inst)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
