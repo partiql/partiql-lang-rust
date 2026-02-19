@@ -762,15 +762,24 @@ pub struct IonDataSource {
     path: String,
     reader: Option<Box<ion_rs::Reader<'static>>>,
     field_to_slot: FxHashMap<String, u16>,
+    /// If set, we're in whole-value mode: build a Tuple into this slot
+    whole_value_slot: Option<u16>,
     string_storage: Vec<String>,
 }
 
 impl IonDataSource {
     fn new(path: String, layout: ScanLayout) -> Self {
         let mut field_to_slot = FxHashMap::default();
+        let mut whole_value_slot = None;
         for proj in &layout.projections {
-            if let ScanSourceType::FieldPath(field_name) = &proj.source.source_type {
-                field_to_slot.insert(field_name.clone(), proj.target_slot);
+            match &proj.source.source_type {
+                ScanSourceType::FieldPath(field_name) => {
+                    field_to_slot.insert(field_name.clone(), proj.target_slot);
+                }
+                ScanSourceType::WholeValue => {
+                    whole_value_slot = Some(proj.target_slot);
+                }
+                _ => {}
             }
         }
 
@@ -778,6 +787,7 @@ impl IonDataSource {
             path,
             reader: None,
             field_to_slot,
+            whole_value_slot,
             string_storage: Vec::new(),
         }
     }
@@ -820,26 +830,39 @@ impl DataSource for IonDataSource {
                     ))
                 })?;
 
-                loop {
-                    match reader.next().map_err(|e| {
-                        partiql_eval::EngineError::ReaderError(format!(
-                            "error reading struct field: {e}"
-                        ))
-                    })? {
-                        ion_rs::StreamItem::Value(ion_type) => {
-                            let field_name = reader.field_name().map_err(|e| {
-                                partiql_eval::EngineError::ReaderError(format!(
-                                    "failed to get field name: {e}"
-                                ))
-                            })?;
+                // Whole-value mode: build a Tuple with all fields
+                if let Some(target_slot) = self.whole_value_slot {
+                    let mut vw = writer.value_writer(target_slot)?;
+                    vw.step_in_tuple()?;
 
-                            let field_text = field_name.text().ok_or_else(|| {
-                                partiql_eval::EngineError::ReaderError(
-                                    "field name has no text".to_string(),
-                                )
-                            })?;
+                    loop {
+                        match reader.next().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "error reading struct field: {e}"
+                            ))
+                        })? {
+                            ion_rs::StreamItem::Value(ion_type) => {
+                                let field_name = reader.field_name().map_err(|e| {
+                                    partiql_eval::EngineError::ReaderError(format!(
+                                        "failed to get field name: {e}"
+                                    ))
+                                })?;
+                                let field_text = field_name.text().ok_or_else(|| {
+                                    partiql_eval::EngineError::ReaderError(
+                                        "field name has no text".to_string(),
+                                    )
+                                })?;
 
-                            if let Some(&target_slot) = self.field_to_slot.get(field_text) {
+                                // Store field name in string_storage for arena lifetime
+                                self.string_storage.push(field_text.to_string());
+                                let name_idx = self.string_storage.len() - 1;
+                                let name_ref = unsafe {
+                                    std::mem::transmute::<&str, &str>(
+                                        self.string_storage[name_idx].as_str(),
+                                    )
+                                };
+                                vw.put_field_name(name_ref)?;
+
                                 match ion_type {
                                     IonType::Int => {
                                         let val = reader.read_i64().map_err(|e| {
@@ -847,7 +870,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read i64: {e}"
                                             ))
                                         })?;
-                                        writer.write_i64(target_slot, val)?;
+                                        vw.put_i64(val)?;
                                     }
                                     IonType::Float => {
                                         let val = reader.read_f64().map_err(|e| {
@@ -855,7 +878,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read f64: {e}"
                                             ))
                                         })?;
-                                        writer.write_f64(target_slot, val)?;
+                                        vw.put_f64(val)?;
                                     }
                                     IonType::Bool => {
                                         let val = reader.read_bool().map_err(|e| {
@@ -863,7 +886,7 @@ impl DataSource for IonDataSource {
                                                 "failed to read bool: {e}"
                                             ))
                                         })?;
-                                        writer.write_bool(target_slot, val)?;
+                                        vw.put_bool(val)?;
                                     }
                                     IonType::String => {
                                         let val = reader.read_str().map_err(|e| {
@@ -872,30 +895,113 @@ impl DataSource for IonDataSource {
                                             ))
                                         })?;
                                         self.string_storage.push(val.to_string());
-                                        let idx = self.string_storage.len() - 1;
+                                        let str_idx = self.string_storage.len() - 1;
                                         let str_ref = unsafe {
                                             std::mem::transmute::<&str, &str>(
-                                                self.string_storage[idx].as_str(),
+                                                self.string_storage[str_idx].as_str(),
                                             )
                                         };
-                                        writer.write_str(target_slot, str_ref)?;
+                                        vw.put_str(str_ref)?;
                                     }
                                     IonType::Null => {
-                                        writer.write_null(target_slot)?;
+                                        vw.put_null()?;
                                     }
                                     other_type => {
                                         return Err(partiql_eval::EngineError::ReaderError(
                                             format!(
-                                                "unsupported ion type for projection: {:?}",
+                                                "unsupported ion type in whole-value mode: {:?}",
                                                 other_type
                                             ),
                                         ));
                                     }
                                 }
                             }
+                            ion_rs::StreamItem::Nothing => break,
+                            ion_rs::StreamItem::Null(_) => continue,
                         }
-                        ion_rs::StreamItem::Nothing => break,
-                        ion_rs::StreamItem::Null(_) => continue,
+                    }
+
+                    vw.step_out()?;
+                    vw.finish()?;
+                } else {
+                    // Column-projection mode: write individual fields to slots
+                    loop {
+                        match reader.next().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "error reading struct field: {e}"
+                            ))
+                        })? {
+                            ion_rs::StreamItem::Value(ion_type) => {
+                                let field_name = reader.field_name().map_err(|e| {
+                                    partiql_eval::EngineError::ReaderError(format!(
+                                        "failed to get field name: {e}"
+                                    ))
+                                })?;
+
+                                let field_text = field_name.text().ok_or_else(|| {
+                                    partiql_eval::EngineError::ReaderError(
+                                        "field name has no text".to_string(),
+                                    )
+                                })?;
+
+                                if let Some(&target_slot) = self.field_to_slot.get(field_text) {
+                                    match ion_type {
+                                        IonType::Int => {
+                                            let val = reader.read_i64().map_err(|e| {
+                                                partiql_eval::EngineError::ReaderError(format!(
+                                                    "failed to read i64: {e}"
+                                                ))
+                                            })?;
+                                            writer.write_i64(target_slot, val)?;
+                                        }
+                                        IonType::Float => {
+                                            let val = reader.read_f64().map_err(|e| {
+                                                partiql_eval::EngineError::ReaderError(format!(
+                                                    "failed to read f64: {e}"
+                                                ))
+                                            })?;
+                                            writer.write_f64(target_slot, val)?;
+                                        }
+                                        IonType::Bool => {
+                                            let val = reader.read_bool().map_err(|e| {
+                                                partiql_eval::EngineError::ReaderError(format!(
+                                                    "failed to read bool: {e}"
+                                                ))
+                                            })?;
+                                            writer.write_bool(target_slot, val)?;
+                                        }
+                                        IonType::String => {
+                                            let val = reader.read_str().map_err(|e| {
+                                                partiql_eval::EngineError::ReaderError(format!(
+                                                    "failed to read string: {e}"
+                                                ))
+                                            })?;
+                                            self.string_storage.push(val.to_string());
+                                            let idx = self.string_storage.len() - 1;
+                                            let str_ref = unsafe {
+                                                std::mem::transmute::<&str, &str>(
+                                                    self.string_storage[idx].as_str(),
+                                                )
+                                            };
+                                            writer.write_str(target_slot, str_ref)?;
+                                        }
+                                        IonType::Null => {
+                                            writer.write_null(target_slot)?;
+                                        }
+                                        other_type => {
+                                            return Err(partiql_eval::EngineError::ReaderError(
+                                                format!(
+                                                    "unsupported ion type for projection: {:?}",
+                                                    other_type
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            ion_rs::StreamItem::Nothing => break,
+                            ion_rs::StreamItem::Null(_) => continue,
+                        }
                     }
                 }
 

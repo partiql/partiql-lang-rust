@@ -4,6 +4,7 @@ use common::{
     count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog,
     CompiledSourceFactory,
 };
+use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
 use std::time::Instant;
@@ -196,6 +197,11 @@ fn main() {
     };
     let compile_time = compile_start.elapsed();
 
+    // Dump compiled plan for debugging
+    println!("Compiled Plan:");
+    println!("{}", compiled);
+    println!();
+
     // Phase 4: Execute
     let exec_start = Instant::now();
 
@@ -223,21 +229,44 @@ fn main() {
 
     let shape = vm.shape().clone();
     let mut row_count = 0usize;
-    let mut results: Vec<Value> = Vec::new();
 
+    let (prefix, tab, suffix) = match shape {
+        Shape::Bag(_) => (Some("<<"), "  ", Some(">>")),
+        Shape::List(_) => (Some("["), "  ", Some("]")),
+        Shape::Single(_) => (None, "", None),
+    };
+
+    println!("Results:");
+    println!("{}", "=".repeat(60));
+
+    let mut is_first = true;
     match vm.execute() {
         Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+            if let Some(p) = prefix {
+                println!("{}", p);
+            }
             for row_result in iter {
                 match row_result {
                     Ok(row) => {
                         row_count += 1;
-                        results.push(row_to_value(&row, &shape));
+                        if is_first {
+                            is_first = false;
+                        } else {
+                            println!(",");
+                        }
+                        let value = row_to_value(&row, &shape);
+                        print!("{}", tab);
+                        print!("{:?}", value);
                     }
                     Err(e) => {
                         eprintln!("Execution error: {:?}", e);
                         std::process::exit(1);
                     }
                 }
+            }
+            println!();
+            if let Some(s) = suffix {
+                println!("{}", s);
             }
         }
         Err(e) => {
@@ -246,12 +275,6 @@ fn main() {
         }
     }
     let exec_time = exec_start.elapsed();
-
-    println!("Results:");
-    println!("{}", "=".repeat(60));
-    for value in &results {
-        println!("{:?}", value);
-    }
 
     println!("\n{}", "=".repeat(60));
     println!("TIMING SUMMARY");
@@ -285,7 +308,7 @@ fn row_to_value(
         RowShape::Struct(fields) => {
             // Construct tuple with all fields (including single field case)
             let mut tuple = Tuple::new();
-            for (idx, field) in fields.iter().enumerate() {
+            for field in fields.iter() {
                 let name = match &field.name {
                     FieldName::Static(s) => s.clone(),
                     FieldName::Register(reg) => {
@@ -293,7 +316,12 @@ fn row_to_value(
                         row.get_str(*reg).unwrap_or("?").to_string()
                     }
                 };
-                let mut view = row.get_value_view(idx).expect("register should exist");
+                // Get register index from the field's value shape
+                let reg_idx = match &field.value {
+                    RowShape::Register(idx, _) => *idx,
+                    _ => continue, // nested structs not yet supported here
+                };
+                let mut view = row.get_value_view(reg_idx).expect("register should exist");
                 tuple.insert(&name, value_view_to_value(&mut view));
             }
             Value::Tuple(Box::new(tuple))
