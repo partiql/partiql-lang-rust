@@ -39,7 +39,52 @@ use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// Global thread-safe CatalogId allocator with ID reuse.
+///
+/// Uses a free-list to recycle released IDs before allocating new ones.
+/// This keeps CatalogId values small and bounded by the maximum number
+/// of concurrently live CompilationContexts, rather than growing unboundedly.
+struct CatalogIdAllocator {
+    /// High-water mark — next fresh ID if free list is empty
+    next_id: AtomicU64,
+    /// Recycled IDs available for reuse
+    free_ids: Mutex<Vec<u64>>,
+}
+
+impl CatalogIdAllocator {
+    const fn new() -> Self {
+        CatalogIdAllocator {
+            next_id: AtomicU64::new(0),
+            free_ids: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Allocate a CatalogId. Reuses a previously released ID if available,
+    /// otherwise allocates a fresh one.
+    fn allocate(&self) -> CatalogId {
+        // Try free list first
+        if let Ok(mut free) = self.free_ids.lock() {
+            if let Some(id) = free.pop() {
+                return CatalogId::from(id);
+            }
+        }
+        // No recycled IDs — mint a new one
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        CatalogId::from(id)
+    }
+
+    /// Release a CatalogId back to the allocator for reuse.
+    fn release(&self, id: CatalogId) {
+        if let Ok(mut free) = self.free_ids.lock() {
+            free.push(u64::from(id));
+        }
+    }
+}
+
+static CATALOG_ID_ALLOCATOR: CatalogIdAllocator = CatalogIdAllocator::new();
 
 /// Information about scans belonging to a specific catalog.
 ///
@@ -193,18 +238,19 @@ pub trait ExecutionCatalog: Send + Sync {
 /// // Compiler uses context to find "main" catalog
 /// ```
 pub struct CompilationContext {
-    next_catalog_id: u64,
     catalogs: HashMap<CatalogId, Arc<dyn CompilationCatalog>>,
     name_to_id: HashMap<String, CatalogId>,
+    /// CatalogIds owned by this context, released back to the allocator on drop.
+    allocated_ids: Vec<CatalogId>,
 }
 
 impl CompilationContext {
     /// Create a new empty CompilationContext.
     pub fn new() -> Self {
         CompilationContext {
-            next_catalog_id: 0,
             catalogs: HashMap::new(),
             name_to_id: HashMap::new(),
+            allocated_ids: Vec::new(),
         }
     }
 
@@ -213,18 +259,29 @@ impl CompilationContext {
     /// The returned CatalogId should be used when setting up ExecutionContext
     /// to map the same catalog ID to an ExecutionCatalog instance.
     ///
+    /// CatalogIds are globally unique and recycled when this CompilationContext
+    /// is dropped, keeping ID values small and bounded.
+    ///
     /// If a catalog with this name already exists, it will be replaced and
-    /// a new CatalogId will be generated.
+    /// a new CatalogId will be generated. The old CatalogId is released immediately.
     pub fn add_catalog(
         &mut self,
         name: impl Into<String>,
         catalog: Arc<dyn CompilationCatalog>,
     ) -> CatalogId {
-        let id = CatalogId::from(self.next_catalog_id);
-        self.next_catalog_id += 1;
         let name = name.into();
+
+        // If replacing an existing catalog, release the old ID
+        if let Some(old_id) = self.name_to_id.remove(&name) {
+            self.catalogs.remove(&old_id);
+            self.allocated_ids.retain(|id| *id != old_id);
+            CATALOG_ID_ALLOCATOR.release(old_id);
+        }
+
+        let id = CATALOG_ID_ALLOCATOR.allocate();
         self.catalogs.insert(id, catalog);
         self.name_to_id.insert(name, id);
+        self.allocated_ids.push(id);
         id
     }
 
@@ -235,6 +292,21 @@ impl CompilationContext {
         let id = self.name_to_id.get(name)?;
         let catalog = self.catalogs.get(id)?;
         Some((*id, catalog.as_ref()))
+    }
+
+    /// Get all CatalogIds allocated by this context.
+    /// Useful for cleanup of associated global state (e.g., JNI catalog registrations).
+    pub fn catalog_ids(&self) -> &[CatalogId] {
+        &self.allocated_ids
+    }
+}
+
+impl Drop for CompilationContext {
+    fn drop(&mut self) {
+        // Release all allocated CatalogIds back to the global allocator
+        for id in &self.allocated_ids {
+            CATALOG_ID_ALLOCATOR.release(*id);
+        }
     }
 }
 

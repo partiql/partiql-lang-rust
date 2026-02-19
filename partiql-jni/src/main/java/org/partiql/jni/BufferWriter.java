@@ -6,23 +6,72 @@ import java.nio.charset.StandardCharsets;
 /**
  * Provides write access to a ByteBuffer for populating BufferedExecutionCatalog data.
  * 
- * This class enables users to write values directly to a buffer using the same
+ * This class enables users to write rows of values directly to a buffer using the same
  * encoding format as RegisterWriter, but without any JNI overhead.
  * 
- * BufferWriter instances are provided by BufferedExecutionCatalog during data
- * population and should not be created directly.
+ * <h2>Row-Oriented Format</h2>
+ * <p>Data is organized into rows, each delimited by a row-end marker. Within each row,
+ * slot entries map a register slot index to a value (scalar or collection).</p>
+ * 
+ * <pre>{@code
+ * writer.beginRow();
+ * writer.putLong(0, 42);
+ * writer.putString(1, "Alice");
+ * writer.endRow();
+ * 
+ * writer.beginRow();
+ * writer.putLong(0, 43);
+ * writer.putString(1, "Bob");
+ * writer.endRow();
+ * }</pre>
+ * 
+ * <h2>Collection Support</h2>
+ * <p>Use {@link #valueWriter(int)} to create a {@link BufferValueWriter} for writing
+ * structured values (tuples, lists, bags) into a slot:</p>
+ * 
+ * <pre>{@code
+ * writer.beginRow();
+ * writer.putLong(0, 1);
+ * 
+ * BufferValueWriter vw = writer.valueWriter(1);
+ * vw.stepInList();
+ * vw.putI64(95);
+ * vw.putI64(87);
+ * vw.stepOut();
+ * 
+ * writer.endRow();
+ * }</pre>
+ * 
+ * <p>BufferWriter instances are provided by BufferedExecutionCatalog during data
+ * population and should not be created directly.</p>
  */
 public final class BufferWriter {
-    private ByteBuffer buffer;
-    private final BufferedMemoryPool pool;
+    ByteBuffer buffer;
+    final BufferedMemoryPool pool;
     
-    // Type tags for encoding (must match RegisterWriter and Rust decoder)
+    // =========================================================================
+    // Type tags for scalar encoding (must match Rust decoder)
+    // =========================================================================
     static final byte TYPE_NULL = 0;
     static final byte TYPE_MISSING = 1;
     static final byte TYPE_BOOL = 2;
     static final byte TYPE_I64 = 3;
     static final byte TYPE_F64 = 4;
     static final byte TYPE_STRING = 5;
+    
+    // =========================================================================
+    // Container type tags (must match Rust decoder)
+    // =========================================================================
+    static final byte TYPE_TUPLE = 6;
+    static final byte TYPE_LIST = 7;
+    static final byte TYPE_BAG = 8;
+    
+    // =========================================================================
+    // Structural markers (must match Rust decoder)
+    // =========================================================================
+    static final byte MARKER_FIELD_NAME = 0x10;
+    static final byte MARKER_CONTAINER_END = 0x11;
+    static final byte MARKER_ROW_END = 0x12;
     
     /**
      * Package-private constructor for non-pooled usage.
@@ -45,6 +94,37 @@ public final class BufferWriter {
         this.buffer = buffer;
         this.pool = pool;
     }
+    
+    // =========================================================================
+    // Row boundaries
+    // =========================================================================
+    
+    /**
+     * Begin a new row.
+     * 
+     * <p>This is a logical marker. All {@code put*} calls between {@code beginRow()}
+     * and {@code endRow()} belong to the same row. The Rust decoder will deliver
+     * these as one {@code next_row()} call.</p>
+     */
+    public void beginRow() {
+        // No wire bytes needed — the row starts implicitly.
+        // This method exists for API clarity and future validation.
+    }
+    
+    /**
+     * End the current row by writing a row-end marker.
+     * 
+     * <p>The Rust decoder reads fields until it encounters this marker,
+     * then returns the row.</p>
+     */
+    public void endRow() {
+        ensureCapacity(1);
+        buffer.put(MARKER_ROW_END);
+    }
+    
+    // =========================================================================
+    // Scalar puts — slot-targeted
+    // =========================================================================
     
     /**
      * Write a NULL value to the specified register slot.
@@ -122,6 +202,37 @@ public final class BufferWriter {
         buffer.put(bytes);
     }
     
+    // =========================================================================
+    // Complex value construction
+    // =========================================================================
+    
+    /**
+     * Create a {@link BufferValueWriter} for constructing a complex value
+     * (tuple, list, bag) in the specified register slot.
+     * 
+     * <p>The returned writer writes the slot header and then delegates
+     * container/scalar content directly into this buffer. Call
+     * {@code stepInTuple()}, {@code stepInList()}, or {@code stepInBag()}
+     * on the returned writer to begin building the value.</p>
+     * 
+     * <p><b>Important:</b> You must complete the value writer (close all
+     * containers via {@code stepOut()}) before writing additional slots
+     * or calling {@code endRow()}.</p>
+     * 
+     * @param slot Register slot index (0-based)
+     * @return A BufferValueWriter for constructing the value
+     */
+    public BufferValueWriter valueWriter(int slot) {
+        // Write the slot header now; the type tag will be written by stepIn*
+        ensureCapacity(2); // slot(2)
+        buffer.putShort((short) slot);
+        return new BufferValueWriter(this);
+    }
+    
+    // =========================================================================
+    // Buffer introspection
+    // =========================================================================
+    
     /**
      * Get the current position in the buffer.
      * Useful for debugging or monitoring buffer usage.
@@ -151,6 +262,40 @@ public final class BufferWriter {
         return buffer;
     }
     
+    // =========================================================================
+    // Internal — raw write helpers used by BufferValueWriter
+    // =========================================================================
+    
+    /** Write a raw byte to the buffer. */
+    void writeByte(byte b) {
+        ensureCapacity(1);
+        buffer.put(b);
+    }
+    
+    /** Write a raw int (4 bytes) to the buffer. */
+    void writeInt(int v) {
+        ensureCapacity(4);
+        buffer.putInt(v);
+    }
+    
+    /** Write a raw long (8 bytes) to the buffer. */
+    void writeLong(long v) {
+        ensureCapacity(8);
+        buffer.putLong(v);
+    }
+    
+    /** Write a raw double (8 bytes) to the buffer. */
+    void writeDouble(double v) {
+        ensureCapacity(8);
+        buffer.putDouble(v);
+    }
+    
+    /** Write raw bytes to the buffer. */
+    void writeBytes(byte[] bytes) {
+        ensureCapacity(bytes.length);
+        buffer.put(bytes);
+    }
+    
     /**
      * Ensure the buffer has at least the specified number of bytes remaining.
      * 
@@ -160,7 +305,7 @@ public final class BufferWriter {
      * @param bytes Number of bytes needed
      * @throws IllegalStateException if buffer is too small and no pool is available
      */
-    private void ensureCapacity(int bytes) {
+    void ensureCapacity(int bytes) {
         if (buffer.remaining() < bytes) {
             if (pool != null) {
                 // Use pool to grow buffer

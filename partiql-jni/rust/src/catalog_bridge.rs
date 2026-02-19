@@ -124,13 +124,11 @@ pub fn register_execution_catalog(catalog_id: CatalogId, catalog_ref: GlobalRef,
 }
 
 /// Remove a CompilationCatalog registration
-#[allow(dead_code)]
 pub fn unregister_compilation_catalog(catalog_id: CatalogId) {
     COMPILATION_CATALOGS.remove(&catalog_id);
 }
 
 /// Remove an ExecutionCatalog registration
-#[allow(dead_code)]
 pub fn unregister_execution_catalog(catalog_id: CatalogId) {
     EXECUTION_CATALOGS.remove(&catalog_id);
 }
@@ -615,11 +613,38 @@ impl ExecutionCatalog for JavaExecutionCatalog {
 ///
 /// This DataSource provides optimal performance by reading data directly
 /// from memory without any JNI callbacks. All data is in the buffer upfront.
+///
+/// # Wire Format
+///
+/// The buffer contains a sequence of rows, each terminated by `MARKER_ROW_END`.
+/// Within each row, slot entries are: `[slot: u16][Value]`.
+///
+/// Values can be:
+/// - Scalars: `[type_tag: u8][data]`
+/// - Containers: `[TYPE_TUPLE|TYPE_LIST|TYPE_BAG] content* MARKER_CONTAINER_END`
+///
+/// Tuple fields within a container: `MARKER_FIELD_NAME [len: u32] [utf8_bytes] [Value]`
 struct BufferDataSource {
     buffer: Vec<u8>,
     offset: usize,
     layout: ScanLayout,
 }
+
+// Type tags (must match Java BufferWriter/BufferValueWriter)
+const TYPE_NULL: u8 = 0;
+const TYPE_MISSING: u8 = 1;
+const TYPE_BOOL: u8 = 2;
+const TYPE_I64: u8 = 3;
+const TYPE_F64: u8 = 4;
+const TYPE_STRING: u8 = 5;
+const TYPE_TUPLE: u8 = 6;
+const TYPE_LIST: u8 = 7;
+const TYPE_BAG: u8 = 8;
+
+// Structural markers
+const MARKER_FIELD_NAME: u8 = 0x10;
+const MARKER_CONTAINER_END: u8 = 0x11;
+const MARKER_ROW_END: u8 = 0x12;
 
 impl BufferDataSource {
     fn new(buffer: Vec<u8>, layout: ScanLayout) -> Self {
@@ -627,6 +652,352 @@ impl BufferDataSource {
             buffer,
             offset: 0,
             layout,
+        }
+    }
+
+    /// Read a single byte, advancing offset
+    #[inline]
+    fn read_u8(&mut self) -> Result<u8> {
+        if self.offset >= self.buffer.len() {
+            return Err(EngineError::IllegalState(
+                "Buffer underflow reading u8".to_string(),
+            ));
+        }
+        let v = self.buffer[self.offset];
+        self.offset += 1;
+        Ok(v)
+    }
+
+    /// Peek at the next byte without advancing offset
+    #[inline]
+    fn peek_u8(&self) -> Option<u8> {
+        if self.offset < self.buffer.len() {
+            Some(self.buffer[self.offset])
+        } else {
+            None
+        }
+    }
+
+    /// Read a u16 from native-endian bytes
+    #[inline]
+    fn read_u16(&mut self) -> Result<u16> {
+        if self.offset + 2 > self.buffer.len() {
+            return Err(EngineError::IllegalState(
+                "Buffer underflow reading u16".to_string(),
+            ));
+        }
+        let bytes = [self.buffer[self.offset], self.buffer[self.offset + 1]];
+        self.offset += 2;
+        Ok(u16::from_ne_bytes(bytes))
+    }
+
+    /// Read an i32 from native-endian bytes
+    #[inline]
+    fn read_i32(&mut self) -> Result<i32> {
+        if self.offset + 4 > self.buffer.len() {
+            return Err(EngineError::IllegalState(
+                "Buffer underflow reading i32".to_string(),
+            ));
+        }
+        let bytes: [u8; 4] = self.buffer[self.offset..self.offset + 4]
+            .try_into()
+            .map_err(|_| EngineError::IllegalState("Failed to read i32".to_string()))?;
+        self.offset += 4;
+        Ok(i32::from_ne_bytes(bytes))
+    }
+
+    /// Read an i64 from native-endian bytes
+    #[inline]
+    fn read_i64(&mut self) -> Result<i64> {
+        if self.offset + 8 > self.buffer.len() {
+            return Err(EngineError::IllegalState(
+                "Buffer underflow reading i64".to_string(),
+            ));
+        }
+        let bytes: [u8; 8] = self.buffer[self.offset..self.offset + 8]
+            .try_into()
+            .map_err(|_| EngineError::IllegalState("Failed to read i64".to_string()))?;
+        self.offset += 8;
+        Ok(i64::from_ne_bytes(bytes))
+    }
+
+    /// Read an f64 from native-endian bytes
+    #[inline]
+    fn read_f64(&mut self) -> Result<f64> {
+        if self.offset + 8 > self.buffer.len() {
+            return Err(EngineError::IllegalState(
+                "Buffer underflow reading f64".to_string(),
+            ));
+        }
+        let bytes: [u8; 8] = self.buffer[self.offset..self.offset + 8]
+            .try_into()
+            .map_err(|_| EngineError::IllegalState("Failed to read f64".to_string()))?;
+        self.offset += 8;
+        Ok(f64::from_ne_bytes(bytes))
+    }
+
+    /// Read a length-prefixed UTF-8 string (len: i32, data: [u8; len])
+    #[inline]
+    fn read_string(&mut self) -> Result<&str> {
+        let len = self.read_i32()? as usize;
+        if self.offset + len > self.buffer.len() {
+            return Err(EngineError::IllegalState(format!(
+                "Buffer underflow reading string data: need {} bytes, only {} remaining",
+                len,
+                self.buffer.len() - self.offset
+            )));
+        }
+        let str_bytes = &self.buffer[self.offset..self.offset + len];
+        let s = std::str::from_utf8(str_bytes)
+            .map_err(|e| EngineError::IllegalState(format!("Invalid UTF-8 in string: {}", e)))?;
+        self.offset += len;
+        Ok(s)
+    }
+
+    /// Map a buffer slot index to the target register slot using layout projections
+    fn map_slot(&self, buffer_slot: u16) -> u16 {
+        if !self.layout.projections.is_empty() {
+            self.layout
+                .projections
+                .iter()
+                .find_map(|proj| {
+                    match &proj.source.source_type {
+                        ScanSourceType::ColumnIndex(col_idx) => {
+                            if *col_idx == buffer_slot as usize {
+                                return Some(proj.target_slot);
+                            }
+                        }
+                        ScanSourceType::FieldPath(_) => {
+                            if (buffer_slot as usize) < self.layout.projections.len() {
+                                return self
+                                    .layout
+                                    .projections
+                                    .get(buffer_slot as usize)
+                                    .map(|p| p.target_slot);
+                            }
+                        }
+                        ScanSourceType::WholeValue => {}
+                    }
+                    None
+                })
+                .unwrap_or(buffer_slot)
+        } else {
+            buffer_slot
+        }
+    }
+
+    /// Decode one row from the buffer and write to registers.
+    ///
+    /// Reads slot entries until MARKER_ROW_END or end-of-buffer.
+    fn decode_and_write_row(
+        &mut self,
+        writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+    ) -> Result<bool> {
+        let mut has_fields = false;
+
+        while let Some(next) = self.peek_u8() {
+            // Check for row-end marker
+            if next == MARKER_ROW_END {
+                self.offset += 1; // consume marker
+                break;
+            }
+
+            // Read slot header: [slot: u16]
+            let buffer_slot = self.read_u16()?;
+            let target_slot = self.map_slot(buffer_slot);
+
+            // Peek at type tag
+            let type_tag = self.peek_u8().ok_or_else(|| {
+                EngineError::IllegalState(
+                    "Buffer underflow: expected type tag after slot".to_string(),
+                )
+            })?;
+
+            // Dispatch: scalar vs container
+            match type_tag {
+                TYPE_TUPLE | TYPE_LIST | TYPE_BAG => {
+                    // Complex value — use ValueWriter
+                    let mut vw = writer.value_writer(target_slot)?;
+                    self.decode_value_into_writer(&mut vw)?;
+                    vw.finish()?;
+                }
+                _ => {
+                    // Scalar value — decode and write directly
+                    self.decode_scalar(writer, target_slot)?;
+                }
+            }
+
+            has_fields = true;
+        }
+
+        Ok(has_fields)
+    }
+
+    /// Decode a scalar value from the buffer and write to the register writer.
+    fn decode_scalar(
+        &mut self,
+        writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+        target_slot: u16,
+    ) -> Result<()> {
+        let type_tag = self.read_u8()?;
+        match type_tag {
+            TYPE_NULL => {
+                writer.write_null(target_slot)?;
+            }
+            TYPE_MISSING => {
+                writer.write_missing(target_slot)?;
+            }
+            TYPE_BOOL => {
+                let value = self.read_u8()? != 0;
+                writer.write_bool(target_slot, value)?;
+            }
+            TYPE_I64 => {
+                let value = self.read_i64()?;
+                writer.write_i64(target_slot, value)?;
+            }
+            TYPE_F64 => {
+                let value = self.read_f64()?;
+                writer.write_f64(target_slot, value)?;
+            }
+            TYPE_STRING => {
+                let s = self.read_string()?;
+                // TODO: Fix memory leak - strings need to be allocated in arena
+                // For now, leak the string (same as RegisterWriter)
+                let leaked_str: &'static str = Box::leak(s.to_string().into_boxed_str());
+                writer.write_str(target_slot, leaked_str)?;
+            }
+            _ => {
+                return Err(EngineError::IllegalState(format!(
+                    "Unknown scalar type tag: {} at offset {}",
+                    type_tag,
+                    self.offset - 1
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Recursively decode a value (scalar or container) into a ValueWriter.
+    ///
+    /// This is used for container elements and nested structures.
+    fn decode_value_into_writer(
+        &mut self,
+        vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    ) -> Result<()> {
+        let type_tag = self.read_u8()?;
+        match type_tag {
+            TYPE_NULL => {
+                vw.put_null()?;
+            }
+            TYPE_MISSING => {
+                vw.put_missing()?;
+            }
+            TYPE_BOOL => {
+                let value = self.read_u8()? != 0;
+                vw.put_bool(value)?;
+            }
+            TYPE_I64 => {
+                let value = self.read_i64()?;
+                vw.put_i64(value)?;
+            }
+            TYPE_F64 => {
+                let value = self.read_f64()?;
+                vw.put_f64(value)?;
+            }
+            TYPE_STRING => {
+                let s = self.read_string()?;
+                let leaked_str: &'static str = Box::leak(s.to_string().into_boxed_str());
+                vw.put_str(leaked_str)?;
+            }
+            TYPE_TUPLE => {
+                vw.step_in_tuple()?;
+                self.decode_tuple_contents(vw)?;
+                vw.step_out()?;
+            }
+            TYPE_LIST => {
+                vw.step_in_list()?;
+                self.decode_sequence_contents(vw)?;
+                vw.step_out()?;
+            }
+            TYPE_BAG => {
+                vw.step_in_bag()?;
+                self.decode_sequence_contents(vw)?;
+                vw.step_out()?;
+            }
+            _ => {
+                return Err(EngineError::IllegalState(format!(
+                    "Unknown type tag in value: {} at offset {}",
+                    type_tag,
+                    self.offset - 1
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Decode tuple contents: (MARKER_FIELD_NAME len bytes Value)* MARKER_CONTAINER_END
+    fn decode_tuple_contents(
+        &mut self,
+        vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    ) -> Result<()> {
+        loop {
+            let next = match self.peek_u8() {
+                Some(b) => b,
+                None => {
+                    return Err(EngineError::IllegalState(
+                        "Buffer underflow: expected field name or container end in tuple"
+                            .to_string(),
+                    ));
+                }
+            };
+
+            if next == MARKER_CONTAINER_END {
+                self.offset += 1; // consume marker
+                return Ok(());
+            }
+
+            if next != MARKER_FIELD_NAME {
+                return Err(EngineError::IllegalState(format!(
+                    "Expected MARKER_FIELD_NAME (0x10) or MARKER_CONTAINER_END (0x11) in tuple, got 0x{:02x} at offset {}",
+                    next, self.offset
+                )));
+            }
+
+            // Consume MARKER_FIELD_NAME
+            self.offset += 1;
+
+            // Read field name
+            let field_name = self.read_string()?;
+            let leaked_name: &'static str = Box::leak(field_name.to_string().into_boxed_str());
+            vw.put_field_name(leaked_name)?;
+
+            // Read the field value (recursively)
+            self.decode_value_into_writer(vw)?;
+        }
+    }
+
+    /// Decode list/bag contents: Value* MARKER_CONTAINER_END
+    fn decode_sequence_contents(
+        &mut self,
+        vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    ) -> Result<()> {
+        loop {
+            let next = match self.peek_u8() {
+                Some(b) => b,
+                None => {
+                    return Err(EngineError::IllegalState(
+                        "Buffer underflow: expected value or container end in list/bag".to_string(),
+                    ));
+                }
+            };
+
+            if next == MARKER_CONTAINER_END {
+                self.offset += 1; // consume marker
+                return Ok(());
+            }
+
+            // Read the next element value (recursively)
+            self.decode_value_into_writer(vw)?;
         }
     }
 }
@@ -647,192 +1018,13 @@ impl DataSource for BufferDataSource {
             return Ok(false);
         }
 
-        // Decode values from buffer and write to registers
-        // Returns true if row was written, false if no more rows
+        // Decode one row from buffer and write to registers
         self.decode_and_write_row(writer)
     }
 
     fn close(&mut self) -> Result<()> {
         // Nothing to clean up
         Ok(())
-    }
-}
-
-impl BufferDataSource {
-    /// Decode one row from buffer and write to registers
-    ///
-    /// Buffer format (same as RegisterWriter):
-    /// For each field: [slot: u16][type_tag: u8][data: variable]
-    fn decode_and_write_row(
-        &mut self,
-        writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
-    ) -> Result<bool> {
-        // Type tags (must match RegisterWriter/BufferWriter)
-        const TYPE_NULL: u8 = 0;
-        const TYPE_MISSING: u8 = 1;
-        const TYPE_BOOL: u8 = 2;
-        const TYPE_I64: u8 = 3;
-        const TYPE_F64: u8 = 4;
-        const TYPE_STRING: u8 = 5;
-
-        // Check if we have at least 3 bytes for a field (slot + type)
-        if self.offset + 3 > self.buffer.len() {
-            // No more complete fields
-            return Ok(false);
-        }
-
-        // Track if we've written any field in this row
-        let mut has_fields = false;
-
-        // Read fields until we run out of buffer or detect row boundary
-        // For now, we'll read all remaining fields as a single row
-        // TODO: Add proper row boundaries in buffer format
-        while self.offset + 3 <= self.buffer.len() {
-            // Read slot from buffer (2 bytes) - this is the source column index
-            let slot_bytes = [self.buffer[self.offset], self.buffer[self.offset + 1]];
-            let buffer_slot = u16::from_ne_bytes(slot_bytes);
-            self.offset += 2;
-
-            // Map buffer slot to target slot using layout projections
-            // For FieldPath: buffer_slot corresponds to index in projections list
-            // For ColumnIndex: buffer_slot corresponds to the column index
-            let target_slot = if !self.layout.projections.is_empty() {
-                // Try to find matching projection
-                self.layout
-                    .projections
-                    .iter()
-                    .find_map(|proj| {
-                        match &proj.source.source_type {
-                            ScanSourceType::ColumnIndex(col_idx) => {
-                                if *col_idx == buffer_slot as usize {
-                                    return Some(proj.target_slot);
-                                }
-                            }
-                            ScanSourceType::FieldPath(_) => {
-                                // For FieldPath: buffer slots are sequential (0, 1, 2, ...)
-                                // Map buffer_slot to the corresponding projection by index
-                                if (buffer_slot as usize) < self.layout.projections.len() {
-                                    return self
-                                        .layout
-                                        .projections
-                                        .get(buffer_slot as usize)
-                                        .map(|p| p.target_slot);
-                                }
-                            }
-                            ScanSourceType::WholeValue => {}
-                        }
-                        None
-                    })
-                    .unwrap_or(buffer_slot) // Fallback to buffer slot if no mapping found
-            } else {
-                buffer_slot // No projections, use buffer slot directly
-            };
-
-            // Read type tag (1 byte)
-            let type_tag = self.buffer[self.offset];
-            self.offset += 1;
-
-            // Decode and write based on type, using target_slot
-            match type_tag {
-                TYPE_NULL => {
-                    writer.write_null(target_slot)?;
-                    has_fields = true;
-                }
-                TYPE_MISSING => {
-                    writer.write_missing(target_slot)?;
-                    has_fields = true;
-                }
-                TYPE_BOOL => {
-                    if self.offset >= self.buffer.len() {
-                        return Err(EngineError::IllegalState(
-                            "Buffer underflow reading bool".to_string(),
-                        ));
-                    }
-                    let value = self.buffer[self.offset] != 0;
-                    self.offset += 1;
-                    writer.write_bool(target_slot, value)?;
-                    has_fields = true;
-                }
-                TYPE_I64 => {
-                    if self.offset + 8 > self.buffer.len() {
-                        return Err(EngineError::IllegalState(
-                            "Buffer underflow reading i64".to_string(),
-                        ));
-                    }
-                    let bytes: [u8; 8] = self.buffer[self.offset..self.offset + 8]
-                        .try_into()
-                        .map_err(|_| EngineError::IllegalState("Failed to read i64".to_string()))?;
-                    let value = i64::from_ne_bytes(bytes);
-                    self.offset += 8;
-                    writer.write_i64(target_slot, value)?;
-                    has_fields = true;
-                }
-                TYPE_F64 => {
-                    if self.offset + 8 > self.buffer.len() {
-                        return Err(EngineError::IllegalState(
-                            "Buffer underflow reading f64".to_string(),
-                        ));
-                    }
-                    let bytes: [u8; 8] = self.buffer[self.offset..self.offset + 8]
-                        .try_into()
-                        .map_err(|_| EngineError::IllegalState("Failed to read f64".to_string()))?;
-                    let value = f64::from_ne_bytes(bytes);
-                    self.offset += 8;
-                    writer.write_f64(target_slot, value)?;
-                    has_fields = true;
-                }
-                TYPE_STRING => {
-                    // Read length prefix (4 bytes)
-                    if self.offset + 4 > self.buffer.len() {
-                        return Err(EngineError::IllegalState(
-                            "Buffer underflow reading string length".to_string(),
-                        ));
-                    }
-                    let len_bytes: [u8; 4] = self.buffer[self.offset..self.offset + 4]
-                        .try_into()
-                        .map_err(|_| {
-                        EngineError::IllegalState("Failed to read string length".to_string())
-                    })?;
-                    let len = i32::from_ne_bytes(len_bytes) as usize;
-                    self.offset += 4;
-
-                    // Read string data
-                    if self.offset + len > self.buffer.len() {
-                        return Err(EngineError::IllegalState(format!(
-                            "Buffer underflow reading string data: need {} bytes, only {} remaining",
-                            len,
-                            self.buffer.len() - self.offset
-                        )));
-                    }
-                    let str_bytes = &self.buffer[self.offset..self.offset + len];
-                    let s = std::str::from_utf8(str_bytes).map_err(|e| {
-                        EngineError::IllegalState(format!("Invalid UTF-8 in string: {}", e))
-                    })?;
-
-                    // TODO: Fix memory leak - strings need to be allocated in arena
-                    // For now, leak the string (same as RegisterWriter)
-                    let leaked_str: &'static str = Box::leak(s.to_string().into_boxed_str());
-                    writer.write_str(target_slot, leaked_str)?;
-                    self.offset += len;
-                    has_fields = true;
-                }
-                _ => {
-                    return Err(EngineError::IllegalState(format!(
-                        "Unknown type tag: {}",
-                        type_tag
-                    )));
-                }
-            }
-
-            // For now, treat each complete set of fields as one row
-            // Break after reading fields to return one row at a time
-            // TODO: Add explicit row boundaries in buffer format
-            if has_fields {
-                break;
-            }
-        }
-
-        Ok(has_fields)
     }
 }
 
