@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
  * Provides write access to a ByteBuffer for populating BufferedExecutionCatalog data.
  * 
  * This class enables users to write rows of values directly to a buffer using the same
- * encoding format as RegisterWriter, but without any JNI overhead.
+ * encoding format as the Rust RegisterWriter, but without any JNI overhead.
  * 
  * <h2>Row-Oriented Format</h2>
  * <p>Data is organized into rows, each delimited by a row-end marker. Within each row,

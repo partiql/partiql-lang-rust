@@ -12,10 +12,9 @@
 
 use dashmap::DashMap;
 use jni::objects::GlobalRef;
-use jni::sys::jmethodID;
 use jni::JavaVM;
 use once_cell::sync::Lazy;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_eval::source::{
@@ -33,21 +32,6 @@ use std::sync::RwLock;
 /// Initialized once when library loads, used for thread attachment
 static JAVA_VM: Lazy<RwLock<Option<Arc<JavaVM>>>> = Lazy::new(|| RwLock::new(None));
 
-/// Cached RegisterWriter class and method IDs
-///
-/// These are cached globally to avoid expensive find_class/get_method_id calls
-/// on every nextRow() invocation (saves ~1-2μs per row)
-static REGISTER_WRITER_CACHE: Lazy<Mutex<Option<RegisterWriterCache>>> =
-    Lazy::new(|| Mutex::new(None));
-
-struct RegisterWriterCache {
-    class_ref: GlobalRef,
-    constructor_id: jmethodID,
-}
-
-unsafe impl Send for RegisterWriterCache {}
-unsafe impl Sync for RegisterWriterCache {}
-
 /// Initialize the JavaVM pointer for catalog callbacks
 ///
 /// Must be called once during library initialization
@@ -57,52 +41,10 @@ pub fn init_java_vm(vm: JavaVM) {
     }
 }
 
-/// Initialize RegisterWriter class cache
-///
-/// Should be called once during initialization to cache class and method references
-fn init_register_writer_cache(env: &mut jni::JNIEnv<'_>) -> Result<()> {
-    let mut cache_guard = REGISTER_WRITER_CACHE
-        .lock()
-        .map_err(|e| EngineError::IllegalState(format!("Failed to lock cache: {}", e)))?;
-
-    if cache_guard.is_none() {
-        // Find RegisterWriter class
-        let writer_class = env
-            .find_class("org/partiql/jni/RegisterWriter")
-            .map_err(|e| {
-                EngineError::IllegalState(format!("Failed to find RegisterWriter class: {}", e))
-            })?;
-
-        // Create global reference
-        let class_ref = env
-            .new_global_ref(&writer_class)
-            .map_err(|e| EngineError::IllegalState(format!("Failed to create GlobalRef: {}", e)))?;
-
-        // Get constructor method ID: (J)V
-        let constructor_id = env
-            .get_method_id(writer_class, "<init>", "(J)V")
-            .map_err(|e| EngineError::IllegalState(format!("Failed to get constructor ID: {}", e)))?
-            .into_raw();
-
-        *cache_guard = Some(RegisterWriterCache {
-            class_ref,
-            constructor_id,
-        });
-    }
-
-    Ok(())
-}
-
 /// Global storage for Java CompilationCatalog references
 ///
 /// Maps catalog_id to (GlobalRef, JavaVM)
 static COMPILATION_CATALOGS: Lazy<DashMap<CatalogId, (GlobalRef, Arc<JavaVM>)>> =
-    Lazy::new(DashMap::new);
-
-/// Global storage for Java ExecutionCatalog references
-///
-/// Maps catalog_id to (GlobalRef, JavaVM)
-static EXECUTION_CATALOGS: Lazy<DashMap<CatalogId, (GlobalRef, Arc<JavaVM>)>> =
     Lazy::new(DashMap::new);
 
 /// Register a Java CompilationCatalog for callbacks
@@ -116,193 +58,9 @@ pub fn register_compilation_catalog(
     COMPILATION_CATALOGS.insert(catalog_id, (catalog_ref, vm));
 }
 
-/// Register a Java ExecutionCatalog for callbacks
-///
-/// Stores a GlobalRef that will be used for create() callbacks
-pub fn register_execution_catalog(catalog_id: CatalogId, catalog_ref: GlobalRef, vm: Arc<JavaVM>) {
-    EXECUTION_CATALOGS.insert(catalog_id, (catalog_ref, vm));
-}
-
 /// Remove a CompilationCatalog registration
 pub fn unregister_compilation_catalog(catalog_id: CatalogId) {
     COMPILATION_CATALOGS.remove(&catalog_id);
-}
-
-/// Remove an ExecutionCatalog registration
-pub fn unregister_execution_catalog(catalog_id: CatalogId) {
-    EXECUTION_CATALOGS.remove(&catalog_id);
-}
-
-/// Convert Rust ScanLayout to Java ScanLayout object
-fn convert_scan_layout_to_java<'a>(
-    env: &mut jni::JNIEnv<'a>,
-    layout: &ScanLayout,
-) -> Result<jni::objects::JObject<'a>> {
-    // Create ArrayList<ScanProjection> for projections
-    let array_list_class = env
-        .find_class("java/util/ArrayList")
-        .map_err(|e| EngineError::IllegalState(format!("Failed to find ArrayList class: {}", e)))?;
-    let proj_list = env
-        .new_object(array_list_class, "()V", &[])
-        .map_err(|e| EngineError::IllegalState(format!("Failed to create ArrayList: {}", e)))?;
-
-    // Convert each Rust projection to Java
-    for proj in layout.projections.iter() {
-        let java_proj = convert_scan_projection_to_java(env, proj)?;
-        env.call_method(
-            &proj_list,
-            "add",
-            "(Ljava/lang/Object;)Z",
-            &[jni::objects::JValue::Object(&java_proj)],
-        )
-        .map_err(|e| {
-            EngineError::IllegalState(format!("Failed to add projection to list: {}", e))
-        })?;
-    }
-
-    // Create Java ScanLayout with the projection list
-    let layout_class = env.find_class("org/partiql/jni/ScanLayout").map_err(|e| {
-        EngineError::IllegalState(format!("Failed to find ScanLayout class: {}", e))
-    })?;
-
-    let layout_obj = env
-        .new_object(
-            layout_class,
-            "(Ljava/util/List;)V",
-            &[jni::objects::JValue::Object(&proj_list)],
-        )
-        .map_err(|e| EngineError::IllegalState(format!("Failed to create ScanLayout: {}", e)))?;
-
-    Ok(layout_obj)
-}
-
-/// Convert Rust ScanProjection to Java ScanProjection object
-fn convert_scan_projection_to_java<'a>(
-    env: &mut jni::JNIEnv<'a>,
-    proj: &partiql_eval::source::ScanProjection,
-) -> Result<jni::objects::JObject<'a>> {
-    // Convert ScanSource
-    let java_source = convert_scan_source_to_java(env, &proj.source)?;
-
-    // Get target slot
-    let target_slot = proj.target_slot as i32;
-
-    // Create TypeHint.ANY
-    let type_hint_class = env
-        .find_class("org/partiql/jni/TypeHint")
-        .map_err(|e| EngineError::IllegalState(format!("Failed to find TypeHint class: {}", e)))?;
-    let type_hint_any = env
-        .get_static_field(type_hint_class, "ANY", "Lorg/partiql/jni/TypeHint;")
-        .map_err(|e| EngineError::IllegalState(format!("Failed to get TypeHint.ANY: {}", e)))?
-        .l()
-        .map_err(|e| EngineError::IllegalState(format!("Failed to convert TypeHint.ANY: {}", e)))?;
-
-    // Create ScanProjection
-    let proj_class = env
-        .find_class("org/partiql/jni/ScanProjection")
-        .map_err(|e| {
-            EngineError::IllegalState(format!("Failed to find ScanProjection class: {}", e))
-        })?;
-
-    let proj_obj = env
-        .new_object(
-            proj_class,
-            "(Lorg/partiql/jni/ScanSource;ILorg/partiql/jni/TypeHint;)V",
-            &[
-                jni::objects::JValue::Object(&java_source),
-                jni::objects::JValue::Int(target_slot),
-                jni::objects::JValue::Object(&type_hint_any),
-            ],
-        )
-        .map_err(|e| {
-            EngineError::IllegalState(format!("Failed to create ScanProjection: {}", e))
-        })?;
-
-    Ok(proj_obj)
-}
-
-/// Convert Rust ScanSource to Java ScanSource object
-fn convert_scan_source_to_java<'a>(
-    env: &mut jni::JNIEnv<'a>,
-    source: &ScanSource,
-) -> Result<jni::objects::JObject<'a>> {
-    match &source.source_type {
-        ScanSourceType::ColumnIndex(idx) => {
-            // Create ScanSource.ColumnIndex
-            let source_class = env
-                .find_class("org/partiql/jni/ScanSource$ColumnIndex")
-                .map_err(|e| {
-                    EngineError::IllegalState(format!(
-                        "Failed to find ScanSource.ColumnIndex class: {}",
-                        e
-                    ))
-                })?;
-
-            let source_obj = env
-                .new_object(
-                    source_class,
-                    "(I)V",
-                    &[jni::objects::JValue::Int(*idx as i32)],
-                )
-                .map_err(|e| {
-                    EngineError::IllegalState(format!(
-                        "Failed to create ScanSource.ColumnIndex: {}",
-                        e
-                    ))
-                })?;
-
-            Ok(source_obj)
-        }
-        ScanSourceType::FieldPath(path) => {
-            // Create Java string for the field path
-            let path_str: &str = path.as_ref();
-            let java_path = env.new_string(path_str).map_err(|e| {
-                EngineError::IllegalState(format!("Failed to create Java string: {}", e))
-            })?;
-
-            // Create ScanSource.FieldPath
-            let source_class = env
-                .find_class("org/partiql/jni/ScanSource$FieldPath")
-                .map_err(|e| {
-                    EngineError::IllegalState(format!(
-                        "Failed to find ScanSource.FieldPath class: {}",
-                        e
-                    ))
-                })?;
-
-            let source_obj = env
-                .new_object(
-                    source_class,
-                    "(Ljava/lang/String;)V",
-                    &[jni::objects::JValue::Object(&java_path)],
-                )
-                .map_err(|e| {
-                    EngineError::IllegalState(format!(
-                        "Failed to create ScanSource.FieldPath: {}",
-                        e
-                    ))
-                })?;
-
-            Ok(source_obj)
-        }
-        ScanSourceType::WholeValue => {
-            // Create ScanSource.WholeValue
-            let source_class = env
-                .find_class("org/partiql/jni/ScanSource$WholeValue")
-                .map_err(|e| {
-                    EngineError::IllegalState(format!(
-                        "Failed to find ScanSource.WholeValue class: {}",
-                        e
-                    ))
-                })?;
-
-            let source_obj = env.new_object(source_class, "()V", &[]).map_err(|e| {
-                EngineError::IllegalState(format!("Failed to create ScanSource.WholeValue: {}", e))
-            })?;
-
-            Ok(source_obj)
-        }
-    }
 }
 
 /// Rust CompilationCatalog that delegates to Java via JNI
@@ -436,38 +194,6 @@ impl CompilationCatalog for JavaCompilationCatalog {
     }
 }
 
-/// Rust ExecutionCatalog that delegates to Java via JNI
-///
-/// TODO: This type will be deleted once we migrate to a pure-Rust catalog system.
-/// It exists for backward compatibility with Java-based catalog implementations.
-#[allow(dead_code)]
-pub struct JavaExecutionCatalog {
-    catalog_id: CatalogId,
-    /// Mapping from ScanId to (EntryId, ScanLayout) built during prepare()
-    scan_mappings: HashMap<ScanId, (EntryId, ScanLayout)>,
-}
-
-#[allow(dead_code)]
-impl JavaExecutionCatalog {
-    pub fn new(catalog_id: CatalogId) -> Self {
-        JavaExecutionCatalog {
-            catalog_id,
-            scan_mappings: HashMap::new(),
-        }
-    }
-
-    /// Prepare the catalog by inspecting the CompiledPlan
-    pub fn prepare(&mut self, compiled: &CompiledPlan) {
-        self.scan_mappings.clear();
-        for (scan_id, scan_meta) in compiled.scans() {
-            self.scan_mappings.insert(
-                scan_id,
-                (scan_meta.object_id.entry_id(), scan_meta.layout.clone()),
-            );
-        }
-    }
-}
-
 /// Rust ExecutionCatalog that reads from a pre-populated DirectByteBuffer
 ///
 /// This catalog provides optimal performance by eliminating Rust-to-Java callbacks
@@ -532,78 +258,6 @@ impl ExecutionCatalog for JavaBufferedExecutionCatalog {
         // Create BufferDataSource that reads from our buffer with the layout
         Ok(Box::new(BufferDataSource::new(
             self.buffer.clone(),
-            layout.clone(),
-        )))
-    }
-}
-
-impl ExecutionCatalog for JavaExecutionCatalog {
-    fn prepare(&mut self, scans: &CatalogScans) {
-        self.scan_mappings.clear();
-        for (scan_id, entry_id, layout) in scans.iter() {
-            self.scan_mappings
-                .insert(scan_id, (entry_id, layout.clone()));
-        }
-    }
-
-    fn create(&self, scan_id: ScanId) -> Result<Box<dyn DataSource>> {
-        // Look up the scan mapping
-        let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
-            EngineError::IllegalState(format!(
-                "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
-                scan_id
-            ))
-        })?;
-
-        // Get the registered catalog
-        let entry = EXECUTION_CATALOGS
-            .get(&self.catalog_id)
-            .ok_or_else(|| EngineError::IllegalState("Catalog not registered".to_string()))?;
-        let (catalog_ref, vm) = entry.value();
-
-        // Attach to JVM for this thread
-        let mut env = vm
-            .attach_current_thread()
-            .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
-
-        // Convert EntryId to jlong
-        let entry_id_value = u64::from(*entry_id) as i64;
-
-        // Convert Rust ScanLayout to Java ScanLayout
-        let layout_obj = convert_scan_layout_to_java(&mut env, layout)?;
-
-        // Call Java method: DataSource create(long entryId, ScanLayout layout)
-        let result = env
-            .call_method(
-                catalog_ref.as_obj(),
-                "create",
-                "(JLorg/partiql/jni/ScanLayout;)Lorg/partiql/jni/DataSource;",
-                &[
-                    jni::objects::JValue::Long(entry_id_value),
-                    jni::objects::JValue::Object(&layout_obj),
-                ],
-            )
-            .map_err(|e| EngineError::IllegalState(format!("Failed to call create(): {}", e)))?;
-
-        let data_source_obj = result.l().map_err(|e| {
-            EngineError::IllegalState(format!("Failed to get DataSource object: {}", e))
-        })?;
-
-        if data_source_obj.is_null() {
-            return Err(EngineError::IllegalState(
-                "Java ExecutionCatalog.create() returned null".to_string(),
-            ));
-        }
-
-        // Create GlobalRef for the DataSource
-        let data_source_ref = env
-            .new_global_ref(data_source_obj)
-            .map_err(|e| EngineError::IllegalState(format!("Failed to create GlobalRef: {}", e)))?;
-
-        // Wrap in JavaDataSource
-        Ok(Box::new(JavaDataSource::new(
-            data_source_ref,
-            vm.clone(),
             layout.clone(),
         )))
     }
@@ -1024,133 +678,6 @@ impl DataSource for BufferDataSource {
 
     fn close(&mut self) -> Result<()> {
         // Nothing to clean up
-        Ok(())
-    }
-}
-
-/// Rust DataSource that delegates to Java via JNI
-///
-/// Wraps a Java DataSource object and implements the Rust DataSource trait.
-/// Handles JNI callbacks for open(), next_row(), and close().
-struct JavaDataSource {
-    data_source_ref: GlobalRef,
-    vm: Arc<JavaVM>,
-    writer_obj: Option<GlobalRef>, // Cached RegisterWriter object for reuse
-}
-
-impl JavaDataSource {
-    fn new(data_source_ref: GlobalRef, vm: Arc<JavaVM>, _layout: ScanLayout) -> Self {
-        JavaDataSource {
-            data_source_ref,
-            vm,
-            writer_obj: None,
-        }
-    }
-}
-
-impl DataSource for JavaDataSource {
-    fn open(&mut self) -> Result<()> {
-        let mut env = self
-            .vm
-            .attach_current_thread()
-            .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
-
-        // Call Java method: void open()
-        env.call_method(self.data_source_ref.as_obj(), "open", "()V", &[])
-            .map_err(|e| EngineError::IllegalState(format!("Failed to call open(): {}", e)))?;
-
-        Ok(())
-    }
-
-    fn next_row(
-        &mut self,
-        writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
-    ) -> Result<bool> {
-        // 1. Thread attachment
-        let mut env = self
-            .vm
-            .attach_current_thread()
-            .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
-
-        // 2. Initialize cache if needed (first call only)
-        init_register_writer_cache(&mut env)?;
-
-        // 3. Create a handle for the RegisterWriter
-        let writer_ptr = writer as *mut partiql_eval::source::RegisterWriter<'_, '_>;
-        let writer_handle = writer_ptr as i64;
-
-        // 4. Create or reuse RegisterWriter object
-        if let Some(writer_obj) = &self.writer_obj {
-            // Subsequent calls: update the handle in existing object
-            env.set_field(
-                writer_obj.as_obj(),
-                "nativeHandle",
-                "J",
-                jni::objects::JValue::Long(writer_handle),
-            )
-            .map_err(|e| {
-                EngineError::IllegalState(format!("Failed to update nativeHandle: {}", e))
-            })?;
-        } else {
-            // First call: create the object
-            let cache_guard = REGISTER_WRITER_CACHE
-                .lock()
-                .map_err(|e| EngineError::IllegalState(format!("Failed to lock cache: {}", e)))?;
-
-            let cache = cache_guard
-                .as_ref()
-                .ok_or_else(|| EngineError::IllegalState("Cache not initialized".to_string()))?;
-
-            let writer_obj = unsafe {
-                let method_id = jni::objects::JMethodID::from_raw(cache.constructor_id);
-                let args = [jni::sys::jvalue { j: writer_handle }];
-                env.new_object_unchecked(&cache.class_ref, method_id, &args)
-                    .map_err(|e| {
-                        EngineError::IllegalState(format!("Failed to create RegisterWriter: {}", e))
-                    })?
-            };
-
-            // Store as global reference for reuse
-            let global_ref = env.new_global_ref(writer_obj).map_err(|e| {
-                EngineError::IllegalState(format!("Failed to create GlobalRef: {}", e))
-            })?;
-
-            self.writer_obj = Some(global_ref);
-        }
-
-        let writer_obj = self
-            .writer_obj
-            .as_ref()
-            .expect("writer_obj must be Some after initialization");
-
-        // 5. Call Java method: boolean nextRow(RegisterWriter writer)
-        let result = env
-            .call_method(
-                self.data_source_ref.as_obj(),
-                "nextRow",
-                "(Lorg/partiql/jni/RegisterWriter;)Z",
-                &[jni::objects::JValue::Object(writer_obj.as_obj())],
-            )
-            .map_err(|e| EngineError::IllegalState(format!("Failed to call nextRow(): {}", e)))?;
-
-        // 6. Extract result
-        let has_next = result.z().map_err(|e| {
-            EngineError::IllegalState(format!("Failed to get boolean result: {}", e))
-        })?;
-
-        Ok(has_next)
-    }
-
-    fn close(&mut self) -> Result<()> {
-        let mut env = self
-            .vm
-            .attach_current_thread()
-            .map_err(|e| EngineError::IllegalState(format!("Failed to attach to JVM: {}", e)))?;
-
-        // Call Java method: void close()
-        env.call_method(self.data_source_ref.as_obj(), "close", "()V", &[])
-            .map_err(|e| EngineError::IllegalState(format!("Failed to call close(): {}", e)))?;
-
         Ok(())
     }
 }
