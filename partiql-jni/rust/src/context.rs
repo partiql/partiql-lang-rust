@@ -19,6 +19,13 @@ static COMPILATION_CONTEXT_HANDLES: Lazy<DashMap<u64, CompilationContext>> =
 
 static EXECUTION_CONTEXT_HANDLES: Lazy<DashMap<u64, ExecutionContext>> = Lazy::new(DashMap::new);
 
+// Track which CatalogIds belong to each CompilationContext handle for cleanup
+static COMPILATION_CATALOG_IDS: Lazy<DashMap<u64, Vec<CatalogId>>> = Lazy::new(DashMap::new);
+
+// Track which CatalogIds and buffer_ids belong to each ExecutionContext handle for cleanup
+static EXECUTION_CATALOG_IDS: Lazy<DashMap<u64, Vec<CatalogId>>> = Lazy::new(DashMap::new);
+static EXECUTION_BUFFER_IDS: Lazy<DashMap<u64, Vec<i32>>> = Lazy::new(DashMap::new);
+
 // Buffer cache for avoiding expensive GetDirectBufferAddress JNI calls
 // Maps buffer_id -> (address as usize, capacity)
 // We store address as usize instead of *mut u8 for Send/Sync safety
@@ -48,9 +55,16 @@ pub fn get_compilation_context(
 }
 
 pub fn remove_compilation_context_handle(handle: u64) -> Option<CompilationContext> {
+    // Clean up COMPILATION_CATALOGS global map entries for this context
+    if let Some((_, catalog_ids)) = COMPILATION_CATALOG_IDS.remove(&handle) {
+        for id in catalog_ids {
+            catalog_bridge::unregister_compilation_catalog(id);
+        }
+    }
     COMPILATION_CONTEXT_HANDLES
         .remove(&handle)
         .map(|(_, ctx)| ctx)
+    // Note: CompilationContext::drop() releases CatalogIds back to the allocator
 }
 
 // ExecutionContext handle operations
@@ -77,6 +91,18 @@ pub fn get_execution_context(
 }
 
 pub fn remove_execution_context_handle(handle: u64) -> Option<ExecutionContext> {
+    // Clean up EXECUTION_CATALOGS global map entries for this context
+    if let Some((_, catalog_ids)) = EXECUTION_CATALOG_IDS.remove(&handle) {
+        for id in catalog_ids {
+            catalog_bridge::unregister_execution_catalog(id);
+        }
+    }
+    // Clean up BUFFER_ADDRESS_CACHE entries for this context
+    if let Some((_, buffer_ids)) = EXECUTION_BUFFER_IDS.remove(&handle) {
+        for bid in buffer_ids {
+            BUFFER_ADDRESS_CACHE.remove(&bid);
+        }
+    }
     EXECUTION_CONTEXT_HANDLES
         .remove(&handle)
         .map(|(_, ctx)| ctx)
@@ -145,6 +171,12 @@ pub extern "system" fn Java_org_partiql_jni_CompilationContext_nativeAddCatalog(
 
         // Register the GlobalRef with the catalog_id for callbacks
         catalog_bridge::register_compilation_catalog(catalog_id, global_ref, vm);
+
+        // Track this CatalogId for cleanup on close
+        COMPILATION_CATALOG_IDS
+            .entry(handle as u64)
+            .or_default()
+            .push(catalog_id);
 
         // Convert CatalogId to jlong
         Ok(u64::from(catalog_id) as jlong)
@@ -232,6 +264,12 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddCatalog(
         // Register the GlobalRef for callbacks
         catalog_bridge::register_execution_catalog(catalog_id_typed, global_ref, vm);
 
+        // Track this CatalogId for cleanup on close
+        EXECUTION_CATALOG_IDS
+            .entry(handle as u64)
+            .or_default()
+            .push(catalog_id_typed);
+
         Ok(())
     })
 }
@@ -300,6 +338,12 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddBufferedCa
 
         // Add catalog to ExecutionContext
         exec_context.add_catalog(catalog_id_typed, buffered_catalog);
+
+        // Track buffer_id for cleanup on close
+        EXECUTION_BUFFER_IDS
+            .entry(handle as u64)
+            .or_default()
+            .push(buffer_id);
 
         Ok(())
     })
