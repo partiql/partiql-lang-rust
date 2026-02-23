@@ -22,8 +22,7 @@ static EXECUTION_CONTEXT_HANDLES: Lazy<DashMap<u64, ExecutionContext>> = Lazy::n
 // Track which CatalogIds belong to each CompilationContext handle for cleanup
 static COMPILATION_CATALOG_IDS: Lazy<DashMap<u64, Vec<CatalogId>>> = Lazy::new(DashMap::new);
 
-// Track which CatalogIds and buffer_ids belong to each ExecutionContext handle for cleanup
-static EXECUTION_CATALOG_IDS: Lazy<DashMap<u64, Vec<CatalogId>>> = Lazy::new(DashMap::new);
+// Track which buffer_ids belong to each ExecutionContext handle for cleanup
 static EXECUTION_BUFFER_IDS: Lazy<DashMap<u64, Vec<i32>>> = Lazy::new(DashMap::new);
 
 // Buffer cache for avoiding expensive GetDirectBufferAddress JNI calls
@@ -91,12 +90,6 @@ pub fn get_execution_context(
 }
 
 pub fn remove_execution_context_handle(handle: u64) -> Option<ExecutionContext> {
-    // Clean up EXECUTION_CATALOGS global map entries for this context
-    if let Some((_, catalog_ids)) = EXECUTION_CATALOG_IDS.remove(&handle) {
-        for id in catalog_ids {
-            catalog_bridge::unregister_execution_catalog(id);
-        }
-    }
     // Clean up BUFFER_ADDRESS_CACHE entries for this context
     if let Some((_, buffer_ids)) = EXECUTION_BUFFER_IDS.remove(&handle) {
         for bid in buffer_ids {
@@ -217,60 +210,6 @@ pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeNew(
     jni_guard!(env, {
         let context = ExecutionContext::default();
         Ok(create_execution_context_handle(context) as jlong)
-    })
-}
-
-/// Add a catalog to the ExecutionContext
-///
-/// Java signature:
-/// ```java
-/// private static native void nativeAddCatalog(long handle, long catalogId, ExecutionCatalog catalog);
-/// ```
-#[no_mangle]
-pub extern "system" fn Java_org_partiql_jni_ExecutionContext_nativeAddCatalog(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    handle: jlong,
-    catalog_id: jlong,
-    catalog: JObject<'_>,
-) {
-    jni_guard_void!(env, {
-        // Check if catalog is null
-        if catalog.is_null() {
-            return Err(JniError::from(partiql_eval::EngineError::IllegalState(
-                "ExecutionCatalog cannot be null".to_string(),
-            )));
-        }
-
-        // Get mutable access to the ExecutionContext
-        let mut exec_context = get_execution_context_mut(handle as u64)?;
-
-        // Create GlobalRef for the Java ExecutionCatalog
-        let global_ref = env.new_global_ref(&catalog)?;
-
-        // Get JavaVM
-        let vm = Arc::new(env.get_java_vm()?);
-
-        // Convert catalog_id to typed CatalogId
-        let catalog_id_typed = CatalogId::from(catalog_id as u64);
-
-        // Create JavaExecutionCatalog wrapper
-        let java_exec_catalog: Box<dyn partiql_eval::ExecutionCatalog> =
-            Box::new(catalog_bridge::JavaExecutionCatalog::new(catalog_id_typed));
-
-        // Add catalog to ExecutionContext
-        exec_context.add_catalog(catalog_id_typed, java_exec_catalog);
-
-        // Register the GlobalRef for callbacks
-        catalog_bridge::register_execution_catalog(catalog_id_typed, global_ref, vm);
-
-        // Track this CatalogId for cleanup on close
-        EXECUTION_CATALOG_IDS
-            .entry(handle as u64)
-            .or_default()
-            .push(catalog_id_typed);
-
-        Ok(())
     })
 }
 
