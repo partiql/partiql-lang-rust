@@ -1,11 +1,12 @@
+import java.time.Duration
+
 plugins {
     `java-library`
     `maven-publish`
+    signing
+    id("io.github.gradle-nexus.publish-plugin") version "2.0.0"
     id("me.champeau.jmh") version "0.7.2"
 }
-
-group = "org.partiql"
-version = "0.14.0"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -134,39 +135,69 @@ tasks.test {
     dependsOn(copyNativeLib)
 }
 
+// Nexus publishing (Sonatype OSSRH / Maven Central)
+val NEXUS_URL = "https://ossrh-staging-api.central.sonatype.com/service/local/"
+val SNAPSHOT_REPO_URL = "https://central.sonatype.com/repository/maven-snapshots/"
+val SONATYPE_USER_KEY = "centralPortalUsername"
+val SONATYPE_PASS_KEY = "centralPortalPassword"
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri(NEXUS_URL))
+            snapshotRepositoryUrl.set(uri(SNAPSHOT_REPO_URL))
+            username.set(properties[SONATYPE_USER_KEY].toString())
+            password.set(properties[SONATYPE_PASS_KEY].toString())
+        }
+    }
+    connectTimeout.set(Duration.ofMinutes(3))
+    clientTimeout.set(Duration.ofMinutes(3))
+}
+
 // Maven publishing configuration
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-            
+
+            groupId = "org.partiql"
+            artifactId = "partiql-jni"
+
             pom {
+                packaging = "jar"
                 name.set("PartiQL JNI")
-                description.set("JNI bindings for PartiQL Rust engine")
+                description.set("JNI bindings for the PartiQL Rust engine")
                 url.set("https://github.com/partiql/partiql-lang-rust")
-                
+
                 licenses {
                     license {
-                        name.set("Apache License 2.0")
-                        url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                        name.set("The Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                     }
                 }
-                
+
                 developers {
                     developer {
                         name.set("PartiQL Team")
-                        email.set("partiql-team@amazon.com")
+                        email.set("partiql-dev@amazon.com")
+                        organization.set("PartiQL")
+                        organizationUrl.set("https://github.com/partiql")
                     }
                 }
-                
+
                 scm {
-                    connection.set("scm:git:git://github.com/partiql/partiql-lang-rust.git")
-                    developerConnection.set("scm:git:ssh://github.com/partiql/partiql-lang-rust.git")
-                    url.set("https://github.com/partiql/partiql-lang-rust")
+                    connection.set("scm:git@github.com:partiql/partiql-lang-rust.git")
+                    developerConnection.set("scm:git@github.com:partiql/partiql-lang-rust.git")
+                    url.set("git@github.com:partiql/partiql-lang-rust.git")
                 }
             }
         }
     }
+}
+
+// Signing — required for Maven Central releases, not for snapshots
+signing {
+    isRequired = !version.toString().endsWith("-SNAPSHOT")
+    sign(publishing.publications["maven"])
 }
 
 // JMH configuration

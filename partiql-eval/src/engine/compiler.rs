@@ -596,10 +596,6 @@ impl<'a> PlanCompiler<'a> {
     }
 
     fn apply_project(&self, result: &mut SubtreeResult, project: &Project) -> Result<()> {
-        eprintln!("[DEBUG apply_project] exprs:");
-        for (name, expr) in &project.exprs {
-            eprintln!("  {} => {:?}", name, expr);
-        }
         let output_start = result.slot_count;
         let num_outputs = project.exprs.len();
         result.slot_count += num_outputs;
@@ -625,7 +621,6 @@ impl<'a> PlanCompiler<'a> {
     }
 
     fn apply_project_value(&self, result: &mut SubtreeResult, pv: &ProjectValue) -> Result<()> {
-        eprintln!("[DEBUG apply_project_value] expr: {:?}", pv.expr);
         let output_slot = result.slot_count as SlotId;
         result.slot_count += 1;
 

@@ -1,6 +1,6 @@
 [package]
 name = "partiql-jni"
-version = "0.14.0"
+version = "0.15.0-alpha.1"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["PartiQL Team <partiql-team@amazon.com>"]
