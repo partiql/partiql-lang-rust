@@ -21,7 +21,7 @@ edition.workspace = true
 bench = false
 
 [dependencies]
-partiql-common = { path = "../partiql-common", version = "0.14.*" }
+partiql-common = { path = "../partiql-common", version = "0.15.0-alpha.1" }
 itertools = "0.14"
 
 miette = { version = "7", features = ["fancy"] }
