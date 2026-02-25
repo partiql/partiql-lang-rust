@@ -54,35 +54,6 @@ gradle test            # Run tests
 gradle jar             # Create JAR file
 ```
 
-### Option 2: Manual Build
-
-```bash
-# 1. Build Rust library
-cd partiql-jni
-cargo build --release
-
-# 2. Create resources directory
-mkdir -p src/main/resources/native
-
-# 3. Copy native library (platform-specific)
-# macOS:
-cp ../target/release/libpartiql_jni.dylib src/main/resources/native/
-# Linux:
-cp ../target/release/libpartiql_jni.so src/main/resources/native/
-# Windows:
-cp ../target/release/partiql_jni.dll src/main/resources/native/
-
-# 4. Compile Java code (requires javac)
-javac -d build/classes/java/main \
-  java/org/partiql/jni/*.java \
-  java/org/partiql/jni/exceptions/*.java
-
-# 5. Create JAR
-jar cf partiql-jni-0.14.0.jar \
-  -C build/classes/java/main . \
-  -C src/main/resources .
-```
-
 ## Quick Start
 
 ### Basic Usage

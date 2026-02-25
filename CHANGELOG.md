@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [0.15.0-alpha.1]
+### Added
+- Added an experimental PartiQLVM evaluator. This exhibits significant performance improvements with the ability to
+zero-copy data, however, it is notably **experimental** and subject to changes.
+
 ## [0.14.0]
 ### Changed
 - Changed many internal `HashMap`s to use `rustc-hash`'s `FxHash`
@@ -352,6 +357,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL CLI with REPL and query visualization features
 
 [Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.14.0...HEAD
+[0.15.0-alpha.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.15.0-alpha.1
 [0.14.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.14.0
 [0.13.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.13.0
 [0.12.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.12.0
