@@ -12,5 +12,4 @@ pub use catalog::{CompilationCatalog, CompilationContext, ExecutionCatalog, Exec
 pub use compiler::PlanCompiler;
 pub use error::{EngineError, Result};
 pub use expr::SlotResolver;
-pub(crate) use expr::UdfRegistry;
 pub use plan::{CompiledPlan, ExecutionResult, PartiQLVM, QueryIterator};

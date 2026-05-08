@@ -325,6 +325,52 @@ pub enum Inst {
         dst: u16,
         element_regs: Vec<u16>,
     },
+
+    // === Relational Instructions (SFW bytecode) ===
+    /// Open a data source cursor. cursor_id indexes into the VM's cursor array.
+    /// The cursor's ScanLayout is determined at compile time from CursorMetadata.
+    OpenCursor {
+        cursor_id: u16,
+    },
+
+    /// Advance cursor to next row, writing columns into registers per ScanLayout.
+    /// If no more rows, jump to `eof_target` instruction index.
+    NextRow {
+        cursor_id: u16,
+        eof_target: u32,
+    },
+
+    /// Close cursor and release resources.
+    CloseCursor {
+        cursor_id: u16,
+    },
+
+    /// Unconditional jump to instruction at `target`.
+    Jump {
+        target: u32,
+    },
+
+    /// Jump to `target` if register `src` is NOT true (false/null/missing).
+    /// Used for WHERE clause filtering.
+    JumpIfNotTrue {
+        src: u16,
+        target: u32,
+    },
+
+    /// Yield the current register state as a result row. The VM pauses here
+    /// and returns control to the consumer. Execution resumes at the next
+    /// instruction when the consumer requests the next row.
+    EmitRow,
+
+    /// Halt execution. The query is complete.
+    Halt,
+
+    /// Decrement the i64 counter in `counter_reg`. If it was already 0, jump to `target`.
+    /// Used for LIMIT: initialize counter with the limit value, then DecrOrJump before EmitRow.
+    DecrOrJump {
+        counter_reg: u16,
+        target: u32,
+    },
 }
 
 impl Inst {
@@ -479,6 +525,19 @@ impl Clone for Program {
 }
 
 impl Program {
+    /// Create an empty program (no instructions). Used as a default.
+    pub fn empty() -> Self {
+        Program {
+            insts: Vec::new(),
+            consts: Vec::new(),
+            arena: Arena::default(),
+            const_refs: Vec::new(),
+            keys: Vec::new(),
+            reg_count: 0,
+            slot_count: 0,
+        }
+    }
+
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn eval_binary_arithmetic_dynamic<'a>(
@@ -1414,6 +1473,21 @@ impl Program {
                 let bag_slice = arena.alloc_slice(&elements);
                 regs[*dst as usize] = ValueRef::Bag(bag_slice);
             }
+
+            // Relational instructions are handled by the VM dispatch loop,
+            // not by eval_inst. If we reach them here, it's a bug.
+            Inst::OpenCursor { .. }
+            | Inst::NextRow { .. }
+            | Inst::CloseCursor { .. }
+            | Inst::Jump { .. }
+            | Inst::JumpIfNotTrue { .. }
+            | Inst::EmitRow
+            | Inst::Halt
+            | Inst::DecrOrJump { .. } => {
+                return Err(EngineError::IllegalState(
+                    "relational instruction encountered in scalar eval_inst".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -1429,6 +1503,7 @@ impl Program {
     /// The register array is borrowed from PartiQLVM and reused across all rows,
     /// eliminating heap allocations during expression evaluation.
     /// The first `slot_count` registers are reserved for slot data.
+    #[allow(dead_code)]
     pub(crate) fn eval<'a>(
         &self,
         arena: &'a Arena,
@@ -1455,7 +1530,7 @@ pub trait SlotResolver {
 
 #[derive(Default)]
 pub struct ProgramBuilder {
-    insts: Vec<Inst>,
+    pub(crate) insts: Vec<Inst>,
     consts: Vec<ValueOwned>,
     keys: Vec<String>,
     next_reg: u16,
@@ -1470,6 +1545,116 @@ impl ProgramBuilder {
             keys: Vec::new(),
             next_reg: slot_count,
             slot_count,
+        }
+    }
+
+    // === Relational instruction emission helpers ===
+
+    /// Emit an OpenCursor instruction
+    pub fn emit_open_cursor(&mut self, cursor_id: u16) {
+        self.insts.push(Inst::OpenCursor { cursor_id });
+    }
+
+    /// Emit a NextRow instruction. Returns the index of this instruction
+    /// so the caller can patch the eof_target later.
+    pub fn emit_next_row(&mut self, cursor_id: u16) -> usize {
+        let idx = self.insts.len();
+        // Placeholder eof_target — must be patched by caller
+        self.insts.push(Inst::NextRow {
+            cursor_id,
+            eof_target: 0,
+        });
+        idx
+    }
+
+    /// Emit a CloseCursor instruction
+    pub fn emit_close_cursor(&mut self, cursor_id: u16) {
+        self.insts.push(Inst::CloseCursor { cursor_id });
+    }
+
+    /// Emit an unconditional Jump. Returns the index so it can be patched.
+    pub fn emit_jump(&mut self) -> usize {
+        let idx = self.insts.len();
+        self.insts.push(Inst::Jump { target: 0 });
+        idx
+    }
+
+    /// Emit a conditional jump (JumpIfNotTrue). Returns the index so it can be patched.
+    pub fn emit_jump_if_not_true(&mut self, src: u16) -> usize {
+        let idx = self.insts.len();
+        self.insts.push(Inst::JumpIfNotTrue { src, target: 0 });
+        idx
+    }
+
+    /// Emit an EmitRow instruction
+    pub fn emit_emit_row(&mut self) {
+        self.insts.push(Inst::EmitRow);
+    }
+
+    /// Emit a Halt instruction
+    pub fn emit_halt(&mut self) {
+        self.insts.push(Inst::Halt);
+    }
+
+    /// Emit a DecrOrJump instruction. Returns the index so it can be patched.
+    #[allow(dead_code)]
+    pub fn emit_decr_or_jump(&mut self, counter_reg: u16) -> usize {
+        let idx = self.insts.len();
+        self.insts.push(Inst::DecrOrJump {
+            counter_reg,
+            target: 0,
+        });
+        idx
+    }
+
+    /// Patch a previously emitted instruction's jump target.
+    /// Works for NextRow (eof_target), Jump, JumpIfNotTrue, DecrOrJump.
+    pub fn patch_target(&mut self, inst_idx: usize, target: u32) {
+        match &mut self.insts[inst_idx] {
+            Inst::NextRow { eof_target, .. } => *eof_target = target,
+            Inst::Jump { target: t } => *t = target,
+            Inst::JumpIfNotTrue { target: t, .. } => *t = target,
+            Inst::DecrOrJump { target: t, .. } => *t = target,
+            _ => panic!("patch_target called on non-patchable instruction"),
+        }
+    }
+
+    /// Get the current instruction count (next instruction index)
+    pub fn current_offset(&self) -> u32 {
+        self.insts.len() as u32
+    }
+
+    // === Public accessors for inline_program support ===
+
+    /// Allocate a register (public for compiler use).
+    pub fn alloc_reg_pub(&mut self) -> u16 {
+        self.alloc_reg()
+    }
+
+    /// Push a constant and return its index (public for compiler use).
+    pub fn push_const_pub(&mut self, value: ValueOwned) -> u16 {
+        self.push_const(value)
+    }
+
+    /// Push a key and return its index (public for compiler use).
+    pub fn push_key_pub(&mut self, key: String) -> u16 {
+        self.intern_key(key)
+    }
+
+    /// Get the number of constants currently in the pool.
+    pub fn consts_len(&self) -> usize {
+        self.consts.len()
+    }
+
+    /// Get the number of keys currently in the pool.
+    pub fn keys_len(&self) -> usize {
+        self.keys.len()
+    }
+
+    /// Update next_reg to at least the given value (for merging sub-programs).
+    pub fn update_next_reg(&mut self, reg_count: u16) {
+        if reg_count > self.next_reg {
+            self.next_reg = reg_count;
         }
     }
 

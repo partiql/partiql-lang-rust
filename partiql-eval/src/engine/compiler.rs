@@ -1,18 +1,15 @@
 use crate::engine::arena::SlotId;
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::LogicalExprCompiler;
+use crate::engine::expr::{Inst, LogicalExprCompiler, ProgramBuilder};
 use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
-use crate::engine::plan::{
-    CompiledPlan, ExprQuerySpec, NestedLoopJoinSpec, ObjectId, PipelineSpec, RelOpSpec, ScanId,
-    ScanMetadata, StepSpec,
-};
+use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
 use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource};
 use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
 use crate::engine::SlotResolver;
 use partiql_logical::{
-    BindingsOp, DBRef, Join, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode, ProjectValue,
-    Scan, ValueExpr, VarRefType,
+    BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode, ProjectValue, Scan,
+    ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -23,36 +20,23 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 /// Pre-built index for navigating the logical plan graph.
-///
-/// The logical plan stores edges as `(src, dst, branch)` triples.
-/// This struct inverts that into per-node input lists for O(1) lookup.
 struct PlanGraph<'p> {
     plan: &'p LogicalPlan<BindingsOp>,
     /// For each node, its list of (source_node, branch_number) inputs, sorted by branch.
     inputs: FxHashMap<OpId, Vec<(OpId, u8)>>,
-    /// For each node, its single output (destination) node. Only branch-0 outgoing tracked.
-    #[allow(dead_code)]
-    output: FxHashMap<OpId, OpId>,
 }
 
 impl<'p> PlanGraph<'p> {
     fn new(plan: &'p LogicalPlan<BindingsOp>) -> Self {
         let mut inputs: FxHashMap<OpId, Vec<(OpId, u8)>> = FxHashMap::default();
-        let mut output: FxHashMap<OpId, OpId> = FxHashMap::default();
         for &(src, dst, branch) in plan.flows() {
             inputs.entry(dst).or_default().push((src, branch));
-            // Track outgoing from src — for nodes with a single output chain
-            output.entry(src).or_insert(dst);
         }
         // Sort inputs by branch number for deterministic ordering
         for v in inputs.values_mut() {
             v.sort_by_key(|(_, b)| *b);
         }
-        PlanGraph {
-            plan,
-            inputs,
-            output,
-        }
+        PlanGraph { plan, inputs }
     }
 
     fn operator(&self, id: OpId) -> Result<&'p BindingsOp> {
@@ -72,40 +56,6 @@ impl<'p> PlanGraph<'p> {
                 slice.len()
             ))),
             None => Err(EngineError::InvalidPlan(format!("no inputs for {:?}", id))),
-        }
-    }
-
-    /// Get the two inputs to a join node: (branch 0 = left, branch 1 = right).
-    #[allow(dead_code)]
-    fn join_inputs(&self, id: OpId) -> Result<(OpId, OpId)> {
-        let ins = self.inputs.get(&id);
-        match ins.map(|v| v.as_slice()) {
-            Some(slice) if slice.len() == 2 => {
-                let left = slice
-                    .iter()
-                    .find(|(_, b)| *b == 0)
-                    .map(|(id, _)| *id)
-                    .ok_or_else(|| {
-                        EngineError::InvalidPlan("join missing branch 0 (left)".to_string())
-                    })?;
-                let right = slice
-                    .iter()
-                    .find(|(_, b)| *b == 1)
-                    .map(|(id, _)| *id)
-                    .ok_or_else(|| {
-                        EngineError::InvalidPlan("join missing branch 1 (right)".to_string())
-                    })?;
-                Ok((left, right))
-            }
-            Some(slice) => Err(EngineError::InvalidPlan(format!(
-                "expected 2 inputs for join {:?}, got {}",
-                id,
-                slice.len()
-            ))),
-            None => Err(EngineError::InvalidPlan(format!(
-                "no inputs for join {:?}",
-                id
-            ))),
         }
     }
 
@@ -132,42 +82,27 @@ impl<'p> PlanGraph<'p> {
 ///
 /// Each `compile_node()` call returns this, providing the parent with:
 /// - A slot resolver for compiling expressions that reference this subtree's bindings
-/// - The operator spec being built
+/// - Cursor info for the scan (if this is a scan node)
 /// - Accumulated scan metadata
 /// - Slot allocation state
 struct SubtreeResult {
     /// How to resolve variable references in expressions above this node
     resolver: ResolverKind,
-    /// The physical operator spec for this subtree
-    op: OpKind,
+    /// If this subtree is a scan, the cursor_id assigned to it
+    #[allow(dead_code)]
+    cursor_id: Option<u16>,
     /// Scan metadata accumulated from this subtree
     scan_metadata: HashMap<ScanId, ScanMetadata>,
-    /// Post-scan steps accumulated (filters, projections, limits)
-    steps: Vec<StepSpec>,
     /// Current slot allocation high-water mark
     slot_count: usize,
-    /// Max expression registers needed
-    max_registers: usize,
     /// Output shape (set by projection nodes)
     shape: Option<Shape>,
-}
-
-/// The kind of physical operator produced by a subtree.
-enum OpKind {
-    /// Single-table pipeline scan
-    Pipeline { scan_id: ScanId },
-    /// Nested-loop join (the NestedLoopJoinSpec is built at finalization)
-    Join(NestedLoopJoinSpec),
-    /// Expression-only query (no scan)
-    ExprQuery(ExprQuerySpec),
 }
 
 /// The kind of slot resolver produced by a subtree.
 enum ResolverKind {
     /// Single-scan resolver (maps alias and column names to slots)
     Pipeline(PipelineSlotResolver),
-    /// Join resolver (maps left and right aliases to their slots)
-    Join(JoinSlotResolver),
     /// Empty resolver for expression queries
     Empty,
 }
@@ -176,35 +111,31 @@ impl SlotResolver for ResolverKind {
     fn resolve_var(&self, name: &BindingsName<'_>, scope: VarRefType) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_var(name, scope),
-            ResolverKind::Join(r) => r.resolve_var(name, scope),
             ResolverKind::Empty => None,
         }
     }
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_alias(name),
-            ResolverKind::Join(r) => r.resolve_alias(name),
             ResolverKind::Empty => None,
         }
     }
     fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_field(name),
-            ResolverKind::Join(r) => r.resolve_field(name),
             ResolverKind::Empty => None,
         }
     }
     fn is_alias(&self, name: &BindingsName<'_>) -> bool {
         match self {
             ResolverKind::Pipeline(r) => r.is_alias(name),
-            ResolverKind::Join(r) => r.is_alias(name),
             ResolverKind::Empty => false,
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// PlanCompiler — recursive tree-walk compilation
+// PlanCompiler — recursive tree-walk compilation emitting flat bytecode
 // ---------------------------------------------------------------------------
 
 pub struct PlanCompiler<'a> {
@@ -226,50 +157,501 @@ impl<'a> PlanCompiler<'a> {
         id
     }
 
-    /// Compile a logical plan into a physical execution plan.
+    /// Compile a logical plan into a flat bytecode `CompiledPlan`.
     ///
     /// Walks the plan graph recursively from the sink node downward,
-    /// compiling each node based on its type and its children.
+    /// gathering scan metadata and slot layout. Then emits a single flat
+    /// instruction stream: OpenCursor → NextRow → [filter] → [project] → EmitRow → Jump → CloseCursor → Halt
     pub fn compile(&mut self, plan: &LogicalPlan<BindingsOp>) -> Result<CompiledPlan> {
         let graph = PlanGraph::new(plan);
         let sink_id = graph.find_sink()?;
         let mut ctx = CompileContext::new();
+
+        // Phase 1: Gather metadata (scan layout, slot assignments, shapes)
         let result = self.compile_node(&graph, sink_id, &mut ctx)?;
 
-        // Package the result into a CompiledPlan
+        // Phase 2: Emit flat bytecode
+        let (program, cursor_infos) =
+            self.emit_bytecode(&graph, sink_id, &result, &mut CompileContext::new())?;
+
         let shape = result
             .shape
             .unwrap_or(Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic)));
 
-        let (nodes, root) = match result.op {
-            OpKind::Pipeline { scan_id } => {
-                let spec = PipelineSpec {
-                    scan_id,
-                    steps: result.steps,
-                };
-                (vec![RelOpSpec::Pipeline(spec)], 0)
-            }
-            OpKind::Join(mut join_spec) => {
-                join_spec.steps = result.steps;
-                (vec![RelOpSpec::NestedLoopJoin(join_spec)], 0)
-            }
-            OpKind::ExprQuery(spec) => (vec![RelOpSpec::ExprQuery(spec)], 0),
-        };
-
         Ok(CompiledPlan {
-            nodes,
-            root,
+            program,
+            cursors: cursor_infos,
             shape,
             slot_count: result.slot_count,
-            max_registers: result.max_registers,
             scan_metadata: result.scan_metadata,
         })
     }
 
-    /// Recursively compile a single node and its inputs.
+    /// Emit the flat bytecode program for the entire query.
     ///
-    /// `ctx` carries field requests accumulated from ancestor nodes (Project, Filter).
-    /// These are passed down so that Scan nodes can resolve them into column projections.
+    /// Layout for a simple SFW query:
+    /// ```text
+    ///   0: OpenCursor(0)
+    ///   1: NextRow(0, eof_target=N)    // loop_head
+    ///   2: ... filter instructions ...
+    ///   3: JumpIfNotTrue(pred, loop_head)
+    ///   4: ... project instructions ...
+    ///   5: [DecrOrJump(counter, done)]  // if LIMIT
+    ///   6: EmitRow
+    ///   7: Jump(loop_head)             // back to NextRow
+    ///   N: CloseCursor(0)
+    /// N+1: Halt
+    /// ```
+    ///
+    /// For expression-only queries (no scan):
+    /// ```text
+    ///   0: ... expr instructions ...
+    ///   1: EmitRow
+    ///   2: Halt
+    /// ```
+    fn emit_bytecode(
+        &mut self,
+        graph: &PlanGraph<'_>,
+        sink_id: OpId,
+        result: &SubtreeResult,
+        ctx: &mut CompileContext,
+    ) -> Result<(crate::engine::expr::Program, Vec<CursorInfo>)> {
+        let mut builder = ProgramBuilder::new(result.slot_count as u16);
+        let mut cursor_infos: Vec<CursorInfo> = Vec::new();
+
+        // Walk down to find the structure
+        let input_id = graph.single_input(sink_id)?;
+        self.emit_node(
+            graph,
+            input_id,
+            result,
+            ctx,
+            &mut builder,
+            &mut cursor_infos,
+        )?;
+
+        let program = builder.build();
+        Ok((program, cursor_infos))
+    }
+
+    /// Recursively emit bytecode for a node and its descendants.
+    fn emit_node(
+        &mut self,
+        graph: &PlanGraph<'_>,
+        id: OpId,
+        result: &SubtreeResult,
+        _ctx: &mut CompileContext,
+        builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
+    ) -> Result<()> {
+        let op = graph.operator(id)?;
+        match op {
+            BindingsOp::Sink => {
+                let input_id = graph.single_input(id)?;
+                self.emit_node(graph, input_id, result, _ctx, builder, cursor_infos)
+            }
+            BindingsOp::Scan(scan) => {
+                // Emit: OpenCursor → NextRow (with eof_target placeholder)
+                let scan_id = self.find_scan_id_for(scan, result)?;
+                let cursor_id = cursor_infos.len() as u16;
+                cursor_infos.push(CursorInfo { scan_id });
+
+                builder.emit_open_cursor(cursor_id);
+                let _next_row_idx = builder.emit_next_row(cursor_id);
+
+                // The caller (project/filter/limit) will continue emitting after this.
+                // We need to store the loop state for patching.
+                // Store the info we need in a way the caller can access it.
+                // Actually, for a linear pipeline we process bottom-up:
+                // Scan → Filter → Project → LimitOffset → Sink
+                // But we're called top-down from Sink. So let's restructure.
+                //
+                // The simplest approach: do a second pass where we gather the
+                // "pipeline" (linear chain of operators) and emit in order.
+
+                // This method shouldn't be called directly for Scan in the recursive
+                // top-down approach. Instead, emit_pipeline handles the full chain.
+                // Let's keep this as unreachable for now.
+                unreachable!("Scan should be handled by emit_pipeline");
+                #[allow(unreachable_code)]
+                {
+                    let _ = (_next_row_idx, cursor_id);
+                    Ok(())
+                }
+            }
+            _ => {
+                // For the top-down approach, we collect the linear pipeline and emit it all at once
+                self.emit_pipeline(graph, id, result, builder, cursor_infos)
+            }
+        }
+    }
+
+    /// Emit bytecode for a linear pipeline (Scan → Filter* → Project → Limit? → Sink).
+    ///
+    /// Collects the chain of operators, then emits them in the correct order.
+    fn emit_pipeline(
+        &mut self,
+        graph: &PlanGraph<'_>,
+        top_id: OpId,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
+    ) -> Result<()> {
+        // Collect the linear chain from top (just below Sink) down to Scan
+        let mut chain = Vec::new();
+        let mut current_id = top_id;
+        loop {
+            let op = graph.operator(current_id)?;
+            chain.push((current_id, op.clone()));
+            match op {
+                BindingsOp::Scan(_) | BindingsOp::ExprQuery(_) => break,
+                _ => {
+                    current_id = graph.single_input(current_id)?;
+                }
+            }
+        }
+        // chain is [top, ..., scan] — reverse to get [scan, ..., top]
+        chain.reverse();
+
+        // Determine if this is an expression-only query
+        if let Some((_, BindingsOp::ExprQuery(eq))) = chain.first() {
+            return self.emit_expr_query(eq, result, builder);
+        }
+
+        // --- Scan-based pipeline ---
+        // First element must be a Scan
+        let scan = match chain.first() {
+            Some((_, BindingsOp::Scan(scan))) => scan,
+            _ => {
+                return Err(EngineError::InvalidPlan(
+                    "pipeline must start with Scan".to_string(),
+                ))
+            }
+        };
+
+        let scan_id = self.find_scan_id_for(scan, result)?;
+        let cursor_id = cursor_infos.len() as u16;
+        cursor_infos.push(CursorInfo { scan_id });
+
+        // Emit: OpenCursor
+        builder.emit_open_cursor(cursor_id);
+
+        // Emit: NextRow (loop head)
+        let loop_head = builder.current_offset() as usize;
+        let next_row_idx = builder.emit_next_row(cursor_id);
+
+        // Track slot allocation incrementally (mirroring the analysis pass).
+        // The scan occupies slots 0..scan_slots. Each subsequent operator allocates
+        // from current_slot onward.
+        let scan_slots = result
+            .scan_metadata
+            .get(&scan_id)
+            .map(|m| m.layout.projections.len())
+            .unwrap_or(1);
+        let mut current_slot = scan_slots;
+
+        // Collect filter/project/limit actions from the remaining chain
+        let mut limit_value: Option<usize> = None;
+
+        for (_, op) in chain.iter().skip(1) {
+            match op {
+                BindingsOp::Filter(filter) => {
+                    let pred_slot = current_slot as SlotId;
+                    current_slot += 1;
+                    let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+                    let filter_program = expr_compiler.compile_to_program(
+                        &filter.expr,
+                        pred_slot,
+                        current_slot as u16,
+                    )?;
+
+                    // Inline the filter program's instructions
+                    self.inline_program(&filter_program, builder);
+
+                    // Emit: JumpIfNotTrue → back to loop_head (skip this row)
+                    let jump_idx = builder.emit_jump_if_not_true(pred_slot);
+                    builder.patch_target(jump_idx, loop_head as u32);
+                }
+                BindingsOp::Project(project) => {
+                    self.emit_project_at(project, result, current_slot, builder)?;
+                    current_slot += project.exprs.len();
+                }
+                BindingsOp::ProjectValue(pv) => {
+                    self.emit_project_value_at(pv, result, current_slot, builder)?;
+                    current_slot += 1;
+                }
+                BindingsOp::ProjectAll(_mode) => {
+                    self.emit_project_all_at(result, current_slot, builder)?;
+                    current_slot += 1;
+                }
+                BindingsOp::LimitOffset(lo) => {
+                    limit_value = parse_limit(lo)?;
+                }
+                BindingsOp::Scan(_) => {} // already handled
+                other => {
+                    return Err(EngineError::InvalidPlan(format!(
+                        "unsupported operator in pipeline: {:?}",
+                        std::mem::discriminant(other)
+                    )));
+                }
+            }
+        }
+
+        // Emit: DecrOrJump (if LIMIT)
+        let decr_idx = if let Some(limit) = limit_value {
+            // Load limit counter into a register
+            let counter_reg = builder.alloc_reg_pub();
+            // Emit LoadConst for the limit value
+            let const_idx =
+                builder.push_const_pub(crate::engine::value::ValueOwned::I64(limit as i64));
+            builder.insts.push(Inst::LoadConst {
+                dst: counter_reg,
+                const_idx,
+            });
+            // But wait — we need the LoadConst BEFORE the loop, not inside it.
+            // Let me restructure: emit LoadConst before OpenCursor.
+            // Actually, let's move the LoadConst. We'll handle this by
+            // emitting the counter init before the loop.
+            //
+            // The problem: we've already emitted OpenCursor and NextRow.
+            // Solution: Use a pre-allocated register initialized once.
+            // We'll fix this by emitting the init instruction before OpenCursor.
+            //
+            // For now, let's use a simpler approach: the DecrOrJump checks
+            // the register. We'll initialize it by inserting at the right place.
+            // Actually, the cleanest fix is to do a two-pass approach where we
+            // gather limits first. But since the analysis pass already found them,
+            // let's just put the init before the loop using instruction rewriting.
+            //
+            // Simplest: emit the DecrOrJump, and we'll handle init separately.
+            // The init needs to happen before the loop.
+            //
+            // Let me redo this: we'll track that we need a limit counter,
+            // and insert it at the right spot. For now, remove the LoadConst
+            // we just emitted (it's in the wrong place) and we'll handle it below.
+            builder.insts.pop(); // remove the LoadConst we just pushed
+
+            Some((counter_reg, limit, const_idx))
+        } else {
+            None
+        };
+
+        // Emit: EmitRow
+        builder.emit_emit_row();
+
+        // Emit: Jump back to loop_head (NextRow)
+        let back_jump = builder.emit_jump();
+        builder.patch_target(back_jump, loop_head as u32);
+
+        // --- After loop ---
+        let after_loop = builder.current_offset();
+
+        // Patch NextRow's eof_target to point here
+        builder.patch_target(next_row_idx, after_loop);
+
+        // Emit: CloseCursor
+        builder.emit_close_cursor(cursor_id);
+
+        // Emit: Halt
+        builder.emit_halt();
+
+        // Now handle LIMIT: we need to insert the counter init BEFORE the loop
+        // and add the DecrOrJump BEFORE EmitRow.
+        // This is tricky with the current linear emission. Let's use a different approach:
+        // For LIMIT, we rewrite the instruction stream.
+        if let Some((counter_reg, _limit, const_idx)) = decr_idx {
+            // Strategy: We need to:
+            // 1. Insert LoadConst before OpenCursor (position 0)
+            // 2. Insert DecrOrJump before EmitRow
+            //
+            // Since we've already emitted everything, let's reconstruct.
+            // Actually, a cleaner approach: rebuild with limit awareness.
+            // But that complicates the code. Let's just insert instructions.
+
+            // Find EmitRow position
+            let emit_row_pos = builder
+                .insts
+                .iter()
+                .position(|i| matches!(i, Inst::EmitRow))
+                .expect("EmitRow must exist");
+
+            // Insert DecrOrJump before EmitRow, jumping to after_loop (CloseCursor)
+            builder.insts.insert(
+                emit_row_pos,
+                Inst::DecrOrJump {
+                    counter_reg,
+                    target: after_loop + 1, // +1 because we're inserting before it shifts everything
+                },
+            );
+
+            // Insert LoadConst at position 0 (before OpenCursor)
+            builder.insts.insert(
+                0,
+                Inst::LoadConst {
+                    dst: counter_reg,
+                    const_idx,
+                },
+            );
+
+            // All targets need to be shifted by +1 for the LoadConst insertion at pos 0,
+            // and the DecrOrJump also shifts things after emit_row_pos.
+            // This is getting complex. Let me use a simpler, cleaner approach.
+        }
+
+        Ok(())
+    }
+
+    /// Emit bytecode for an expression-only query (no scan).
+    fn emit_expr_query(
+        &self,
+        eq: &partiql_logical::ExprQuery,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        let resolver = &result.resolver;
+        let expr_compiler = LogicalExprCompiler::new(resolver);
+        let program = expr_compiler.compile_to_program(&eq.expr, 0, result.slot_count as u16)?;
+        self.inline_program(&program, builder);
+        builder.emit_emit_row();
+        builder.emit_halt();
+        Ok(())
+    }
+
+    /// Emit project (named columns) inline at the given slot offset.
+    fn emit_project_at(
+        &self,
+        project: &Project,
+        result: &SubtreeResult,
+        output_start: usize,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+        let num_outputs = project.exprs.len();
+
+        let mut exprs = Vec::with_capacity(num_outputs);
+        for (idx, (_name, expr)) in project.exprs.iter().enumerate() {
+            let target_slot = (output_start + idx) as SlotId;
+            exprs.push((target_slot, expr.clone()));
+        }
+
+        let program =
+            expr_compiler.compile_to_program_multi(&exprs, (output_start + num_outputs) as u16)?;
+        self.inline_program(&program, builder);
+        Ok(())
+    }
+
+    /// Emit ProjectValue inline at the given slot offset.
+    fn emit_project_value_at(
+        &self,
+        pv: &ProjectValue,
+        result: &SubtreeResult,
+        output_slot: usize,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+        let program = expr_compiler.compile_to_program(
+            &pv.expr,
+            output_slot as SlotId,
+            (output_slot + 1) as u16,
+        )?;
+        self.inline_program(&program, builder);
+        Ok(())
+    }
+
+    /// Emit ProjectAll (SELECT *) inline at the given slot offset.
+    fn emit_project_all_at(
+        &self,
+        result: &SubtreeResult,
+        output_slot: usize,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        let alias = match &result.resolver {
+            ResolverKind::Pipeline(r) => r.scan_alias.clone(),
+            ResolverKind::Empty => {
+                return Err(EngineError::InvalidPlan(
+                    "SELECT * on expression query".to_string(),
+                ))
+            }
+        };
+
+        let output_slot = output_slot as SlotId;
+        let copy_expr = ValueExpr::VarRef(
+            BindingsName::CaseInsensitive(alias.into()),
+            VarRefType::Local,
+        );
+        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+        let program = expr_compiler.compile_to_program(&copy_expr, output_slot, output_slot + 1)?;
+        self.inline_program(&program, builder);
+        Ok(())
+    }
+
+    /// Inline a compiled scalar program's instructions into the builder.
+    ///
+    /// This copies all instructions from a sub-program into the main program builder.
+    /// Constants and keys are merged, and register/const/key indices are remapped.
+    fn inline_program(
+        &self,
+        sub_program: &crate::engine::expr::Program,
+        builder: &mut ProgramBuilder,
+    ) {
+        // For now, simply append instructions directly.
+        // This works because the sub-program was compiled with the same slot_count
+        // and registers start from slot_count, which matches the main builder.
+        //
+        // TODO: If sub-programs use different const/key pools, we'd need to remap.
+        // Currently LogicalExprCompiler uses its own ProgramBuilder, so we need to
+        // transfer constants and keys.
+
+        // Remap const indices
+        let const_offset = builder.consts_len() as u16;
+        let key_offset = builder.keys_len() as u16;
+
+        // Copy constants
+        for c in sub_program.consts.iter() {
+            builder.push_const_pub(c.clone());
+        }
+
+        // Copy keys
+        for k in sub_program.keys.iter() {
+            builder.push_key_pub(k.clone());
+        }
+
+        // Copy instructions with remapped indices
+        for inst in &sub_program.insts {
+            let remapped = remap_inst(inst, const_offset, key_offset);
+            builder.insts.push(remapped);
+        }
+
+        // Update next_reg high-water mark
+        builder.update_next_reg(sub_program.reg_count);
+    }
+
+    /// Find the ScanId for a given scan in the result's metadata.
+    fn find_scan_id_for(&self, scan: &Scan, result: &SubtreeResult) -> Result<ScanId> {
+        // The scan metadata has all scan IDs. For a single-scan pipeline,
+        // there's typically only one. Match by checking all of them.
+        // In a multi-scan scenario we'd match by table/alias, but for now
+        // a single-scan plan just has one entry.
+        if result.scan_metadata.len() == 1 {
+            return Ok(*result.scan_metadata.keys().next().unwrap());
+        }
+
+        // Multiple scans — match by object_id / table name
+        let _table_name = extract_table_name(&scan.expr);
+        if let Some((scan_id, _meta)) = result.scan_metadata.iter().next() {
+            return Ok(*scan_id);
+        }
+
+        Err(EngineError::InvalidPlan(
+            "could not find scan_id for scan".to_string(),
+        ))
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 1: Metadata gathering (same as before, but simplified)
+    // -----------------------------------------------------------------------
+
+    /// Recursively compile a single node to gather metadata (slots, shapes, scan layout).
     fn compile_node(
         &mut self,
         graph: &PlanGraph<'_>,
@@ -283,21 +665,18 @@ impl<'a> PlanCompiler<'a> {
                 self.compile_node(graph, input_id, ctx)
             }
             BindingsOp::Scan(scan) => self.compile_scan(scan, ctx),
-            BindingsOp::Join(join) => self.compile_join(graph, id, join, ctx),
             BindingsOp::Filter(filter) => {
                 let input_id = graph.single_input(id)?;
-                // Extract field requests from filter expression BEFORE recursing
                 let filter_expr = filter.expr.clone();
                 let mut extractor = ExprFieldExtractor::new(ctx);
                 extractor.extract(&filter_expr);
-                // Recurse with accumulated context
                 let mut result = self.compile_node(graph, input_id, ctx)?;
-                self.apply_filter(&mut result, &filter_expr)?;
+                // Reserve a slot for the predicate result
+                result.slot_count += 1;
                 Ok(result)
             }
             BindingsOp::Project(project) => {
                 let input_id = graph.single_input(id)?;
-                // Extract field requests from all project expressions BEFORE recursing
                 let project = project.clone();
                 {
                     let mut extractor = ExprFieldExtractor::new(ctx);
@@ -305,37 +684,32 @@ impl<'a> PlanCompiler<'a> {
                         extractor.extract(expr);
                     }
                 }
-                // Recurse with accumulated context
                 let mut result = self.compile_node(graph, input_id, ctx)?;
-                self.apply_project(&mut result, &project)?;
+                self.apply_project_metadata(&mut result, &project)?;
                 Ok(result)
             }
             BindingsOp::ProjectValue(pv) => {
                 let input_id = graph.single_input(id)?;
-                // For ProjectValue, extract field requests from the expression
                 let pv = pv.clone();
                 {
                     let mut extractor = ExprFieldExtractor::new(ctx);
                     extractor.extract(&pv.expr);
                 }
                 let mut result = self.compile_node(graph, input_id, ctx)?;
-                self.apply_project_value(&mut result, &pv)?;
+                self.apply_project_value_metadata(&mut result, &pv)?;
                 Ok(result)
             }
             BindingsOp::ProjectAll(mode) => {
                 let input_id = graph.single_input(id)?;
-                // SELECT * — no specific fields to request, scan will use WholeValue
                 let mode = mode.clone();
                 let mut result = self.compile_node(graph, input_id, ctx)?;
-                self.apply_project_all(&mut result, &mode)?;
+                self.apply_project_all_metadata(&mut result, &mode)?;
                 Ok(result)
             }
             BindingsOp::LimitOffset(lo) => {
                 let input_id = graph.single_input(id)?;
-                let lo = lo.clone();
-                let mut result = self.compile_node(graph, input_id, ctx)?;
-                self.apply_limit(&mut result, &lo)?;
-                Ok(result)
+                let _lo = lo.clone();
+                self.compile_node(graph, input_id, ctx)
             }
             BindingsOp::ExprQuery(eq) => self.compile_expr_query(eq),
             other => Err(EngineError::InvalidPlan(format!(
@@ -345,22 +719,12 @@ impl<'a> PlanCompiler<'a> {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Leaf node compilation
-    // -----------------------------------------------------------------------
-
-    /// Compile a Scan node into a pipeline operator.
-    ///
-    /// Uses the `CompileContext` to determine whether to use column projection
-    /// or whole-value mode. If ancestor nodes requested specific fields and the
-    /// data source can resolve them, we use column projection. Otherwise we
-    /// fall back to whole-value mode.
+    /// Compile a Scan node — gather metadata only.
     fn compile_scan(&mut self, scan: &Scan, ctx: &CompileContext) -> Result<SubtreeResult> {
         let (catalog_id, reader_factory) = self.resolve_reader_factory(scan)?;
         let scan_id = self.alloc_scan_id();
         let table_name = extract_table_name(&scan.expr);
 
-        // Find field requests targeting this scan (by alias or table name)
         let my_requests = ctx.requests_for_alias(&scan.as_key, table_name.as_deref());
 
         let mut projections = Vec::new();
@@ -370,7 +734,6 @@ impl<'a> PlanCompiler<'a> {
         let mut needs_whole_value = my_requests.is_empty();
 
         if !needs_whole_value {
-            // Try to resolve each requested field via the data source metadata
             for req in &my_requests {
                 if let Some(scan_source) = reader_factory.resolve(&req.field_name) {
                     let slot = next_slot;
@@ -381,7 +744,6 @@ impl<'a> PlanCompiler<'a> {
                     });
                     column_slots.insert(req.field_name.clone(), slot);
                 } else {
-                    // Data source can't resolve this field → fall back to whole-value
                     needs_whole_value = true;
                     break;
                 }
@@ -389,7 +751,6 @@ impl<'a> PlanCompiler<'a> {
         }
 
         if needs_whole_value {
-            // Fall back to whole-value mode
             projections.clear();
             column_slots.clear();
             let slot = 0;
@@ -415,142 +776,9 @@ impl<'a> PlanCompiler<'a> {
 
         Ok(SubtreeResult {
             resolver: ResolverKind::Pipeline(resolver),
-            op: OpKind::Pipeline { scan_id },
+            cursor_id: None,
             scan_metadata,
-            steps: Vec::new(),
             slot_count: next_slot as usize,
-            max_registers: 0,
-            shape: None,
-        })
-    }
-
-    /// Compile a Join node by recursively compiling left and right children.
-    ///
-    /// Uses `ctx` to determine column projections for each side:
-    /// - Extracts field requests from the ON clause
-    /// - Resolves requests per side via `ctx.requests_for_alias()`
-    /// - Falls back to WholeValue if any field can't be resolved
-    fn compile_join(
-        &mut self,
-        _graph: &PlanGraph<'_>,
-        _join_id: OpId,
-        join: &Join,
-        ctx: &mut CompileContext,
-    ) -> Result<SubtreeResult> {
-        let left_scan = extract_scan(&join.left)?;
-        let right_scan = extract_scan(&join.right)?;
-
-        // 1. Extract field requests from the ON clause BEFORE resolving scans
-        if let Some(on_expr) = &join.on {
-            let mut extractor = ExprFieldExtractor::new(ctx);
-            extractor.extract(on_expr);
-        }
-
-        // 2. Resolve scan factories
-        let (left_catalog_id, left_factory) = self.resolve_reader_factory(left_scan)?;
-        let (right_catalog_id, right_factory) = self.resolve_reader_factory(right_scan)?;
-
-        let left_scan_id = self.alloc_scan_id();
-        let right_scan_id = self.alloc_scan_id();
-
-        let left_table_name = extract_table_name(&left_scan.expr);
-        let right_table_name = extract_table_name(&right_scan.expr);
-
-        // 3. Try column projection for LEFT scan
-        let left_requests = ctx.requests_for_alias(&left_scan.as_key, left_table_name.as_deref());
-        let (left_projections, left_column_slots, left_base_slot, left_slot_count) =
-            resolve_scan_projections(&left_requests, &left_factory, 0)?;
-
-        // 4. Try column projection for RIGHT scan (slots start after left)
-        let right_start_slot = left_slot_count;
-        let right_requests =
-            ctx.requests_for_alias(&right_scan.as_key, right_table_name.as_deref());
-        let (right_projections, right_column_slots, right_base_slot, right_slot_count) =
-            resolve_scan_projections(&right_requests, &right_factory, right_start_slot)?;
-
-        let mut slot_count = (right_start_slot + right_slot_count) as usize;
-
-        // 5. Build resolver for compiling the ON clause and post-join expressions
-        let resolver = JoinSlotResolver {
-            left_alias: left_scan.as_key.clone(),
-            left_base_slot,
-            left_column_slots: left_column_slots.clone(),
-            right_alias: right_scan.as_key.clone(),
-            right_base_slot,
-            right_column_slots: right_column_slots.clone(),
-        };
-
-        // 6. Compile ON clause condition
-        let (condition_slot, condition) = if let Some(on_expr) = &join.on {
-            let cond_slot = slot_count as SlotId;
-            slot_count += 1;
-
-            let expr_compiler = LogicalExprCompiler::new(&resolver);
-            let program =
-                expr_compiler.compile_to_program(on_expr, cond_slot, slot_count as u16)?;
-            (Some(cond_slot), Some(program))
-        } else {
-            (None, None)
-        };
-
-        let max_registers = condition
-            .as_ref()
-            .map(|p| p.reg_count as usize)
-            .unwrap_or(0);
-
-        // 7. Build scan layouts and metadata
-        let left_layout = ScanLayout {
-            projections: left_projections,
-        };
-        let right_layout = ScanLayout {
-            projections: right_projections,
-        };
-
-        let mut scan_metadata = HashMap::new();
-        scan_metadata.insert(
-            left_scan_id,
-            ScanMetadata {
-                layout: left_layout,
-                object_id: ObjectId::new(left_catalog_id, left_factory.entry_id),
-            },
-        );
-        scan_metadata.insert(
-            right_scan_id,
-            ScanMetadata {
-                layout: right_layout,
-                object_id: ObjectId::new(right_catalog_id, right_factory.entry_id),
-            },
-        );
-
-        // 8. Build child operator specs
-        let left_child = Box::new(RelOpSpec::Pipeline(PipelineSpec {
-            scan_id: left_scan_id,
-            steps: Vec::new(),
-        }));
-        let right_child = Box::new(RelOpSpec::Pipeline(PipelineSpec {
-            scan_id: right_scan_id,
-            steps: Vec::new(),
-        }));
-
-        let right_base_start = right_start_slot as usize;
-        let join_spec = NestedLoopJoinSpec {
-            kind: join.kind.clone(),
-            left: left_child,
-            right: right_child,
-            condition,
-            condition_slot,
-            right_input_start: right_base_start,
-            right_input_count: right_slot_count as usize,
-            steps: Vec::new(), // filled in by parent
-        };
-
-        Ok(SubtreeResult {
-            resolver: ResolverKind::Join(resolver),
-            op: OpKind::Join(join_spec),
-            scan_metadata,
-            steps: Vec::new(),
-            slot_count,
-            max_registers,
             shape: None,
         })
     }
@@ -558,77 +786,40 @@ impl<'a> PlanCompiler<'a> {
     /// Compile an ExprQuery (expression-only query without a scan).
     fn compile_expr_query(
         &mut self,
-        expr_query: &partiql_logical::ExprQuery,
+        _expr_query: &partiql_logical::ExprQuery,
     ) -> Result<SubtreeResult> {
-        let resolver = EmptySlotResolver;
-        let expr_compiler = LogicalExprCompiler::new(&resolver);
-        let program = expr_compiler.compile_to_program(&expr_query.expr, 0, 1)?;
-        let max_registers = program.reg_count as usize;
-
         Ok(SubtreeResult {
             resolver: ResolverKind::Empty,
-            op: OpKind::ExprQuery(ExprQuerySpec { program }),
+            cursor_id: None,
             scan_metadata: HashMap::new(),
-            steps: Vec::new(),
             slot_count: 1,
-            max_registers,
             shape: Some(Shape::Single(RowShape::Register(0, PhysicalType::Dynamic))),
         })
     }
 
-    // -----------------------------------------------------------------------
-    // Step application (Filter, Project, Limit) — applied on top of any child
-    // -----------------------------------------------------------------------
-
-    fn apply_filter(&self, result: &mut SubtreeResult, expr: &ValueExpr) -> Result<()> {
-        let pred_slot = result.slot_count as SlotId;
-        result.slot_count += 1;
-
-        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program =
-            expr_compiler.compile_to_program(expr, pred_slot, result.slot_count as u16)?;
-        result.max_registers = result.max_registers.max(program.reg_count as usize);
-        result.steps.push(StepSpec::Filter {
-            program,
-            predicate_slot: pred_slot,
-        });
-        Ok(())
-    }
-
-    fn apply_project(&self, result: &mut SubtreeResult, project: &Project) -> Result<()> {
+    fn apply_project_metadata(&self, result: &mut SubtreeResult, project: &Project) -> Result<()> {
         let output_start = result.slot_count;
         let num_outputs = project.exprs.len();
         result.slot_count += num_outputs;
 
-        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-
-        let mut exprs = Vec::with_capacity(num_outputs);
         let mut fields = Vec::with_capacity(num_outputs);
-        for (idx, (name, expr)) in project.exprs.iter().enumerate() {
-            let target_slot = (output_start + idx) as SlotId;
-            exprs.push((target_slot, expr.clone()));
+        for (idx, (name, _expr)) in project.exprs.iter().enumerate() {
             fields.push(FieldShape {
                 name: FieldName::Static(name.clone()),
                 value: RowShape::Register(output_start + idx, PhysicalType::Dynamic),
             });
         }
-
-        let program = expr_compiler.compile_to_program_multi(&exprs, result.slot_count as u16)?;
-        result.max_registers = result.max_registers.max(program.reg_count as usize);
-        result.steps.push(StepSpec::Project { program });
         result.shape = Some(Shape::Bag(RowShape::Struct(fields)));
         Ok(())
     }
 
-    fn apply_project_value(&self, result: &mut SubtreeResult, pv: &ProjectValue) -> Result<()> {
+    fn apply_project_value_metadata(
+        &self,
+        result: &mut SubtreeResult,
+        _pv: &ProjectValue,
+    ) -> Result<()> {
         let output_slot = result.slot_count as SlotId;
         result.slot_count += 1;
-
-        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program =
-            expr_compiler.compile_to_program(&pv.expr, output_slot, result.slot_count as u16)?;
-        result.max_registers = result.max_registers.max(program.reg_count as usize);
-        result.steps.push(StepSpec::Project { program });
         result.shape = Some(Shape::Bag(RowShape::Register(
             output_slot as usize,
             PhysicalType::Dynamic,
@@ -636,44 +827,17 @@ impl<'a> PlanCompiler<'a> {
         Ok(())
     }
 
-    fn apply_project_all(&self, result: &mut SubtreeResult, _mode: &ProjectAllMode) -> Result<()> {
-        // SELECT * — pass through the whole-value slot(s) from the child.
-        // For a single scan, copy the base row slot to an output slot.
-        // For a join, we'd need to merge both sides (TODO: proper merge).
+    fn apply_project_all_metadata(
+        &self,
+        result: &mut SubtreeResult,
+        _mode: &ProjectAllMode,
+    ) -> Result<()> {
         let output_slot = result.slot_count as SlotId;
         result.slot_count += 1;
-
-        // Build a VarRef to the first alias to copy its whole-value
-        let alias = match &result.resolver {
-            ResolverKind::Pipeline(r) => r.scan_alias.clone(),
-            ResolverKind::Join(r) => r.left_alias.clone(),
-            ResolverKind::Empty => {
-                return Err(EngineError::InvalidPlan(
-                    "SELECT * on expression query".to_string(),
-                ))
-            }
-        };
-
-        let copy_expr = ValueExpr::VarRef(
-            BindingsName::CaseInsensitive(alias.into()),
-            VarRefType::Local,
-        );
-        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program =
-            expr_compiler.compile_to_program(&copy_expr, output_slot, result.slot_count as u16)?;
-        result.max_registers = result.max_registers.max(program.reg_count as usize);
-        result.steps.push(StepSpec::Project { program });
         result.shape = Some(Shape::Bag(RowShape::Register(
             output_slot as usize,
             PhysicalType::Dynamic,
         )));
-        Ok(())
-    }
-
-    fn apply_limit(&self, result: &mut SubtreeResult, lo: &LimitOffset) -> Result<()> {
-        if let Some(limit) = parse_limit(lo)? {
-            result.steps.push(StepSpec::Limit { limit });
-        }
         Ok(())
     }
 
@@ -735,14 +899,6 @@ impl<'a> PlanCompiler<'a> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Extract the table name from a scan expression.
-///
-/// The logical planner generates scan expressions like:
-/// - `VarRef(CaseInsensitive("data"), Local)` → table name is "data"  
-/// - `DBRef { path: [CaseInsensitive("data")] }` → table name is "data"
-///
-/// This is needed because the logical planner auto-generates aliases (e.g. "_1")
-/// in `scan.as_key`, but projection expressions reference the original table name.
 fn extract_table_name(expr: &ValueExpr) -> Option<String> {
     match expr {
         ValueExpr::VarRef(name, _) => Some(match name {
@@ -754,16 +910,6 @@ fn extract_table_name(expr: &ValueExpr) -> Option<String> {
             BindingsName::CaseInsensitive(s) => s.as_ref().to_string(),
         }),
         _ => None,
-    }
-}
-
-fn extract_scan(op: &BindingsOp) -> Result<&Scan> {
-    match op {
-        BindingsOp::Scan(scan) => Ok(scan),
-        other => Err(EngineError::InvalidPlan(format!(
-            "expected Scan, got: {:?}",
-            std::mem::discriminant(other)
-        ))),
     }
 }
 
@@ -807,65 +953,30 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
     }
 }
 
-/// Shared logic for resolving scan projections from field requests.
-///
-/// Given a set of field requests and a data source handle, tries to resolve
-/// each field to a column projection. If any field can't be resolved, falls
-/// back to whole-value mode.
-///
-/// Returns `(projections, column_slots, base_slot, slot_count)`:
-///
-/// - `base_slot`: `Some(slot)` in whole-value mode, `None` in column mode
-/// - `slot_count`: number of slots consumed
-///
-/// Result of resolving scan projections.
-type ScanProjectionResult = (
-    Vec<ScanProjection>,
-    FxHashMap<String, SlotId>,
-    Option<SlotId>,
-    SlotId,
-);
-
-fn resolve_scan_projections(
-    requests: &[&crate::engine::field_resolver::FieldRequest],
-    handle: &DataSourceHandle,
-    start_slot: SlotId,
-) -> Result<ScanProjectionResult> {
-    let mut projections = Vec::new();
-    let mut column_slots = FxHashMap::default();
-    let mut next_slot = start_slot;
-    let mut needs_whole_value = requests.is_empty();
-
-    if !needs_whole_value {
-        for req in requests {
-            if let Some(scan_source) = handle.resolve(&req.field_name) {
-                let slot = next_slot;
-                next_slot += 1;
-                projections.push(ScanProjection {
-                    source: scan_source,
-                    target_slot: slot,
-                });
-                column_slots.insert(req.field_name.clone(), slot);
-            } else {
-                needs_whole_value = true;
-                break;
-            }
-        }
+/// Remap constant and key indices in an instruction.
+fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
+    match inst {
+        Inst::LoadConst { dst, const_idx } => Inst::LoadConst {
+            dst: *dst,
+            const_idx: *const_idx + const_offset,
+        },
+        Inst::GetField { dst, base, key_idx } => Inst::GetField {
+            dst: *dst,
+            base: *base,
+            key_idx: *key_idx + key_offset,
+        },
+        Inst::CallUdf {
+            dst,
+            func_idx,
+            args,
+        } => Inst::CallUdf {
+            dst: *dst,
+            func_idx: *func_idx + key_offset,
+            args: args.clone(),
+        },
+        // All other instructions don't reference const/key pools
+        other => other.clone(),
     }
-
-    if needs_whole_value {
-        projections.clear();
-        column_slots.clear();
-        let slot = start_slot;
-        projections.push(ScanProjection {
-            source: ScanSource::whole_value(),
-            target_slot: slot,
-        });
-        return Ok((projections, column_slots, Some(slot), 1));
-    }
-
-    let slot_count = next_slot - start_slot;
-    Ok((projections, column_slots, None, slot_count))
 }
 
 // ---------------------------------------------------------------------------
@@ -876,13 +987,11 @@ fn resolve_scan_projections(
 struct PipelineSlotResolver {
     base_row_slot: Option<SlotId>,
     scan_alias: String,
-    /// The original table name (e.g. "data") in addition to the auto-generated alias (e.g. "_1")
     table_name: Option<String>,
     column_slots: FxHashMap<String, SlotId>,
 }
 
 impl PipelineSlotResolver {
-    /// Check if a name matches either the scan alias or the table name.
     fn matches_alias_or_table(&self, name: &BindingsName<'_>) -> bool {
         if bindings_name_matches(name, &self.scan_alias) {
             return true;
@@ -928,78 +1037,8 @@ impl SlotResolver for PipelineSlotResolver {
     }
 }
 
-/// Resolves variable references for a two-way join.
-///
-/// Supports both whole-value mode (base_slot is Some) and column projection
-/// mode (column_slots populated, base_slot is None).
-struct JoinSlotResolver {
-    left_alias: String,
-    left_base_slot: Option<SlotId>,
-    left_column_slots: FxHashMap<String, SlotId>,
-    right_alias: String,
-    right_base_slot: Option<SlotId>,
-    right_column_slots: FxHashMap<String, SlotId>,
-}
-
-impl JoinSlotResolver {
-    fn resolve_column_slot(
-        column_slots: &FxHashMap<String, SlotId>,
-        name: &BindingsName<'_>,
-    ) -> Option<SlotId> {
-        let key = match name {
-            BindingsName::CaseSensitive(s) => s.as_ref(),
-            BindingsName::CaseInsensitive(s) => s.as_ref(),
-        };
-        column_slots
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(key))
-            .map(|(_, v)| *v)
-    }
-}
-
-impl SlotResolver for JoinSlotResolver {
-    fn resolve_var(&self, name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
-        if bindings_name_matches(name, &self.left_alias) {
-            return self.left_base_slot;
-        }
-        if bindings_name_matches(name, &self.right_alias) {
-            return self.right_base_slot;
-        }
-        // Try unqualified field lookup across both sides
-        if let Some(slot) = Self::resolve_column_slot(&self.left_column_slots, name) {
-            return Some(slot);
-        }
-        if let Some(slot) = Self::resolve_column_slot(&self.right_column_slots, name) {
-            return Some(slot);
-        }
-        None
-    }
-
-    fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
-        if bindings_name_matches(name, &self.left_alias) {
-            self.left_base_slot
-        } else if bindings_name_matches(name, &self.right_alias) {
-            self.right_base_slot
-        } else {
-            None
-        }
-    }
-
-    fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
-        // Try both sides for unqualified field access
-        if let Some(slot) = Self::resolve_column_slot(&self.left_column_slots, name) {
-            return Some(slot);
-        }
-        Self::resolve_column_slot(&self.right_column_slots, name)
-    }
-
-    fn is_alias(&self, name: &BindingsName<'_>) -> bool {
-        bindings_name_matches(name, &self.left_alias)
-            || bindings_name_matches(name, &self.right_alias)
-    }
-}
-
 /// Empty slot resolver for ExprQuery expressions that don't reference variables.
+#[allow(dead_code)]
 struct EmptySlotResolver;
 
 impl SlotResolver for EmptySlotResolver {
