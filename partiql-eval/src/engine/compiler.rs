@@ -333,6 +333,24 @@ impl<'a> PlanCompiler<'a> {
         let cursor_id = cursor_infos.len() as u16;
         cursor_infos.push(CursorInfo { scan_id });
 
+        // Pre-scan chain for LIMIT value.
+        let mut limit_value: Option<usize> = None;
+        for (_, op) in chain.iter().skip(1) {
+            if let BindingsOp::LimitOffset(lo) = op {
+                limit_value = parse_limit(lo)?;
+            }
+        }
+
+        // Reserve a placeholder slot for the LIMIT LoadConst (emitted later once
+        // we know the counter register won't conflict with sub-program temps).
+        let limit_loadconst_idx = if limit_value.is_some() {
+            let idx = builder.current_offset();
+            builder.insts.push(Inst::Halt); // placeholder — will be replaced
+            Some(idx)
+        } else {
+            None
+        };
+
         // Emit: OpenCursor
         builder.emit_open_cursor(cursor_id);
 
@@ -349,9 +367,6 @@ impl<'a> PlanCompiler<'a> {
             .map(|m| m.layout.projections.len())
             .unwrap_or(1);
         let mut current_slot = scan_slots;
-
-        // Collect filter/project/limit actions from the remaining chain
-        let mut limit_value: Option<usize> = None;
 
         for (_, op) in chain.iter().skip(1) {
             match op {
@@ -384,10 +399,7 @@ impl<'a> PlanCompiler<'a> {
                     self.emit_project_all_at(result, current_slot, builder)?;
                     current_slot += 1;
                 }
-                BindingsOp::LimitOffset(lo) => {
-                    limit_value = parse_limit(lo)?;
-                }
-                BindingsOp::Scan(_) => {} // already handled
+                BindingsOp::LimitOffset(_) | BindingsOp::Scan(_) => {}
                 other => {
                     return Err(EngineError::InvalidPlan(format!(
                         "unsupported operator in pipeline: {:?}",
@@ -397,41 +409,19 @@ impl<'a> PlanCompiler<'a> {
             }
         }
 
-        // Emit: DecrOrJump (if LIMIT)
-        let decr_idx = if let Some(limit) = limit_value {
-            // Load limit counter into a register
+        // Emit: DecrOrJump (if LIMIT) — jumps past the loop when counter hits 0.
+        // Allocate the counter register NOW (after all sub-programs have been inlined)
+        // so it doesn't conflict with any temp registers used by filter/project code.
+        let decr_jump_idx = if let Some(limit) = limit_value {
             let counter_reg = builder.alloc_reg_pub();
-            // Emit LoadConst for the limit value
             let const_idx =
                 builder.push_const_pub(crate::engine::value::ValueOwned::I64(limit as i64));
-            builder.insts.push(Inst::LoadConst {
+            // Patch the placeholder LoadConst at the beginning
+            builder.insts[limit_loadconst_idx.unwrap() as usize] = Inst::LoadConst {
                 dst: counter_reg,
                 const_idx,
-            });
-            // But wait — we need the LoadConst BEFORE the loop, not inside it.
-            // Let me restructure: emit LoadConst before OpenCursor.
-            // Actually, let's move the LoadConst. We'll handle this by
-            // emitting the counter init before the loop.
-            //
-            // The problem: we've already emitted OpenCursor and NextRow.
-            // Solution: Use a pre-allocated register initialized once.
-            // We'll fix this by emitting the init instruction before OpenCursor.
-            //
-            // For now, let's use a simpler approach: the DecrOrJump checks
-            // the register. We'll initialize it by inserting at the right place.
-            // Actually, the cleanest fix is to do a two-pass approach where we
-            // gather limits first. But since the analysis pass already found them,
-            // let's just put the init before the loop using instruction rewriting.
-            //
-            // Simplest: emit the DecrOrJump, and we'll handle init separately.
-            // The init needs to happen before the loop.
-            //
-            // Let me redo this: we'll track that we need a limit counter,
-            // and insert it at the right spot. For now, remove the LoadConst
-            // we just emitted (it's in the wrong place) and we'll handle it below.
-            builder.insts.pop(); // remove the LoadConst we just pushed
-
-            Some((counter_reg, limit, const_idx))
+            };
+            Some(builder.emit_decr_or_jump(counter_reg))
         } else {
             None
         };
@@ -449,54 +439,16 @@ impl<'a> PlanCompiler<'a> {
         // Patch NextRow's eof_target to point here
         builder.patch_target(next_row_idx, after_loop);
 
+        // Patch DecrOrJump's target to point here (skip to CloseCursor when limit reached)
+        if let Some(idx) = decr_jump_idx {
+            builder.patch_target(idx, after_loop);
+        }
+
         // Emit: CloseCursor
         builder.emit_close_cursor(cursor_id);
 
         // Emit: Halt
         builder.emit_halt();
-
-        // Now handle LIMIT: we need to insert the counter init BEFORE the loop
-        // and add the DecrOrJump BEFORE EmitRow.
-        // This is tricky with the current linear emission. Let's use a different approach:
-        // For LIMIT, we rewrite the instruction stream.
-        if let Some((counter_reg, _limit, const_idx)) = decr_idx {
-            // Strategy: We need to:
-            // 1. Insert LoadConst before OpenCursor (position 0)
-            // 2. Insert DecrOrJump before EmitRow
-            //
-            // Since we've already emitted everything, let's reconstruct.
-            // Actually, a cleaner approach: rebuild with limit awareness.
-            // But that complicates the code. Let's just insert instructions.
-
-            // Find EmitRow position
-            let emit_row_pos = builder
-                .insts
-                .iter()
-                .position(|i| matches!(i, Inst::EmitRow))
-                .expect("EmitRow must exist");
-
-            // Insert DecrOrJump before EmitRow, jumping to after_loop (CloseCursor)
-            builder.insts.insert(
-                emit_row_pos,
-                Inst::DecrOrJump {
-                    counter_reg,
-                    target: after_loop + 1, // +1 because we're inserting before it shifts everything
-                },
-            );
-
-            // Insert LoadConst at position 0 (before OpenCursor)
-            builder.insts.insert(
-                0,
-                Inst::LoadConst {
-                    dst: counter_reg,
-                    const_idx,
-                },
-            );
-
-            // All targets need to be shifted by +1 for the LoadConst insertion at pos 0,
-            // and the DecrOrJump also shifts things after emit_row_pos.
-            // This is getting complex. Let me use a simpler, cleaner approach.
-        }
 
         Ok(())
     }

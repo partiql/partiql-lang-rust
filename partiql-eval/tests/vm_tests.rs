@@ -565,3 +565,48 @@ fn multiple_rows_with_filter() {
         "$bag::[\"alice\", \"carol\"]",
     );
 }
+
+#[test]
+fn limit_basic() {
+    assert_vm_eval(
+        "SELECT VALUE d.a FROM data AS d LIMIT 2",
+        &[("data", "[{a: 10}, {a: 20}, {a: 30}, {a: 40}]")],
+        "$bag::[10, 20]",
+    );
+}
+
+#[test]
+fn limit_zero() {
+    assert_vm_eval(
+        "SELECT VALUE d.a FROM data AS d LIMIT 0",
+        &[("data", "[{a: 1}, {a: 2}, {a: 3}]")],
+        "$bag::[]",
+    );
+}
+
+#[test]
+fn limit_exceeds_rows() {
+    assert_vm_eval(
+        "SELECT VALUE d.a FROM data AS d LIMIT 100",
+        &[("data", "[{a: 1}, {a: 2}]")],
+        "$bag::[1, 2]",
+    );
+}
+
+#[test]
+fn limit_with_filter() {
+    assert_vm_eval(
+        "SELECT VALUE d.a FROM data AS d WHERE d.a > 2 LIMIT 2",
+        &[("data", "[{a: 1}, {a: 2}, {a: 3}, {a: 4}, {a: 5}]")],
+        "$bag::[3, 4]",
+    );
+}
+
+#[test]
+fn limit_with_true_filter() {
+    assert_vm_eval(
+        "SELECT VALUE d.a FROM data AS d WHERE 1 = 1 LIMIT 2",
+        &[("data", "[{a: 10}, {a: 20}, {a: 30}]")],
+        "$bag::[10, 20]",
+    );
+}

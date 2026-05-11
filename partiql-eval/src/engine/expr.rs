@@ -1597,7 +1597,6 @@ impl ProgramBuilder {
     }
 
     /// Emit a DecrOrJump instruction. Returns the index so it can be patched.
-    #[allow(dead_code)]
     pub fn emit_decr_or_jump(&mut self, counter_reg: u16) -> usize {
         let idx = self.insts.len();
         self.insts.push(Inst::DecrOrJump {
