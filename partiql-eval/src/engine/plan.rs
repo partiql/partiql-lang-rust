@@ -127,6 +127,24 @@ impl fmt::Display for CompiledPlan {
                 writeln!(f, "    {:4}: scan_id={:?}", i, cursor.scan_id)?;
             }
         }
+        write!(f, "  output: ")?;
+        match &self.shape {
+            crate::engine::value::Shape::Bag(row) => {
+                write!(f, "Bag(")?;
+                fmt_row_shape(f, row)?;
+                writeln!(f, ")")?;
+            }
+            crate::engine::value::Shape::List(row) => {
+                write!(f, "List(")?;
+                fmt_row_shape(f, row)?;
+                writeln!(f, ")")?;
+            }
+            crate::engine::value::Shape::Single(row) => {
+                write!(f, "Single(")?;
+                fmt_row_shape(f, row)?;
+                writeln!(f, ")")?;
+            }
+        }
         writeln!(f, "  constants: {}", self.program.consts.len())?;
         for (i, c) in self.program.consts.iter().enumerate() {
             writeln!(f, "    {:4}: {}", i, c)?;
@@ -140,6 +158,31 @@ impl fmt::Display for CompiledPlan {
             writeln!(f, "    {:4}: {:?}", i, inst)?;
         }
         write!(f, "}}")
+    }
+}
+
+fn fmt_row_shape(f: &mut fmt::Formatter<'_>, row: &crate::engine::value::RowShape) -> fmt::Result {
+    use crate::engine::value::{FieldName, RowShape};
+    match row {
+        RowShape::Register(idx, _) => write!(f, "slot {idx}"),
+        RowShape::Struct(fields) => {
+            write!(f, "{{ ")?;
+            for (i, field) in fields.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                match &field.name {
+                    FieldName::Static(name) => write!(f, "'{name}'")?,
+                    FieldName::Register(reg) => write!(f, "slot {reg}")?,
+                }
+                write!(f, ": ")?;
+                match &field.value {
+                    RowShape::Register(idx, _) => write!(f, "slot {idx}")?,
+                    RowShape::Struct(_) => write!(f, "{{...}}")?,
+                }
+            }
+            write!(f, " }}")
+        }
     }
 }
 
