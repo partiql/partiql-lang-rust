@@ -1,5 +1,6 @@
 use ordered_float::OrderedFloat;
 use rust_decimal::Decimal as RustDecimal;
+use std::fmt;
 
 /// Owned tuple representation for arena-allocated value storage
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -32,4 +33,49 @@ pub(crate) enum ValueOwned {
     Tuple(TupleOwned),
     List(Vec<ValueOwned>),
     Bag(Vec<ValueOwned>),
+}
+
+impl fmt::Display for ValueOwned {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValueOwned::Missing => write!(f, "Missing"),
+            ValueOwned::Null => write!(f, "Null"),
+            ValueOwned::Bool(b) => write!(f, "Bool({b})"),
+            ValueOwned::I64(n) => write!(f, "I64({n})"),
+            ValueOwned::F64(n) => write!(f, "F64({n})"),
+            ValueOwned::Decimal(d) => write!(f, "Decimal({d})"),
+            ValueOwned::String(s) => write!(f, "String(\"{}\")", s.escape_default()),
+            ValueOwned::Bytes(b) => write!(f, "Bytes(<{} bytes>)", b.len()),
+            ValueOwned::Tuple(t) => {
+                write!(f, "{{ ")?;
+                for (i, field) in t.fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "'{}': {}", field.name, field.value)?;
+                }
+                write!(f, " }}")
+            }
+            ValueOwned::List(items) => {
+                write!(f, "[")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                write!(f, "]")
+            }
+            ValueOwned::Bag(items) => {
+                write!(f, "<< ")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{item}")?;
+                }
+                write!(f, " >>")
+            }
+        }
+    }
 }

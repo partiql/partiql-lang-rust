@@ -103,6 +103,14 @@ impl fmt::Display for CompiledPlan {
         writeln!(f, "  cursors: {}", self.cursors.len())?;
         writeln!(f, "  slot_count: {}", self.slot_count)?;
         writeln!(f, "  registers: {}", self.program.reg_count)?;
+        writeln!(f, "  constants: {}", self.program.consts.len())?;
+        for (i, c) in self.program.consts.iter().enumerate() {
+            writeln!(f, "    {:4}: {}", i, c)?;
+        }
+        writeln!(f, "  keys: {}", self.program.keys.len())?;
+        for (i, k) in self.program.keys.iter().enumerate() {
+            writeln!(f, "    {:4}: \"{}\"", i, k)?;
+        }
         writeln!(f, "  instructions: {}", self.program.insts.len())?;
         for (i, inst) in self.program.insts.iter().enumerate() {
             writeln!(f, "    {:4}: {:?}", i, inst)?;
