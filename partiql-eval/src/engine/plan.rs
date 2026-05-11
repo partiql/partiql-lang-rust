@@ -100,9 +100,33 @@ impl Clone for CompiledPlan {
 impl fmt::Display for CompiledPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "CompiledPlan {{")?;
-        writeln!(f, "  cursors: {}", self.cursors.len())?;
         writeln!(f, "  slot_count: {}", self.slot_count)?;
         writeln!(f, "  registers: {}", self.program.reg_count)?;
+        writeln!(f, "  cursors: {}", self.cursors.len())?;
+        for (i, cursor) in self.cursors.iter().enumerate() {
+            if let Some(meta) = self.scan_metadata.get(&cursor.scan_id) {
+                write!(f, "    {:4}: ", i)?;
+                for (j, proj) in meta.layout.projections.iter().enumerate() {
+                    if j > 0 {
+                        write!(f, ", ")?;
+                    }
+                    match &proj.source.source_type {
+                        crate::engine::source::ScanSourceType::WholeValue => {
+                            write!(f, "slot {} ← WholeValue", proj.target_slot)?;
+                        }
+                        crate::engine::source::ScanSourceType::FieldPath(name) => {
+                            write!(f, "slot {} ← Field(\"{}\")", proj.target_slot, name)?;
+                        }
+                        crate::engine::source::ScanSourceType::ColumnIndex(idx) => {
+                            write!(f, "slot {} ← Column({})", proj.target_slot, idx)?;
+                        }
+                    }
+                }
+                writeln!(f)?;
+            } else {
+                writeln!(f, "    {:4}: scan_id={:?}", i, cursor.scan_id)?;
+            }
+        }
         writeln!(f, "  constants: {}", self.program.consts.len())?;
         for (i, c) in self.program.consts.iter().enumerate() {
             writeln!(f, "    {:4}: {}", i, c)?;
