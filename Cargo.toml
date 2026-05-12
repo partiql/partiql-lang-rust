@@ -21,7 +21,6 @@ members = [
     "partiql-logical-planner",
     "partiql-logical",
     "partiql-eval",
-    "partiql-jni/rust",
     "partiql-parser",
     "partiql-tools",
     "partiql-types",
