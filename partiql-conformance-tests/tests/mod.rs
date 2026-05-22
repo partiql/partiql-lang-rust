@@ -1,19 +1,28 @@
 use partiql_ast_passes::error::AstTransformationError;
+#[cfg(not(feature = "eval_vm"))]
 use partiql_eval as eval;
 use std::ops::Deref;
 
 use partiql_eval::error::{EvalErr, PlanErr};
-use partiql_eval::eval::{BasicContext, EvalContext, EvalPlan, EvalResult, Evaluated};
+#[cfg(not(feature = "eval_vm"))]
+use partiql_eval::eval::{BasicContext, EvalContext, EvalPlan, EvalResult};
 use partiql_logical as logical;
 use partiql_parser::{Parsed, ParserError, ParserResult};
+#[cfg(not(feature = "eval_vm"))]
 use partiql_value::DateTime;
+use partiql_value::Value;
 
 use partiql_catalog::catalog::{PartiqlCatalog, PartiqlSharedCatalog, SharedCatalog};
+#[cfg(not(feature = "eval_vm"))]
 use partiql_catalog::context::SystemContext;
 use thiserror::Error;
 
 mod test_value;
 pub(crate) use test_value::TestValue;
+
+#[cfg(feature = "eval_vm")]
+#[path = "support/eval_vm.rs"]
+mod eval_vm;
 
 use once_cell::sync::Lazy;
 pub(crate) static SHARED_CATALOG: Lazy<PartiqlSharedCatalog> = Lazy::new(init_shared_catalog);
@@ -29,6 +38,7 @@ pub(crate) enum EvaluationMode {
     Error,
 }
 
+#[cfg(not(feature = "eval_vm"))]
 impl From<EvaluationMode> for eval::plan::EvaluationMode {
     fn from(value: EvaluationMode) -> Self {
         match value {
@@ -67,6 +77,7 @@ pub(crate) fn lower(
     planner.lower(parsed)
 }
 
+#[cfg(not(feature = "eval_vm"))]
 #[track_caller]
 #[inline]
 pub(crate) fn compile(
@@ -78,6 +89,7 @@ pub(crate) fn compile(
     planner.compile(&logical)
 }
 
+#[cfg(not(feature = "eval_vm"))]
 #[track_caller]
 #[inline]
 pub(crate) fn evaluate(plan: EvalPlan, ctx: &dyn EvalContext) -> EvalResult {
@@ -178,7 +190,25 @@ pub(crate) fn eval<'a>(
     statement: &'a str,
     mode: EvaluationMode,
     env: &Option<TestValue>,
-) -> Result<Evaluated, TestError<'a>> {
+) -> Result<Value, TestError<'a>> {
+    #[cfg(feature = "eval_vm")]
+    {
+        eval_vm::eval_via_vm(statement, mode, env)
+    }
+    #[cfg(not(feature = "eval_vm"))]
+    {
+        eval_legacy(statement, mode, env)
+    }
+}
+
+#[cfg(not(feature = "eval_vm"))]
+#[track_caller]
+#[inline]
+fn eval_legacy<'a>(
+    statement: &'a str,
+    mode: EvaluationMode,
+    env: &Option<TestValue>,
+) -> Result<Value, TestError<'a>> {
     let catalog: &PartiqlSharedCatalog = SHARED_CATALOG.deref();
 
     let parsed = parse(statement)?;
@@ -191,7 +221,7 @@ pub(crate) fn eval<'a>(
     let ctx = BasicContext::new(bindings, sys);
     let plan = compile(mode, catalog, lowered)?;
 
-    Ok(evaluate(plan, &ctx)?)
+    Ok(evaluate(plan, &ctx)?.result)
 }
 
 #[track_caller]
@@ -219,8 +249,9 @@ pub(crate) fn pass_eval(
 ) {
     match eval(statement, mode, env) {
         Ok(v) => {
-            assert_eq!(&TestValue::from(v), expected)
-        },
+            let actual = TestValue::from(v);
+            assert_eq!(&actual, expected)
+        }
         Err(TestError::Parse(err)) => {
             panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error: {err:#?}")
         }

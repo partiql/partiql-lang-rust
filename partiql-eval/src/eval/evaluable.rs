@@ -1012,13 +1012,7 @@ impl Evaluable for EvalLimitOffset {
         let offset = match &self.offset {
             None => 0,
             Some(expr) => match expr.evaluate(&empty_bindings, ctx).as_ref() {
-                Value::Integer(i) => {
-                    if *i >= 0 {
-                        *i as usize
-                    } else {
-                        0
-                    }
-                }
+                Value::Integer(i) if *i >= 0 => *i as usize,
                 _ => 0,
             },
         };
