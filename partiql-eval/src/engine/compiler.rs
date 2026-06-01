@@ -103,7 +103,9 @@ struct SubtreeResult {
 enum ResolverKind {
     /// Single-scan resolver (maps alias and column names to slots)
     Pipeline(PipelineSlotResolver),
-    /// Empty resolver for expression queries
+    /// Global resolver for expression queries that reference catalog objects
+    Global(GlobalSlotResolver),
+    /// Empty resolver for expression queries with no variable references
     Empty,
 }
 
@@ -111,26 +113,57 @@ impl SlotResolver for ResolverKind {
     fn resolve_var(&self, name: &BindingsName<'_>, scope: VarRefType) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_var(name, scope),
+            ResolverKind::Global(r) => r.resolve_var(name, scope),
             ResolverKind::Empty => None,
         }
     }
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_alias(name),
+            ResolverKind::Global(r) => r.resolve_alias(name),
             ResolverKind::Empty => None,
         }
     }
     fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_field(name),
+            ResolverKind::Global(r) => r.resolve_field(name),
             ResolverKind::Empty => None,
         }
     }
     fn is_alias(&self, name: &BindingsName<'_>) -> bool {
         match self {
             ResolverKind::Pipeline(r) => r.is_alias(name),
+            ResolverKind::Global(_) => false,
             ResolverKind::Empty => false,
         }
+    }
+}
+
+/// Resolver for global DB object references in expression queries.
+struct GlobalSlotResolver {
+    slots: FxHashMap<String, SlotId>,
+}
+
+impl SlotResolver for GlobalSlotResolver {
+    fn resolve_var(&self, name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
+        let key = match name {
+            BindingsName::CaseSensitive(s) => s.as_ref(),
+            BindingsName::CaseInsensitive(s) => s.as_ref(),
+        };
+        self.slots
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| *v)
+    }
+    fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
+        self.resolve_var(name, VarRefType::Global)
+    }
+    fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
+        self.resolve_var(name, VarRefType::Global)
+    }
+    fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
+        false
     }
 }
 
@@ -315,7 +348,7 @@ impl<'a> PlanCompiler<'a> {
 
         // Determine if this is an expression-only query
         if let Some((_, BindingsOp::ExprQuery(eq))) = chain.first() {
-            return self.emit_expr_query(eq, result, builder);
+            return self.emit_expr_query(eq, result, builder, cursor_infos);
         }
 
         // --- Scan-based pipeline ---
@@ -459,13 +492,32 @@ impl<'a> PlanCompiler<'a> {
         eq: &partiql_logical::ExprQuery,
         result: &SubtreeResult,
         builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
     ) -> Result<()> {
+        // Emit OpenCursor + NextRow for each implicit scan (global DB refs).
+        // Collect NextRow instruction indices so we can patch eof_target to Halt.
+        let mut next_row_indices = Vec::new();
+        for &scan_id in result.scan_metadata.keys() {
+            let cursor_id = cursor_infos.len() as u16;
+            cursor_infos.push(CursorInfo { scan_id });
+            builder.emit_open_cursor(cursor_id);
+            let next_row_idx = builder.emit_next_row(cursor_id);
+            next_row_indices.push(next_row_idx);
+        }
+
         let resolver = &result.resolver;
         let expr_compiler = LogicalExprCompiler::new(resolver);
         let program = expr_compiler.compile_to_program(&eq.expr, 0, result.slot_count as u16)?;
         self.inline_program(&program, builder);
         builder.emit_emit_row();
         builder.emit_halt();
+
+        // Patch all NextRow eof_targets to point to the Halt instruction
+        let halt_offset = builder.current_offset() - 1;
+        for idx in next_row_indices {
+            builder.patch_target(idx, halt_offset);
+        }
+
         Ok(())
     }
 
@@ -519,7 +571,7 @@ impl<'a> PlanCompiler<'a> {
     ) -> Result<()> {
         let alias = match &result.resolver {
             ResolverKind::Pipeline(r) => r.scan_alias.clone(),
-            ResolverKind::Empty => {
+            ResolverKind::Global(_) | ResolverKind::Empty => {
                 return Err(EngineError::InvalidPlan(
                     "SELECT * on expression query".to_string(),
                 ))
@@ -736,15 +788,71 @@ impl<'a> PlanCompiler<'a> {
     }
 
     /// Compile an ExprQuery (expression-only query without a scan).
+    ///
+    /// If the expression references catalog objects (DBRef), we create implicit
+    /// scans so their values are loaded into registers before the expression runs.
     fn compile_expr_query(
         &mut self,
-        _expr_query: &partiql_logical::ExprQuery,
+        expr_query: &partiql_logical::ExprQuery,
     ) -> Result<SubtreeResult> {
+        let db_refs = collect_db_refs(&expr_query.expr);
+
+        if db_refs.is_empty() {
+            return Ok(SubtreeResult {
+                resolver: ResolverKind::Empty,
+                cursor_id: None,
+                scan_metadata: HashMap::new(),
+                slot_count: 1,
+                shape: Some(Shape::Single(RowShape::Register(0, PhysicalType::Dynamic))),
+            });
+        }
+
+        let mut slots = FxHashMap::default();
+        let mut scan_metadata = HashMap::new();
+        let mut next_slot: SlotId = 0;
+
+        for db_ref in &db_refs {
+            let name = match db_ref.path.first() {
+                Some(BindingsName::CaseSensitive(s)) => s.as_ref().to_string(),
+                Some(BindingsName::CaseInsensitive(s)) => s.as_ref().to_string(),
+                None => continue,
+            };
+
+            if slots.contains_key(&name) {
+                continue;
+            }
+
+            let (catalog_id, reader_factory) = match self.resolve_catalog_table(db_ref) {
+                Ok(result) => result,
+                Err(_) => continue,
+            };
+
+            let scan_id = self.alloc_scan_id();
+            let slot = next_slot;
+            next_slot += 1;
+
+            let layout = ScanLayout {
+                projections: vec![ScanProjection {
+                    source: ScanSource::whole_value(),
+                    target_slot: slot,
+                }],
+            };
+            let object_id = ObjectId::new(catalog_id, reader_factory.entry_id);
+            scan_metadata.insert(scan_id, ScanMetadata { layout, object_id });
+            slots.insert(name, slot);
+        }
+
+        let resolver = if slots.is_empty() {
+            ResolverKind::Empty
+        } else {
+            ResolverKind::Global(GlobalSlotResolver { slots })
+        };
+
         Ok(SubtreeResult {
-            resolver: ResolverKind::Empty,
+            resolver,
             cursor_id: None,
-            scan_metadata: HashMap::new(),
-            slot_count: 1,
+            scan_metadata,
+            slot_count: std::cmp::max(next_slot as usize, 1),
             shape: Some(Shape::Single(RowShape::Register(0, PhysicalType::Dynamic))),
         })
     }
@@ -862,6 +970,56 @@ fn extract_table_name(expr: &ValueExpr) -> Option<String> {
             BindingsName::CaseInsensitive(s) => s.as_ref().to_string(),
         }),
         _ => None,
+    }
+}
+
+/// Recursively collect all DBRef nodes from a ValueExpr tree.
+fn collect_db_refs(expr: &ValueExpr) -> Vec<&DBRef> {
+    let mut refs = Vec::new();
+    collect_db_refs_inner(expr, &mut refs);
+    refs
+}
+
+fn collect_db_refs_inner<'a>(expr: &'a ValueExpr, out: &mut Vec<&'a DBRef>) {
+    match expr {
+        ValueExpr::DBRef(db_ref) => out.push(db_ref),
+        ValueExpr::UnExpr(_, inner) => collect_db_refs_inner(inner, out),
+        ValueExpr::BinaryExpr(_, lhs, rhs) => {
+            collect_db_refs_inner(lhs, out);
+            collect_db_refs_inner(rhs, out);
+        }
+        ValueExpr::Call(call) => {
+            for arg in &call.arguments {
+                collect_db_refs_inner(arg, out);
+            }
+        }
+        ValueExpr::ListExpr(list) => {
+            for elem in &list.elements {
+                collect_db_refs_inner(elem, out);
+            }
+        }
+        ValueExpr::BagExpr(bag) => {
+            for elem in &bag.elements {
+                collect_db_refs_inner(elem, out);
+            }
+        }
+        ValueExpr::TupleExpr(tuple) => {
+            for attr in &tuple.attrs {
+                collect_db_refs_inner(attr, out);
+            }
+            for val in &tuple.values {
+                collect_db_refs_inner(val, out);
+            }
+        }
+        ValueExpr::Path(base, _steps) => {
+            collect_db_refs_inner(base.as_ref(), out);
+        }
+        ValueExpr::DynamicLookup(lookups) => {
+            for lookup in lookups.iter() {
+                collect_db_refs_inner(lookup, out);
+            }
+        }
+        _ => {}
     }
 }
 

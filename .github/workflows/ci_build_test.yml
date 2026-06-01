@@ -239,6 +239,16 @@ jobs:
           fi
       - name: Print comparison report to summary
         run: cat ${{ env.COMPARISON_REPORT_NAME }} >> $GITHUB_STEP_SUMMARY
+      - name: Truncate report for PR comment (max 65000 chars)
+        run: |
+          if [ $(wc -c < ${{ env.COMPARISON_REPORT_NAME }}) -gt 65000 ]; then
+            head -c 64000 ${{ env.COMPARISON_REPORT_NAME }} > comment-body.md
+            echo "" >> comment-body.md
+            echo "---" >> comment-body.md
+            echo "*Report truncated. See [workflow summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for full details.*" >> comment-body.md
+          else
+            cp ${{ env.COMPARISON_REPORT_NAME }} comment-body.md
+          fi
       - name: Find Comment
         uses: peter-evans/find-comment@v2
         continue-on-error: true
@@ -253,5 +263,5 @@ jobs:
         with:
           comment-id: ${{ steps.fc.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
-          body-file: ${{ env.COMPARISON_REPORT_NAME }}
+          body-file: comment-body.md
           edit-mode: replace
