@@ -1,4 +1,5 @@
 pub mod arena;
+pub(crate) mod builtins;
 pub mod catalog;
 pub mod compiler;
 pub mod error;

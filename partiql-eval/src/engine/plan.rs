@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::engine::arena::Arena;
+use crate::engine::builtins::BuiltinFunctions;
 use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::{Inst, Program};
@@ -273,6 +274,8 @@ pub struct PartiQLVM {
     halted: bool,
     /// Number of output slots.
     slot_count: usize,
+    /// Built-in function registry.
+    builtins: BuiltinFunctions,
 }
 
 impl PartiQLVM {
@@ -303,6 +306,7 @@ impl PartiQLVM {
             ip: 0,
             halted: false,
             slot_count,
+            builtins: BuiltinFunctions::new(),
         };
 
         // Pre-create data sources from catalog
@@ -544,7 +548,9 @@ impl<'vm> QueryIterator<'vm> {
 
                 // All scalar instructions delegate to eval_inst
                 other => {
-                    if let Err(e) = program.eval_inst(other, &self.vm.arena, regs, None) {
+                    if let Err(e) =
+                        program.eval_inst(other, &self.vm.arena, regs, Some(&self.vm.builtins))
+                    {
                         return Some(Err(e));
                     }
                 }
