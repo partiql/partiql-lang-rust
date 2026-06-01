@@ -1518,7 +1518,8 @@ impl Program {
 }
 
 pub(crate) trait UdfRegistry {
-    fn call(&self, name: &str, args: &[ValueRef<'_>], arena: &Arena) -> Result<ValueRef<'_>>;
+    fn call<'a>(&self, name: &str, args: &[ValueRef<'a>], arena: &'a Arena)
+        -> Result<ValueRef<'a>>;
 }
 
 pub trait SlotResolver {
