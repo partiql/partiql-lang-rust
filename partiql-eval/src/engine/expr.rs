@@ -22,6 +22,8 @@ pub enum Expr {
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
+    Neg(Box<Expr>),
+    Pos(Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
     In(Box<Expr>, Box<Expr>),
     GetField(Box<Expr>, String),
@@ -295,6 +297,10 @@ pub enum Inst {
         b: u16,
     },
     NotBool {
+        dst: u16,
+        src: u16,
+    },
+    NegNum {
         dst: u16,
         src: u16,
     },
@@ -1406,6 +1412,16 @@ impl Program {
                 let sv = regs[*src as usize].as_bool()?;
                 regs[*dst as usize] = ValueRef::Bool(!sv);
             }
+            Inst::NegNum { dst, src } => {
+                regs[*dst as usize] = match regs[*src as usize] {
+                    ValueRef::I64(n) => ValueRef::I64(-n),
+                    ValueRef::F64(n) => ValueRef::F64(-n),
+                    ValueRef::Decimal(d) => ValueRef::Decimal(-d),
+                    ValueRef::Null => ValueRef::Null,
+                    ValueRef::Missing => ValueRef::Missing,
+                    _ => ValueRef::Missing,
+                };
+            }
             Inst::GetField { dst, base, key_idx } => {
                 let key = self
                     .keys
@@ -1817,6 +1833,16 @@ impl ExprCompiler {
                 self.builder.insts.push(Inst::NotBool { dst, src });
                 Ok(dst)
             }
+            Expr::Neg(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::NegNum { dst, src });
+                Ok(dst)
+            }
+            Expr::Pos(expr) => {
+                // Unary + is a no-op on numeric values
+                self.compile_expr(expr)
+            }
             Expr::GetField(base, key) => {
                 let base_reg = self.compile_expr(base)?;
                 let dst = self.builder.alloc_reg();
@@ -2169,7 +2195,8 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 let expr = self.lower_expr(expr)?;
                 match op {
                     partiql_logical::UnaryOp::Not => Ok(Expr::Not(expr.into())),
-                    _ => Err(EngineError::UnsupportedExpr(format!("unary op {op:?}"))),
+                    partiql_logical::UnaryOp::Neg => Ok(Expr::Neg(expr.into())),
+                    partiql_logical::UnaryOp::Pos => Ok(Expr::Pos(expr.into())),
                 }
             }
             ValueExpr::Call(call) => Ok(Expr::UdfCall {
@@ -2240,7 +2267,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
     }
 }
 
-fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
+pub(crate) fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
     Ok(match lit {
         Lit::Missing => ValueOwned::Missing,
         Lit::Null => ValueOwned::Null,

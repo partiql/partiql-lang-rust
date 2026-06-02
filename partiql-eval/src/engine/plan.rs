@@ -8,8 +8,8 @@ use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::{Inst, Program};
 use crate::engine::source::RegisterWriter;
-use crate::engine::source::{DataSourceImpl, ScanLayout};
-use crate::engine::value::{RegisterReader, Shape, ValueRef};
+use crate::engine::source::{DataSourceImpl, InlineDataSource, ScanLayout};
+use crate::engine::value::{RegisterReader, Shape, ValueOwned, ValueRef};
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -79,6 +79,8 @@ pub struct CompiledPlan {
     pub(crate) slot_count: usize,
     /// Scan metadata keyed by ScanId for catalog resolution.
     pub(crate) scan_metadata: HashMap<ScanId, ScanMetadata>,
+    /// Inline data for scans backed by literal expressions (not catalog tables).
+    pub(crate) inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
 }
 
 // Safety: Program is Send+Sync (verified by its own unsafe impl).
@@ -94,6 +96,7 @@ impl Clone for CompiledPlan {
             shape: self.shape.clone(),
             slot_count: self.slot_count,
             scan_metadata: self.scan_metadata.clone(),
+            inline_scans: self.inline_scans.clone(),
         }
     }
 }
@@ -195,6 +198,7 @@ impl Default for CompiledPlan {
             shape: Shape::default(),
             slot_count: 0,
             scan_metadata: HashMap::new(),
+            inline_scans: HashMap::new(),
         }
     }
 }
@@ -318,6 +322,14 @@ impl PartiQLVM {
     /// Bind all cursors to data sources from the execution context.
     fn bind_cursors(&mut self, exec_context: &ExecutionContext) -> Result<()> {
         for (cursor_id, cursor_info) in self.compiled.cursors.iter().enumerate() {
+            // Check for inline scans first (literal collections in FROM)
+            if let Some(values) = self.compiled.inline_scans.get(&cursor_info.scan_id) {
+                self.cursors[cursor_id] = Some(DataSourceImpl::Inline(InlineDataSource::new(
+                    values.clone(),
+                )));
+                continue;
+            }
+
             let scan_meta = self.compiled.get_scan(cursor_info.scan_id).ok_or_else(|| {
                 EngineError::IllegalState(format!("Unknown scan_id: {:?}", cursor_info.scan_id))
             })?;
