@@ -175,6 +175,7 @@ pub struct PlanCompiler<'a> {
     compilation_context: &'a CompilationContext,
     next_scan_id: u64,
     inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
+    expr_scans: HashMap<ScanId, ValueExpr>,
 }
 
 impl<'a> PlanCompiler<'a> {
@@ -183,6 +184,7 @@ impl<'a> PlanCompiler<'a> {
             compilation_context,
             next_scan_id: 0,
             inline_scans: HashMap::new(),
+            expr_scans: HashMap::new(),
         }
     }
 
@@ -220,6 +222,7 @@ impl<'a> PlanCompiler<'a> {
             slot_count: result.slot_count,
             scan_metadata: result.scan_metadata,
             inline_scans: std::mem::take(&mut self.inline_scans),
+            expr_scan_ids: self.expr_scans.keys().copied().collect(),
         })
     }
 
@@ -386,6 +389,17 @@ impl<'a> PlanCompiler<'a> {
         } else {
             None
         };
+
+        // For expression-based scans, compile the expression and emit MaterializeCursor
+        if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            let expr_program =
+                expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
+            self.inline_program(&expr_program, builder);
+            builder
+                .insts
+                .push(Inst::MaterializeCursor { src: 0, cursor_id });
+        }
 
         // Emit: OpenCursor
         builder.emit_open_cursor(cursor_id);
@@ -728,11 +742,17 @@ impl<'a> PlanCompiler<'a> {
 
     /// Compile a Scan node — gather metadata only.
     fn compile_scan(&mut self, scan: &Scan, ctx: &CompileContext) -> Result<SubtreeResult> {
-        // Try inline scan for literal expressions first
+        // Try inline scan for literal expressions first (compile-time constants)
         if let Some(values) = try_expr_to_inline_values(&scan.expr) {
             return self.compile_inline_scan(scan, values);
         }
-        let (catalog_id, reader_factory) = self.resolve_reader_factory(scan)?;
+        // Try catalog resolution (DBRef / VarRef)
+        let catalog_result = self.resolve_reader_factory(scan);
+        if catalog_result.is_err() {
+            // Expression-based scan: will be compiled and materialized at runtime
+            return self.compile_expr_scan(scan);
+        }
+        let (catalog_id, reader_factory) = catalog_result.unwrap();
         let scan_id = self.alloc_scan_id();
         let table_name = extract_table_name(&scan.expr);
 
@@ -942,6 +962,46 @@ impl<'a> PlanCompiler<'a> {
             scan_id,
             ScanMetadata {
                 layout,
+                object_id: dummy_object_id,
+            },
+        );
+
+        Ok(SubtreeResult {
+            resolver: ResolverKind::Pipeline(resolver),
+            cursor_id: None,
+            scan_metadata,
+            slot_count: 1,
+            shape: None,
+        })
+    }
+
+    /// Compile an expression-based scan (runtime-evaluated collection in FROM).
+    /// The expression will be compiled and materialized at emit time.
+    fn compile_expr_scan(&mut self, scan: &Scan) -> Result<SubtreeResult> {
+        let scan_id = self.alloc_scan_id();
+        self.expr_scans.insert(scan_id, scan.expr.clone());
+
+        let resolver = PipelineSlotResolver {
+            base_row_slot: Some(0),
+            scan_alias: scan.as_key.clone(),
+            table_name: None,
+            column_slots: FxHashMap::default(),
+        };
+
+        let dummy_object_id = ObjectId::from((
+            partiql_common::catalog::CatalogId::from(u64::MAX),
+            partiql_common::catalog::EntryId::from(u64::MAX),
+        ));
+        let mut scan_metadata = HashMap::new();
+        scan_metadata.insert(
+            scan_id,
+            ScanMetadata {
+                layout: ScanLayout {
+                    projections: vec![ScanProjection {
+                        source: ScanSource::whole_value(),
+                        target_slot: 0,
+                    }],
+                },
                 object_id: dummy_object_id,
             },
         );

@@ -304,6 +304,10 @@ pub enum Inst {
         dst: u16,
         src: u16,
     },
+    MaterializeCursor {
+        src: u16,
+        cursor_id: u16,
+    },
     GetField {
         dst: u16,
         base: u16,
@@ -1499,7 +1503,8 @@ impl Program {
             | Inst::JumpIfNotTrue { .. }
             | Inst::EmitRow
             | Inst::Halt
-            | Inst::DecrOrJump { .. } => {
+            | Inst::DecrOrJump { .. }
+            | Inst::MaterializeCursor { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

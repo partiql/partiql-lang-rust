@@ -1,6 +1,7 @@
-use super::value_owned::ValueOwned;
+use super::value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};
 use crate::engine::arena::Arena;
 use crate::engine::error::{EngineError, Result};
+use ordered_float::OrderedFloat;
 use rust_decimal::Decimal as RustDecimal;
 
 /// Compact tuple representation stored in arena for zero-copy operations
@@ -132,5 +133,34 @@ pub(crate) fn value_get_field_ref<'a>(value: ValueRef<'a>, key: &str) -> ValueRe
                 .unwrap_or(ValueRef::Missing)
         }
         _ => ValueRef::Missing,
+    }
+}
+
+pub(crate) fn value_ref_to_owned(value: ValueRef<'_>) -> ValueOwned {
+    match value {
+        ValueRef::Missing => ValueOwned::Missing,
+        ValueRef::Null => ValueOwned::Null,
+        ValueRef::Bool(b) => ValueOwned::Bool(b),
+        ValueRef::I64(n) => ValueOwned::I64(n),
+        ValueRef::F64(f) => ValueOwned::F64(OrderedFloat(f)),
+        ValueRef::Decimal(d) => ValueOwned::Decimal(d),
+        ValueRef::Str(s) => ValueOwned::String(s.to_string()),
+        ValueRef::Bytes(b) => ValueOwned::Bytes(b.to_vec()),
+        ValueRef::Tuple(t) => ValueOwned::Tuple(TupleOwned {
+            fields: t
+                .fields
+                .iter()
+                .map(|f| TupleFieldOwned {
+                    name: f.name.to_string(),
+                    value: value_ref_to_owned(f.value),
+                })
+                .collect(),
+        }),
+        ValueRef::List(items) => {
+            ValueOwned::List(items.iter().map(|i| value_ref_to_owned(*i)).collect())
+        }
+        ValueRef::Bag(items) => {
+            ValueOwned::Bag(items.iter().map(|i| value_ref_to_owned(*i)).collect())
+        }
     }
 }
