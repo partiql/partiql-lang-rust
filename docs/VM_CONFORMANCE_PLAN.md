@@ -42,10 +42,10 @@ The `stdout` field of failed tests contains the error classification:
 | 13 | GroupBy | Not supported |
 | 14 | Having | Not supported |
 
-## Current State (2026-06-02)
+## Current State (2026-06-03)
 
-- **3,775 passing / 2,896 failing / 6,671 total (56.6% conformant)**
-- Previously 3,559 (53.4%) before inline scans + unary negation
+- **3,911 passing / 2,760 failing / 6,671 total (58.6% conformant)**
+- Previously 3,775 (56.6%) before LIKE support
 - Previously 2,587 (38.8%) before DBRef/global resolution was implemented
 - Previously 1,117 (16.7%) before built-in functions were implemented
 - Only ~24 tests produce a wrong result — correctness is high when coverage exists
@@ -61,7 +61,7 @@ The `stdout` field of failed tests contains the error classification:
 | 4 | Scan expression types | ~57 remaining | — | `engine/compiler.rs` (DONE: inline scans for literals) |
 | 5 | Unary negation (`-x`) | 0 remaining | — | `engine/expr.rs` (DONE) |
 | 6 | Variant/Ion literals | 162 (2.9%) | 75.9% | `engine/expr.rs:2285` |
-| 7 | LIKE (PatternMatchExpr) | 100 (1.8%) | 77.7% | `engine/expr.rs:2214` |
+| 7 | LIKE (PatternMatchExpr) | ~128 WrongResult remaining | — | `engine/expr.rs` (DONE: impl works, failures are projection wrapping) |
 | 8 | JOIN operator | 84 (1.5%) | 79.2% | `engine/compiler.rs` |
 | 9 | ORDER BY operator | 60 (1.1%) | 80.3% | `engine/compiler.rs` |
 | 10 | UNION/INTERSECT/EXCEPT (BagOp) | 59 (1.1%) | 81.4% | `engine/compiler.rs` |

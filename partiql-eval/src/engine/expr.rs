@@ -3,6 +3,7 @@ use crate::engine::error::{EngineError, Result};
 use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
+use regex;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 
@@ -26,11 +27,31 @@ pub enum Expr {
     Pos(Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
     In(Box<Expr>, Box<Expr>),
+    Like {
+        value: Box<Expr>,
+        pattern: String,
+        escape: String,
+    },
+    LikeDynamic {
+        value: Box<Expr>,
+        pattern: Box<Expr>,
+        escape: Box<Expr>,
+    },
     GetField(Box<Expr>, String),
-    UdfCall { name: String, args: Vec<Expr> },
-    Tuple { attrs: Vec<Expr>, values: Vec<Expr> },
-    List { elements: Vec<Expr> },
-    Bag { elements: Vec<Expr> },
+    UdfCall {
+        name: String,
+        args: Vec<Expr>,
+    },
+    Tuple {
+        attrs: Vec<Expr>,
+        values: Vec<Expr>,
+    },
+    List {
+        elements: Vec<Expr>,
+    },
+    Bag {
+        elements: Vec<Expr>,
+    },
 }
 
 // TODO: Implement fully
@@ -303,6 +324,17 @@ pub enum Inst {
     NegNum {
         dst: u16,
         src: u16,
+    },
+    LikeMatch {
+        dst: u16,
+        value: u16,
+        pattern_idx: u16,
+    },
+    LikeDynamicMatch {
+        dst: u16,
+        value: u16,
+        pattern: u16,
+        escape: u16,
     },
     MaterializeCursor {
         src: u16,
@@ -1426,6 +1458,48 @@ impl Program {
                     _ => ValueRef::Missing,
                 };
             }
+            Inst::LikeMatch {
+                dst,
+                value,
+                pattern_idx,
+            } => {
+                let pattern_str = self
+                    .keys
+                    .get(*pattern_idx as usize)
+                    .ok_or_else(|| EngineError::IllegalState("invalid pattern key".to_string()))?;
+                regs[*dst as usize] = match regs[*value as usize] {
+                    ValueRef::Str(s) => match regex::Regex::new(pattern_str) {
+                        Ok(re) => ValueRef::Bool(re.is_match(s)),
+                        Err(_) => ValueRef::Missing,
+                    },
+                    ValueRef::Null => ValueRef::Null,
+                    ValueRef::Missing => ValueRef::Missing,
+                    _ => ValueRef::Missing,
+                };
+            }
+            Inst::LikeDynamicMatch {
+                dst,
+                value,
+                pattern,
+                escape,
+            } => {
+                regs[*dst as usize] = match (
+                    regs[*value as usize],
+                    regs[*pattern as usize],
+                    regs[*escape as usize],
+                ) {
+                    (ValueRef::Str(v), ValueRef::Str(p), ValueRef::Str(e)) => {
+                        let re_pattern = like_to_re_pattern(p, e);
+                        match regex::Regex::new(&re_pattern) {
+                            Ok(re) => ValueRef::Bool(re.is_match(v)),
+                            Err(_) => ValueRef::Missing,
+                        }
+                    }
+                    (ValueRef::Null, _, _) | (_, ValueRef::Null, _) => ValueRef::Null,
+                    (ValueRef::Missing, _, _) | (_, ValueRef::Missing, _) => ValueRef::Missing,
+                    _ => ValueRef::Missing,
+                };
+            }
             Inst::GetField { dst, base, key_idx } => {
                 let key = self
                     .keys
@@ -1848,6 +1922,39 @@ impl ExprCompiler {
                 // Unary + is a no-op on numeric values
                 self.compile_expr(expr)
             }
+            Expr::Like {
+                value,
+                pattern,
+                escape,
+            } => {
+                let value_reg = self.compile_expr(value)?;
+                let dst = self.builder.alloc_reg();
+                let regex_str = like_to_re_pattern(pattern, escape);
+                let pattern_idx = self.builder.intern_key(regex_str);
+                self.builder.insts.push(Inst::LikeMatch {
+                    dst,
+                    value: value_reg,
+                    pattern_idx,
+                });
+                Ok(dst)
+            }
+            Expr::LikeDynamic {
+                value,
+                pattern,
+                escape,
+            } => {
+                let value_reg = self.compile_expr(value)?;
+                let pattern_reg = self.compile_expr(pattern)?;
+                let escape_reg = self.compile_expr(escape)?;
+                let dst = self.builder.alloc_reg();
+                self.builder.insts.push(Inst::LikeDynamicMatch {
+                    dst,
+                    value: value_reg,
+                    pattern: pattern_reg,
+                    escape: escape_reg,
+                });
+                Ok(dst)
+            }
             Expr::GetField(base, key) => {
                 let base_reg = self.compile_expr(base)?;
                 let dst = self.builder.alloc_reg();
@@ -2244,8 +2351,24 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
             ValueExpr::BetweenExpr(_between_expr) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
             }
-            ValueExpr::PatternMatchExpr(_pattern_match_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            ValueExpr::PatternMatchExpr(pm) => {
+                let value = self.lower_expr(&pm.value)?;
+                match &pm.pattern {
+                    partiql_logical::Pattern::Like(like) => Ok(Expr::Like {
+                        value: value.into(),
+                        pattern: like.pattern.clone(),
+                        escape: like.escape.clone(),
+                    }),
+                    partiql_logical::Pattern::LikeNonStringNonLiteral(like) => {
+                        let pattern = self.lower_expr(&like.pattern)?;
+                        let escape = self.lower_expr(&like.escape)?;
+                        Ok(Expr::LikeDynamic {
+                            value: value.into(),
+                            pattern: pattern.into(),
+                            escape: escape.into(),
+                        })
+                    }
+                }
             }
             ValueExpr::SubQueryExpr(_sub_query_expr) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
@@ -2325,6 +2448,36 @@ fn call_name(call: &CallExpr) -> String {
         CallName::ById(name, _, _) => name.clone(),
         other => format!("{other:?}"),
     }
+}
+
+fn like_to_re_pattern(like_expr: &str, escape: &str) -> String {
+    let escape_ch = escape.chars().next();
+    let mut pattern = String::from("^");
+    pattern.reserve(like_expr.len() + 6);
+    let mut escaped = false;
+    let mut wildcard = false;
+    for ch in like_expr.chars() {
+        let is_any = std::mem::replace(&mut wildcard, false);
+        let is_escaped = std::mem::replace(&mut escaped, false);
+        match (ch, is_escaped) {
+            (_, false) if Some(ch) == escape_ch => escaped = true,
+            ('%', false) => {
+                if !is_any {
+                    pattern.push_str(".*?");
+                }
+                wildcard = true;
+            }
+            ('_', false) => pattern.push('.'),
+            _ => {
+                if regex_syntax::is_meta_character(ch) {
+                    pattern.push('\\');
+                }
+                pattern.push(ch);
+            }
+        }
+    }
+    pattern.push('$');
+    pattern
 }
 
 fn bindings_name_to_string(name: &BindingsName<'_>) -> String {
