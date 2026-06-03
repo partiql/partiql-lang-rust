@@ -1103,12 +1103,8 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
                     None
                 }
             }
-            partiql_logical::Lit::Struct(_) => {
-                lit_to_value(lit).ok().map(|val| vec![val])
-            }
-            _ => {
-                lit_to_value(lit).ok().map(|val| vec![val])
-            }
+            partiql_logical::Lit::Struct(_) => lit_to_value(lit).ok().map(|val| vec![val]),
+            _ => lit_to_value(lit).ok().map(|val| vec![val]),
         },
         ValueExpr::ListExpr(list) => {
             let values: Vec<ValueOwned> = list
