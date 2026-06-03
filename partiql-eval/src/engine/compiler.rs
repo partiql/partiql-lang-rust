@@ -1104,20 +1104,10 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
                 }
             }
             partiql_logical::Lit::Struct(_) => {
-                // A single struct in FROM produces one row
-                if let Ok(val) = lit_to_value(lit) {
-                    Some(vec![val])
-                } else {
-                    None
-                }
+                lit_to_value(lit).ok().map(|val| vec![val])
             }
             _ => {
-                // Single scalar literal — produce one row
-                if let Ok(val) = lit_to_value(lit) {
-                    Some(vec![val])
-                } else {
-                    None
-                }
+                lit_to_value(lit).ok().map(|val| vec![val])
             }
         },
         ValueExpr::ListExpr(list) => {
@@ -1146,11 +1136,7 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
         }
         ValueExpr::TupleExpr(_) => {
             // A tuple expression in FROM — treat as a single row
-            if let Some(val) = try_expr_to_single_value(expr) {
-                Some(vec![val])
-            } else {
-                None
-            }
+            try_expr_to_single_value(expr).map(|val| vec![val])
         }
         _ => None,
     }
