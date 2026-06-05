@@ -87,12 +87,23 @@ fn main() {
         std::process::exit(1);
     }
 
+    if let Err(e) = execute_query(&query_arg, &data_source, data_path.as_ref()) {
+        eprintln!("{}", e);
+        std::process::exit(1);
+    }
+}
+
+fn execute_query(
+    query_str: &str,
+    data_source: &str,
+    data_path: Option<&String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Replace !input with data (no parentheses for hybrid)
-    let query = query_arg.replace("~input~", "data");
+    let query = query_str.replace("~input~", "data");
 
     println!("Query:       {}", query);
     println!("Data Source: {}", data_source);
-    if let Some(ref path) = data_path {
+    if let Some(path) = data_path {
         println!("Data Path:   {}", path);
     }
 
@@ -107,8 +118,8 @@ fn main() {
             common::format_with_commas(total)
         );
         total
-    } else if let Some(ref path) = data_path {
-        let total = count_rows_from_file(&data_source, path);
+    } else if let Some(path) = data_path {
+        let total = count_rows_from_file(data_source, path);
         println!(
             "Reader Config: total_rows={} (from file)",
             common::format_with_commas(total)
@@ -122,32 +133,32 @@ fn main() {
 
     println!();
 
-    let catalog = create_catalog(data_source.clone(), data_path.clone());
+    let catalog = create_catalog(data_source.to_string(), data_path.cloned());
 
     // Default column names for in-memory reader
     let column_names = vec!["a".to_string(), "b".to_string()];
 
     // Phase 1: Parse
     let parse_start = Instant::now();
-    let parsed = match parse(&query) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Parse error: {:?}", e);
-            std::process::exit(1);
-        }
-    };
+    let parsed = parse(&query).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
+
+    // === PIPELINE TRACE: AST ===
+    println!("\n{}", "=".repeat(60));
+    println!("PHASE 1: PARSED AST");
+    println!("{}", "=".repeat(60));
+    println!("{:#?}", parsed);
 
     // Phase 2: Lower (AST → Logical Plan)
     let lower_start = Instant::now();
-    let logical = match lower(&*catalog, &parsed) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("Lower error: {:?}", e);
-            std::process::exit(1);
-        }
-    };
+    let logical = lower(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
+
+    // === PIPELINE TRACE: LOGICAL PLAN ===
+    println!("\n{}", "=".repeat(60));
+    println!("PHASE 2: LOGICAL PLAN");
+    println!("{}", "=".repeat(60));
+    println!("{:#?}", logical);
 
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
@@ -162,7 +173,7 @@ fn main() {
         Simple(common::SimpleExecutionCatalog),
     }
 
-    let (comp_catalog, mut exec_catalog_inner) = match data_source.as_str() {
+    let (comp_catalog, mut exec_catalog_inner) = match data_source {
         "rand" => {
             // Random catalog for custom reader demonstration
             let (comp, exec) =
@@ -171,17 +182,18 @@ fn main() {
         }
         "mem" | "ion" | "ionb" => {
             // Simple catalog for mem/ion data sources - use CompiledSourceFactory
-            let factory = match data_source.as_str() {
+            let factory = match data_source {
                 "mem" => CompiledSourceFactory::mem(total_rows, column_names.clone()),
-                "ion" | "ionb" => CompiledSourceFactory::ion(data_path.clone().unwrap_or_default()),
+                "ion" | "ionb" => {
+                    CompiledSourceFactory::ion(data_path.cloned().unwrap_or_default())
+                }
                 _ => unreachable!(),
             };
             let (comp, exec) = simple_catalog(vec![("data".to_string(), factory)]);
             (comp, ExecCatalog::Simple(exec))
         }
         _ => {
-            eprintln!("Unsupported data source: {}", data_source);
-            std::process::exit(1);
+            return Err(format!("Unsupported data source: {}", data_source).into());
         }
     };
 
@@ -189,13 +201,9 @@ fn main() {
     let catalog_id = context.add_catalog("default", comp_catalog);
 
     let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
-    let compiled = match compiler.compile(&logical) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Compile error: {:?}", e);
-            std::process::exit(1);
-        }
-    };
+    let compiled = compiler
+        .compile(&logical)
+        .map_err(|e| format!("Compile error: {:?}", e))?;
     let compile_time = compile_start.elapsed();
 
     // Dump compiled plan for debugging
@@ -220,13 +228,8 @@ fn main() {
         ExecCatalog::Simple(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
     }
 
-    let mut vm = match partiql_eval::PartiQLVM::new(compiled, &exec_context) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Execution setup error: {:?}", e);
-            std::process::exit(1);
-        }
-    };
+    let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+        .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
     let shape = vm.shape().clone();
     let mut row_count = 0usize;
@@ -260,8 +263,7 @@ fn main() {
                         print!("{:?}", value);
                     }
                     Err(e) => {
-                        eprintln!("Execution error: {:?}", e);
-                        std::process::exit(1);
+                        return Err(format!("Execution error: {:?}", e).into());
                     }
                 }
             }
@@ -271,8 +273,7 @@ fn main() {
             }
         }
         Err(e) => {
-            eprintln!("Execution setup error: {:?}", e);
-            std::process::exit(1);
+            return Err(format!("Execution setup error: {:?}", e).into());
         }
     }
     let exec_time = exec_start.elapsed();
@@ -297,6 +298,8 @@ fn main() {
         exec_time.as_secs_f64() * 1000.0
     );
     println!("Rows returned:     {}", row_count);
+
+    Ok(())
 }
 
 fn row_to_value(
