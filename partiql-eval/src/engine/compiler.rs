@@ -7,6 +7,7 @@ use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetada
 use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource};
 use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use crate::engine::SlotResolver;
+use crate::plan::EvaluationMode;
 use partiql_logical::{
     BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode, ProjectValue, Scan,
     ValueExpr, VarRefType,
@@ -173,15 +174,17 @@ impl SlotResolver for GlobalSlotResolver {
 
 pub struct PlanCompiler<'a> {
     compilation_context: &'a CompilationContext,
+    mode: EvaluationMode,
     next_scan_id: u64,
     inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
     expr_scans: HashMap<ScanId, ValueExpr>,
 }
 
 impl<'a> PlanCompiler<'a> {
-    pub fn new(compilation_context: &'a CompilationContext) -> Self {
+    pub fn new(compilation_context: &'a CompilationContext, mode: EvaluationMode) -> Self {
         PlanCompiler {
             compilation_context,
+            mode,
             next_scan_id: 0,
             inline_scans: HashMap::new(),
             expr_scans: HashMap::new(),
@@ -396,6 +399,9 @@ impl<'a> PlanCompiler<'a> {
             let expr_program =
                 expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
             self.inline_program(&expr_program, builder);
+            if self.mode == EvaluationMode::Strict {
+                builder.insts.push(Inst::AssertCollection { src: 0 });
+            }
             builder
                 .insts
                 .push(Inst::MaterializeCursor { src: 0, cursor_id });
@@ -603,6 +609,20 @@ impl<'a> PlanCompiler<'a> {
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
         let program = expr_compiler.compile_to_program(&copy_expr, output_slot, output_slot + 1)?;
         self.inline_program(&program, builder);
+
+        match self.mode {
+            EvaluationMode::Permissive => {
+                let const_idx = builder.push_const_pub(ValueOwned::String("_1".to_string()));
+                builder.insts.push(Inst::CoerceToTuple {
+                    dst: output_slot,
+                    src: output_slot,
+                    const_idx,
+                });
+            }
+            EvaluationMode::Strict => {
+                builder.insts.push(Inst::AssertTuple { src: output_slot });
+            }
+        }
         Ok(())
     }
 
@@ -1297,6 +1317,15 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
             dst: *dst,
             func_idx: *func_idx + key_offset,
             args: args.clone(),
+        },
+        Inst::CoerceToTuple {
+            dst,
+            src,
+            const_idx,
+        } => Inst::CoerceToTuple {
+            dst: *dst,
+            src: *src,
+            const_idx: *const_idx + const_offset,
         },
         // All other instructions don't reference const/key pools
         other => other.clone(),

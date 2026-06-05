@@ -4,6 +4,7 @@ use common::{
     count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog,
     CompiledSourceFactory,
 };
+use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
@@ -187,7 +188,7 @@ fn main() {
     // Add catalog and CAPTURE the returned catalog_id - this is the ONLY place catalog_id is assigned
     let catalog_id = context.add_catalog("default", comp_catalog);
 
-    let mut compiler = PlanCompiler::new(&context);
+    let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
     let compiled = match compiler.compile(&logical) {
         Ok(p) => p,
         Err(e) => {

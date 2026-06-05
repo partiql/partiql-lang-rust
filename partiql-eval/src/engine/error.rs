@@ -20,6 +20,8 @@ pub enum EngineError {
     ReaderError(String),
     #[error("slot index out of bounds: {0}")]
     SlotOutOfBounds(u16),
+    #[error("strict mode violation: {0}")]
+    StrictModeViolation(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

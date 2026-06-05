@@ -410,12 +410,9 @@ fn engine_error_to_eval_err(e: EngineError) -> EvalErr {
 // Main Evaluation Entry Point
 // =============================================================================
 
-// TODO: PlanCompiler should eventually accept an EvaluationMode parameter.
-// For now the VM runs in its default mode regardless of the mode passed here.
-// Mode-dependent behavior differences will appear in the conformance gap report.
 pub(crate) fn eval_via_vm<'a>(
     statement: &'a str,
-    _mode: EvaluationMode,
+    mode: EvaluationMode,
     env: &Option<TestValue>,
 ) -> Result<Value, TestError<'a>> {
     let mut catalog = PartiqlCatalog::default();
@@ -455,7 +452,8 @@ pub(crate) fn eval_via_vm<'a>(
 
     let mut context = CompilationContext::new();
     let catalog_id = context.add_catalog("default", comp_catalog);
-    let mut compiler = PlanCompiler::new(&context);
+    let eval_mode: partiql_eval::plan::EvaluationMode = mode.into();
+    let mut compiler = PlanCompiler::new(&context, eval_mode);
     let compiled = compiler
         .compile(&logical)
         .map_err(|e| TestError::Plan(engine_error_to_plan_err(e)))?;

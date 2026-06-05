@@ -571,6 +571,15 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
+                Inst::AssertCollection { src } => {
+                    let value = regs[*src as usize];
+                    if !matches!(value, ValueRef::Bag(_) | ValueRef::List(_)) {
+                        return Some(Err(EngineError::StrictModeViolation(
+                            "FROM clause requires collection value".to_string(),
+                        )));
+                    }
+                }
+
                 Inst::MaterializeCursor { src, cursor_id } => {
                     let collection = regs[*src as usize];
                     let values = match collection {
