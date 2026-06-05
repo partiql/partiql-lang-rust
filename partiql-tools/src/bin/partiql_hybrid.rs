@@ -184,7 +184,9 @@ fn execute_query(
             // Simple catalog for mem/ion data sources - use CompiledSourceFactory
             let factory = match data_source {
                 "mem" => CompiledSourceFactory::mem(total_rows, column_names.clone()),
-                "ion" | "ionb" => CompiledSourceFactory::ion(data_path.cloned().unwrap_or_default()),
+                "ion" | "ionb" => {
+                    CompiledSourceFactory::ion(data_path.cloned().unwrap_or_default())
+                }
                 _ => unreachable!(),
             };
             let (comp, exec) = simple_catalog(vec![("data".to_string(), factory)]);
