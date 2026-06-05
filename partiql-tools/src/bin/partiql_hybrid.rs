@@ -10,7 +10,7 @@ use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanC
 use partiql_value::{Tuple, Value};
 use std::time::Instant;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 const BATCH_SIZE: usize = 1;
 const NUM_BATCHES: usize = 10_000;
@@ -21,16 +21,25 @@ const NUM_BATCHES: usize = 10_000;
 #[derive(Parser)]
 #[command(name = "partiql-hybrid")]
 struct Cli {
-    /// Query to execute. If omitted, enter REPL mode.
-    query: Option<String>,
-
     /// Data source: mem | rand | ion | ionb.
-    #[arg(long, default_value = "mem")]
+    #[arg(long, default_value = "mem", global = true)]
     data_source: String,
 
     /// Path to the data file (required for file-based data sources).
-    #[arg(long)]
+    #[arg(long, global = true)]
     data_path: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Execute a single query immediately
+    Exec {
+        /// The mandatory PartiQL query string to run
+        query: String,
+    },
 }
 
 fn main() {
@@ -45,8 +54,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    match &cli.query {
-        Some(query) => {
+    match &cli.command {
+        Some(Commands::Exec { query }) => {
             if let Err(e) = execute_query(query, &cli.data_source, cli.data_path.as_ref()) {
                 eprintln!("{}", e);
                 std::process::exit(1);
