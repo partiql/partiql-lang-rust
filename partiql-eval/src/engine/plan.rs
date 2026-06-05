@@ -8,8 +8,8 @@ use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::{Inst, Program};
 use crate::engine::source::RegisterWriter;
-use crate::engine::source::{DataSourceImpl, ScanLayout};
-use crate::engine::value::{RegisterReader, Shape, ValueRef};
+use crate::engine::source::{DataSourceImpl, InlineDataSource, ScanLayout};
+use crate::engine::value::{value_ref_to_owned, RegisterReader, Shape, ValueOwned, ValueRef};
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -79,6 +79,10 @@ pub struct CompiledPlan {
     pub(crate) slot_count: usize,
     /// Scan metadata keyed by ScanId for catalog resolution.
     pub(crate) scan_metadata: HashMap<ScanId, ScanMetadata>,
+    /// Inline data for scans backed by literal expressions (not catalog tables).
+    pub(crate) inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
+    /// Scan IDs that are expression-based (materialized at runtime via MaterializeCursor).
+    pub(crate) expr_scan_ids: Vec<ScanId>,
 }
 
 // Safety: Program is Send+Sync (verified by its own unsafe impl).
@@ -94,6 +98,8 @@ impl Clone for CompiledPlan {
             shape: self.shape.clone(),
             slot_count: self.slot_count,
             scan_metadata: self.scan_metadata.clone(),
+            inline_scans: self.inline_scans.clone(),
+            expr_scan_ids: self.expr_scan_ids.clone(),
         }
     }
 }
@@ -195,6 +201,8 @@ impl Default for CompiledPlan {
             shape: Shape::default(),
             slot_count: 0,
             scan_metadata: HashMap::new(),
+            inline_scans: HashMap::new(),
+            expr_scan_ids: Vec::new(),
         }
     }
 }
@@ -263,9 +271,9 @@ pub struct PartiQLVM {
     compiled: Arc<CompiledPlan>,
     /// Data source cursors. Index = cursor_id.
     cursors: Vec<Option<DataSourceImpl>>,
-    /// Per-row memory arena for computed values.
-    /// Reset at each `NextRow` instruction.
-    arena: Arena,
+    /// Memory banks. Bank 0 = query-level (persistent across rows).
+    /// Bank 1+ = per-cursor row-level banks, reset at each NextRow.
+    banks: Vec<Arena>,
     /// Unified register array: [0..slot_count] are output slots, rest are temporaries.
     registers: Vec<ValueRef<'static>>,
     /// Instruction pointer — saved across `EmitRow` yield points.
@@ -301,7 +309,7 @@ impl PartiQLVM {
         let mut vm = PartiQLVM {
             compiled,
             cursors,
-            arena: Arena::new(16384),
+            banks: vec![Arena::new(4096), Arena::new(16384)],
             registers,
             ip: 0,
             halted: false,
@@ -318,6 +326,19 @@ impl PartiQLVM {
     /// Bind all cursors to data sources from the execution context.
     fn bind_cursors(&mut self, exec_context: &ExecutionContext) -> Result<()> {
         for (cursor_id, cursor_info) in self.compiled.cursors.iter().enumerate() {
+            // Check for inline scans first (literal collections in FROM)
+            if let Some(values) = self.compiled.inline_scans.get(&cursor_info.scan_id) {
+                self.cursors[cursor_id] = Some(DataSourceImpl::Inline(InlineDataSource::new(
+                    values.clone(),
+                )));
+                continue;
+            }
+
+            // Skip expression scans — they are bound at runtime by MaterializeCursor
+            if self.compiled.expr_scan_ids.contains(&cursor_info.scan_id) {
+                continue;
+            }
+
             let scan_meta = self.compiled.get_scan(cursor_info.scan_id).ok_or_else(|| {
                 EngineError::IllegalState(format!("Unknown scan_id: {:?}", cursor_info.scan_id))
             })?;
@@ -362,7 +383,9 @@ impl PartiQLVM {
         // Reset VM state for a new execution
         self.ip = 0;
         self.halted = false;
-        self.arena.reset();
+        for bank in &self.banks {
+            bank.reset();
+        }
         // Reset registers
         for reg in self.registers.iter_mut() {
             *reg = ValueRef::Missing;
@@ -384,7 +407,9 @@ impl PartiQLVM {
         self.bind_cursors(exec_context)?;
         self.ip = 0;
         self.halted = false;
-        self.arena.reset();
+        for bank in &self.banks {
+            bank.reset();
+        }
         Ok(())
     }
 }
@@ -465,8 +490,8 @@ impl<'vm> QueryIterator<'vm> {
                     cursor_id,
                     eof_target,
                 } => {
-                    // Reset arena for the new row
-                    self.vm.arena.reset();
+                    // Reset the row-level bank for the new row
+                    self.vm.banks[1].reset();
 
                     let cursor = match self.vm.cursors.get_mut(*cursor_id as usize) {
                         Some(Some(c)) => c,
@@ -478,9 +503,9 @@ impl<'vm> QueryIterator<'vm> {
                         }
                     };
 
-                    // Write next row into registers via RegisterWriter
+                    // Write next row into registers via RegisterWriter (row bank)
                     let has_row = {
-                        let mut writer = RegisterWriter::new(regs, &self.vm.arena);
+                        let mut writer = RegisterWriter::new(regs, &self.vm.banks[1]);
                         match cursor.next_row(&mut writer) {
                             Ok(has) => has,
                             Err(e) => return Some(Err(e)),
@@ -546,10 +571,22 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
+                Inst::MaterializeCursor { src, cursor_id } => {
+                    let collection = regs[*src as usize];
+                    let values = match collection {
+                        ValueRef::Bag(items) | ValueRef::List(items) => {
+                            items.iter().map(|item| value_ref_to_owned(*item)).collect()
+                        }
+                        other => vec![value_ref_to_owned(other)],
+                    };
+                    self.vm.cursors[*cursor_id as usize] =
+                        Some(DataSourceImpl::Inline(InlineDataSource::new(values)));
+                }
+
                 // All scalar instructions delegate to eval_inst
                 other => {
                     if let Err(e) =
-                        program.eval_inst(other, &self.vm.arena, regs, Some(&self.vm.builtins))
+                        program.eval_inst(other, &self.vm.banks[1], regs, Some(&self.vm.builtins))
                     {
                         return Some(Err(e));
                     }
@@ -587,7 +624,9 @@ impl Drop for QueryIterator<'_> {
                 let _ = ds.close();
             }
         }
-        self.vm.arena.reset();
+        for bank in &self.vm.banks {
+            bank.reset();
+        }
         self.vm.halted = true;
     }
 }

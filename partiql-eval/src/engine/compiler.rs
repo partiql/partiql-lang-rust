@@ -1,11 +1,11 @@
 use crate::engine::arena::SlotId;
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::{Inst, LogicalExprCompiler, ProgramBuilder};
+use crate::engine::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
 use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
 use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource};
-use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape};
+use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use crate::engine::SlotResolver;
 use partiql_logical::{
     BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode, ProjectValue, Scan,
@@ -174,6 +174,8 @@ impl SlotResolver for GlobalSlotResolver {
 pub struct PlanCompiler<'a> {
     compilation_context: &'a CompilationContext,
     next_scan_id: u64,
+    inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
+    expr_scans: HashMap<ScanId, ValueExpr>,
 }
 
 impl<'a> PlanCompiler<'a> {
@@ -181,6 +183,8 @@ impl<'a> PlanCompiler<'a> {
         PlanCompiler {
             compilation_context,
             next_scan_id: 0,
+            inline_scans: HashMap::new(),
+            expr_scans: HashMap::new(),
         }
     }
 
@@ -217,6 +221,8 @@ impl<'a> PlanCompiler<'a> {
             shape,
             slot_count: result.slot_count,
             scan_metadata: result.scan_metadata,
+            inline_scans: std::mem::take(&mut self.inline_scans),
+            expr_scan_ids: self.expr_scans.keys().copied().collect(),
         })
     }
 
@@ -383,6 +389,17 @@ impl<'a> PlanCompiler<'a> {
         } else {
             None
         };
+
+        // For expression-based scans, compile the expression and emit MaterializeCursor
+        if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            let expr_program =
+                expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
+            self.inline_program(&expr_program, builder);
+            builder
+                .insts
+                .push(Inst::MaterializeCursor { src: 0, cursor_id });
+        }
 
         // Emit: OpenCursor
         builder.emit_open_cursor(cursor_id);
@@ -725,7 +742,17 @@ impl<'a> PlanCompiler<'a> {
 
     /// Compile a Scan node — gather metadata only.
     fn compile_scan(&mut self, scan: &Scan, ctx: &CompileContext) -> Result<SubtreeResult> {
-        let (catalog_id, reader_factory) = self.resolve_reader_factory(scan)?;
+        // Try inline scan for literal expressions first (compile-time constants)
+        if let Some(values) = try_expr_to_inline_values(&scan.expr) {
+            return self.compile_inline_scan(scan, values);
+        }
+        // Try catalog resolution (DBRef / VarRef)
+        let catalog_result = self.resolve_reader_factory(scan);
+        if catalog_result.is_err() {
+            // Expression-based scan: will be compiled and materialized at runtime
+            return self.compile_expr_scan(scan);
+        }
+        let (catalog_id, reader_factory) = catalog_result.unwrap();
         let scan_id = self.alloc_scan_id();
         let table_name = extract_table_name(&scan.expr);
 
@@ -901,6 +928,93 @@ impl<'a> PlanCompiler<'a> {
         Ok(())
     }
 
+    /// Compile an inline scan (literal collection in FROM clause).
+    fn compile_inline_scan(
+        &mut self,
+        scan: &Scan,
+        values: Vec<ValueOwned>,
+    ) -> Result<SubtreeResult> {
+        let scan_id = self.alloc_scan_id();
+        self.inline_scans.insert(scan_id, values);
+
+        let layout = ScanLayout {
+            projections: vec![ScanProjection {
+                source: ScanSource::whole_value(),
+                target_slot: 0,
+            }],
+        };
+
+        let resolver = PipelineSlotResolver {
+            base_row_slot: Some(0),
+            scan_alias: scan.as_key.clone(),
+            table_name: None,
+            column_slots: FxHashMap::default(),
+        };
+
+        // Store scan metadata so find_scan_id_for can locate this scan.
+        // Use a dummy ObjectId since inline scans bypass catalog lookup.
+        let dummy_object_id = ObjectId::from((
+            partiql_common::catalog::CatalogId::from(u64::MAX),
+            partiql_common::catalog::EntryId::from(u64::MAX),
+        ));
+        let mut scan_metadata = HashMap::new();
+        scan_metadata.insert(
+            scan_id,
+            ScanMetadata {
+                layout,
+                object_id: dummy_object_id,
+            },
+        );
+
+        Ok(SubtreeResult {
+            resolver: ResolverKind::Pipeline(resolver),
+            cursor_id: None,
+            scan_metadata,
+            slot_count: 1,
+            shape: None,
+        })
+    }
+
+    /// Compile an expression-based scan (runtime-evaluated collection in FROM).
+    /// The expression will be compiled and materialized at emit time.
+    fn compile_expr_scan(&mut self, scan: &Scan) -> Result<SubtreeResult> {
+        let scan_id = self.alloc_scan_id();
+        self.expr_scans.insert(scan_id, scan.expr.clone());
+
+        let resolver = PipelineSlotResolver {
+            base_row_slot: Some(0),
+            scan_alias: scan.as_key.clone(),
+            table_name: None,
+            column_slots: FxHashMap::default(),
+        };
+
+        let dummy_object_id = ObjectId::from((
+            partiql_common::catalog::CatalogId::from(u64::MAX),
+            partiql_common::catalog::EntryId::from(u64::MAX),
+        ));
+        let mut scan_metadata = HashMap::new();
+        scan_metadata.insert(
+            scan_id,
+            ScanMetadata {
+                layout: ScanLayout {
+                    projections: vec![ScanProjection {
+                        source: ScanSource::whole_value(),
+                        target_slot: 0,
+                    }],
+                },
+                object_id: dummy_object_id,
+            },
+        );
+
+        Ok(SubtreeResult {
+            resolver: ResolverKind::Pipeline(resolver),
+            cursor_id: None,
+            scan_metadata,
+            slot_count: 1,
+            shape: None,
+        })
+    }
+
     // -----------------------------------------------------------------------
     // Catalog / table resolution
     // -----------------------------------------------------------------------
@@ -969,6 +1083,106 @@ fn extract_table_name(expr: &ValueExpr) -> Option<String> {
             BindingsName::CaseSensitive(s) => s.as_ref().to_string(),
             BindingsName::CaseInsensitive(s) => s.as_ref().to_string(),
         }),
+        _ => None,
+    }
+}
+
+/// Try to convert a scan expression to inline values.
+/// Returns Some(values) for literal lists/bags/structs, None otherwise.
+fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
+    match expr {
+        ValueExpr::Lit(lit) => match lit.as_ref() {
+            partiql_logical::Lit::List(elements) | partiql_logical::Lit::Bag(elements) => {
+                let values: Vec<ValueOwned> = elements
+                    .iter()
+                    .filter_map(|e| lit_to_value(e).ok())
+                    .collect();
+                if values.len() == elements.len() {
+                    Some(values)
+                } else {
+                    None
+                }
+            }
+            partiql_logical::Lit::Struct(_) => lit_to_value(lit).ok().map(|val| vec![val]),
+            _ => lit_to_value(lit).ok().map(|val| vec![val]),
+        },
+        ValueExpr::ListExpr(list) => {
+            let values: Vec<ValueOwned> = list
+                .elements
+                .iter()
+                .filter_map(try_expr_to_single_value)
+                .collect();
+            if values.len() == list.elements.len() {
+                Some(values)
+            } else {
+                None
+            }
+        }
+        ValueExpr::BagExpr(bag) => {
+            let values: Vec<ValueOwned> = bag
+                .elements
+                .iter()
+                .filter_map(try_expr_to_single_value)
+                .collect();
+            if values.len() == bag.elements.len() {
+                Some(values)
+            } else {
+                None
+            }
+        }
+        ValueExpr::TupleExpr(_) => {
+            // A tuple expression in FROM — treat as a single row
+            try_expr_to_single_value(expr).map(|val| vec![val])
+        }
+        _ => None,
+    }
+}
+
+/// Try to convert a single ValueExpr to a ValueOwned (for literal expressions).
+fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
+    match expr {
+        ValueExpr::Lit(lit) => lit_to_value(lit).ok(),
+        ValueExpr::TupleExpr(tuple) => {
+            let mut fields = Vec::with_capacity(tuple.attrs.len());
+            for (attr, val) in tuple.attrs.iter().zip(tuple.values.iter()) {
+                let name = match attr {
+                    ValueExpr::Lit(lit) => match lit.as_ref() {
+                        partiql_logical::Lit::String(s) => s.clone(),
+                        _ => return None,
+                    },
+                    _ => return None,
+                };
+                let value = try_expr_to_single_value(val)?;
+                fields.push(crate::engine::value::TupleFieldOwned { name, value });
+            }
+            Some(ValueOwned::Tuple(crate::engine::value::TupleOwned {
+                fields,
+            }))
+        }
+        ValueExpr::ListExpr(list) => {
+            let items: Vec<ValueOwned> = list
+                .elements
+                .iter()
+                .filter_map(try_expr_to_single_value)
+                .collect();
+            if items.len() == list.elements.len() {
+                Some(ValueOwned::List(items))
+            } else {
+                None
+            }
+        }
+        ValueExpr::BagExpr(bag) => {
+            let items: Vec<ValueOwned> = bag
+                .elements
+                .iter()
+                .filter_map(try_expr_to_single_value)
+                .collect();
+            if items.len() == bag.elements.len() {
+                Some(ValueOwned::Bag(items))
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }

@@ -14,4 +14,6 @@ pub(crate) use value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};
 pub use value_view::{ValueType, ValueView};
 
 // Internal exports for use within the engine
-pub(crate) use internal::{value_get_field_ref, TupleField, TupleRef, ValueRef};
+pub(crate) use internal::{
+    value_get_field_ref, value_ref_to_owned, TupleField, TupleRef, ValueRef,
+};

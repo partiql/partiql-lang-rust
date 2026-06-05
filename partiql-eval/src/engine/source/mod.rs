@@ -16,6 +16,7 @@ mod value_writer;
 pub use value_writer::{RegisterWriter, ValueWriter};
 
 use crate::engine::error::Result;
+use crate::engine::value::{ValueOwned, ValueRef};
 use partiql_common::catalog::EntryId;
 use std::sync::Arc;
 
@@ -24,25 +25,62 @@ use std::sync::Arc;
 /// Used by the VM to dispatch to catalog-provided data sources.
 pub(crate) enum DataSourceImpl {
     Catalog(Box<dyn DataSource>),
+    Inline(InlineDataSource),
 }
 
 impl DataSourceImpl {
     pub fn open(&mut self) -> Result<()> {
         match self {
             DataSourceImpl::Catalog(ds) => ds.open(),
+            DataSourceImpl::Inline(ds) => ds.open(),
         }
     }
 
     pub fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> Result<bool> {
         match self {
             DataSourceImpl::Catalog(ds) => ds.next_row(writer),
+            DataSourceImpl::Inline(ds) => ds.next_row(writer),
         }
     }
 
     pub fn close(&mut self) -> Result<()> {
         match self {
             DataSourceImpl::Catalog(ds) => ds.close(),
+            DataSourceImpl::Inline(ds) => ds.close(),
         }
+    }
+}
+
+/// Data source backed by an inline collection of owned values.
+pub(crate) struct InlineDataSource {
+    pub(crate) values: Vec<ValueOwned>,
+    position: usize,
+}
+
+impl InlineDataSource {
+    pub fn new(values: Vec<ValueOwned>) -> Self {
+        InlineDataSource {
+            values,
+            position: 0,
+        }
+    }
+
+    fn open(&mut self) -> Result<()> {
+        self.position = 0;
+        Ok(())
+    }
+
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> Result<bool> {
+        if self.position >= self.values.len() {
+            return Ok(false);
+        }
+        let value = &self.values[self.position];
+        self.position += 1;
+        Self::write_value_to_register(value, writer)
+    }
+
+    fn close(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -105,5 +143,25 @@ impl DataSourceHandle {
     /// the data source can provide the field, `None` otherwise.
     pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
         self.metadata.resolve(field_name)
+    }
+}
+
+/// Data source backed by an inline collection of owned values.
+impl InlineDataSource {
+    /// Write a value to the register using unsafe lifetime extension.
+    ///
+    /// Safety: InlineDataSource lives in PartiQLVM alongside the arena and registers.
+    /// The values persist for the VM's lifetime, which outlives any single row iteration.
+    fn write_value_to_register<'w, 'a>(
+        value: &ValueOwned,
+        writer: &mut RegisterWriter<'w, 'a>,
+    ) -> Result<bool> {
+        // Safety: value lives in InlineDataSource which lives in PartiQLVM.
+        // The arena and registers also live in PartiQLVM. The value outlives
+        // the per-row arena reset cycle.
+        let value_static: &'a ValueOwned = unsafe { &*(value as *const ValueOwned) };
+        let value_ref = ValueRef::from_owned(value_static, writer.arena);
+        writer.regs[0] = value_ref;
+        Ok(true)
     }
 }
