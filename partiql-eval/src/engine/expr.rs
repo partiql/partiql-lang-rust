@@ -368,6 +368,25 @@ pub enum Inst {
         element_regs: Vec<u16>,
     },
 
+    /// If src is already a Tuple, copy to dst. Otherwise wrap as {'key': value}.
+    /// const_idx indexes into the Program's const pool for the field name string.
+    CoerceToTuple {
+        dst: u16,
+        src: u16,
+        const_idx: u16,
+    },
+
+    /// Strict mode: assert src is a Tuple. If not, runtime error.
+    AssertTuple {
+        src: u16,
+    },
+
+    /// Strict mode: assert src is a List or Bag. If not, runtime error.
+    /// Handled in the VM dispatch loop (relational instruction).
+    AssertCollection {
+        src: u16,
+    },
+
     // === Relational Instructions (SFW bytecode) ===
     /// Open a data source cursor. cursor_id indexes into the VM's cursor array.
     /// The cursor's ScanLayout is determined at compile time from CursorMetadata.
@@ -1568,6 +1587,39 @@ impl Program {
                 regs[*dst as usize] = ValueRef::Bag(bag_slice);
             }
 
+            Inst::CoerceToTuple {
+                dst,
+                src,
+                const_idx,
+            } => {
+                let value = regs[*src as usize];
+                match value {
+                    ValueRef::Tuple(_) => {
+                        regs[*dst as usize] = value;
+                    }
+                    _ => {
+                        let name_ref = self
+                            .const_refs
+                            .get(*const_idx as usize)
+                            .copied()
+                            .ok_or_else(|| {
+                                EngineError::IllegalState("invalid const index".to_string())
+                            })?;
+                        let fields = std::iter::once((name_ref, value));
+                        let tuple_ref = arena.alloc_tuple(fields);
+                        regs[*dst as usize] = ValueRef::Tuple(tuple_ref);
+                    }
+                }
+            }
+            Inst::AssertTuple { src } => {
+                let value = regs[*src as usize];
+                if !matches!(value, ValueRef::Tuple(_)) {
+                    return Err(EngineError::StrictModeViolation(
+                        "SELECT * requires tuple value".to_string(),
+                    ));
+                }
+            }
+
             // Relational instructions are handled by the VM dispatch loop,
             // not by eval_inst. If we reach them here, it's a bug.
             Inst::OpenCursor { .. }
@@ -1578,7 +1630,8 @@ impl Program {
             | Inst::EmitRow
             | Inst::Halt
             | Inst::DecrOrJump { .. }
-            | Inst::MaterializeCursor { .. } => {
+            | Inst::MaterializeCursor { .. }
+            | Inst::AssertCollection { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

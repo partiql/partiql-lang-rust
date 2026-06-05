@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, TypeEnvEntry};
 use partiql_common::catalog::EntryId;
+use partiql_eval::plan::EvaluationMode;
 use partiql_eval::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
     RegisterWriter, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
@@ -397,7 +398,7 @@ fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
     // Compile
     let mut context = CompilationContext::new();
     let catalog_id = context.add_catalog("default", comp_catalog);
-    let mut compiler = PlanCompiler::new(&context);
+    let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
     let compiled = compiler.compile(&logical).expect("compile failed");
 
     // Prepare execution catalog
