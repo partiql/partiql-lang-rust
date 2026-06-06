@@ -10,86 +10,60 @@ use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanC
 use partiql_value::{Tuple, Value};
 use std::time::Instant;
 
+use clap::{Parser, Subcommand};
+
 const BATCH_SIZE: usize = 1;
 const NUM_BATCHES: usize = 10_000;
 
+/// PartiQL hybrid engine CLI: run a single query or drop into a REPL.
+///
+/// Note: `~input~` in the query is replaced with `data`.
+#[derive(Parser)]
+#[command(name = "partiql-hybrid")]
+struct Cli {
+    /// Data source: mem | rand | ion | ionb.
+    #[arg(long, default_value = "mem", global = true)]
+    data_source: String,
+
+    /// Path to the data file (required for file-based data sources).
+    #[arg(long, global = true)]
+    data_path: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Execute a single query immediately
+    Exec {
+        /// The mandatory PartiQL query string to run
+        query: String,
+    },
+}
+
 fn main() {
-    // Parse command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
+    let cli = Cli::parse();
+
+    // File-based data sources require an explicit --data-path.
+    if cli.data_source != "mem" && cli.data_source != "rand" && cli.data_path.is_none() {
         eprintln!(
-            "Usage: {} <query> --data-source <mem|ion|rand> [--data-path <path>]",
-            args[0]
+            "Error: --data-path is required for file-based data source '{}'",
+            cli.data_source
         );
-        eprintln!("\nExamples:");
-        eprintln!("  {} \"SELECT a, b FROM !input WHERE a % 1000 = 0\" --data-source ion --data-path test_data/data_b1024_n10000.ion", args[0]);
-        eprintln!("  {} \"SELECT * FROM !input\" --data-source mem", args[0]);
-        eprintln!(
-            "  {} \"SELECT * FROM data WHERE a > 0 LIMIT 10\" --data-source rand",
-            args[0]
-        );
-        eprintln!("\nNote: !input will be replaced with 'data' in the query");
         std::process::exit(1);
     }
 
-    let mut query_arg = None;
-    let mut data_source = "mem".to_string();
-    let mut data_path = None;
-
-    // Parse arguments
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--data-source" => {
-                if i + 1 < args.len() {
-                    data_source = args[i + 1].clone();
-                    i += 2;
-                } else {
-                    eprintln!("Error: --data-source requires a value");
-                    std::process::exit(1);
-                }
-            }
-            "--data-path" => {
-                if i + 1 < args.len() {
-                    data_path = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: --data-path requires a value");
-                    std::process::exit(1);
-                }
-            }
-            arg if !arg.starts_with("--") => {
-                if query_arg.is_none() {
-                    query_arg = Some(arg.to_string());
-                } else {
-                    eprintln!("Error: Only one query is allowed");
-                    std::process::exit(1);
-                }
-                i += 1;
-            }
-            _ => {
-                eprintln!("Unknown argument: {}", args[i]);
+    match &cli.command {
+        Some(Commands::Exec { query }) => {
+            if let Err(e) = execute_query(query, &cli.data_source, cli.data_path.as_ref()) {
+                eprintln!("{}", e);
                 std::process::exit(1);
             }
         }
-    }
-
-    let query_arg = query_arg.unwrap_or_else(|| {
-        eprintln!("Error: Query is required");
-        std::process::exit(1);
-    });
-
-    if data_source != "mem" && data_source != "rand" && data_path.is_none() {
-        eprintln!(
-            "Error: --data-path is required for file-based data source '{}'",
-            data_source
-        );
-        std::process::exit(1);
-    }
-
-    if let Err(e) = execute_query(&query_arg, &data_source, data_path.as_ref()) {
-        eprintln!("{}", e);
-        std::process::exit(1);
+        None => {
+            println!("REPL mode triggered!");
+        }
     }
 }
 
