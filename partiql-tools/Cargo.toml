@@ -21,6 +21,11 @@ path = "src/bin/partiql_hybrid.rs"
 bench = false
 
 [[bin]]
+name = "pqlite"
+path = "src/bin/pqlite.rs"
+bench = false
+
+[[bin]]
 name = "partiql-benchmarks"
 path = "src/bin/partiql_benchmarks.rs"
 bench = false
