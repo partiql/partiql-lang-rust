@@ -14,6 +14,7 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
+    ValidationResult, Validator,
 };
 
 const BATCH_SIZE: usize = 1;
@@ -102,6 +103,28 @@ impl Prompt for PqlitePrompt {
     }
 }
 
+/// Validator that decides when a multi-line REPL entry is complete.
+///
+/// An input is considered complete when, after trimming trailing whitespace,
+/// it either:
+///   * ends with a semicolon (`;`) — a finished PartiQL statement, or
+///   * is a meta-command starting with a dot (`.`).
+///
+/// Anything else is treated as `Incomplete`, so pressing Enter inserts a
+/// newline and lets the user keep typing on the following line.
+struct PqliteValidator;
+
+impl Validator for PqliteValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let trimmed = line.trim_end();
+        if trimmed.trim_start().starts_with('.') || trimmed.ends_with(';') {
+            ValidationResult::Complete
+        } else {
+            ValidationResult::Incomplete
+        }
+    }
+}
+
 /// Build a persistent, file-backed history at `~/.pqlite_history`.
 ///
 /// Falls back to in-memory history (never crashing) if the home directory
@@ -186,7 +209,9 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
 fn run_repl(data_source: &str, data_path: Option<&String>) {
-    let mut line_editor = Reedline::create().with_history(build_history());
+    let mut line_editor = Reedline::create()
+        .with_history(build_history())
+        .with_validator(Box::new(PqliteValidator));
     let prompt = PqlitePrompt;
 
     loop {
@@ -205,7 +230,12 @@ fn run_repl(data_source: &str, data_path: Option<&String>) {
                     }
                 }
 
-                if let Err(e) = execute_query(&buffer, data_source, data_path) {
+                // The trailing `;` is the REPL's statement terminator (used by
+                // the validator to detect a complete entry), not part of the
+                // PartiQL grammar — strip it while preserving internal newlines
+                // before handing the full multi-line text to the engine.
+                let query = trimmed.strip_suffix(';').unwrap_or(trimmed);
+                if let Err(e) = execute_query(query, data_source, data_path) {
                     eprintln!("{}", e);
                 }
             }
