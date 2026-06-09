@@ -1,5 +1,7 @@
 use crate::engine::arena::SlotId;
 use crate::engine::error::Result;
+use crate::engine::value::RegisterReader;
+use std::sync::Arc;
 
 /// Indicates how long data in a buffer remains valid after a read operation.
 ///
@@ -237,4 +239,67 @@ pub trait DataSourceMetadata: Send + Sync {
     /// Returns `Some(ScanSource)` if the field can be provided, `None` otherwise.
     /// Used by the compiler to determine how to access each required field.
     fn resolve(&self, field_name: &str) -> Option<ScanSource>;
+}
+
+/// Factory for creating a streaming DataSource from evaluated arguments.
+///
+/// Table functions are registered by name and invoked at runtime when the
+/// VM encounters a `CreateTableFnCursor` instruction. The function receives
+/// the full register bank (as a `RegisterReader`) plus a slice of slot indices
+/// indicating where each argument lives. This allows reading arguments of any
+/// type, including complex values (tuples, lists) via `reader.get_value_view()`.
+///
+/// # Contract
+///
+/// String/bytes data read from the `RegisterReader` is only guaranteed valid
+/// for the duration of `create()`. Implementations must `.to_string()` or copy
+/// any data they need to retain.
+///
+/// # Example
+/// ```ignore
+/// struct ScanIonFn;
+///
+/// impl TableFunction for ScanIonFn {
+///     fn create(
+///         &self,
+///         reader: &RegisterReader<'_>,
+///         arg_slots: &[SlotId],
+///         layout: &ScanLayout,
+///     ) -> Result<Box<dyn DataSource>> {
+///         let path = reader.get_str(arg_slots[0] as usize)
+///             .ok_or(EngineError::ReaderError("scan_ion requires a path".into()))?
+///             .to_string();
+///         Ok(Box::new(IonDataSource::new(path, layout.clone())))
+///     }
+/// }
+/// ```
+pub trait TableFunction: Send + Sync {
+    fn create(
+        &self,
+        reader: &RegisterReader<'_>,
+        arg_slots: &[SlotId],
+        layout: &ScanLayout,
+    ) -> Result<Box<dyn DataSource>>;
+}
+
+/// Compile-time handle returned by `CompilationCatalog::get_table_function()`.
+///
+/// Provides metadata about the function's output schema so the compiler can
+/// build a `ScanLayout` (resolve field names to column indices/types).
+pub struct TableFunctionHandle {
+    pub metadata: Arc<dyn DataSourceMetadata>,
+}
+
+impl TableFunctionHandle {
+    pub fn new(metadata: Arc<dyn DataSourceMetadata>) -> Self {
+        TableFunctionHandle { metadata }
+    }
+
+    pub fn buffer_stability(&self) -> BufferStability {
+        self.metadata.buffer_stability()
+    }
+
+    pub fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.metadata.resolve(field_name)
+    }
 }

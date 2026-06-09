@@ -340,6 +340,16 @@ pub enum Inst {
         src: u16,
         cursor_id: u16,
     },
+    /// Create a table function cursor from evaluated arguments in registers.
+    ///
+    /// Looks up the table function by name (from the keys pool at `func_name_idx`),
+    /// reads arguments from the register bank using the slot mapping stored in
+    /// `TableFnScanMetadata`, calls `create()` to produce a `DataSource`, and
+    /// stores it in the cursor slot. The subsequent `OpenCursor` opens it.
+    CreateTableFnCursor {
+        cursor_id: u16,
+        func_name_idx: u16,
+    },
     GetField {
         dst: u16,
         base: u16,
@@ -1631,6 +1641,7 @@ impl Program {
             | Inst::Halt
             | Inst::DecrOrJump { .. }
             | Inst::MaterializeCursor { .. }
+            | Inst::CreateTableFnCursor { .. }
             | Inst::AssertCollection { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),

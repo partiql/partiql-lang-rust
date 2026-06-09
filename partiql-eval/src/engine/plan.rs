@@ -41,6 +41,17 @@ pub struct ScanMetadata {
     pub object_id: ObjectId,
 }
 
+/// Metadata for a table function scan, known at compile time.
+///
+/// Associates a table function scan with its function name, output layout,
+/// and the register slots where each argument has been evaluated.
+#[derive(Clone, Debug)]
+pub struct TableFnScanMetadata {
+    pub func_name: String,
+    pub layout: ScanLayout,
+    pub arg_slots: Vec<crate::engine::arena::SlotId>,
+}
+
 /// Metadata for a cursor in bytecode mode.
 ///
 /// Each cursor corresponds to a data source that can be opened/closed/iterated.
@@ -83,6 +94,9 @@ pub struct CompiledPlan {
     pub(crate) inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
     /// Scan IDs that are expression-based (materialized at runtime via MaterializeCursor).
     pub(crate) expr_scan_ids: Vec<ScanId>,
+    /// Table function scans keyed by ScanId. These are bound at runtime by
+    /// the `CreateTableFnCursor` instruction.
+    pub(crate) table_fn_scans: HashMap<ScanId, TableFnScanMetadata>,
 }
 
 // Safety: Program is Send+Sync (verified by its own unsafe impl).
@@ -100,6 +114,7 @@ impl Clone for CompiledPlan {
             scan_metadata: self.scan_metadata.clone(),
             inline_scans: self.inline_scans.clone(),
             expr_scan_ids: self.expr_scan_ids.clone(),
+            table_fn_scans: self.table_fn_scans.clone(),
         }
     }
 }
@@ -111,7 +126,30 @@ impl fmt::Display for CompiledPlan {
         writeln!(f, "  registers: {}", self.program.reg_count)?;
         writeln!(f, "  cursors: {}", self.cursors.len())?;
         for (i, cursor) in self.cursors.iter().enumerate() {
-            if let Some(meta) = self.scan_metadata.get(&cursor.scan_id) {
+            if let Some(tf_meta) = self.table_fn_scans.get(&cursor.scan_id) {
+                write!(
+                    f,
+                    "    {:4}: table_fn \"{}\" args={:?} → ",
+                    i, tf_meta.func_name, tf_meta.arg_slots
+                )?;
+                for (j, proj) in tf_meta.layout.projections.iter().enumerate() {
+                    if j > 0 {
+                        write!(f, ", ")?;
+                    }
+                    match &proj.source.source_type {
+                        crate::engine::source::ScanSourceType::WholeValue => {
+                            write!(f, "slot {} ← WholeValue", proj.target_slot)?;
+                        }
+                        crate::engine::source::ScanSourceType::FieldPath(name) => {
+                            write!(f, "slot {} ← Field(\"{}\")", proj.target_slot, name)?;
+                        }
+                        crate::engine::source::ScanSourceType::ColumnIndex(idx) => {
+                            write!(f, "slot {} ← Column({})", proj.target_slot, idx)?;
+                        }
+                    }
+                }
+                writeln!(f)?;
+            } else if let Some(meta) = self.scan_metadata.get(&cursor.scan_id) {
                 write!(f, "    {:4}: ", i)?;
                 for (j, proj) in meta.layout.projections.iter().enumerate() {
                     if j > 0 {
@@ -203,6 +241,7 @@ impl Default for CompiledPlan {
             scan_metadata: HashMap::new(),
             inline_scans: HashMap::new(),
             expr_scan_ids: Vec::new(),
+            table_fn_scans: HashMap::new(),
         }
     }
 }
@@ -284,6 +323,8 @@ pub struct PartiQLVM {
     slot_count: usize,
     /// Built-in function registry.
     builtins: BuiltinFunctions,
+    /// Registered table functions, keyed by name.
+    table_functions: HashMap<String, Arc<dyn crate::engine::source::TableFunction>>,
 }
 
 impl PartiQLVM {
@@ -315,6 +356,7 @@ impl PartiQLVM {
             halted: false,
             slot_count,
             builtins: BuiltinFunctions::new(),
+            table_functions: exec_context.table_functions().clone(),
         };
 
         // Pre-create data sources from catalog
@@ -336,6 +378,15 @@ impl PartiQLVM {
 
             // Skip expression scans — they are bound at runtime by MaterializeCursor
             if self.compiled.expr_scan_ids.contains(&cursor_info.scan_id) {
+                continue;
+            }
+
+            // Skip table function scans — they are bound at runtime by CreateTableFnCursor
+            if self
+                .compiled
+                .table_fn_scans
+                .contains_key(&cursor_info.scan_id)
+            {
                 continue;
             }
 
@@ -404,6 +455,7 @@ impl PartiQLVM {
             }
             *cursor = None;
         }
+        self.table_functions = exec_context.table_functions().clone();
         self.bind_cursors(exec_context)?;
         self.ip = 0;
         self.halted = false;
@@ -590,6 +642,35 @@ impl<'vm> QueryIterator<'vm> {
                     };
                     self.vm.cursors[*cursor_id as usize] =
                         Some(DataSourceImpl::Inline(InlineDataSource::new(values)));
+                }
+
+                Inst::CreateTableFnCursor {
+                    cursor_id,
+                    func_name_idx,
+                } => {
+                    let func_name = &program.keys[*func_name_idx as usize];
+                    let table_fn = match self.vm.table_functions.get(func_name) {
+                        Some(f) => f.clone(),
+                        None => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "table function '{}' not registered",
+                                func_name
+                            ))))
+                        }
+                    };
+
+                    let scan_id = self.vm.compiled.cursors[*cursor_id as usize].scan_id;
+                    let tf_meta = &self.vm.compiled.table_fn_scans[&scan_id];
+
+                    let reader = RegisterReader::new(regs);
+                    let data_source =
+                        match table_fn.create(&reader, &tf_meta.arg_slots, &tf_meta.layout) {
+                            Ok(ds) => ds,
+                            Err(e) => return Some(Err(e)),
+                        };
+
+                    self.vm.cursors[*cursor_id as usize] =
+                        Some(DataSourceImpl::Catalog(data_source));
                 }
 
                 // All scalar instructions delegate to eval_inst
