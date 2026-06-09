@@ -23,11 +23,15 @@ const NUM_BATCHES: usize = 10_000;
 /// Maximum number of lines retained in the REPL history file.
 const HISTORY_CAPACITY: usize = 1000;
 
+/// Version string shared by the `--version` flag and the REPL startup banner:
+/// the crate version joined with the git commit SHA captured in build.rs.
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_SHA"));
+
 /// Pqlite: An interactive PartiQL database engine and REPL.
 ///
 /// Note: `~input~` in the query is replaced with `data`.
 #[derive(Parser)]
-#[command(name = "pqlite")]
+#[command(name = "pqlite", version = VERSION)]
 struct Cli {
     /// Data source: mem | rand | ion | ionb.
     #[arg(long, default_value = "mem", global = true)]
@@ -64,6 +68,11 @@ fn main() {
 
     match &cli.command {
         Some(Commands::Exec { query }) => {
+            let query = normalize_query(query);
+            if query.is_empty() {
+                eprintln!("Error: empty query");
+                std::process::exit(1);
+            }
             if let Err(e) = execute_query(query, &cli.data_source, cli.data_path.as_ref()) {
                 eprintln!("{}", e);
                 std::process::exit(1);
@@ -73,6 +82,20 @@ fn main() {
             run_repl(&cli.data_source, cli.data_path.as_ref());
         }
     }
+}
+
+/// Normalize a query string before handing it to the engine: trim outer
+/// whitespace and strip a single trailing `;` statement terminator, while
+/// preserving any internal newlines. The `;` is accepted as a convenience
+/// terminator (and is what the REPL validator uses to detect a complete
+/// entry) but is not part of the PartiQL grammar, so it must be removed.
+///
+/// TODO: support the trailing `;` statement terminator natively in the
+/// PartiQL grammar/parser so semicolons are a first-class part of the
+/// language, and remove this stripping workaround once that lands.
+fn normalize_query(input: &str) -> &str {
+    let trimmed = input.trim();
+    trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end()
 }
 
 /// Minimal REPL prompt that renders a fixed `pqlite> ` indicator.
@@ -208,13 +231,9 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
 /// Print the REPL startup banner: the crate version, the git commit it was
 /// built from, and a pointer to the help command.
 fn print_startup_banner() {
-    // `CARGO_PKG_VERSION` is set by Cargo; `PQLITE_GIT_SHA` is captured in
-    // build.rs (falls back to "unknown" when git is unavailable).
-    println!(
-        "pqlite version {}@{}",
-        env!("CARGO_PKG_VERSION"),
-        env!("PQLITE_GIT_SHA")
-    );
+    // Reuse the same VERSION string that backs the `--version` flag so the two
+    // can never drift (crate version + git SHA captured in build.rs).
+    println!("pqlite version {VERSION}");
     println!("For usage information, enter \".help\".");
 }
 
@@ -245,11 +264,10 @@ fn run_repl(data_source: &str, data_path: Option<&String>) {
                     }
                 }
 
-                // The trailing `;` is the REPL's statement terminator (used by
-                // the validator to detect a complete entry), not part of the
-                // PartiQL grammar — strip it while preserving internal newlines
-                // before handing the full multi-line text to the engine.
-                let query = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+                // Strip the trailing `;` terminator (preserving internal
+                // newlines) before handing the full multi-line text to the
+                // engine — shared with the `exec` subcommand for consistency.
+                let query = normalize_query(trimmed);
 
                 // A lone `;` (e.g. on its own line) leaves nothing to run once
                 // the terminator is stripped — skip it rather than handing an
