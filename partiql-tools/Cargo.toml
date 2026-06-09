@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 autobins = false
 autobenches = false
+build = "build.rs"
 
 [lib]
 name = "partiql_tools"
@@ -18,6 +19,11 @@ bench = false
 [[bin]]
 name = "partiql-hybrid"
 path = "src/bin/partiql_hybrid.rs"
+bench = false
+
+[[bin]]
+name = "pqlite"
+path = "src/bin/pqlite.rs"
 bench = false
 
 [[bin]]
