@@ -234,7 +234,15 @@ fn run_repl(data_source: &str, data_path: Option<&String>) {
                 // the validator to detect a complete entry), not part of the
                 // PartiQL grammar — strip it while preserving internal newlines
                 // before handing the full multi-line text to the engine.
-                let query = trimmed.strip_suffix(';').unwrap_or(trimmed);
+                let query = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+
+                // A lone `;` (e.g. on its own line) leaves nothing to run once
+                // the terminator is stripped — skip it rather than handing an
+                // empty string to the parser.
+                if query.is_empty() {
+                    continue;
+                }
+
                 if let Err(e) = execute_query(query, data_source, data_path) {
                     eprintln!("{}", e);
                 }
