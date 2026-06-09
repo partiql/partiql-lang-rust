@@ -12,10 +12,15 @@ use std::borrow::Cow;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
+use reedline::{
+    FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
+};
 
 const BATCH_SIZE: usize = 1;
 const NUM_BATCHES: usize = 10_000;
+
+/// Maximum number of lines retained in the REPL history file.
+const HISTORY_CAPACITY: usize = 1000;
 
 /// Pqlite: An interactive PartiQL database engine and REPL.
 ///
@@ -97,19 +102,109 @@ impl Prompt for PqlitePrompt {
     }
 }
 
+/// Build a persistent, file-backed history at `~/.pqlite_history`.
+///
+/// Falls back to in-memory history (never crashing) if the home directory
+/// cannot be resolved or the history file cannot be opened.
+fn build_history() -> Box<dyn History> {
+    let history_path = home_dir().map(|mut p| {
+        p.push(".pqlite_history");
+        p
+    });
+
+    if let Some(path) = history_path {
+        match FileBackedHistory::with_file(HISTORY_CAPACITY, path.clone()) {
+            Ok(history) => return Box::new(history),
+            Err(e) => {
+                eprintln!(
+                    "Warning: could not open history file {}: {} (using in-memory history)",
+                    path.display(),
+                    e
+                );
+            }
+        }
+    } else {
+        eprintln!("Warning: could not resolve home directory (using in-memory history)");
+    }
+
+    // Fallback: in-memory history. If even this fails, run without history.
+    match FileBackedHistory::new(HISTORY_CAPACITY) {
+        Ok(history) => Box::new(history),
+        Err(_) => Box::new(FileBackedHistory::default()),
+    }
+}
+
+/// Resolve the user's home directory across platforms.
+fn home_dir() -> Option<std::path::PathBuf> {
+    // `std::env::home_dir` was un-deprecated in Rust 1.85 and is correct on
+    // all supported platforms, so no extra crate is needed here.
+    #[allow(deprecated)]
+    std::env::home_dir()
+}
+
+/// Print the REPL help menu listing meta-commands and query usage.
+fn print_help() {
+    println!("PartiQL REPL — available commands:");
+    println!("  .help     Show this help message");
+    println!("  .tables   List tables in the current catalog");
+    println!("  .quit     Exit the REPL (alias: .exit)");
+    println!("  .exit     Exit the REPL (alias: .quit)");
+    println!();
+    println!("To run a query, type any PartiQL statement and press Enter,");
+    println!("e.g.  SELECT a FROM ~input~ LIMIT 5");
+    println!("(`~input~` is replaced with the `data` table.)");
+}
+
+/// Outcome of handling a REPL meta-command (a line starting with `.`).
+enum MetaOutcome {
+    /// The command was handled; continue the loop.
+    Handled,
+    /// The user requested to quit; break the loop.
+    Quit,
+}
+
+/// Handle a dot-prefixed meta-command. `input` must be the trimmed buffer.
+fn handle_meta_command(input: &str) -> MetaOutcome {
+    match input {
+        ".quit" | ".exit" => MetaOutcome::Quit,
+        ".help" => {
+            print_help();
+            MetaOutcome::Handled
+        }
+        ".tables" => {
+            println!("Mock: Current tables in catalog: [data]");
+            MetaOutcome::Handled
+        }
+        _ => {
+            println!("Unrecognized command. Type .help for a list of commands.");
+            MetaOutcome::Handled
+        }
+    }
+}
+
 /// Run the interactive REPL: read a line, execute it as a query, and loop.
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
 fn run_repl(data_source: &str, data_path: Option<&String>) {
-    let mut line_editor = Reedline::create();
+    let mut line_editor = Reedline::create().with_history(build_history());
     let prompt = PqlitePrompt;
 
     loop {
         match line_editor.read_line(&prompt) {
             Ok(Signal::Success(buffer)) => {
-                if buffer.trim().is_empty() {
+                let trimmed = buffer.trim();
+                if trimmed.is_empty() {
                     continue;
                 }
+
+                // Meta-commands start with a dot and are handled locally.
+                if trimmed.starts_with('.') {
+                    match handle_meta_command(trimmed) {
+                        MetaOutcome::Handled => continue,
+                        MetaOutcome::Quit => break,
+                    }
+                }
+
                 if let Err(e) = execute_query(&buffer, data_source, data_path) {
                     eprintln!("{}", e);
                 }
