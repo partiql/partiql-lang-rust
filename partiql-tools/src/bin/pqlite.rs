@@ -29,8 +29,29 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
+    /// Print debug info for pipeline stages. Accepts: ast, plan, program, or * for all.
+    #[arg(long, global = true, value_delimiter = ',')]
+    debug: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+struct DebugFlags {
+    ast: bool,
+    plan: bool,
+    program: bool,
+}
+
+impl DebugFlags {
+    fn from_args(args: &[String]) -> Self {
+        let all = args.iter().any(|s| s == "*");
+        DebugFlags {
+            ast: all || args.iter().any(|s| s == "ast"),
+            plan: all || args.iter().any(|s| s == "plan"),
+            program: all || args.iter().any(|s| s == "program"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -44,6 +65,7 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+    let debug = DebugFlags::from_args(&cli.debug);
 
     match &cli.command {
         Some(Commands::Exec { query }) => {
@@ -52,13 +74,13 @@ fn main() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            if let Err(e) = execute_query(query) {
+            if let Err(e) = execute_query(query, &debug) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
         }
         None => {
-            run_repl();
+            run_repl(&debug);
         }
     }
 }
@@ -218,7 +240,7 @@ fn print_startup_banner() {
 /// Run the interactive REPL: read a line, execute it as a query, and loop.
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
-fn run_repl() {
+fn run_repl(debug: &DebugFlags) {
     print_startup_banner();
 
     let mut line_editor = Reedline::create()
@@ -254,7 +276,7 @@ fn run_repl() {
                     continue;
                 }
 
-                if let Err(e) = execute_query(query) {
+                if let Err(e) = execute_query(query, debug) {
                     eprintln!("{}", e);
                 }
             }
@@ -276,11 +298,8 @@ fn run_repl() {
     }
 }
 
-fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std::error::Error>> {
     let query = query_str.to_string();
-
-    println!("Query: {}", query);
-    println!();
 
     let catalog = create_table_fn_catalog();
 
@@ -289,22 +308,18 @@ fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
     let parsed = parse(&query).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
 
-    // === PIPELINE TRACE: AST ===
-    println!("\n{}", "=".repeat(60));
-    println!("PHASE 1: PARSED AST");
-    println!("{}", "=".repeat(60));
-    println!("{:#?}", parsed);
+    if debug.ast {
+        eprintln!("[AST] {:?}", parsed);
+    }
 
     // Phase 2: Lower (AST → Logical Plan)
     let lower_start = Instant::now();
     let logical = lower(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
 
-    // === PIPELINE TRACE: LOGICAL PLAN ===
-    println!("\n{}", "=".repeat(60));
-    println!("PHASE 2: LOGICAL PLAN");
-    println!("{}", "=".repeat(60));
-    println!("{:#?}", logical);
+    if debug.plan {
+        eprintln!("[Plan] {:?}", logical);
+    }
 
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
@@ -324,10 +339,9 @@ fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Compile error: {:?}", e))?;
     let compile_time = compile_start.elapsed();
 
-    // Dump compiled plan for debugging
-    println!("Compiled Plan:");
-    println!("{}", compiled);
-    println!();
+    if debug.program {
+        eprintln!("[Program]\n{}", compiled);
+    }
 
     // Phase 4: Execute
     let exec_start = Instant::now();
@@ -352,9 +366,6 @@ fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
         Shape::List(_) => (Some("["), "  ", Some("]")),
         Shape::Single(_) => (None, "", None),
     };
-
-    println!("Results:");
-    println!("{}", "=".repeat(60));
 
     let mut is_first = true;
     match vm.execute() {
@@ -391,26 +402,16 @@ fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     let exec_time = exec_start.elapsed();
 
-    println!("\n{}", "=".repeat(60));
-    println!("TIMING SUMMARY");
-    println!("{}", "=".repeat(60));
-    println!(
-        "Parse time:       {:.3}ms",
-        parse_time.as_secs_f64() * 1000.0
+    let total_time = parse_time + lower_time + compile_time + exec_time;
+    eprintln!(
+        "({} rows in {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+        row_count,
+        total_time.as_secs_f64() * 1000.0,
+        parse_time.as_secs_f64() * 1000.0,
+        lower_time.as_secs_f64() * 1000.0,
+        compile_time.as_secs_f64() * 1000.0,
+        exec_time.as_secs_f64() * 1000.0,
     );
-    println!(
-        "Lower time:       {:.3}ms",
-        lower_time.as_secs_f64() * 1000.0
-    );
-    println!(
-        "Compile time:     {:.3}ms",
-        compile_time.as_secs_f64() * 1000.0
-    );
-    println!(
-        "Execution time:   {:.3}ms",
-        exec_time.as_secs_f64() * 1000.0
-    );
-    println!("Rows returned:     {}", row_count);
 
     Ok(())
 }
