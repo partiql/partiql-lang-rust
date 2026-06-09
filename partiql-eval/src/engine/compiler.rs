@@ -4,13 +4,15 @@ use crate::engine::error::{EngineError, Result};
 use crate::engine::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
 use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
-use crate::engine::source::{DataSourceHandle, ScanLayout, ScanProjection, ScanSource};
+use crate::engine::source::{
+    DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TableFunctionHandle,
+};
 use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use crate::engine::SlotResolver;
 use crate::plan::EvaluationMode;
 use partiql_logical::{
-    BindingsOp, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode, ProjectValue, Scan,
-    ValueExpr, VarRefType,
+    BindingsOp, CallName, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
+    ProjectValue, Scan, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -178,6 +180,15 @@ pub struct PlanCompiler<'a> {
     next_scan_id: u64,
     inline_scans: HashMap<ScanId, Vec<ValueOwned>>,
     expr_scans: HashMap<ScanId, ValueExpr>,
+    table_fn_scans: HashMap<ScanId, TableFnScanInfo>,
+    table_fn_arg_slots: HashMap<ScanId, Vec<SlotId>>,
+}
+
+#[derive(Clone)]
+struct TableFnScanInfo {
+    func_name: String,
+    layout: ScanLayout,
+    arguments: Vec<ValueExpr>,
 }
 
 impl<'a> PlanCompiler<'a> {
@@ -188,6 +199,8 @@ impl<'a> PlanCompiler<'a> {
             next_scan_id: 0,
             inline_scans: HashMap::new(),
             expr_scans: HashMap::new(),
+            table_fn_scans: HashMap::new(),
+            table_fn_arg_slots: HashMap::new(),
         }
     }
 
@@ -218,6 +231,22 @@ impl<'a> PlanCompiler<'a> {
             .shape
             .unwrap_or(Shape::Bag(RowShape::Register(0, PhysicalType::Dynamic)));
 
+        let table_fn_scans = self
+            .table_fn_scans
+            .drain()
+            .map(|(id, info)| {
+                let arg_slots = self.table_fn_arg_slots.remove(&id).unwrap_or_default();
+                (
+                    id,
+                    crate::engine::plan::TableFnScanMetadata {
+                        func_name: info.func_name,
+                        layout: info.layout,
+                        arg_slots,
+                    },
+                )
+            })
+            .collect();
+
         Ok(CompiledPlan {
             program,
             cursors: cursor_infos,
@@ -226,6 +255,7 @@ impl<'a> PlanCompiler<'a> {
             scan_metadata: result.scan_metadata,
             inline_scans: std::mem::take(&mut self.inline_scans),
             expr_scan_ids: self.expr_scans.keys().copied().collect(),
+            table_fn_scans,
         })
     }
 
@@ -393,8 +423,30 @@ impl<'a> PlanCompiler<'a> {
             None
         };
 
-        // For expression-based scans, compile the expression and emit MaterializeCursor
-        if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
+        // For table function scans, compile arguments and emit CreateTableFnCursor + OpenCursor
+        if let Some(tf_info) = self.table_fn_scans.get(&scan_id).cloned() {
+            // Compile each argument expression into its own register
+            let mut arg_slots: Vec<SlotId> = Vec::new();
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            for arg_expr in &tf_info.arguments {
+                let target = builder.alloc_reg_pub();
+                let prog = expr_compiler.compile_to_program(arg_expr, target, target + 1)?;
+                self.inline_program(&prog, builder);
+                arg_slots.push(target);
+            }
+
+            // Store resolved arg_slots for the CompiledPlan
+            self.table_fn_arg_slots.insert(scan_id, arg_slots);
+
+            // Emit CreateTableFnCursor + OpenCursor
+            let func_name_idx = builder.push_key_pub(tf_info.func_name.clone());
+            builder.insts.push(Inst::CreateTableFnCursor {
+                cursor_id,
+                func_name_idx,
+            });
+            builder.emit_open_cursor(cursor_id);
+        } else if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
+            // For expression-based scans, compile the expression and emit MaterializeCursor
             let expr_compiler = LogicalExprCompiler::new(&result.resolver);
             let expr_program =
                 expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
@@ -405,10 +457,11 @@ impl<'a> PlanCompiler<'a> {
             builder
                 .insts
                 .push(Inst::MaterializeCursor { src: 0, cursor_id });
+            builder.emit_open_cursor(cursor_id);
+        } else {
+            // Regular catalog scan
+            builder.emit_open_cursor(cursor_id);
         }
-
-        // Emit: OpenCursor
-        builder.emit_open_cursor(cursor_id);
 
         // Emit: NextRow (loop head)
         let loop_head = builder.current_offset() as usize;
@@ -766,6 +819,10 @@ impl<'a> PlanCompiler<'a> {
         if let Some(values) = try_expr_to_inline_values(&scan.expr) {
             return self.compile_inline_scan(scan, values);
         }
+        // Try table function resolution (Call expressions)
+        if let Some(result) = self.try_compile_table_fn_scan(scan, ctx)? {
+            return Ok(result);
+        }
         // Try catalog resolution (DBRef / VarRef)
         let catalog_result = self.resolve_reader_factory(scan);
         if catalog_result.is_err() {
@@ -1033,6 +1090,128 @@ impl<'a> PlanCompiler<'a> {
             slot_count: 1,
             shape: None,
         })
+    }
+
+    // -----------------------------------------------------------------------
+    // Table function compilation
+    // -----------------------------------------------------------------------
+
+    /// Try to compile a scan as a table function call.
+    /// Returns `Ok(Some(result))` if the scan expr is a Call to a known table function,
+    /// `Ok(None)` if it's not a Call or the function isn't registered.
+    fn try_compile_table_fn_scan(
+        &mut self,
+        scan: &Scan,
+        ctx: &CompileContext,
+    ) -> Result<Option<SubtreeResult>> {
+        let call_expr = match &scan.expr {
+            ValueExpr::Call(call) => call,
+            _ => return Ok(None),
+        };
+
+        let func_name = match &call_expr.name {
+            CallName::ByName(name) => name.clone(),
+            _ => return Ok(None),
+        };
+
+        let handle = match self.resolve_table_function(&func_name) {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+
+        let scan_id = self.alloc_scan_id();
+
+        // Determine output layout from field requests
+        let table_name = Some(func_name.clone());
+        let my_requests = ctx.requests_for_alias(&scan.as_key, table_name.as_deref());
+
+        let mut projections = Vec::new();
+        let mut column_slots = FxHashMap::default();
+        let mut base_row_slot: Option<SlotId> = None;
+        let mut next_slot: SlotId = 0;
+        let mut needs_whole_value = my_requests.is_empty();
+
+        if !needs_whole_value {
+            for req in &my_requests {
+                if let Some(scan_source) = handle.resolve(&req.field_name) {
+                    let slot = next_slot;
+                    next_slot += 1;
+                    projections.push(ScanProjection {
+                        source: scan_source,
+                        target_slot: slot,
+                    });
+                    column_slots.insert(req.field_name.clone(), slot);
+                } else {
+                    needs_whole_value = true;
+                    break;
+                }
+            }
+        }
+
+        if needs_whole_value {
+            projections.clear();
+            column_slots.clear();
+            base_row_slot = Some(0);
+            projections.push(ScanProjection {
+                source: ScanSource::whole_value(),
+                target_slot: 0,
+            });
+            next_slot = 1;
+        }
+
+        let layout = ScanLayout { projections };
+
+        // Store table function scan info for bytecode emission
+        self.table_fn_scans.insert(
+            scan_id,
+            TableFnScanInfo {
+                func_name,
+                layout: layout.clone(),
+                arguments: call_expr.arguments.clone(),
+            },
+        );
+
+        let resolver = PipelineSlotResolver {
+            base_row_slot,
+            scan_alias: scan.as_key.clone(),
+            table_name,
+            column_slots,
+        };
+
+        // Store scan metadata so find_scan_id_for can locate this scan.
+        let dummy_object_id = ObjectId::from((
+            partiql_common::catalog::CatalogId::from(u64::MAX),
+            partiql_common::catalog::EntryId::from(u64::MAX),
+        ));
+        let mut scan_metadata = HashMap::new();
+        scan_metadata.insert(
+            scan_id,
+            ScanMetadata {
+                layout,
+                object_id: dummy_object_id,
+            },
+        );
+
+        Ok(Some(SubtreeResult {
+            resolver: ResolverKind::Pipeline(resolver),
+            cursor_id: None,
+            scan_metadata,
+            slot_count: next_slot as usize,
+            shape: None,
+        }))
+    }
+
+    /// Search all catalogs for a table function by name.
+    fn resolve_table_function(&self, name: &str) -> Option<TableFunctionHandle> {
+        // Search through all registered catalogs
+        for catalog_name in ["default"] {
+            if let Some((_id, catalog)) = self.compilation_context.get_catalog(catalog_name) {
+                if let Some(handle) = catalog.get_table_function(name) {
+                    return Some(handle);
+                }
+            }
+        }
+        None
     }
 
     // -----------------------------------------------------------------------

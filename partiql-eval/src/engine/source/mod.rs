@@ -4,7 +4,7 @@ pub(crate) mod api;
 // Re-export public API types from api.rs
 pub use api::{
     BufferStability, DataSource, DataSourceMetadata, PhysicalType, ScanLayout, ScanProjection,
-    ScanSource, ScanSourceType,
+    ScanSource, ScanSourceType, TableFunction, TableFunctionHandle,
 };
 
 // Re-export ScanId and CatalogScans for catalog implementations

@@ -12,6 +12,9 @@ use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
 use partiql_eval::source::DataSourceHandle;
+use partiql_eval::source::{
+    TableFunction as VmTableFunction, TableFunctionHandle as VmTableFunctionHandle,
+};
 use partiql_eval::CompilationCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
@@ -311,11 +314,14 @@ impl BaseTableExpr for DataTableExpr {
 pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn SharedCatalog> {
     let mut catalog = PartiqlCatalog::default();
 
-    // Add the data table function
+    // Add the data table function (legacy: used by other binaries)
     let data_fn = TableFunction::new(Box::new(DataTableFunction::new(data_source, data_path)));
     catalog
         .add_table_function(data_fn)
         .expect("Failed to add table function");
+
+    // Register table functions for the VM path (rand, mem, scan_ion)
+    register_table_fn_stubs(&mut catalog);
 
     // Add type entry for "data" table so it can be referenced without parentheses
     let mut bld = PartiqlShapeBuilder::default();
@@ -336,6 +342,91 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
     Box::new(catalog.to_shared_catalog())
 }
 
+/// Create a frontend catalog with only table function stubs (no legacy data table).
+/// Used by pqlite when table functions are the sole data source mechanism.
+pub fn create_table_fn_catalog() -> Box<dyn SharedCatalog> {
+    let mut catalog = PartiqlCatalog::default();
+    register_table_fn_stubs(&mut catalog);
+    Box::new(catalog.to_shared_catalog())
+}
+
+fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) {
+    catalog
+        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
+            "rand",
+            vec![
+                partiql_catalog::call_defs::CallSpecArg::Positional,
+                partiql_catalog::call_defs::CallSpecArg::Positional,
+            ],
+        ))))
+        .expect("Failed to add rand table function");
+    catalog
+        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
+            "mem",
+            vec![
+                partiql_catalog::call_defs::CallSpecArg::Positional,
+                partiql_catalog::call_defs::CallSpecArg::Positional,
+            ],
+        ))))
+        .expect("Failed to add mem table function");
+    catalog
+        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
+            "scan_ion",
+            vec![partiql_catalog::call_defs::CallSpecArg::Positional],
+        ))))
+        .expect("Failed to add scan_ion table function");
+}
+
+/// Stub table function for the frontend planner. Only provides `call_def()` so
+/// the planner can validate the call and produce a `CallExpr` in the logical plan.
+/// The actual execution is handled by the VM's `TableFunction` implementations.
+#[derive(Debug)]
+struct StubTableFn {
+    call_def: CallDef,
+}
+
+impl StubTableFn {
+    fn new(name: &'static str, input: Vec<partiql_catalog::call_defs::CallSpecArg>) -> Self {
+        StubTableFn {
+            call_def: CallDef {
+                names: vec![name],
+                overloads: vec![CallSpec {
+                    input,
+                    output: Box::new(move |args| {
+                        partiql_logical::ValueExpr::Call(partiql_logical::CallExpr {
+                            name: partiql_logical::CallName::ByName(name.to_string()),
+                            arguments: args,
+                        })
+                    }),
+                }],
+            },
+        }
+    }
+}
+
+impl BaseTableFunctionInfo for StubTableFn {
+    fn call_def(&self) -> &CallDef {
+        &self.call_def
+    }
+
+    fn plan_eval(&self) -> Box<dyn BaseTableExpr> {
+        Box::new(StubTableExpr)
+    }
+}
+
+#[derive(Debug)]
+struct StubTableExpr;
+
+impl BaseTableExpr for StubTableExpr {
+    fn evaluate<'c>(
+        &self,
+        _args: &[Cow<'_, Value>],
+        _ctx: &'c dyn SessionContext,
+    ) -> BaseTableExprResult<'c> {
+        unreachable!("StubTableExpr should never be evaluated — VM handles execution")
+    }
+}
+
 // =============================================================================
 // Random Data Source - Customer-Provided Reader Example
 // =============================================================================
@@ -354,7 +445,10 @@ use partiql_eval::source::{
     BufferStability, CatalogScans, DataSource, DataSourceMetadata, PhysicalType, RegisterWriter,
     ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
+use partiql_eval::value::RegisterReader;
 use partiql_eval::{ExecutionCatalog, Result as EvalResult};
+
+type SlotId = u16;
 use rand::Rng;
 
 /// Custom DataSource that generates random integer data
@@ -1213,4 +1307,147 @@ pub fn simple_catalog(
     let comp_catalog = Arc::new(SimpleCompilationCatalog::new(tables.clone()));
     let exec_catalog = SimpleExecutionCatalog::new(tables);
     (comp_catalog, exec_catalog)
+}
+
+// =============================================================================
+// Table Function implementations for the VM engine
+// =============================================================================
+
+/// Compile-time metadata for table functions that produce columnar integer data.
+/// Used by `rand()` and `mem()` table functions.
+pub struct ColumnarIntMetadata {
+    column_names: Vec<String>,
+}
+
+impl ColumnarIntMetadata {
+    pub fn new(column_names: Vec<String>) -> Self {
+        ColumnarIntMetadata { column_names }
+    }
+}
+
+impl DataSourceMetadata for ColumnarIntMetadata {
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        self.column_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(field_name))
+            .map(|index| ScanSource::column(index, PhysicalType::I64))
+    }
+}
+
+/// Compile-time metadata for Ion table functions (dynamic schema).
+pub struct DynamicSchemaMetadata;
+
+impl DataSourceMetadata for DynamicSchemaMetadata {
+    fn buffer_stability(&self) -> BufferStability {
+        BufferStability::UntilNext
+    }
+
+    fn resolve(&self, field_name: &str) -> Option<ScanSource> {
+        Some(ScanSource::field(field_name, PhysicalType::Dynamic))
+    }
+}
+
+/// Table function: `rand(total_rows, num_columns)`
+///
+/// Generates random integer data. Each column gets a random i64 value per row.
+pub struct RandTableFunction;
+
+impl VmTableFunction for RandTableFunction {
+    fn create(
+        &self,
+        reader: &RegisterReader<'_>,
+        arg_slots: &[SlotId],
+        layout: &ScanLayout,
+    ) -> EvalResult<Box<dyn DataSource>> {
+        let total_rows = reader.get_i64(arg_slots[0] as usize).ok_or_else(|| {
+            partiql_eval::EngineError::ReaderError("rand: arg 0 must be integer".into())
+        })? as usize;
+        let num_columns = reader.get_i64(arg_slots[1] as usize).ok_or_else(|| {
+            partiql_eval::EngineError::ReaderError("rand: arg 1 must be integer".into())
+        })? as usize;
+        Ok(Box::new(RandomDataSource::new(
+            total_rows,
+            num_columns,
+            layout.clone(),
+        )))
+    }
+}
+
+/// Table function: `mem(total_rows, num_columns)`
+///
+/// Generates sequential integer data. Row N has value N in all columns.
+pub struct MemTableFunction;
+
+impl VmTableFunction for MemTableFunction {
+    fn create(
+        &self,
+        reader: &RegisterReader<'_>,
+        arg_slots: &[SlotId],
+        layout: &ScanLayout,
+    ) -> EvalResult<Box<dyn DataSource>> {
+        let total_rows = reader.get_i64(arg_slots[0] as usize).ok_or_else(|| {
+            partiql_eval::EngineError::ReaderError("mem: arg 0 must be integer".into())
+        })? as usize;
+        let num_columns = reader.get_i64(arg_slots[1] as usize).ok_or_else(|| {
+            partiql_eval::EngineError::ReaderError("mem: arg 1 must be integer".into())
+        })? as usize;
+        Ok(Box::new(InMemGeneratedReader::new(
+            total_rows,
+            num_columns,
+            layout.clone(),
+        )))
+    }
+}
+
+/// Table function: `scan_ion(path)`
+///
+/// Reads Ion data from a file path, streaming rows lazily.
+pub struct ScanIonTableFunction;
+
+impl VmTableFunction for ScanIonTableFunction {
+    fn create(
+        &self,
+        reader: &RegisterReader<'_>,
+        arg_slots: &[SlotId],
+        layout: &ScanLayout,
+    ) -> EvalResult<Box<dyn DataSource>> {
+        let path = reader
+            .get_str(arg_slots[0] as usize)
+            .ok_or_else(|| {
+                partiql_eval::EngineError::ReaderError("scan_ion: arg 0 must be string".into())
+            })?
+            .to_string();
+        Ok(Box::new(IonDataSource::new(path, layout.clone())))
+    }
+}
+
+/// CompilationCatalog that provides table function metadata for pqlite.
+pub struct TableFnCompilationCatalog {
+    column_names: Vec<String>,
+}
+
+impl TableFnCompilationCatalog {
+    pub fn new(column_names: Vec<String>) -> Self {
+        TableFnCompilationCatalog { column_names }
+    }
+}
+
+impl CompilationCatalog for TableFnCompilationCatalog {
+    fn get_table(&self, _path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
+        None
+    }
+
+    fn get_table_function(&self, name: &str) -> Option<VmTableFunctionHandle> {
+        match name {
+            "rand" | "mem" => Some(VmTableFunctionHandle::new(Arc::new(
+                ColumnarIntMetadata::new(self.column_names.clone()),
+            ))),
+            "scan_ion" => Some(VmTableFunctionHandle::new(Arc::new(DynamicSchemaMetadata))),
+            _ => None,
+        }
+    }
 }

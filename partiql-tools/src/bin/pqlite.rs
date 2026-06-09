@@ -1,12 +1,9 @@
 use partiql_tools::common;
 
-use common::{
-    count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog,
-    CompiledSourceFactory,
-};
+use common::{create_table_fn_catalog, lower, parse};
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
-use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
+use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -17,9 +14,6 @@ use reedline::{
     ValidationResult, Validator,
 };
 
-const BATCH_SIZE: usize = 1;
-const NUM_BATCHES: usize = 10_000;
-
 /// Maximum number of lines retained in the REPL history file.
 const HISTORY_CAPACITY: usize = 1000;
 
@@ -29,18 +23,12 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 
 /// Pqlite: An interactive PartiQL database engine and REPL.
 ///
-/// Note: `~input~` in the query is replaced with `data`.
+/// Use table functions in queries to access data:
+///   SELECT t.a FROM mem(100, 2) t;
+///   SELECT t.name FROM scan_ion('data.ion') t;
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
-    /// Data source: mem | rand | ion | ionb.
-    #[arg(long, default_value = "mem", global = true)]
-    data_source: String,
-
-    /// Path to the data file (required for file-based data sources).
-    #[arg(long, global = true)]
-    data_path: Option<String>,
-
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -57,15 +45,6 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    // File-based data sources require an explicit --data-path.
-    if cli.data_source != "mem" && cli.data_source != "rand" && cli.data_path.is_none() {
-        eprintln!(
-            "Error: --data-path is required for file-based data source '{}'",
-            cli.data_source
-        );
-        std::process::exit(1);
-    }
-
     match &cli.command {
         Some(Commands::Exec { query }) => {
             let query = normalize_query(query);
@@ -73,13 +52,13 @@ fn main() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            if let Err(e) = execute_query(query, &cli.data_source, cli.data_path.as_ref()) {
+            if let Err(e) = execute_query(query) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
         }
         None => {
-            run_repl(&cli.data_source, cli.data_path.as_ref());
+            run_repl();
         }
     }
 }
@@ -192,13 +171,16 @@ fn home_dir() -> Option<std::path::PathBuf> {
 fn print_help() {
     println!("PartiQL REPL — available commands:");
     println!("  .help     Show this help message");
-    println!("  .tables   List tables in the current catalog");
     println!("  .quit     Exit the REPL (alias: .exit)");
     println!("  .exit     Exit the REPL (alias: .quit)");
     println!();
-    println!("To run a query, type any PartiQL statement and press Enter,");
-    println!("e.g.  SELECT a FROM ~input~ LIMIT 5");
-    println!("(`~input~` is replaced with the `data` table.)");
+    println!("To run a query, type any PartiQL statement and press Enter.");
+    println!("Available table functions:");
+    println!("  mem(rows, cols)       — sequential integer data");
+    println!("  rand(rows, cols)      — random integer data");
+    println!("  scan_ion(path)        — read Ion file");
+    println!();
+    println!("Example: SELECT t.a, t.b FROM mem(100, 2) t LIMIT 5;");
 }
 
 /// Outcome of handling a REPL meta-command (a line starting with `.`).
@@ -215,10 +197,6 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
         ".quit" | ".exit" => MetaOutcome::Quit,
         ".help" => {
             print_help();
-            MetaOutcome::Handled
-        }
-        ".tables" => {
-            println!("Mock: Current tables in catalog: [data]");
             MetaOutcome::Handled
         }
         _ => {
@@ -240,7 +218,7 @@ fn print_startup_banner() {
 /// Run the interactive REPL: read a line, execute it as a query, and loop.
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
-fn run_repl(data_source: &str, data_path: Option<&String>) {
+fn run_repl() {
     print_startup_banner();
 
     let mut line_editor = Reedline::create()
@@ -276,7 +254,7 @@ fn run_repl(data_source: &str, data_path: Option<&String>) {
                     continue;
                 }
 
-                if let Err(e) = execute_query(query, data_source, data_path) {
+                if let Err(e) = execute_query(query) {
                     eprintln!("{}", e);
                 }
             }
@@ -298,50 +276,13 @@ fn run_repl(data_source: &str, data_path: Option<&String>) {
     }
 }
 
-fn execute_query(
-    query_str: &str,
-    data_source: &str,
-    data_path: Option<&String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Replace !input with data (no parentheses for hybrid)
-    let query = query_str.replace("~input~", "data");
+fn execute_query(query_str: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let query = query_str.to_string();
 
-    println!("Query:       {}", query);
-    println!("Data Source: {}", data_source);
-    if let Some(path) = data_path {
-        println!("Data Path:   {}", path);
-    }
-
-    let total_rows = if data_source == "mem" || data_source == "rand" {
-        let batch_size = BATCH_SIZE;
-        let num_batches = NUM_BATCHES;
-        let total = batch_size * num_batches;
-        println!(
-            "Reader Config: batch_size={}, num_batches={}, total_rows={}",
-            batch_size,
-            num_batches,
-            common::format_with_commas(total)
-        );
-        total
-    } else if let Some(path) = data_path {
-        let total = count_rows_from_file(data_source, path);
-        println!(
-            "Reader Config: total_rows={} (from file)",
-            common::format_with_commas(total)
-        );
-        total
-    } else {
-        0
-    };
-
-    std::env::set_var("TOTAL_ROWS", total_rows.to_string());
-
+    println!("Query: {}", query);
     println!();
 
-    let catalog = create_catalog(data_source.to_string(), data_path.cloned());
-
-    // Default column names for in-memory reader
-    let column_names = vec!["a".to_string(), "b".to_string()];
+    let catalog = create_table_fn_catalog();
 
     // Phase 1: Parse
     let parse_start = Instant::now();
@@ -368,42 +309,14 @@ fn execute_query(
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
 
-    // Set up compilation context - use two-phase catalog pattern for ALL data sources
+    // Set up compilation context with table function support
     let mut context = CompilationContext::new();
 
-    // Create appropriate catalog based on data source - all use two-phase pattern
-    // The execution catalog is wrapped in an enum to handle different concrete types
-    enum ExecCatalog {
-        Random(common::RandomExecutionCatalog),
-        Simple(common::SimpleExecutionCatalog),
-    }
-
-    let (comp_catalog, mut exec_catalog_inner) = match data_source {
-        "rand" => {
-            // Random catalog for custom reader demonstration
-            let (comp, exec) =
-                random_catalog(vec![("data".to_string(), total_rows, column_names.clone())]);
-            (comp, ExecCatalog::Random(exec))
-        }
-        "mem" | "ion" | "ionb" => {
-            // Simple catalog for mem/ion data sources - use CompiledSourceFactory
-            let factory = match data_source {
-                "mem" => CompiledSourceFactory::mem(total_rows, column_names.clone()),
-                "ion" | "ionb" => {
-                    CompiledSourceFactory::ion(data_path.cloned().unwrap_or_default())
-                }
-                _ => unreachable!(),
-            };
-            let (comp, exec) = simple_catalog(vec![("data".to_string(), factory)]);
-            (comp, ExecCatalog::Simple(exec))
-        }
-        _ => {
-            return Err(format!("Unsupported data source: {}", data_source).into());
-        }
-    };
-
-    // Add catalog and CAPTURE the returned catalog_id - this is the ONLY place catalog_id is assigned
-    let catalog_id = context.add_catalog("default", comp_catalog);
+    // Use TableFnCompilationCatalog which supports both table lookups and table functions
+    let column_names = vec!["a".to_string(), "b".to_string()];
+    let comp_catalog: std::sync::Arc<dyn partiql_eval::CompilationCatalog> =
+        std::sync::Arc::new(common::TableFnCompilationCatalog::new(column_names));
+    let _catalog_id = context.add_catalog("default", comp_catalog);
 
     let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
     let compiled = compiler
@@ -419,19 +332,14 @@ fn execute_query(
     // Phase 4: Execute
     let exec_start = Instant::now();
 
-    // Prepare execution catalog with catalog-specific scans (ScanId-based pattern)
-    let catalog_scans = compiled.scans_for_catalog(catalog_id);
-    match &mut exec_catalog_inner {
-        ExecCatalog::Random(exec) => exec.prepare(&catalog_scans),
-        ExecCatalog::Simple(exec) => exec.prepare(&catalog_scans),
-    }
-
-    // Create ExecutionContext and ALWAYS populate it with execution catalog
+    // Create ExecutionContext with table functions registered
     let mut exec_context = ExecutionContext::new();
-    match exec_catalog_inner {
-        ExecCatalog::Random(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
-        ExecCatalog::Simple(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
-    }
+    exec_context.register_table_function("rand", std::sync::Arc::new(common::RandTableFunction));
+    exec_context.register_table_function("mem", std::sync::Arc::new(common::MemTableFunction));
+    exec_context.register_table_function(
+        "scan_ion",
+        std::sync::Arc::new(common::ScanIonTableFunction),
+    );
 
     let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;

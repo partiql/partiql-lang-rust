@@ -34,7 +34,9 @@
 
 use crate::engine::error::Result;
 use crate::engine::plan::ScanId;
-use crate::engine::source::{DataSource, DataSourceHandle, ScanLayout};
+use crate::engine::source::{
+    DataSource, DataSourceHandle, ScanLayout, TableFunction, TableFunctionHandle,
+};
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -153,6 +155,18 @@ pub trait CompilationCatalog: Send + Sync {
     /// - `Some(DataSourceHandle)` if the table exists
     /// - `None` if the table is not found
     fn get_table(&self, path: &[BindingsName<'_>]) -> Option<DataSourceHandle>;
+
+    /// Get table function metadata by name.
+    ///
+    /// Returns a `TableFunctionHandle` containing compile-time metadata about
+    /// the function's output schema, enabling field resolution and layout
+    /// construction during compilation.
+    ///
+    /// Default implementation returns `None` (no table functions available).
+    fn get_table_function(&self, name: &str) -> Option<TableFunctionHandle> {
+        let _ = name;
+        None
+    }
 }
 
 /// Execution-time catalog that creates DataSource instances from ScanIds.
@@ -334,6 +348,7 @@ impl Default for CompilationContext {
 /// ```
 pub struct ExecutionContext {
     catalogs: FxHashMap<CatalogId, Box<dyn ExecutionCatalog>>,
+    table_functions: HashMap<String, Arc<dyn TableFunction>>,
 }
 
 impl ExecutionContext {
@@ -341,7 +356,31 @@ impl ExecutionContext {
     pub fn new() -> Self {
         ExecutionContext {
             catalogs: FxHashMap::default(),
+            table_functions: HashMap::new(),
         }
+    }
+
+    /// Register a table function by name.
+    ///
+    /// Table functions are invoked at runtime by `CreateTableFnCursor` instructions.
+    /// The name should match what the query uses in the FROM clause
+    /// (e.g., "scan_ion" for `FROM scan_ion('path')`).
+    pub fn register_table_function(
+        &mut self,
+        name: impl Into<String>,
+        func: Arc<dyn TableFunction>,
+    ) {
+        self.table_functions.insert(name.into(), func);
+    }
+
+    /// Get a registered table function by name.
+    pub fn get_table_function(&self, name: &str) -> Option<&Arc<dyn TableFunction>> {
+        self.table_functions.get(name)
+    }
+
+    /// Get all registered table functions.
+    pub fn table_functions(&self) -> &HashMap<String, Arc<dyn TableFunction>> {
+        &self.table_functions
     }
 
     /// Add an execution catalog with the given CatalogId.
