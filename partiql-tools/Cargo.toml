@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 autobins = false
 autobenches = false
+build = "build.rs"
 
 [lib]
 name = "partiql_tools"

@@ -205,10 +205,25 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
     }
 }
 
+/// Print the REPL startup banner: the crate version, the git commit it was
+/// built from, and a pointer to the help command.
+fn print_startup_banner() {
+    // `CARGO_PKG_VERSION` is set by Cargo; `PQLITE_GIT_SHA` is captured in
+    // build.rs (falls back to "unknown" when git is unavailable).
+    println!(
+        "pqlite version {}@{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("PQLITE_GIT_SHA")
+    );
+    println!("For usage information, enter \".help\".");
+}
+
 /// Run the interactive REPL: read a line, execute it as a query, and loop.
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
 fn run_repl(data_source: &str, data_path: Option<&String>) {
+    print_startup_banner();
+
     let mut line_editor = Reedline::create()
         .with_history(build_history())
         .with_validator(Box::new(PqliteValidator));
