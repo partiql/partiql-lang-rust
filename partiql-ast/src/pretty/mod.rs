@@ -22,6 +22,71 @@ where
     }
 }
 
+impl PrettyDoc for Item {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            Item::Query(q) => q.pretty_doc(arena),
+            Item::Ddl(ddl) => ddl.op.pretty_doc(arena),
+            // DML pretty-printing is not yet implemented; emit an empty document
+            // rather than panicking so round-trip/snapshot harnesses degrade gracefully.
+            Item::Dml(_) => arena.nil(),
+        }
+    }
+}
+
+impl PrettyDoc for DdlOp {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            DdlOp::CreateTable(create_table) => create_table.pretty_doc(arena),
+            // The remaining DDL operations are not yet produced by the grammar; emit
+            // an empty document rather than panicking until they are implemented.
+            DdlOp::DropTable(_) | DdlOp::CreateIndex(_) | DdlOp::DropIndex(_) => arena.nil(),
+        }
+    }
+}
+
+impl PrettyDoc for CreateTable {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let CreateTable {
+            table_name,
+            as_query,
+        } = self;
+        // `CREATE TABLE <name>`
+        let create = arena
+            .text("CREATE")
+            .append(arena.space())
+            .append(arena.text("TABLE"))
+            .append(arena.space())
+            .append(table_name.pretty_doc(arena));
+        match as_query {
+            // `CREATE TABLE <name> AS ( <query> )` (CTAS). The grammar accepts exactly
+            // this form, so the emitted text re-parses cleanly on round-trip.
+            Some(query) => create
+                .append(arena.space())
+                .append(arena.text("AS"))
+                .append(arena.space())
+                .append(pretty_parenthesized_doc(query.pretty_doc(arena), arena))
+                .group(),
+            None => create.group(),
+        }
+    }
+}
+
 impl PrettyDoc for TopLevelQuery {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where

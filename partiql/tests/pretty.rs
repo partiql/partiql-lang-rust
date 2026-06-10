@@ -1,6 +1,6 @@
 use crate::common::parse;
 use itertools::Itertools;
-use partiql_ast::ast::{AstNode, TopLevelQuery};
+use partiql_ast::ast::{AstNode, Item};
 use partiql_common::pretty::ToPretty;
 use partiql_value::{bag, list, tuple, DateTime, Value};
 use rust_decimal::prelude::FromPrimitive;
@@ -23,7 +23,7 @@ fn pretty_print_test(name: &str, statement: &str) {
 }
 
 #[track_caller]
-fn pretty_print_output_test(name: &str, statement: &str, statement_ast: &AstNode<TopLevelQuery>) {
+fn pretty_print_output_test(name: &str, statement: &str, statement_ast: &AstNode<Item>) {
     // TODO https://github.com/partiql/partiql-lang-rust/issues/473
     let doc = [180, 120, 80, 40, 30, 20, 10]
         .into_iter()
@@ -42,7 +42,7 @@ fn pretty_print_output_test(name: &str, statement: &str, statement_ast: &AstNode
 }
 
 #[track_caller]
-fn pretty_print_roundtrip_test(statement_ast: &AstNode<TopLevelQuery>) {
+fn pretty_print_roundtrip_test(statement_ast: &AstNode<Item>) {
     let pretty = statement_ast.to_pretty_string(40).unwrap();
     let reparsed = parse(pretty.as_str());
     assert!(reparsed.is_ok());

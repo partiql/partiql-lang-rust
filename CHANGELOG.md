@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING* partiql-parser: `Parsed`'s `ast` field type changed from `ast::AstNode<ast::TopLevelQuery>` to `ast::AstNode<ast::Item>` to support DDL statements alongside queries. Code that accesses `parsed.ast` must now match on `ast::Item` (e.g. `Item::Query`) to reach the query node.
 
 ### Added
+- partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
 
 ### Removed
 

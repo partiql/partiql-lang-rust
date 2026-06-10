@@ -50,7 +50,7 @@ pub enum Item {
     // Data Modification Language statements
     Dml(Dml),
     // Data retrieval statements
-    Query(Query),
+    Query(AstNode<TopLevelQuery>),
 }
 
 impl fmt::Display for Item {
@@ -69,7 +69,7 @@ pub struct Ddl {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DdlOp {
-    /// `CREATE TABLE <symbol>`
+    /// `CREATE TABLE <symbol>` or `CREATE TABLE <symbol> AS (<query>)`
     CreateTable(CreateTable),
     /// `DROP TABLE <Ident>`
     DropTable(DropTable),
@@ -80,11 +80,14 @@ pub enum DdlOp {
     DropIndex(DropIndex),
 }
 
-#[derive(Visit, Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateTable {
     #[visit(skip)]
     pub table_name: SymbolPrimitive,
+    /// Optional source query for `CREATE TABLE <name> AS (<query>)` (CTAS).
+    /// `None` for a plain `CREATE TABLE <name>`.
+    pub as_query: Option<Box<AstNode<Query>>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq, Eq)]

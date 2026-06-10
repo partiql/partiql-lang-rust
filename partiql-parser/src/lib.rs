@@ -111,7 +111,7 @@ impl Parser {
 pub struct Parsed<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,
-    pub ast: ast::AstNode<ast::TopLevelQuery>,
+    pub ast: ast::AstNode<ast::Item>,
     pub locations: LocationMap,
 }
 
