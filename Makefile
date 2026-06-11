@@ -1,4 +1,4 @@
-.PHONY: ci-check build test fmt clippy deny conformance coverage help
+.PHONY: ci-check build test fmt clippy deny conformance conformance-check coverage help
 
 # Run all CI checks (matches GitHub Actions)
 ci-check: build test fmt clippy deny
@@ -29,8 +29,12 @@ deny:
 
 # Conformance tests (optional, can be slow)
 conformance:
-	@echo "unning conformance tests..."
+	@echo "Running conformance tests..."
 	cargo test --package partiql-conformance-tests --features "conformance_test"
+
+# Check VM conformance report matches actual results (requires nightly + jq)
+conformance-check:
+	@./scripts/conformance_report.sh check
 
 # Code coverage (requires cargo-llvm-cov)
 coverage:
@@ -50,6 +54,7 @@ help:
 	@echo "  fmt          - Check code formatting"
 	@echo "  clippy       - Run clippy lints"
 	@echo "  deny         - Run cargo-deny security/license checks"
-	@echo "  conformance  - Run conformance tests (slow)"
+	@echo "  conformance       - Run conformance tests (slow)"
+	@echo "  conformance-check - Verify vm.json matches actual results (requires nightly + jq)"
 	@echo "  coverage     - Generate code coverage report"
 	@echo "  help         - Show this help message"
