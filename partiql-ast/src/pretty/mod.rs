@@ -22,7 +22,7 @@ where
     }
 }
 
-impl PrettyDoc for Item {
+impl PrettyDoc for Statement {
     fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
     where
         D: DocAllocator<'b, A>,
@@ -30,11 +30,9 @@ impl PrettyDoc for Item {
         A: Clone,
     {
         match self {
-            Item::Query(q) => q.pretty_doc(arena),
-            Item::Ddl(ddl) => ddl.op.pretty_doc(arena),
-            // DML pretty-printing is not yet implemented; emit an empty document
-            // rather than panicking so round-trip/snapshot harnesses degrade gracefully.
-            Item::Dml(_) => arena.nil(),
+            Statement::Query(q) => q.pretty_doc(arena),
+            Statement::Ddl(ddl_op) => ddl_op.pretty_doc(arena),
+            Statement::Dml(_) => arena.nil(),
         }
     }
 }

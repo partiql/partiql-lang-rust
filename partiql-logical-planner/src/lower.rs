@@ -5,12 +5,12 @@ use ordered_float::OrderedFloat;
 use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
-    CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
-    DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
-    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
+    CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, DdlOp, Delete, Dml, DmlOp, DropIndex,
+    DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
+    GroupingStrategy, Insert, InsertValue, Join, JoinKind, JoinSpec, Like, List, Lit,
     NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
     Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
-    SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    SimpleCase, SortSpec, Statement, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
@@ -265,10 +265,13 @@ impl<'a> AstToLogical<'a> {
 
     pub fn lower_query(
         mut self,
-        query: &ast::AstNode<ast::TopLevelQuery>,
+        query: &ast::TopLevelQuery,
+        stmt_id: NodeId,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         self.enter_plan();
+        self.id_stack.push(stmt_id);
         query.visit(&mut self);
+        self.id_stack.pop();
         true_or_fault_err!(
             self,
             self.plan_stack.len() == 1,
@@ -580,12 +583,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
-    fn enter_item(&mut self, _item: &'ast Item) -> Traverse {
-        not_yet_implemented_fault!(self, "Item");
-    }
-
-    fn enter_ddl(&mut self, _ddl: &'ast Ddl) -> Traverse {
-        not_yet_implemented_fault!(self, "Ddl".to_string());
+    fn enter_statement(&mut self, _statement: &'ast Statement) -> Traverse {
+        not_yet_implemented_fault!(self, "Statement");
     }
 
     fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) -> Traverse {

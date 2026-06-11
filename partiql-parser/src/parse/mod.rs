@@ -30,13 +30,13 @@ mod grammar {
 
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
-type LalrpopResult<'input> = Result<ast::AstNode<ast::Item>, LalrpopError<'input>>;
+type LalrpopResult<'input> = Result<ast::AstNode<ast::Statement>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
-    pub ast: ast::AstNode<ast::Item>,
+    pub statements: Vec<ast::AstNode<ast::Statement>>,
     pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
@@ -84,8 +84,8 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
             errors.push(ParseError::from(e));
             Err(ErrorData { errors, offsets })
         }
-        (Ok(ast), true) => Ok(AstData {
-            ast,
+        (Ok(stmt), true) => Ok(AstData {
+            statements: vec![stmt],
             locations,
             offsets,
         }),
@@ -150,7 +150,7 @@ mod tests {
             let res = parse_partiql($q);
             println!("{:#?}", res);
             match res {
-                Ok(data) => data.ast,
+                Ok(data) => data.statements.into_iter().next().unwrap(),
                 _ => panic!("{:?}", res),
             }
         }};
@@ -361,18 +361,14 @@ mod tests {
 
             if let ast::AstNode {
                 node:
-                    ast::Item::Query(ast::AstNode {
-                        node:
-                            ast::TopLevelQuery {
-                                query:
-                                    ast::AstNode {
-                                        node:
-                                            ast::Query {
-                                                set:
-                                                    ast::AstNode {
-                                                        node: ast::QuerySet::Expr(ref e),
-                                                        ..
-                                                    },
+                    ast::Statement::Query(ast::TopLevelQuery {
+                        query:
+                            ast::AstNode {
+                                node:
+                                    ast::Query {
+                                        set:
+                                            ast::AstNode {
+                                                node: ast::QuerySet::Expr(ref e),
                                                 ..
                                             },
                                         ..
@@ -563,7 +559,7 @@ mod tests {
                 let res = parse_partiql_null_id($q);
                 println!("{:#?}", res);
                 match res {
-                    Ok(data) => data.ast,
+                    Ok(data) => data.statements.into_iter().next().unwrap(),
                     _ => panic!("{:?}", res),
                 }
             }};

@@ -28,27 +28,18 @@ grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'
 
 // Top-level entry point: a single `PartiQL` statement, which is either a
 // data-retrieval query or a DDL operation (currently `CREATE TABLE` / CTAS).
-pub(crate) Statement: ast::AstNode<ast::Item> = {
-    <lo:@L> <query:TopLevelQuery> <hi:@R> => state.node(ast::Item::Query(query), lo..hi),
-    <lo:@L> <ddl:Ddl> <hi:@R> => state.node(ast::Item::Ddl(ddl), lo..hi),
+pub(crate) Statement: ast::AstNode<ast::Statement> = {
+    <lo:@L> <query:TopLevelQuery> <hi:@R> => state.node(ast::Statement::Query(query.node), lo..hi),
+    <lo:@L> <ddl_op:DdlOp> <hi:@R> => state.node(ast::Statement::Ddl(ddl_op), lo..hi),
 }
 
-pub(crate) TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
+TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
     <lo:@L>
     <with:WithClause?>
     <query:Query>
     <hi:@R> => {
         state.node(ast::TopLevelQuery { with, query }, lo..hi)
     }
-}
-
-// ------------------------------------------------------------------------------ //
-//                                                                                //
-//                          Data Definition Language                             //
-//                                                                                //
-// ------------------------------------------------------------------------------ //
-Ddl: ast::Ddl = {
-    <op:DdlOp> => ast::Ddl { op },
 }
 
 DdlOp: ast::DdlOp = {

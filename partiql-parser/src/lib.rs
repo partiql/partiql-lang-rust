@@ -85,13 +85,13 @@ impl Parser {
     pub fn parse<'input>(&self, text: &'input str) -> ParserResult<'input> {
         match parse_partiql(text) {
             Ok(AstData {
-                ast,
+                statements,
                 locations,
                 offsets,
             }) => Ok(Parsed {
                 text,
                 offsets,
-                ast,
+                statements,
                 locations,
             }),
             Err(ErrorData { errors, offsets }) => Err(ParserError {
@@ -111,7 +111,7 @@ impl Parser {
 pub struct Parsed<'input> {
     pub text: &'input str,
     pub offsets: LineOffsetTracker,
-    pub ast: ast::AstNode<ast::Item>,
+    pub statements: Vec<ast::AstNode<ast::Statement>>,
     pub locations: LocationMap,
 }
 

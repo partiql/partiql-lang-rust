@@ -31,22 +31,27 @@ impl<'c> LogicalPlanner<'c> {
         &self,
         parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
-        match &parsed.ast.node {
-            // Data-retrieval queries flow through the existing lowering pipeline unchanged.
-            ast::Item::Query(q) => {
+        if parsed.statements.len() != 1 {
+            return Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "multi-statement input".to_string(),
+                )],
+            });
+        }
+        let stmt = &parsed.statements[0];
+        match &stmt.node {
+            ast::Statement::Query(q) => {
                 let mut resolver = NameResolver::new(self.catalog);
-                let registry = resolver.resolve(q)?;
+                let registry = resolver.resolve(q, stmt.id)?;
                 let planner = AstToLogical::new(self.catalog, registry);
-                planner.lower_query(q)
+                planner.lower_query(q, stmt.id)
             }
-            // DDL/DML lowering is not yet implemented; surface a clear error rather
-            // than silently producing an empty plan.
-            ast::Item::Ddl(_) => Err(AstTransformationError {
+            ast::Statement::Ddl(_) => Err(AstTransformationError {
                 errors: vec![AstTransformError::NotYetImplemented(
                     "DDL statement lowering".to_string(),
                 )],
             }),
-            ast::Item::Dml(_) => Err(AstTransformationError {
+            ast::Statement::Dml(_) => Err(AstTransformationError {
                 errors: vec![AstTransformError::NotYetImplemented(
                     "DML statement lowering".to_string(),
                 )],

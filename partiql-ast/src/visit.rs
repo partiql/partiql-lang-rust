@@ -99,16 +99,10 @@ pub trait Visitor<'ast> {
     fn exit_ast_node(&mut self, _id: NodeId) -> Traverse {
         Traverse::Continue
     }
-    fn enter_item(&mut self, _item: &'ast ast::Item) -> Traverse {
+    fn enter_statement(&mut self, _statement: &'ast ast::Statement) -> Traverse {
         Traverse::Continue
     }
-    fn exit_item(&mut self, _item: &'ast ast::Item) -> Traverse {
-        Traverse::Continue
-    }
-    fn enter_ddl(&mut self, _ddl: &'ast ast::Ddl) -> Traverse {
-        Traverse::Continue
-    }
-    fn exit_ddl(&mut self, _ddl: &'ast ast::Ddl) -> Traverse {
+    fn exit_statement(&mut self, _statement: &'ast ast::Statement) -> Traverse {
         Traverse::Continue
     }
     fn enter_ddl_op(&mut self, _ddl_op: &'ast ast::DdlOp) -> Traverse {
