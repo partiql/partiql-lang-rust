@@ -1,8 +1,8 @@
 //! A `PartiQL` abstract syntax tree (AST).
 //!
 //! This module contains the structures for the language AST.
-//! Two main entities in the module are [`Item`] and [`AstNode`]. `AstNode` represents an AST node
-//! and `Item` represents a `PartiQL` statement type, e.g. query, data definition language (DDL)
+//! Two main entities in the module are [`Statement`] and [`AstNode`]. `AstNode` represents an AST node
+//! and `Statement` represents a `PartiQL` statement type, e.g. query, data definition language (DDL)
 //! data manipulation language (DML).
 
 // As more changes to this AST are expected, unless explicitly advised, using the structures exposed
@@ -44,32 +44,22 @@ impl<T> IdAnnotated<NodeId> for AstNode<T> {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Item {
-    // Data Definition Language statements
-    Ddl(Ddl),
-    // Data Modification Language statements
+pub enum Statement {
+    Query(TopLevelQuery),
+    Ddl(DdlOp),
     Dml(Dml),
-    // Data retrieval statements
-    Query(Query),
 }
 
-impl fmt::Display for Item {
+impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Use Debug formatting for now
         write!(f, "{self:?}")
     }
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Ddl {
-    pub op: DdlOp,
-}
-
-#[derive(Visit, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DdlOp {
-    /// `CREATE TABLE <symbol>`
+    /// `CREATE TABLE <symbol>` or `CREATE TABLE <symbol> AS (<query>)`
     CreateTable(CreateTable),
     /// `DROP TABLE <Ident>`
     DropTable(DropTable),
@@ -80,11 +70,14 @@ pub enum DdlOp {
     DropIndex(DropIndex),
 }
 
-#[derive(Visit, Clone, Debug, PartialEq, Eq)]
+#[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateTable {
     #[visit(skip)]
     pub table_name: SymbolPrimitive,
+    /// Optional source query for `CREATE TABLE <name> AS (<query>)` (CTAS).
+    /// `None` for a plain `CREATE TABLE <name>`.
+    pub as_query: Option<Box<AstNode<Query>>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq, Eq)]

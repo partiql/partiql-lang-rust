@@ -66,7 +66,7 @@ pub(crate) fn parse(statement: &str) -> ParserResult {
     #[cfg(feature = "test_pretty_print")]
     if let Ok(result) = &result {
         use partiql_common::pretty::ToPretty;
-        let pretty = result.ast.to_pretty_string(80);
+        let pretty = result.statements[0].to_pretty_string(80);
         if let Ok(pretty) = pretty {
             println!("{pretty}");
         } else {

@@ -26,13 +26,38 @@ use partiql_common::node::NodeIdGenerator;
 grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'input, Id>) where Id: NodeIdGenerator;
 
 
-pub(crate) TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
+// Top-level entry point: a single `PartiQL` statement, which is either a
+// data-retrieval query or a DDL operation (currently `CREATE TABLE` / CTAS).
+pub(crate) Statement: ast::AstNode<ast::Statement> = {
+    <lo:@L> <query:TopLevelQuery> <hi:@R> => state.node(ast::Statement::Query(query.node), lo..hi),
+    <lo:@L> <ddl_op:DdlOp> <hi:@R> => state.node(ast::Statement::Ddl(ddl_op), lo..hi),
+}
+
+TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
     <lo:@L>
     <with:WithClause?>
     <query:Query>
     <hi:@R> => {
         state.node(ast::TopLevelQuery { with, query }, lo..hi)
     }
+}
+
+DdlOp: ast::DdlOp = {
+    <c:CreateTable> => ast::DdlOp::CreateTable(c),
+}
+
+// `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS).
+// The optional `AS (...)` clause distinguishes the two forms; a plain
+// `CREATE TABLE <name>` leaves `as_query` as `None`.
+CreateTable: ast::CreateTable = {
+    "CREATE" "TABLE" <table_name:SymbolPrimitive> <as_query:CtasClause?> => {
+        ast::CreateTable { table_name, as_query }
+    }
+}
+
+#[inline]
+CtasClause: Box<ast::AstNode<ast::Query>> = {
+    "AS" "(" <query:Query> ")" => Box::new(query),
 }
 
 Query: ast::AstNode<ast::Query> = {
@@ -2163,6 +2188,7 @@ extern {
         "BY" => lexer::Token::By,
         "CASE" => lexer::Token::Case,
         "COLUMNS" => lexer::Token::Columns,
+        "CREATE" => lexer::Token::Create,
         "CROSS" => lexer::Token::Cross,
         "CYCLE" => lexer::Token::Cycle,
         "DATE" => lexer::Token::Date,

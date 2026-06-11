@@ -129,9 +129,12 @@ impl<'c> NameResolver<'c> {
 
     pub fn resolve(
         &mut self,
-        query: &ast::AstNode<ast::TopLevelQuery>,
+        query: &ast::TopLevelQuery,
+        stmt_id: NodeId,
     ) -> Result<KeyRegistry, AstTransformationError> {
+        self.id_path_to_root.push(stmt_id);
         query.visit(self);
+        self.id_path_to_root.pop();
         if !self.errors.is_empty() {
             return Err(AstTransformationError {
                 errors: std::mem::take(&mut self.errors),

@@ -3,7 +3,8 @@
 
 use crate::lower::AstToLogical;
 
-use partiql_ast_passes::error::AstTransformationError;
+use partiql_ast::ast;
+use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 use partiql_ast_passes::name_resolver::NameResolver;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
@@ -30,10 +31,31 @@ impl<'c> LogicalPlanner<'c> {
         &self,
         parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
-        let q = &parsed.ast;
-        let mut resolver = NameResolver::new(self.catalog);
-        let registry = resolver.resolve(q)?;
-        let planner = AstToLogical::new(self.catalog, registry);
-        planner.lower_query(q)
+        if parsed.statements.len() != 1 {
+            return Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "multi-statement input".to_string(),
+                )],
+            });
+        }
+        let stmt = &parsed.statements[0];
+        match &stmt.node {
+            ast::Statement::Query(q) => {
+                let mut resolver = NameResolver::new(self.catalog);
+                let registry = resolver.resolve(q, stmt.id)?;
+                let planner = AstToLogical::new(self.catalog, registry);
+                planner.lower_query(q, stmt.id)
+            }
+            ast::Statement::Ddl(_) => Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "DDL statement lowering".to_string(),
+                )],
+            }),
+            ast::Statement::Dml(_) => Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "DML statement lowering".to_string(),
+                )],
+            }),
+        }
     }
 }

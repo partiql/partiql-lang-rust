@@ -30,13 +30,13 @@ mod grammar {
 
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
-type LalrpopResult<'input> = Result<ast::AstNode<ast::TopLevelQuery>, LalrpopError<'input>>;
+type LalrpopResult<'input> = Result<ast::AstNode<ast::Statement>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
-    pub ast: ast::AstNode<ast::TopLevelQuery>,
+    pub statements: Vec<ast::AstNode<ast::Statement>>,
     pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
@@ -62,7 +62,7 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
     let lexer = CommentSkippingLexer::new(lexer);
 
-    let result: LalrpopResult<'_> = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
+    let result: LalrpopResult<'_> = grammar::StatementParser::new().parse(s, &mut state, lexer);
 
     let ParserState {
         locations, errors, ..
@@ -84,8 +84,8 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
             errors.push(ParseError::from(e));
             Err(ErrorData { errors, offsets })
         }
-        (Ok(ast), true) => Ok(AstData {
-            ast,
+        (Ok(stmt), true) => Ok(AstData {
+            statements: vec![stmt],
             locations,
             offsets,
         }),
@@ -150,7 +150,7 @@ mod tests {
             let res = parse_partiql($q);
             println!("{:#?}", res);
             match res {
-                Ok(data) => data.ast,
+                Ok(data) => data.statements.into_iter().next().unwrap(),
                 _ => panic!("{:?}", res),
             }
         }};
@@ -361,7 +361,7 @@ mod tests {
 
             if let ast::AstNode {
                 node:
-                    ast::TopLevelQuery {
+                    ast::Statement::Query(ast::TopLevelQuery {
                         query:
                             ast::AstNode {
                                 node:
@@ -376,7 +376,7 @@ mod tests {
                                 ..
                             },
                         ..
-                    },
+                    }),
                 ..
             } = res
             {
@@ -559,7 +559,7 @@ mod tests {
                 let res = parse_partiql_null_id($q);
                 println!("{:#?}", res);
                 match res {
-                    Ok(data) => data.ast,
+                    Ok(data) => data.statements.into_iter().next().unwrap(),
                     _ => panic!("{:?}", res),
                 }
             }};
@@ -966,6 +966,47 @@ mod tests {
                     },
                 })
             );
+        }
+    }
+
+    mod ddl {
+        use super::*;
+
+        // `CREATE TABLE <name>` with no `AS (...)` clause is valid; the CtasClause
+        // is optional (`<as_query:CtasClause?>`) and leaves `as_query` as `None`.
+        #[test]
+        fn create_table_plain() {
+            parse!(r"CREATE TABLE my_table");
+        }
+
+        // CTAS over the upstream table-function layout: a function-call FROM source
+        // (`mem(5, 2)`) with alias `m` and a qualified projection `m.a`.
+        #[test]
+        fn create_table_as_select() {
+            parse!(r"CREATE TABLE new_table AS (SELECT m.a FROM mem(5, 2) m)");
+        }
+
+        // The parenthesized query is the full top-level `Query` rule, so WHERE,
+        // ORDER BY, and LIMIT are all accepted inside `AS (...)`.
+        #[test]
+        fn create_table_as_complex() {
+            parse!(
+                r"CREATE TABLE summary AS (SELECT m.a FROM mem(5, 2) m WHERE m.a > 1 ORDER BY m.a DESC LIMIT 10)"
+            );
+        }
+
+        // Negative: a missing closing parenthesis must fail gracefully (Err), not panic.
+        #[test]
+        fn create_table_as_missing_close_paren() {
+            let res = parse_partiql(r"CREATE TABLE foo AS (SELECT 1");
+            assert!(res.is_err());
+        }
+
+        // Negative: a missing table identifier must fail gracefully (Err), not panic.
+        #[test]
+        fn create_table_missing_identifier() {
+            let res = parse_partiql(r"CREATE TABLE");
+            assert!(res.is_err());
         }
     }
 }
