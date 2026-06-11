@@ -42,9 +42,10 @@ The `stdout` field of failed tests contains the error classification:
 | 13 | GroupBy | Not supported |
 | 14 | Having | Not supported |
 
-## Current State (2026-06-03)
+## Current State (2026-06-11)
 
-- **3,911 passing / 2,760 failing / 6,671 total (58.6% conformant)**
+- **4,115 passing / 2,556 failing / 6,671 total (61.7% conformant)**
+- Previously 3,911 (58.6%) before trim/exists support
 - Previously 3,775 (56.6%) before LIKE support
 - Previously 2,587 (38.8%) before DBRef/global resolution was implemented
 - Previously 1,117 (16.7%) before built-in functions were implemented
@@ -55,7 +56,7 @@ The `stdout` field of failed tests contains the error classification:
 
 | # | Root Cause | Tests Blocked | Cumulative | Key Files |
 |--:|:--|--:|--:|:--|
-| 1 | Missing built-in functions | ~338 remaining | — | `engine/builtins.rs` (DONE for top functions) |
+| 1 | Missing built-in functions | ~170 remaining | — | `engine/builtins.rs` (trim/exists DONE; extract blocked on DateTime in ValueRef) |
 | 2 | Unresolved DB objects / globals | ~126 remaining | — | `engine/compiler.rs` (DONE: implicit scans for ExprQuery) |
 | 3 | GROUP BY operator | 688 (12.4%) | 64.7% | `engine/compiler.rs` |
 | 4 | Scan expression types | ~57 remaining | — | `engine/compiler.rs` (DONE: inline scans for literals) |
@@ -79,7 +80,7 @@ The `stdout` field of failed tests contains the error classification:
 
 ## Task Breakdown
 
-### Task 1: Built-in Functions (~338 tests remaining)
+### Task 1: Built-in Functions (~170 tests remaining)
 
 The VM dispatches function calls via `UdfRegistry` trait in `engine/builtins.rs`. The `BuiltinFunctions` struct implements this and is wired into `PartiQLVM` (passed to `eval_inst` in the dispatch loop at `plan.rs`).
 
@@ -89,19 +90,19 @@ The VM dispatches function calls via `UdfRegistry` trait in `engine/builtins.rs`
 - [x] `lower` — 274 tests
 - [x] `upper` — 274 tests
 - [x] `substring` — 188 tests
+- [x] `trim` (LTrim/BTrim/RTrim) — 140 tests (5 remaining are static analysis tests)
 - [x] `overlay` — 44 tests
 - [x] `cardinality` — 35 tests
 - [x] `mod` — 30 tests
 - [x] `position` — 28 tests
+- [x] `exists` — 20 tests (remaining failures blocked by unresolved vars / variant literals)
 - [x] `abs` — 11 tests
 - [x] `bit_length` — 11 tests
 - [x] `octet_length` — 11 tests
 
 **Remaining (not yet implemented in `builtins.rs`):**
 
-- [ ] `trim` (LTrim/BTrim/RTrim) — 120 tests
-- [ ] `extract` (ExtractYear/Month/Day/etc.) — 32 tests
-- [ ] `exists` — 18 tests
+- [ ] `extract` (ExtractYear/Month/Day/etc.) — 32 tests (blocked: no DateTime variant in ValueRef)
 
 **Aggregate functions (require GROUP BY first):**
 
