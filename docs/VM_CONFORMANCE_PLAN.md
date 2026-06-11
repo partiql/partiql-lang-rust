@@ -2,6 +2,26 @@
 
 This document tracks the gaps between the new VM evaluator (`partiql-eval/src/engine/`) and the legacy evaluator, prioritized by impact on the conformance test suite.
 
+## Conformance Report Tooling
+
+Committed JSON reports live in `partiql-conformance-tests/reports/`:
+- `legacy.json` — baseline from main branch's legacy evaluator
+- `vm.json` — current VM evaluator results (update after every VM change)
+
+```bash
+# See the work list (tests legacy passes but VM fails):
+./scripts/conformance_report.sh diff
+
+# Update VM report after making changes:
+./scripts/conformance_report.sh vm
+
+# Verify committed vm.json matches actual results:
+./scripts/conformance_report.sh check
+# (also available as: make conformance-check)
+```
+
+Requirements: `cargo +nightly`, `jq`
+
 ## How to Run the Analysis
 
 ```bash
