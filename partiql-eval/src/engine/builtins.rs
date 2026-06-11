@@ -30,6 +30,10 @@ impl UdfRegistry for BuiltinFunctions {
             "Abs" => builtin_abs(args),
             "Mod" => builtin_mod(args),
             "Cardinality" => builtin_cardinality(args),
+            "LTrim" => builtin_ltrim(args),
+            "BTrim" => builtin_btrim(args),
+            "RTrim" => builtin_rtrim(args),
+            "Exists" => builtin_exists(args),
             _ => Err(EngineError::UdfNotFound(name.to_string())),
         }
     }
@@ -224,5 +228,52 @@ fn builtin_cardinality<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
         Some(ValueRef::Null) => Ok(ValueRef::Null),
         Some(ValueRef::Missing) => Ok(ValueRef::Missing),
         _ => Ok(ValueRef::Missing),
+    }
+}
+
+fn builtin_ltrim<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
+    match (args.first(), args.get(1)) {
+        (Some(ValueRef::Str(trim_chars)), Some(ValueRef::Str(source))) => {
+            let chars: Vec<char> = trim_chars.chars().collect();
+            Ok(ValueRef::Str(source.trim_start_matches(&chars[..])))
+        }
+        (Some(ValueRef::Null), _) | (_, Some(ValueRef::Null)) => Ok(ValueRef::Null),
+        (Some(ValueRef::Missing), _) | (_, Some(ValueRef::Missing)) => Ok(ValueRef::Missing),
+        _ => Ok(ValueRef::Missing),
+    }
+}
+
+fn builtin_btrim<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
+    match (args.first(), args.get(1)) {
+        (Some(ValueRef::Str(trim_chars)), Some(ValueRef::Str(source))) => {
+            let chars: Vec<char> = trim_chars.chars().collect();
+            Ok(ValueRef::Str(source.trim_matches(&chars[..])))
+        }
+        (Some(ValueRef::Null), _) | (_, Some(ValueRef::Null)) => Ok(ValueRef::Null),
+        (Some(ValueRef::Missing), _) | (_, Some(ValueRef::Missing)) => Ok(ValueRef::Missing),
+        _ => Ok(ValueRef::Missing),
+    }
+}
+
+fn builtin_rtrim<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
+    match (args.first(), args.get(1)) {
+        (Some(ValueRef::Str(trim_chars)), Some(ValueRef::Str(source))) => {
+            let chars: Vec<char> = trim_chars.chars().collect();
+            Ok(ValueRef::Str(source.trim_end_matches(&chars[..])))
+        }
+        (Some(ValueRef::Null), _) | (_, Some(ValueRef::Null)) => Ok(ValueRef::Null),
+        (Some(ValueRef::Missing), _) | (_, Some(ValueRef::Missing)) => Ok(ValueRef::Missing),
+        _ => Ok(ValueRef::Missing),
+    }
+}
+
+fn builtin_exists<'a>(args: &[ValueRef<'a>]) -> Result<ValueRef<'a>> {
+    match args.first() {
+        Some(ValueRef::Tuple(t)) => Ok(ValueRef::Bool(!t.fields.is_empty())),
+        Some(ValueRef::List(items)) => Ok(ValueRef::Bool(!items.is_empty())),
+        Some(ValueRef::Bag(items)) => Ok(ValueRef::Bool(!items.is_empty())),
+        Some(ValueRef::Null) => Ok(ValueRef::Null),
+        Some(ValueRef::Missing) => Ok(ValueRef::Missing),
+        _ => Ok(ValueRef::Bool(false)),
     }
 }
