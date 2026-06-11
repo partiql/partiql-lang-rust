@@ -47,7 +47,9 @@ fn pretty_print_roundtrip_test(statement_ast: &AstNode<Statement>) {
     let reparsed = parse(pretty.as_str());
     assert!(reparsed.is_ok());
 
-    let pretty2 = reparsed.unwrap().statements[0].to_pretty_string(40).unwrap();
+    let pretty2 = reparsed.unwrap().statements[0]
+        .to_pretty_string(40)
+        .unwrap();
 
     assert_eq!(pretty, pretty2);
 }
@@ -84,7 +86,9 @@ fn pretty_print_value_roundtrip_test(value: &Value) {
     let reparsed = parse(pretty.as_str());
     assert!(reparsed.is_ok());
 
-    let pretty2 = reparsed.unwrap().statements[0].to_pretty_string(40).unwrap();
+    let pretty2 = reparsed.unwrap().statements[0]
+        .to_pretty_string(40)
+        .unwrap();
 
     assert_eq!(pretty, pretty2);
 }
