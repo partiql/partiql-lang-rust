@@ -6,7 +6,7 @@ use crate::engine::arena::Arena;
 use crate::engine::builtins::BuiltinFunctions;
 use crate::engine::catalog::ExecutionContext;
 use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::{Inst, Program};
+use crate::engine::expr::{AggFunc, Inst, Program};
 use crate::engine::source::RegisterWriter;
 use crate::engine::source::{DataSourceImpl, InlineDataSource, ScanLayout};
 use crate::engine::value::{value_ref_to_owned, RegisterReader, Shape, ValueOwned, ValueRef};
@@ -311,7 +311,8 @@ pub struct PartiQLVM {
     /// Data source cursors. Index = cursor_id.
     cursors: Vec<Option<DataSourceImpl>>,
     /// Memory banks. Bank 0 = query-level (persistent across rows).
-    /// Bank 1+ = per-cursor row-level banks, reset at each NextRow.
+    /// Bank 1 = per-cursor row-level bank, reset at each NextRow.
+    /// Bank 2+ = sorter banks (persistent until sorter closes).
     banks: Vec<Arena>,
     /// Unified register array: [0..slot_count] are output slots, rest are temporaries.
     registers: Vec<ValueRef<'static>>,
@@ -325,6 +326,8 @@ pub struct PartiQLVM {
     builtins: BuiltinFunctions,
     /// Registered table functions, keyed by name.
     table_functions: HashMap<String, Arc<dyn crate::engine::source::TableFunction>>,
+    /// Sorters for GROUP BY (indexed by sorter_id from bytecode).
+    sorters: Vec<Option<crate::engine::sorter::Sorter>>,
 }
 
 impl PartiQLVM {
@@ -357,6 +360,7 @@ impl PartiQLVM {
             slot_count,
             builtins: BuiltinFunctions::new(),
             table_functions: exec_context.table_functions().clone(),
+            sorters: Vec::new(),
         };
 
         // Pre-create data sources from catalog
@@ -673,6 +677,155 @@ impl<'vm> QueryIterator<'vm> {
                         Some(DataSourceImpl::Catalog(data_source));
                 }
 
+                // === Sorter Instructions ===
+
+                Inst::SorterInsert {
+                    sorter_id,
+                    src_reg,
+                    reg_count,
+                } => {
+                    let sorter = match self.vm.sorters.get_mut(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    let bank = &self.vm.banks[sorter.bank_id];
+                    let start = *src_reg as usize;
+                    let count = *reg_count as usize;
+                    let mut fields = Vec::with_capacity(count);
+                    for i in start..start + count {
+                        // Safety: sorter bank outlives the sorter records.
+                        // Same contract as the VM's register/arena relationship.
+                        let copied = copy_value_ref_to_bank(regs[i], bank);
+                        let copied: ValueRef<'static> = unsafe { std::mem::transmute(copied) };
+                        fields.push(copied);
+                    }
+                    sorter.insert(crate::engine::sorter::SorterRecord { fields });
+                }
+
+                Inst::SorterSort {
+                    sorter_id,
+                    eof_target,
+                } => {
+                    let sorter = match self.vm.sorters.get_mut(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    if !sorter.sort() {
+                        self.vm.ip = *eof_target as usize;
+                    }
+                }
+
+                Inst::SorterData { sorter_id, dst_reg } => {
+                    let sorter = match self.vm.sorters.get(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    let fields = match sorter.current() {
+                        Some(f) => f,
+                        None => {
+                            return Some(Err(EngineError::IllegalState(
+                                "sorter positioned past end".to_string(),
+                            )))
+                        }
+                    };
+                    let dst = *dst_reg as usize;
+                    for (i, field) in fields.iter().enumerate() {
+                        regs[dst + i] = *field;
+                    }
+                }
+
+                Inst::SorterNext { sorter_id, target } => {
+                    let sorter = match self.vm.sorters.get_mut(*sorter_id as usize) {
+                        Some(Some(s)) => s,
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(format!(
+                                "sorter {} not bound",
+                                sorter_id
+                            ))))
+                        }
+                    };
+                    if sorter.advance() {
+                        self.vm.ip = *target as usize;
+                    }
+                }
+
+                // === Aggregation Instructions ===
+
+                Inst::AggStep {
+                    func,
+                    accum_reg,
+                    input_reg,
+                } => {
+                    let accum = regs[*accum_reg as usize];
+                    let input = regs[*input_reg as usize];
+                    regs[*accum_reg as usize] = agg_step(*func, accum, input);
+                }
+
+                Inst::AggFinal {
+                    func,
+                    accum_reg,
+                    dst_reg,
+                } => {
+                    let accum = regs[*accum_reg as usize];
+                    regs[*dst_reg as usize] = agg_final(*func, accum);
+                }
+
+                Inst::AggReset { accum_start, count } => {
+                    let start = *accum_start as usize;
+                    let cnt = *count as usize;
+                    for reg in &mut regs[start..start + cnt] {
+                        *reg = ValueRef::Missing;
+                    }
+                }
+
+                // === Subroutine Instructions ===
+
+                Inst::Gosub { ret_reg, target } => {
+                    regs[*ret_reg as usize] = ValueRef::I64(self.vm.ip as i64);
+                    self.vm.ip = *target as usize;
+                }
+
+                Inst::Return { ret_reg } => {
+                    match regs[*ret_reg as usize] {
+                        ValueRef::I64(addr) => {
+                            self.vm.ip = addr as usize;
+                        }
+                        _ => {
+                            return Some(Err(EngineError::IllegalState(
+                                "Return: ret_reg does not contain a valid address".to_string(),
+                            )))
+                        }
+                    }
+                }
+
+                // === Comparison ===
+
+                Inst::CompareEq {
+                    lhs_reg,
+                    rhs_reg,
+                    dst_reg,
+                } => {
+                    let lhs = regs[*lhs_reg as usize];
+                    let rhs = regs[*rhs_reg as usize];
+                    regs[*dst_reg as usize] =
+                        ValueRef::Bool(crate::engine::sorter::value_ref_eq(&lhs, &rhs));
+                }
+
                 // All scalar instructions delegate to eval_inst
                 other => {
                     if let Err(e) =
@@ -718,5 +871,144 @@ impl Drop for QueryIterator<'_> {
             bank.reset();
         }
         self.vm.halted = true;
+    }
+}
+
+/// Copy a ValueRef's data into the given arena bank, returning a new ValueRef
+/// that borrows from that bank. For inline types (I64, F64, Bool, etc.) this is
+/// a no-op copy. For heap types (Str, Bytes), it allocates into the bank.
+fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<'a> {
+    match value {
+        ValueRef::Missing => ValueRef::Missing,
+        ValueRef::Null => ValueRef::Null,
+        ValueRef::Bool(b) => ValueRef::Bool(b),
+        ValueRef::I64(n) => ValueRef::I64(n),
+        ValueRef::F64(f) => ValueRef::F64(f),
+        ValueRef::Decimal(d) => ValueRef::Decimal(d),
+        ValueRef::Str(s) => {
+            let bytes = bank.alloc_slice(s.as_bytes());
+            let copied = unsafe { std::str::from_utf8_unchecked(bytes) };
+            ValueRef::Str(copied)
+        }
+        ValueRef::Bytes(b) => {
+            let copied = bank.alloc_slice(b);
+            ValueRef::Bytes(copied)
+        }
+        // Tuple/List/Bag: deep copy into bank
+        ValueRef::Tuple(t) => {
+            use crate::engine::value::{TupleField, TupleRef};
+            let fields: Vec<TupleField<'a>> = t
+                .fields
+                .iter()
+                .map(|f| TupleField {
+                    name: {
+                        let bytes = bank.alloc_slice(f.name.as_bytes());
+                        unsafe { std::str::from_utf8_unchecked(bytes) }
+                    },
+                    value: copy_value_ref_to_bank(f.value, bank),
+                })
+                .collect();
+            let fields_slice = bank.alloc_slice(&fields);
+            let tuple_ref = bank.alloc_tuple_ref(TupleRef {
+                fields: fields_slice,
+            });
+            ValueRef::Tuple(tuple_ref)
+        }
+        ValueRef::List(items) => {
+            let refs: Vec<ValueRef<'a>> =
+                items.iter().map(|v| copy_value_ref_to_bank(*v, bank)).collect();
+            let refs_slice = bank.alloc_slice(&refs);
+            ValueRef::List(refs_slice)
+        }
+        ValueRef::Bag(items) => {
+            let refs: Vec<ValueRef<'a>> =
+                items.iter().map(|v| copy_value_ref_to_bank(*v, bank)).collect();
+            let refs_slice = bank.alloc_slice(&refs);
+            ValueRef::Bag(refs_slice)
+        }
+    }
+}
+
+/// Perform one step of an aggregate function: update the accumulator with a new input.
+fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> ValueRef<'static> {
+    match func {
+        AggFunc::Sum => match (accum, input) {
+            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
+            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
+            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a + b),
+            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a + b),
+            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => ValueRef::Decimal(a + b),
+            // Mixed numeric: promote to f64
+            (ValueRef::I64(a), ValueRef::F64(b)) => ValueRef::F64(a as f64 + b),
+            (ValueRef::F64(a), ValueRef::I64(b)) => ValueRef::F64(a + b as f64),
+            _ => unsafe { std::mem::transmute(accum) },
+        },
+        AggFunc::Count => match accum {
+            ValueRef::Missing => ValueRef::I64(1),
+            ValueRef::I64(n) => ValueRef::I64(n + 1),
+            _ => ValueRef::I64(1),
+        },
+        AggFunc::Min => match (accum, input) {
+            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
+            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
+            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a.min(b)),
+            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a.min(b)),
+            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
+                ValueRef::Decimal(if a <= b { a } else { b })
+            }
+            _ => unsafe { std::mem::transmute(accum) },
+        },
+        AggFunc::Max => match (accum, input) {
+            (_, ValueRef::Null | ValueRef::Missing) => unsafe { std::mem::transmute(accum) },
+            (ValueRef::Missing, v) => unsafe { std::mem::transmute(v) },
+            (ValueRef::I64(a), ValueRef::I64(b)) => ValueRef::I64(a.max(b)),
+            (ValueRef::F64(a), ValueRef::F64(b)) => ValueRef::F64(a.max(b)),
+            (ValueRef::Decimal(a), ValueRef::Decimal(b)) => {
+                ValueRef::Decimal(if a >= b { a } else { b })
+            }
+            _ => unsafe { std::mem::transmute(accum) },
+        },
+        AggFunc::Any => match (accum, input) {
+            (ValueRef::Bool(true), _) => ValueRef::Bool(true),
+            (_, ValueRef::Bool(true)) => ValueRef::Bool(true),
+            (ValueRef::Missing, ValueRef::Bool(b)) => ValueRef::Bool(b),
+            (ValueRef::Bool(a), _) => ValueRef::Bool(a),
+            _ => unsafe { std::mem::transmute(accum) },
+        },
+        AggFunc::Every => match (accum, input) {
+            (ValueRef::Bool(false), _) => ValueRef::Bool(false),
+            (_, ValueRef::Bool(false)) => ValueRef::Bool(false),
+            (ValueRef::Missing, ValueRef::Bool(b)) => ValueRef::Bool(b),
+            (ValueRef::Bool(a), _) => ValueRef::Bool(a),
+            _ => unsafe { std::mem::transmute(accum) },
+        },
+        AggFunc::Avg => {
+            // Avg stores (count, sum) encoded as two I64 values packed in the accum.
+            // For simplicity, we'll accumulate sum and count separately:
+            // The compiler should allocate TWO accum registers for Avg.
+            // For now, treat as Sum — finalize will need count.
+            // TODO: proper Avg support with paired registers
+            agg_step(AggFunc::Sum, accum, input)
+        }
+    }
+}
+
+/// Finalize an aggregate: convert the accumulator state to the final result.
+fn agg_final<'a>(func: AggFunc, accum: ValueRef<'a>) -> ValueRef<'a> {
+    match func {
+        AggFunc::Count => match accum {
+            ValueRef::Missing => ValueRef::I64(0),
+            other => other,
+        },
+        AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Any | AggFunc::Every => {
+            match accum {
+                ValueRef::Missing => ValueRef::Null,
+                other => other,
+            }
+        }
+        AggFunc::Avg => {
+            // TODO: proper Avg with count/sum pair
+            accum
+        }
     }
 }
