@@ -257,6 +257,14 @@ impl<'a> PlanCompiler<'a> {
             })
             .collect();
 
+        let sorter_metadata = self
+            .sorter_infos
+            .iter()
+            .map(|s| crate::engine::plan::SorterMetadata {
+                key_count: s.key_count,
+            })
+            .collect();
+
         Ok(CompiledPlan {
             program,
             cursors: cursor_infos,
@@ -266,6 +274,7 @@ impl<'a> PlanCompiler<'a> {
             inline_scans: std::mem::take(&mut self.inline_scans),
             expr_scan_ids: self.expr_scans.keys().copied().collect(),
             table_fn_scans,
+            sorter_metadata,
         })
     }
 

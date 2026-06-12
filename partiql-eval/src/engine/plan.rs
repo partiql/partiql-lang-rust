@@ -97,6 +97,15 @@ pub struct CompiledPlan {
     /// Table function scans keyed by ScanId. These are bound at runtime by
     /// the `CreateTableFnCursor` instruction.
     pub(crate) table_fn_scans: HashMap<ScanId, TableFnScanMetadata>,
+    /// Sorter metadata for GROUP BY. Index = sorter_id. Each entry describes
+    /// the number of key fields used for sorting.
+    pub(crate) sorter_metadata: Vec<SorterMetadata>,
+}
+
+/// Compile-time metadata for a sorter used by GROUP BY.
+#[derive(Debug, Clone)]
+pub struct SorterMetadata {
+    pub key_count: usize,
 }
 
 // Safety: Program is Send+Sync (verified by its own unsafe impl).
@@ -115,6 +124,7 @@ impl Clone for CompiledPlan {
             inline_scans: self.inline_scans.clone(),
             expr_scan_ids: self.expr_scan_ids.clone(),
             table_fn_scans: self.table_fn_scans.clone(),
+            sorter_metadata: self.sorter_metadata.clone(),
         }
     }
 }
@@ -242,6 +252,7 @@ impl Default for CompiledPlan {
             inline_scans: HashMap::new(),
             expr_scan_ids: Vec::new(),
             table_fn_scans: HashMap::new(),
+            sorter_metadata: Vec::new(),
         }
     }
 }
@@ -350,17 +361,29 @@ impl PartiQLVM {
         let total_regs = compiled.program.reg_count as usize;
         let registers = vec![ValueRef::Missing; total_regs];
 
+        // Pre-allocate banks: bank[0]=query, bank[1]=row, bank[2..]=sorters
+        let mut banks = vec![Arena::new(4096), Arena::new(16384)];
+        let mut sorters: Vec<Option<crate::engine::sorter::Sorter>> = Vec::new();
+        for (i, meta) in compiled.sorter_metadata.iter().enumerate() {
+            let bank_id = 2 + i;
+            banks.push(Arena::new(16384));
+            sorters.push(Some(crate::engine::sorter::Sorter::new(
+                bank_id,
+                meta.key_count,
+            )));
+        }
+
         let mut vm = PartiQLVM {
             compiled,
             cursors,
-            banks: vec![Arena::new(4096), Arena::new(16384)],
+            banks,
             registers,
             ip: 0,
             halted: false,
             slot_count,
             builtins: BuiltinFunctions::new(),
             table_functions: exec_context.table_functions().clone(),
-            sorters: Vec::new(),
+            sorters,
         };
 
         // Pre-create data sources from catalog
