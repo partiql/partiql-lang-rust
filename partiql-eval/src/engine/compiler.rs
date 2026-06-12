@@ -772,7 +772,7 @@ impl<'a> PlanCompiler<'a> {
         }
 
         // Set has_data flag
-        let const_one = builder.push_const_pub(ValueOwned::I64(1));
+        let const_one = builder.push_const_pub(ValueOwned::Bool(true));
         builder.insts.push(Inst::LoadConst {
             dst: has_data_reg,
             const_idx: const_one,
@@ -904,7 +904,7 @@ impl<'a> PlanCompiler<'a> {
         builder.emit_emit_row();
 
         // Clear has_data flag
-        let const_zero = builder.push_const_pub(ValueOwned::I64(0));
+        let const_zero = builder.push_const_pub(ValueOwned::Bool(false));
         builder.insts.push(Inst::LoadConst {
             dst: has_data_reg,
             const_idx: const_zero,
@@ -1194,7 +1194,11 @@ impl<'a> PlanCompiler<'a> {
                         extractor.extract(&agg.expr);
                     }
                 }
-                self.compile_node(graph, input_id, ctx)
+                let mut result = self.compile_node(graph, input_id, ctx)?;
+                // GROUP BY creates a new output scope. Reset slot_count to 0 so
+                // operators above (Project, Having) allocate output from the start.
+                result.slot_count = 0;
+                Ok(result)
             }
             BindingsOp::Having(having) => {
                 let input_id = graph.single_input(id)?;

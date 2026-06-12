@@ -75,6 +75,10 @@ impl Sorter {
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
+
+    pub fn record_count(&self) -> usize {
+        self.records.len()
+    }
 }
 
 /// Compare two ValueRefs for ordering. Used by the sorter for sort-based grouping.
