@@ -873,6 +873,8 @@ impl<'a> PlanCompiler<'a> {
             .position(|(_, op)| matches!(op, BindingsOp::GroupBy(_)))
             .unwrap();
 
+        let mut having_skip_idx: Option<usize> = None;
+
         for (_, op) in chain.iter().skip(group_by_idx + 1) {
             match op {
                 BindingsOp::Having(having) => {
@@ -884,8 +886,7 @@ impl<'a> PlanCompiler<'a> {
                         having_temp,
                     )?;
                     self.inline_program(&prog, builder);
-                    let having_skip = builder.emit_jump_if_not_true(having_pred_reg);
-                    builder.patch_target(having_skip, 0); // placeholder, repatch below
+                    having_skip_idx = Some(builder.emit_jump_if_not_true(having_pred_reg));
                 }
                 BindingsOp::Project(project) => {
                     self.emit_project_at(project, &grouped_result, 0, builder)?;
@@ -916,6 +917,11 @@ impl<'a> PlanCompiler<'a> {
 
         // Patch emit_skip_jump to the Return
         builder.patch_target(emit_skip_jump, return_addr);
+
+        // Patch HAVING skip jump to the Return (skip EmitRow, go straight to Return)
+        if let Some(idx) = having_skip_idx {
+            builder.patch_target(idx, return_addr);
+        }
 
         // Patch jump_to_halt
         let halt_addr = builder.current_offset();
