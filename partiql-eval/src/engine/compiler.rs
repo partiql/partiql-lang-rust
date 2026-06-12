@@ -824,8 +824,50 @@ impl<'a> PlanCompiler<'a> {
             });
         }
 
+        // Build a resolver for the grouped output phase.
+        // Maps group key aliases and $__agg_N names to their registers.
+        let mut grouped_column_slots = FxHashMap::default();
+
+        // Group key aliases → prev_key_reg (for single key) or data_reg + offset
+        // Since we copy the key to prev_key_reg during accumulate, and the emit
+        // subroutine fires with the previous group's key still in prev_key_reg:
+        for (i, (name, _expr)) in key_exprs.iter().enumerate() {
+            // For multi-key: we'd need multiple prev_key registers.
+            // For now, use data_reg + i since during emit the last SorterData
+            // still has the boundary row, and prev_key holds the group's key.
+            // Actually the key we want is in prev_key_reg for the first key.
+            // TODO: multi-key support — for now just map first key to prev_key_reg
+            if i == 0 {
+                grouped_column_slots.insert((*name).clone(), prev_key_reg);
+            } else {
+                // Multi-key: allocate additional prev_key registers
+                // For now, skip — this limits us to single-key GROUP BY
+                grouped_column_slots.insert((*name).clone(), prev_key_reg + i as u16);
+            }
+        }
+
+        // Aggregate names ($__agg_1, etc.) → accum registers (where AggFinal writes)
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            grouped_column_slots.insert(agg.name.clone(), accum_base + i as u16);
+        }
+
+        let grouped_resolver = ResolverKind::Pipeline(PipelineSlotResolver {
+            base_row_slot: None,
+            scan_alias: String::new(),
+            table_name: None,
+            column_slots: grouped_column_slots,
+        });
+        let grouped_result = SubtreeResult {
+            resolver: grouped_resolver,
+            cursor_id: None,
+            slot_count: result.slot_count,
+            scan_metadata: HashMap::new(),
+            shape: None,
+        };
+
+        let grouped_expr_compiler = LogicalExprCompiler::new(&grouped_result.resolver);
+
         // Now handle any operators AFTER the GroupBy in the chain (Having, Project)
-        // Find where GroupBy is in the chain and process everything after it
         let group_by_idx = chain
             .iter()
             .position(|(_, op)| matches!(op, BindingsOp::GroupBy(_)))
@@ -834,32 +876,25 @@ impl<'a> PlanCompiler<'a> {
         for (_, op) in chain.iter().skip(group_by_idx + 1) {
             match op {
                 BindingsOp::Having(having) => {
-                    // Compile HAVING expression
                     let having_pred_reg = builder.alloc_reg_pub();
                     let having_temp = having_pred_reg + 1;
-                    let prog = expr_compiler.compile_to_program(
+                    let prog = grouped_expr_compiler.compile_to_program(
                         &having.expr,
                         having_pred_reg,
                         having_temp,
                     )?;
                     self.inline_program(&prog, builder);
-                    // Jump to return (skip EmitRow) if HAVING fails
                     let having_skip = builder.emit_jump_if_not_true(having_pred_reg);
-                    // Patch to the Return instruction (will be emitted below)
-                    // For now save it; we'll patch after EmitRow
                     builder.patch_target(having_skip, 0); // placeholder, repatch below
                 }
                 BindingsOp::Project(project) => {
-                    // Compile project expressions into output slots 0..N
-                    // The project references $__agg_N variables which should resolve
-                    // to the accumulator registers where AggFinal wrote results.
-                    self.emit_project_at(project, result, 0, builder)?;
+                    self.emit_project_at(project, &grouped_result, 0, builder)?;
                 }
                 BindingsOp::ProjectValue(pv) => {
-                    self.emit_project_value_at(pv, result, 0, builder)?;
+                    self.emit_project_value_at(pv, &grouped_result, 0, builder)?;
                 }
                 BindingsOp::ProjectAll(_mode) => {
-                    self.emit_project_all_at(result, 0, builder)?;
+                    self.emit_project_all_at(&grouped_result, 0, builder)?;
                 }
                 _ => {}
             }
