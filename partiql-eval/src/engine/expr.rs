@@ -509,6 +509,14 @@ pub enum Inst {
         ret_reg: u16,
     },
 
+    // === Register Operations ===
+
+    /// Copy the value in `src` to `dst`.
+    Copy {
+        dst: u16,
+        src: u16,
+    },
+
     // === Comparison ===
 
     /// Compare two registers for equality (dynamic types). Writes Bool to `dst_reg`.
@@ -1739,6 +1747,7 @@ impl Program {
             | Inst::AggReset { .. }
             | Inst::Gosub { .. }
             | Inst::Return { .. }
+            | Inst::Copy { .. }
             | Inst::CompareEq { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),

@@ -813,6 +813,10 @@ impl<'vm> QueryIterator<'vm> {
                     }
                 }
 
+                Inst::Copy { dst, src } => {
+                    regs[*dst as usize] = regs[*src as usize];
+                }
+
                 // === Comparison ===
 
                 Inst::CompareEq {
