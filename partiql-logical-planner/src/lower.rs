@@ -2269,4 +2269,24 @@ mod tests {
             [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
         );
     }
+
+    #[test]
+    fn test_legacy_lower_rejects_plain_create_table() {
+        // The no-AS form (`CreateTable`, as_query: None) must also be rejected by the
+        // legacy `lower` shim with the same uniform DDL error — covering the
+        // CreateTable branch of the shim, not just CTAS.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject plain CREATE TABLE")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
 }

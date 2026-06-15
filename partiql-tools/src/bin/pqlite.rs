@@ -299,6 +299,23 @@ fn run_repl(debug: &DebugFlags) {
     }
 }
 
+/// Render a `BindingsName` as its bare identifier (`t`), not the Debug wrapper
+/// (`CaseInsensitive("t")`). `BindingsName` has no Display impl, so match it out.
+fn binding_name_str<'a>(name: &'a partiql_value::BindingsName<'_>) -> &'a str {
+    match name {
+        partiql_value::BindingsName::CaseSensitive(s) => s.as_ref(),
+        partiql_value::BindingsName::CaseInsensitive(s) => s.as_ref(),
+    }
+}
+
+/// Shared stderr footer for a planning-only DDL statement.
+fn print_ddl_planned_footer(elapsed: std::time::Duration) {
+    eprintln!(
+        "(planned in {:.1}ms — execution not yet implemented)",
+        elapsed.as_secs_f64() * 1000.0
+    );
+}
+
 fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std::error::Error>> {
     let query = query_str.to_string();
 
@@ -325,20 +342,19 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
     let logical = match statement {
         LogicalStatement::Query(plan) => plan,
         LogicalStatement::CreateTableAs { table_name, query } => {
-            println!("Planned CREATE TABLE {:?} AS:", table_name);
-            println!("{:?}", query);
-            eprintln!(
-                "(planned in {:.1}ms — execution not yet implemented)",
-                (parse_time + lower_time).as_secs_f64() * 1000.0
-            );
+            // `{}` (Display) on the plan, not `{:?}`: LogicalPlan has a readable
+            // Display impl; Debug would dump the raw nodes/edges struct.
+            println!("Planned CREATE TABLE {} AS:", binding_name_str(&table_name));
+            println!("{}", query);
+            print_ddl_planned_footer(parse_time + lower_time);
             return Ok(());
         }
         LogicalStatement::CreateTable { table_name } => {
-            println!("Planned CREATE TABLE {:?} (no source query)", table_name);
-            eprintln!(
-                "(planned in {:.1}ms — execution not yet implemented)",
-                (parse_time + lower_time).as_secs_f64() * 1000.0
+            println!(
+                "Planned CREATE TABLE {} (no source query)",
+                binding_name_str(&table_name)
             );
+            print_ddl_planned_footer(parse_time + lower_time);
             return Ok(());
         }
     };
