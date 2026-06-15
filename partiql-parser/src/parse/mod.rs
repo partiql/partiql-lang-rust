@@ -986,12 +986,21 @@ mod tests {
             parse!(r"CREATE TABLE new_table AS (SELECT m.a FROM mem(5, 2) m)");
         }
 
-        // The parenthesized query is the full top-level `Query` rule, so WHERE,
+        // The parenthesized query is the full `TopLevelQuery` rule, so WHERE,
         // ORDER BY, and LIMIT are all accepted inside `AS (...)`.
         #[test]
         fn create_table_as_complex() {
             parse!(
                 r"CREATE TABLE summary AS (SELECT m.a FROM mem(5, 2) m WHERE m.a > 1 ORDER BY m.a DESC LIMIT 10)"
+            );
+        }
+
+        // CTAS source is a `TopLevelQuery`, so it may carry a `WITH` (CTE) clause,
+        // per the SQL specification.
+        #[test]
+        fn create_table_as_with_cte() {
+            parse!(
+                r"CREATE TABLE t AS (WITH q AS (SELECT m.a FROM mem(2, 1) m) SELECT q.a FROM q)"
             );
         }
 

@@ -76,8 +76,9 @@ pub struct CreateTable {
     #[visit(skip)]
     pub table_name: SymbolPrimitive,
     /// Optional source query for `CREATE TABLE <name> AS (<query>)` (CTAS).
-    /// `None` for a plain `CREATE TABLE <name>`.
-    pub as_query: Option<Box<AstNode<Query>>>,
+    /// `None` for a plain `CREATE TABLE <name>`. Holds a `TopLevelQuery` so the
+    /// CTAS source may carry a `WITH` (CTE) clause, per the SQL specification.
+    pub as_query: Option<Box<AstNode<TopLevelQuery>>>,
 }
 
 #[derive(Visit, Clone, Debug, PartialEq, Eq)]

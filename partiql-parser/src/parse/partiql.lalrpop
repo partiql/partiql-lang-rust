@@ -56,8 +56,8 @@ CreateTable: ast::CreateTable = {
 }
 
 #[inline]
-CtasClause: Box<ast::AstNode<ast::Query>> = {
-    "AS" "(" <query:Query> ")" => Box::new(query),
+CtasClause: Box<ast::AstNode<ast::TopLevelQuery>> = {
+    "AS" "(" <query:TopLevelQuery> ")" => Box::new(query),
 }
 
 Query: ast::AstNode<ast::Query> = {

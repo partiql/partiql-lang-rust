@@ -64,17 +64,9 @@ impl<'c> LogicalPlanner<'c> {
                 match &ct.as_query {
                     None => Ok(logical::LogicalStatement::CreateTable { table_name }),
                     Some(inner) => {
-                        // Wrap the inner AstNode<Query> in a TopLevelQuery to feed the
-                        // existing pipeline. Lossless: Query has no `with` field, so
-                        // `with: None` drops nothing. Id-safe: we clone the original
-                        // node, so its parse-time NodeId is preserved verbatim;
-                        // both NameResolver and AstToLogical key on that id. Never
-                        // reconstruct the node with a fresh id or search_locals breaks.
-                        let wrapped = ast::TopLevelQuery {
-                            with: None,
-                            query: inner.as_ref().clone(),
-                        };
-                        let plan = self.lower_query(&wrapped, stmt.id)?;
+                        // `as_query` is a `TopLevelQuery` (it may carry a `WITH` clause),
+                        // so it feeds the existing pipeline directly — no wrapping needed.
+                        let plan = self.lower_query(&inner.node, stmt.id)?;
                         Ok(logical::LogicalStatement::CreateTableAs {
                             table_name,
                             query: plan,
