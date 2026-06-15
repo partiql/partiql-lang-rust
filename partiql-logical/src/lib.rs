@@ -465,6 +465,30 @@ pub struct DBRef {
     pub path: Vec<BindingsName<'static>>,
 }
 
+/// A top-level `PartiQL` statement produced by the planner.
+///
+/// DDL is a statement *category* that contains a query, not a relational
+/// operator — so it lives here, above [`LogicalPlan`], rather than inside
+/// [`BindingsOp`]. The relational operator graph is left untouched.
+///
+/// The target `table_name` is a name being *defined*, carried verbatim as a
+/// case-preserving [`BindingsName`] (single identifier, no catalog/path). The
+/// library never resolves the destination catalog or performs writes; a
+/// consumer orchestrates storage/transactions around query execution.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum LogicalStatement {
+    /// An ordinary data-retrieval query.
+    Query(LogicalPlan<BindingsOp>),
+    /// `CREATE TABLE <name> AS (<query>)` — the target plus the lowered source query.
+    CreateTableAs {
+        table_name: BindingsName<'static>,
+        query: LogicalPlan<BindingsOp>,
+    },
+    /// `CREATE TABLE <name>` — the target only, no source query.
+    CreateTable { table_name: BindingsName<'static> },
+}
+
 /// Represents a `PartiQL` value expression. Evaluation of a [`ValueExpr`] leads to a `PartiQL` value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]

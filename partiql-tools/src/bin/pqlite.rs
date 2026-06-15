@@ -1,9 +1,10 @@
 use partiql_tools::common;
 
-use common::{create_table_fn_catalog, lower, parse};
+use common::{create_table_fn_catalog, lower_statement, parse};
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
+use partiql_logical::LogicalStatement;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -312,10 +313,35 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // Phase 2: Lower (AST → Logical Plan)
+    // Phase 2: Lower (AST → Logical Statement)
     let lower_start = Instant::now();
-    let logical = lower(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
+    let statement =
+        lower_statement(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
+
+    // DDL statements are planning-only for now: print the lowered plan and stop.
+    // (Compile/execute and storage are a later slice; the consumer would
+    // orchestrate writes around the inner query's execution.)
+    let logical = match statement {
+        LogicalStatement::Query(plan) => plan,
+        LogicalStatement::CreateTableAs { table_name, query } => {
+            println!("Planned CREATE TABLE {:?} AS:", table_name);
+            println!("{:?}", query);
+            eprintln!(
+                "(planned in {:.1}ms — execution not yet implemented)",
+                (parse_time + lower_time).as_secs_f64() * 1000.0
+            );
+            return Ok(());
+        }
+        LogicalStatement::CreateTable { table_name } => {
+            println!("Planned CREATE TABLE {:?} (no source query)", table_name);
+            eprintln!(
+                "(planned in {:.1}ms — execution not yet implemented)",
+                (parse_time + lower_time).as_secs_f64() * 1000.0
+            );
+            return Ok(());
+        }
+    };
 
     if debug.plan {
         eprintln!("[Plan] {:?}", logical);
