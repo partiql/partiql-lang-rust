@@ -52,6 +52,7 @@ ion-rs = "0.18.1"
 bytes = "1.9"
 rand = "0.8"
 partiql-logical = { path = "../partiql-logical" }
+partiql-ast = { path = "../partiql-ast" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-common = { path = "../partiql-common" }

@@ -1,9 +1,10 @@
 use partiql_tools::common;
 
-use common::{create_table_fn_catalog, lower, parse};
+use common::{create_table_fn_catalog, lower_statement, parse};
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
+use partiql_logical::LogicalStatement;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -298,6 +299,26 @@ fn run_repl(debug: &DebugFlags) {
     }
 }
 
+/// Render a `BindingsName` the SQL-idiomatic way, so the printed form round-trips
+/// the case-sensitivity the user typed (instead of the `CaseInsensitive("t")` Debug
+/// wrapper, which both leaks internals and reads identically for quoted vs bare):
+///   - case-sensitive (originally quoted) -> re-quoted, e.g. `"My_Table"`
+///   - case-insensitive (originally bare) -> bare, e.g. `my_table`
+fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
+    match name {
+        partiql_value::BindingsName::CaseSensitive(s) => format!("\"{}\"", s),
+        partiql_value::BindingsName::CaseInsensitive(s) => s.as_ref().to_string(),
+    }
+}
+
+/// Shared stderr footer for a planning-only DDL statement.
+fn print_ddl_planned_footer(elapsed: std::time::Duration) {
+    eprintln!(
+        "(planned in {:.1}ms — execution not yet implemented)",
+        elapsed.as_secs_f64() * 1000.0
+    );
+}
+
 fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std::error::Error>> {
     let query = query_str.to_string();
 
@@ -312,10 +333,45 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // Phase 2: Lower (AST → Logical Plan)
+    // Phase 2: Lower (AST → Logical Statement)
+    // pqlite runs exactly one statement per submission; reject anything else here,
+    // since lowering operates on a single statement.
+    let stmt = match parsed.statements.as_slice() {
+        [stmt] => stmt,
+        // Match the planner's wording for this condition so the failure reads the
+        // same whether it surfaces here or via `LogicalPlanner::lower`.
+        _ => return Err("Lower error: multi-statement input".into()),
+    };
     let lower_start = Instant::now();
-    let logical = lower(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
+    let statement =
+        lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
+
+    // DDL statements are planning-only for now: print the lowered plan and stop.
+    // (Compile/execute and storage are a later slice; the consumer would
+    // orchestrate writes around the inner query's execution.)
+    let logical = match statement {
+        LogicalStatement::Query(plan) => plan,
+        LogicalStatement::CreateTableAs { table_name, query } => {
+            // `{}` (Display) on the plan, not `{:?}`: LogicalPlan has a readable
+            // Display impl; Debug would dump the raw nodes/edges struct.
+            println!(
+                "Planned CREATE TABLE {} AS:",
+                format_table_name(&table_name)
+            );
+            println!("{}", query);
+            print_ddl_planned_footer(parse_time + lower_time);
+            return Ok(());
+        }
+        LogicalStatement::CreateTable { table_name } => {
+            println!(
+                "Planned CREATE TABLE {} (no source query)",
+                format_table_name(&table_name)
+            );
+            print_ddl_planned_footer(parse_time + lower_time);
+            return Ok(());
+        }
+    };
 
     if debug.plan {
         eprintln!("[Plan] {:?}", logical);

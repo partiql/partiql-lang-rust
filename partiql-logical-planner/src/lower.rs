@@ -308,7 +308,7 @@ impl<'a> AstToLogical<'a> {
     }
 
     /// Convert a `SymbolPrimitive` into a `BindingsName`
-    fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
+    pub(crate) fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
         match sym.case {
             CaseSensitivity::CaseSensitive => {
                 BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
@@ -2106,5 +2106,187 @@ mod tests {
         assert_eq!(expected_logical, logical);
 
         println!("logical: {:?}", &logical);
+    }
+
+    #[test]
+    fn test_ctas_lowers_to_create_table_as() {
+        use partiql_logical::{BindingsOp, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let statement = "CREATE TABLE t AS (SELECT a FROM foo WHERE a > 1)";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let (table_name, query) = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { table_name, query } => (table_name, query)
+        );
+
+        // Target carried verbatim, case-insensitive (bare identifier).
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+
+        // Inner plan is the ordinary relational DAG, terminating in Sink.
+        assert!(
+            query.operator_count() >= 2,
+            "expected a non-trivial inner plan"
+        );
+        assert_matches!(
+            query.operators().last(),
+            Some(BindingsOp::Sink),
+            "inner plan must terminate in Sink"
+        );
+    }
+
+    #[test]
+    fn test_plain_create_table_lowers_to_create_table() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTable { table_name } => table_name
+        );
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+    }
+
+    #[test]
+    fn test_ctas_preserves_quoted_target_casing() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE \"T\" AS (SELECT a FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { table_name, .. } => table_name
+        );
+        // Quoted identifier -> CaseSensitive, value preserved verbatim.
+        assert_eq!(table_name, BindingsName::CaseSensitive("T".into()));
+    }
+
+    #[test]
+    fn test_ctas_inner_source_resolves_through_existing_path() {
+        use partiql_logical::{self as logical, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
+
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT customers.name FROM customers AS c)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let query = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { query, .. } => query
+        );
+
+        // The catalog-registered source lowered to a Scan over a DBRef (not a fallback
+        // Global VarRef), proving the inner query used the normal resolution path.
+        let has_dbref_scan = query.operators().iter().any(|op| {
+            matches!(
+                op,
+                BindingsOp::Scan(logical::Scan { expr: ValueExpr::DBRef(db), .. })
+                    if db.catalog == "default"
+                        && db.path == vec![BindingsName::CaseInsensitive("customers".into())]
+            )
+        });
+        assert!(
+            has_dbref_scan,
+            "inner source `customers` must resolve to a DBRef Scan"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_ctas() {
+        // Back-compat contract: the legacy `lower` entry point (used by ~16 callers
+        // that only handle relational plans) must still reject DDL rather than
+        // silently changing its return type. CTAS is surfaced via `lower_statement`.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT a FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject CTAS")
+            .errors;
+        // Assert the specific rejection error, not merely that *some* error occurred,
+        // so a future change that swapped this for a different error (a parse error,
+        // the inner query's error, etc.) would fail rather than silently pass.
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_short_circuits_ddl_before_inner_query() {
+        // The legacy `lower` shim must reject DDL at the front door, BEFORE lowering
+        // the inner query. Here the CTAS source references an undefined function, which
+        // would itself produce a lowering error — but `lower()` must still return the
+        // uniform DDL rejection, never leak the inner-query error.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT undefined_fn(a) FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject CTAS")
+            .errors;
+        // Uniform DDL error — NOT the inner UnsupportedFunction("undefined_fn") error.
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_plain_create_table() {
+        // The no-AS form (`CreateTable`, as_query: None) must also be rejected by the
+        // legacy `lower` shim with the same uniform DDL error — covering the
+        // CreateTable branch of the shim, not just CTAS.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject plain CREATE TABLE")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
     }
 }
