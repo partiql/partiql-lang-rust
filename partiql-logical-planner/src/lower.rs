@@ -337,9 +337,11 @@ impl<'a> AstToLogical<'a> {
                 for scope_id in scope_ids {
                     if let Some(schema) = self.key_registry.schema.get(scope_id) {
                         for produce in &schema.produce {
-                            if let name_resolver::Symbol::Known(sym) = produce {
-                                scope_vars.push(sym.value.clone());
-                            }
+                            let var_name = match produce {
+                                name_resolver::Symbol::Known(sym) => sym.value.clone(),
+                                name_resolver::Symbol::Unknown(id) => format!("_{id}"),
+                            };
+                            scope_vars.push(var_name);
                         }
                     }
                 }
