@@ -350,41 +350,57 @@ impl<'a> AstToLogical<'a> {
                     continue;
                 }
 
-                // If multiple variables in scope, names must match exactly
-                if scope_vars.len() > 1 {
-                    for var_name in &scope_vars {
-                        if Self::names_match(
-                            &varref.name.value,
-                            &varref.name.case,
-                            var_name,
-                            &CaseSensitivity::CaseInsensitive, // scope vars are case-insensitive
-                        ) {
-                            return Some(ValueExpr::VarRef(
-                                Self::symprim_to_binding(&varref.name),
-                                VarRefType::Local,
-                            ));
-                        }
-                    }
-                }
-                // If single variable in scope
-                else if let Some(single_var_name) = scope_vars.first() {
+                // Try exact match against any scope variable
+                for var_name in &scope_vars {
                     if Self::names_match(
                         &varref.name.value,
                         &varref.name.case,
-                        single_var_name,
+                        var_name,
                         &CaseSensitivity::CaseInsensitive,
                     ) {
-                        // Names match - return the variable reference
                         return Some(ValueExpr::VarRef(
                             Self::symprim_to_binding(&varref.name),
                             VarRefType::Local,
                         ));
+                    }
+                }
+
+                // No exact match — collect only FROM source variables (first
+                // produce from each scope_id, skipping GROUP BY key scopes which
+                // register after FROM in traversal order). We identify FROM sources
+                // as the first scope_id that produces variables.
+                // If exactly one FROM source, resolve as a field path on it.
+                // If multiple FROM sources, ambiguous — return None (will error).
+                let first_scope_vars: Vec<String> = if let Some(&first_scope_id) = scope_ids.first()
+                {
+                    if let Some(schema) = self.key_registry.schema.get(&first_scope_id) {
+                        schema
+                            .produce
+                            .iter()
+                            .map(|s| match s {
+                                name_resolver::Symbol::Known(sym) => sym.value.clone(),
+                                name_resolver::Symbol::Unknown(id) => format!("_{id}"),
+                            })
+                            .collect()
                     } else {
-                        // Names don't match - assume path on that variable
-                        let single_var_binding =
-                            BindingsName::CaseInsensitive(Cow::Owned(single_var_name.clone()));
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
+                if first_scope_vars.len() == 1 {
+                    let from_var = &first_scope_vars[0];
+                    if !Self::names_match(
+                        &varref.name.value,
+                        &varref.name.case,
+                        from_var,
+                        &CaseSensitivity::CaseInsensitive,
+                    ) {
+                        let from_var_binding =
+                            BindingsName::CaseInsensitive(Cow::Owned(from_var.clone()));
                         return Some(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(single_var_binding, VarRefType::Local)),
+                            Box::new(ValueExpr::VarRef(from_var_binding, VarRefType::Local)),
                             vec![PathComponent::Key(Self::symprim_to_binding(&varref.name))],
                         ));
                     }
