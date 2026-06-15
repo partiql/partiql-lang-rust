@@ -444,7 +444,6 @@ pub enum Inst {
     },
 
     // === Sorter Instructions (GROUP BY) ===
-
     /// Copy registers `src_reg..src_reg+reg_count` from the row bank into the
     /// sorter's persistent bank, appending a new record.
     SorterInsert {
@@ -474,7 +473,6 @@ pub enum Inst {
     },
 
     // === Aggregation Instructions ===
-
     /// Update accumulator register with a new input value.
     /// For Count, `input_reg` is ignored (counts rows, not values).
     AggStep {
@@ -497,7 +495,6 @@ pub enum Inst {
     },
 
     // === Subroutine Instructions ===
-
     /// Save the next instruction address into `ret_reg`, then jump to `target`.
     Gosub {
         ret_reg: u16,
@@ -510,7 +507,6 @@ pub enum Inst {
     },
 
     // === Register Operations ===
-
     /// Copy the value in `src` to `dst`.
     Copy {
         dst: u16,
@@ -518,7 +514,6 @@ pub enum Inst {
     },
 
     // === Comparison ===
-
     /// Compare two registers for equality (dynamic types). Writes Bool to `dst_reg`.
     CompareEq {
         lhs_reg: u16,

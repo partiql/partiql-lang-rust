@@ -1,6 +1,7 @@
 use crate::engine::arena::SlotId;
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
+use crate::engine::expr::AggFunc;
 use crate::engine::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
 use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
@@ -10,7 +11,6 @@ use crate::engine::source::{
 use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use crate::engine::SlotResolver;
 use crate::plan::EvaluationMode;
-use crate::engine::expr::AggFunc;
 use partiql_logical::{
     BindingsOp, CallName, DBRef, GroupBy, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
     ProjectValue, Scan, ValueExpr, VarRefType,
@@ -189,7 +189,6 @@ pub struct PlanCompiler<'a> {
 
 struct SorterCompileInfo {
     key_count: usize,
-    bank_id: usize,
 }
 
 #[derive(Clone)]
@@ -936,10 +935,7 @@ impl<'a> PlanCompiler<'a> {
         builder.emit_halt();
 
         // Record the sorter info for the compiled plan
-        self.sorter_infos.push(SorterCompileInfo {
-            key_count,
-            bank_id: 2 + sorter_id, // banks 0=query, 1=row, 2+=sorters
-        });
+        self.sorter_infos.push(SorterCompileInfo { key_count });
 
         Ok(())
     }
@@ -1193,7 +1189,7 @@ impl<'a> PlanCompiler<'a> {
                 // Extract field references from group key exprs and aggregate input exprs
                 {
                     let mut extractor = ExprFieldExtractor::new(ctx);
-                    for (_name, expr) in &group_by.exprs {
+                    for expr in group_by.exprs.values() {
                         extractor.extract(expr);
                     }
                     for agg in &group_by.aggregate_exprs {

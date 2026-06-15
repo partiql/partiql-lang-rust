@@ -701,7 +701,6 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 // === Sorter Instructions ===
-
                 Inst::SorterInsert {
                     sorter_id,
                     src_reg,
@@ -720,11 +719,13 @@ impl<'vm> QueryIterator<'vm> {
                     let start = *src_reg as usize;
                     let count = *reg_count as usize;
                     let mut fields = Vec::with_capacity(count);
-                    for i in start..start + count {
+                    for reg in &regs[start..start + count] {
                         // Safety: sorter bank outlives the sorter records.
                         // Same contract as the VM's register/arena relationship.
-                        let copied = copy_value_ref_to_bank(regs[i], bank);
-                        let copied: ValueRef<'static> = unsafe { std::mem::transmute(copied) };
+                        let copied = copy_value_ref_to_bank(*reg, bank);
+                        let copied: ValueRef<'static> = unsafe {
+                            std::mem::transmute::<ValueRef<'_>, ValueRef<'static>>(copied)
+                        };
                         fields.push(copied);
                     }
                     sorter.insert(crate::engine::sorter::SorterRecord { fields });
@@ -788,7 +789,6 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 // === Aggregation Instructions ===
-
                 Inst::AggStep {
                     func,
                     accum_reg,
@@ -817,31 +817,27 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 // === Subroutine Instructions ===
-
                 Inst::Gosub { ret_reg, target } => {
                     regs[*ret_reg as usize] = ValueRef::I64(self.vm.ip as i64);
                     self.vm.ip = *target as usize;
                 }
 
-                Inst::Return { ret_reg } => {
-                    match regs[*ret_reg as usize] {
-                        ValueRef::I64(addr) => {
-                            self.vm.ip = addr as usize;
-                        }
-                        _ => {
-                            return Some(Err(EngineError::IllegalState(
-                                "Return: ret_reg does not contain a valid address".to_string(),
-                            )))
-                        }
+                Inst::Return { ret_reg } => match regs[*ret_reg as usize] {
+                    ValueRef::I64(addr) => {
+                        self.vm.ip = addr as usize;
                     }
-                }
+                    _ => {
+                        return Some(Err(EngineError::IllegalState(
+                            "Return: ret_reg does not contain a valid address".to_string(),
+                        )))
+                    }
+                },
 
                 Inst::Copy { dst, src } => {
                     regs[*dst as usize] = regs[*src as usize];
                 }
 
                 // === Comparison ===
-
                 Inst::CompareEq {
                     lhs_reg,
                     rhs_reg,
@@ -942,14 +938,18 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
             ValueRef::Tuple(tuple_ref)
         }
         ValueRef::List(items) => {
-            let refs: Vec<ValueRef<'a>> =
-                items.iter().map(|v| copy_value_ref_to_bank(*v, bank)).collect();
+            let refs: Vec<ValueRef<'a>> = items
+                .iter()
+                .map(|v| copy_value_ref_to_bank(*v, bank))
+                .collect();
             let refs_slice = bank.alloc_slice(&refs);
             ValueRef::List(refs_slice)
         }
         ValueRef::Bag(items) => {
-            let refs: Vec<ValueRef<'a>> =
-                items.iter().map(|v| copy_value_ref_to_bank(*v, bank)).collect();
+            let refs: Vec<ValueRef<'a>> = items
+                .iter()
+                .map(|v| copy_value_ref_to_bank(*v, bank))
+                .collect();
             let refs_slice = bank.alloc_slice(&refs);
             ValueRef::Bag(refs_slice)
         }
@@ -957,6 +957,7 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
 }
 
 /// Perform one step of an aggregate function: update the accumulator with a new input.
+#[allow(clippy::missing_transmute_annotations)]
 fn agg_step(func: AggFunc, accum: ValueRef<'_>, input: ValueRef<'_>) -> ValueRef<'static> {
     match func {
         AggFunc::Sum => match (accum, input) {
@@ -1027,12 +1028,10 @@ fn agg_final<'a>(func: AggFunc, accum: ValueRef<'a>) -> ValueRef<'a> {
             ValueRef::Missing => ValueRef::I64(0),
             other => other,
         },
-        AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Any | AggFunc::Every => {
-            match accum {
-                ValueRef::Missing => ValueRef::Null,
-                other => other,
-            }
-        }
+        AggFunc::Sum | AggFunc::Min | AggFunc::Max | AggFunc::Any | AggFunc::Every => match accum {
+            ValueRef::Missing => ValueRef::Null,
+            other => other,
+        },
         AggFunc::Avg => {
             // TODO: proper Avg with count/sum pair
             accum
