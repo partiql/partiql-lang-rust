@@ -686,6 +686,9 @@ impl<'a> PlanCompiler<'a> {
             builder.alloc_reg_pub();
         }
         let prev_key_reg = builder.alloc_reg_pub();
+        for _ in 1..key_count {
+            builder.alloc_reg_pub();
+        }
         let accum_base = builder.alloc_reg_pub();
         for _ in 1..agg_count {
             builder.alloc_reg_pub();
@@ -700,25 +703,31 @@ impl<'a> PlanCompiler<'a> {
             dst_reg: data_reg,
         });
 
-        // Emit: CompareEq (prev_key vs current key)
+        // Compare ALL key fields: prev_key[i] == current[i] for each key
+        // Result: all_eq = key0_eq AND key1_eq AND ...
         let cmp_result_reg = builder.alloc_reg_pub();
+        // Start by comparing first key
         builder.insts.push(Inst::CompareEq {
             lhs_reg: prev_key_reg,
-            rhs_reg: data_reg, // first field is the group key
+            rhs_reg: data_reg,
             dst_reg: cmp_result_reg,
         });
+        // AND with subsequent keys
+        for k in 1..key_count {
+            let key_cmp_reg = builder.alloc_reg_pub();
+            builder.insts.push(Inst::CompareEq {
+                lhs_reg: prev_key_reg + k as u16,
+                rhs_reg: data_reg + k as u16,
+                dst_reg: key_cmp_reg,
+            });
+            builder.insts.push(Inst::AndBool {
+                dst: cmp_result_reg,
+                a: cmp_result_reg,
+                b: key_cmp_reg,
+            });
+        }
 
-        // Emit: JumpIfNotTrue → skip to accumulate (if same group, no boundary)
-        // Wait — we want to jump PAST the emit if keys ARE equal.
-        // CompareEq returns true if equal. We want to skip emit when equal.
-        // JumpIfNotTrue jumps when NOT true, so we jump to accumulate when NOT equal? No.
-        // Actually: if keys are EQUAL (same group), we skip the emit.
-        // JumpIfNotTrue(cmp_result) jumps when cmp is false (keys differ) → emit.
-        // We want to jump OVER emit when keys are SAME (cmp is true).
-        // So we need a "JumpIfTrue" → but we only have JumpIfNotTrue.
-        // Solution: invert — jump to accumulate when keys ARE equal:
-        // if (eq) skip emit: JumpIfTrue → accumulate
-        // We don't have JumpIfTrue, so use: NotBool + JumpIfNotTrue
+        // If all keys equal (same group), skip emit. Otherwise fall through to emit.
         let not_cmp_reg = builder.alloc_reg_pub();
         builder.insts.push(Inst::NotBool {
             dst: not_cmp_reg,
@@ -745,11 +754,13 @@ impl<'a> PlanCompiler<'a> {
         // Patch the skip-emit jump to here
         builder.patch_target(skip_emit_jump, accumulate_target);
 
-        // Move current key to prev_key
-        builder.insts.push(Inst::Copy {
-            dst: prev_key_reg,
-            src: data_reg,
-        });
+        // Move ALL current keys to prev_key registers
+        for k in 0..key_count {
+            builder.insts.push(Inst::Copy {
+                dst: prev_key_reg + k as u16,
+                src: data_reg + k as u16,
+            });
+        }
 
         // AggStep for each aggregate
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
