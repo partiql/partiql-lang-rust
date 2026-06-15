@@ -112,10 +112,9 @@ impl<'c> LogicalPlanner<'c> {
         }
         match self.lower_statement(parsed)? {
             logical::LogicalStatement::Query(plan) => Ok(plan),
-            // Exhaustive on purpose: a new LogicalStatement variant must be triaged
-            // here. DDL is short-circuited above, so these arms are belt-and-suspenders.
-            logical::LogicalStatement::CreateTableAs { .. }
-            | logical::LogicalStatement::CreateTable { .. } => Err(ddl_not_yet_implemented()),
+            // DDL is already rejected at the front door above, so only a query plan
+            // reaches here. This arm is a defensive fallback for any non-query result.
+            _ => Err(ddl_not_yet_implemented()),
         }
     }
 
