@@ -74,16 +74,14 @@ impl Sorter {
 }
 
 /// Compare two ValueRefs for ordering. Used by the sorter for sort-based grouping.
+/// MISSING and NULL are treated as equal for grouping purposes (SQL semantics).
 fn compare_value_ref(a: &ValueRef<'_>, b: &ValueRef<'_>) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a, b) {
-        (ValueRef::Missing, ValueRef::Missing) => Ordering::Equal,
-        (ValueRef::Missing, _) => Ordering::Less,
-        (_, ValueRef::Missing) => Ordering::Greater,
-
-        (ValueRef::Null, ValueRef::Null) => Ordering::Equal,
-        (ValueRef::Null, _) => Ordering::Less,
-        (_, ValueRef::Null) => Ordering::Greater,
+        // MISSING and NULL are equivalent for GROUP BY
+        (ValueRef::Missing | ValueRef::Null, ValueRef::Missing | ValueRef::Null) => Ordering::Equal,
+        (ValueRef::Missing | ValueRef::Null, _) => Ordering::Less,
+        (_, ValueRef::Missing | ValueRef::Null) => Ordering::Greater,
 
         (ValueRef::Bool(a), ValueRef::Bool(b)) => a.cmp(b),
         (ValueRef::I64(a), ValueRef::I64(b)) => a.cmp(b),

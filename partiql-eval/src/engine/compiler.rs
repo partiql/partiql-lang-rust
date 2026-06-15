@@ -689,8 +689,27 @@ impl<'a> PlanCompiler<'a> {
         for _ in 1..key_count {
             builder.alloc_reg_pub();
         }
-        let accum_base = builder.alloc_reg_pub();
-        for _ in 1..agg_count {
+        // Allocate accumulator registers. AVG uses accum_reg for sum and
+        // accum_reg+1 for count (2 registers). Others use 1 register.
+        let accum_base = if agg_count > 0 {
+            builder.alloc_reg_pub()
+        } else {
+            0
+        };
+        let mut accum_offsets: Vec<u16> = Vec::with_capacity(agg_count);
+        let mut next_offset: u16 = 0;
+        for agg in group_by.aggregate_exprs.iter() {
+            accum_offsets.push(next_offset);
+            let regs_needed = if matches!(agg.func, partiql_logical::AggFunc::AggAvg) {
+                2
+            } else {
+                1
+            };
+            next_offset += regs_needed;
+        }
+        let total_accum_regs = next_offset;
+        // Allocate remaining accum registers (first one already allocated above)
+        for _ in 1..total_accum_regs {
             builder.alloc_reg_pub();
         }
         let has_data_reg = builder.alloc_reg_pub();
@@ -743,10 +762,10 @@ impl<'a> PlanCompiler<'a> {
             target: 0, // patched later
         });
 
-        // AggReset accumulators
+        // AggReset all accumulator registers
         builder.insts.push(Inst::AggReset {
             accum_start: accum_base,
-            count: agg_count as u16,
+            count: total_accum_regs,
         });
 
         // --- ACCUMULATE ---
@@ -764,21 +783,39 @@ impl<'a> PlanCompiler<'a> {
 
         // AggStep for each aggregate
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
-            let func = match agg.func {
-                partiql_logical::AggFunc::AggSum => AggFunc::Sum,
-                partiql_logical::AggFunc::AggCount => AggFunc::Count,
-                partiql_logical::AggFunc::AggAvg => AggFunc::Avg,
-                partiql_logical::AggFunc::AggMin => AggFunc::Min,
-                partiql_logical::AggFunc::AggMax => AggFunc::Max,
-                partiql_logical::AggFunc::AggAny => AggFunc::Any,
-                partiql_logical::AggFunc::AggEvery => AggFunc::Every,
-            };
             let input_reg = data_reg + key_count as u16 + i as u16;
-            builder.insts.push(Inst::AggStep {
-                func,
-                accum_reg: accum_base + i as u16,
-                input_reg,
-            });
+            let accum_reg = accum_base + accum_offsets[i];
+            match &agg.func {
+                partiql_logical::AggFunc::AggAvg => {
+                    // AVG: emit Sum into accum_reg, Count into accum_reg+1
+                    builder.insts.push(Inst::AggStep {
+                        func: AggFunc::Sum,
+                        accum_reg,
+                        input_reg,
+                    });
+                    builder.insts.push(Inst::AggStep {
+                        func: AggFunc::Count,
+                        accum_reg: accum_reg + 1,
+                        input_reg,
+                    });
+                }
+                other => {
+                    let func = match other {
+                        partiql_logical::AggFunc::AggSum => AggFunc::Sum,
+                        partiql_logical::AggFunc::AggCount => AggFunc::Count,
+                        partiql_logical::AggFunc::AggMin => AggFunc::Min,
+                        partiql_logical::AggFunc::AggMax => AggFunc::Max,
+                        partiql_logical::AggFunc::AggAny => AggFunc::Any,
+                        partiql_logical::AggFunc::AggEvery => AggFunc::Every,
+                        _ => unreachable!(),
+                    };
+                    builder.insts.push(Inst::AggStep {
+                        func,
+                        accum_reg,
+                        input_reg,
+                    });
+                }
+            }
         }
 
         // Set has_data flag
@@ -815,10 +852,10 @@ impl<'a> PlanCompiler<'a> {
         // Check has_data flag — if missing/0, skip emit
         let emit_skip_jump = builder.emit_jump_if_not_true(has_data_reg);
 
-        // AggFinal for each aggregate → write to output slots
-        // Output layout: slot 0..key_count = group keys, slot key_count..key_count+agg_count = aggregates
-        for (i, _agg) in group_by.aggregate_exprs.iter().enumerate() {
-            let func = match group_by.aggregate_exprs[i].func {
+        // AggFinal for each aggregate
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            let accum_reg = accum_base + accum_offsets[i];
+            let func = match &agg.func {
                 partiql_logical::AggFunc::AggSum => AggFunc::Sum,
                 partiql_logical::AggFunc::AggCount => AggFunc::Count,
                 partiql_logical::AggFunc::AggAvg => AggFunc::Avg,
@@ -829,8 +866,8 @@ impl<'a> PlanCompiler<'a> {
             };
             builder.insts.push(Inst::AggFinal {
                 func,
-                accum_reg: accum_base + i as u16,
-                dst_reg: accum_base + i as u16, // finalize in-place for now
+                accum_reg,
+                dst_reg: accum_reg, // finalize in-place
             });
         }
 
@@ -858,7 +895,7 @@ impl<'a> PlanCompiler<'a> {
 
         // Aggregate names ($__agg_1, etc.) → accum registers (where AggFinal writes)
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
-            grouped_column_slots.insert(agg.name.clone(), accum_base + i as u16);
+            grouped_column_slots.insert(agg.name.clone(), accum_base + accum_offsets[i]);
         }
 
         let grouped_resolver = ResolverKind::Pipeline(PipelineSlotResolver {

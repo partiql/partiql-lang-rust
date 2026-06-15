@@ -804,8 +804,24 @@ impl<'vm> QueryIterator<'vm> {
                     accum_reg,
                     dst_reg,
                 } => {
-                    let accum = regs[*accum_reg as usize];
-                    regs[*dst_reg as usize] = agg_final(*func, accum);
+                    if *func == AggFunc::Avg {
+                        // AVG: sum is in accum_reg, count is in accum_reg+1
+                        let sum = regs[*accum_reg as usize];
+                        let count = regs[*accum_reg as usize + 1];
+                        regs[*dst_reg as usize] = match (sum, count) {
+                            (ValueRef::Missing, _) | (_, ValueRef::Missing) => ValueRef::Null,
+                            (ValueRef::I64(s), ValueRef::I64(c)) if c > 0 => {
+                                ValueRef::F64(s as f64 / c as f64)
+                            }
+                            (ValueRef::F64(s), ValueRef::I64(c)) if c > 0 => {
+                                ValueRef::F64(s / c as f64)
+                            }
+                            _ => ValueRef::Null,
+                        };
+                    } else {
+                        let accum = regs[*accum_reg as usize];
+                        regs[*dst_reg as usize] = agg_final(*func, accum);
+                    }
                 }
 
                 Inst::AggReset { accum_start, count } => {
@@ -1033,7 +1049,9 @@ fn agg_final<'a>(func: AggFunc, accum: ValueRef<'a>) -> ValueRef<'a> {
             other => other,
         },
         AggFunc::Avg => {
-            // TODO: proper Avg with count/sum pair
+            // AVG finalize: accum_reg holds sum, accum_reg+1 holds count.
+            // This is handled specially in the dispatch loop — not here.
+            // This arm shouldn't be reached; the dispatch handles Avg directly.
             accum
         }
     }
