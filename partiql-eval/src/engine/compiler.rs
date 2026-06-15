@@ -1,6 +1,7 @@
 use crate::engine::arena::SlotId;
 use crate::engine::catalog::CompilationContext;
 use crate::engine::error::{EngineError, Result};
+use crate::engine::expr::AggFunc;
 use crate::engine::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
 use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
@@ -11,7 +12,7 @@ use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape,
 use crate::engine::SlotResolver;
 use crate::plan::EvaluationMode;
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
+    BindingsOp, CallName, DBRef, GroupBy, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
     ProjectValue, Scan, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
@@ -182,6 +183,12 @@ pub struct PlanCompiler<'a> {
     expr_scans: HashMap<ScanId, ValueExpr>,
     table_fn_scans: HashMap<ScanId, TableFnScanInfo>,
     table_fn_arg_slots: HashMap<ScanId, Vec<SlotId>>,
+    next_sorter_id: usize,
+    sorter_infos: Vec<SorterCompileInfo>,
+}
+
+struct SorterCompileInfo {
+    key_count: usize,
 }
 
 #[derive(Clone)]
@@ -201,6 +208,8 @@ impl<'a> PlanCompiler<'a> {
             expr_scans: HashMap::new(),
             table_fn_scans: HashMap::new(),
             table_fn_arg_slots: HashMap::new(),
+            next_sorter_id: 0,
+            sorter_infos: Vec::new(),
         }
     }
 
@@ -247,6 +256,14 @@ impl<'a> PlanCompiler<'a> {
             })
             .collect();
 
+        let sorter_metadata = self
+            .sorter_infos
+            .iter()
+            .map(|s| crate::engine::plan::SorterMetadata {
+                key_count: s.key_count,
+            })
+            .collect();
+
         Ok(CompiledPlan {
             program,
             cursors: cursor_infos,
@@ -256,6 +273,7 @@ impl<'a> PlanCompiler<'a> {
             inline_scans: std::mem::take(&mut self.inline_scans),
             expr_scan_ids: self.expr_scans.keys().copied().collect(),
             table_fn_scans,
+            sorter_metadata,
         })
     }
 
@@ -509,6 +527,20 @@ impl<'a> PlanCompiler<'a> {
                     current_slot += 1;
                 }
                 BindingsOp::LimitOffset(_) | BindingsOp::Scan(_) => {}
+                BindingsOp::GroupBy(group_by) => {
+                    return self.emit_group_by_pipeline(
+                        &chain,
+                        group_by,
+                        scan_id,
+                        cursor_id,
+                        loop_head,
+                        next_row_idx,
+                        current_slot,
+                        result,
+                        builder,
+                        cursor_infos,
+                    );
+                }
                 other => {
                     return Err(EngineError::InvalidPlan(format!(
                         "unsupported operator in pipeline: {:?}",
@@ -558,6 +590,400 @@ impl<'a> PlanCompiler<'a> {
 
         // Emit: Halt
         builder.emit_halt();
+
+        Ok(())
+    }
+
+    /// Emit bytecode for a GROUP BY pipeline (two-phase: scan+insert → sort+iterate+emit).
+    ///
+    /// Called when `emit_pipeline` encounters a `GroupBy` operator in the chain.
+    /// At this point, the input scan is already open and the NextRow loop head has been emitted.
+    /// Any filters before the GroupBy have also been emitted.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_group_by_pipeline(
+        &mut self,
+        chain: &[(OpId, BindingsOp)],
+        group_by: &GroupBy,
+        scan_id: ScanId,
+        cursor_id: u16,
+        loop_head: usize,
+        next_row_idx: usize,
+        current_slot: usize,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
+    ) -> Result<()> {
+        let _ = (scan_id, cursor_infos);
+        let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+
+        // --- Determine what to insert into the sorter ---
+        // Group key expressions + aggregate input expressions
+        let key_exprs: Vec<(&String, &ValueExpr)> = group_by.exprs.iter().collect();
+        let key_count = key_exprs.len();
+        let agg_count = group_by.aggregate_exprs.len();
+        let record_count = key_count + agg_count; // fields per sorter record
+
+        // Allocate registers for computing record fields before SorterInsert
+        let record_base = current_slot as u16;
+        let mut temp_slot = record_base + record_count as u16;
+
+        // Compile key expressions into record_base..record_base+key_count
+        for (i, (_name, expr)) in key_exprs.iter().enumerate() {
+            let dst = record_base + i as u16;
+            let prog = expr_compiler.compile_to_program(expr, dst, temp_slot)?;
+            self.inline_program(&prog, builder);
+            temp_slot = temp_slot.max(dst + 1 + prog.reg_count);
+        }
+
+        // Compile aggregate input expressions into record_base+key_count..
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            let dst = record_base + key_count as u16 + i as u16;
+            let prog = expr_compiler.compile_to_program(&agg.expr, dst, temp_slot)?;
+            self.inline_program(&prog, builder);
+            temp_slot = temp_slot.max(dst + 1 + prog.reg_count);
+        }
+
+        // Allocate sorter (compiler tracks the ID; VM will have it pre-allocated)
+        let sorter_id = self.next_sorter_id;
+        self.next_sorter_id += 1;
+
+        // Emit: SorterInsert
+        builder.insts.push(Inst::SorterInsert {
+            sorter_id: sorter_id as u16,
+            src_reg: record_base,
+            reg_count: record_count as u16,
+        });
+
+        // Emit: Jump back to NextRow (continue input scan loop)
+        let back_jump = builder.emit_jump();
+        builder.patch_target(back_jump, loop_head as u32);
+
+        // --- After input loop ---
+        let after_input = builder.current_offset();
+        builder.patch_target(next_row_idx, after_input);
+
+        // Emit: CloseCursor (done reading input)
+        builder.emit_close_cursor(cursor_id);
+
+        // === PHASE 2: Sort + Iterate ===
+
+        // Emit: SorterSort (jump to halt if empty)
+        let sorter_sort_idx = builder.current_offset();
+        builder.insts.push(Inst::SorterSort {
+            sorter_id: sorter_id as u16,
+            eof_target: 0, // patched later
+        });
+
+        // Allocate registers for the iterate phase:
+        // - data regs: where SorterData writes the current record
+        // - prev_key reg: holds previous group key for boundary detection
+        // - accum regs: one per aggregate
+        // - has_data flag
+        // - gosub return address
+        let data_reg = builder.alloc_reg_pub();
+        // Allocate additional data regs for the full record
+        for _ in 1..record_count {
+            builder.alloc_reg_pub();
+        }
+        let prev_key_reg = builder.alloc_reg_pub();
+        for _ in 1..key_count {
+            builder.alloc_reg_pub();
+        }
+        // Allocate accumulator registers. AVG uses accum_reg for sum and
+        // accum_reg+1 for count (2 registers). Others use 1 register.
+        let accum_base = if agg_count > 0 {
+            builder.alloc_reg_pub()
+        } else {
+            0
+        };
+        let mut accum_offsets: Vec<u16> = Vec::with_capacity(agg_count);
+        let mut next_offset: u16 = 0;
+        for agg in group_by.aggregate_exprs.iter() {
+            accum_offsets.push(next_offset);
+            let regs_needed = if matches!(agg.func, partiql_logical::AggFunc::AggAvg) {
+                2
+            } else {
+                1
+            };
+            next_offset += regs_needed;
+        }
+        let total_accum_regs = next_offset;
+        // Allocate remaining accum registers (first one already allocated above)
+        for _ in 1..total_accum_regs {
+            builder.alloc_reg_pub();
+        }
+        let has_data_reg = builder.alloc_reg_pub();
+        let ret_reg = builder.alloc_reg_pub();
+
+        // Emit: SorterData (iterate loop head)
+        let iterate_head = builder.current_offset();
+        builder.insts.push(Inst::SorterData {
+            sorter_id: sorter_id as u16,
+            dst_reg: data_reg,
+        });
+
+        // Compare ALL key fields: prev_key[i] == current[i] for each key
+        // Result: all_eq = key0_eq AND key1_eq AND ...
+        let cmp_result_reg = builder.alloc_reg_pub();
+        // Start by comparing first key
+        builder.insts.push(Inst::CompareEq {
+            lhs_reg: prev_key_reg,
+            rhs_reg: data_reg,
+            dst_reg: cmp_result_reg,
+        });
+        // AND with subsequent keys
+        for k in 1..key_count {
+            let key_cmp_reg = builder.alloc_reg_pub();
+            builder.insts.push(Inst::CompareEq {
+                lhs_reg: prev_key_reg + k as u16,
+                rhs_reg: data_reg + k as u16,
+                dst_reg: key_cmp_reg,
+            });
+            builder.insts.push(Inst::AndBool {
+                dst: cmp_result_reg,
+                a: cmp_result_reg,
+                b: key_cmp_reg,
+            });
+        }
+
+        // If all keys equal (same group), skip emit. Otherwise fall through to emit.
+        let not_cmp_reg = builder.alloc_reg_pub();
+        builder.insts.push(Inst::NotBool {
+            dst: not_cmp_reg,
+            src: cmp_result_reg,
+        });
+        let skip_emit_jump = builder.emit_jump_if_not_true(not_cmp_reg);
+
+        // --- GROUP BOUNDARY: emit previous group, then reset ---
+        // Gosub to emit subroutine
+        let gosub_emit_idx = builder.current_offset();
+        builder.insts.push(Inst::Gosub {
+            ret_reg,
+            target: 0, // patched later
+        });
+
+        // AggReset all accumulator registers
+        builder.insts.push(Inst::AggReset {
+            accum_start: accum_base,
+            count: total_accum_regs,
+        });
+
+        // --- ACCUMULATE ---
+        let accumulate_target = builder.current_offset();
+        // Patch the skip-emit jump to here
+        builder.patch_target(skip_emit_jump, accumulate_target);
+
+        // Move ALL current keys to prev_key registers
+        for k in 0..key_count {
+            builder.insts.push(Inst::Copy {
+                dst: prev_key_reg + k as u16,
+                src: data_reg + k as u16,
+            });
+        }
+
+        // AggStep for each aggregate
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            let input_reg = data_reg + key_count as u16 + i as u16;
+            let accum_reg = accum_base + accum_offsets[i];
+            match &agg.func {
+                partiql_logical::AggFunc::AggAvg => {
+                    // AVG: emit Sum into accum_reg, Count into accum_reg+1
+                    builder.insts.push(Inst::AggStep {
+                        func: AggFunc::Sum,
+                        accum_reg,
+                        input_reg,
+                    });
+                    builder.insts.push(Inst::AggStep {
+                        func: AggFunc::Count,
+                        accum_reg: accum_reg + 1,
+                        input_reg,
+                    });
+                }
+                other => {
+                    let func = match other {
+                        partiql_logical::AggFunc::AggSum => AggFunc::Sum,
+                        partiql_logical::AggFunc::AggCount => AggFunc::Count,
+                        partiql_logical::AggFunc::AggMin => AggFunc::Min,
+                        partiql_logical::AggFunc::AggMax => AggFunc::Max,
+                        partiql_logical::AggFunc::AggAny => AggFunc::Any,
+                        partiql_logical::AggFunc::AggEvery => AggFunc::Every,
+                        _ => unreachable!(),
+                    };
+                    builder.insts.push(Inst::AggStep {
+                        func,
+                        accum_reg,
+                        input_reg,
+                    });
+                }
+            }
+        }
+
+        // Set has_data flag
+        let const_one = builder.push_const_pub(ValueOwned::Bool(true));
+        builder.insts.push(Inst::LoadConst {
+            dst: has_data_reg,
+            const_idx: const_one,
+        });
+
+        // Emit: SorterNext → jump back to iterate_head
+        builder.insts.push(Inst::SorterNext {
+            sorter_id: sorter_id as u16,
+            target: iterate_head,
+        });
+
+        // --- After iterate loop: emit final group ---
+        let gosub_final_idx = builder.current_offset();
+        builder.insts.push(Inst::Gosub {
+            ret_reg,
+            target: 0, // patched later (same emit subroutine)
+        });
+        let jump_to_halt = builder.emit_jump(); // jump to halt
+
+        // === EMIT SUBROUTINE ===
+        let emit_sub_addr = builder.current_offset();
+        // Patch both gosub targets
+        if let Inst::Gosub { target, .. } = &mut builder.insts[gosub_emit_idx as usize] {
+            *target = emit_sub_addr;
+        }
+        if let Inst::Gosub { target, .. } = &mut builder.insts[gosub_final_idx as usize] {
+            *target = emit_sub_addr;
+        }
+
+        // Check has_data flag — if missing/0, skip emit
+        let emit_skip_jump = builder.emit_jump_if_not_true(has_data_reg);
+
+        // AggFinal for each aggregate
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            let accum_reg = accum_base + accum_offsets[i];
+            let func = match &agg.func {
+                partiql_logical::AggFunc::AggSum => AggFunc::Sum,
+                partiql_logical::AggFunc::AggCount => AggFunc::Count,
+                partiql_logical::AggFunc::AggAvg => AggFunc::Avg,
+                partiql_logical::AggFunc::AggMin => AggFunc::Min,
+                partiql_logical::AggFunc::AggMax => AggFunc::Max,
+                partiql_logical::AggFunc::AggAny => AggFunc::Any,
+                partiql_logical::AggFunc::AggEvery => AggFunc::Every,
+            };
+            builder.insts.push(Inst::AggFinal {
+                func,
+                accum_reg,
+                dst_reg: accum_reg, // finalize in-place
+            });
+        }
+
+        // Build a resolver for the grouped output phase.
+        // Maps group key aliases and $__agg_N names to their registers.
+        let mut grouped_column_slots = FxHashMap::default();
+
+        // Group key aliases → prev_key_reg (for single key) or data_reg + offset
+        // Since we copy the key to prev_key_reg during accumulate, and the emit
+        // subroutine fires with the previous group's key still in prev_key_reg:
+        for (i, (name, _expr)) in key_exprs.iter().enumerate() {
+            // For multi-key: we'd need multiple prev_key registers.
+            // For now, use data_reg + i since during emit the last SorterData
+            // still has the boundary row, and prev_key holds the group's key.
+            // Actually the key we want is in prev_key_reg for the first key.
+            // TODO: multi-key support — for now just map first key to prev_key_reg
+            if i == 0 {
+                grouped_column_slots.insert((*name).clone(), prev_key_reg);
+            } else {
+                // Multi-key: allocate additional prev_key registers
+                // For now, skip — this limits us to single-key GROUP BY
+                grouped_column_slots.insert((*name).clone(), prev_key_reg + i as u16);
+            }
+        }
+
+        // Aggregate names ($__agg_1, etc.) → accum registers (where AggFinal writes)
+        for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
+            grouped_column_slots.insert(agg.name.clone(), accum_base + accum_offsets[i]);
+        }
+
+        let grouped_resolver = ResolverKind::Pipeline(PipelineSlotResolver {
+            base_row_slot: None,
+            scan_alias: String::new(),
+            table_name: None,
+            column_slots: grouped_column_slots,
+        });
+        let grouped_result = SubtreeResult {
+            resolver: grouped_resolver,
+            cursor_id: None,
+            slot_count: result.slot_count,
+            scan_metadata: HashMap::new(),
+            shape: None,
+        };
+
+        let grouped_expr_compiler = LogicalExprCompiler::new(&grouped_result.resolver);
+
+        // Now handle any operators AFTER the GroupBy in the chain (Having, Project)
+        let group_by_idx = chain
+            .iter()
+            .position(|(_, op)| matches!(op, BindingsOp::GroupBy(_)))
+            .unwrap();
+
+        let mut having_skip_idx: Option<usize> = None;
+
+        for (_, op) in chain.iter().skip(group_by_idx + 1) {
+            match op {
+                BindingsOp::Having(having) => {
+                    let having_pred_reg = builder.alloc_reg_pub();
+                    let having_temp = having_pred_reg + 1;
+                    let prog = grouped_expr_compiler.compile_to_program(
+                        &having.expr,
+                        having_pred_reg,
+                        having_temp,
+                    )?;
+                    self.inline_program(&prog, builder);
+                    having_skip_idx = Some(builder.emit_jump_if_not_true(having_pred_reg));
+                }
+                BindingsOp::Project(project) => {
+                    self.emit_project_at(project, &grouped_result, 0, builder)?;
+                }
+                BindingsOp::ProjectValue(pv) => {
+                    self.emit_project_value_at(pv, &grouped_result, 0, builder)?;
+                }
+                BindingsOp::ProjectAll(_mode) => {
+                    self.emit_project_all_at(&grouped_result, 0, builder)?;
+                }
+                _ => {}
+            }
+        }
+
+        // EmitRow
+        builder.emit_emit_row();
+
+        // Clear has_data flag
+        let const_zero = builder.push_const_pub(ValueOwned::Bool(false));
+        builder.insts.push(Inst::LoadConst {
+            dst: has_data_reg,
+            const_idx: const_zero,
+        });
+
+        // Return from subroutine
+        let return_addr = builder.current_offset();
+        builder.insts.push(Inst::Return { ret_reg });
+
+        // Patch emit_skip_jump to the Return
+        builder.patch_target(emit_skip_jump, return_addr);
+
+        // Patch HAVING skip jump to the Return (skip EmitRow, go straight to Return)
+        if let Some(idx) = having_skip_idx {
+            builder.patch_target(idx, return_addr);
+        }
+
+        // Patch jump_to_halt
+        let halt_addr = builder.current_offset();
+        builder.patch_target(jump_to_halt, halt_addr);
+
+        // Patch SorterSort eof_target to halt
+        if let Inst::SorterSort { eof_target, .. } = &mut builder.insts[sorter_sort_idx as usize] {
+            *eof_target = halt_addr;
+        }
+
+        // Emit: Halt
+        builder.emit_halt();
+
+        // Record the sorter info for the compiled plan
+        self.sorter_infos.push(SorterCompileInfo { key_count });
 
         Ok(())
     }
@@ -804,6 +1230,34 @@ impl<'a> PlanCompiler<'a> {
                 let input_id = graph.single_input(id)?;
                 let _lo = lo.clone();
                 self.compile_node(graph, input_id, ctx)
+            }
+            BindingsOp::GroupBy(group_by) => {
+                let input_id = graph.single_input(id)?;
+                let group_by = group_by.clone();
+                // Extract field references from group key exprs and aggregate input exprs
+                {
+                    let mut extractor = ExprFieldExtractor::new(ctx);
+                    for expr in group_by.exprs.values() {
+                        extractor.extract(expr);
+                    }
+                    for agg in &group_by.aggregate_exprs {
+                        extractor.extract(&agg.expr);
+                    }
+                }
+                let mut result = self.compile_node(graph, input_id, ctx)?;
+                // GROUP BY creates a new output scope. Reset slot_count to 0 so
+                // operators above (Project, Having) allocate output from the start.
+                result.slot_count = 0;
+                Ok(result)
+            }
+            BindingsOp::Having(having) => {
+                let input_id = graph.single_input(id)?;
+                let having_expr = having.expr.clone();
+                let mut extractor = ExprFieldExtractor::new(ctx);
+                extractor.extract(&having_expr);
+                let mut result = self.compile_node(graph, input_id, ctx)?;
+                result.slot_count += 1;
+                Ok(result)
             }
             BindingsOp::ExprQuery(eq) => self.compile_expr_query(eq),
             other => Err(EngineError::InvalidPlan(format!(

@@ -6,6 +6,8 @@ pub mod error;
 pub mod expr;
 pub mod field_resolver;
 pub mod plan;
+#[allow(dead_code)]
+pub(crate) mod sorter;
 pub mod source;
 pub mod value;
 

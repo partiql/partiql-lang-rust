@@ -442,6 +442,96 @@ pub enum Inst {
         counter_reg: u16,
         target: u32,
     },
+
+    // === Sorter Instructions (GROUP BY) ===
+    /// Copy registers `src_reg..src_reg+reg_count` from the row bank into the
+    /// sorter's persistent bank, appending a new record.
+    SorterInsert {
+        sorter_id: u16,
+        src_reg: u16,
+        reg_count: u16,
+    },
+
+    /// Sort all records in the sorter by the first `key_count` fields.
+    /// If the sorter is empty, jump to `eof_target`.
+    SorterSort {
+        sorter_id: u16,
+        eof_target: u32,
+    },
+
+    /// Write the current record's fields into registers starting at `dst_reg`.
+    /// Zero-copy: registers point directly into the sorter's bank.
+    SorterData {
+        sorter_id: u16,
+        dst_reg: u16,
+    },
+
+    /// Advance to the next record. If exhausted, fall through; otherwise jump to `target`.
+    SorterNext {
+        sorter_id: u16,
+        target: u32,
+    },
+
+    // === Aggregation Instructions ===
+    /// Update accumulator register with a new input value.
+    /// For Count, `input_reg` is ignored (counts rows, not values).
+    AggStep {
+        func: AggFunc,
+        accum_reg: u16,
+        input_reg: u16,
+    },
+
+    /// Finalize the accumulator and write the result to `dst_reg`.
+    AggFinal {
+        func: AggFunc,
+        accum_reg: u16,
+        dst_reg: u16,
+    },
+
+    /// Reset accumulator registers `accum_start..accum_start+count` to Missing.
+    AggReset {
+        accum_start: u16,
+        count: u16,
+    },
+
+    // === Subroutine Instructions ===
+    /// Save the next instruction address into `ret_reg`, then jump to `target`.
+    Gosub {
+        ret_reg: u16,
+        target: u32,
+    },
+
+    /// Jump to the address stored in `ret_reg`.
+    Return {
+        ret_reg: u16,
+    },
+
+    // === Register Operations ===
+    /// Copy the value in `src` to `dst`.
+    Copy {
+        dst: u16,
+        src: u16,
+    },
+
+    // === Comparison ===
+    /// Compare two registers for equality (dynamic types). Writes Bool to `dst_reg`.
+    CompareEq {
+        lhs_reg: u16,
+        rhs_reg: u16,
+        dst_reg: u16,
+    },
+}
+
+/// Aggregate function type used by AggStep and AggFinal instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggFunc {
+    Sum,
+    Count,
+    Avg,
+    Min,
+    Max,
+    Any,
+    Every,
 }
 
 impl Inst {
@@ -1642,7 +1732,18 @@ impl Program {
             | Inst::DecrOrJump { .. }
             | Inst::MaterializeCursor { .. }
             | Inst::CreateTableFnCursor { .. }
-            | Inst::AssertCollection { .. } => {
+            | Inst::AssertCollection { .. }
+            | Inst::SorterInsert { .. }
+            | Inst::SorterSort { .. }
+            | Inst::SorterData { .. }
+            | Inst::SorterNext { .. }
+            | Inst::AggStep { .. }
+            | Inst::AggFinal { .. }
+            | Inst::AggReset { .. }
+            | Inst::Gosub { .. }
+            | Inst::Return { .. }
+            | Inst::Copy { .. }
+            | Inst::CompareEq { .. } => {
                 return Err(EngineError::IllegalState(
                     "relational instruction encountered in scalar eval_inst".to_string(),
                 ));

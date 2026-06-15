@@ -1,5 +1,0 @@
----
-source: partiql/tests/graph.rs
-expression: res.unwrap().result
----
-<< {  }, {  }, {  } >>
