@@ -37,23 +37,20 @@ impl<'c> LogicalPlanner<'c> {
         LogicalPlanner { catalog }
     }
 
-    /// Lower a parsed statement into a top-level [`logical::LogicalStatement`].
+    /// Lower a single parsed statement into a top-level [`logical::LogicalStatement`].
     ///
     /// This is the full-fidelity entry point: it preserves the statement
-    /// category (query vs. DDL). [`Self::lower`] is a back-compat shim over this.
+    /// category (query vs. DDL). It takes a single `AstNode<Statement>` rather
+    /// than a bare `Statement` because query-bearing statements (a top-level
+    /// query, or a CTAS source) are lowered through the two-pass pipeline, which
+    /// keys name resolution and lowering on the node's parse-time `NodeId`.
+    /// Iterating a multi-statement parse is the caller's concern. [`Self::lower`]
+    /// is a back-compat shim over this.
     #[inline]
     pub fn lower_statement(
         &self,
-        parsed: &Parsed<'_>,
+        stmt: &ast::AstNode<ast::Statement>,
     ) -> Result<logical::LogicalStatement, AstTransformationError> {
-        if parsed.statements.len() != 1 {
-            return Err(AstTransformationError {
-                errors: vec![AstTransformError::NotYetImplemented(
-                    "multi-statement input".to_string(),
-                )],
-            });
-        }
-        let stmt = &parsed.statements[0];
         match &stmt.node {
             ast::Statement::Query(q) => {
                 let plan = self.lower_query(q, stmt.id)?;
@@ -93,16 +90,23 @@ impl<'c> LogicalPlanner<'c> {
         &self,
         parsed: &Parsed<'_>,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
+        // This shim only handles a single statement; multi-statement iteration is
+        // not its job (the relational-plan return type can carry just one query).
+        let [stmt] = parsed.statements.as_slice() else {
+            return Err(AstTransformationError {
+                errors: vec![AstTransformError::NotYetImplemented(
+                    "multi-statement input".to_string(),
+                )],
+            });
+        };
         // Reject DDL at the front door, before any inner-query lowering, so this
         // shim returns a uniform `NotYetImplemented("DDL statement lowering")`
         // rather than leaking an inner-query error (e.g. an unresolved table in a
         // CTAS source). CTAS is surfaced as a plan via `lower_statement`.
-        if let [stmt] = parsed.statements.as_slice() {
-            if matches!(stmt.node, ast::Statement::Ddl(_)) {
-                return Err(ddl_not_yet_implemented());
-            }
+        if matches!(stmt.node, ast::Statement::Ddl(_)) {
+            return Err(ddl_not_yet_implemented());
         }
-        match self.lower_statement(parsed)? {
+        match self.lower_statement(stmt)? {
             logical::LogicalStatement::Query(plan) => Ok(plan),
             // DDL is already rejected at the front door above, so only a query plan
             // reaches here. This arm is a defensive fallback for any non-query result.

@@ -59,16 +59,16 @@ pub fn lower(
     planner.lower(parsed)
 }
 
-/// Lower AST to a top-level logical statement (query or DDL).
+/// Lower a single statement to a top-level logical statement (query or DDL).
 ///
 /// Unlike [`lower`], this preserves the statement category, so callers can
 /// distinguish a `Query` plan from a `CreateTableAs` / `CreateTable` DDL node.
 pub fn lower_statement(
     catalog: &dyn SharedCatalog,
-    parsed: &Parsed<'_>,
+    stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
 ) -> Result<partiql_logical::LogicalStatement, AstTransformationError> {
     let planner = LogicalPlanner::new(catalog);
-    planner.lower_statement(parsed)
+    planner.lower_statement(stmt)
 }
 
 /// Compile logical plan to evaluation plan

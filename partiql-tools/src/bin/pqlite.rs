@@ -334,9 +334,17 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
     }
 
     // Phase 2: Lower (AST → Logical Statement)
+    // pqlite runs exactly one statement per submission; reject anything else here,
+    // since lowering operates on a single statement.
+    let stmt = match parsed.statements.as_slice() {
+        [stmt] => stmt,
+        // Match the planner's wording for this condition so the failure reads the
+        // same whether it surfaces here or via `LogicalPlanner::lower`.
+        _ => return Err("Lower error: multi-statement input".into()),
+    };
     let lower_start = Instant::now();
     let statement =
-        lower_statement(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
+        lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
 
     // DDL statements are planning-only for now: print the lowered plan and stop.

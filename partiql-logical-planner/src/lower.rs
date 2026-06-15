@@ -2120,7 +2120,7 @@ mod tests {
             .expect("Expect successful parse");
         let planner = LogicalPlanner::new(&catalog);
         let stmt = planner
-            .lower_statement(&parsed)
+            .lower_statement(&parsed.statements[0])
             .expect("Expect successful lowering");
 
         let (table_name, query) = assert_matches!(
@@ -2154,7 +2154,7 @@ mod tests {
             .expect("Expect successful parse");
         let planner = LogicalPlanner::new(&catalog);
         let stmt = planner
-            .lower_statement(&parsed)
+            .lower_statement(&parsed.statements[0])
             .expect("Expect successful lowering");
 
         let table_name = assert_matches!(
@@ -2175,7 +2175,7 @@ mod tests {
             .expect("Expect successful parse");
         let planner = LogicalPlanner::new(&catalog);
         let stmt = planner
-            .lower_statement(&parsed)
+            .lower_statement(&parsed.statements[0])
             .expect("Expect successful lowering");
 
         let table_name = assert_matches!(
@@ -2201,7 +2201,7 @@ mod tests {
             .expect("Expect successful parse");
         let planner = LogicalPlanner::new(&catalog);
         let stmt = planner
-            .lower_statement(&parsed)
+            .lower_statement(&parsed.statements[0])
             .expect("Expect successful lowering");
 
         let query = assert_matches!(
