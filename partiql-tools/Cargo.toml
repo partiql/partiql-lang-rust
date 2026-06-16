@@ -63,6 +63,9 @@ partiql-parser = { path = "../partiql-parser" }
 partiql-types = { path = "../partiql-types" }
 partiql-value = { path = "../partiql-value" }
 clap = { version = "4.6.1", features = ["derive"] }
+# default-features disabled drops the serde / serde-json / serde-bincode codecs
+# we don't use; the LMDB backend and the Str/Bytes codecs are unaffected.
+heed = { version = "0.20", default-features = false }
 reedline = "0.48.0"
 
 [dev-dependencies]
