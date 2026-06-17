@@ -5,7 +5,7 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
 use partiql_logical::LogicalStatement;
-use partiql_tools::storage::{default_db_path, HeedDB};
+use partiql_tools::storage::HeedDB;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -35,7 +35,8 @@ struct Cli {
     #[arg(long, global = true, value_delimiter = ',')]
     debug: Vec<String>,
 
-    /// Path to the database file. Defaults to ~/.pqlite/default.pal.
+    /// Path to the database file (required for the interactive REPL). The
+    /// parent directory must already exist; it is not created for you.
     #[arg(long, global = true)]
     db: Option<std::path::PathBuf>,
 
@@ -86,24 +87,19 @@ fn main() {
             }
         }
         None => {
-            // Open the database lazily — only the interactive REPL needs it.
-            // A one-shot `exec` query is read-only today, so it must not
-            // manifest a database file on disk as a side effect (e.g. silently
-            // creating ~/.pqlite/default.pal). When the write path lands, exec
-            // will open the db explicitly where it needs to.
-
-            // Resolve the database path: explicit --db wins, else the default.
-            let db_path = cli.db.clone().or_else(default_db_path).unwrap_or_else(|| {
-                eprintln!(
-                    "Error: could not resolve a database path (home directory not found); pass --db <PATH>"
-                );
+            // The REPL needs a database. We require an explicit --db rather
+            // than inventing a default path: like standard UNIX tools, we don't
+            // create files or directories on the user's behalf.
+            let db_path = cli.db.clone().unwrap_or_else(|| {
+                eprintln!("Error: The `--db <PATH>` option is required to open the database.");
                 std::process::exit(1);
             });
 
-            // Open (or create) the database up front. A database that silently
-            // stops persisting is worse than one that refuses to start, so this
+            // Open the database up front. A database that silently stops
+            // persisting is worse than one that refuses to start, so this
             // hard-fails (unlike the REPL history file, which falls back to
-            // in-memory by design).
+            // in-memory by design). The parent directory must already exist;
+            // the filesystem error bubbles up naturally if it does not.
             let db = match HeedDB::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
