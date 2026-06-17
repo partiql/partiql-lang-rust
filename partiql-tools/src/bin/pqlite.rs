@@ -5,6 +5,7 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
 use partiql_logical::LogicalStatement;
+use partiql_tools::storage::HeedDB;
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -33,6 +34,11 @@ struct Cli {
     /// Print debug info for pipeline stages. Accepts: ast, plan, program, or * for all.
     #[arg(long, global = true, value_delimiter = ',')]
     debug: Vec<String>,
+
+    /// Path to the database file (required for the interactive REPL). The
+    /// parent directory must already exist; it is not created for you.
+    #[arg(long, global = true)]
+    db: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -81,7 +87,32 @@ fn main() {
             }
         }
         None => {
-            run_repl(&debug);
+            // The REPL needs a database. We require an explicit --db rather
+            // than inventing a default path: like standard UNIX tools, we don't
+            // create files or directories on the user's behalf.
+            let db_path = cli.db.clone().unwrap_or_else(|| {
+                eprintln!("Error: The `--db <PATH>` option is required to open the database.");
+                std::process::exit(1);
+            });
+
+            // Open the database up front. A database that silently stops
+            // persisting is worse than one that refuses to start, so this
+            // hard-fails (unlike the REPL history file, which falls back to
+            // in-memory by design). The parent directory must already exist;
+            // the filesystem error bubbles up naturally if it does not.
+            let db = match HeedDB::open(&db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    eprintln!(
+                        "Error: could not open database at {}: {}",
+                        db_path.display(),
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            run_repl(&debug, &db);
         }
     }
 }
@@ -230,19 +261,23 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
 }
 
 /// Print the REPL startup banner: the crate version, the git commit it was
-/// built from, and a pointer to the help command.
-fn print_startup_banner() {
+/// built from, the active database path, and a pointer to the help command.
+///
+/// Written to stderr, not stdout: the banner is startup chrome, and stdout is
+/// reserved for the query result stream so it can be piped/redirected cleanly.
+fn print_startup_banner(db_path: &std::path::Path) {
     // Reuse the same VERSION string that backs the `--version` flag so the two
     // can never drift (crate version + git SHA captured in build.rs).
-    println!("pqlite version {VERSION}");
-    println!("For usage information, enter \".help\".");
+    eprintln!("pqlite version {VERSION}");
+    eprintln!("database: {}", db_path.display());
+    eprintln!("For usage information, enter \".help\".");
 }
 
 /// Run the interactive REPL: read a line, execute it as a query, and loop.
 ///
 /// Errors from `execute_query` are reported but never terminate the session.
-fn run_repl(debug: &DebugFlags) {
-    print_startup_banner();
+fn run_repl(debug: &DebugFlags, db: &HeedDB) {
+    print_startup_banner(db.path());
 
     let mut line_editor = Reedline::create()
         .with_history(build_history())
