@@ -372,12 +372,10 @@ fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
 /// ASCII-equivalent to the engine's `UniCase` fold; full Unicode-consistent
 /// folding is a later-PR refinement.
 ///
-/// NOTE: `name` may contain arbitrary bytes from a quoted identifier. The
-/// downstream `HeedDB::create_table_from_rows` passes this key to heed's
-/// `create_database`, which calls `CString::new(name).unwrap()` internally —
-/// an interior NUL byte would panic there (rolling back the txn, so no
-/// corruption, but an ugly panic). A future hardening can reject interior-NUL
-/// names here; PR 2 does not, as it is not a corruption risk.
+/// NOTE: `name` may contain arbitrary bytes from a quoted identifier. An
+/// interior NUL byte would otherwise panic heed's internal
+/// `CString::new(name).unwrap()`; `HeedDB::create_table_from_rows` guards
+/// against that up front and returns `StorageError::InvalidName` instead.
 fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
     match name {
         partiql_value::BindingsName::CaseInsensitive(s) => s.to_lowercase(),
@@ -538,6 +536,8 @@ fn execute_query(
             let exec_time = exec_start.elapsed();
 
             // stdout stays empty for a write; confirmation + timing go to stderr.
+            // The confirmation line carries the row count; the timing line is
+            // purely the per-phase breakdown so the count is not repeated.
             eprintln!(
                 "Created table {} ({} rows)",
                 format_table_name(&table_name),
@@ -545,8 +545,7 @@ fn execute_query(
             );
             let total_time = parse_time + lower_time + compile_time + exec_time;
             eprintln!(
-                "({} rows in {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
-                n,
+                "(took {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
                 total_time.as_secs_f64() * 1000.0,
                 parse_time.as_secs_f64() * 1000.0,
                 lower_time.as_secs_f64() * 1000.0,

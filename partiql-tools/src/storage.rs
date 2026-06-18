@@ -41,6 +41,9 @@ pub enum StorageError {
     TableExists(String),
     /// A `CREATE TABLE AS` used a reserved name (`_`-prefixed system namespace).
     ReservedName(String),
+    /// A table name heed cannot use as a database name (it contains an interior
+    /// NUL byte, which would panic heed's internal `CString::new`).
+    InvalidName(String),
     /// A VM execution error, pre-stringified by the caller so this layer does
     /// not depend on `partiql-eval`'s error type.
     Execution(String),
@@ -52,11 +55,13 @@ impl std::fmt::Display for StorageError {
             StorageError::Io(e) => write!(f, "storage I/O error: {e}"),
             StorageError::Heed(e) => write!(f, "storage engine error: {e}"),
             StorageError::TableExists(name) => write!(f, "table already exists: {name}"),
-            // User-facing: surfaced verbatim to CLI users, hence the full sentence.
             StorageError::ReservedName(name) => write!(
                 f,
-                "Table name '{name}' is reserved (names starting with '_' are for system use)"
+                "reserved table name '{name}' (names starting with '_' are for system use)"
             ),
+            StorageError::InvalidName(name) => {
+                write!(f, "invalid table name {name:?}: contains a NUL byte")
+            }
             StorageError::Execution(msg) => write!(f, "execution error: {msg}"),
         }
     }
@@ -69,6 +74,7 @@ impl std::error::Error for StorageError {
             StorageError::Heed(e) => Some(e),
             StorageError::TableExists(_)
             | StorageError::ReservedName(_)
+            | StorageError::InvalidName(_)
             | StorageError::Execution(_) => None,
         }
     }
@@ -157,6 +163,14 @@ impl HeedDB {
         // and corrupt it. Reject the whole `_` namespace up front.
         if name.starts_with('_') {
             return Err(StorageError::ReservedName(name.to_string()));
+        }
+
+        // A name with an interior NUL would panic heed's internal
+        // `CString::new(name).unwrap()` in `create_database`. Reject it here as a
+        // clean error rather than letting a user-supplied quoted identifier
+        // (e.g. `CREATE TABLE "a\0b" AS ...`) reach that unwrap.
+        if name.contains('\0') {
+            return Err(StorageError::InvalidName(name.to_string()));
         }
 
         let mut wtxn = self.env.write_txn()?;
@@ -298,6 +312,24 @@ mod tests {
     }
 
     #[test]
+    fn create_table_from_rows_rejects_interior_nul_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nul.pqlite");
+        let db = HeedDB::open(&path).unwrap();
+
+        // An interior NUL would otherwise panic heed's CString::new; the guard
+        // turns it into a clean error and never opens a transaction.
+        let res = db.create_table_from_rows("a\0b", vec![Ok(())]);
+        assert!(
+            matches!(res, Err(StorageError::InvalidName(_))),
+            "interior-NUL name should be InvalidName, got: {res:?}"
+        );
+
+        let rtxn = db.env().read_txn().unwrap();
+        assert_eq!(db.tables().len(&rtxn).unwrap(), 0);
+    }
+
+    #[test]
     fn create_table_from_rows_rolls_back_on_mid_stream_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rollback.pqlite");
@@ -352,6 +384,11 @@ mod tests {
         let s = rn.to_string();
         assert!(s.contains("reserved"), "got: {s}");
         assert!(s.contains("_x"), "got: {s}");
+
+        let inv = StorageError::InvalidName("a\0b".to_string());
+        let s = inv.to_string();
+        assert!(s.contains("invalid table name"), "got: {s}");
+        assert!(s.contains("NUL"), "got: {s}");
 
         let ex = StorageError::Execution("boom".to_string());
         assert!(ex.to_string().contains("boom"), "got: {ex}");
