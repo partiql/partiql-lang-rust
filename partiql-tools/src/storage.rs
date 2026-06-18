@@ -92,6 +92,29 @@ impl From<heed::Error> for StorageError {
     }
 }
 
+/// Normalize a database path so heed can open a not-yet-existing single-file
+/// (`NO_SUB_DIR`) database given as a bare filename.
+///
+/// For a file that doesn't exist yet, heed recovers by canonicalizing
+/// `path.parent()` and re-joining the file name. But `parent()` of a bare name
+/// like `foo.pqlite` is the empty path `""`, and canonicalizing `""` is ENOENT —
+/// so `pqlite --db foo.pqlite` would spuriously fail even though the current
+/// directory exists and every other UNIX tool (`sqlite3 foo.db`, `touch`, ...)
+/// would just create the file there. Joining a bare name onto `.` gives heed a
+/// real parent (`.`) to canonicalize.
+///
+/// This neither invents a default path nor creates any directory: a path that
+/// already has a directory component is returned unchanged, so a genuinely
+/// missing parent (`missing_dir/foo.pqlite`) still errors — the behavior the
+/// `--db` contract wants.
+fn normalize_db_path(path: &Path) -> PathBuf {
+    if path.parent() == Some(Path::new("")) {
+        Path::new(".").join(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Owns the LMDB environment and the `_tables` system catalog handle.
 ///
 /// The `Env` and the `Database` handle share a lifecycle: the catalog handle is
@@ -114,6 +137,10 @@ impl HeedDB {
         // the parent directory is missing the filesystem error bubbles up
         // naturally — matching how standard UNIX tools behave.
 
+        // Normalize a bare filename to an explicit `./name` before handing it
+        // to heed (see `normalize_db_path` for the why).
+        let normalized = normalize_db_path(path);
+
         // Open the environment. `flags` and `open` are both unsafe in heed
         // 0.20, so the whole builder chain is in one unsafe block.
         // SAFETY: NO_SUB_DIR only changes the on-disk layout (single file vs.
@@ -126,7 +153,7 @@ impl HeedDB {
                 .map_size(DEFAULT_MAP_SIZE)
                 .max_dbs(MAX_DBS)
                 .flags(heed::EnvFlags::NO_SUB_DIR)
-                .open(path)?
+                .open(&normalized)?
         };
 
         // Open/create the `_tables` catalog in a write transaction.
@@ -431,5 +458,27 @@ mod tests {
         } // first handle dropped, env closed
         let reopened = HeedDB::open(&path);
         assert!(reopened.is_ok(), "reopening an existing db must succeed");
+    }
+
+    #[test]
+    fn normalize_db_path_prefixes_bare_filename_with_dot() {
+        // A bare filename (empty parent) gets an explicit `.` parent so heed can
+        // canonicalize it; anything with a real directory component is untouched.
+        assert_eq!(
+            normalize_db_path(Path::new("foo.pqlite")),
+            Path::new("./foo.pqlite")
+        );
+        assert_eq!(
+            normalize_db_path(Path::new("./foo.pqlite")),
+            Path::new("./foo.pqlite")
+        );
+        assert_eq!(
+            normalize_db_path(Path::new("sub/foo.pqlite")),
+            Path::new("sub/foo.pqlite")
+        );
+        assert_eq!(
+            normalize_db_path(Path::new("/tmp/foo.pqlite")),
+            Path::new("/tmp/foo.pqlite")
+        );
     }
 }

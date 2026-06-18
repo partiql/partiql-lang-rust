@@ -109,6 +109,57 @@ fn ctas_with_db_creates_table_and_persists_file() {
 }
 
 #[test]
+fn ctas_with_bare_db_filename_creates_file_in_cwd() {
+    // Regression: `pqlite --db foo.pqlite` with a BARE filename (no directory
+    // component) must create the file in the current directory, like any UNIX
+    // tool — not fail with ENOENT. The child runs with its cwd set to a temp
+    // dir, so the bare name resolves there.
+    let dir = tempfile::tempdir().unwrap();
+
+    let out = Command::new(PQLITE)
+        .arg("--db")
+        .arg("bare.pqlite") // bare name: parent() is "" — the bug case
+        .arg("exec")
+        .arg("CREATE TABLE t AS (SELECT t.a FROM mem(2,2) t)")
+        .current_dir(dir.path())
+        .output()
+        .expect("failed to spawn pqlite");
+
+    assert!(
+        out.status.success(),
+        "bare --db filename should create the db in cwd; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.path().join("bare.pqlite").is_file(),
+        "the bare-named db file should exist in the cwd after CTAS"
+    );
+}
+
+#[test]
+fn ctas_with_missing_parent_dir_errors() {
+    // The flip side of the bare-name fix: a path whose parent directory does
+    // NOT exist must still error (we never create directories on the user's
+    // behalf). This guards against the normalization over-reaching.
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("does_not_exist").join("x.pqlite");
+
+    let (ok, _, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT t.a FROM mem(1,2) t)",
+        Some(&missing),
+    );
+    assert!(!ok, "CTAS into a missing parent dir must fail");
+    assert!(
+        stderr.contains("could not open database"),
+        "expected an open error for the missing parent, got: {stderr}"
+    );
+    assert!(
+        !missing.exists(),
+        "we must not create the file or its parent dir"
+    );
+}
+
+#[test]
 fn duplicate_ctas_is_rejected_and_names_the_table() {
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("dup.pqlite");
