@@ -5,7 +5,7 @@ use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
 use partiql_logical::LogicalStatement;
-use partiql_tools::storage::HeedDB;
+use partiql_tools::storage::{HeedDB, StorageError};
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
 use std::time::Instant;
@@ -70,6 +70,26 @@ enum Commands {
     },
 }
 
+/// How `execute_query` obtains a database when a statement needs one.
+///
+/// Only `CREATE TABLE AS` needs storage. The REPL opens one handle for the
+/// whole session and passes it as `Open`; `exec` passes `Lazy` so the database
+/// is opened only if a write statement actually requires it — a plain query via
+/// `exec` never opens or creates a file.
+///
+/// This is CLI dispatch plumbing, not a storage abstraction: it encodes the
+/// three valid call states (live handle / lazy path / no path) as two variants
+/// so an illegal "both a handle and a path" state is unrepresentable. It is
+/// unrelated to any future engine-agnostic storage trait.
+#[derive(Clone, Copy)]
+enum DbSource<'a> {
+    /// An already-open handle (the REPL session database).
+    Open(&'a HeedDB),
+    /// A `--db` path to open on demand (the `exec` subcommand); `None` if no
+    /// `--db` was given.
+    Lazy(Option<&'a std::path::Path>),
+}
+
 fn main() {
     let cli = Cli::parse();
     let debug = DebugFlags::from_args(&cli.debug);
@@ -81,7 +101,7 @@ fn main() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            if let Err(e) = execute_query(query, &debug) {
+            if let Err(e) = execute_query(query, &debug, DbSource::Lazy(cli.db.as_deref())) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
@@ -312,7 +332,7 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
                     continue;
                 }
 
-                if let Err(e) = execute_query(query, debug) {
+                if let Err(e) = execute_query(query, debug, DbSource::Open(db)) {
                     eprintln!("{}", e);
                 }
             }
@@ -346,6 +366,25 @@ fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
     }
 }
 
+/// Derive the canonical catalog key for a table name. Bare (case-insensitive)
+/// identifiers fold to lowercase so `foo`, `FOO`, and `Foo` collide as one
+/// table; quoted (case-sensitive) identifiers are kept verbatim. This is
+/// ASCII-equivalent to the engine's `UniCase` fold; full Unicode-consistent
+/// folding is a later-PR refinement.
+///
+/// NOTE: `name` may contain arbitrary bytes from a quoted identifier. The
+/// downstream `HeedDB::create_table_from_rows` passes this key to heed's
+/// `create_database`, which calls `CString::new(name).unwrap()` internally —
+/// an interior NUL byte would panic there (rolling back the txn, so no
+/// corruption, but an ugly panic). A future hardening can reject interior-NUL
+/// names here; PR 2 does not, as it is not a corruption risk.
+fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
+    match name {
+        partiql_value::BindingsName::CaseInsensitive(s) => s.to_lowercase(),
+        partiql_value::BindingsName::CaseSensitive(s) => s.to_string(),
+    }
+}
+
 /// Shared stderr footer for a planning-only DDL statement.
 fn print_ddl_planned_footer(elapsed: std::time::Duration) {
     eprintln!(
@@ -354,7 +393,58 @@ fn print_ddl_planned_footer(elapsed: std::time::Duration) {
     );
 }
 
-fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std::error::Error>> {
+/// Compile a lowered query plan into an executable program, applying the
+/// `plan`/`program` debug dumps. Shared by the `Query` and `CreateTableAs`
+/// paths so their compilation setup cannot drift.
+///
+/// Note: when a debug flag is set, the `[Plan]`/`[Program]` dumps are written
+/// inside this call, so the caller's reported `compile:` time includes their
+/// cost. That only affects the diagnostic timing line under `--debug`; normal
+/// output is unaffected.
+fn build_compiled(
+    logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
+    debug: &DebugFlags,
+) -> Result<partiql_eval::CompiledPlan, Box<dyn std::error::Error>> {
+    if debug.plan {
+        eprintln!("[Plan] {:?}", logical);
+    }
+
+    let mut context = CompilationContext::new();
+    let column_names = vec!["a".to_string(), "b".to_string()];
+    let comp_catalog: std::sync::Arc<dyn partiql_eval::CompilationCatalog> =
+        std::sync::Arc::new(common::TableFnCompilationCatalog::new(column_names));
+    let _catalog_id = context.add_catalog("default", comp_catalog);
+
+    let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
+    let compiled = compiler
+        .compile(logical)
+        .map_err(|e| format!("Compile error: {:?}", e))?;
+
+    if debug.program {
+        eprintln!("[Program]\n{}", compiled);
+    }
+
+    Ok(compiled)
+}
+
+/// Build the execution context with pqlite's table functions registered.
+/// Shared by the `Query` and `CreateTableAs` paths.
+fn build_exec_context() -> ExecutionContext {
+    let mut exec_context = ExecutionContext::new();
+    exec_context.register_table_function("rand", std::sync::Arc::new(common::RandTableFunction));
+    exec_context.register_table_function("mem", std::sync::Arc::new(common::MemTableFunction));
+    exec_context.register_table_function(
+        "scan_ion",
+        std::sync::Arc::new(common::ScanIonTableFunction),
+    );
+    exec_context
+}
+
+fn execute_query(
+    query_str: &str,
+    debug: &DebugFlags,
+    db_source: DbSource,
+) -> Result<(), Box<dyn std::error::Error>> {
     let query = query_str.to_string();
 
     let catalog = create_table_fn_catalog();
@@ -388,14 +478,81 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
     let logical = match statement {
         LogicalStatement::Query(plan) => plan,
         LogicalStatement::CreateTableAs { table_name, query } => {
-            // `{}` (Display) on the plan, not `{:?}`: LogicalPlan has a readable
-            // Display impl; Debug would dump the raw nodes/edges struct.
-            println!(
-                "Planned CREATE TABLE {} AS:",
-                format_table_name(&table_name)
+            let key = canonical_table_key(&table_name);
+
+            // Resolve the database. The REPL passes its already-open session
+            // handle; `exec` opens lazily from --db here, so a plain query via
+            // `exec` never opens or creates a file. `lazily_opened` owns the
+            // exec-path handle for the rest of this arm (deferred-init local so
+            // the borrow in the `Lazy` branch outlives the match).
+            let lazily_opened;
+            let db: &HeedDB = match db_source {
+                DbSource::Open(db) => db,
+                DbSource::Lazy(path) => {
+                    let path = path.ok_or(
+                        "Error: The `--db <PATH>` option is required for CREATE TABLE AS.",
+                    )?;
+                    lazily_opened = HeedDB::open(path).map_err(|e| {
+                        format!(
+                            "Error: could not open database at {}: {}",
+                            path.display(),
+                            e
+                        )
+                    })?;
+                    &lazily_opened
+                }
+            };
+
+            // Compile and execute the inner query exactly like a plain query,
+            // but stream the rows into storage instead of stdout.
+            let compile_start = Instant::now();
+            let compiled = build_compiled(&query, debug)?;
+            let compile_time = compile_start.elapsed();
+
+            let exec_start = Instant::now();
+            let exec_context = build_exec_context();
+            let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+                .map_err(|e| format!("Execution setup error: {:?}", e))?;
+
+            let n = match vm.execute() {
+                Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+                    // Map each VM row to Result<(), StorageError>: PR 2 discards
+                    // the (not-yet-serialized) row data and keeps only
+                    // success/failure. The VM's error type is stringified here
+                    // so storage stays independent of partiql-eval.
+                    let rows = iter.map(|r| {
+                        r.map(|_row| ())
+                            .map_err(|e| StorageError::Execution(format!("{:?}", e)))
+                    });
+                    match db.create_table_from_rows(&key, rows) {
+                        Ok(n) => n,
+                        // Every StorageError carries its own user-facing message
+                        // via Display (e.g. "table already exists: foo"), so route
+                        // them all through one uniform prefix rather than
+                        // special-casing any single variant.
+                        Err(e) => return Err(format!("Error: {}", e).into()),
+                    }
+                }
+                Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
+            };
+            let exec_time = exec_start.elapsed();
+
+            // stdout stays empty for a write; confirmation + timing go to stderr.
+            eprintln!(
+                "Created table {} ({} rows)",
+                format_table_name(&table_name),
+                n
             );
-            println!("{}", query);
-            print_ddl_planned_footer(parse_time + lower_time);
+            let total_time = parse_time + lower_time + compile_time + exec_time;
+            eprintln!(
+                "({} rows in {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+                n,
+                total_time.as_secs_f64() * 1000.0,
+                parse_time.as_secs_f64() * 1000.0,
+                lower_time.as_secs_f64() * 1000.0,
+                compile_time.as_secs_f64() * 1000.0,
+                exec_time.as_secs_f64() * 1000.0,
+            );
             return Ok(());
         }
         LogicalStatement::CreateTable { table_name } => {
@@ -408,44 +565,14 @@ fn execute_query(query_str: &str, debug: &DebugFlags) -> Result<(), Box<dyn std:
         }
     };
 
-    if debug.plan {
-        eprintln!("[Plan] {:?}", logical);
-    }
-
     // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
-
-    // Set up compilation context with table function support
-    let mut context = CompilationContext::new();
-
-    // Use TableFnCompilationCatalog which supports both table lookups and table functions
-    let column_names = vec!["a".to_string(), "b".to_string()];
-    let comp_catalog: std::sync::Arc<dyn partiql_eval::CompilationCatalog> =
-        std::sync::Arc::new(common::TableFnCompilationCatalog::new(column_names));
-    let _catalog_id = context.add_catalog("default", comp_catalog);
-
-    let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
-    let compiled = compiler
-        .compile(&logical)
-        .map_err(|e| format!("Compile error: {:?}", e))?;
+    let compiled = build_compiled(&logical, debug)?;
     let compile_time = compile_start.elapsed();
-
-    if debug.program {
-        eprintln!("[Program]\n{}", compiled);
-    }
 
     // Phase 4: Execute
     let exec_start = Instant::now();
-
-    // Create ExecutionContext with table functions registered
-    let mut exec_context = ExecutionContext::new();
-    exec_context.register_table_function("rand", std::sync::Arc::new(common::RandTableFunction));
-    exec_context.register_table_function("mem", std::sync::Arc::new(common::MemTableFunction));
-    exec_context.register_table_function(
-        "scan_ion",
-        std::sync::Arc::new(common::ScanIonTableFunction),
-    );
-
+    let exec_context = build_exec_context();
     let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
@@ -606,5 +733,31 @@ fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
             }
             Value::Bag(Box::new(items.into()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partiql_value::BindingsName;
+    use std::borrow::Cow;
+
+    #[test]
+    fn canonical_key_folds_case_insensitive_to_lowercase() {
+        let n = BindingsName::CaseInsensitive(Cow::Borrowed("FOO"));
+        assert_eq!(canonical_table_key(&n), "foo");
+    }
+
+    #[test]
+    fn canonical_key_preserves_case_sensitive_verbatim() {
+        let n = BindingsName::CaseSensitive(Cow::Borrowed("Foo"));
+        assert_eq!(canonical_table_key(&n), "Foo");
+    }
+
+    #[test]
+    fn canonical_key_collides_bare_names_regardless_of_case() {
+        let a = BindingsName::CaseInsensitive(Cow::Borrowed("Foo"));
+        let b = BindingsName::CaseInsensitive(Cow::Borrowed("FOO"));
+        assert_eq!(canonical_table_key(&a), canonical_table_key(&b));
     }
 }
