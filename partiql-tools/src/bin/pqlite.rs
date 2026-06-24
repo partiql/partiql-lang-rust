@@ -528,14 +528,15 @@ fn execute_query(
                     let first_row_bytes: Option<Vec<u8>> = match iter.next() {
                         None => None,
                         Some(r) => {
-                            // Route the row-0 VM error through the same
-                            // StorageError::Execution Display chain that the
-                            // mid-stream path uses, so both stderr lines read
-                            // "Error: execution error: {Debug}". Without
-                            // this, row 0 would emit "Error: Execution error
-                            // on first row: ..." — same failure, different
-                            // wording, which makes scripts that grep stderr
-                            // brittle.
+                            // Route row-0 VM errors through the same
+                            // StorageError::Execution Display chain as the
+                            // mid-stream path, so both stderr lines read
+                            // "Error: execution error: {Debug}" — keeps
+                            // stderr-grepping scripts stable across paths.
+                            // SerializeError surfaces directly (its Display
+                            // already starts with "unsupported: "), so codec
+                            // rejections read "Error: unsupported: ..." —
+                            // matches PartiQL's single-level error style.
                             let row = r.map_err(|e| {
                                 format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
                             })?;
@@ -544,7 +545,7 @@ fn execute_query(
                                 &row_shape,
                                 &mut scratch_buf,
                             )
-                            .map_err(|e| format!("Error: execution error: {e}"))?;
+                            .map_err(|e| format!("Error: {e}"))?;
                             Some(scratch_buf.clone())
                         }
                     };
@@ -586,7 +587,7 @@ fn execute_query(
                                 &row_shape,
                                 &mut scratch_buf,
                             )
-                            .map_err(|e| StorageError::Execution(format!("{e}")))?;
+                            .map_err(|e| StorageError::Codec(format!("{e}")))?;
                             push_row(&scratch_buf)?;
                         }
                         Ok(())

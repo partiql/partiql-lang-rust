@@ -56,6 +56,12 @@ pub enum StorageError {
     /// A VM execution error, pre-stringified by the caller so this layer does
     /// not depend on `partiql-eval`'s error type.
     Execution(String),
+    /// A row-codec rejection (e.g. unsupported type/shape) bubbled up through
+    /// the `create_table_from_rows` driver closure. The carried string already
+    /// reads as a complete error sentence (e.g. "unsupported: column 'b': Bool
+    /// — tag reserved..."); Display surfaces it verbatim so stderr stays
+    /// single-level ("Error: unsupported: ..."), matching PartiQL's style.
+    Codec(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -72,6 +78,7 @@ impl std::fmt::Display for StorageError {
                 write!(f, "invalid table name {name:?}: contains a NUL byte")
             }
             StorageError::Execution(msg) => write!(f, "execution error: {msg}"),
+            StorageError::Codec(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -84,7 +91,8 @@ impl std::error::Error for StorageError {
             StorageError::TableExists(_)
             | StorageError::ReservedName(_)
             | StorageError::InvalidName(_)
-            | StorageError::Execution(_) => None,
+            | StorageError::Execution(_)
+            | StorageError::Codec(_) => None,
         }
     }
 }
