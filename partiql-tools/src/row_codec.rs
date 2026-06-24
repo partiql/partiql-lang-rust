@@ -260,15 +260,27 @@ pub fn serialize_row(
             }
             ValueType::Integer => {
                 buf.push(TAG_INTEGER);
-                buf.extend_from_slice(&view.get_i64().unwrap().to_le_bytes());
+                buf.extend_from_slice(
+                    &view
+                        .get_i64()
+                        .expect("ValueType::Integer must yield i64 — VM invariant")
+                        .to_le_bytes(),
+                );
             }
             ValueType::Float => {
                 buf.push(TAG_FLOAT);
-                buf.extend_from_slice(&view.get_f64().unwrap().to_le_bytes());
+                buf.extend_from_slice(
+                    &view
+                        .get_f64()
+                        .expect("ValueType::Float must yield f64 — VM invariant")
+                        .to_le_bytes(),
+                );
             }
             ValueType::Decimal => {
                 buf.push(TAG_DECIMAL);
-                let d = view.get_decimal().unwrap();
+                let d = view
+                    .get_decimal()
+                    .expect("ValueType::Decimal must yield Decimal — VM invariant");
                 // rust_decimal: scale() -> u32 with documented range 0..=28
                 // across all 1.x; mantissa() -> i128 (widened from native
                 // 96-bit; upper 32 bits sign-extended). Wire format per the
@@ -280,7 +292,9 @@ pub fn serialize_row(
             }
             ValueType::String => {
                 buf.push(TAG_STRING);
-                let s = view.get_str().unwrap();
+                let s = view
+                    .get_str()
+                    .expect("ValueType::String must yield &str — VM invariant");
                 let sb = s.as_bytes();
                 let str_len: u32 = sb
                     .len()
