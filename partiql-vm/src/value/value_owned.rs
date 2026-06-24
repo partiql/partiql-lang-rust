@@ -33,6 +33,8 @@ pub(crate) enum ValueOwned {
     Tuple(TupleOwned),
     List(Vec<ValueOwned>),
     Bag(Vec<ValueOwned>),
+    /// Ion variant literal: (raw_bytes, type_name)
+    Variant(Vec<u8>, String),
 }
 
 impl fmt::Display for ValueOwned {
@@ -75,6 +77,10 @@ impl fmt::Display for ValueOwned {
                     write!(f, "{item}")?;
                 }
                 write!(f, " >>")
+            }
+            ValueOwned::Variant(bytes, type_name) => {
+                let text = std::str::from_utf8(bytes).unwrap_or("<invalid utf8>");
+                write!(f, "Variant({type_name}::{text})")
             }
         }
     }

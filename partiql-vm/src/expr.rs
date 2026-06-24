@@ -27,6 +27,8 @@ pub enum Expr {
     Not(Box<Expr>),
     Neg(Box<Expr>),
     Pos(Box<Expr>),
+    IsNull(Box<Expr>),
+    IsMissing(Box<Expr>),
     Concat(Box<Expr>, Box<Expr>),
     In(Box<Expr>, Box<Expr>),
     Like {
@@ -91,7 +93,9 @@ impl Expr {
             | Expr::Neg(e)
             | Expr::Pos(e)
             | Expr::GetField(e, _)
-            | Expr::CollToScalar(e) => e.for_each_subquery(f),
+            | Expr::CollToScalar(e)
+            | Expr::IsNull(e)
+            | Expr::IsMissing(e) => e.for_each_subquery(f),
             Expr::LikeDynamic {
                 value,
                 pattern,
@@ -391,6 +395,14 @@ pub enum Inst {
     /// COLL_TO_SCALAR (spec 9.1): a collection of one tuple with one attribute becomes that
     /// attribute's value; anything else becomes MISSING.
     CollToScalar {
+        dst: u16,
+        src: u16,
+    },
+    IsNull {
+        dst: u16,
+        src: u16,
+    },
+    IsMissing {
         dst: u16,
         src: u16,
     },
@@ -932,11 +944,13 @@ impl Program {
         let av = regs[lhs as usize];
         let bv = regs[rhs as usize];
 
-        // Null/Missing propagation: any operand is Null or Missing → result is Null
-        if matches!(av, ValueRef::Null | ValueRef::Missing)
-            || matches!(bv, ValueRef::Null | ValueRef::Missing)
-        {
-            regs[dst as usize] = ValueRef::Null;
+        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
+        if is_null_or_missing(av) || is_null_or_missing(bv) {
+            if is_missing(av) || is_missing(bv) {
+                regs[dst as usize] = ValueRef::Missing;
+            } else {
+                regs[dst as usize] = ValueRef::Null;
+            }
             return Ok(());
         }
 
@@ -1069,11 +1083,13 @@ impl Program {
         let av = regs[lhs as usize];
         let bv = regs[rhs as usize];
 
-        // Null/Missing propagation
-        if matches!(av, ValueRef::Null | ValueRef::Missing)
-            || matches!(bv, ValueRef::Null | ValueRef::Missing)
-        {
-            regs[dst as usize] = ValueRef::Null;
+        // Null/Missing propagation: MISSING propagates as MISSING, NULL as NULL
+        if is_null_or_missing(av) || is_null_or_missing(bv) {
+            if is_missing(av) || is_missing(bv) {
+                regs[dst as usize] = ValueRef::Missing;
+            } else {
+                regs[dst as usize] = ValueRef::Null;
+            }
             return Ok(());
         }
 
@@ -1702,6 +1718,26 @@ impl Program {
                     _ => ValueRef::Missing,
                 };
             }
+            Inst::IsNull { dst, src } => {
+                let is_null = matches!(
+                    regs[*src as usize],
+                    ValueRef::Null | ValueRef::Missing | ValueRef::Variant(_, _)
+                );
+                let result = if is_null {
+                    if let ValueRef::Variant(bytes, _) = regs[*src as usize] {
+                        ValueRef::Bool(variant_is_null(bytes))
+                    } else {
+                        ValueRef::Bool(true)
+                    }
+                } else {
+                    ValueRef::Bool(false)
+                };
+                regs[*dst as usize] = result;
+            }
+            Inst::IsMissing { dst, src } => {
+                regs[*dst as usize] =
+                    ValueRef::Bool(matches!(regs[*src as usize], ValueRef::Missing));
+            }
             Inst::NegNum { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
                     ValueRef::I64(n) => ValueRef::I64(-n),
@@ -2176,6 +2212,18 @@ impl ExprCompiler<'_> {
                 self.builder.insts.push(Inst::NotBool { dst, src });
                 Ok(dst)
             }
+            Expr::IsNull(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::IsNull { dst, src });
+                Ok(dst)
+            }
+            Expr::IsMissing(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.builder.alloc_reg()?;
+                self.builder.insts.push(Inst::IsMissing { dst, src });
+                Ok(dst)
+            }
             Expr::Neg(expr) => {
                 let src = self.compile_expr(expr)?;
                 let dst = self.builder.alloc_reg()?;
@@ -2644,8 +2692,24 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
             ValueExpr::SearchedCase(_searched_case) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
             }
-            ValueExpr::IsTypeExpr(_is_type_expr) => {
-                Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
+            ValueExpr::IsTypeExpr(is_type_expr) => {
+                use partiql_logical::Type;
+                let inner = self.lower_expr(&is_type_expr.expr)?;
+                let check = match &is_type_expr.is_type {
+                    Type::NullType => Expr::IsNull(inner.into()),
+                    Type::MissingType => Expr::IsMissing(inner.into()),
+                    other => {
+                        return Err(EngineError::UnsupportedExpr(format!(
+                            "IS type check for {:?}",
+                            other
+                        )));
+                    }
+                };
+                if is_type_expr.not {
+                    Ok(Expr::Not(check.into()))
+                } else {
+                    Ok(check)
+                }
             }
             ValueExpr::NullIfExpr(_null_if_expr) => {
                 Err(EngineError::UnsupportedExpr(format!("{:?}", *expr)))
@@ -2704,7 +2768,7 @@ pub(crate) fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
         Lit::Int32(v) => ValueOwned::I64((*v).into()),
         Lit::Decimal(d) => ValueOwned::Decimal(*d),
         Lit::Double(f) => ValueOwned::F64(*f),
-        Lit::Variant(_, _) => todo!("Variant literals are not (yet) supported."),
+        Lit::Variant(bytes, type_name) => ValueOwned::Variant(bytes.clone(), type_name.clone()),
         other => return Err(EngineError::UnsupportedExpr(format!("{other:?}"))),
     })
 }
@@ -2734,6 +2798,27 @@ fn call_name(call: &CallExpr) -> String {
         CallName::ById(name, _, _) => name.clone(),
         other => format!("{other:?}"),
     }
+}
+
+/// Check if Ion variant bytes represent a null value.
+/// Ion typed nulls are text like "null", "null.bool", "null.int", etc.
+fn variant_is_null(bytes: &[u8]) -> bool {
+    let text = std::str::from_utf8(bytes).unwrap_or("");
+    text == "null" || text.starts_with("null.")
+}
+
+/// Check if a ValueRef is null-like (Null, or a Variant typed-null)
+fn is_null_or_missing(v: ValueRef<'_>) -> bool {
+    match v {
+        ValueRef::Null | ValueRef::Missing => true,
+        ValueRef::Variant(bytes, _) => variant_is_null(bytes),
+        _ => false,
+    }
+}
+
+/// Check if a ValueRef is specifically Missing
+fn is_missing(v: ValueRef<'_>) -> bool {
+    matches!(v, ValueRef::Missing)
 }
 
 fn like_to_re_pattern(like_expr: &str, escape: &str) -> String {

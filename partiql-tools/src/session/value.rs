@@ -105,6 +105,15 @@ fn value_view_to_value(
         ValueType::Tuple => Value::Tuple(Box::new(walk_struct(view)?)),
         ValueType::List => Value::List(Box::new(walk_sequence(view)?.into())),
         ValueType::Bag => Value::Bag(Box::new(walk_sequence(view)?.into())),
+        ValueType::Variant => {
+            use partiql_extension_ion::boxed_ion::BoxedIonType;
+            use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
+            let (bytes, _type_name) = view.get_variant().map_err(scalar_err)?;
+            let type_tag = BoxedIonType::default().to_dyn_type_tag();
+            let variant = partiql_value::Variant::new(bytes.to_vec(), type_tag)
+                .map_err(|e| RowConvertError(format!("Ion literal: {e}")))?;
+            Value::from(variant)
+        }
     })
 }
 

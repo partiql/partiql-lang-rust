@@ -198,6 +198,8 @@ fn type_rank(v: &ValueRef<'_>) -> u8 {
         ValueRef::List(_) => 5,
         ValueRef::Tuple(_) => 6,
         ValueRef::Bag(_) => 7,
+        // Not decoded: an Ion variant orders after every other type
+        ValueRef::Variant(_, _) => 8,
     }
 }
 
@@ -379,6 +381,7 @@ fn type_ordinal(v: &ValueRef<'_>) -> u8 {
         ValueRef::Tuple(_) => 8,
         ValueRef::List(_) => 9,
         ValueRef::Bag(_) => 10,
+        ValueRef::Variant(_, _) => 11,
     }
 }
 

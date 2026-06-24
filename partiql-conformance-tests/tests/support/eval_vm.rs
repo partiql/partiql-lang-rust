@@ -108,6 +108,15 @@ fn view_to_value(view: &mut ValueView<'_>) -> Value {
             }
             Value::Bag(Box::new(Bag::from(items)))
         }
+        ValueType::Variant => {
+            use partiql_extension_ion::boxed_ion::BoxedIonType;
+            use partiql_value::boxed_variant::DynBoxedVariantTypeFactory;
+            let (bytes, _type_name) = view.get_variant().unwrap();
+            let type_tag = BoxedIonType::default().to_dyn_type_tag();
+            let variant =
+                partiql_value::Variant::new(bytes.to_vec(), type_tag).expect("variant decode");
+            Value::from(variant)
+        }
     }
 }
 

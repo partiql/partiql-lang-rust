@@ -15,6 +15,7 @@ pub enum ValueType {
     Tuple,
     List,
     Bag,
+    Variant,
 }
 
 /// Cursor for single-pass traversal of hierarchical PartiQL values
@@ -97,6 +98,7 @@ impl<'a> ValueView<'a> {
             ValueRef::Tuple(_) => ValueType::Tuple,
             ValueRef::List(_) => ValueType::List,
             ValueRef::Bag(_) => ValueType::Bag,
+            ValueRef::Variant(_, _) => ValueType::Variant,
         }
     }
 
@@ -174,6 +176,17 @@ impl<'a> ValueView<'a> {
             ValueRef::Bytes(b) => Ok(b),
             _ => Err(EngineError::TypeError(format!(
                 "expected Bytes, got {:?}",
+                self.get_type()
+            ))),
+        }
+    }
+
+    /// Get variant data as (raw_bytes, type_name)
+    pub fn get_variant(&self) -> Result<(&'a [u8], &'a str)> {
+        match self.current {
+            ValueRef::Variant(bytes, type_name) => Ok((bytes, type_name)),
+            _ => Err(EngineError::TypeError(format!(
+                "expected Variant, got {:?}",
                 self.get_type()
             ))),
         }
