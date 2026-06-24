@@ -478,31 +478,21 @@ fn execute_query(
         LogicalStatement::CreateTableAs { table_name, query } => {
             let key = canonical_table_key(&table_name);
 
-            // Resolve the database. The REPL passes its already-open session
-            // handle; `exec` opens lazily from --db here, so a plain query via
-            // `exec` never opens or creates a file. `lazily_opened` owns the
-            // exec-path handle for the rest of this arm (deferred-init local so
-            // the borrow in the `Lazy` branch outlives the match).
-            let lazily_opened;
-            let db: &HeedDB = match db_source {
-                DbSource::Open(db) => db,
-                DbSource::Lazy(path) => {
-                    let path = path.ok_or(
-                        "Error: The `--db <PATH>` option is required for CREATE TABLE AS.",
-                    )?;
-                    lazily_opened = HeedDB::open(path).map_err(|e| {
-                        format!(
-                            "Error: could not open database at {}: {}",
-                            path.display(),
-                            e
-                        )
-                    })?;
-                    &lazily_opened
-                }
+            // Validate --db early but DO NOT open the env yet. Deferring the
+            // open until after compile + VM setup means a parse, compile, or
+            // ROW-0 schema-rejection exits without creating any .pqlite file
+            // on disk. A mid-stream rejection (row 50 hits a Bool, etc.)
+            // safely rolls back the wtxn — no catalog entry, no row bytes —
+            // but the env file on disk persists. That is the streaming-engine
+            // trade-off; protecting mid-stream would require buffering the
+            // whole result set, which defeats the per-row write model.
+            let db_path: Option<&std::path::Path> = match db_source {
+                DbSource::Open(_) => None,
+                DbSource::Lazy(path) => Some(
+                    path.ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE AS.")?,
+                ),
             };
 
-            // Compile and execute the inner query exactly like a plain query,
-            // but stream the rows into storage instead of stdout.
             let compile_start = Instant::now();
             let compiled = build_compiled(&query, debug)?;
             let compile_time = compile_start.elapsed();
@@ -512,22 +502,97 @@ fn execute_query(
             let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
                 .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
+            // Capture the result RowShape BEFORE vm.execute() — that call
+            // borrows the VM mutably for the iterator's lifetime, after which
+            // vm.shape() is unreachable inside the loop.
+            let row_shape = vm.shape().row_shape().clone();
+
+            // One scratch buffer for the entire CTAS. 4 KiB matches LMDB's
+            // typical B+tree page size; larger OS pages (e.g. 16 KiB on Apple
+            // Silicon) just pay one growth realloc on the first wide row.
+            // `serialize_row` clears the buffer's bytes but keeps the heap
+            // allocation, and `push_row(&scratch_buf)` hands storage a borrow
+            // — zero allocations per row after warmup.
+            let mut scratch_buf: Vec<u8> = Vec::with_capacity(4096);
+
+            // Peek-then-open: encode row 0 before opening the env. A row-0
+            // schema rejection (Bool literal in a projection, etc.) exits
+            // without ever touching the filesystem. Row 0's encoded bytes
+            // are stashed in `first_row_bytes`; the driver closure writes
+            // them first, then resumes the normal loop for rows 1..N. A
+            // mid-stream rejection on row K (K >= 1) rolls back the wtxn
+            // — catalog stays clean, row bytes are discarded — but the
+            // .pqlite file itself remains on disk from the env-open above.
             let n = match vm.execute() {
-                Ok(partiql_eval::ExecutionResult::Query(iter)) => {
-                    // Map each VM row to Result<(), StorageError>: PR 2 discards
-                    // the (not-yet-serialized) row data and keeps only
-                    // success/failure. The VM's error type is stringified here
-                    // so storage stays independent of partiql-eval.
-                    let rows = iter.map(|r| {
-                        r.map(|_row| ())
-                            .map_err(|e| StorageError::Execution(format!("{:?}", e)))
+                Ok(partiql_eval::ExecutionResult::Query(mut iter)) => {
+                    let first_row_bytes: Option<Vec<u8>> = match iter.next() {
+                        None => None,
+                        Some(r) => {
+                            // Route the row-0 VM error through the same
+                            // StorageError::Execution Display chain that the
+                            // mid-stream path uses, so both stderr lines read
+                            // "Error: execution error: {Debug}". Without
+                            // this, row 0 would emit "Error: Execution error
+                            // on first row: ..." — same failure, different
+                            // wording, which makes scripts that grep stderr
+                            // brittle.
+                            let row = r.map_err(|e| {
+                                format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
+                            })?;
+                            partiql_tools::row_codec::serialize_row(
+                                &row,
+                                &row_shape,
+                                &mut scratch_buf,
+                            )
+                            .map_err(|e| format!("Error: execution error: {e}"))?;
+                            Some(scratch_buf.clone())
+                        }
+                    };
+
+                    // First-row encode passed (or zero rows). Now safe to open
+                    // the env: any later error rolls back via wtxn drop, but
+                    // the env file on disk would persist regardless. By only
+                    // opening here, a rejected CTAS leaves the FS untouched.
+                    let lazily_opened;
+                    let db: &HeedDB = match db_source {
+                        DbSource::Open(db) => db,
+                        DbSource::Lazy(_) => {
+                            let path = db_path.expect("Lazy implies a path");
+                            lazily_opened = HeedDB::open(path).map_err(|e| {
+                                format!(
+                                    "Error: could not open database at {}: {}",
+                                    path.display(),
+                                    e
+                                )
+                            })?;
+                            &lazily_opened
+                        }
+                    };
+
+                    let driver_result = db.create_table_from_rows(&key, |push_row| {
+                        // SAFETY-RELEVANT: QueryIterator::next uses unsafe
+                        // lifetime extension on the RegisterReader it yields
+                        // (partiql-eval/src/engine/plan.rs:892-895). Aliasing
+                        // a RegisterReader across iter.next() is UB. We
+                        // consume `row` synchronously inside serialize_row,
+                        // then drop it; push_row sees only the encoded bytes.
+                        if let Some(ref bytes) = first_row_bytes {
+                            push_row(bytes)?;
+                        }
+                        for r in iter.by_ref() {
+                            let row = r.map_err(|e| StorageError::Execution(format!("{:?}", e)))?;
+                            partiql_tools::row_codec::serialize_row(
+                                &row,
+                                &row_shape,
+                                &mut scratch_buf,
+                            )
+                            .map_err(|e| StorageError::Execution(format!("{e}")))?;
+                            push_row(&scratch_buf)?;
+                        }
+                        Ok(())
                     });
-                    match db.create_table_from_rows(&key, rows) {
+                    match driver_result {
                         Ok(n) => n,
-                        // Every StorageError carries its own user-facing message
-                        // via Display (e.g. "table already exists: foo"), so route
-                        // them all through one uniform prefix rather than
-                        // special-casing any single variant.
                         Err(e) => return Err(format!("Error: {}", e).into()),
                     }
                 }
