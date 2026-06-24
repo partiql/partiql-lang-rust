@@ -32,6 +32,8 @@ pub(crate) enum ValueRef<'a> {
     List(&'a [ValueRef<'a>]),
     #[allow(dead_code)]
     Bag(&'a [ValueRef<'a>]),
+    /// Ion variant literal: (raw_bytes, type_name)
+    Variant(&'a [u8], &'a str),
 }
 
 impl<'a> ValueRef<'a> {
@@ -80,6 +82,9 @@ impl<'a> ValueRef<'a> {
                     .collect();
                 let refs_slice = arena.alloc_slice(&refs);
                 ValueRef::Bag(refs_slice)
+            }
+            ValueOwned::Variant(bytes, type_name) => {
+                ValueRef::Variant(bytes.as_slice(), type_name.as_str())
             }
         }
     }
@@ -161,6 +166,9 @@ pub(crate) fn value_ref_to_owned(value: ValueRef<'_>) -> ValueOwned {
         }
         ValueRef::Bag(items) => {
             ValueOwned::Bag(items.iter().map(|i| value_ref_to_owned(*i)).collect())
+        }
+        ValueRef::Variant(bytes, type_name) => {
+            ValueOwned::Variant(bytes.to_vec(), type_name.to_string())
         }
     }
 }

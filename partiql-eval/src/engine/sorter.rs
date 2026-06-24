@@ -109,6 +109,7 @@ fn type_ordinal(v: &ValueRef<'_>) -> u8 {
         ValueRef::Tuple(_) => 8,
         ValueRef::List(_) => 9,
         ValueRef::Bag(_) => 10,
+        ValueRef::Variant(_, _) => 11,
     }
 }
 
