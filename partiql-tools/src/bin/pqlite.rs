@@ -76,11 +76,6 @@ enum Commands {
 /// whole session and passes it as `Open`; `exec` passes `Lazy` so the database
 /// is opened only if a write statement actually requires it — a plain query via
 /// `exec` never opens or creates a file.
-///
-/// This is CLI dispatch plumbing, not a storage abstraction: it encodes the
-/// three valid call states (live handle / lazy path / no path) as two variants
-/// so an illegal "both a handle and a path" state is unrepresentable. It is
-/// unrelated to any future engine-agnostic storage trait.
 #[derive(Clone, Copy)]
 enum DbSource<'a> {
     /// An already-open handle (the REPL session database).
@@ -115,11 +110,9 @@ fn main() {
                 std::process::exit(1);
             });
 
-            // Open the database up front. A database that silently stops
-            // persisting is worse than one that refuses to start, so this
-            // hard-fails (unlike the REPL history file, which falls back to
-            // in-memory by design). The parent directory must already exist;
-            // the filesystem error bubbles up naturally if it does not.
+            // Open the database up front. Hard-fail rather than fall back (a
+            // silently-non-persisting db is worse than one that refuses to
+            // start). The parent directory must already exist.
             let db = match HeedDB::open(&db_path) {
                 Ok(db) => db,
                 Err(e) => {
@@ -320,14 +313,9 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
                     }
                 }
 
-                // Strip the trailing `;` terminator (preserving internal
-                // newlines) before handing the full multi-line text to the
-                // engine — shared with the `exec` subcommand for consistency.
                 let query = normalize_query(trimmed);
 
-                // A lone `;` (e.g. on its own line) leaves nothing to run once
-                // the terminator is stripped — skip it rather than handing an
-                // empty string to the parser.
+                // A lone `;` strips to empty — skip rather than parse "".
                 if query.is_empty() {
                     continue;
                 }
@@ -374,8 +362,8 @@ fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
 ///
 /// NOTE: `name` may contain arbitrary bytes from a quoted identifier. An
 /// interior NUL byte would otherwise panic heed's internal
-/// `CString::new(name).unwrap()`; `HeedDB::create_table_from_rows` guards
-/// against that up front and returns `StorageError::InvalidName` instead.
+/// `CString::new(name).unwrap()`; `HeedDB::create_table` guards against that
+/// up front and returns `StorageError::InvalidName` instead.
 fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
     match name {
         partiql_value::BindingsName::CaseInsensitive(s) => s.to_lowercase(),
@@ -470,22 +458,13 @@ fn execute_query(
         lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
 
-    // DDL statements are planning-only for now: print the lowered plan and stop.
-    // (Compile/execute and storage are a later slice; the consumer would
-    // orchestrate writes around the inner query's execution.)
     let logical = match statement {
         LogicalStatement::Query(plan) => plan,
         LogicalStatement::CreateTableAs { table_name, query } => {
             let key = canonical_table_key(&table_name);
 
-            // Validate --db early but DO NOT open the env yet. Deferring the
-            // open until after compile + VM setup means a parse, compile, or
-            // ROW-0 schema-rejection exits without creating any .pqlite file
-            // on disk. A mid-stream rejection (row 50 hits a Bool, etc.)
-            // safely rolls back the wtxn — no catalog entry, no row bytes —
-            // but the env file on disk persists. That is the streaming-engine
-            // trade-off; protecting mid-stream would require buffering the
-            // whole result set, which defeats the per-row write model.
+            // Resolve --db before compile + VM setup so a missing --db on a
+            // CTAS path is a clean CLI error before any expensive work.
             let db_path: Option<&std::path::Path> = match db_source {
                 DbSource::Open(_) => None,
                 DbSource::Lazy(path) => Some(
@@ -502,85 +481,38 @@ fn execute_query(
             let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
                 .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
-            // Capture the result RowShape BEFORE vm.execute() — that call
-            // borrows the VM mutably for the iterator's lifetime, after which
-            // vm.shape() is unreachable inside the loop.
+            // Capture RowShape before vm.execute() borrows the VM mutably.
             let row_shape = vm.shape().row_shape().clone();
 
-            // One scratch buffer for the entire CTAS. 4 KiB matches LMDB's
-            // typical B+tree page size; larger OS pages (e.g. 16 KiB on Apple
-            // Silicon) just pay one growth realloc on the first wide row.
-            // `serialize_row` clears the buffer's bytes but keeps the heap
-            // allocation, and `push_row(&scratch_buf)` hands storage a borrow
-            // — zero allocations per row after warmup.
+            // 4 KiB scratch: matches LMDB's typical page size; reused per row.
             let mut scratch_buf: Vec<u8> = Vec::with_capacity(4096);
 
-            // Peek-then-open: encode row 0 before opening the env. A row-0
-            // schema rejection (Bool literal in a projection, etc.) exits
-            // without ever touching the filesystem. Row 0's encoded bytes
-            // are stashed in `first_row_bytes`; the driver closure writes
-            // them first, then resumes the normal loop for rows 1..N. A
-            // mid-stream rejection on row K (K >= 1) rolls back the wtxn
-            // — catalog stays clean, row bytes are discarded — but the
-            // .pqlite file itself remains on disk from the env-open above.
+            // Open the env up front. Mid-stream rejection rolls back the wtxn
+            // (no catalog entry, no row bytes), but the env file itself may
+            // remain on disk.
+            let lazily_opened;
+            let db: &HeedDB = match db_source {
+                DbSource::Open(db) => db,
+                DbSource::Lazy(_) => {
+                    let path = db_path.expect("Lazy implies a path");
+                    lazily_opened = HeedDB::open(path).map_err(|e| {
+                        format!(
+                            "Error: could not open database at {}: {}",
+                            path.display(),
+                            e
+                        )
+                    })?;
+                    &lazily_opened
+                }
+            };
+
             let n = match vm.execute() {
-                Ok(partiql_eval::ExecutionResult::Query(mut iter)) => {
-                    let first_row_bytes: Option<Vec<u8>> = match iter.next() {
-                        None => None,
-                        Some(r) => {
-                            // Route row-0 VM errors through the same
-                            // StorageError::Execution Display chain as the
-                            // mid-stream path, so both stderr lines read
-                            // "Error: execution error: {Debug}" — keeps
-                            // stderr-grepping scripts stable across paths.
-                            // SerializeError surfaces directly (its Display
-                            // already starts with "unsupported: "), so codec
-                            // rejections read "Error: unsupported: ..." —
-                            // matches PartiQL's single-level error style.
-                            let row = r.map_err(|e| {
-                                format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
-                            })?;
-                            partiql_tools::row_codec::serialize_row(
-                                &row,
-                                &row_shape,
-                                &mut scratch_buf,
-                            )
-                            .map_err(|e| format!("Error: {e}"))?;
-                            Some(scratch_buf.clone())
-                        }
-                    };
-
-                    // First-row encode passed (or zero rows). Now safe to open
-                    // the env: any later error rolls back via wtxn drop, but
-                    // the env file on disk would persist regardless. By only
-                    // opening here, a rejected CTAS leaves the FS untouched.
-                    let lazily_opened;
-                    let db: &HeedDB = match db_source {
-                        DbSource::Open(db) => db,
-                        DbSource::Lazy(_) => {
-                            let path = db_path.expect("Lazy implies a path");
-                            lazily_opened = HeedDB::open(path).map_err(|e| {
-                                format!(
-                                    "Error: could not open database at {}: {}",
-                                    path.display(),
-                                    e
-                                )
-                            })?;
-                            &lazily_opened
-                        }
-                    };
-
+                Ok(partiql_eval::ExecutionResult::Query(iter)) => {
                     let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
-                    // SAFETY-RELEVANT: QueryIterator::next uses unsafe lifetime
-                    // extension on the RegisterReader it yields. Aliasing across
-                    // iter.next() is UB. We consume `row` synchronously inside
-                    // serialize_row, drop it, then push the bytes.
-                    if let Some(ref bytes) = first_row_bytes {
-                        writer
-                            .push_row(bytes)
-                            .map_err(|e| format!("Error: {}", e))?;
-                    }
-                    for r in iter.by_ref() {
+                    // SAFETY: QueryIterator::next uses unsafe lifetime extension
+                    // on its RegisterReader. Aliasing across iter.next() is UB.
+                    // Consume `row` synchronously, drop it, then push the bytes.
+                    for r in iter {
                         let row = r.map_err(|e| {
                             format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
                         })?;
@@ -599,8 +531,6 @@ fn execute_query(
             let exec_time = exec_start.elapsed();
 
             // stdout stays empty for a write; confirmation + timing go to stderr.
-            // The confirmation line carries the row count; the timing line is
-            // purely the per-phase breakdown so the count is not repeated.
             eprintln!(
                 "Created table {} ({} rows)",
                 format_table_name(&table_name),

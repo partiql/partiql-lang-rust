@@ -26,16 +26,14 @@ type TablesDb = heed::Database<heed::types::Str, heed::types::Bytes>;
 /// `U64`'s `BytesEncode` impl heap-allocates an 8-byte `Vec` on every `put`,
 /// while `Bytes` returns `Cow::Borrowed(&[u8])` — zero allocations per row.
 /// Big-endian is preserved at the call site (the caller fills a stack-local
-/// `[u8; 8]` via `row_id.to_be_bytes()`); LMDB's B+tree keys are
+/// `[u8; 8]` via `row_id.to_be_bytes()`). LMDB's B+tree keys are
 /// byte-comparison-ordered, so BE keeps lexicographic key order matching
-/// numeric order. Switching to LE would reverse iteration order and break
-/// PR4's row enumeration.
+/// numeric order; LE would reverse iteration order.
 type RowKey = heed::types::Bytes;
 
-/// A user table's row store: 8-byte big-endian `u64` row-id keys to opaque
-/// byte values. Storage is codec-agnostic — whatever bytes the caller pushes
-/// via the `create_table_from_rows` driver are persisted verbatim. The
-/// encoder lives in `crate::row_codec` since PR 3.
+/// `RowDb` is the per-table B+tree keyed by big-endian u64 row ID. Bytes
+/// pushed via `TableWriter::push_row` are stored verbatim — storage adds
+/// no framing.
 type RowDb = heed::Database<RowKey, heed::types::Bytes>;
 
 /// Write-side handle for a single CTAS operation.
@@ -102,11 +100,10 @@ pub enum StorageError {
     /// A VM execution error, pre-stringified by the caller so this layer does
     /// not depend on `partiql-eval`'s error type.
     Execution(String),
-    /// A row-codec rejection (e.g. unsupported type/shape) bubbled up through
-    /// the `create_table_from_rows` driver closure. The carried string already
-    /// reads as a complete error sentence (e.g. "unsupported: column 'b': Bool
-    /// — tag reserved..."); Display surfaces it verbatim so stderr stays
-    /// single-level ("Error: unsupported: ..."), matching PartiQL's style.
+    /// A row-codec rejection (e.g. unsupported type/shape). The carried string
+    /// already reads as a complete error sentence (e.g. "unsupported: column
+    /// 'b': Bool — tag reserved..."); Display surfaces it verbatim so stderr
+    /// stays single-level ("Error: unsupported: ..."), matching PartiQL's style.
     Codec(String),
 }
 
@@ -219,9 +216,7 @@ impl HeedDB {
                 .open(&normalized)?
         };
 
-        // Open/create the `_tables` catalog in a write transaction.
-        // `create_database` borrows the RwTxn mutably and opens the db if it
-        // already exists, so reopening is not an error.
+        // `create_database` is idempotent — reopening an existing db is fine.
         let mut wtxn = env.write_txn()?;
         let tables: TablesDb = env.create_database(&mut wtxn, Some(TABLES_DB))?;
         wtxn.commit()?;
@@ -252,6 +247,9 @@ impl HeedDB {
             return Err(StorageError::TableExists(name.to_string()));
         }
         let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
+        // Catalog value is the format-version byte. Zero-row tables have no
+        // rows to read it from, and a `[0x00]` sentinel would collide with
+        // TAG_INTEGER if a tool ran the catalog cell through the row parser.
         self.tables
             .put(&mut wtxn, name, &[crate::row_codec::FORMAT_VERSION])?;
         Ok(TableWriter {
