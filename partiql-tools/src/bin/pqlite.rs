@@ -570,32 +570,29 @@ fn execute_query(
                         }
                     };
 
-                    let driver_result = db.create_table_from_rows(&key, |push_row| {
-                        // SAFETY-RELEVANT: QueryIterator::next uses unsafe
-                        // lifetime extension on the RegisterReader it yields
-                        // (partiql-eval/src/engine/plan.rs:892-895). Aliasing
-                        // a RegisterReader across iter.next() is UB. We
-                        // consume `row` synchronously inside serialize_row,
-                        // then drop it; push_row sees only the encoded bytes.
-                        if let Some(ref bytes) = first_row_bytes {
-                            push_row(bytes)?;
-                        }
-                        for r in iter.by_ref() {
-                            let row = r.map_err(|e| StorageError::Execution(format!("{:?}", e)))?;
-                            partiql_tools::row_codec::serialize_row(
-                                &row,
-                                &row_shape,
-                                &mut scratch_buf,
-                            )
-                            .map_err(|e| StorageError::Codec(format!("{e}")))?;
-                            push_row(&scratch_buf)?;
-                        }
-                        Ok(())
-                    });
-                    match driver_result {
-                        Ok(n) => n,
-                        Err(e) => return Err(format!("Error: {}", e).into()),
+                    let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
+                    // SAFETY-RELEVANT: QueryIterator::next uses unsafe lifetime
+                    // extension on the RegisterReader it yields. Aliasing across
+                    // iter.next() is UB. We consume `row` synchronously inside
+                    // serialize_row, drop it, then push the bytes.
+                    if let Some(ref bytes) = first_row_bytes {
+                        writer
+                            .push_row(bytes)
+                            .map_err(|e| format!("Error: {}", e))?;
                     }
+                    for r in iter.by_ref() {
+                        let row = r.map_err(|e| {
+                            format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
+                        })?;
+                        partiql_tools::row_codec::serialize_row(&row, &row_shape, &mut scratch_buf)
+                            .map_err(|e| {
+                                format!("Error: {}", StorageError::Codec(format!("{e}")))
+                            })?;
+                        writer
+                            .push_row(&scratch_buf)
+                            .map_err(|e| format!("Error: {}", e))?;
+                    }
+                    writer.commit().map_err(|e| format!("Error: {}", e))?
                 }
                 Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
             };

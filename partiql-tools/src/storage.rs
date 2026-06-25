@@ -38,6 +38,52 @@ type RowKey = heed::types::Bytes;
 /// encoder lives in `crate::row_codec` since PR 3.
 type RowDb = heed::Database<RowKey, heed::types::Bytes>;
 
+/// Write-side handle for a single CTAS operation.
+///
+/// Holds the open `wtxn` and the table's `RowDb` between `create_table` and
+/// `commit`. Drop without `commit` triggers `wtxn`'s rollback — no catalog
+/// entry, no row bytes.
+///
+/// The `row_id` counter encodes as big-endian into a stack-local `[u8; 8]`
+/// key buffer reused across every `push_row` call. Combined with `RowKey =
+/// heed::types::Bytes` (Cow::Borrowed), this gives zero heap allocations per
+/// row for the key side of the put.
+pub struct TableWriter<'env> {
+    wtxn: heed::RwTxn<'env>,
+    table: RowDb,
+    row_id: u64,
+    key_buf: [u8; 8],
+}
+
+// `heed::RwTxn` does not impl `Debug`, so derive can't be used. Hand-rolled
+// impl skips the txn field and surfaces the row counter — enough to read in
+// test diagnostics (`{:?}` on `Result<TableWriter, _>` in the name-rejection
+// tests) without leaking heed internals.
+impl<'env> std::fmt::Debug for TableWriter<'env> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableWriter")
+            .field("row_id", &self.row_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'env> TableWriter<'env> {
+    /// Encode the next row. `bytes` is the caller-encoded row payload —
+    /// storage adds no framing.
+    pub fn push_row(&mut self, bytes: &[u8]) -> Result<(), StorageError> {
+        self.key_buf = self.row_id.to_be_bytes();
+        self.table.put(&mut self.wtxn, &self.key_buf[..], bytes)?;
+        self.row_id += 1;
+        Ok(())
+    }
+
+    /// Commit the write txn and return the number of rows persisted.
+    pub fn commit(self) -> Result<u64, StorageError> {
+        self.wtxn.commit()?;
+        Ok(self.row_id)
+    }
+}
+
 /// Errors from opening or initializing the storage environment, or from
 /// executing a write path against it.
 #[derive(Debug)]
@@ -187,73 +233,33 @@ impl HeedDB {
         })
     }
 
-    /// Create a new table by driving a caller-supplied per-row writer in a
-    /// single write transaction.
+    /// Open a write handle for a new table named `name`.
     ///
-    /// Storage opens the write txn, creates the row store, registers the
-    /// table in the catalog, then invokes `driver_closure` with a
-    /// `push_row(&[u8])` callback. The caller calls `push_row` once per
-    /// encoded row; storage assigns the next `u64` row-id and persists the
-    /// bytes verbatim. Any error from `driver_closure` or `push_row` drops
-    /// the `RwTxn` before commit, so LMDB rolls the whole operation back and
-    /// nothing partial persists.
-    ///
-    /// The push-callback shape lets the caller hand storage a `&[u8]`
-    /// borrowed from a reusable buffer instead of cloning per row.
-    ///
-    /// `name` must already be canonicalized by the caller (bare identifiers
-    /// folded to lowercase, quoted identifiers verbatim). Returns the number
-    /// of rows written.
-    pub fn create_table_from_rows<F>(
-        &self,
-        name: &str,
-        mut driver_closure: F,
-    ) -> Result<u64, StorageError>
-    where
-        F: FnMut(&mut dyn FnMut(&[u8]) -> Result<(), StorageError>) -> Result<(), StorageError>,
-    {
-        // heed performs no runtime codec check when reopening a named db, so
-        // `CREATE TABLE _tables AS ...` would reopen the catalog's own dbi and
-        // corrupt it. Reject the whole `_` namespace before any transaction.
+    /// Runs all up-front catalog work (reserved-name guard, NUL guard, dup
+    /// check, format-version write) and opens a write transaction. The
+    /// returned `TableWriter` lives until `commit` (success) or drop
+    /// (rollback). `name` must already be canonicalized by the caller —
+    /// bare identifiers folded to lowercase, quoted identifiers verbatim.
+    pub fn create_table(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
         if name.starts_with('_') {
             return Err(StorageError::ReservedName(name.to_string()));
         }
-
-        // An interior NUL would panic heed's internal `CString::new(name)` in
-        // `create_database`. Reject it here as a clean error.
         if name.contains('\0') {
             return Err(StorageError::InvalidName(name.to_string()));
         }
-
         let mut wtxn = self.env.write_txn()?;
-
-        // Dup check in the same txn (`RwTxn` derefs to `RoTxn`).
         if self.tables.get(&wtxn, name)?.is_some() {
             return Err(StorageError::TableExists(name.to_string()));
         }
-
         let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
-        // Catalog value records the row format version. PR 4's reader needs
-        // this on zero-row tables (no row bytes to peek for the version) and
-        // it avoids the [0x00] tag collision with `row_codec::TAG_INTEGER`.
         self.tables
             .put(&mut wtxn, name, &[crate::row_codec::FORMAT_VERSION])?;
-
-        let mut row_id: u64 = 0;
-        // Stack-local 8-byte key buffer reused across every push. Combined
-        // with `RowKey = heed::types::Bytes` (Cow::Borrowed), this gives
-        // zero heap allocations per row for the key side of the put.
-        let mut key_buf: [u8; 8] = [0u8; 8];
-        let mut push_row = |row_bytes: &[u8]| -> Result<(), StorageError> {
-            key_buf = row_id.to_be_bytes();
-            table.put(&mut wtxn, &key_buf[..], row_bytes)?;
-            row_id += 1;
-            Ok(())
-        };
-        driver_closure(&mut push_row)?;
-
-        wtxn.commit()?;
-        Ok(row_id)
+        Ok(TableWriter {
+            wtxn,
+            table,
+            row_id: 0,
+            key_buf: [0u8; 8],
+        })
     }
 
     // TODO: these accessors expose heed types (`Env`, `Database`) directly,
@@ -282,7 +288,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_table_from_rows_writes_bytes_verbatim_and_registers_catalog() {
+    fn table_writer_round_trip_via_push_and_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("writer.pqlite");
+        let db = HeedDB::open(&path).unwrap();
+
+        let mut w = db.create_table("widgets").expect("create_table");
+        w.push_row(&[0xDE, 0xAD]).unwrap();
+        w.push_row(&[0xBE, 0xEF, 0x01]).unwrap();
+        let n = w.commit().unwrap();
+        assert_eq!(n, 2);
+
+        let rtxn = db.env().read_txn().unwrap();
+        assert!(db.tables().get(&rtxn, "widgets").unwrap().is_some());
+        let rowdb: RowDb = db
+            .env()
+            .open_database(&rtxn, Some("widgets"))
+            .unwrap()
+            .expect("rowdb must exist after commit");
+        assert_eq!(rowdb.len(&rtxn).unwrap(), 2);
+    }
+
+    #[test]
+    fn create_table_writes_bytes_verbatim_and_registers_catalog() {
         // Bit-perfect roundtrip: storage's contract is "persist whatever bytes
         // the caller pushes." A concrete sentinel sequence proves it.
         let dir = tempfile::tempdir().unwrap();
@@ -294,14 +322,11 @@ mod tests {
             &[0x01],
             &[0xFF, 0x00, 0xFF, 0x00, 0xFF],
         ];
-        let n = db
-            .create_table_from_rows("widgets", |push_row| {
-                for p in payloads.iter() {
-                    push_row(p)?;
-                }
-                Ok(())
-            })
-            .unwrap();
+        let mut w = db.create_table("widgets").unwrap();
+        for p in payloads.iter() {
+            w.push_row(p).unwrap();
+        }
+        let n = w.commit().unwrap();
         assert_eq!(n, 3);
 
         let rtxn = db.env().read_txn().unwrap();
@@ -327,14 +352,12 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_with_no_rows_creates_empty_table() {
+    fn create_table_with_no_rows_creates_empty_table() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        let n = db
-            .create_table_from_rows("blank", |_push_row| Ok(()))
-            .unwrap();
+        let n = db.create_table("blank").unwrap().commit().unwrap();
         assert_eq!(n, 0);
 
         let rtxn = db.env().read_txn().unwrap();
@@ -348,25 +371,19 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rejects_duplicate_name() {
+    fn create_table_rejects_duplicate_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("dup.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        db.create_table_from_rows("t", |push_row| {
-            push_row(&[])?;
-            push_row(&[])?;
-            Ok(())
-        })
-        .unwrap();
-
-        let again = db.create_table_from_rows("t", |push_row| {
-            push_row(&[])?;
-            Ok(())
-        });
+        let mut w1 = db.create_table("t").unwrap();
+        w1.push_row(&[0x01]).unwrap();
+        w1.commit().unwrap();
+        let again = db.create_table("t");
         assert!(
             matches!(again, Err(StorageError::TableExists(ref n)) if n == "t"),
-            "second create should be TableExists, got: {again:?}"
+            "expected TableExists; got {:?}",
+            again
         );
 
         let rtxn = db.env().read_txn().unwrap();
@@ -374,19 +391,17 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rejects_reserved_names() {
+    fn create_table_rejects_reserved_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("reserved.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        for name in ["_tables", "_indexes", "_x"] {
-            let res = db.create_table_from_rows(name, |push_row| {
-                push_row(&[])?;
-                Ok(())
-            });
+        for name in ["_tables", "_x", "_"] {
+            let res = db.create_table(name);
             assert!(
                 matches!(res, Err(StorageError::ReservedName(_))),
-                "{name} should be reserved, got: {res:?}"
+                "expected ReservedName for {name:?}; got {:?}",
+                res
             );
         }
 
@@ -396,20 +411,18 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rejects_interior_nul_names() {
+    fn create_table_rejects_interior_nul_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nul.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
         // An interior NUL would otherwise panic heed's CString::new; the guard
         // turns it into a clean error and never opens a transaction.
-        let res = db.create_table_from_rows("a\0b", |push_row| {
-            push_row(&[])?;
-            Ok(())
-        });
+        let res = db.create_table("a\0b");
         assert!(
             matches!(res, Err(StorageError::InvalidName(_))),
-            "interior-NUL name should be InvalidName, got: {res:?}"
+            "expected InvalidName; got {:?}",
+            res
         );
 
         let rtxn = db.env().read_txn().unwrap();
@@ -417,36 +430,19 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rolls_back_on_mid_stream_error() {
+    fn dropping_writer_rolls_back_uncommitted_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rollback.pqlite");
+        let path = dir.path().join("rb.pqlite");
         let db = HeedDB::open(&path).unwrap();
-
-        let res = db.create_table_from_rows("partial", |push_row| {
-            push_row(&[0xAA])?;
-            push_row(&[0xBB])?;
-            Err(StorageError::Execution("boom".to_string()))
-        });
-        assert!(
-            matches!(res, Err(StorageError::Execution(_))),
-            "expected the mid-stream Execution error to surface, got: {res:?}"
-        );
-
-        // Rollback: the txn was never committed, so the catalog has no entry.
+        {
+            let mut w = db.create_table("partial").unwrap();
+            w.push_row(&[0x42]).unwrap();
+            // Drop w without commit — wtxn rolls back.
+        }
         let rtxn = db.env().read_txn().unwrap();
-        assert_eq!(
-            db.tables().len(&rtxn).unwrap(),
-            0,
-            "the failed CTAS must not register the table"
-        );
-
-        // The orphan row-store db must also be absent — rollback dropped it.
         assert!(
-            db.env()
-                .open_database::<RowKey, heed::types::Bytes>(&rtxn, Some("partial"))
-                .unwrap()
-                .is_none(),
-            "the failed CTAS must not leave a row-store db behind"
+            db.tables().get(&rtxn, "partial").unwrap().is_none(),
+            "rolled-back create must leave no catalog entry"
         );
     }
 
