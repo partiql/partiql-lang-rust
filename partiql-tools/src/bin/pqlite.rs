@@ -435,7 +435,6 @@ fn execute_query(
 
     let catalog = create_table_fn_catalog();
 
-    // Phase 1: Parse
     let parse_start = Instant::now();
     let parsed = parse(&query).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
@@ -444,7 +443,6 @@ fn execute_query(
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // Phase 2: Lower (AST → Logical Statement)
     // pqlite runs exactly one statement per submission; reject anything else here,
     // since lowering operates on a single statement.
     let stmt = match parsed.statements.as_slice() {
@@ -530,7 +528,6 @@ fn execute_query(
             };
             let exec_time = exec_start.elapsed();
 
-            // stdout stays empty for a write; confirmation + timing go to stderr.
             eprintln!(
                 "Created table {} ({} rows)",
                 format_table_name(&table_name),
@@ -557,12 +554,10 @@ fn execute_query(
         }
     };
 
-    // Phase 3: Compile (Logical → CompiledPlan)
     let compile_start = Instant::now();
     let compiled = build_compiled(&logical, debug)?;
     let compile_time = compile_start.elapsed();
 
-    // Phase 4: Execute
     let exec_start = Instant::now();
     let exec_context = build_exec_context();
     let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)

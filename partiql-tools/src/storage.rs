@@ -1,8 +1,7 @@
 //! LMDB-backed storage for pqlite.
 //!
-//! All heed/LMDB contact lives here so the binary stays thin and this logic is
-//! unit-testable in isolation. PR 1 opens the environment and creates the
-//! `_tables` system catalog; it writes nothing into the catalog.
+//! All heed/LMDB contact lives here so the binary stays thin and the storage
+//! logic is unit-testable in isolation.
 
 use std::path::{Path, PathBuf};
 
@@ -10,15 +9,14 @@ use std::path::{Path, PathBuf};
 /// on disk); LMDB grows actual usage up to this ceiling.
 const DEFAULT_MAP_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
 
-/// Upper bound on named databases in the environment. One catalog db now, with
-/// headroom for one named db per user table in later PRs.
+/// Upper bound on named databases in the environment. One catalog plus
+/// headroom for one named db per user table.
 const MAX_DBS: u32 = 128;
 
 /// Name of the system catalog database inside the environment.
 const TABLES_DB: &str = "_tables";
 
-/// The `_tables` catalog database: table-name keys to opaque byte values. The
-/// value format is deliberately left opaque until the table-registration PR.
+/// The `_tables` catalog database: table-name keys to opaque byte values.
 type TablesDb = heed::Database<heed::types::Str, heed::types::Bytes>;
 
 /// Row-store key codec: an 8-byte big-endian `u64` row id passed as raw bytes.
@@ -260,18 +258,16 @@ impl HeedDB {
         })
     }
 
-    // TODO: these accessors expose heed types (`Env`, `Database`) directly,
-    // which leaks the storage engine across the module boundary. If a later
-    // milestone abstracts storage away from heed (e.g. custom index
-    // structures), wrap these behind an engine-agnostic interface instead.
-
-    /// The live environment. Used by later PRs to begin transactions.
-    pub fn env(&self) -> &heed::Env {
+    /// The live LMDB environment. Test-only; heed types do not leak across
+    /// the module boundary.
+    #[cfg(test)]
+    pub(crate) fn env(&self) -> &heed::Env {
         &self.env
     }
 
-    /// The `_tables` system catalog handle (opaque byte values for now).
-    pub fn tables(&self) -> &TablesDb {
+    /// The `_tables` system catalog handle. Test-only.
+    #[cfg(test)]
+    pub(crate) fn tables(&self) -> &TablesDb {
         &self.tables
     }
 

@@ -146,18 +146,17 @@ fn write_struct_row(
                 )));
             }
         };
-        let view = row
-            .get_value_view(slot)
-            .expect("register slot from shape must exist in the row");
+        let view = row.get_value_view(slot).expect("register slot from shape");
         validate_value_type(view.get_type(), Some(name))?;
     }
 
     // Pre-flight passed: write the row.
     buf.push(FORMAT_VERSION);
     buf.push(TAG_STRUCT);
-    let field_count: u32 = fields.len().try_into().expect(
-        "row has more than u32::MAX columns — wire format requires field_count fits in u32",
-    );
+    let field_count: u32 = fields
+        .len()
+        .try_into()
+        .expect("field_count exceeds u32::MAX");
     buf.extend_from_slice(&field_count.to_le_bytes());
     for field in fields.iter() {
         let name = match &field.name {
@@ -172,7 +171,7 @@ fn write_struct_row(
         let name_len: u32 = name_bytes
             .len()
             .try_into()
-            .expect("column name longer than u32::MAX bytes");
+            .expect("name_len exceeds u32::MAX");
         buf.extend_from_slice(&name_len.to_le_bytes());
         buf.extend_from_slice(name_bytes);
         write_tagged_value(row, slot, buf);
@@ -235,27 +234,15 @@ fn write_tagged_value(row: &RegisterReader<'_>, slot: usize, buf: &mut Vec<u8>) 
         }
         ValueType::Integer => {
             buf.push(TAG_INTEGER);
-            buf.extend_from_slice(
-                &view
-                    .get_i64()
-                    .expect("ValueType::Integer must yield i64 — VM invariant")
-                    .to_le_bytes(),
-            );
+            buf.extend_from_slice(&view.get_i64().expect("i64 view").to_le_bytes());
         }
         ValueType::Float => {
             buf.push(TAG_FLOAT);
-            buf.extend_from_slice(
-                &view
-                    .get_f64()
-                    .expect("ValueType::Float must yield f64 — VM invariant")
-                    .to_le_bytes(),
-            );
+            buf.extend_from_slice(&view.get_f64().expect("f64 view").to_le_bytes());
         }
         ValueType::Decimal => {
             buf.push(TAG_DECIMAL);
-            let d = view
-                .get_decimal()
-                .expect("ValueType::Decimal must yield Decimal — VM invariant");
+            let d = view.get_decimal().expect("decimal view");
             // rust_decimal: scale() is u32 in 0..=28; the i32 cast is lossless.
             let scale_i32: i32 = d.scale() as i32;
             buf.extend_from_slice(&scale_i32.to_le_bytes());
@@ -263,14 +250,9 @@ fn write_tagged_value(row: &RegisterReader<'_>, slot: usize, buf: &mut Vec<u8>) 
         }
         ValueType::String => {
             buf.push(TAG_STRING);
-            let s = view
-                .get_str()
-                .expect("ValueType::String must yield &str — VM invariant");
+            let s = view.get_str().expect("string view");
             let sb = s.as_bytes();
-            let str_len: u32 = sb
-                .len()
-                .try_into()
-                .expect("string column value longer than u32::MAX bytes");
+            let str_len: u32 = sb.len().try_into().expect("str_len exceeds u32::MAX");
             buf.extend_from_slice(&str_len.to_le_bytes());
             buf.extend_from_slice(sb);
         }
