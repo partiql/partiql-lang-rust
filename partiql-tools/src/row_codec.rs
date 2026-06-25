@@ -22,14 +22,14 @@ use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType};
 /// `struct_body = field_count + (name_len + name + tagged_value){N}`.
 pub const FORMAT_VERSION: u8 = 0x01;
 
-/// Maximum columns per row. Real CTAS rows top out at hundreds; 1024 is
-/// ample headroom while catching corruption (a flipped byte producing a
-/// huge u32 field_count) before `Vec::with_capacity` allocates gigabytes.
+/// Sanity cap on `field_count` consumed by the reader. Real CTAS rows top
+/// out at hundreds; 1024 is ample headroom while catching a flipped byte
+/// producing a huge u32 before `Vec::with_capacity` allocates gigabytes.
 pub const MAX_FIELDS_PER_ROW: u32 = 1024;
 
-/// Maximum byte length of a column name. PartiQL identifiers are typically
-/// <100 bytes; 1 MiB catches corruption while staying well above any
-/// real-world name. The cap applies to UTF-8 byte length, not char count.
+/// Sanity cap on `name_len` consumed by the reader. PartiQL identifiers are
+/// typically <100 bytes; 1 MiB catches corruption while staying well above
+/// any real-world name. UTF-8 byte length, not char count.
 pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 
 // Tag constants. `pub` so the reader and encoder share one source of truth.
@@ -48,9 +48,9 @@ pub const TAG_NULL: u8 = 0x06;
 /// is a separate crate from this library.
 #[derive(Debug)]
 pub enum SerializeError {
-    /// An unsupported type or shape: containers, dynamic column names,
-    /// MISSING, BOOL, BYTES, nested struct values, empty column names. The
-    /// string identifies the offending column or top-level value.
+    /// An unsupported type or shape encountered mid-stream: containers,
+    /// dynamic column names, MISSING, BOOL, BYTES, nested struct values.
+    /// The string identifies the offending column or top-level value.
     Unsupported(String),
 }
 
@@ -87,13 +87,14 @@ pub fn serialize_row(
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
     buf.clear();
+    buf.push(FORMAT_VERSION);
     match row_shape {
-        RowShape::Struct(fields) => write_struct_row(row, fields, buf),
-        RowShape::Register(slot, _) => write_scalar_row(row, *slot, buf),
+        RowShape::Struct(fields) => write_struct(row, fields, buf),
+        RowShape::Register(slot, _) => write_value(row, *slot, None, buf),
     }
 }
 
-fn write_struct_row(
+fn write_struct(
     row: &RegisterReader<'_>,
     fields: &[partiql_eval::value::FieldShape],
     buf: &mut Vec<u8>,
@@ -105,15 +106,13 @@ fn write_struct_row(
             MAX_FIELDS_PER_ROW
         )));
     }
-    // Pre-flight: validate every column before pushing any payload bytes.
+    buf.push(TAG_STRUCT);
+    // Safe: the cap above bounds fields.len() to MAX_FIELDS_PER_ROW (u32).
+    let field_count: u32 = fields.len() as u32;
+    buf.extend_from_slice(&field_count.to_le_bytes());
     for (col, field) in fields.iter().enumerate() {
         let name = match &field.name {
-            FieldName::Static(s) if !s.is_empty() => s.as_str(),
-            FieldName::Static(_) => {
-                return Err(SerializeError::Unsupported(format!(
-                    "column {col}: empty column name not supported"
-                )));
-            }
+            FieldName::Static(s) => s.as_str(),
             FieldName::Register(_) => {
                 return Err(SerializeError::Unsupported(format!(
                     "column {col}: dynamic column names are not supported yet"
@@ -127,107 +126,31 @@ fn write_struct_row(
                 MAX_NAME_LEN_BYTES
             )));
         }
-        // Duplicate-name check: bounded by MAX_FIELDS_PER_ROW so the O(K²)
-        // is acceptable.
-        for prior in &fields[..col] {
-            if let FieldName::Static(prior_name) = &prior.name {
-                if prior_name == name {
-                    return Err(SerializeError::Unsupported(format!(
-                        "column {col}: duplicate column name '{name}' (already used)"
-                    )));
-                }
-            }
-        }
-        let slot = match &field.value {
-            RowShape::Register(idx, _) => *idx,
+        // Safe: the cap above bounds name.len() to MAX_NAME_LEN_BYTES (u32).
+        let name_len: u32 = name.len() as u32;
+        buf.extend_from_slice(&name_len.to_le_bytes());
+        buf.extend_from_slice(name.as_bytes());
+        match &field.value {
+            RowShape::Register(idx, _) => write_value(row, *idx, Some(name), buf)?,
             RowShape::Struct(_) => {
                 return Err(SerializeError::Unsupported(format!(
                     "column '{name}': nested struct values are not supported yet"
                 )));
             }
-        };
-        let view = row.get_value_view(slot).expect("register slot from shape");
-        validate_value_type(view.get_type(), Some(name))?;
-    }
-
-    // Pre-flight passed: write the row.
-    buf.push(FORMAT_VERSION);
-    buf.push(TAG_STRUCT);
-    let field_count: u32 = fields
-        .len()
-        .try_into()
-        .expect("field_count exceeds u32::MAX");
-    buf.extend_from_slice(&field_count.to_le_bytes());
-    for field in fields.iter() {
-        let name = match &field.name {
-            FieldName::Static(s) => s.as_str(),
-            FieldName::Register(_) => unreachable!("pre-flight rejects FieldName::Register"),
-        };
-        let slot = match &field.value {
-            RowShape::Register(idx, _) => *idx,
-            RowShape::Struct(_) => unreachable!("pre-flight rejects nested-struct field values"),
-        };
-        let name_bytes = name.as_bytes();
-        let name_len: u32 = name_bytes
-            .len()
-            .try_into()
-            .expect("name_len exceeds u32::MAX");
-        buf.extend_from_slice(&name_len.to_le_bytes());
-        buf.extend_from_slice(name_bytes);
-        write_tagged_value(row, slot, buf);
+        }
     }
     Ok(())
 }
 
-fn write_scalar_row(
+/// Write `tag + payload` for the value at register `slot`. Unsupported types
+/// return `Err`; the caller propagates and the in-flight wtxn rolls back.
+fn write_value(
     row: &RegisterReader<'_>,
     slot: usize,
+    col_name: Option<&str>,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
-    let view = row
-        .get_value_view(slot)
-        .expect("register slot from shape must exist in the row");
-    validate_value_type(view.get_type(), None)?;
-    buf.push(FORMAT_VERSION);
-    write_tagged_value(row, slot, buf);
-    Ok(())
-}
-
-/// Reject unsupported types. `col_name` is `Some(name)` for a struct-field
-/// walk and `None` for a top-level scalar row; the error wording branches
-/// accordingly.
-fn validate_value_type(ty: ValueType, col_name: Option<&str>) -> Result<(), SerializeError> {
-    let prefix = match col_name {
-        Some(name) => format!("column '{name}'"),
-        None => "top-level value".to_string(),
-    };
-    match ty {
-        ValueType::Null
-        | ValueType::Integer
-        | ValueType::Float
-        | ValueType::Decimal
-        | ValueType::String => Ok(()),
-        ValueType::Bool => Err(SerializeError::Unsupported(format!(
-            "{prefix}: Bool is not yet supported"
-        ))),
-        ValueType::Bytes => Err(SerializeError::Unsupported(format!(
-            "{prefix}: Bytes is not yet supported"
-        ))),
-        ValueType::Missing => Err(SerializeError::Unsupported(format!(
-            "{prefix}: MISSING is not yet supported"
-        ))),
-        ValueType::Tuple | ValueType::List | ValueType::Bag => Err(SerializeError::Unsupported(
-            format!("{prefix}: container type ({ty:?}) is not yet supported"),
-        )),
-    }
-}
-
-/// Write `tag + payload` for the value at register `slot`. The caller is
-/// responsible for having pre-flight-validated the type.
-fn write_tagged_value(row: &RegisterReader<'_>, slot: usize, buf: &mut Vec<u8>) {
-    let view = row
-        .get_value_view(slot)
-        .expect("register slot from shape must exist in the row");
+    let view = row.get_value_view(slot).expect("register slot from shape");
     match view.get_type() {
         ValueType::Null => {
             buf.push(TAG_NULL);
@@ -256,11 +179,20 @@ fn write_tagged_value(row: &RegisterReader<'_>, slot: usize, buf: &mut Vec<u8>) 
             buf.extend_from_slice(&str_len.to_le_bytes());
             buf.extend_from_slice(sb);
         }
-        ValueType::Bool
+        ty @ (ValueType::Bool
         | ValueType::Bytes
         | ValueType::Missing
         | ValueType::Tuple
         | ValueType::List
-        | ValueType::Bag => unreachable!("pre-flight rejects all reserved/container types"),
+        | ValueType::Bag) => {
+            let prefix = match col_name {
+                Some(name) => format!("column '{name}'"),
+                None => "top-level value".to_string(),
+            };
+            return Err(SerializeError::Unsupported(format!(
+                "{prefix}: {ty:?} is not yet supported"
+            )));
+        }
     }
+    Ok(())
 }

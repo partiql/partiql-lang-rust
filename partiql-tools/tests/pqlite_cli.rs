@@ -625,16 +625,17 @@ fn ctas_scalar_and_string_boundaries() {
 
 #[test]
 #[cfg_attr(windows, ignore)]
-fn ctas_rejects_bool_at_preflight_with_pointed_message() {
-    // The preflight pass must reject a Bool column before any bytes are
-    // written. Verifies both the rejection and the error wording.
+fn ctas_rejects_bool_with_pointed_message() {
+    // The encoder must reject a Bool column mid-stream. Err propagates so
+    // the wtxn rolls back; the env file may persist but the catalog stays
+    // clean.
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("bool.pqlite");
     let (ok, _stdout, stderr) = run_exec(
         "CREATE TABLE t AS (SELECT true AS b FROM mem(1,1) m)",
         Some(&db_path),
     );
-    assert!(!ok, "Bool column must trip preflight; stderr: {stderr}");
+    assert!(!ok, "Bool column must be rejected; stderr: {stderr}");
     assert!(
         stderr.contains("column 'b'") && stderr.contains("Bool"),
         "error must name the column and the rejected type; got: {stderr}",
