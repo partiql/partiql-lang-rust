@@ -1,49 +1,28 @@
 //! LMDB-backed storage for pqlite.
-//!
-//! All heed/LMDB contact lives here so the binary stays thin and the storage
-//! logic is unit-testable in isolation.
 
 use std::path::{Path, PathBuf};
 
-/// Virtual address space reserved for the LMDB map. Sparse (not pre-allocated
-/// on disk); LMDB grows actual usage up to this ceiling.
+/// Virtual address space reserved for the LMDB map. Sparse on disk.
 const DEFAULT_MAP_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
 
-/// Upper bound on named databases in the environment. One catalog plus
-/// headroom for one named db per user table.
+/// One catalog plus headroom for one named db per user table.
 const MAX_DBS: u32 = 128;
 
-/// Name of the system catalog database inside the environment.
 const TABLES_DB: &str = "_tables";
 
-/// The `_tables` catalog database: table-name keys to opaque byte values.
 type TablesDb = heed::Database<heed::types::Str, heed::types::Bytes>;
 
-/// Row-store key codec: an 8-byte big-endian `u64` row id passed as raw bytes.
-/// We use `heed::types::Bytes` (not `heed::types::U64<BigEndian>`) because
-/// `U64`'s `BytesEncode` impl heap-allocates an 8-byte `Vec` on every `put`,
-/// while `Bytes` returns `Cow::Borrowed(&[u8])` — zero allocations per row.
-/// Big-endian is preserved at the call site (the caller fills a stack-local
-/// `[u8; 8]` via `row_id.to_be_bytes()`). LMDB's B+tree keys are
-/// byte-comparison-ordered, so BE keeps lexicographic key order matching
-/// numeric order; LE would reverse iteration order.
+/// Row-store keys are an 8-byte big-endian `u64` row id passed as raw bytes.
+/// `Bytes` (not `U64<BigEndian>`) so the caller can pass a stack-local
+/// `[u8; 8]` — zero allocations per put. BE keeps lexicographic key order
+/// matching numeric order.
 type RowKey = heed::types::Bytes;
 
-/// `RowDb` is the per-table B+tree keyed by big-endian u64 row ID. Bytes
-/// pushed via `TableWriter::push_row` are stored verbatim — storage adds
-/// no framing.
 type RowDb = heed::Database<RowKey, heed::types::Bytes>;
 
-/// Write-side handle for a single CTAS operation.
-///
-/// Holds the open `wtxn` and the table's `RowDb` between `create_table` and
-/// `commit`. Drop without `commit` triggers `wtxn`'s rollback — no catalog
-/// entry, no row bytes.
-///
-/// The `row_id` counter encodes as big-endian into a stack-local `[u8; 8]`
-/// key buffer reused across every `push_row` call. Combined with `RowKey =
-/// heed::types::Bytes` (Cow::Borrowed), this gives zero heap allocations per
-/// row for the key side of the put.
+/// Write-side handle for a single CTAS operation. Drop without `commit`
+/// triggers `wtxn`'s rollback. `key_buf` is reused across pushes for a
+/// zero-alloc key path.
 pub struct TableWriter<'env> {
     wtxn: heed::RwTxn<'env>,
     table: RowDb,
@@ -51,10 +30,7 @@ pub struct TableWriter<'env> {
     key_buf: [u8; 8],
 }
 
-// `heed::RwTxn` does not impl `Debug`, so derive can't be used. Hand-rolled
-// impl skips the txn field and surfaces the row counter — enough to read in
-// test diagnostics (`{:?}` on `Result<TableWriter, _>` in the name-rejection
-// tests) without leaking heed internals.
+// Hand-rolled `Debug` because `heed::RwTxn` does not implement it.
 impl<'env> std::fmt::Debug for TableWriter<'env> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableWriter")
@@ -80,8 +56,6 @@ impl<'env> TableWriter<'env> {
     }
 }
 
-/// Errors from opening or initializing the storage environment, or from
-/// executing a write path against it.
 #[derive(Debug)]
 pub enum StorageError {
     Io(std::io::Error),
@@ -140,21 +114,10 @@ impl From<heed::Error> for StorageError {
     }
 }
 
-/// Normalize a database path so heed can open a not-yet-existing single-file
-/// (`NO_SUB_DIR`) database given as a bare filename.
-///
-/// For a file that doesn't exist yet, heed recovers by canonicalizing
-/// `path.parent()` and re-joining the file name. But `parent()` of a bare name
-/// like `foo.pqlite` is the empty path `""`, and canonicalizing `""` is ENOENT —
-/// so `pqlite --db foo.pqlite` would spuriously fail even though the current
-/// directory exists and every other UNIX tool (`sqlite3 foo.db`, `touch`, ...)
-/// would just create the file there. Joining a bare name onto `.` gives heed a
-/// real parent (`.`) to canonicalize.
-///
-/// This neither invents a default path nor creates any directory: a path that
-/// already has a directory component is returned unchanged, so a genuinely
-/// missing parent (`missing_dir/foo.pqlite`) still errors — the behavior the
-/// `--db` contract wants.
+/// Prefix a bare filename with `./` so heed can canonicalize its parent.
+/// Without this, `--db foo.pqlite` fails ENOENT because `parent()` of a
+/// bare name is the empty path. Paths with a real directory component are
+/// returned unchanged, so a genuinely missing parent still errors.
 fn normalize_db_path(path: &Path) -> PathBuf {
     if path.parent() == Some(Path::new("")) {
         Path::new(".").join(path)
@@ -163,12 +126,8 @@ fn normalize_db_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Owns the LMDB environment and the `_tables` system catalog handle.
-///
-/// The `Env` and the `Database` handle share a lifecycle: the catalog handle is
-/// valid only while the `Env` is alive, so both live on this struct together.
-/// Later PRs reuse `env()` to begin transactions and `tables()` across them
-/// without re-resolving the catalog by name.
+/// Owns the LMDB environment and the `_tables` catalog handle. The catalog
+/// handle is valid only while the env is alive, so both live together.
 #[derive(Debug)]
 pub struct HeedDB {
     env: heed::Env,
@@ -180,22 +139,11 @@ impl HeedDB {
     /// Open (or create) the LMDB environment at `path` as a single file, and
     /// open/create the `_tables` system catalog inside it.
     pub fn open(path: &Path) -> Result<HeedDB, StorageError> {
-        // We do not create the parent directory on the user's behalf. In
-        // single-file (`NO_SUB_DIR`) mode LMDB opens the file directly, so if
-        // the parent directory is missing the filesystem error bubbles up
-        // naturally — matching how standard UNIX tools behave.
-
-        // Normalize a bare filename to an explicit `./name` before handing it
-        // to heed (see `normalize_db_path` for the why).
         let normalized = normalize_db_path(path);
 
-        // Open the environment. `flags` and `open` are both unsafe in heed
-        // 0.20, so the whole builder chain is in one unsafe block.
         // SAFETY: NO_SUB_DIR only changes the on-disk layout (single file vs.
-        // directory) and carries none of the corruption-prone semantics of the
-        // dangerous flags (NO_SYNC / NO_META_SYNC / NO_LOCK). open() memory-maps
-        // the file; inter-process coordination is handled by LMDB's sibling
-        // lock file, and pqlite opens each env path at most once per process.
+        // directory). The dangerous flags (NO_SYNC / NO_META_SYNC / NO_LOCK)
+        // are not set, and pqlite opens each env path at most once per process.
         let env = unsafe {
             heed::EnvOpenOptions::new()
                 .map_size(DEFAULT_MAP_SIZE)
@@ -204,7 +152,7 @@ impl HeedDB {
                 .open(&normalized)?
         };
 
-        // `create_database` is idempotent — reopening an existing db is fine.
+        // `create_database` is idempotent.
         let mut wtxn = env.write_txn()?;
         let tables: TablesDb = env.create_database(&mut wtxn, Some(TABLES_DB))?;
         wtxn.commit()?;
@@ -259,7 +207,6 @@ impl HeedDB {
         &self.tables
     }
 
-    /// The resolved on-disk path this environment was opened at.
     pub fn path(&self) -> &Path {
         &self.path
     }
