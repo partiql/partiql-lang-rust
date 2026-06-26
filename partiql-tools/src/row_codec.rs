@@ -6,9 +6,9 @@
 //! warmup.
 //!
 //! Wire format:
-//!   ROW   = ver(u8=0x01) tagged_value
+//!   ROW          = tagged_value
 //!   tagged_value = tag(u8) payload
-//!   payload(TAG_STRUCT) = field_count(u32 LE) (name_len(u32 LE) name_utf8 tagged_value){N}
+//!   payload(TAG_TUPLE) = field_count(u32 LE) (name_len(u32 LE) name_utf8 tagged_value){N}
 //!
 //! All multi-byte VALUE bytes are little-endian. Row-id KEYS in LMDB stay
 //! big-endian: storage encodes them as `row_id.to_be_bytes()` under a
@@ -16,11 +16,6 @@
 //! matches numeric order with zero per-row key allocations.
 
 use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType};
-
-/// Format-version byte gating the entire wire grammar (not just per-tag
-/// interpretation). Readers must refuse unknown versions. Currently 0x01:
-/// `struct_body = field_count + (name_len + name + tagged_value){N}`.
-pub const FORMAT_VERSION: u8 = 0x01;
 
 /// Sanity cap on `field_count` consumed by the reader. Real CTAS rows top
 /// out at hundreds; 1024 is ample headroom while catching a flipped byte
@@ -36,7 +31,7 @@ pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 pub const TAG_INTEGER: u8 = 0x00;
 pub const TAG_DECIMAL: u8 = 0x01;
 pub const TAG_FLOAT: u8 = 0x02;
-pub const TAG_STRUCT: u8 = 0x03;
+pub const TAG_TUPLE: u8 = 0x03;
 // 0x04 = TAG_BAG     — reserved; rejected.
 pub const TAG_STRING: u8 = 0x05;
 pub const TAG_NULL: u8 = 0x06;
@@ -49,8 +44,8 @@ pub const TAG_NULL: u8 = 0x06;
 #[derive(Debug)]
 pub enum SerializeError {
     /// An unsupported type or shape encountered mid-stream: containers,
-    /// dynamic column names, MISSING, BOOL, BYTES, nested struct values.
-    /// The string identifies the offending column or top-level value.
+    /// dynamic column names, MISSING, BOOL, BYTES. The string identifies
+    /// the offending column or top-level value.
     Unsupported(String),
 }
 
@@ -66,10 +61,10 @@ impl std::error::Error for SerializeError {}
 
 /// Serialize one VM row into `buf` as a tagged-union byte sequence.
 ///
-/// `buf` is cleared on entry. On success, `buf` contains:
-///   * `FORMAT_VERSION` (1 byte)
-///   * top-level tag (1 byte: TAG_STRUCT for struct rows, or a scalar tag)
-///   * payload for that tag (struct_body for TAG_STRUCT, value bytes for scalars)
+/// `buf` is cleared on entry. On success, `buf` contains a single
+/// `tagged_value`: one tag byte followed by its payload. A top-level tuple
+/// is TAG_TUPLE + struct body; a top-level scalar is its scalar tag +
+/// value bytes.
 ///
 /// All integer fields are little-endian. The row-id key in LMDB stays
 /// big-endian under `heed::types::Bytes`. Only VALUE bytes are LE.
@@ -87,26 +82,25 @@ pub fn serialize_row(
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
     buf.clear();
-    buf.push(FORMAT_VERSION);
     match row_shape {
-        RowShape::Struct(fields) => write_struct(row, fields, buf),
+        RowShape::Struct(fields) => write_tuple(row, fields, buf),
         RowShape::Register(slot, _) => write_value(row, *slot, None, buf),
     }
 }
 
-fn write_struct(
+fn write_tuple(
     row: &RegisterReader<'_>,
     fields: &[partiql_eval::value::FieldShape],
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
     if fields.len() > MAX_FIELDS_PER_ROW as usize {
         return Err(SerializeError::Unsupported(format!(
-            "row has {} columns, exceeds MAX_FIELDS_PER_ROW ({})",
+            "tuple has {} fields, exceeds MAX_FIELDS_PER_ROW ({})",
             fields.len(),
             MAX_FIELDS_PER_ROW
         )));
     }
-    buf.push(TAG_STRUCT);
+    buf.push(TAG_TUPLE);
     // Safe: the cap above bounds fields.len() to MAX_FIELDS_PER_ROW (u32).
     let field_count: u32 = fields.len() as u32;
     buf.extend_from_slice(&field_count.to_le_bytes());
@@ -115,13 +109,13 @@ fn write_struct(
             FieldName::Static(s) => s.as_str(),
             FieldName::Register(_) => {
                 return Err(SerializeError::Unsupported(format!(
-                    "column {col}: dynamic column names are not supported yet"
+                    "field {col}: dynamic field names are not supported yet"
                 )));
             }
         };
         if name.len() > MAX_NAME_LEN_BYTES as usize {
             return Err(SerializeError::Unsupported(format!(
-                "column {col}: name length {} bytes exceeds MAX_NAME_LEN_BYTES ({})",
+                "field {col}: name length {} bytes exceeds MAX_NAME_LEN_BYTES ({})",
                 name.len(),
                 MAX_NAME_LEN_BYTES
             )));
@@ -132,11 +126,7 @@ fn write_struct(
         buf.extend_from_slice(name.as_bytes());
         match &field.value {
             RowShape::Register(idx, _) => write_value(row, *idx, Some(name), buf)?,
-            RowShape::Struct(_) => {
-                return Err(SerializeError::Unsupported(format!(
-                    "column '{name}': nested struct values are not supported yet"
-                )));
-            }
+            RowShape::Struct(nested_fields) => write_tuple(row, nested_fields, buf)?,
         }
     }
     Ok(())
@@ -147,7 +137,7 @@ fn write_struct(
 fn write_value(
     row: &RegisterReader<'_>,
     slot: usize,
-    col_name: Option<&str>,
+    field_name: Option<&str>,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
     let view = row.get_value_view(slot).expect("register slot from shape");
@@ -185,8 +175,8 @@ fn write_value(
         | ValueType::Tuple
         | ValueType::List
         | ValueType::Bag) => {
-            let prefix = match col_name {
-                Some(name) => format!("column '{name}'"),
+            let prefix = match field_name {
+                Some(name) => format!("field '{name}'"),
                 None => "top-level value".to_string(),
             };
             return Err(SerializeError::Unsupported(format!(

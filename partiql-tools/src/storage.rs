@@ -245,11 +245,9 @@ impl HeedDB {
             return Err(StorageError::TableExists(name.to_string()));
         }
         let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
-        // Catalog value is the format-version byte. Zero-row tables have no
-        // rows to read it from, and a `[0x00]` sentinel would collide with
-        // TAG_INTEGER if a tool ran the catalog cell through the row parser.
-        self.tables
-            .put(&mut wtxn, name, &[crate::row_codec::FORMAT_VERSION])?;
+        // Catalog value is empty: the cell records existence only. Table-
+        // level metadata (schema, etc.) lands in a future PR.
+        self.tables.put(&mut wtxn, name, &[])?;
         Ok(TableWriter {
             wtxn,
             table,

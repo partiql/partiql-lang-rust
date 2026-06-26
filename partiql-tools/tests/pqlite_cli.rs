@@ -181,8 +181,8 @@ fn duplicate_ctas_is_rejected_and_names_the_table() {
 // Wire-format parser (hand-written, mirrors row_codec spec).
 
 use partiql_tools::row_codec::{
-    FORMAT_VERSION, MAX_FIELDS_PER_ROW, MAX_NAME_LEN_BYTES, TAG_DECIMAL, TAG_FLOAT, TAG_INTEGER,
-    TAG_NULL, TAG_STRING, TAG_STRUCT,
+    MAX_FIELDS_PER_ROW, MAX_NAME_LEN_BYTES, TAG_DECIMAL, TAG_FLOAT, TAG_INTEGER, TAG_NULL,
+    TAG_STRING, TAG_TUPLE,
 };
 
 #[derive(Debug, PartialEq)]
@@ -192,33 +192,21 @@ enum ParsedValue {
     Float(f64),
     String(String),
     Null,
+    Tuple(Vec<(String, ParsedValue)>),
 }
 
-#[derive(Debug)]
-struct ParsedRow {
-    payload: ParsedPayload,
-}
-
-#[derive(Debug)]
-enum ParsedPayload {
-    /// Top-level TAG_STRUCT: a struct of named fields.
-    Struct(Vec<(String, ParsedValue)>),
-    /// Top-level scalar tag (Integer/Decimal/Float/String/Null).
-    Scalar(ParsedValue),
-}
-
-/// Mirror of the wire-format spec. Returns `ParsedRow` or panics with a
+/// Mirror of the wire-format spec. Returns `ParsedValue` or panics with a
 /// pointed message; this is a test helper, not a production reader.
 ///
-/// Imports `FORMAT_VERSION`, `TAG_*`, `MAX_FIELDS_PER_ROW`, and
-/// `MAX_NAME_LEN_BYTES` from `partiql_tools::row_codec` so a tag-byte or
-/// cap change in the encoder cannot drift here.
+/// Imports `TAG_*`, `MAX_FIELDS_PER_ROW`, and `MAX_NAME_LEN_BYTES` from
+/// `partiql_tools::row_codec` so a tag-byte or cap change in the encoder
+/// cannot drift here.
 ///
 /// ENDIANNESS INVARIANT: every multi-byte field is little-endian, matching
 /// `row_codec::serialize_row`'s `to_le_bytes()` calls. A new tag must be
 /// written `to_le_bytes()` there AND read `from_le_bytes()` here — an
 /// asymmetry compiles cleanly and silently corrupts every persisted row.
-fn parse_row(bytes: &[u8]) -> ParsedRow {
+fn parse_row(bytes: &[u8]) -> ParsedValue {
     fn take<'a>(i: &mut usize, n: usize, bytes: &'a [u8]) -> &'a [u8] {
         assert!(
             *i + n <= bytes.len(),
@@ -261,52 +249,46 @@ fn parse_row(bytes: &[u8]) -> ParsedRow {
                 )
             }
             t if t == TAG_NULL => ParsedValue::Null,
+            t if t == TAG_TUPLE => {
+                let field_count = take_u32(i, bytes);
+                assert!(
+                    field_count <= MAX_FIELDS_PER_ROW,
+                    "sanity: field_count={field_count} exceeds MAX_FIELDS_PER_ROW ({MAX_FIELDS_PER_ROW})"
+                );
+                let mut fields = Vec::with_capacity(field_count as usize);
+                for _ in 0..field_count {
+                    let name_len = take_u32(i, bytes);
+                    assert!(
+                        name_len <= MAX_NAME_LEN_BYTES,
+                        "sanity: name_len={name_len} exceeds MAX_NAME_LEN_BYTES ({MAX_NAME_LEN_BYTES})"
+                    );
+                    let name = std::str::from_utf8(take(i, name_len as usize, bytes))
+                        .expect("field name must be valid UTF-8")
+                        .to_string();
+                    let inner_tag = take(i, 1, bytes)[0];
+                    fields.push((name, take_value(i, bytes, inner_tag)));
+                }
+                ParsedValue::Tuple(fields)
+            }
             other => panic!("unknown tag {other:#04x} at offset {}", *i - 1),
         }
     }
 
     let mut i = 0usize;
-    assert_eq!(
-        take(&mut i, 1, bytes)[0],
-        FORMAT_VERSION,
-        "format version must be FORMAT_VERSION ({FORMAT_VERSION:#04x})"
-    );
     let top_tag = take(&mut i, 1, bytes)[0];
-    let payload = if top_tag == TAG_STRUCT {
-        let field_count = take_u32(&mut i, bytes);
-        assert!(
-            field_count <= MAX_FIELDS_PER_ROW,
-            "sanity: field_count={field_count} exceeds MAX_FIELDS_PER_ROW ({MAX_FIELDS_PER_ROW})"
-        );
-        let mut fields = Vec::with_capacity(field_count as usize);
-        for _ in 0..field_count {
-            let name_len = take_u32(&mut i, bytes);
-            assert!(
-                name_len <= MAX_NAME_LEN_BYTES,
-                "sanity: name_len={name_len} exceeds MAX_NAME_LEN_BYTES ({MAX_NAME_LEN_BYTES})"
-            );
-            let name = std::str::from_utf8(take(&mut i, name_len as usize, bytes))
-                .expect("field name must be valid UTF-8")
-                .to_string();
-            let tag = take(&mut i, 1, bytes)[0];
-            fields.push((name, take_value(&mut i, bytes, tag)));
-        }
-        ParsedPayload::Struct(fields)
-    } else {
-        ParsedPayload::Scalar(take_value(&mut i, bytes, top_tag))
-    };
+    let value = take_value(&mut i, bytes, top_tag);
     assert_eq!(
         i,
         bytes.len(),
         "parser left {} trailing bytes",
         bytes.len() - i
     );
-    ParsedRow { payload }
+    value
 }
 
 /// Read every row in table `t` from the .pqlite file at `db_path`, returning
-/// ParsedRow values in row_id order.
-fn read_all_rows(db_path: &std::path::Path, table: &str) -> Vec<ParsedRow> {
+/// ParsedValue rows in row_id order.
+fn read_all_rows(db_path: &std::path::Path, table: &str) -> Vec<ParsedValue> {
     let env = unsafe {
         heed::EnvOpenOptions::new()
             .map_size(1024 * 1024 * 1024)
@@ -347,9 +329,9 @@ fn ctas_persists_tagged_union_rows() {
     let rows = read_all_rows(&db_path, "t");
     assert_eq!(rows.len(), 3, "expected 3 rows; got: {rows:?}");
     for (idx, row) in rows.iter().enumerate() {
-        let fields = match &row.payload {
-            ParsedPayload::Struct(f) => f,
-            other => panic!("row {idx}: expected Struct, got {other:?}"),
+        let fields = match row {
+            ParsedValue::Tuple(f) => f,
+            other => panic!("row {idx}: expected Tuple, got {other:?}"),
         };
         assert_eq!(fields.len(), 1, "row {idx}: expected 1 field");
         let (name, value) = &fields[0];
@@ -391,9 +373,9 @@ fn ctas_oversize_row_round_trips_through_lmdb_overflow_pages() {
 
     let rows = read_all_rows(&db_path, "t");
     assert_eq!(rows.len(), 1, "expected exactly 1 row; got: {}", rows.len());
-    let fields = match &rows[0].payload {
-        ParsedPayload::Struct(f) => f,
-        other => panic!("expected Struct payload, got {other:?}"),
+    let fields = match &rows[0] {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
     };
     assert_eq!(fields.len(), 1, "row should have exactly one field");
     let (name, value) = &fields[0];
@@ -417,13 +399,12 @@ fn ctas_oversize_row_round_trips_through_lmdb_overflow_pages() {
 
 #[test]
 fn parser_adversarial_truncation_walk() {
-    // Hand-crafted valid 1-column row mirroring row_codec's wire format:
-    //   version(0x01), struct_tag(0x03),
+    // Hand-crafted valid 1-field tuple mirroring row_codec's wire format:
+    //   tuple_tag(0x03),
     //   field_count(1 u32 LE), name_len(1 u32 LE), name "a",
-    //   tag 0x00 (Integer), value 42 (i64 LE). 20 bytes total.
-    let valid_bytes: [u8; 20] = [
-        FORMAT_VERSION,
-        TAG_STRUCT,
+    //   tag 0x00 (Integer), value 42 (i64 LE). 19 bytes total.
+    let valid_bytes: [u8; 19] = [
+        TAG_TUPLE,
         0x01,
         0x00,
         0x00,
@@ -447,16 +428,16 @@ fn parser_adversarial_truncation_walk() {
     // Sanity: the full payload parses cleanly. If this fails, the loop below
     // is testing the wrong baseline.
     let row = parse_row(&valid_bytes);
-    let fields = match &row.payload {
-        ParsedPayload::Struct(f) => f,
-        other => panic!("expected Struct payload, got {other:?}"),
+    let fields = match &row {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
     };
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].0, "a");
     assert_eq!(fields[0].1, ParsedValue::Integer(42));
 
-    // Truncate at every offset 0..20. Every truncation MUST panic — never
-    // return a half-parsed ParsedRow, never read OOB. catch_unwind verifies
+    // Truncate at every offset 0..19. Every truncation MUST panic — never
+    // return a half-parsed value, never read OOB. catch_unwind verifies
     // the parser exits via a panic, not via a normal return.
     for len in 0..valid_bytes.len() {
         let truncated = &valid_bytes[..len];
@@ -483,16 +464,16 @@ fn panic_message(err: Box<dyn std::any::Any + Send>) -> String {
 
 #[test]
 fn parser_sanity_cap_field_count_trips_before_allocation() {
-    // version + struct_tag + field_count = MAX_FIELDS_PER_ROW + 1 (= 1025,
-    // LE: 0x01 0x04 0x00 0x00). The cap rejects values > MAX_FIELDS_PER_ROW.
+    // tuple_tag + field_count = MAX_FIELDS_PER_ROW + 1 (= 1025, LE: 0x01
+    // 0x04 0x00 0x00). The cap rejects values > MAX_FIELDS_PER_ROW.
     //
     // The assertion pins the panic SOURCE to the sanity cap by matching the
     // message text. A naive `result.is_err()` would silently pass if the cap
     // were deleted (the downstream `take()` bounds-check would fire instead
-    // on this exact 6-byte payload). Matching `"sanity:"` and `"field_count"`
+    // on this exact 5-byte payload). Matching `"sanity:"` and `"field_count"`
     // makes cap removal, cap weakening, and cap-position regressions all
     // surface a different message ("ran off the end ...") and fail this test.
-    let payload: [u8; 6] = [FORMAT_VERSION, TAG_STRUCT, 0x01, 0x04, 0x00, 0x00];
+    let payload: [u8; 5] = [TAG_TUPLE, 0x01, 0x04, 0x00, 0x00];
     assert_eq!(
         u32::from_le_bytes([0x01, 0x04, 0x00, 0x00]),
         MAX_FIELDS_PER_ROW + 1,
@@ -509,7 +490,7 @@ fn parser_sanity_cap_field_count_trips_before_allocation() {
 
 #[test]
 fn parser_sanity_cap_name_len_trips_before_allocation() {
-    // version + struct_tag + field_count=1 + name_len = MAX_NAME_LEN_BYTES + 1
+    // tuple_tag + field_count=1 + name_len = MAX_NAME_LEN_BYTES + 1
     // (= 1_048_577, LE: 0x01 0x00 0x10 0x00). The cap rejects name_len values
     // > MAX_NAME_LEN_BYTES before attempting to read the name bytes.
     //
@@ -517,18 +498,7 @@ fn parser_sanity_cap_name_len_trips_before_allocation() {
     // to the sanity cap by matching the message. Without this, removing or
     // weakening the cap would still leave `take()`'s OOB check to fire,
     // silently passing the test while shipping a real OOM regression.
-    let payload: [u8; 10] = [
-        FORMAT_VERSION,
-        TAG_STRUCT,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x01,
-        0x00,
-        0x10,
-        0x00,
-    ];
+    let payload: [u8; 9] = [TAG_TUPLE, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00];
     assert_eq!(
         u32::from_le_bytes([0x01, 0x00, 0x10, 0x00]),
         MAX_NAME_LEN_BYTES + 1,
@@ -566,12 +536,11 @@ fn ctas_scalar_and_string_boundaries() {
 
     let rows = read_all_rows(&db_path, "t");
     assert_eq!(rows.len(), 1);
-    let struct_fields = match rows.into_iter().next().unwrap().payload {
-        ParsedPayload::Struct(f) => f,
-        other => panic!("expected Struct payload, got {other:?}"),
+    let tuple_fields = match rows.into_iter().next().unwrap() {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
     };
-    let fields: std::collections::HashMap<String, ParsedValue> =
-        struct_fields.into_iter().collect();
+    let fields: std::collections::HashMap<String, ParsedValue> = tuple_fields.into_iter().collect();
 
     // i64::MAX must round-trip exactly — proves the high bit of the i64 LE
     // encoding survives the to_le_bytes/from_le_bytes round trip.
@@ -637,7 +606,7 @@ fn ctas_rejects_bool_with_pointed_message() {
     );
     assert!(!ok, "Bool column must be rejected; stderr: {stderr}");
     assert!(
-        stderr.contains("column 'b'") && stderr.contains("Bool"),
+        stderr.contains("field 'b'") && stderr.contains("Bool"),
         "error must name the column and the rejected type; got: {stderr}",
     );
     // Verify wtxn rollback by re-opening: the env file may persist on disk,
@@ -664,8 +633,8 @@ fn ctas_rejects_bool_with_pointed_message() {
 #[test]
 #[cfg_attr(windows, ignore)]
 fn ctas_persists_bare_scalar_rows() {
-    // Top-level shape is RowShape::Register(_) — a bag of scalars, not a
-    // bag of structs. Encoder writes ver + TAG_INTEGER + i64 LE per row.
+    // Top-level shape is RowShape::Register(_) — a bag of scalars. Encoder
+    // writes TAG_INTEGER + i64 LE per row, no tuple framing.
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("scalar.pqlite");
     let (ok, _stdout, stderr) = run_exec(
@@ -676,11 +645,11 @@ fn ctas_persists_bare_scalar_rows() {
     let rows = read_all_rows(&db_path, "t");
     assert_eq!(rows.len(), 3, "expected 3 scalar rows; got: {rows:?}");
     for (idx, row) in rows.iter().enumerate() {
-        match &row.payload {
-            ParsedPayload::Scalar(ParsedValue::Integer(v)) => {
+        match row {
+            ParsedValue::Integer(v) => {
                 assert_eq!(*v as usize, idx, "row {idx}: value should equal row index");
             }
-            other => panic!("row {idx}: expected scalar Integer, got {other:?}"),
+            other => panic!("row {idx}: expected Integer, got {other:?}"),
         }
     }
 }
