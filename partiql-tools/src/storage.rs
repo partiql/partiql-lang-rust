@@ -1,52 +1,72 @@
 //! LMDB-backed storage for pqlite.
-//!
-//! All heed/LMDB contact lives here so the binary stays thin and this logic is
-//! unit-testable in isolation. PR 1 opens the environment and creates the
-//! `_tables` system catalog; it writes nothing into the catalog.
 
 use std::path::{Path, PathBuf};
 
-/// Virtual address space reserved for the LMDB map. Sparse (not pre-allocated
-/// on disk); LMDB grows actual usage up to this ceiling.
+/// Virtual address space reserved for the LMDB map. Sparse on disk.
 const DEFAULT_MAP_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
 
-/// Upper bound on named databases in the environment. One catalog db now, with
-/// headroom for one named db per user table in later PRs.
+/// One catalog plus headroom for one named db per user table.
 const MAX_DBS: u32 = 128;
 
-/// Name of the system catalog database inside the environment.
 const TABLES_DB: &str = "_tables";
 
-/// The `_tables` catalog database: table-name keys to opaque byte values. The
-/// value format is deliberately left opaque until the table-registration PR.
 type TablesDb = heed::Database<heed::types::Str, heed::types::Bytes>;
 
-/// Row-store key codec: a `u64` row id, big-endian so LMDB's lexicographic key
-/// order matches numeric order.
-type RowKey = heed::types::U64<heed::byteorder::BigEndian>;
+/// Row-store keys are an 8-byte big-endian `u64` row id passed as raw bytes.
+/// `Bytes` (not `U64<BigEndian>`) so the caller can pass a stack-local
+/// `[u8; 8]` — zero allocations per put. BE keeps lexicographic key order
+/// matching numeric order.
+type RowKey = heed::types::Bytes;
 
-/// A user table's row store: `u64` row-id keys to opaque byte values. PR 2
-/// writes a constant `&[0x00]` value per row; Ion-encoded values land in PR 3.
 type RowDb = heed::Database<RowKey, heed::types::Bytes>;
 
-/// Errors from opening or initializing the storage environment, or from
-/// executing a write path against it.
+/// Write-side handle for a single CTAS operation. Drop without `commit`
+/// triggers `wtxn`'s rollback. `key_buf` is reused across pushes for a
+/// zero-alloc key path.
+pub struct TableWriter<'env> {
+    wtxn: heed::RwTxn<'env>,
+    table: RowDb,
+    row_id: u64,
+    key_buf: [u8; 8],
+}
+
+// Hand-rolled `Debug` because `heed::RwTxn` does not implement it.
+impl<'env> std::fmt::Debug for TableWriter<'env> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableWriter")
+            .field("row_id", &self.row_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'env> TableWriter<'env> {
+    /// Encode the next row. `bytes` is the caller-encoded row payload —
+    /// storage adds no framing.
+    pub fn push_row(&mut self, bytes: &[u8]) -> Result<(), StorageError> {
+        self.key_buf = self.row_id.to_be_bytes();
+        self.table.put(&mut self.wtxn, &self.key_buf[..], bytes)?;
+        self.row_id += 1;
+        Ok(())
+    }
+
+    /// Commit the write txn and return the number of rows persisted.
+    pub fn commit(self) -> Result<u64, StorageError> {
+        self.wtxn.commit()?;
+        Ok(self.row_id)
+    }
+}
+
 #[derive(Debug)]
 pub enum StorageError {
-    /// Filesystem-level error surfaced while working with the database file.
     Io(std::io::Error),
-    /// Error from the heed/LMDB layer.
     Heed(heed::Error),
-    /// A `CREATE TABLE AS` named a table already registered in the catalog.
     TableExists(String),
-    /// A `CREATE TABLE AS` used a reserved name (`_`-prefixed system namespace).
+    /// `_`-prefixed name; the namespace is reserved.
     ReservedName(String),
-    /// A table name heed cannot use as a database name (it contains an interior
-    /// NUL byte, which would panic heed's internal `CString::new`).
+    /// Name contains an interior NUL byte (heed would panic).
     InvalidName(String),
-    /// A VM execution error, pre-stringified by the caller so this layer does
-    /// not depend on `partiql-eval`'s error type.
     Execution(String),
+    Codec(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -63,6 +83,7 @@ impl std::fmt::Display for StorageError {
                 write!(f, "invalid table name {name:?}: contains a NUL byte")
             }
             StorageError::Execution(msg) => write!(f, "execution error: {msg}"),
+            StorageError::Codec(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -75,7 +96,8 @@ impl std::error::Error for StorageError {
             StorageError::TableExists(_)
             | StorageError::ReservedName(_)
             | StorageError::InvalidName(_)
-            | StorageError::Execution(_) => None,
+            | StorageError::Execution(_)
+            | StorageError::Codec(_) => None,
         }
     }
 }
@@ -92,21 +114,10 @@ impl From<heed::Error> for StorageError {
     }
 }
 
-/// Normalize a database path so heed can open a not-yet-existing single-file
-/// (`NO_SUB_DIR`) database given as a bare filename.
-///
-/// For a file that doesn't exist yet, heed recovers by canonicalizing
-/// `path.parent()` and re-joining the file name. But `parent()` of a bare name
-/// like `foo.pqlite` is the empty path `""`, and canonicalizing `""` is ENOENT —
-/// so `pqlite --db foo.pqlite` would spuriously fail even though the current
-/// directory exists and every other UNIX tool (`sqlite3 foo.db`, `touch`, ...)
-/// would just create the file there. Joining a bare name onto `.` gives heed a
-/// real parent (`.`) to canonicalize.
-///
-/// This neither invents a default path nor creates any directory: a path that
-/// already has a directory component is returned unchanged, so a genuinely
-/// missing parent (`missing_dir/foo.pqlite`) still errors — the behavior the
-/// `--db` contract wants.
+/// Prefix a bare filename with `./` so heed can canonicalize its parent.
+/// Without this, `--db foo.pqlite` fails ENOENT because `parent()` of a
+/// bare name is the empty path. Paths with a real directory component are
+/// returned unchanged, so a genuinely missing parent still errors.
 fn normalize_db_path(path: &Path) -> PathBuf {
     if path.parent() == Some(Path::new("")) {
         Path::new(".").join(path)
@@ -115,12 +126,8 @@ fn normalize_db_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Owns the LMDB environment and the `_tables` system catalog handle.
-///
-/// The `Env` and the `Database` handle share a lifecycle: the catalog handle is
-/// valid only while the `Env` is alive, so both live on this struct together.
-/// Later PRs reuse `env()` to begin transactions and `tables()` across them
-/// without re-resolving the catalog by name.
+/// Owns the LMDB environment and the `_tables` catalog handle. The catalog
+/// handle is valid only while the env is alive, so both live together.
 #[derive(Debug)]
 pub struct HeedDB {
     env: heed::Env,
@@ -132,22 +139,11 @@ impl HeedDB {
     /// Open (or create) the LMDB environment at `path` as a single file, and
     /// open/create the `_tables` system catalog inside it.
     pub fn open(path: &Path) -> Result<HeedDB, StorageError> {
-        // We do not create the parent directory on the user's behalf. In
-        // single-file (`NO_SUB_DIR`) mode LMDB opens the file directly, so if
-        // the parent directory is missing the filesystem error bubbles up
-        // naturally — matching how standard UNIX tools behave.
-
-        // Normalize a bare filename to an explicit `./name` before handing it
-        // to heed (see `normalize_db_path` for the why).
         let normalized = normalize_db_path(path);
 
-        // Open the environment. `flags` and `open` are both unsafe in heed
-        // 0.20, so the whole builder chain is in one unsafe block.
         // SAFETY: NO_SUB_DIR only changes the on-disk layout (single file vs.
-        // directory) and carries none of the corruption-prone semantics of the
-        // dangerous flags (NO_SYNC / NO_META_SYNC / NO_LOCK). open() memory-maps
-        // the file; inter-process coordination is handled by LMDB's sibling
-        // lock file, and pqlite opens each env path at most once per process.
+        // directory). The dangerous flags (NO_SYNC / NO_META_SYNC / NO_LOCK)
+        // are not set, and pqlite opens each env path at most once per process.
         let env = unsafe {
             heed::EnvOpenOptions::new()
                 .map_size(DEFAULT_MAP_SIZE)
@@ -156,9 +152,7 @@ impl HeedDB {
                 .open(&normalized)?
         };
 
-        // Open/create the `_tables` catalog in a write transaction.
-        // `create_database` borrows the RwTxn mutably and opens the db if it
-        // already exists, so reopening is not an error.
+        // `create_database` is idempotent.
         let mut wtxn = env.write_txn()?;
         let tables: TablesDb = env.create_database(&mut wtxn, Some(TABLES_DB))?;
         wtxn.commit()?;
@@ -170,76 +164,49 @@ impl HeedDB {
         })
     }
 
-    /// Create a new table from a stream of rows, in a single write transaction.
+    /// Open a write handle for a new table named `name`.
     ///
-    /// PR 2 writes a constant `&[0x00]` value per row; Ion serialization lands
-    /// in PR 3. Only the transaction boundary, table creation, catalog
-    /// registration, and row-iteration loop are exercised here.
-    ///
-    /// `name` must already be canonicalized by the caller (bare identifiers
-    /// folded to lowercase, quoted identifiers verbatim). Returns the number
-    /// of rows written. Any error drops the `RwTxn` before commit, so LMDB
-    /// rolls the whole operation back and nothing partial persists.
-    pub fn create_table_from_rows<I>(&self, name: &str, rows: I) -> Result<u64, StorageError>
-    where
-        I: IntoIterator<Item = Result<(), StorageError>>,
-    {
-        // Reserved-name guard runs FIRST, before any transaction. heed performs
-        // no runtime codec check when reopening a named db, so creating a table
-        // called `_tables` would reopen the catalog's own dbi with integer keys
-        // and corrupt it. Reject the whole `_` namespace up front.
+    /// Runs all up-front catalog work (reserved-name guard, NUL guard, dup
+    /// check, catalog registration) and opens a write transaction. The
+    /// returned `TableWriter` lives until `commit` (success) or drop
+    /// (rollback). `name` must already be canonicalized by the caller —
+    /// bare identifiers folded to lowercase, quoted identifiers verbatim.
+    pub fn create_table(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
         if name.starts_with('_') {
             return Err(StorageError::ReservedName(name.to_string()));
         }
-
-        // A name with an interior NUL would panic heed's internal
-        // `CString::new(name).unwrap()` in `create_database`. Reject it here as a
-        // clean error rather than letting a user-supplied quoted identifier
-        // (e.g. `CREATE TABLE "a\0b" AS ...`) reach that unwrap.
         if name.contains('\0') {
             return Err(StorageError::InvalidName(name.to_string()));
         }
-
         let mut wtxn = self.env.write_txn()?;
-
-        // Duplicate check against the catalog, in the same txn. `RwTxn` derefs
-        // to `RoTxn`, so the existence check and the creation are atomic.
         if self.tables.get(&wtxn, name)?.is_some() {
             return Err(StorageError::TableExists(name.to_string()));
         }
-
-        // Create the per-table row store and register the table in the catalog.
         let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
-        self.tables.put(&mut wtxn, name, &[0x00])?;
-
-        // Dummy write loop: sequential u64 key, constant byte value.
-        let mut row_id: u64 = 0;
-        for row in rows {
-            row?; // a VM error (Execution) bubbles out; dropping wtxn rolls back.
-            table.put(&mut wtxn, &row_id, &[0x00])?;
-            row_id += 1;
-        }
-
-        wtxn.commit()?;
-        Ok(row_id)
+        // Catalog value is empty: the cell records existence only. Table-
+        // level metadata (schema, etc.) lands in a future PR.
+        self.tables.put(&mut wtxn, name, &[])?;
+        Ok(TableWriter {
+            wtxn,
+            table,
+            row_id: 0,
+            key_buf: [0u8; 8],
+        })
     }
 
-    // TODO: these accessors expose heed types (`Env`, `Database`) directly,
-    // which leaks the storage engine across the module boundary. If a later
-    // milestone abstracts storage away from heed (e.g. custom index
-    // structures), wrap these behind an engine-agnostic interface instead.
-
-    /// The live environment. Used by later PRs to begin transactions.
-    pub fn env(&self) -> &heed::Env {
+    /// The live LMDB environment. Test-only; heed types do not leak across
+    /// the module boundary.
+    #[cfg(test)]
+    pub(crate) fn env(&self) -> &heed::Env {
         &self.env
     }
 
-    /// The `_tables` system catalog handle (opaque byte values for now).
-    pub fn tables(&self) -> &TablesDb {
+    /// The `_tables` system catalog handle. Test-only.
+    #[cfg(test)]
+    pub(crate) fn tables(&self) -> &TablesDb {
         &self.tables
     }
 
-    /// The resolved on-disk path this environment was opened at.
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -250,43 +217,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_table_from_rows_writes_all_rows_and_registers_catalog() {
+    fn table_writer_round_trip_via_push_and_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("writer.pqlite");
+        let db = HeedDB::open(&path).unwrap();
+
+        let mut w = db.create_table("widgets").expect("create_table");
+        w.push_row(&[0xDE, 0xAD]).unwrap();
+        w.push_row(&[0xBE, 0xEF, 0x01]).unwrap();
+        let n = w.commit().unwrap();
+        assert_eq!(n, 2);
+
+        let rtxn = db.env().read_txn().unwrap();
+        assert!(db.tables().get(&rtxn, "widgets").unwrap().is_some());
+        let rowdb: RowDb = db
+            .env()
+            .open_database(&rtxn, Some("widgets"))
+            .unwrap()
+            .expect("rowdb must exist after commit");
+        assert_eq!(rowdb.len(&rtxn).unwrap(), 2);
+    }
+
+    #[test]
+    fn create_table_writes_bytes_verbatim_and_registers_catalog() {
+        // Bit-perfect roundtrip: storage's contract is "persist whatever bytes
+        // the caller pushes." A concrete sentinel sequence proves it.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ctas.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        let rows: Vec<Result<(), StorageError>> = vec![Ok(()), Ok(()), Ok(())];
-        let n = db.create_table_from_rows("widgets", rows).unwrap();
+        let payloads: [&[u8]; 3] = [
+            &[0xDE, 0xAD, 0xBE, 0xEF],
+            &[0x01],
+            &[0xFF, 0x00, 0xFF, 0x00, 0xFF],
+        ];
+        let mut w = db.create_table("widgets").unwrap();
+        for p in payloads.iter() {
+            w.push_row(p).unwrap();
+        }
+        let n = w.commit().unwrap();
         assert_eq!(n, 3);
 
         let rtxn = db.env().read_txn().unwrap();
-
-        // The table is registered in the catalog.
         assert!(
             db.tables().get(&rtxn, "widgets").unwrap().is_some(),
             "widgets should be registered in _tables"
         );
 
-        // The row store has exactly keys 0, 1, 2.
         let rowdb: RowDb = db
             .env()
             .open_database::<RowKey, heed::types::Bytes>(&rtxn, Some("widgets"))
             .unwrap()
             .expect("widgets row db should exist");
         assert_eq!(rowdb.len(&rtxn).unwrap(), 3);
-        for i in 0u64..3 {
-            assert!(rowdb.get(&rtxn, &i).unwrap().is_some(), "row {i} missing");
+        for (i, expected) in payloads.iter().enumerate() {
+            let key = (i as u64).to_be_bytes();
+            let got = rowdb
+                .get(&rtxn, &key[..])
+                .unwrap()
+                .expect("row should be present");
+            assert_eq!(got, *expected, "row {i} bytes must round-trip verbatim");
         }
     }
 
     #[test]
-    fn create_table_from_rows_with_no_rows_creates_empty_table() {
+    fn create_table_with_no_rows_creates_empty_table() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        let rows: Vec<Result<(), StorageError>> = Vec::new();
-        let n = db.create_table_from_rows("blank", rows).unwrap();
+        let n = db.create_table("blank").unwrap().commit().unwrap();
         assert_eq!(n, 0);
 
         let rtxn = db.env().read_txn().unwrap();
@@ -300,56 +300,58 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rejects_duplicate_name() {
+    fn create_table_rejects_duplicate_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("dup.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        db.create_table_from_rows("t", vec![Ok(()), Ok(())])
-            .unwrap();
-
-        let again = db.create_table_from_rows("t", vec![Ok(())]);
+        let mut w1 = db.create_table("t").unwrap();
+        w1.push_row(&[0x01]).unwrap();
+        w1.commit().unwrap();
+        let again = db.create_table("t");
         assert!(
             matches!(again, Err(StorageError::TableExists(ref n)) if n == "t"),
-            "second create should be TableExists, got: {again:?}"
+            "expected TableExists; got {:?}",
+            again
         );
 
-        // The original table is untouched: catalog still has exactly one entry.
         let rtxn = db.env().read_txn().unwrap();
         assert_eq!(db.tables().len(&rtxn).unwrap(), 1);
     }
 
     #[test]
-    fn create_table_from_rows_rejects_reserved_names() {
+    fn create_table_rejects_reserved_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("reserved.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
-        for name in ["_tables", "_indexes", "_x"] {
-            let res = db.create_table_from_rows(name, vec![Ok(())]);
+        for name in ["_tables", "_x", "_"] {
+            let res = db.create_table(name);
             assert!(
                 matches!(res, Err(StorageError::ReservedName(_))),
-                "{name} should be reserved, got: {res:?}"
+                "expected ReservedName for {name:?}; got {:?}",
+                res
             );
         }
 
-        // The guard runs before any transaction, so the catalog is untouched.
+        // Guard runs before any transaction, so the catalog is untouched.
         let rtxn = db.env().read_txn().unwrap();
         assert_eq!(db.tables().len(&rtxn).unwrap(), 0);
     }
 
     #[test]
-    fn create_table_from_rows_rejects_interior_nul_names() {
+    fn create_table_rejects_interior_nul_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nul.pqlite");
         let db = HeedDB::open(&path).unwrap();
 
         // An interior NUL would otherwise panic heed's CString::new; the guard
         // turns it into a clean error and never opens a transaction.
-        let res = db.create_table_from_rows("a\0b", vec![Ok(())]);
+        let res = db.create_table("a\0b");
         assert!(
             matches!(res, Err(StorageError::InvalidName(_))),
-            "interior-NUL name should be InvalidName, got: {res:?}"
+            "expected InvalidName; got {:?}",
+            res
         );
 
         let rtxn = db.env().read_txn().unwrap();
@@ -357,37 +359,19 @@ mod tests {
     }
 
     #[test]
-    fn create_table_from_rows_rolls_back_on_mid_stream_error() {
+    fn dropping_writer_rolls_back_uncommitted_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rollback.pqlite");
+        let path = dir.path().join("rb.pqlite");
         let db = HeedDB::open(&path).unwrap();
-
-        let rows: Vec<Result<(), StorageError>> = vec![
-            Ok(()),
-            Ok(()),
-            Err(StorageError::Execution("boom".to_string())),
-        ];
-        let res = db.create_table_from_rows("partial", rows);
-        assert!(
-            matches!(res, Err(StorageError::Execution(_))),
-            "expected the mid-stream Execution error to surface, got: {res:?}"
-        );
-
-        // Rollback: the txn was never committed, so the catalog has no entry.
+        {
+            let mut w = db.create_table("partial").unwrap();
+            w.push_row(&[0x42]).unwrap();
+            // Drop w without commit — wtxn rolls back.
+        }
         let rtxn = db.env().read_txn().unwrap();
-        assert_eq!(
-            db.tables().len(&rtxn).unwrap(),
-            0,
-            "the failed CTAS must not register the table"
-        );
-
-        // The orphan row-store db must also be absent — rollback dropped it.
         assert!(
-            db.env()
-                .open_database::<RowKey, heed::types::Bytes>(&rtxn, Some("partial"))
-                .unwrap()
-                .is_none(),
-            "the failed CTAS must not leave a row-store db behind"
+            db.tables().get(&rtxn, "partial").unwrap().is_none(),
+            "rolled-back create must leave no catalog entry"
         );
     }
 

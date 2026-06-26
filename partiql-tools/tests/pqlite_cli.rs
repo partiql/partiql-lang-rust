@@ -177,3 +177,479 @@ fn duplicate_ctas_is_rejected_and_names_the_table() {
         "duplicate error should name the table, got: {stderr2}"
     );
 }
+
+// Wire-format parser (hand-written, mirrors row_codec spec).
+
+use partiql_tools::row_codec::{
+    MAX_FIELDS_PER_ROW, MAX_NAME_LEN_BYTES, TAG_DECIMAL, TAG_FLOAT, TAG_INTEGER, TAG_NULL,
+    TAG_STRING, TAG_TUPLE,
+};
+
+#[derive(Debug, PartialEq)]
+enum ParsedValue {
+    Integer(i64),
+    Decimal { scale: i32, mantissa: i128 },
+    Float(f64),
+    String(String),
+    Null,
+    Tuple(Vec<(String, ParsedValue)>),
+}
+
+/// Mirror of the wire-format spec. Returns `ParsedValue` or panics with a
+/// pointed message; this is a test helper, not a production reader.
+///
+/// Imports `TAG_*`, `MAX_FIELDS_PER_ROW`, and `MAX_NAME_LEN_BYTES` from
+/// `partiql_tools::row_codec` so a tag-byte or cap change in the encoder
+/// cannot drift here.
+///
+/// ENDIANNESS INVARIANT: every multi-byte field is little-endian, matching
+/// `row_codec::serialize_row`'s `to_le_bytes()` calls. A new tag must be
+/// written `to_le_bytes()` there AND read `from_le_bytes()` here — an
+/// asymmetry compiles cleanly and silently corrupts every persisted row.
+fn parse_row(bytes: &[u8]) -> ParsedValue {
+    fn take<'a>(i: &mut usize, n: usize, bytes: &'a [u8]) -> &'a [u8] {
+        assert!(
+            *i + n <= bytes.len(),
+            "ran off the end at offset {i} taking {n}"
+        );
+        let s = &bytes[*i..*i + n];
+        *i += n;
+        s
+    }
+    fn take_u32(i: &mut usize, bytes: &[u8]) -> u32 {
+        u32::from_le_bytes(take(i, 4, bytes).try_into().unwrap())
+    }
+    fn take_i32(i: &mut usize, bytes: &[u8]) -> i32 {
+        i32::from_le_bytes(take(i, 4, bytes).try_into().unwrap())
+    }
+    fn take_i64(i: &mut usize, bytes: &[u8]) -> i64 {
+        i64::from_le_bytes(take(i, 8, bytes).try_into().unwrap())
+    }
+    fn take_f64(i: &mut usize, bytes: &[u8]) -> f64 {
+        f64::from_le_bytes(take(i, 8, bytes).try_into().unwrap())
+    }
+    fn take_i128(i: &mut usize, bytes: &[u8]) -> i128 {
+        i128::from_le_bytes(take(i, 16, bytes).try_into().unwrap())
+    }
+    fn take_value(i: &mut usize, bytes: &[u8], tag: u8) -> ParsedValue {
+        match tag {
+            t if t == TAG_INTEGER => ParsedValue::Integer(take_i64(i, bytes)),
+            t if t == TAG_DECIMAL => {
+                let scale = take_i32(i, bytes);
+                let mantissa = take_i128(i, bytes);
+                ParsedValue::Decimal { scale, mantissa }
+            }
+            t if t == TAG_FLOAT => ParsedValue::Float(take_f64(i, bytes)),
+            t if t == TAG_STRING => {
+                let len = take_u32(i, bytes) as usize;
+                ParsedValue::String(
+                    std::str::from_utf8(take(i, len, bytes))
+                        .expect("string must be valid UTF-8")
+                        .to_string(),
+                )
+            }
+            t if t == TAG_NULL => ParsedValue::Null,
+            t if t == TAG_TUPLE => {
+                let field_count = take_u32(i, bytes);
+                assert!(
+                    field_count <= MAX_FIELDS_PER_ROW,
+                    "sanity: field_count={field_count} exceeds MAX_FIELDS_PER_ROW ({MAX_FIELDS_PER_ROW})"
+                );
+                let mut fields = Vec::with_capacity(field_count as usize);
+                for _ in 0..field_count {
+                    let name_len = take_u32(i, bytes);
+                    assert!(
+                        name_len <= MAX_NAME_LEN_BYTES,
+                        "sanity: name_len={name_len} exceeds MAX_NAME_LEN_BYTES ({MAX_NAME_LEN_BYTES})"
+                    );
+                    let name = std::str::from_utf8(take(i, name_len as usize, bytes))
+                        .expect("field name must be valid UTF-8")
+                        .to_string();
+                    let inner_tag = take(i, 1, bytes)[0];
+                    fields.push((name, take_value(i, bytes, inner_tag)));
+                }
+                ParsedValue::Tuple(fields)
+            }
+            other => panic!("unknown tag {other:#04x} at offset {}", *i - 1),
+        }
+    }
+
+    let mut i = 0usize;
+    let top_tag = take(&mut i, 1, bytes)[0];
+    let value = take_value(&mut i, bytes, top_tag);
+    assert_eq!(
+        i,
+        bytes.len(),
+        "parser left {} trailing bytes",
+        bytes.len() - i
+    );
+    value
+}
+
+/// Read every row in table `t` from the .pqlite file at `db_path`, returning
+/// ParsedValue rows in row_id order.
+fn read_all_rows(db_path: &std::path::Path, table: &str) -> Vec<ParsedValue> {
+    let env = unsafe {
+        heed::EnvOpenOptions::new()
+            .map_size(1024 * 1024 * 1024)
+            .max_dbs(128)
+            .flags(heed::EnvFlags::NO_SUB_DIR)
+            .open(db_path)
+            .expect("re-open env")
+    };
+    let rtxn = env.read_txn().expect("read txn");
+    // Key codec matches storage: BE u64 bytes under `heed::types::Bytes`
+    // (storage switched from `U64<BigEndian>` to `Bytes` to drop the per-put
+    // Vec allocation; BE byte order preserves numeric key ordering).
+    let rowdb: heed::Database<heed::types::Bytes, heed::types::Bytes> = env
+        .open_database(&rtxn, Some(table))
+        .expect("open row db")
+        .expect("row db must exist");
+    let mut out = Vec::new();
+    for entry in rowdb.iter(&rtxn).expect("iter rows") {
+        let (_row_id, payload) = entry.expect("row entry");
+        out.push(parse_row(payload));
+    }
+    out
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_persists_tagged_union_rows() {
+    // mem(3,2) yields i64 rows with column `a` taking 0, 1, 2.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("rt.pqlite");
+    let (ok, _stdout, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT t.a FROM mem(3,2) t)",
+        Some(&db_path),
+    );
+    assert!(ok, "CTAS should succeed; stderr: {stderr}");
+    assert!(db_path.is_file());
+
+    let rows = read_all_rows(&db_path, "t");
+    assert_eq!(rows.len(), 3, "expected 3 rows; got: {rows:?}");
+    for (idx, row) in rows.iter().enumerate() {
+        let fields = match row {
+            ParsedValue::Tuple(f) => f,
+            other => panic!("row {idx}: expected Tuple, got {other:?}"),
+        };
+        assert_eq!(fields.len(), 1, "row {idx}: expected 1 field");
+        let (name, value) = &fields[0];
+        assert_eq!(name, "a", "row {idx}: field name should be `a`");
+        match value {
+            ParsedValue::Integer(v) => {
+                assert_eq!(*v as usize, idx, "row {idx}: value should equal row index");
+            }
+            other => panic!("row {idx}: expected Integer, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_oversize_row_round_trips_through_lmdb_overflow_pages() {
+    // Guard the two paths that mem(3,2)'s small rows don't exercise:
+    //   1) the reusable Vec<u8> in pqlite's CTAS arm grows past its 4 KiB
+    //      initial capacity (Vec doubles its allocation)
+    //   2) LMDB routes the value onto overflow pages (heed wraps mdb_put
+    //      which handles this transparently)
+    //
+    // We synthesize the oversize row via a 16 KiB string LITERAL embedded in
+    // the SQL projection, joined with mem(1,2) to satisfy the planner's
+    // FROM-clause requirement. This avoids adding a test-only table
+    // function to the production binary — the literal is materialized once
+    // by the parser and lives only for the duration of this CTAS.
+    const PAYLOAD_SIZE: usize = 16 * 1024;
+    let big_string: String = "x".repeat(PAYLOAD_SIZE);
+    let query = format!(
+        "CREATE TABLE t AS (SELECT '{}' AS s FROM mem(1,2) m)",
+        big_string
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("oversize.pqlite");
+    let (ok, _stdout, stderr) = run_exec(&query, Some(&db_path));
+    assert!(ok, "CTAS should succeed; stderr: {stderr}");
+
+    let rows = read_all_rows(&db_path, "t");
+    assert_eq!(rows.len(), 1, "expected exactly 1 row; got: {}", rows.len());
+    let fields = match &rows[0] {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
+    };
+    assert_eq!(fields.len(), 1, "row should have exactly one field");
+    let (name, value) = &fields[0];
+    assert_eq!(name, "s", "field name should be `s`");
+    match value {
+        ParsedValue::String(s) => {
+            assert_eq!(
+                s.len(),
+                PAYLOAD_SIZE,
+                "string must be exactly {PAYLOAD_SIZE} bytes; got len={}",
+                s.len()
+            );
+            assert!(
+                s.chars().all(|c| c == 'x'),
+                "every char should be 'x' (corruption check)"
+            );
+        }
+        other => panic!("expected String, got {other:?}"),
+    }
+}
+
+#[test]
+fn parser_adversarial_truncation_walk() {
+    // Hand-crafted valid 1-field tuple mirroring row_codec's wire format:
+    //   tuple_tag(0x03),
+    //   field_count(1 u32 LE), name_len(1 u32 LE), name "a",
+    //   tag 0x00 (Integer), value 42 (i64 LE). 19 bytes total.
+    let valid_bytes: [u8; 19] = [
+        TAG_TUPLE,
+        0x01,
+        0x00,
+        0x00,
+        0x00, // field_count = 1
+        0x01,
+        0x00,
+        0x00,
+        0x00, // name_len = 1
+        b'a', // name
+        TAG_INTEGER,
+        0x2a,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00, // i64 LE = 42
+    ];
+
+    // Sanity: the full payload parses cleanly. If this fails, the loop below
+    // is testing the wrong baseline.
+    let row = parse_row(&valid_bytes);
+    let fields = match &row {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].0, "a");
+    assert_eq!(fields[0].1, ParsedValue::Integer(42));
+
+    // Truncate at every offset 0..19. Every truncation MUST panic — never
+    // return a half-parsed value, never read OOB. catch_unwind verifies
+    // the parser exits via a panic, not via a normal return.
+    for len in 0..valid_bytes.len() {
+        let truncated = &valid_bytes[..len];
+        let result = std::panic::catch_unwind(|| parse_row(truncated));
+        assert!(
+            result.is_err(),
+            "parser returned without panicking on truncation len={len}: must never return half-parsed bytes",
+        );
+    }
+}
+
+/// Extract the message string from a `catch_unwind` payload. Panic messages
+/// land as either `&'static str` or `String` depending on whether the panic
+/// site used `panic!("literal")` or formatted via `assert!(..., "msg")`.
+fn panic_message(err: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = err.downcast_ref::<String>() {
+        return s.clone();
+    }
+    if let Some(s) = err.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    String::from("<non-string panic payload>")
+}
+
+#[test]
+fn parser_sanity_cap_field_count_trips_before_allocation() {
+    // tuple_tag + field_count = MAX_FIELDS_PER_ROW + 1 (= 1025, LE: 0x01
+    // 0x04 0x00 0x00). The cap rejects values > MAX_FIELDS_PER_ROW.
+    //
+    // The assertion pins the panic SOURCE to the sanity cap by matching the
+    // message text. A naive `result.is_err()` would silently pass if the cap
+    // were deleted (the downstream `take()` bounds-check would fire instead
+    // on this exact 5-byte payload). Matching `"sanity:"` and `"field_count"`
+    // makes cap removal, cap weakening, and cap-position regressions all
+    // surface a different message ("ran off the end ...") and fail this test.
+    let payload: [u8; 5] = [TAG_TUPLE, 0x01, 0x04, 0x00, 0x00];
+    assert_eq!(
+        u32::from_le_bytes([0x01, 0x04, 0x00, 0x00]),
+        MAX_FIELDS_PER_ROW + 1,
+        "fixture must encode exactly MAX_FIELDS_PER_ROW + 1",
+    );
+    let result = std::panic::catch_unwind(|| parse_row(&payload));
+    let msg =
+        panic_message(result.expect_err("sanity cap must reject field_count > MAX_FIELDS_PER_ROW"));
+    assert!(
+        msg.contains("sanity:") && msg.contains("field_count"),
+        "expected the field_count sanity-cap panic; got: {msg}",
+    );
+}
+
+#[test]
+fn parser_sanity_cap_name_len_trips_before_allocation() {
+    // tuple_tag + field_count=1 + name_len = MAX_NAME_LEN_BYTES + 1
+    // (= 1_048_577, LE: 0x01 0x00 0x10 0x00). The cap rejects name_len values
+    // > MAX_NAME_LEN_BYTES before attempting to read the name bytes.
+    //
+    // As with the field_count sibling, the assertion pins the panic SOURCE
+    // to the sanity cap by matching the message. Without this, removing or
+    // weakening the cap would still leave `take()`'s OOB check to fire,
+    // silently passing the test while shipping a real OOM regression.
+    let payload: [u8; 9] = [TAG_TUPLE, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00];
+    assert_eq!(
+        u32::from_le_bytes([0x01, 0x00, 0x10, 0x00]),
+        MAX_NAME_LEN_BYTES + 1,
+        "fixture must encode exactly MAX_NAME_LEN_BYTES + 1",
+    );
+    let result = std::panic::catch_unwind(|| parse_row(&payload));
+    let msg =
+        panic_message(result.expect_err("sanity cap must reject name_len > MAX_NAME_LEN_BYTES"));
+    assert!(
+        msg.contains("sanity:") && msg.contains("name_len"),
+        "expected the name_len sanity-cap panic; got: {msg}",
+    );
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_scalar_and_string_boundaries() {
+    // Boundary values that exercise the LE byte-packing edges:
+    //   * i64::MAX (9_223_372_036_854_775_807) — every i64 bit position used
+    //   * negative Float / Decimal literal — sign bit + non-trivial mantissa
+    //   * 0.0000 — zero mantissa with non-zero scale (proves scale survives)
+    //   * empty string — proves length-prefix handles len=0 correctly
+    //
+    // We do NOT include i64::MIN — the PartiQL parser rejects the literal
+    // `-9223372036854775808` because it tokenizes as unary-minus applied to
+    // `9223372036854775808` (= i64::MAX + 1) which overflows i64. That is a
+    // parser-level constraint, not an encoder one; out of scope here.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("boundaries.pqlite");
+    let (ok, _stdout, stderr) = run_exec(
+        "CREATE TABLE t AS (            SELECT                 9223372036854775807 AS max_int,                -12345.6789 AS neg_float,                0.0000 AS zero_dec,                '' AS empty_str             FROM mem(1,1) m         )",
+        Some(&db_path),
+    );
+    assert!(ok, "boundary CTAS failed; stderr: {stderr}");
+
+    let rows = read_all_rows(&db_path, "t");
+    assert_eq!(rows.len(), 1);
+    let tuple_fields = match rows.into_iter().next().unwrap() {
+        ParsedValue::Tuple(f) => f,
+        other => panic!("expected Tuple row, got {other:?}"),
+    };
+    let fields: std::collections::HashMap<String, ParsedValue> = tuple_fields.into_iter().collect();
+
+    // i64::MAX must round-trip exactly — proves the high bit of the i64 LE
+    // encoding survives the to_le_bytes/from_le_bytes round trip.
+    assert_eq!(
+        fields.get("max_int"),
+        Some(&ParsedValue::Integer(i64::MAX)),
+        "i64::MAX must round-trip exactly",
+    );
+
+    // PartiQL may type `-12345.6789` as either Float or Decimal depending on
+    // planner literal-typing rules. Accept either; the numeric value must
+    // round-trip in both representations.
+    let neg = fields.get("neg_float").expect("neg_float column missing");
+    match neg {
+        ParsedValue::Float(v) => assert!(
+            (*v - (-12345.6789_f64)).abs() < 1e-9,
+            "negative float should round-trip: got {v}",
+        ),
+        ParsedValue::Decimal { scale, mantissa } => {
+            let reconstructed = (*mantissa as f64) / 10f64.powi(*scale);
+            assert!(
+                (reconstructed - (-12345.6789_f64)).abs() < 1e-9,
+                "negative decimal should round-trip: mantissa={mantissa} scale={scale}",
+            );
+        }
+        other => panic!("expected Float or Decimal for -12345.6789, got {other:?}"),
+    }
+
+    // 0.0000 must preserve scale even with mantissa=0 — load-bearing
+    // assertion for our 20-byte decimal encoding (4-byte i32 scale +
+    // 16-byte i128 mantissa). A bug that dropped scale would still pass an
+    // `== 0` check but corrupt non-zero decimals.
+    match fields.get("zero_dec").expect("zero_dec column missing") {
+        ParsedValue::Decimal { scale, mantissa } => {
+            assert_eq!(*mantissa, 0, "0.0000 mantissa must be exactly 0");
+            assert!(
+                *scale >= 1,
+                "0.0000 must preserve a non-zero scale, got {scale}"
+            );
+        }
+        other => panic!("expected Decimal for 0.0000, got {other:?}"),
+    }
+
+    // Empty string proves the u32 length prefix handles len=0 cleanly.
+    assert_eq!(
+        fields.get("empty_str"),
+        Some(&ParsedValue::String(String::new())),
+        "empty string must round-trip with len=0 in the u32 length prefix",
+    );
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_rejects_bool_with_pointed_message() {
+    // The encoder must reject a Bool column mid-stream. Err propagates so
+    // the wtxn rolls back; the env file may persist but the catalog stays
+    // clean.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("bool.pqlite");
+    let (ok, _stdout, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT true AS b FROM mem(1,1) m)",
+        Some(&db_path),
+    );
+    assert!(!ok, "Bool column must be rejected; stderr: {stderr}");
+    assert!(
+        stderr.contains("field 'b'") && stderr.contains("Bool"),
+        "error must name the column and the rejected type; got: {stderr}",
+    );
+    // Verify wtxn rollback by re-opening: the env file may persist on disk,
+    // but the catalog must not register `t`.
+    let env = unsafe {
+        heed::EnvOpenOptions::new()
+            .map_size(1024 * 1024 * 1024)
+            .max_dbs(128)
+            .flags(heed::EnvFlags::NO_SUB_DIR)
+            .open(&db_path)
+            .expect("re-open env")
+    };
+    let rtxn = env.read_txn().expect("read txn");
+    let catalog: heed::Database<heed::types::Str, heed::types::Bytes> = env
+        .open_database(&rtxn, Some("_tables"))
+        .expect("open catalog")
+        .expect("catalog must exist");
+    assert!(
+        catalog.get(&rtxn, "t").expect("catalog get").is_none(),
+        "row-0 rejection must leave catalog clean even if env file persists"
+    );
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_persists_bare_scalar_rows() {
+    // Top-level shape is RowShape::Register(_) — a bag of scalars. Encoder
+    // writes TAG_INTEGER + i64 LE per row, no tuple framing.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("scalar.pqlite");
+    let (ok, _stdout, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT VALUE t.a FROM mem(3,2) t)",
+        Some(&db_path),
+    );
+    assert!(ok, "bare-scalar CTAS should succeed; stderr: {stderr}");
+    let rows = read_all_rows(&db_path, "t");
+    assert_eq!(rows.len(), 3, "expected 3 scalar rows; got: {rows:?}");
+    for (idx, row) in rows.iter().enumerate() {
+        match row {
+            ParsedValue::Integer(v) => {
+                assert_eq!(*v as usize, idx, "row {idx}: value should equal row index");
+            }
+            other => panic!("row {idx}: expected Integer, got {other:?}"),
+        }
+    }
+}
