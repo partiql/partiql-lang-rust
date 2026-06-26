@@ -84,25 +84,14 @@ impl<'env> TableWriter<'env> {
 /// executing a write path against it.
 #[derive(Debug)]
 pub enum StorageError {
-    /// Filesystem-level error surfaced while working with the database file.
     Io(std::io::Error),
-    /// Error from the heed/LMDB layer.
     Heed(heed::Error),
-    /// A `CREATE TABLE AS` named a table already registered in the catalog.
     TableExists(String),
-    /// A `CREATE TABLE AS` used a reserved name (`_`-prefixed system namespace).
+    /// `_`-prefixed name; the namespace is reserved.
     ReservedName(String),
-    /// A table name heed cannot use as a database name (it contains an interior
-    /// NUL byte, which would panic heed's internal `CString::new`).
+    /// Name contains an interior NUL byte (heed would panic).
     InvalidName(String),
-    /// A VM execution error, pre-stringified by the caller so this layer does
-    /// not depend on `partiql-eval`'s error type.
     Execution(String),
-    /// A row-codec rejection (e.g. unsupported type/shape). The carried string
-    /// already reads as a complete error sentence (e.g. "unsupported: field
-    /// 'b': Bool is not yet supported"); Display surfaces it verbatim so
-    /// stderr stays single-level ("Error: unsupported: ..."), matching
-    /// PartiQL's style.
     Codec(String),
 }
 
