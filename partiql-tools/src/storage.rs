@@ -99,9 +99,10 @@ pub enum StorageError {
     /// not depend on `partiql-eval`'s error type.
     Execution(String),
     /// A row-codec rejection (e.g. unsupported type/shape). The carried string
-    /// already reads as a complete error sentence (e.g. "unsupported: column
-    /// 'b': Bool — tag reserved..."); Display surfaces it verbatim so stderr
-    /// stays single-level ("Error: unsupported: ..."), matching PartiQL's style.
+    /// already reads as a complete error sentence (e.g. "unsupported: field
+    /// 'b': Bool is not yet supported"); Display surfaces it verbatim so
+    /// stderr stays single-level ("Error: unsupported: ..."), matching
+    /// PartiQL's style.
     Codec(String),
 }
 
@@ -229,7 +230,7 @@ impl HeedDB {
     /// Open a write handle for a new table named `name`.
     ///
     /// Runs all up-front catalog work (reserved-name guard, NUL guard, dup
-    /// check, format-version write) and opens a write transaction. The
+    /// check, catalog registration) and opens a write transaction. The
     /// returned `TableWriter` lives until `commit` (success) or drop
     /// (rollback). `name` must already be canonicalized by the caller —
     /// bare identifiers folded to lowercase, quoted identifiers verbatim.

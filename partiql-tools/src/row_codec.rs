@@ -44,8 +44,8 @@ pub const TAG_NULL: u8 = 0x06;
 #[derive(Debug)]
 pub enum SerializeError {
     /// An unsupported type or shape encountered mid-stream: containers,
-    /// dynamic column names, MISSING, BOOL, BYTES. The string identifies
-    /// the offending column or top-level value.
+    /// dynamic field names, MISSING, BOOL, BYTES. The string identifies
+    /// the offending tuple field or top-level value.
     Unsupported(String),
 }
 
