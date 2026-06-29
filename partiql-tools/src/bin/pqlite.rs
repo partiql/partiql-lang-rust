@@ -1,13 +1,16 @@
 use partiql_tools::common;
 
 use common::{create_table_fn_catalog, lower_statement, parse};
+use partiql_common::catalog::CatalogId;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
-use partiql_eval::{CompilationContext, ExecutionContext, PlanCompiler};
+use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_logical::LogicalStatement;
+use partiql_tools::catalog::{HeedCompilationCatalog, HeedExecutionCatalog};
 use partiql_tools::storage::{HeedDB, StorageError};
 use partiql_value::{Tuple, Value};
 use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -16,11 +19,9 @@ use reedline::{
     ValidationResult, Validator,
 };
 
-/// Maximum number of lines retained in the REPL history file.
 const HISTORY_CAPACITY: usize = 1000;
 
-/// Version string shared by the `--version` flag and the REPL startup banner:
-/// the crate version joined with the git commit SHA captured in build.rs.
+/// Crate version joined with the git commit SHA captured in build.rs.
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_SHA"));
 
 /// Pqlite: An interactive PartiQL database engine and REPL.
@@ -35,8 +36,7 @@ struct Cli {
     #[arg(long, global = true, value_delimiter = ',')]
     debug: Vec<String>,
 
-    /// Path to the database file (required for the interactive REPL). The
-    /// parent directory must already exist; it is not created for you.
+    /// Path to the database file. The parent directory must already exist.
     #[arg(long, global = true)]
     db: Option<std::path::PathBuf>,
 
@@ -70,21 +70,6 @@ enum Commands {
     },
 }
 
-/// How `execute_query` obtains a database when a statement needs one.
-///
-/// Only `CREATE TABLE AS` needs storage. The REPL opens one handle for the
-/// whole session and passes it as `Open`; `exec` passes `Lazy` so the database
-/// is opened only if a write statement actually requires it — a plain query via
-/// `exec` never opens or creates a file.
-#[derive(Clone, Copy)]
-enum DbSource<'a> {
-    /// An already-open handle (the REPL session database).
-    Open(&'a HeedDB),
-    /// A `--db` path to open on demand (the `exec` subcommand); `None` if no
-    /// `--db` was given.
-    Lazy(Option<&'a std::path::Path>),
-}
-
 fn main() {
     let cli = Cli::parse();
     let debug = DebugFlags::from_args(&cli.debug);
@@ -96,55 +81,41 @@ fn main() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            if let Err(e) = execute_query(query, &debug, DbSource::Lazy(cli.db.as_deref())) {
+            let db = match cli.db.as_deref() {
+                Some(p) => match HeedDB::open(p) {
+                    Ok(db) => Some(Arc::new(db)),
+                    Err(e) => {
+                        eprintln!("Error: could not open database at {}: {}", p.display(), e);
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
+            if let Err(e) = execute_query(query, &debug, db) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
         }
         None => {
-            // The REPL needs a database. We require an explicit --db rather
-            // than inventing a default path: like standard UNIX tools, we don't
-            // create files or directories on the user's behalf.
+            // Require explicit --db rather than inventing a default path.
             let db_path = cli.db.clone().unwrap_or_else(|| {
                 eprintln!("Error: The `--db <PATH>` option is required to open the database.");
                 std::process::exit(1);
             });
 
-            // Open the database up front. Hard-fail rather than fall back (a
-            // silently-non-persisting db is worse than one that refuses to
-            // start). The parent directory must already exist.
-            let db = match HeedDB::open(&db_path) {
-                Ok(db) => db,
-                Err(e) => {
-                    eprintln!(
-                        "Error: could not open database at {}: {}",
-                        db_path.display(),
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            };
-
-            run_repl(&debug, &db);
+            run_repl(&debug, &db_path);
         }
     }
 }
 
-/// Normalize a query string before handing it to the engine: trim outer
-/// whitespace and strip a single trailing `;` statement terminator, while
-/// preserving any internal newlines. The `;` is accepted as a convenience
-/// terminator (and is what the REPL validator uses to detect a complete
-/// entry) but is not part of the PartiQL grammar, so it must be removed.
-///
-/// TODO: support the trailing `;` statement terminator natively in the
-/// PartiQL grammar/parser so semicolons are a first-class part of the
-/// language, and remove this stripping workaround once that lands.
+/// Trim outer whitespace and strip a single trailing `;` so the REPL can use
+/// `;` as a completion signal without it leaking into the PartiQL grammar.
+/// TODO: drop this once the parser accepts `;` natively.
 fn normalize_query(input: &str) -> &str {
     let trimmed = input.trim();
     trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end()
 }
 
-/// Minimal REPL prompt that renders a fixed `pqlite> ` indicator.
 struct PqlitePrompt;
 
 impl Prompt for PqlitePrompt {
@@ -172,15 +143,8 @@ impl Prompt for PqlitePrompt {
     }
 }
 
-/// Validator that decides when a multi-line REPL entry is complete.
-///
-/// An input is considered complete when, after trimming trailing whitespace,
-/// it either:
-///   * ends with a semicolon (`;`) — a finished PartiQL statement, or
-///   * is a meta-command starting with a dot (`.`).
-///
-/// Anything else is treated as `Incomplete`, so pressing Enter inserts a
-/// newline and lets the user keep typing on the following line.
+/// Marks a REPL entry as complete when it ends with `;` or is a `.`-prefixed
+/// meta-command; anything else keeps reading on the next line.
 struct PqliteValidator;
 
 impl Validator for PqliteValidator {
@@ -194,10 +158,8 @@ impl Validator for PqliteValidator {
     }
 }
 
-/// Build a persistent, file-backed history at `~/.pqlite_history`.
-///
-/// Falls back to in-memory history (never crashing) if the home directory
-/// cannot be resolved or the history file cannot be opened.
+/// File-backed history at `~/.pqlite_history`; falls back to in-memory on
+/// resolution or open failure.
 fn build_history() -> Box<dyn History> {
     let history_path = home_dir().map(|mut p| {
         p.push(".pqlite_history");
@@ -219,22 +181,18 @@ fn build_history() -> Box<dyn History> {
         eprintln!("Warning: could not resolve home directory (using in-memory history)");
     }
 
-    // Fallback: in-memory history. If even this fails, run without history.
     match FileBackedHistory::new(HISTORY_CAPACITY) {
         Ok(history) => Box::new(history),
         Err(_) => Box::new(FileBackedHistory::default()),
     }
 }
 
-/// Resolve the user's home directory across platforms.
 fn home_dir() -> Option<std::path::PathBuf> {
-    // `std::env::home_dir` was un-deprecated in Rust 1.85 and is correct on
-    // all supported platforms, so no extra crate is needed here.
+    // `std::env::home_dir` was un-deprecated in Rust 1.85.
     #[allow(deprecated)]
     std::env::home_dir()
 }
 
-/// Print the REPL help menu listing meta-commands and query usage.
 fn print_help() {
     println!("PartiQL REPL — available commands:");
     println!("  .help     Show this help message");
@@ -250,15 +208,11 @@ fn print_help() {
     println!("Example: SELECT t.a, t.b FROM mem(100, 2) t LIMIT 5;");
 }
 
-/// Outcome of handling a REPL meta-command (a line starting with `.`).
 enum MetaOutcome {
-    /// The command was handled; continue the loop.
     Handled,
-    /// The user requested to quit; break the loop.
     Quit,
 }
 
-/// Handle a dot-prefixed meta-command. `input` must be the trimmed buffer.
 fn handle_meta_command(input: &str) -> MetaOutcome {
     match input {
         ".quit" | ".exit" => MetaOutcome::Quit,
@@ -273,24 +227,30 @@ fn handle_meta_command(input: &str) -> MetaOutcome {
     }
 }
 
-/// Print the REPL startup banner: the crate version, the git commit it was
-/// built from, the active database path, and a pointer to the help command.
-///
-/// Written to stderr, not stdout: the banner is startup chrome, and stdout is
-/// reserved for the query result stream so it can be piped/redirected cleanly.
+/// Written to stderr to keep stdout reserved for query output.
 fn print_startup_banner(db_path: &std::path::Path) {
-    // Reuse the same VERSION string that backs the `--version` flag so the two
-    // can never drift (crate version + git SHA captured in build.rs).
     eprintln!("pqlite version {VERSION}");
     eprintln!("database: {}", db_path.display());
     eprintln!("For usage information, enter \".help\".");
 }
 
-/// Run the interactive REPL: read a line, execute it as a query, and loop.
-///
-/// Errors from `execute_query` are reported but never terminate the session.
-fn run_repl(debug: &DebugFlags, db: &HeedDB) {
-    print_startup_banner(db.path());
+/// `execute_query` errors are reported but never terminate the session.
+fn run_repl(debug: &DebugFlags, db_path: &std::path::Path) {
+    // Hard-fail rather than fall back to in-memory: a silently non-persisting
+    // db is worse than refusing to start.
+    let db = match HeedDB::open(db_path) {
+        Ok(db) => Arc::new(db),
+        Err(e) => {
+            eprintln!(
+                "Error: could not open database at {}: {}",
+                db_path.display(),
+                e
+            );
+            std::process::exit(1);
+        }
+    };
+
+    print_startup_banner(db_path);
 
     let mut line_editor = Reedline::create()
         .with_history(build_history())
@@ -305,7 +265,6 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
                     continue;
                 }
 
-                // Meta-commands start with a dot and are handled locally.
                 if trimmed.starts_with('.') {
                     match handle_meta_command(trimmed) {
                         MetaOutcome::Handled => continue,
@@ -315,12 +274,12 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
 
                 let query = normalize_query(trimmed);
 
-                // A lone `;` strips to empty — skip rather than parse "".
+                // A lone `;` normalizes to empty — skip rather than parse "".
                 if query.is_empty() {
                     continue;
                 }
 
-                if let Err(e) = execute_query(query, debug, DbSource::Open(db)) {
+                if let Err(e) = execute_query(query, debug, Some(Arc::clone(&db))) {
                     eprintln!("{}", e);
                 }
             }
@@ -331,9 +290,7 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
                 println!("Exiting...");
                 break;
             }
-            Ok(_) => {
-                // Other signals (HostCommand / ExternalBreak) are not used here.
-            }
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("REPL error: {}", e);
                 break;
@@ -342,11 +299,7 @@ fn run_repl(debug: &DebugFlags, db: &HeedDB) {
     }
 }
 
-/// Render a `BindingsName` the SQL-idiomatic way, so the printed form round-trips
-/// the case-sensitivity the user typed (instead of the `CaseInsensitive("t")` Debug
-/// wrapper, which both leaks internals and reads identically for quoted vs bare):
-///   - case-sensitive (originally quoted) -> re-quoted, e.g. `"My_Table"`
-///   - case-insensitive (originally bare) -> bare, e.g. `my_table`
+/// SQL-idiomatic rendering: quoted identifiers re-quoted, bare ones bare.
 fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
     match name {
         partiql_value::BindingsName::CaseSensitive(s) => format!("\"{}\"", s),
@@ -354,16 +307,11 @@ fn format_table_name(name: &partiql_value::BindingsName<'_>) -> String {
     }
 }
 
-/// Derive the canonical catalog key for a table name. Bare (case-insensitive)
-/// identifiers fold to lowercase so `foo`, `FOO`, and `Foo` collide as one
-/// table; quoted (case-sensitive) identifiers are kept verbatim. This is
-/// ASCII-equivalent to the engine's `UniCase` fold; full Unicode-consistent
-/// folding is a later-PR refinement.
+/// Bare identifiers fold to ASCII lowercase; quoted identifiers are verbatim.
+/// `HeedDB::create_table` rejects interior NULs that would panic heed.
 ///
-/// NOTE: `name` may contain arbitrary bytes from a quoted identifier. An
-/// interior NUL byte would otherwise panic heed's internal
-/// `CString::new(name).unwrap()`; `HeedDB::create_table` guards against that
-/// up front and returns `StorageError::InvalidName` instead.
+/// ASCII-only — full Unicode-consistent folding (matching the engine's UniCase
+/// fold for non-ASCII identifiers) is a later-PR refinement.
 fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
     match name {
         partiql_value::BindingsName::CaseInsensitive(s) => s.to_lowercase(),
@@ -371,7 +319,6 @@ fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
     }
 }
 
-/// Shared stderr footer for a planning-only DDL statement.
 fn print_ddl_planned_footer(elapsed: std::time::Duration) {
     eprintln!(
         "(planned in {:.1}ms — execution not yet implemented)",
@@ -379,76 +326,129 @@ fn print_ddl_planned_footer(elapsed: std::time::Duration) {
     );
 }
 
-/// Compile a lowered query plan into an executable program, applying the
-/// `plan`/`program` debug dumps. Shared by the `Query` and `CreateTableAs`
-/// paths so their compilation setup cannot drift.
-///
-/// Note: when a debug flag is set, the `[Plan]`/`[Program]` dumps are written
-/// inside this call, so the caller's reported `compile:` time includes their
-/// cost. That only affects the diagnostic timing line under `--debug`; normal
-/// output is unaffected.
+/// Bundles `HeedCompilationCatalog` with the existing `TableFnCompilationCatalog`
+/// under `PlanCompiler`'s single `"default"` catalog name. Also records the
+/// first unresolved bare table name so `build_compiled` can fail fast with
+/// "Table not found" instead of letting Permissive mode yield a MISSING row.
+struct CombinedCatalog {
+    table_fns: common::TableFnCompilationCatalog,
+    heed: Option<HeedCompilationCatalog>,
+    unresolved_table_name: Arc<Mutex<Option<String>>>,
+}
+
+impl partiql_eval::CompilationCatalog for CombinedCatalog {
+    fn get_table(
+        &self,
+        path: &[partiql_value::BindingsName<'_>],
+    ) -> Option<partiql_eval::source::DataSourceHandle> {
+        if let Some(handle) = self.heed.as_ref().and_then(|h| h.get_table(path)) {
+            return Some(handle);
+        }
+        // Only record bare single-element bindings — schema-qualified paths
+        // never match anything here and aren't useful to surface as table names.
+        // The compiler may probe a name multiple times; keep the first.
+        if path.len() == 1 {
+            if let Ok(mut guard) = self.unresolved_table_name.lock() {
+                if guard.is_none() {
+                    let name = match &path[0] {
+                        partiql_value::BindingsName::CaseSensitive(s) => s.to_string(),
+                        partiql_value::BindingsName::CaseInsensitive(s) => s.to_string(),
+                    };
+                    *guard = Some(name);
+                }
+            }
+        }
+        None
+    }
+
+    fn get_table_function(&self, name: &str) -> Option<partiql_eval::source::TableFunctionHandle> {
+        self.table_fns.get_table_function(name)
+    }
+}
+
+/// CatalogId is reused by the matching ExecutionCatalog.
 fn build_compiled(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     debug: &DebugFlags,
-) -> Result<partiql_eval::CompiledPlan, Box<dyn std::error::Error>> {
+    db: Option<Arc<HeedDB>>,
+) -> Result<(partiql_eval::CompiledPlan, CatalogId), Box<dyn std::error::Error>> {
     if debug.plan {
         eprintln!("[Plan] {:?}", logical);
     }
 
     let mut context = CompilationContext::new();
+
     let column_names = vec!["a".to_string(), "b".to_string()];
-    let comp_catalog: std::sync::Arc<dyn partiql_eval::CompilationCatalog> =
-        std::sync::Arc::new(common::TableFnCompilationCatalog::new(column_names));
-    let _catalog_id = context.add_catalog("default", comp_catalog);
+    let unresolved_table_name: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let combined = CombinedCatalog {
+        table_fns: common::TableFnCompilationCatalog::new(column_names),
+        heed: db.map(HeedCompilationCatalog::new),
+        unresolved_table_name: Arc::clone(&unresolved_table_name),
+    };
+    let catalog: Arc<dyn partiql_eval::CompilationCatalog> = Arc::new(combined);
+    let catalog_id = context.add_catalog("default", catalog);
 
     let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
     let compiled = compiler
         .compile(logical)
         .map_err(|e| format!("Compile error: {:?}", e))?;
 
+    let first_unresolved = unresolved_table_name
+        .lock()
+        .map(|mut g| g.take())
+        .unwrap_or(None);
+    if let Some(name) = first_unresolved {
+        return Err(format!("Error: Table '{}' not found", name).into());
+    }
+
     if debug.program {
         eprintln!("[Program]\n{}", compiled);
     }
 
-    Ok(compiled)
+    Ok((compiled, catalog_id))
 }
 
-/// Build the execution context with pqlite's table functions registered.
-/// Shared by the `Query` and `CreateTableAs` paths.
-fn build_exec_context() -> ExecutionContext {
+/// The Heed catalog is `prepare()`-d from `compiled` before being boxed so
+/// `ScanId → table-name` mappings are populated before the VM calls `create()`.
+fn build_exec_context(
+    db: Option<Arc<HeedDB>>,
+    catalog_id: CatalogId,
+    compiled: &partiql_eval::CompiledPlan,
+) -> ExecutionContext {
     let mut exec_context = ExecutionContext::new();
-    exec_context.register_table_function("rand", std::sync::Arc::new(common::RandTableFunction));
-    exec_context.register_table_function("mem", std::sync::Arc::new(common::MemTableFunction));
-    exec_context.register_table_function(
-        "scan_ion",
-        std::sync::Arc::new(common::ScanIonTableFunction),
-    );
+    exec_context.register_table_function("rand", Arc::new(common::RandTableFunction));
+    exec_context.register_table_function("mem", Arc::new(common::MemTableFunction));
+    exec_context.register_table_function("scan_ion", Arc::new(common::ScanIonTableFunction));
+
+    if let Some(db) = db {
+        let mut heed_exec = HeedExecutionCatalog::new(db);
+        let scans = compiled.scans_for_catalog(catalog_id);
+        heed_exec.prepare(&scans);
+        exec_context.add_catalog(catalog_id, Box::new(heed_exec));
+    }
+
     exec_context
 }
 
 fn execute_query(
     query_str: &str,
     debug: &DebugFlags,
-    db_source: DbSource,
+    db: Option<Arc<HeedDB>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let query = query_str.to_string();
-
     let catalog = create_table_fn_catalog();
 
     let parse_start = Instant::now();
-    let parsed = parse(&query).map_err(|e| format!("Parse error: {:?}", e))?;
+    let parsed = parse(query_str).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
 
     if debug.ast {
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // pqlite runs exactly one statement per submission; reject anything else here,
-    // since lowering operates on a single statement.
+    // Lowering operates on a single statement.
     let stmt = match parsed.statements.as_slice() {
         [stmt] => stmt,
-        // Match the planner's wording for this condition so the failure reads the
-        // same whether it surfaces here or via `LogicalPlanner::lower`.
+        // Wording matches `LogicalPlanner::lower` for parity across error sites.
         _ => return Err("Lower error: multi-statement input".into()),
     };
     let lower_start = Instant::now();
@@ -461,55 +461,33 @@ fn execute_query(
         LogicalStatement::CreateTableAs { table_name, query } => {
             let key = canonical_table_key(&table_name);
 
-            // Resolve --db before compile + VM setup so a missing --db on a
-            // CTAS path is a clean CLI error before any expensive work.
-            let db_path: Option<&std::path::Path> = match db_source {
-                DbSource::Open(_) => None,
-                DbSource::Lazy(path) => Some(
-                    path.ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE AS.")?,
-                ),
-            };
+            // Resolve --db before compile + VM setup so a missing flag fails
+            // cleanly before any expensive work.
+            let db = db
+                .as_ref()
+                .ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE AS.")?;
 
             let compile_start = Instant::now();
-            let compiled = build_compiled(&query, debug)?;
+            let (compiled, catalog_id) = build_compiled(&query, debug, Some(Arc::clone(db)))?;
             let compile_time = compile_start.elapsed();
 
             let exec_start = Instant::now();
-            let exec_context = build_exec_context();
+            let exec_context = build_exec_context(Some(Arc::clone(db)), catalog_id, &compiled);
             let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
                 .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
-            // Capture RowShape before vm.execute() borrows the VM mutably.
+            // Snapshot RowShape before vm.execute() borrows the VM mutably.
             let row_shape = vm.shape().row_shape().clone();
 
-            // 4 KiB scratch: matches LMDB's typical page size; reused per row.
+            // 4 KiB scratch matches LMDB's typical page size; reused per row.
             let mut scratch_buf: Vec<u8> = Vec::with_capacity(4096);
-
-            // Open the env up front. Mid-stream rejection rolls back the wtxn
-            // (no catalog entry, no row bytes), but the env file itself may
-            // remain on disk.
-            let lazily_opened;
-            let db: &HeedDB = match db_source {
-                DbSource::Open(db) => db,
-                DbSource::Lazy(_) => {
-                    let path = db_path.expect("Lazy implies a path");
-                    lazily_opened = HeedDB::open(path).map_err(|e| {
-                        format!(
-                            "Error: could not open database at {}: {}",
-                            path.display(),
-                            e
-                        )
-                    })?;
-                    &lazily_opened
-                }
-            };
 
             let n = match vm.execute() {
                 Ok(partiql_eval::ExecutionResult::Query(iter)) => {
                     let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
-                    // SAFETY: QueryIterator::next uses unsafe lifetime extension
-                    // on its RegisterReader. Aliasing across iter.next() is UB.
-                    // Consume `row` synchronously, drop it, then push the bytes.
+                    // SAFETY: QueryIterator::next uses unsafe lifetime extension on its
+                    // RegisterReader. Aliasing across iter.next() is UB. Consume `row`
+                    // synchronously, drop it, then push the bytes.
                     for r in iter {
                         let row = r.map_err(|e| {
                             format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
@@ -555,11 +533,11 @@ fn execute_query(
     };
 
     let compile_start = Instant::now();
-    let compiled = build_compiled(&logical, debug)?;
+    let (compiled, catalog_id) = build_compiled(&logical, debug, db.clone())?;
     let compile_time = compile_start.elapsed();
 
     let exec_start = Instant::now();
-    let exec_context = build_exec_context();
+    let exec_context = build_exec_context(db, catalog_id, &compiled);
     let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
@@ -629,35 +607,28 @@ fn row_to_value(
 
     match shape.row_shape() {
         RowShape::Struct(fields) => {
-            // Construct tuple with all fields (including single field case)
             let mut tuple = Tuple::new();
             for field in fields.iter() {
-                let name = match &field.name {
-                    FieldName::Static(s) => s.clone(),
-                    FieldName::Register(reg) => {
-                        // Dynamic name - get from register as string
-                        row.get_str(*reg).unwrap_or("?").to_string()
-                    }
+                let name: &str = match &field.name {
+                    FieldName::Static(s) => s,
+                    FieldName::Register(reg) => row.get_str(*reg).unwrap_or("?"),
                 };
-                // Get register index from the field's value shape
                 let reg_idx = match &field.value {
                     RowShape::Register(idx, _) => *idx,
                     _ => continue, // nested structs not yet supported here
                 };
                 let mut view = row.get_value_view(reg_idx).expect("register should exist");
-                tuple.insert(&name, value_view_to_value(&mut view));
+                tuple.insert(name, value_view_to_value(&mut view));
             }
             Value::Tuple(Box::new(tuple))
         }
         RowShape::Register(idx, _) => {
-            // Scalar - return value directly
             let mut view = row.get_value_view(*idx).expect("register should exist");
             value_view_to_value(&mut view)
         }
     }
 }
 
-/// Convert a ValueView cursor to a Value
 fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
     use partiql_eval::value::ValueType;
 
@@ -671,15 +642,12 @@ fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
         ValueType::String => Value::String(Box::new(view.get_str().unwrap().to_string())),
         ValueType::Bytes => Value::Blob(Box::new(view.get_bytes().unwrap().to_vec())),
         ValueType::Tuple => {
-            // Navigate tuple fields with support for nested tuples
             let mut tuple = Tuple::new();
             if view.step_in().is_ok() {
                 loop {
                     let field_name = view.get_field_name().unwrap().to_string();
                     let field_value = value_view_to_value(view);
                     tuple.insert(&field_name, field_value);
-
-                    // Move to next field
                     if !view.advance().unwrap_or(false) {
                         break;
                     }
@@ -689,13 +657,10 @@ fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
             Value::Tuple(Box::new(tuple))
         }
         ValueType::List => {
-            // Navigate list elements
             let mut items = Vec::new();
             if view.step_in().is_ok() {
                 loop {
-                    let item_value = value_view_to_value(view);
-                    items.push(item_value);
-
+                    items.push(value_view_to_value(view));
                     if !view.advance().unwrap_or(false) {
                         break;
                     }
@@ -705,13 +670,10 @@ fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
             Value::List(Box::new(items.into()))
         }
         ValueType::Bag => {
-            // Navigate bag elements
             let mut items = Vec::new();
             if view.step_in().is_ok() {
                 loop {
-                    let item_value = value_view_to_value(view);
-                    items.push(item_value);
-
+                    items.push(value_view_to_value(view));
                     if !view.advance().unwrap_or(false) {
                         break;
                     }
