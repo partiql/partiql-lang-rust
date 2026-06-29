@@ -11,6 +11,9 @@ build = "build.rs"
 name = "partiql_tools"
 path = "src/lib.rs"
 
+[features]
+test-support = []
+
 [[bin]]
 name = "partiql-legacy"
 path = "src/bin/partiql_legacy.rs"
@@ -67,8 +70,12 @@ clap = { version = "4.6.1", features = ["derive"] }
 # we don't use; the LMDB backend and the Str/Bytes codecs are unaffected.
 heed = { version = "0.20", default-features = false }
 reedline = "0.48.0"
+rust_decimal = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.0"
 tempfile = "3.0"
+# Self-activate `test-support` for integration tests in `tests/` so the gated
+# module is reachable without requiring `--features test-support` on the CLI.
+partiql-tools = { path = ".", features = ["test-support"] }

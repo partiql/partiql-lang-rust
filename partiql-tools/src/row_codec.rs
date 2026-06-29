@@ -1,9 +1,4 @@
-//! Custom tagged-union row serialization for the CTAS write path.
-//!
-//! Operates on the VM's RegisterReader + RowShape surface, no `partiql_value::Value`
-//! materialization. The CTAS arm in `pqlite.rs` calls `serialize_row` and passes
-//! the encoded bytes to `TableWriter::push_row` — zero per-row allocations after
-//! warmup.
+//! Tagged-union row serialization and deserialization for pqlite.
 //!
 //! Wire format:
 //!   ROW          = tagged_value
@@ -11,23 +6,17 @@
 //!   payload(TAG_TUPLE) = field_count(u32 LE) (name_len(u32 LE) name_utf8 tagged_value){N}
 //!
 //! All multi-byte VALUE bytes are little-endian. Row-id KEYS in LMDB stay
-//! big-endian: storage encodes them as `row_id.to_be_bytes()` under a
-//! `heed::types::Bytes` key codec so the B+tree's lexicographic key order
-//! matches numeric order with zero per-row key allocations.
+//! big-endian (encoded as `row_id.to_be_bytes()` under `heed::types::Bytes`)
+//! so the B+tree's lexicographic order matches numeric order.
 
 use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType};
 
-/// Sanity cap on `field_count` consumed by the reader. Real CTAS rows top
-/// out at hundreds; 1024 is ample headroom while catching a flipped byte
-/// producing a huge u32 before `Vec::with_capacity` allocates gigabytes.
+/// Cap on `field_count` to bound `Vec::with_capacity` against a flipped byte.
 pub const MAX_FIELDS_PER_ROW: u32 = 1024;
 
-/// Sanity cap on `name_len` consumed by the reader. PartiQL identifiers are
-/// typically <100 bytes; 1 MiB catches corruption while staying well above
-/// any real-world name. UTF-8 byte length, not char count.
+/// Cap on `name_len` (UTF-8 byte length) to bound allocations on corruption.
 pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 
-// Tag constants. `pub` so the reader and encoder share one source of truth.
 pub const TAG_INTEGER: u8 = 0x00;
 pub const TAG_DECIMAL: u8 = 0x01;
 pub const TAG_FLOAT: u8 = 0x02;
@@ -39,13 +28,11 @@ pub const TAG_NULL: u8 = 0x06;
 // 0x08 = TAG_BOOL    — reserved; rejected.
 // 0x09 = TAG_BYTES   — reserved; rejected.
 
-/// Errors raised by [`serialize_row`]. `pub` because the binary in `src/bin/`
-/// is a separate crate from this library.
 #[derive(Debug)]
 pub enum SerializeError {
-    /// An unsupported type or shape encountered mid-stream: containers,
-    /// dynamic field names, MISSING, BOOL, BYTES. The string identifies
-    /// the offending tuple field or top-level value.
+    /// Unsupported type or shape: containers, dynamic field names, MISSING,
+    /// BOOL, BYTES, or top-level scalar rows (must be wrapped in a tuple).
+    /// The string identifies the offending field or top-level value.
     Unsupported(String),
 }
 
@@ -59,22 +46,13 @@ impl std::fmt::Display for SerializeError {
 
 impl std::error::Error for SerializeError {}
 
-/// Serialize one VM row into `buf` as a tagged-union byte sequence.
-///
-/// `buf` is cleared on entry. On success, `buf` contains a single
-/// `tagged_value`: one tag byte followed by its payload. A top-level tuple
-/// is TAG_TUPLE + struct body; a top-level scalar is its scalar tag +
-/// value bytes.
-///
-/// All integer fields are little-endian. The row-id key in LMDB stays
-/// big-endian under `heed::types::Bytes`. Only VALUE bytes are LE.
+/// Serialize one VM row into `buf` as a tagged-union byte sequence. `buf`
+/// is cleared on entry.
 ///
 /// # Endianness invariant
 ///
-/// Every multi-byte field is written `to_le_bytes()`. The test parser in
-/// `partiql-tools/tests/pqlite_cli.rs::parse_row` uses `from_le_bytes()` to
-/// match. If you add a new tag, write it `to_le_bytes()` here AND read it
-/// `from_le_bytes()` there — an LE/BE asymmetry compiles cleanly and
+/// Every multi-byte VALUE field is written `to_le_bytes()` and the symmetric
+/// decoder reads `from_le_bytes()`. An LE/BE asymmetry compiles cleanly and
 /// silently corrupts every persisted row.
 pub fn serialize_row(
     row: &RegisterReader<'_>,
@@ -84,7 +62,12 @@ pub fn serialize_row(
     buf.clear();
     match row_shape {
         RowShape::Struct(fields) => write_tuple(row, fields, buf),
-        RowShape::Register(slot, _) => write_value(row, *slot, None, buf),
+        // A bare scalar tag with no tuple frame round-trips on write but
+        // fails on read: the decoder's `vw.put_scalar` requires a
+        // non-empty frame stack. Refuse at encode time.
+        RowShape::Register(_, _) => Err(SerializeError::Unsupported(
+            "top-level scalar rows are not yet supported; wrap in a tuple".to_string(),
+        )),
     }
 }
 
@@ -132,8 +115,6 @@ fn write_tuple(
     Ok(())
 }
 
-/// Write `tag + payload` for the value at register `slot`. Unsupported types
-/// return `Err`; the caller propagates and the in-flight wtxn rolls back.
 fn write_value(
     row: &RegisterReader<'_>,
     slot: usize,
@@ -185,4 +166,270 @@ fn write_value(
         }
     }
     Ok(())
+}
+
+#[derive(Debug)]
+pub enum DeserializeError {
+    Truncated,
+    UnknownTag(u8),
+    InvalidUtf8,
+    NameTooLong(u32),
+    FieldCountTooLarge(u32),
+    /// Reserved tag or `ValueWriter` failure; symmetric to encoder rejection.
+    Unsupported(String),
+}
+
+impl std::fmt::Display for DeserializeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeserializeError::Truncated => write!(f, "truncated row payload"),
+            DeserializeError::UnknownTag(t) => write!(f, "unknown tag byte: 0x{t:02x}"),
+            DeserializeError::InvalidUtf8 => write!(f, "field name is not valid UTF-8"),
+            DeserializeError::NameTooLong(n) => {
+                write!(f, "field name length {n} exceeds {MAX_NAME_LEN_BYTES}")
+            }
+            DeserializeError::FieldCountTooLarge(n) => {
+                write!(f, "tuple field count {n} exceeds {MAX_FIELDS_PER_ROW}")
+            }
+            DeserializeError::Unsupported(m) => write!(f, "unsupported: {m}"),
+        }
+    }
+}
+
+impl std::error::Error for DeserializeError {}
+
+/// Decode one row of the tagged-union wire format into `writer`'s `target_slot`.
+///
+/// # Safety
+///
+/// `bytes` must outlive every arena reset that touches `target_slot`'s
+/// register. In practice the caller (a `DataSource::next_row`
+/// implementation) must hold the backing row buffer for the duration
+/// of the scan. Violating this precondition causes use-after-free of
+/// the string slices written into the engine's arena via the
+/// lifetime extensions inside `decode_tagged_into`.
+///
+/// String UTF-8 validity is checked inline by `take_str` as each
+/// string is read; no pre-pass is required.
+pub unsafe fn deserialize_row_into(
+    bytes: &[u8],
+    writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+    target_slot: u16,
+) -> Result<(), DeserializeError> {
+    let mut cursor = 0usize;
+    let mut vw = writer
+        .value_writer(target_slot)
+        .map_err(|e| DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}")))?;
+    decode_tagged_into(&mut vw, bytes, &mut cursor)?;
+    vw.finish()
+        .map_err(|e| DeserializeError::Unsupported(format!("finish: {e}")))?;
+    Ok(())
+}
+
+fn decode_tagged_into(
+    vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<(), DeserializeError> {
+    let tag = take_byte(bytes, cursor)?;
+    match tag {
+        TAG_INTEGER => {
+            let v = i64::from_le_bytes(take_array::<8>(bytes, cursor)?);
+            vw.put_i64(v).map_err(io_err)?;
+        }
+        TAG_FLOAT => {
+            let v = f64::from_le_bytes(take_array::<8>(bytes, cursor)?);
+            vw.put_f64(v).map_err(io_err)?;
+        }
+        TAG_DECIMAL => {
+            let scale = i32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            let mantissa = i128::from_le_bytes(take_array::<16>(bytes, cursor)?);
+            let scale_u32 = u32::try_from(scale).map_err(|_| {
+                DeserializeError::Unsupported(format!("negative decimal scale {scale}"))
+            })?;
+            let d = rust_decimal::Decimal::try_from_i128_with_scale(mantissa, scale_u32)
+                .map_err(|e| DeserializeError::Unsupported(format!("invalid decimal: {e}")))?;
+            vw.put_decimal(d).map_err(io_err)?;
+        }
+        TAG_STRING => {
+            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            let s = take_str(bytes, cursor, len)?;
+            // Safety: see `deserialize_row_into`'s # Safety block.
+            let s_ext: &str = unsafe { extend_to_arena_lifetime(s) };
+            vw.put_str(s_ext).map_err(io_err)?;
+        }
+        TAG_NULL => {
+            vw.put_null().map_err(io_err)?;
+        }
+        TAG_TUPLE => {
+            let field_count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if field_count > MAX_FIELDS_PER_ROW {
+                return Err(DeserializeError::FieldCountTooLarge(field_count));
+            }
+            vw.step_in_tuple().map_err(io_err)?;
+            for _ in 0..field_count {
+                let name_len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+                if name_len > MAX_NAME_LEN_BYTES {
+                    return Err(DeserializeError::NameTooLong(name_len));
+                }
+                let name = take_str(bytes, cursor, name_len)?;
+                // Safety: see `deserialize_row_into`'s # Safety block.
+                let name_ext: &str = unsafe { extend_to_arena_lifetime(name) };
+                vw.put_field_name(name_ext).map_err(io_err)?;
+                decode_tagged_into(vw, bytes, cursor)?;
+            }
+            vw.step_out().map_err(io_err)?;
+        }
+        t => return Err(DeserializeError::UnknownTag(t)),
+    }
+    Ok(())
+}
+
+#[inline]
+fn take_byte(bytes: &[u8], cursor: &mut usize) -> Result<u8, DeserializeError> {
+    let b = *bytes.get(*cursor).ok_or(DeserializeError::Truncated)?;
+    *cursor += 1;
+    Ok(b)
+}
+
+#[inline]
+fn take_array<const N: usize>(
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<[u8; N], DeserializeError> {
+    let end = cursor.checked_add(N).ok_or(DeserializeError::Truncated)?;
+    let slice = bytes.get(*cursor..end).ok_or(DeserializeError::Truncated)?;
+    let arr = <[u8; N]>::try_from(slice).expect("slice is exactly N bytes");
+    *cursor = end;
+    Ok(arr)
+}
+
+#[inline]
+fn take_str<'b>(
+    bytes: &'b [u8],
+    cursor: &mut usize,
+    len: u32,
+) -> Result<&'b str, DeserializeError> {
+    let len = len as usize;
+    let end = cursor.checked_add(len).ok_or(DeserializeError::Truncated)?;
+    let slice = bytes.get(*cursor..end).ok_or(DeserializeError::Truncated)?;
+    let s = std::str::from_utf8(slice).map_err(|_| DeserializeError::InvalidUtf8)?;
+    *cursor = end;
+    Ok(s)
+}
+
+/// Extends `s`'s lifetime to match the arena's. Caller must ensure the
+/// backing buffer outlives every arena reset that touches the register
+/// the string is written into — see [`deserialize_row_into`]'s
+/// `# Safety` contract for the call-site invariant.
+///
+/// The output lifetime `'out` is unrelated to the input lifetime to
+/// permit the arena-lifetime borrow `put_str` / `put_field_name` require.
+///
+/// # Safety
+///
+/// See [`deserialize_row_into`].
+#[inline]
+unsafe fn extend_to_arena_lifetime<'out>(s: &str) -> &'out str {
+    // SAFETY: caller upholds the precondition documented on
+    // deserialize_row_into.
+    unsafe { &*(s as *const str) }
+}
+
+#[inline]
+fn io_err(e: partiql_eval::EngineError) -> DeserializeError {
+    DeserializeError::Unsupported(format!("writer error: {e}"))
+}
+
+// `RegisterWriter::new` and `ValueRef` are `pub(crate)` in `partiql-eval`, so
+// round-trip unit tests must run as integration tests. Tests below cover the
+// byte-reader helpers and the `DeserializeError` surface.
+#[cfg(test)]
+mod deserialize_tests {
+    use super::*;
+
+    #[test]
+    fn take_byte_advances_cursor_on_success() {
+        let mut cursor = 0usize;
+        let b = take_byte(&[0x42, 0xAA], &mut cursor).unwrap();
+        assert_eq!(b, 0x42);
+        assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn take_byte_truncated_on_empty() {
+        let mut cursor = 0usize;
+        let res = take_byte(&[], &mut cursor);
+        assert!(matches!(res, Err(DeserializeError::Truncated)));
+        assert_eq!(cursor, 0, "cursor must not advance on error");
+    }
+
+    #[test]
+    fn take_array_reads_le_i64() {
+        // 42 as little-endian i64
+        let bytes = 42i64.to_le_bytes();
+        let mut cursor = 0usize;
+        let arr = take_array::<8>(&bytes, &mut cursor).unwrap();
+        assert_eq!(i64::from_le_bytes(arr), 42);
+        assert_eq!(cursor, 8);
+    }
+
+    #[test]
+    fn take_array_truncated_when_short() {
+        let bytes = [0x01, 0x02, 0x03];
+        let mut cursor = 0usize;
+        let res = take_array::<8>(&bytes, &mut cursor);
+        assert!(matches!(res, Err(DeserializeError::Truncated)));
+    }
+
+    #[test]
+    fn take_str_returns_utf8_slice() {
+        let bytes = b"hello";
+        let mut cursor = 0usize;
+        let s = take_str(bytes, &mut cursor, 5).unwrap();
+        assert_eq!(s, "hello");
+        assert_eq!(cursor, 5);
+    }
+
+    #[test]
+    fn take_str_invalid_utf8_returns_invalid_utf8() {
+        // 0xFF is not valid UTF-8 leading byte.
+        let bytes = [0xFFu8];
+        let mut cursor = 0usize;
+        let res = take_str(&bytes, &mut cursor, 1);
+        assert!(matches!(res, Err(DeserializeError::InvalidUtf8)));
+    }
+
+    #[test]
+    fn take_str_truncated_when_shorter_than_len() {
+        let bytes = b"hi";
+        let mut cursor = 0usize;
+        let res = take_str(bytes, &mut cursor, 10);
+        assert!(matches!(res, Err(DeserializeError::Truncated)));
+    }
+
+    #[test]
+    fn display_renders_each_variant() {
+        assert_eq!(
+            format!("{}", DeserializeError::Truncated),
+            "truncated row payload"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::UnknownTag(0xFE)),
+            "unknown tag byte: 0xfe"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::InvalidUtf8),
+            "field name is not valid UTF-8"
+        );
+        assert!(
+            format!("{}", DeserializeError::NameTooLong(99)).starts_with("field name length 99")
+        );
+        assert!(format!("{}", DeserializeError::FieldCountTooLarge(2048))
+            .starts_with("tuple field count 2048"));
+        assert_eq!(
+            format!("{}", DeserializeError::Unsupported("x".to_string())),
+            "unsupported: x"
+        );
+    }
 }
