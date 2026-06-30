@@ -221,6 +221,13 @@ pub unsafe fn deserialize_row_into(
         .value_writer(target_slot)
         .map_err(|e| DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}")))?;
     decode_tagged_into(&mut vw, bytes, &mut cursor)?;
+    if cursor != bytes.len() {
+        return Err(DeserializeError::Unsupported(format!(
+            "trailing bytes after row decode: {} of {} consumed",
+            cursor,
+            bytes.len()
+        )));
+    }
     vw.finish()
         .map_err(|e| DeserializeError::Unsupported(format!("finish: {e}")))?;
     Ok(())

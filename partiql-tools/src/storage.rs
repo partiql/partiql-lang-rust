@@ -224,6 +224,9 @@ impl HeedDB {
     /// database called `name` exists in the env (i.e., the table was never
     /// created or was dropped).
     pub fn open_table(&self, txn: &heed::RoTxn<'_>, name: &str) -> Result<RowDb, StorageError> {
+        if self.tables.get(txn, name)?.is_none() {
+            return Err(StorageError::TableMissing(name.to_string()));
+        }
         self.env
             .open_database(txn, Some(name))?
             .ok_or_else(|| StorageError::TableMissing(name.to_string()))
@@ -231,10 +234,9 @@ impl HeedDB {
 
     /// Enumerate every table name in `_tables`, in lexicographic key order.
     pub fn list_table_names(&self, txn: &heed::RoTxn<'_>) -> Result<Vec<String>, StorageError> {
-        let mut out =
-            Vec::with_capacity(self.tables.len(txn).map_err(StorageError::Heed)? as usize);
-        for result in self.tables.iter(txn).map_err(StorageError::Heed)? {
-            let (k, _v) = result.map_err(StorageError::Heed)?;
+        let mut out = Vec::with_capacity(self.tables.len(txn)? as usize);
+        for result in self.tables.iter(txn)? {
+            let (k, _v) = result?;
             out.push(k.to_string());
         }
         Ok(out)

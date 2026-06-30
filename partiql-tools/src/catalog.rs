@@ -161,6 +161,7 @@ fn hash_to_entry_id(name: &str) -> EntryId {
     EntryId::from(std::hash::Hasher::finish(&hasher))
 }
 
+// Eagerly materialized because Box<dyn DataSource + 'static> cannot hold a borrowed RoTxn.
 /// Pack the entire scan into one byte buffer with per-row `u32` offsets.
 /// One `Vec<u8>` (geometric growth) replaces one allocation per row.
 /// Fails with `ScanTooLarge` if the packed size exceeds `u32::MAX`.
