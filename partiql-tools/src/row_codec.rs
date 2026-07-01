@@ -23,6 +23,14 @@ pub const MAX_BYTES_LEN: u32 = 1024 * 1024;
 /// Cap on `string` payload length (UTF-8 bytes) to bound allocations on corruption.
 pub const MAX_STRING_LEN: u32 = 1024 * 1024;
 
+/// Cap on container nesting depth to bound stack use when decoding a
+/// deeply nested (possibly adversarial) on-disk payload.
+///
+/// Safety invariant: the encoder rejects at a depth no deeper than the decoder
+/// on every path (encode is the stricter side), so any row the encoder produces
+/// is always decodable.
+pub const MAX_RECURSION_DEPTH: u32 = 128;
+
 // Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
 // load-bearing: deserialize_row_into tells a container-rooted row from a
 // scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
@@ -72,7 +80,7 @@ pub fn serialize_row(
 ) -> Result<(), SerializeError> {
     buf.clear();
     match row_shape {
-        RowShape::Struct(fields) => write_tuple(row, fields, buf),
+        RowShape::Struct(fields) => write_tuple(row, fields, 0, buf),
         RowShape::Register(slot, _) => write_value_at_root(row, *slot, buf),
     }
 }
@@ -90,8 +98,14 @@ fn write_value_at_root(
 fn write_tuple(
     row: &RegisterReader<'_>,
     fields: &[partiql_eval::value::FieldShape],
+    depth: u32,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(SerializeError::Unsupported(format!(
+            "nesting depth {depth} exceeds MAX_RECURSION_DEPTH ({MAX_RECURSION_DEPTH})"
+        )));
+    }
     if fields.len() > MAX_FIELDS_PER_ROW as usize {
         return Err(SerializeError::Unsupported(format!(
             "tuple has {} fields, exceeds MAX_FIELDS_PER_ROW ({})",
@@ -125,7 +139,7 @@ fn write_tuple(
         buf.extend_from_slice(name.as_bytes());
         match &field.value {
             RowShape::Register(idx, _) => write_value(row, *idx, Some(name), buf)?,
-            RowShape::Struct(nested_fields) => write_tuple(row, nested_fields, buf)?,
+            RowShape::Struct(nested_fields) => write_tuple(row, nested_fields, depth + 1, buf)?,
         }
     }
     Ok(())
@@ -228,6 +242,7 @@ pub enum DeserializeError {
     InvalidBool(u8),
     BytesTooLong(u32),
     StringTooLong(u32),
+    DepthExceeded(u32),
     /// Reserved tag or `ValueWriter` failure; symmetric to encoder rejection.
     Unsupported(String),
 }
@@ -250,6 +265,9 @@ impl std::fmt::Display for DeserializeError {
             }
             DeserializeError::StringTooLong(len) => {
                 write!(f, "string length {len} exceeds MAX_STRING_LEN")
+            }
+            DeserializeError::DepthExceeded(d) => {
+                write!(f, "nesting depth {d} exceeds MAX_RECURSION_DEPTH")
             }
             DeserializeError::Unsupported(m) => write!(f, "unsupported: {m}"),
         }
@@ -324,7 +342,7 @@ pub unsafe fn deserialize_row_into(
         let mut vw = writer.value_writer(target_slot).map_err(|e| {
             DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}"))
         })?;
-        decode_tagged_into(&mut vw, bytes, &mut cursor)?;
+        decode_tagged_into(&mut vw, bytes, &mut cursor, 0)?;
         if cursor != bytes.len() {
             return Err(DeserializeError::Unsupported(format!(
                 "trailing bytes after row decode: {} of {} consumed",
@@ -423,7 +441,11 @@ fn decode_tagged_into(
     vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
     bytes: &[u8],
     cursor: &mut usize,
+    depth: u32,
 ) -> Result<(), DeserializeError> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(DeserializeError::DepthExceeded(depth));
+    }
     let tag = take_byte(bytes, cursor)?;
     match tag {
         TAG_TUPLE => {
@@ -441,7 +463,7 @@ fn decode_tagged_into(
                 // Safety: see `deserialize_row_into`'s # Safety block.
                 let name_ext: &str = unsafe { extend_to_arena_lifetime(name) };
                 vw.put_field_name(name_ext).map_err(io_err)?;
-                decode_tagged_into(vw, bytes, cursor)?;
+                decode_tagged_into(vw, bytes, cursor, depth + 1)?;
             }
             vw.step_out().map_err(io_err)?;
         }

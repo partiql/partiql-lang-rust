@@ -762,6 +762,87 @@ fn top_level_scalar_row_is_bare_tag_on_disk() {
 }
 
 #[test]
+fn deeply_nested_tuple_payload_within_cap_round_trips() {
+    // A tuple nested a few levels deep, crafted as raw bytes, must decode
+    // cleanly (well within MAX_RECURSION_DEPTH). This directly exercises the
+    // decode_tagged_into recursion without needing the planner to produce a
+    // nested static struct (which it does not yet do).
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("nest_ok.pqlite");
+    // Seed a real table so the table + catalog exist.
+    let (ok, _o, e) = run_exec(
+        "CREATE TABLE t AS (SELECT 1 AS a FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "setup CTAS failed: {e}");
+
+    // Build a payload: 4 nested single-field tuples, innermost value = i64 42.
+    // Each tuple frame: TAG_TUPLE, field_count=1(LE u32), name_len=1(LE u32), 'n', <value>.
+    fn wrap(inner: Vec<u8>) -> Vec<u8> {
+        let mut v = vec![partiql_tools::row_codec::TAG_TUPLE];
+        v.extend_from_slice(&1u32.to_le_bytes()); // field_count
+        v.extend_from_slice(&1u32.to_le_bytes()); // name_len
+        v.push(b'n');
+        v.extend_from_slice(&inner);
+        v
+    }
+    let mut payload = vec![partiql_tools::row_codec::TAG_INTEGER];
+    payload.extend_from_slice(&42i64.to_le_bytes());
+    for _ in 0..4 {
+        payload = wrap(payload);
+    }
+
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    partiql_tools::test_support::inject_row(&db, "t", 1, &payload);
+    drop(db);
+
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT over nested tuple failed: {err}");
+    assert!(
+        out.contains("42"),
+        "nested value 42 must survive round-trip; got: {out}"
+    );
+}
+
+#[test]
+fn over_deep_nested_tuple_payload_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("nest_deep.pqlite");
+    let (ok, _o, e) = run_exec(
+        "CREATE TABLE t AS (SELECT 1 AS a FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "setup CTAS failed: {e}");
+
+    fn wrap(inner: Vec<u8>) -> Vec<u8> {
+        let mut v = vec![partiql_tools::row_codec::TAG_TUPLE];
+        v.extend_from_slice(&1u32.to_le_bytes());
+        v.extend_from_slice(&1u32.to_le_bytes());
+        v.push(b'n');
+        v.extend_from_slice(&inner);
+        v
+    }
+    let mut payload = vec![partiql_tools::row_codec::TAG_INTEGER];
+    payload.extend_from_slice(&0i64.to_le_bytes());
+    // Nest deeper than the cap. MAX_RECURSION_DEPTH + 5 levels guarantees rejection.
+    let levels = partiql_tools::row_codec::MAX_RECURSION_DEPTH + 5;
+    for _ in 0..levels {
+        payload = wrap(payload);
+    }
+
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    partiql_tools::test_support::inject_row(&db, "t", 1, &payload);
+    drop(db);
+
+    let (ok, _out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(!ok, "over-deep nesting must be rejected");
+    assert!(
+        err.contains("nesting depth") || err.contains("depth"),
+        "error must mention depth; got: {err}"
+    );
+}
+
+#[test]
 fn oversize_string_payload_surfaces_error() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("bad_str.pqlite");
