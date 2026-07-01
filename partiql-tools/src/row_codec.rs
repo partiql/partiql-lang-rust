@@ -17,16 +17,21 @@ pub const MAX_FIELDS_PER_ROW: u32 = 1024;
 /// Cap on `name_len` (UTF-8 byte length) to bound allocations on corruption.
 pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 
-pub const TAG_INTEGER: u8 = 0x00;
-pub const TAG_DECIMAL: u8 = 0x01;
-pub const TAG_FLOAT: u8 = 0x02;
-pub const TAG_TUPLE: u8 = 0x03;
-// 0x04 = TAG_BAG     — reserved; rejected.
-pub const TAG_STRING: u8 = 0x05;
-pub const TAG_NULL: u8 = 0x06;
-// 0x07 = TAG_MISSING — reserved; rejected.
-// 0x08 = TAG_BOOL    — reserved; rejected.
-// 0x09 = TAG_BYTES   — reserved; rejected.
+// Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
+// load-bearing: a later commit tells a container-rooted row from a
+// scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
+// tag may sit at or above TAG_TUPLE.
+pub const TAG_NULL: u8 = 0x00;
+pub const TAG_MISSING: u8 = 0x01;
+pub const TAG_BOOL: u8 = 0x02;
+pub const TAG_INTEGER: u8 = 0x03;
+pub const TAG_FLOAT: u8 = 0x04;
+pub const TAG_DECIMAL: u8 = 0x05;
+pub const TAG_STRING: u8 = 0x06;
+pub const TAG_BYTES: u8 = 0x07;
+pub const TAG_TUPLE: u8 = 0x08;
+pub const TAG_LIST: u8 = 0x09;
+pub const TAG_BAG: u8 = 0x0A;
 
 #[derive(Debug)]
 pub enum SerializeError {

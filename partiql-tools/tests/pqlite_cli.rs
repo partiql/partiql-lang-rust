@@ -555,29 +555,29 @@ fn wire_format_byte_shape_is_stable() {
     };
 
     // Expected wire format for {"a": 1i64, "b": "xy"}:
-    //   TAG_TUPLE (0x03)
+    //   TAG_TUPLE (0x08)
     //   field_count = 2 (LE u32: 02 00 00 00)
     //   field 0:
     //     name_len = 1 (LE u32: 01 00 00 00)
     //     name = 'a'   (0x61)
-    //     TAG_INTEGER (0x00)
+    //     TAG_INTEGER (0x03)
     //     i64 value = 1 (LE: 01 00 00 00 00 00 00 00)
     //   field 1:
     //     name_len = 1 (LE u32: 01 00 00 00)
     //     name = 'b'   (0x62)
-    //     TAG_STRING (0x05)
+    //     TAG_STRING (0x06)
     //     str_len = 2  (LE u32: 02 00 00 00)
     //     str bytes = 'x' 'y' (0x78 0x79)
     // name_len (1) deliberately differs from str_len (2) so a regression that
     // swapped the two u32 prefixes would not cancel out.
     let expected: &[u8] = &[
-        0x03, // TAG_TUPLE
+        0x08, // TAG_TUPLE
         0x02, 0x00, 0x00, 0x00, // field_count = 2
         0x01, 0x00, 0x00, 0x00, 0x61, // name "a"
-        0x00, // TAG_INTEGER
+        0x03, // TAG_INTEGER
         0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // i64 1 LE
         0x01, 0x00, 0x00, 0x00, 0x62, // name "b"
-        0x05, // TAG_STRING
+        0x06, // TAG_STRING
         0x02, 0x00, 0x00, 0x00, // str_len = 2
         0x78, 0x79, // "xy"
     ];
