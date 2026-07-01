@@ -442,44 +442,6 @@ fn select_surfaces_unknown_tag_error() {
 }
 
 #[test]
-#[cfg_attr(windows, ignore)]
-fn ctas_rejects_bool_with_pointed_message() {
-    // The encoder must reject a Bool column mid-stream. Err propagates so
-    // the wtxn rolls back; the env file may persist but the catalog stays
-    // clean.
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("bool.pqlite");
-    let (ok, _stdout, stderr) = run_exec(
-        "CREATE TABLE t AS (SELECT true AS b FROM mem(1,1) m)",
-        Some(&db_path),
-    );
-    assert!(!ok, "Bool column must be rejected; stderr: {stderr}");
-    assert!(
-        stderr.contains("field 'b'") && stderr.contains("Bool"),
-        "error must name the column and the rejected type; got: {stderr}",
-    );
-    // Verify wtxn rollback by re-opening: the env file may persist on disk,
-    // but the catalog must not register `t`.
-    let env = unsafe {
-        heed::EnvOpenOptions::new()
-            .map_size(1024 * 1024 * 1024)
-            .max_dbs(128)
-            .flags(heed::EnvFlags::NO_SUB_DIR)
-            .open(&db_path)
-            .expect("re-open env")
-    };
-    let rtxn = env.read_txn().expect("read txn");
-    let catalog: heed::Database<heed::types::Str, heed::types::Bytes> = env
-        .open_database(&rtxn, Some("_tables"))
-        .expect("open catalog")
-        .expect("catalog must exist");
-    assert!(
-        catalog.get(&rtxn, "t").expect("catalog get").is_none(),
-        "row-0 rejection must leave catalog clean even if env file persists"
-    );
-}
-
-#[test]
 fn quoted_table_name_preserves_case_through_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("quoted.pqlite");
@@ -585,5 +547,126 @@ fn wire_format_byte_shape_is_stable() {
     assert_eq!(
         row0, expected,
         "wire format byte shape regressed: expected {expected:02x?}, got {row0:02x?}",
+    );
+}
+
+#[test]
+fn ctas_then_select_bool_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("bool_rt.pqlite");
+    // mem's arg order is (rows, cols): mem(2,1) yields two rows a=0,a=1,
+    // so `m.a = 0` produces true then false. (Not mem(1,2), which is one row.)
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT (m.a = 0) AS b FROM mem(2,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(
+        out.contains("true"),
+        "expected 'true' in output; got: {out}"
+    );
+    assert!(
+        out.contains("false"),
+        "expected 'false' in output; got: {out}"
+    );
+}
+
+#[test]
+fn ctas_then_select_missing_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("missing_rt.pqlite");
+    // mem's arg order is (rows, cols); mem(2,1) yields two rows.
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT m.nonexistent AS x FROM mem(2,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(
+        out.contains("MISSING"),
+        "expected MISSING in output; got: {out}"
+    );
+}
+
+#[test]
+fn invalid_bool_payload_surfaces_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("bad_bool.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT (m.a = 0) AS b FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS setup failed: {err}");
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    partiql_tools::test_support::inject_row(
+        &db,
+        "t",
+        1,
+        &[
+            partiql_tools::row_codec::TAG_TUPLE,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            b'b',
+            partiql_tools::row_codec::TAG_BOOL,
+            0x7F,
+        ],
+    );
+    drop(db);
+    let (ok, _out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(!ok, "expected SELECT to fail on invalid bool payload");
+    assert!(
+        err.contains("invalid bool") && err.contains("0x7f"),
+        "expected the specific bad byte 0x7f to propagate; got: {err}"
+    );
+}
+
+#[test]
+#[cfg_attr(windows, ignore)]
+fn ctas_rejects_container_rolls_back_wtxn() {
+    // Repoint target: migrate this to a cap-violation trigger (oversize
+    // string/bytes or too-many-elements) once List/Bag are supported, since the
+    // container triggers used here become valid then.
+    //
+    // The encoder must reject a still-unsupported container column mid-stream.
+    // Err propagates so the wtxn rolls back; the env file may persist but the
+    // catalog stays clean.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("list.pqlite");
+    let (ok, _stdout, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT [1, 2] AS xs FROM mem(1,1) m)",
+        Some(&db_path),
+    );
+    assert!(!ok, "List column must be rejected; stderr: {stderr}");
+    assert!(
+        stderr.contains("List") && stderr.contains("not yet supported"),
+        "error must name the rejected container type; got: {stderr}",
+    );
+    // Verify wtxn rollback by re-opening: the env file may persist on disk,
+    // but the catalog must not register `t`.
+    let env = unsafe {
+        heed::EnvOpenOptions::new()
+            .map_size(1024 * 1024 * 1024)
+            .max_dbs(128)
+            .flags(heed::EnvFlags::NO_SUB_DIR)
+            .open(&db_path)
+            .expect("re-open env")
+    };
+    let rtxn = env.read_txn().expect("read txn");
+    let catalog: heed::Database<heed::types::Str, heed::types::Bytes> = env
+        .open_database(&rtxn, Some("_tables"))
+        .expect("open catalog")
+        .expect("catalog must exist");
+    assert!(
+        catalog.get(&rtxn, "t").expect("catalog get").is_none(),
+        "row-0 rejection must leave catalog clean even if env file persists"
     );
 }

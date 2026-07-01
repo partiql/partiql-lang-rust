@@ -17,6 +17,9 @@ pub const MAX_FIELDS_PER_ROW: u32 = 1024;
 /// Cap on `name_len` (UTF-8 byte length) to bound allocations on corruption.
 pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 
+/// Cap on `bytes` payload length to bound allocations on corruption.
+pub const MAX_BYTES_LEN: u32 = 1024 * 1024;
+
 // Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
 // load-bearing: a later commit tells a container-rooted row from a
 // scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
@@ -35,8 +38,8 @@ pub const TAG_BAG: u8 = 0x0A;
 
 #[derive(Debug)]
 pub enum SerializeError {
-    /// Unsupported type or shape: containers, dynamic field names, MISSING,
-    /// BOOL, BYTES, or top-level scalar rows (must be wrapped in a tuple).
+    /// Unsupported type or shape: containers (Tuple/List/Bag), dynamic field
+    /// names, or top-level scalar rows (must be wrapped in a tuple).
     /// The string identifies the offending field or top-level value.
     Unsupported(String),
 }
@@ -155,12 +158,34 @@ fn write_value(
             buf.extend_from_slice(&str_len.to_le_bytes());
             buf.extend_from_slice(sb);
         }
-        ty @ (ValueType::Bool
-        | ValueType::Bytes
-        | ValueType::Missing
-        | ValueType::Tuple
-        | ValueType::List
-        | ValueType::Bag) => {
+        ValueType::Bool => {
+            buf.push(TAG_BOOL);
+            let b = view.get_bool().expect("bool view");
+            buf.push(if b { 0x01 } else { 0x00 });
+        }
+        ValueType::Missing => {
+            buf.push(TAG_MISSING);
+        }
+        ValueType::Bytes => {
+            buf.push(TAG_BYTES);
+            let b = view.get_bytes().expect("bytes view");
+            if b.len() > MAX_BYTES_LEN as usize {
+                let prefix = match field_name {
+                    Some(name) => format!("field '{name}'"),
+                    None => "top-level value".to_string(),
+                };
+                return Err(SerializeError::Unsupported(format!(
+                    "{prefix}: bytes length {} exceeds MAX_BYTES_LEN ({})",
+                    b.len(),
+                    MAX_BYTES_LEN
+                )));
+            }
+            // Safe: the cap above bounds b.len() to MAX_BYTES_LEN (u32).
+            let byte_len: u32 = b.len() as u32;
+            buf.extend_from_slice(&byte_len.to_le_bytes());
+            buf.extend_from_slice(b);
+        }
+        ty @ (ValueType::Tuple | ValueType::List | ValueType::Bag) => {
             let prefix = match field_name {
                 Some(name) => format!("field '{name}'"),
                 None => "top-level value".to_string(),
@@ -180,6 +205,8 @@ pub enum DeserializeError {
     InvalidUtf8,
     NameTooLong(u32),
     FieldCountTooLarge(u32),
+    InvalidBool(u8),
+    BytesTooLong(u32),
     /// Reserved tag or `ValueWriter` failure; symmetric to encoder rejection.
     Unsupported(String),
 }
@@ -196,6 +223,10 @@ impl std::fmt::Display for DeserializeError {
             DeserializeError::FieldCountTooLarge(n) => {
                 write!(f, "tuple field count {n} exceeds {MAX_FIELDS_PER_ROW}")
             }
+            DeserializeError::InvalidBool(b) => write!(f, "invalid bool payload: 0x{b:02x}"),
+            DeserializeError::BytesTooLong(len) => {
+                write!(f, "bytes length {len} exceeds MAX_BYTES_LEN")
+            }
             DeserializeError::Unsupported(m) => write!(f, "unsupported: {m}"),
         }
     }
@@ -211,7 +242,7 @@ impl std::error::Error for DeserializeError {}
 /// register. In practice the caller (a `DataSource::next_row`
 /// implementation) must hold the backing row buffer for the duration
 /// of the scan. Violating this precondition causes use-after-free of
-/// the string slices written into the engine's arena via the
+/// the string and byte slices written into the engine's arena via the
 /// lifetime extensions inside `decode_tagged_into`.
 ///
 /// String UTF-8 validity is checked inline by `take_str` as each
@@ -292,6 +323,31 @@ fn decode_tagged_into(
             }
             vw.step_out().map_err(io_err)?;
         }
+        TAG_BOOL => {
+            let b = take_byte(bytes, cursor)?;
+            match b {
+                0x00 => vw.put_bool(false).map_err(io_err)?,
+                0x01 => vw.put_bool(true).map_err(io_err)?,
+                _ => return Err(DeserializeError::InvalidBool(b)),
+            }
+        }
+        TAG_MISSING => {
+            vw.put_missing().map_err(io_err)?;
+        }
+        TAG_BYTES => {
+            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if len > MAX_BYTES_LEN {
+                return Err(DeserializeError::BytesTooLong(len));
+            }
+            let end = cursor
+                .checked_add(len as usize)
+                .ok_or(DeserializeError::Truncated)?;
+            let slice = bytes.get(*cursor..end).ok_or(DeserializeError::Truncated)?;
+            *cursor = end;
+            // Safety: see `deserialize_row_into`'s # Safety block.
+            let b_ext: &[u8] = unsafe { extend_bytes_to_arena_lifetime(slice) };
+            vw.put_bytes(b_ext).map_err(io_err)?;
+        }
         t => return Err(DeserializeError::UnknownTag(t)),
     }
     Ok(())
@@ -346,6 +402,23 @@ unsafe fn extend_to_arena_lifetime<'out>(s: &str) -> &'out str {
     // SAFETY: caller upholds the precondition documented on
     // deserialize_row_into.
     unsafe { &*(s as *const str) }
+}
+
+/// Extends `b`'s lifetime to match the arena's. Sibling of
+/// [`extend_to_arena_lifetime`] for `&[u8]`: the caller must uphold the same
+/// backing-buffer-outlives-arena-reset invariant.
+///
+/// The output lifetime `'out` is unrelated to the input lifetime to permit
+/// the arena-lifetime borrow `put_bytes` requires.
+///
+/// # Safety
+///
+/// See [`deserialize_row_into`].
+#[inline]
+unsafe fn extend_bytes_to_arena_lifetime<'out>(b: &[u8]) -> &'out [u8] {
+    // SAFETY: caller upholds the precondition documented on
+    // deserialize_row_into.
+    unsafe { &*(b as *const [u8]) }
 }
 
 #[inline]
