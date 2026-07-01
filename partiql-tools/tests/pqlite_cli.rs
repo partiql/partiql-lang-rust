@@ -287,11 +287,9 @@ fn ctas_then_select_mixed_scalars() {
 #[test]
 fn ctas_then_select_preserves_multi_field_struct_shape() {
     // Two-column row guards field-name preservation and column ordering
-    // through the encode → LMDB → decode → format pipeline. Nested tuples
-    // (i.e. a column whose VALUE is itself a tuple) are not yet supported
-    // by the encoder — the inline `{ 'k': v }` literal lowers to
-    // ValueType::Tuple, which `write_value` rejects — so the nested case
-    // is intentionally out of scope here. See PR5-deferred-items.
+    // through the encode → LMDB → decode → format pipeline. The nested-tuple
+    // case (a column whose VALUE is itself a tuple) is covered separately by
+    // ctas_then_select_runtime_tuple and ctas_then_select_nested_tuple_in_list.
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("tuple.pqlite");
 
@@ -631,24 +629,26 @@ fn invalid_bool_payload_surfaces_error() {
 
 #[test]
 #[cfg_attr(windows, ignore)]
-fn ctas_rejects_container_rolls_back_wtxn() {
-    // Repoint target: migrate this to a cap-violation trigger (oversize
-    // string/bytes or too-many-elements) once List/Bag are supported, since the
-    // container triggers used here become valid then.
-    //
-    // The encoder must reject a still-unsupported container column mid-stream.
-    // Err propagates so the wtxn rolls back; the env file may persist but the
-    // catalog stays clean.
+fn ctas_rejects_oversize_tuple_rolls_back_wtxn() {
+    // A mid-encode rejection must roll back the wtxn, leaving `_tables` clean.
+    // Trigger: a 1025-field runtime tuple trips MAX_FIELDS_PER_ROW. (An oversize
+    // string would exceed the OS arg length limit when passed via the CLI.)
     let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("list.pqlite");
-    let (ok, _stdout, stderr) = run_exec(
-        "CREATE TABLE t AS (SELECT [1, 2] AS xs FROM mem(1,1) m)",
-        Some(&db_path),
-    );
-    assert!(!ok, "List column must be rejected; stderr: {stderr}");
+    let db_path = dir.path().join("oversize.pqlite");
+    let field_count = partiql_tools::row_codec::MAX_FIELDS_PER_ROW + 1;
+    let fields: String = (0..field_count)
+        .map(|i| format!("'k{i}': {i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let query = format!("CREATE TABLE t AS (SELECT {{ {fields} }} AS obj FROM mem(1,1) m)");
+    let (ok, _stdout, stderr) = run_exec(&query, Some(&db_path));
     assert!(
-        stderr.contains("List") && stderr.contains("not yet supported"),
-        "error must name the rejected container type; got: {stderr}",
+        !ok,
+        "oversize tuple column must be rejected; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("MAX_FIELDS_PER_ROW"),
+        "error must name the field-count cap; got: {stderr}",
     );
     // Verify wtxn rollback by re-opening: the env file may persist on disk,
     // but the catalog must not register `t`.
@@ -839,6 +839,202 @@ fn over_deep_nested_tuple_payload_is_rejected() {
     assert!(
         err.contains("nesting depth") || err.contains("depth"),
         "error must mention depth; got: {err}"
+    );
+}
+
+#[test]
+fn ctas_then_select_list_of_ints() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("list_ints.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT [10, 20, 30] AS xs FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "list CTAS should succeed; stderr: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("10"), "expected 10; got: {out}");
+    assert!(out.contains("20"), "expected 20; got: {out}");
+    assert!(out.contains("30"), "expected 30; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_bag_of_ints() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("bag_ints.pqlite");
+    // `<< ... >>` is the PartiQL bag-literal syntax and parses cleanly.
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT << 100, 200 >> AS xs FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "bag CTAS should succeed; stderr: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("100"), "expected 100; got: {out}");
+    assert!(out.contains("200"), "expected 200; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_empty_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("empty_list.pqlite");
+    // An empty container is legal: count=0, no elements, no step_in.
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT [] AS xs FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "empty-list CTAS should succeed; stderr: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT over empty list failed: {err}");
+    // Empty list renders as `[]` inside the row tuple.
+    assert!(out.contains("'xs': []"), "expected empty list; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_nested_tuple_in_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("nested.pqlite");
+    // A list of runtime tuples exercises the full recursion:
+    // list → tuple → scalar, on both encode and decode.
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT [{ 'a': 1 }, { 'a': 2 }] AS xs FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(
+        ok,
+        "nested-tuple-in-list CTAS should succeed; stderr: {err}"
+    );
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("1"), "expected 1; got: {out}");
+    assert!(out.contains("2"), "expected 2; got: {out}");
+    // Both tuples preserve their field name through the round trip.
+    assert!(out.contains("'a': 1"), "expected 'a': 1; got: {out}");
+    assert!(out.contains("'a': 2"), "expected 'a': 2; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_runtime_tuple() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("runtime_tuple.pqlite");
+    // A runtime `{...}` tuple value flows through write_tuple_via_view
+    // (distinct from the static-struct encode path).
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT { 'k': 42 } AS obj FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "runtime-tuple CTAS should succeed; stderr: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("42"), "expected 42; got: {out}");
+    assert!(out.contains("'k': 42"), "expected 'k': 42; got: {out}");
+}
+
+#[test]
+fn encode_accepts_implies_decode_accepts_at_depth_boundary() {
+    // End-to-end depth coverage for the VIEW encode path: a runtime tuple
+    // nested three levels deep must round-trip. The injected-bytes depth tests
+    // (deeply_nested_tuple_payload_within_cap_round_trips /
+    // over_deep_nested_tuple_payload_is_rejected) anchor the DECODE boundary;
+    // this one proves write_tuple_via_view's own depth accounting produces a
+    // decodable row for a query-produced nested tuple.
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("depth_e2e.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT { 'a': { 'b': { 'c': 42 } } } AS r FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(
+        ok,
+        "3-level runtime-tuple CTAS should succeed; stderr: {err}"
+    );
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT over 3-level nested tuple failed: {err}");
+    // The innermost value and the full nesting survive the round trip.
+    assert!(out.contains("42"), "expected inner value 42; got: {out}");
+    assert!(
+        out.contains("{ 'r': { 'a': { 'b': { 'c': 42 } } } }"),
+        "expected the full 3-level nesting to render; got: {out}"
+    );
+}
+
+#[test]
+fn wire_format_list_byte_shape() {
+    // Pin the on-disk byte layout for a single-element int list. Locks the
+    // TAG_LIST wire format the way `wire_format_byte_shape_is_stable` locks the
+    // tuple/scalar layout. If this fails, the byte literal is the source of
+    // truth — investigate the encoder, do not rewrite the test.
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("list_anchor.pqlite");
+
+    let (ok, _, stderr) = run_exec(
+        "CREATE TABLE t AS (SELECT [1] AS xs FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS should succeed; stderr: {stderr}");
+
+    let row0 = {
+        let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+        partiql_tools::test_support::read_row(&db, "t", 0)
+    };
+
+    // Expected wire format for the row {"xs": [1i64]}:
+    //   TAG_TUPLE (0x08)
+    //   field_count = 1 (LE u32: 01 00 00 00)
+    //   field 0:
+    //     name_len = 2 (LE u32: 02 00 00 00)
+    //     name = 'x' 's' (0x78 0x73)
+    //     TAG_LIST (0x09)
+    //     elem_count = 1 (LE u32: 01 00 00 00)
+    //     element 0:
+    //       TAG_INTEGER (0x03)
+    //       i64 value = 1 (LE: 01 00 00 00 00 00 00 00)
+    let expected: &[u8] = &[
+        0x08, // TAG_TUPLE
+        0x01, 0x00, 0x00, 0x00, // field_count = 1
+        0x02, 0x00, 0x00, 0x00, 0x78, 0x73, // name "xs"
+        0x09, // TAG_LIST
+        0x01, 0x00, 0x00, 0x00, // elem_count = 1
+        0x03, // TAG_INTEGER
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // i64 1 LE
+    ];
+
+    assert_eq!(
+        row0, expected,
+        "list wire format byte shape regressed: expected {expected:02x?}, got {row0:02x?}",
+    );
+}
+
+#[test]
+fn over_many_list_elements_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("too_many.pqlite");
+    let (ok, _o, e) = run_exec(
+        "CREATE TABLE t AS (SELECT 1 AS a FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "setup CTAS failed: {e}");
+
+    // Craft a tuple row whose 'xs' list claims one element more than the cap.
+    // No element bytes are needed — the cap check trips before the read.
+    let mut payload = Vec::new();
+    payload.push(partiql_tools::row_codec::TAG_TUPLE);
+    payload.extend_from_slice(&1u32.to_le_bytes()); // field_count = 1
+    payload.extend_from_slice(&2u32.to_le_bytes()); // name_len = 2
+    payload.extend_from_slice(b"xs");
+    payload.push(partiql_tools::row_codec::TAG_LIST);
+    let bad_count: u32 = partiql_tools::row_codec::MAX_CONTAINER_ELEMENTS + 1;
+    payload.extend_from_slice(&bad_count.to_le_bytes());
+
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    partiql_tools::test_support::inject_row(&db, "t", 1, &payload);
+    drop(db);
+
+    let (ok, _out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(!ok, "over-cap element count must be rejected");
+    assert!(
+        err.contains("element count"),
+        "error must mention element count; got: {err}"
     );
 }
 

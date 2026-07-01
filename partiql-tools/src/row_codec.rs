@@ -4,12 +4,13 @@
 //!   ROW          = tagged_value
 //!   tagged_value = tag(u8) payload
 //!   payload(TAG_TUPLE) = field_count(u32 LE) (name_len(u32 LE) name_utf8 tagged_value){N}
+//!   payload(TAG_LIST | TAG_BAG) = count(u32 LE) tagged_value{N}
 //!
 //! All multi-byte VALUE bytes are little-endian. Row-id KEYS in LMDB stay
 //! big-endian (encoded as `row_id.to_be_bytes()` under `heed::types::Bytes`)
 //! so the B+tree's lexicographic order matches numeric order.
 
-use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType};
+use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType, ValueView};
 
 /// Cap on `field_count` to bound `Vec::with_capacity` against a flipped byte.
 pub const MAX_FIELDS_PER_ROW: u32 = 1024;
@@ -31,6 +32,10 @@ pub const MAX_STRING_LEN: u32 = 1024 * 1024;
 /// is always decodable.
 pub const MAX_RECURSION_DEPTH: u32 = 128;
 
+/// Cap on List/Bag element count to bound work when decoding a
+/// (possibly adversarial) on-disk container payload.
+pub const MAX_CONTAINER_ELEMENTS: u32 = 65_536;
+
 // Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
 // load-bearing: deserialize_row_into tells a container-rooted row from a
 // scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
@@ -49,9 +54,8 @@ pub const TAG_BAG: u8 = 0x0A;
 
 #[derive(Debug)]
 pub enum SerializeError {
-    /// Unsupported type or shape: containers (Tuple/List/Bag) or dynamic
-    /// field names. The string identifies the offending field or top-level
-    /// value.
+    /// Unsupported shape (dynamic field names) or a size/depth cap violation.
+    /// The string identifies the offending field or top-level value.
     Unsupported(String),
 }
 
@@ -92,7 +96,21 @@ fn write_value_at_root(
 ) -> Result<(), SerializeError> {
     // Top-level scalar rows land as a bare tag + payload with no tuple frame.
     // `field_name = None` selects the "top-level value" error prefix.
-    write_value(row, slot, None, buf)
+    write_value(row, slot, None, 0, buf)
+}
+
+/// Reject once container nesting would exceed the stack-bounding cap. Called at
+/// each encoder entry that can recurse; the callee runs at `depth + 1`, so an
+/// empty over-deep container (whose element loop never fires) is still caught by
+/// the callee's own check.
+#[inline]
+fn check_encode_depth(depth: u32) -> Result<(), SerializeError> {
+    if depth > MAX_RECURSION_DEPTH {
+        return Err(SerializeError::Unsupported(format!(
+            "nesting depth {depth} exceeds MAX_RECURSION_DEPTH ({MAX_RECURSION_DEPTH})"
+        )));
+    }
+    Ok(())
 }
 
 fn write_tuple(
@@ -101,11 +119,7 @@ fn write_tuple(
     depth: u32,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
-    if depth > MAX_RECURSION_DEPTH {
-        return Err(SerializeError::Unsupported(format!(
-            "nesting depth {depth} exceeds MAX_RECURSION_DEPTH ({MAX_RECURSION_DEPTH})"
-        )));
-    }
+    check_encode_depth(depth)?;
     if fields.len() > MAX_FIELDS_PER_ROW as usize {
         return Err(SerializeError::Unsupported(format!(
             "tuple has {} fields, exceeds MAX_FIELDS_PER_ROW ({})",
@@ -138,23 +152,53 @@ fn write_tuple(
         buf.extend_from_slice(&name_len.to_le_bytes());
         buf.extend_from_slice(name.as_bytes());
         match &field.value {
-            RowShape::Register(idx, _) => write_value(row, *idx, Some(name), buf)?,
+            // Pass the CURRENT depth: the field lives at the tuple's depth, and
+            // write_value_from_view will +1 itself when it steps into a container.
+            RowShape::Register(idx, _) => write_value(row, *idx, Some(name), depth, buf)?,
             RowShape::Struct(nested_fields) => write_tuple(row, nested_fields, depth + 1, buf)?,
         }
     }
     Ok(())
 }
 
+/// Thin wrapper over the recursive core: fetch the register's view and
+/// delegate. Every value — scalar or container — reached through a
+/// register/view flows through [`write_value_from_view`], the sole encoder
+/// path for such values (static `RowShape::Struct` tuples are emitted by
+/// [`write_tuple`] instead).
 fn write_value(
     row: &RegisterReader<'_>,
     slot: usize,
     field_name: Option<&str>,
+    depth: u32,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
-    let view = row.get_value_view(slot).expect("register slot from shape");
+    let mut view = row.get_value_view(slot).expect("register slot from shape");
+    write_value_from_view(&mut view, field_name, depth, buf)
+}
+
+/// Encode the value the cursor currently points at, recursing into containers.
+/// This is the ONE recursive core: scalars, runtime tuples (`{...}` literals),
+/// lists, and bags all pass through here. `field_name` is used only to build an
+/// error-message prefix on a cap violation.
+fn write_value_from_view(
+    view: &mut ValueView<'_>,
+    field_name: Option<&str>,
+    depth: u32,
+    buf: &mut Vec<u8>,
+) -> Result<(), SerializeError> {
+    check_encode_depth(depth)?;
     match view.get_type() {
         ValueType::Null => {
             buf.push(TAG_NULL);
+        }
+        ValueType::Missing => {
+            buf.push(TAG_MISSING);
+        }
+        ValueType::Bool => {
+            buf.push(TAG_BOOL);
+            let b = view.get_bool().expect("bool view");
+            buf.push(if b { 0x01 } else { 0x00 });
         }
         ValueType::Integer => {
             buf.push(TAG_INTEGER);
@@ -192,14 +236,6 @@ fn write_value(
             buf.extend_from_slice(&str_len.to_le_bytes());
             buf.extend_from_slice(sb);
         }
-        ValueType::Bool => {
-            buf.push(TAG_BOOL);
-            let b = view.get_bool().expect("bool view");
-            buf.push(if b { 0x01 } else { 0x00 });
-        }
-        ValueType::Missing => {
-            buf.push(TAG_MISSING);
-        }
         ValueType::Bytes => {
             buf.push(TAG_BYTES);
             let b = view.get_bytes().expect("bytes view");
@@ -219,16 +255,108 @@ fn write_value(
             buf.extend_from_slice(&byte_len.to_le_bytes());
             buf.extend_from_slice(b);
         }
-        ty @ (ValueType::Tuple | ValueType::List | ValueType::Bag) => {
-            let prefix = match field_name {
-                Some(name) => format!("field '{name}'"),
-                None => "top-level value".to_string(),
-            };
-            return Err(SerializeError::Unsupported(format!(
-                "{prefix}: {ty:?} is not yet supported"
-            )));
-        }
+        ValueType::Tuple => write_tuple_via_view(view, depth + 1, buf)?,
+        ValueType::List => write_list_or_bag_via_view(view, TAG_LIST, "list", depth + 1, buf)?,
+        ValueType::Bag => write_list_or_bag_via_view(view, TAG_BAG, "bag", depth + 1, buf)?,
     }
+    Ok(())
+}
+
+/// Encode a runtime tuple (`{...}` literal) reached as `ValueType::Tuple` in a
+/// view — distinct from the static `RowShape::Struct` path in [`write_tuple`].
+///
+/// The count is backpatched after writing the fields: `ValueView` gives no
+/// pre-`step_in` length, and deferring the count avoids a scratch allocation.
+fn write_tuple_via_view(
+    view: &mut ValueView<'_>,
+    depth: u32,
+    buf: &mut Vec<u8>,
+) -> Result<(), SerializeError> {
+    check_encode_depth(depth)?;
+    buf.push(TAG_TUPLE);
+    // Reserve the field-count slot; backpatched after the fields are written.
+    let count_pos = buf.len();
+    buf.extend_from_slice(&0u32.to_le_bytes());
+    let mut count: u32 = 0;
+    // `step_in` fails on an empty tuple; the empty case leaves count 0 with no
+    // fields, matching the wire format for a static empty struct.
+    if view.step_in().is_ok() {
+        loop {
+            if count >= MAX_FIELDS_PER_ROW {
+                return Err(SerializeError::Unsupported(format!(
+                    "tuple has more than MAX_FIELDS_PER_ROW ({MAX_FIELDS_PER_ROW}) fields"
+                )));
+            }
+            let name: &str = view
+                .get_field_name()
+                .map_err(|e| SerializeError::Unsupported(format!("tuple get_field_name: {e}")))?;
+            if name.len() > MAX_NAME_LEN_BYTES as usize {
+                return Err(SerializeError::Unsupported(format!(
+                    "field '{name}': name length {} bytes exceeds MAX_NAME_LEN_BYTES ({})",
+                    name.len(),
+                    MAX_NAME_LEN_BYTES
+                )));
+            }
+            // Safe: cap above bounds name length to u32.
+            buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
+            buf.extend_from_slice(name.as_bytes());
+            write_value_from_view(view, Some(name), depth, buf)?;
+            count += 1;
+            let has_next = view
+                .advance()
+                .map_err(|e| SerializeError::Unsupported(format!("tuple advance: {e}")))?;
+            if !has_next {
+                break;
+            }
+        }
+        view.step_out()
+            .map_err(|e| SerializeError::Unsupported(format!("tuple step_out: {e}")))?;
+    }
+    buf[count_pos..count_pos + 4].copy_from_slice(&count.to_le_bytes());
+    Ok(())
+}
+
+/// Encode a List or Bag reached in a view. `tag` and `kind` differentiate the
+/// two; the body is identical (ordered elements, no field names).
+///
+/// The count is backpatched after writing the elements: `ValueView` gives no
+/// pre-`step_in` length for List/Bag, and deferring avoids a scratch allocation.
+fn write_list_or_bag_via_view(
+    view: &mut ValueView<'_>,
+    tag: u8,
+    kind: &'static str,
+    depth: u32,
+    buf: &mut Vec<u8>,
+) -> Result<(), SerializeError> {
+    check_encode_depth(depth)?;
+    buf.push(tag);
+    // Reserve the element-count slot; backpatched after the elements are
+    // written so we never allocate a scratch buffer to pre-count.
+    let count_pos = buf.len();
+    buf.extend_from_slice(&0u32.to_le_bytes());
+    let mut count: u32 = 0;
+    // `step_in` errors on an empty container; an empty list/bag is legal and
+    // simply has count 0.
+    if view.step_in().is_ok() {
+        loop {
+            if count >= MAX_CONTAINER_ELEMENTS {
+                return Err(SerializeError::Unsupported(format!(
+                    "{kind} has more than MAX_CONTAINER_ELEMENTS ({MAX_CONTAINER_ELEMENTS}) elements"
+                )));
+            }
+            write_value_from_view(view, None, depth, buf)?;
+            count += 1;
+            let has_next = view
+                .advance()
+                .map_err(|e| SerializeError::Unsupported(format!("{kind} advance: {e}")))?;
+            if !has_next {
+                break;
+            }
+        }
+        view.step_out()
+            .map_err(|e| SerializeError::Unsupported(format!("{kind} step_out: {e}")))?;
+    }
+    buf[count_pos..count_pos + 4].copy_from_slice(&count.to_le_bytes());
     Ok(())
 }
 
@@ -242,6 +370,7 @@ pub enum DeserializeError {
     InvalidBool(u8),
     BytesTooLong(u32),
     StringTooLong(u32),
+    ElementCountTooLarge(u32),
     DepthExceeded(u32),
     /// Reserved tag or `ValueWriter` failure; symmetric to encoder rejection.
     Unsupported(String),
@@ -265,6 +394,12 @@ impl std::fmt::Display for DeserializeError {
             }
             DeserializeError::StringTooLong(len) => {
                 write!(f, "string length {len} exceeds MAX_STRING_LEN")
+            }
+            DeserializeError::ElementCountTooLarge(n) => {
+                write!(
+                    f,
+                    "container element count {n} exceeds {MAX_CONTAINER_ELEMENTS}"
+                )
             }
             DeserializeError::DepthExceeded(d) => {
                 write!(f, "nesting depth {d} exceeds MAX_RECURSION_DEPTH")
@@ -467,6 +602,28 @@ fn decode_tagged_into(
             }
             vw.step_out().map_err(io_err)?;
         }
+        TAG_LIST => {
+            let count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if count > MAX_CONTAINER_ELEMENTS {
+                return Err(DeserializeError::ElementCountTooLarge(count));
+            }
+            vw.step_in_list().map_err(io_err)?;
+            for _ in 0..count {
+                decode_tagged_into(vw, bytes, cursor, depth + 1)?;
+            }
+            vw.step_out().map_err(io_err)?;
+        }
+        TAG_BAG => {
+            let count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if count > MAX_CONTAINER_ELEMENTS {
+                return Err(DeserializeError::ElementCountTooLarge(count));
+            }
+            vw.step_in_bag().map_err(io_err)?;
+            for _ in 0..count {
+                decode_tagged_into(vw, bytes, cursor, depth + 1)?;
+            }
+            vw.step_out().map_err(io_err)?;
+        }
         _ => {
             // Safety: decode_tagged_into is only reached from deserialize_row_into,
             // which upholds the # Safety contract; delegated to the helper.
@@ -659,6 +816,26 @@ mod deserialize_tests {
         );
         assert!(format!("{}", DeserializeError::FieldCountTooLarge(2048))
             .starts_with("tuple field count 2048"));
+        assert_eq!(
+            format!("{}", DeserializeError::InvalidBool(0x7F)),
+            "invalid bool payload: 0x7f"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::BytesTooLong(3000)),
+            "bytes length 3000 exceeds MAX_BYTES_LEN"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::StringTooLong(4096)),
+            "string length 4096 exceeds MAX_STRING_LEN"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::ElementCountTooLarge(99999)),
+            "container element count 99999 exceeds 65536"
+        );
+        assert_eq!(
+            format!("{}", DeserializeError::DepthExceeded(200)),
+            "nesting depth 200 exceeds MAX_RECURSION_DEPTH"
+        );
         assert_eq!(
             format!("{}", DeserializeError::Unsupported("x".to_string())),
             "unsupported: x"
