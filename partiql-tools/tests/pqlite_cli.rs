@@ -670,3 +670,48 @@ fn ctas_rejects_container_rolls_back_wtxn() {
         "row-0 rejection must leave catalog clean even if env file persists"
     );
 }
+
+#[test]
+fn string_at_1kb_encodes_and_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("kb_str.pqlite");
+    let query = format!(
+        "CREATE TABLE t AS (SELECT '{}' AS s FROM mem(1,1) m)",
+        "x".repeat(1024)
+    );
+    let (ok, _out, err) = run_exec(&query, Some(&dbp));
+    assert!(ok, "1KB string CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(
+        out.contains(&"x".repeat(1024)),
+        "1KB string did not round-trip"
+    );
+}
+
+#[test]
+fn oversize_string_payload_surfaces_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("bad_str.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT 'ok' AS s FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS setup failed: {err}");
+    // Craft a tuple row whose string field claims a payload 1 byte over the cap.
+    let mut payload = Vec::new();
+    payload.push(partiql_tools::row_codec::TAG_TUPLE);
+    payload.extend_from_slice(&1u32.to_le_bytes()); // field_count = 1
+    payload.extend_from_slice(&1u32.to_le_bytes()); // name_len = 1
+    payload.push(b's');
+    payload.push(partiql_tools::row_codec::TAG_STRING);
+    let bad_len: u32 = partiql_tools::row_codec::MAX_STRING_LEN + 1;
+    payload.extend_from_slice(&bad_len.to_le_bytes());
+    // Intentionally NO actual string bytes — the cap check must trip before the read.
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    partiql_tools::test_support::inject_row(&db, "t", 1, &payload);
+    drop(db);
+    let (ok, _out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(!ok, "expected SELECT to fail on oversize string");
+    assert!(err.contains("string length"), "got: {err}");
+}

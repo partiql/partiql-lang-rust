@@ -20,6 +20,9 @@ pub const MAX_NAME_LEN_BYTES: u32 = 1024 * 1024;
 /// Cap on `bytes` payload length to bound allocations on corruption.
 pub const MAX_BYTES_LEN: u32 = 1024 * 1024;
 
+/// Cap on `string` payload length (UTF-8 bytes) to bound allocations on corruption.
+pub const MAX_STRING_LEN: u32 = 1024 * 1024;
+
 // Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
 // load-bearing: a later commit tells a container-rooted row from a
 // scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
@@ -154,7 +157,19 @@ fn write_value(
             buf.push(TAG_STRING);
             let s = view.get_str().expect("string view");
             let sb = s.as_bytes();
-            let str_len: u32 = sb.len().try_into().expect("str_len exceeds u32::MAX");
+            if sb.len() > MAX_STRING_LEN as usize {
+                let prefix = match field_name {
+                    Some(name) => format!("field '{name}'"),
+                    None => "top-level value".to_string(),
+                };
+                return Err(SerializeError::Unsupported(format!(
+                    "{prefix}: string length {} bytes exceeds MAX_STRING_LEN ({})",
+                    sb.len(),
+                    MAX_STRING_LEN
+                )));
+            }
+            // Safe: the cap above bounds sb.len() to MAX_STRING_LEN (u32).
+            let str_len: u32 = sb.len() as u32;
             buf.extend_from_slice(&str_len.to_le_bytes());
             buf.extend_from_slice(sb);
         }
@@ -207,6 +222,7 @@ pub enum DeserializeError {
     FieldCountTooLarge(u32),
     InvalidBool(u8),
     BytesTooLong(u32),
+    StringTooLong(u32),
     /// Reserved tag or `ValueWriter` failure; symmetric to encoder rejection.
     Unsupported(String),
 }
@@ -226,6 +242,9 @@ impl std::fmt::Display for DeserializeError {
             DeserializeError::InvalidBool(b) => write!(f, "invalid bool payload: 0x{b:02x}"),
             DeserializeError::BytesTooLong(len) => {
                 write!(f, "bytes length {len} exceeds MAX_BYTES_LEN")
+            }
+            DeserializeError::StringTooLong(len) => {
+                write!(f, "string length {len} exceeds MAX_STRING_LEN")
             }
             DeserializeError::Unsupported(m) => write!(f, "unsupported: {m}"),
         }
@@ -296,6 +315,9 @@ fn decode_tagged_into(
         }
         TAG_STRING => {
             let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if len > MAX_STRING_LEN {
+                return Err(DeserializeError::StringTooLong(len));
+            }
             let s = take_str(bytes, cursor, len)?;
             // Safety: see `deserialize_row_into`'s # Safety block.
             let s_ext: &str = unsafe { extend_to_arena_lifetime(s) };
