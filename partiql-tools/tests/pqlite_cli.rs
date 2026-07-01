@@ -690,6 +690,78 @@ fn string_at_1kb_encodes_and_round_trips() {
 }
 
 #[test]
+fn ctas_then_select_value_int_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("sv_int.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT VALUE m.a * 1000 + 777 FROM mem(3,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    // m.a = 0,1,2 -> 777, 1777, 2777 : distinctive, won't collide with framing.
+    assert!(out.contains("777"), "expected 777; got: {out}");
+    assert!(out.contains("1777"), "expected 1777; got: {out}");
+    assert!(out.contains("2777"), "expected 2777; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_value_string_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("sv_str.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT VALUE 'hello' FROM mem(2,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("hello"), "expected 'hello'; got: {out}");
+}
+
+#[test]
+fn ctas_then_select_value_null_distinct_from_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("sv_null.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT VALUE NULL FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok, "SELECT failed: {err}");
+    assert!(out.contains("NULL"), "expected NULL; got: {out}");
+    assert!(
+        !out.contains("MISSING"),
+        "NULL must not render as MISSING; got: {out}"
+    );
+}
+
+#[test]
+fn top_level_scalar_row_is_bare_tag_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("bare.pqlite");
+    let (ok, _out, err) = run_exec(
+        "CREATE TABLE t AS (SELECT VALUE m.a FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "CTAS failed: {err}");
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    let row0 = partiql_tools::test_support::read_row(&db, "t", 0);
+    drop(db);
+    // Bare TAG_INTEGER (0x03) + i64 0 LE — NO tuple wrapper (no 0x08 prefix).
+    let expected: &[u8] = &[
+        0x03, // TAG_INTEGER
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // i64 0 LE
+    ];
+    assert_eq!(
+        row0, expected,
+        "top-level scalar must be a bare tag, not tuple-wrapped"
+    );
+}
+
+#[test]
 fn oversize_string_payload_surfaces_error() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("bad_str.pqlite");

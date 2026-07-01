@@ -24,7 +24,7 @@ pub const MAX_BYTES_LEN: u32 = 1024 * 1024;
 pub const MAX_STRING_LEN: u32 = 1024 * 1024;
 
 // Tag taxonomy: scalars 0x00-0x07, containers 0x08-0x0A. This split is
-// load-bearing: a later commit tells a container-rooted row from a
+// load-bearing: deserialize_row_into tells a container-rooted row from a
 // scalar-rooted one with a single `tag >= TAG_TUPLE` test, so no scalar
 // tag may sit at or above TAG_TUPLE.
 pub const TAG_NULL: u8 = 0x00;
@@ -41,9 +41,9 @@ pub const TAG_BAG: u8 = 0x0A;
 
 #[derive(Debug)]
 pub enum SerializeError {
-    /// Unsupported type or shape: containers (Tuple/List/Bag), dynamic field
-    /// names, or top-level scalar rows (must be wrapped in a tuple).
-    /// The string identifies the offending field or top-level value.
+    /// Unsupported type or shape: containers (Tuple/List/Bag) or dynamic
+    /// field names. The string identifies the offending field or top-level
+    /// value.
     Unsupported(String),
 }
 
@@ -73,13 +73,18 @@ pub fn serialize_row(
     buf.clear();
     match row_shape {
         RowShape::Struct(fields) => write_tuple(row, fields, buf),
-        // A bare scalar tag with no tuple frame round-trips on write but
-        // fails on read: the decoder's `vw.put_scalar` requires a
-        // non-empty frame stack. Refuse at encode time.
-        RowShape::Register(_, _) => Err(SerializeError::Unsupported(
-            "top-level scalar rows are not yet supported; wrap in a tuple".to_string(),
-        )),
+        RowShape::Register(slot, _) => write_value_at_root(row, *slot, buf),
     }
+}
+
+fn write_value_at_root(
+    row: &RegisterReader<'_>,
+    slot: usize,
+    buf: &mut Vec<u8>,
+) -> Result<(), SerializeError> {
+    // Top-level scalar rows land as a bare tag + payload with no tuple frame.
+    // `field_name = None` selects the "top-level value" error prefix.
+    write_value(row, slot, None, buf)
 }
 
 fn write_tuple(
@@ -253,6 +258,43 @@ impl std::fmt::Display for DeserializeError {
 
 impl std::error::Error for DeserializeError {}
 
+/// Decode a scalar-rooted row directly into `target_slot` via `RegisterWriter`.
+///
+/// # Safety
+///
+/// Same contract as [`deserialize_row_into`]: `bytes` must outlive every
+/// arena reset that touches `target_slot`. Reachable only when the row's
+/// first byte is a scalar tag (`< TAG_TUPLE`); container roots use the
+/// `ValueWriter` frame-stack path in `deserialize_row_into`.
+unsafe fn decode_top_scalar_into(
+    bytes: &[u8],
+    writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+    target_slot: u16,
+) -> Result<(), DeserializeError> {
+    let mut cursor = 0usize;
+    let tag = take_byte(bytes, &mut cursor)?;
+    // Safety: see this fn's # Safety block; contract is delegated to the helper.
+    let scalar = unsafe { decode_scalar_payload(tag, bytes, &mut cursor)? };
+    match scalar {
+        Scalar::Null => writer.write_null(target_slot).map_err(io_err)?,
+        Scalar::Missing => writer.write_missing(target_slot).map_err(io_err)?,
+        Scalar::Bool(v) => writer.write_bool(target_slot, v).map_err(io_err)?,
+        Scalar::I64(v) => writer.write_i64(target_slot, v).map_err(io_err)?,
+        Scalar::F64(v) => writer.write_f64(target_slot, v).map_err(io_err)?,
+        Scalar::Decimal(d) => writer.write_decimal(target_slot, d).map_err(io_err)?,
+        Scalar::Str(s) => writer.write_str(target_slot, s).map_err(io_err)?,
+        Scalar::Bytes(b) => writer.write_bytes(target_slot, b).map_err(io_err)?,
+    }
+    if cursor != bytes.len() {
+        return Err(DeserializeError::Unsupported(format!(
+            "trailing bytes after scalar-root row: {} of {} consumed",
+            cursor,
+            bytes.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Decode one row of the tagged-union wire format into `writer`'s `target_slot`.
 ///
 /// # Safety
@@ -262,7 +304,7 @@ impl std::error::Error for DeserializeError {}
 /// implementation) must hold the backing row buffer for the duration
 /// of the scan. Violating this precondition causes use-after-free of
 /// the string and byte slices written into the engine's arena via the
-/// lifetime extensions inside `decode_tagged_into`.
+/// lifetime extensions inside `decode_scalar_payload` and `decode_tagged_into`.
 ///
 /// String UTF-8 validity is checked inline by `take_str` as each
 /// string is read; no pre-pass is required.
@@ -271,21 +313,110 @@ pub unsafe fn deserialize_row_into(
     writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
     target_slot: u16,
 ) -> Result<(), DeserializeError> {
-    let mut cursor = 0usize;
-    let mut vw = writer
-        .value_writer(target_slot)
-        .map_err(|e| DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}")))?;
-    decode_tagged_into(&mut vw, bytes, &mut cursor)?;
-    if cursor != bytes.len() {
-        return Err(DeserializeError::Unsupported(format!(
-            "trailing bytes after row decode: {} of {} consumed",
-            cursor,
-            bytes.len()
-        )));
+    if bytes.is_empty() {
+        return Err(DeserializeError::Truncated);
     }
-    vw.finish()
-        .map_err(|e| DeserializeError::Unsupported(format!("finish: {e}")))?;
+    // Container-rooted rows start with a tag >= TAG_TUPLE (0x08) and use the
+    // ValueWriter frame-stack path. Scalar-rooted rows write straight to the
+    // register (a bare scalar has no frame for ValueWriter::put_*).
+    if bytes[0] >= TAG_TUPLE {
+        let mut cursor = 0usize;
+        let mut vw = writer.value_writer(target_slot).map_err(|e| {
+            DeserializeError::Unsupported(format!("value_writer({target_slot}): {e}"))
+        })?;
+        decode_tagged_into(&mut vw, bytes, &mut cursor)?;
+        if cursor != bytes.len() {
+            return Err(DeserializeError::Unsupported(format!(
+                "trailing bytes after row decode: {} of {} consumed",
+                cursor,
+                bytes.len()
+            )));
+        }
+        vw.finish()
+            .map_err(|e| DeserializeError::Unsupported(format!("finish: {e}")))?;
+    } else {
+        // Safety: same contract as this function's # Safety block.
+        unsafe { decode_top_scalar_into(bytes, writer, target_slot)? };
+    }
     Ok(())
+}
+
+/// A decoded scalar value. `Str`/`Bytes` carry arena-lifetime borrows
+/// laundered from the source buffer.
+enum Scalar<'a> {
+    Null,
+    Missing,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Decimal(rust_decimal::Decimal),
+    Str(&'a str),
+    Bytes(&'a [u8]),
+}
+
+/// Decode the payload for a single scalar `tag`, advancing `cursor`. The
+/// single source of truth for scalar reads shared by the register-root path
+/// (`decode_top_scalar_into`) and the `ValueWriter` frame path
+/// (`decode_tagged_into`): the two must decode byte-identically forever, so
+/// the reads live here once. An unknown scalar tag yields `UnknownTag`.
+///
+/// # Safety
+///
+/// The `Str`/`Bytes` variants carry borrows extended to an unbounded arena
+/// lifetime. See [`deserialize_row_into`]'s `# Safety` block: `bytes` must
+/// outlive every arena reset that touches the register the value is written
+/// into.
+unsafe fn decode_scalar_payload<'a>(
+    tag: u8,
+    bytes: &[u8],
+    cursor: &mut usize,
+) -> Result<Scalar<'a>, DeserializeError> {
+    let scalar = match tag {
+        TAG_NULL => Scalar::Null,
+        TAG_MISSING => Scalar::Missing,
+        TAG_BOOL => {
+            let b = take_byte(bytes, cursor)?;
+            match b {
+                0x00 => Scalar::Bool(false),
+                0x01 => Scalar::Bool(true),
+                _ => return Err(DeserializeError::InvalidBool(b)),
+            }
+        }
+        TAG_INTEGER => Scalar::I64(i64::from_le_bytes(take_array::<8>(bytes, cursor)?)),
+        TAG_FLOAT => Scalar::F64(f64::from_le_bytes(take_array::<8>(bytes, cursor)?)),
+        TAG_DECIMAL => {
+            let scale = i32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            let mantissa = i128::from_le_bytes(take_array::<16>(bytes, cursor)?);
+            let scale_u32 = u32::try_from(scale).map_err(|_| {
+                DeserializeError::Unsupported(format!("negative decimal scale {scale}"))
+            })?;
+            let d = rust_decimal::Decimal::try_from_i128_with_scale(mantissa, scale_u32)
+                .map_err(|e| DeserializeError::Unsupported(format!("invalid decimal: {e}")))?;
+            Scalar::Decimal(d)
+        }
+        TAG_STRING => {
+            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if len > MAX_STRING_LEN {
+                return Err(DeserializeError::StringTooLong(len));
+            }
+            let s = take_str(bytes, cursor, len)?;
+            // Safety: see `deserialize_row_into`'s # Safety block.
+            let s_ext: &'a str = unsafe { extend_to_arena_lifetime(s) };
+            Scalar::Str(s_ext)
+        }
+        TAG_BYTES => {
+            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
+            if len > MAX_BYTES_LEN {
+                return Err(DeserializeError::BytesTooLong(len));
+            }
+            let slice = take_bytes(bytes, cursor, len)?;
+            // Safety: see `deserialize_row_into`'s # Safety block.
+            let b_ext: &'a [u8] = unsafe { extend_bytes_to_arena_lifetime(slice) };
+            Scalar::Bytes(b_ext)
+        }
+        t => return Err(DeserializeError::UnknownTag(t)),
+    };
+    Ok(scalar)
 }
 
 fn decode_tagged_into(
@@ -295,37 +426,6 @@ fn decode_tagged_into(
 ) -> Result<(), DeserializeError> {
     let tag = take_byte(bytes, cursor)?;
     match tag {
-        TAG_INTEGER => {
-            let v = i64::from_le_bytes(take_array::<8>(bytes, cursor)?);
-            vw.put_i64(v).map_err(io_err)?;
-        }
-        TAG_FLOAT => {
-            let v = f64::from_le_bytes(take_array::<8>(bytes, cursor)?);
-            vw.put_f64(v).map_err(io_err)?;
-        }
-        TAG_DECIMAL => {
-            let scale = i32::from_le_bytes(take_array::<4>(bytes, cursor)?);
-            let mantissa = i128::from_le_bytes(take_array::<16>(bytes, cursor)?);
-            let scale_u32 = u32::try_from(scale).map_err(|_| {
-                DeserializeError::Unsupported(format!("negative decimal scale {scale}"))
-            })?;
-            let d = rust_decimal::Decimal::try_from_i128_with_scale(mantissa, scale_u32)
-                .map_err(|e| DeserializeError::Unsupported(format!("invalid decimal: {e}")))?;
-            vw.put_decimal(d).map_err(io_err)?;
-        }
-        TAG_STRING => {
-            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
-            if len > MAX_STRING_LEN {
-                return Err(DeserializeError::StringTooLong(len));
-            }
-            let s = take_str(bytes, cursor, len)?;
-            // Safety: see `deserialize_row_into`'s # Safety block.
-            let s_ext: &str = unsafe { extend_to_arena_lifetime(s) };
-            vw.put_str(s_ext).map_err(io_err)?;
-        }
-        TAG_NULL => {
-            vw.put_null().map_err(io_err)?;
-        }
         TAG_TUPLE => {
             let field_count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
             if field_count > MAX_FIELDS_PER_ROW {
@@ -345,32 +445,21 @@ fn decode_tagged_into(
             }
             vw.step_out().map_err(io_err)?;
         }
-        TAG_BOOL => {
-            let b = take_byte(bytes, cursor)?;
-            match b {
-                0x00 => vw.put_bool(false).map_err(io_err)?,
-                0x01 => vw.put_bool(true).map_err(io_err)?,
-                _ => return Err(DeserializeError::InvalidBool(b)),
+        _ => {
+            // Safety: decode_tagged_into is only reached from deserialize_row_into,
+            // which upholds the # Safety contract; delegated to the helper.
+            let scalar = unsafe { decode_scalar_payload(tag, bytes, cursor)? };
+            match scalar {
+                Scalar::Null => vw.put_null().map_err(io_err)?,
+                Scalar::Missing => vw.put_missing().map_err(io_err)?,
+                Scalar::Bool(v) => vw.put_bool(v).map_err(io_err)?,
+                Scalar::I64(v) => vw.put_i64(v).map_err(io_err)?,
+                Scalar::F64(v) => vw.put_f64(v).map_err(io_err)?,
+                Scalar::Decimal(d) => vw.put_decimal(d).map_err(io_err)?,
+                Scalar::Str(s) => vw.put_str(s).map_err(io_err)?,
+                Scalar::Bytes(b) => vw.put_bytes(b).map_err(io_err)?,
             }
         }
-        TAG_MISSING => {
-            vw.put_missing().map_err(io_err)?;
-        }
-        TAG_BYTES => {
-            let len = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
-            if len > MAX_BYTES_LEN {
-                return Err(DeserializeError::BytesTooLong(len));
-            }
-            let end = cursor
-                .checked_add(len as usize)
-                .ok_or(DeserializeError::Truncated)?;
-            let slice = bytes.get(*cursor..end).ok_or(DeserializeError::Truncated)?;
-            *cursor = end;
-            // Safety: see `deserialize_row_into`'s # Safety block.
-            let b_ext: &[u8] = unsafe { extend_bytes_to_arena_lifetime(slice) };
-            vw.put_bytes(b_ext).map_err(io_err)?;
-        }
-        t => return Err(DeserializeError::UnknownTag(t)),
     }
     Ok(())
 }
@@ -406,6 +495,20 @@ fn take_str<'b>(
     let s = std::str::from_utf8(slice).map_err(|_| DeserializeError::InvalidUtf8)?;
     *cursor = end;
     Ok(s)
+}
+
+#[inline]
+fn take_bytes<'b>(
+    bytes: &'b [u8],
+    cursor: &mut usize,
+    len: u32,
+) -> Result<&'b [u8], DeserializeError> {
+    let end = cursor
+        .checked_add(len as usize)
+        .ok_or(DeserializeError::Truncated)?;
+    let slice = bytes.get(*cursor..end).ok_or(DeserializeError::Truncated)?;
+    *cursor = end;
+    Ok(slice)
 }
 
 /// Extends `s`'s lifetime to match the arena's. Caller must ensure the
