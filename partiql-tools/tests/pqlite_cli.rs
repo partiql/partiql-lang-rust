@@ -932,8 +932,8 @@ fn ctas_then_select_runtime_tuple() {
 
 #[test]
 fn encode_accepts_implies_decode_accepts_at_depth_boundary() {
-    // End-to-end depth coverage for the VIEW encode path: a runtime tuple
-    // nested three levels deep must round-trip. The injected-bytes depth tests
+    // End-to-end depth coverage for the VIEW encode path: a shallow runtime
+    // tuple must round-trip. The injected-bytes depth tests
     // (deeply_nested_tuple_payload_within_cap_round_trips /
     // over_deep_nested_tuple_payload_is_rejected) anchor the DECODE boundary;
     // this one proves write_tuple_via_view's own depth accounting produces a
@@ -955,6 +955,53 @@ fn encode_accepts_implies_decode_accepts_at_depth_boundary() {
     assert!(
         out.contains("{ 'r': { 'a': { 'b': { 'c': 42 } } } }"),
         "expected the full 3-level nesting to render; got: {out}"
+    );
+}
+
+#[test]
+fn static_root_deep_runtime_tuple_never_writes_unreadable_row() {
+    // Regression: a runtime container nested under a static-struct root
+    // (`... AS r`) is charged at a depth no shallower than the decoder (the
+    // encoder is the stricter side), so the codec's safety invariant holds — the
+    // encoder must NEVER persist a row the decoder then refuses (write-but-can't-
+    // read = data loss). Sweep depths straddling MAX_RECURSION_DEPTH (128) and
+    // assert the invariant directly: for every depth, we never observe
+    // `CTAS ok && SELECT fails`.
+    let mut any_round_tripped = false;
+    for n in [126usize, 127, 128, 129, 130] {
+        let dir = tempfile::tempdir().unwrap();
+        let dbp = dir.path().join(format!("depth_{n}.pqlite"));
+
+        // Build an n-deep runtime tuple `{ 'a': { 'a': ... 42 ... } }` under a
+        // static-struct root named `r`.
+        let mut inner = String::from("42");
+        for _ in 0..n {
+            inner = format!("{{ 'a': {inner} }}");
+        }
+        let query = format!("CREATE TABLE t AS (SELECT {inner} AS r FROM mem(1,1) m)");
+
+        let (ctas_ok, _o, ctas_err) = run_exec(&query, Some(&dbp));
+        let (select_ok, _so, _se) = if ctas_ok {
+            run_exec("SELECT * FROM t", Some(&dbp))
+        } else {
+            (true, String::new(), String::new()) // no row written, nothing to read
+        };
+
+        // The invariant: a persisted row must always be readable back.
+        let wrote_unreadable_row = ctas_ok && !select_ok;
+        assert!(
+            !wrote_unreadable_row,
+            "depth {n}: encoder persisted a row the decoder cannot read \
+             (write-but-can't-read). CTAS err: {ctas_err}"
+        );
+        any_round_tripped |= ctas_ok && select_ok;
+    }
+    // Guard against a vacuous pass: the sweep must include at least one depth
+    // the encoder accepts and the decoder reads back, or the invariant above is
+    // trivially satisfied by an encoder that rejects everything.
+    assert!(
+        any_round_tripped,
+        "sweep never achieved a write+read round-trip; boundary coverage evaporated"
     );
 }
 

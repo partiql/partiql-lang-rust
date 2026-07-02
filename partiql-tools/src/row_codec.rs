@@ -152,9 +152,10 @@ fn write_tuple(
         buf.extend_from_slice(&name_len.to_le_bytes());
         buf.extend_from_slice(name.as_bytes());
         match &field.value {
-            // Pass the CURRENT depth: the field lives at the tuple's depth, and
-            // write_value_from_view will +1 itself when it steps into a container.
-            RowShape::Register(idx, _) => write_value(row, *idx, Some(name), depth, buf)?,
+            // depth + 1: the field value is one frame below this tuple. This keeps
+            // the encoder at or ahead of the decoder's per-frame count (encoder is
+            // the stricter side), so any row the encoder accepts is decodable.
+            RowShape::Register(idx, _) => write_value(row, *idx, Some(name), depth + 1, buf)?,
             RowShape::Struct(nested_fields) => write_tuple(row, nested_fields, depth + 1, buf)?,
         }
     }
@@ -265,8 +266,11 @@ fn write_value_from_view(
 /// Encode a runtime tuple (`{...}` literal) reached as `ValueType::Tuple` in a
 /// view — distinct from the static `RowShape::Struct` path in [`write_tuple`].
 ///
-/// The count is backpatched after writing the fields: `ValueView` gives no
-/// pre-`step_in` length, and deferring the count avoids a scratch allocation.
+/// The count is backpatched after writing the fields: one uniform strategy
+/// across all three container kinds, deferring the count to avoid a scratch
+/// allocation. A pre-`step_in` count is not reliably available here — a nested
+/// tuple's view carries the parent's context, and List/Bag expose no length
+/// before stepping in — so we count while writing rather than special-case.
 fn write_tuple_via_view(
     view: &mut ValueView<'_>,
     depth: u32,
@@ -383,26 +387,41 @@ impl std::fmt::Display for DeserializeError {
             DeserializeError::UnknownTag(t) => write!(f, "unknown tag byte: 0x{t:02x}"),
             DeserializeError::InvalidUtf8 => write!(f, "field name is not valid UTF-8"),
             DeserializeError::NameTooLong(n) => {
-                write!(f, "field name length {n} exceeds {MAX_NAME_LEN_BYTES}")
+                write!(
+                    f,
+                    "field name length {n} exceeds MAX_NAME_LEN_BYTES ({MAX_NAME_LEN_BYTES})"
+                )
             }
             DeserializeError::FieldCountTooLarge(n) => {
-                write!(f, "tuple field count {n} exceeds {MAX_FIELDS_PER_ROW}")
+                write!(
+                    f,
+                    "tuple field count {n} exceeds MAX_FIELDS_PER_ROW ({MAX_FIELDS_PER_ROW})"
+                )
             }
             DeserializeError::InvalidBool(b) => write!(f, "invalid bool payload: 0x{b:02x}"),
             DeserializeError::BytesTooLong(len) => {
-                write!(f, "bytes length {len} exceeds MAX_BYTES_LEN")
+                write!(
+                    f,
+                    "bytes length {len} exceeds MAX_BYTES_LEN ({MAX_BYTES_LEN})"
+                )
             }
             DeserializeError::StringTooLong(len) => {
-                write!(f, "string length {len} exceeds MAX_STRING_LEN")
+                write!(
+                    f,
+                    "string length {len} exceeds MAX_STRING_LEN ({MAX_STRING_LEN})"
+                )
             }
             DeserializeError::ElementCountTooLarge(n) => {
                 write!(
                     f,
-                    "container element count {n} exceeds {MAX_CONTAINER_ELEMENTS}"
+                    "container element count {n} exceeds MAX_CONTAINER_ELEMENTS ({MAX_CONTAINER_ELEMENTS})"
                 )
             }
             DeserializeError::DepthExceeded(d) => {
-                write!(f, "nesting depth {d} exceeds MAX_RECURSION_DEPTH")
+                write!(
+                    f,
+                    "nesting depth {d} exceeds MAX_RECURSION_DEPTH ({MAX_RECURSION_DEPTH})"
+                )
             }
             DeserializeError::Unsupported(m) => write!(f, "unsupported: {m}"),
         }
@@ -602,23 +621,19 @@ fn decode_tagged_into(
             }
             vw.step_out().map_err(io_err)?;
         }
-        TAG_LIST => {
+        // List and bag share an identical wire layout and decode loop; only the
+        // frame kind differs, mirroring the unified `write_list_or_bag_via_view`
+        // on the encode side.
+        TAG_LIST | TAG_BAG => {
             let count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
             if count > MAX_CONTAINER_ELEMENTS {
                 return Err(DeserializeError::ElementCountTooLarge(count));
             }
-            vw.step_in_list().map_err(io_err)?;
-            for _ in 0..count {
-                decode_tagged_into(vw, bytes, cursor, depth + 1)?;
+            if tag == TAG_LIST {
+                vw.step_in_list().map_err(io_err)?;
+            } else {
+                vw.step_in_bag().map_err(io_err)?;
             }
-            vw.step_out().map_err(io_err)?;
-        }
-        TAG_BAG => {
-            let count = u32::from_le_bytes(take_array::<4>(bytes, cursor)?);
-            if count > MAX_CONTAINER_ELEMENTS {
-                return Err(DeserializeError::ElementCountTooLarge(count));
-            }
-            vw.step_in_bag().map_err(io_err)?;
             for _ in 0..count {
                 decode_tagged_into(vw, bytes, cursor, depth + 1)?;
             }
@@ -822,19 +837,19 @@ mod deserialize_tests {
         );
         assert_eq!(
             format!("{}", DeserializeError::BytesTooLong(3000)),
-            "bytes length 3000 exceeds MAX_BYTES_LEN"
+            "bytes length 3000 exceeds MAX_BYTES_LEN (1048576)"
         );
         assert_eq!(
             format!("{}", DeserializeError::StringTooLong(4096)),
-            "string length 4096 exceeds MAX_STRING_LEN"
+            "string length 4096 exceeds MAX_STRING_LEN (1048576)"
         );
         assert_eq!(
             format!("{}", DeserializeError::ElementCountTooLarge(99999)),
-            "container element count 99999 exceeds 65536"
+            "container element count 99999 exceeds MAX_CONTAINER_ELEMENTS (65536)"
         );
         assert_eq!(
             format!("{}", DeserializeError::DepthExceeded(200)),
-            "nesting depth 200 exceeds MAX_RECURSION_DEPTH"
+            "nesting depth 200 exceeds MAX_RECURSION_DEPTH (128)"
         );
         assert_eq!(
             format!("{}", DeserializeError::Unsupported("x".to_string())),
