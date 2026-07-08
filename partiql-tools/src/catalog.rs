@@ -16,6 +16,9 @@ use crate::storage::{HeedDB, StorageError};
 
 type EvalResult<T> = std::result::Result<T, EngineError>;
 
+/// Rows fetched per read transaction.
+const CHUNK_ROWS: usize = 64;
+
 /// Table identifiers are hashed to a `u64` EntryId at `get_table` time; the
 /// execution-side catalog rebuilds the reverse map by re-hashing every name
 /// in `_tables`. Hash collision on a `u64` is structurally possible but
@@ -143,13 +146,15 @@ impl ExecutionCatalog for HeedExecutionCatalog {
             ))
         })?;
 
-        let (bytes, rows) = read_all_rows(&self.db, name)
-            .map_err(|e| EngineError::ReaderError(format!("table scan failed: {e}")))?;
-
         Ok(Box::new(HeedTableSource {
-            bytes,
-            rows,
-            cursor: 0,
+            db: Arc::clone(&self.db),
+            table: name.clone(),
+            bytes: Vec::new(),
+            offsets: Vec::new(),
+            pos: 0,
+            resume_after: None,
+            exhausted: false,
+            rows_emitted: 0,
         }))
     }
 }
@@ -161,63 +166,124 @@ fn hash_to_entry_id(name: &str) -> EntryId {
     EntryId::from(std::hash::Hasher::finish(&hasher))
 }
 
-// Eagerly materialized because Box<dyn DataSource + 'static> cannot hold a borrowed RoTxn.
-/// Pack the entire scan into one byte buffer with per-row `u32` offsets.
-/// One `Vec<u8>` (geometric growth) replaces one allocation per row.
-/// Fails with `ScanTooLarge` if the packed size exceeds `u32::MAX`.
-fn read_all_rows(
-    db: &HeedDB,
-    table_name: &str,
-) -> Result<(Vec<u8>, Vec<std::ops::Range<u32>>), StorageError> {
-    let rtxn = db.read_txn()?;
-    let tbl = db.open_table(&rtxn, table_name)?;
-    let row_count = tbl.len(&rtxn).map_err(StorageError::Heed)? as usize;
-    let mut bytes: Vec<u8> = Vec::new();
-    let mut rows: Vec<std::ops::Range<u32>> = Vec::with_capacity(row_count);
-    let mut prev_end: u32 = 0;
-    for result in tbl.iter(&rtxn).map_err(StorageError::Heed)? {
-        let (_k, v) = result.map_err(StorageError::Heed)?;
-        bytes.extend_from_slice(v);
-        // Only the cumulative end is checked; the start equals the prior
-        // iteration's end (or 0), which already fit in u32 by induction.
-        let end = u32::try_from(bytes.len()).map_err(|_| StorageError::ScanTooLarge {
-            table: table_name.to_string(),
-            observed_bytes: bytes.len(),
-        })?;
-        rows.push(prev_end..end);
-        prev_end = end;
-    }
-    Ok((bytes, rows))
-}
-
+/// Streams a table one CHUNK_ROWS-sized buffer at a time. `resume_after` is a
+/// keyset cursor (the real last key, not a counter) so chunk boundaries stay
+/// correct across the gaps a future DELETE would leave.
 pub(crate) struct HeedTableSource {
-    bytes: Vec<u8>,
-    rows: Vec<std::ops::Range<u32>>,
-    cursor: usize,
+    db: Arc<HeedDB>,
+    table: String,
+    bytes: Vec<u8>,                     // current chunk's packed rows
+    offsets: Vec<std::ops::Range<u32>>, // per-row slices into `bytes`
+    pos: usize,                         // next row within the chunk
+    resume_after: Option<[u8; 8]>,      // next chunk ranges strictly after this key
+    exhausted: bool,                    // last chunk was short: no more rows
+    rows_emitted: u64,                  // total so far, for decode-error messages
 }
 
 impl DataSource for HeedTableSource {
     fn open(&mut self) -> EvalResult<()> {
-        self.cursor = 0;
+        // Reset for a fresh scan (VM lifecycle: open once, next_row until false, close once).
+        self.bytes.clear();
+        self.offsets.clear();
+        self.pos = 0;
+        self.resume_after = None;
+        self.exhausted = false;
+        self.rows_emitted = 0;
         Ok(())
     }
 
     fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<bool> {
-        if self.cursor >= self.rows.len() {
-            return Ok(false);
+        if self.pos >= self.offsets.len() {
+            if self.exhausted {
+                return Ok(false);
+            }
+            self.load_next_chunk()
+                .map_err(|e| EngineError::ReaderError(format!("chunk scan failed: {e}")))?;
+            if self.offsets.is_empty() {
+                return Ok(false);
+            }
         }
-        let r = &self.rows[self.cursor];
+        let r = self.offsets[self.pos].clone();
         let row = &self.bytes[r.start as usize..r.end as usize];
-        // Safety: HeedTableSource owns self.bytes for the entire scan; the
-        // borrowed slice outlives every per-row arena reset the writer performs.
+        // Safety: `row`'s string/bytes leaves are laundered into the arena, so
+        // they must outlive the engine's use of this row. `BufferStability::
+        // UntilNext` guarantees the engine won't hold a row past the next
+        // `next_row` call (later consumers deep-copy), and `self.bytes` is only
+        // refilled in load_next_chunk on a subsequent `next_row` — so no live
+        // borrow aliases the buffer at refill. See deserialize_row_into's
+        // # Safety block.
         unsafe { deserialize_row_into(row, writer, 0) }.map_err(|e: DeserializeError| {
-            EngineError::ReaderError(format!("row {} decode failed: {e}", self.cursor))
+            EngineError::ReaderError(format!("row {} decode failed: {e}", self.rows_emitted))
         })?;
-        self.cursor += 1;
+        self.pos += 1;
+        self.rows_emitted += 1;
         Ok(true)
     }
 
     fn close(&mut self) -> EvalResult<()> {
+        Ok(())
+    }
+}
+
+impl HeedTableSource {
+    /// Fetch up to CHUNK_ROWS rows via one read txn and a sequential range scan
+    /// (leaf-page walk, not point-gets), packing them into the reused buffer.
+    /// Resumes strictly after the last key read (keyset pagination) so gaps from
+    /// future DELETEs never cause skipped or double-read rows.
+    fn load_next_chunk(&mut self) -> Result<(), StorageError> {
+        let rtxn = self.db.read_txn()?;
+        let tbl = self.db.open_table(&rtxn, &self.table)?;
+
+        self.bytes.clear();
+        self.offsets.clear();
+        self.pos = 0;
+
+        // Range lower bound: strictly after the last key of the previous chunk,
+        // or unbounded for the first chunk.
+        let range: (std::ops::Bound<&[u8]>, std::ops::Bound<&[u8]>) = match &self.resume_after {
+            Some(k) => (
+                std::ops::Bound::Excluded(&k[..]),
+                std::ops::Bound::Unbounded,
+            ),
+            None => (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded),
+        };
+
+        let mut count = 0usize;
+        let mut prev_end: u32 = 0;
+        let mut last_key: Option<[u8; 8]> = None;
+        for result in tbl.range(&rtxn, &range).map_err(StorageError::Heed)? {
+            let (k, v) = result.map_err(StorageError::Heed)?;
+            self.bytes.extend_from_slice(v);
+            let end = u32::try_from(self.bytes.len()).map_err(|_| StorageError::ScanTooLarge {
+                table: self.table.clone(),
+                observed_bytes: self.bytes.len(),
+            })?;
+            self.offsets.push(prev_end..end);
+            prev_end = end;
+            // Stack-copy the key (no per-row alloc). A non-8-byte key means the
+            // row-id scheme changed; fail loudly rather than truncate the cursor.
+            last_key = Some(<[u8; 8]>::try_from(k).map_err(|_| {
+                StorageError::Codec(format!(
+                    "table {}: row key is {} bytes, expected 8 (BE u64)",
+                    self.table,
+                    k.len()
+                ))
+            })?);
+            count += 1;
+            if count == CHUNK_ROWS {
+                break;
+            }
+        }
+        // txn drops at end of scope; the packed buffer is owned and outlives it.
+        drop(rtxn);
+
+        if let Some(k) = last_key {
+            self.resume_after = Some(k);
+        }
+        // A short chunk means the range is drained — no further chunks.
+        if count < CHUNK_ROWS {
+            self.exhausted = true;
+        }
         Ok(())
     }
 }
@@ -245,11 +311,27 @@ mod tests {
         assert!(cat.get_table(&bindings).is_none());
     }
 
+    /// Build a `HeedTableSource` bound to `db`/`table` in the pre-scan state
+    /// (as `create()` produces it), so tests can drive `load_next_chunk`
+    /// directly without a `RegisterWriter`.
+    fn source_for(db: &Arc<HeedDB>, table: &str) -> HeedTableSource {
+        HeedTableSource {
+            db: Arc::clone(db),
+            table: table.to_string(),
+            bytes: Vec::new(),
+            offsets: Vec::new(),
+            pos: 0,
+            resume_after: None,
+            exhausted: false,
+            rows_emitted: 0,
+        }
+    }
+
     #[test]
-    fn read_all_rows_packs_rows_into_flat_buffer() {
+    fn streaming_single_chunk_reads_all_rows_when_under_chunk_size() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("flat.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let path = dir.path().join("single.pqlite");
+        let db = Arc::new(HeedDB::open(&path).unwrap());
 
         let mut w = db.create_table("t").unwrap();
         w.push_row(&[0xAA, 0xBB]).unwrap();
@@ -257,21 +339,129 @@ mod tests {
         w.push_row(&[0xDD, 0xEE, 0xFF]).unwrap();
         w.commit().unwrap();
 
-        let (bytes, rows) = read_all_rows(&db, "t").unwrap();
-        assert_eq!(bytes, vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
-        assert_eq!(rows, vec![0u32..2, 2..3, 3..6]);
+        let mut src = source_for(&db, "t");
+        src.load_next_chunk().unwrap();
+
+        assert_eq!(src.offsets.len(), 3);
+        assert!(src.exhausted);
+        assert_eq!(src.offsets, vec![0u32..2, 2..3, 3..6]);
+        assert_eq!(src.bytes, vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
     }
 
     #[test]
-    fn read_all_rows_handles_empty_table() {
+    fn streaming_spans_multiple_chunks() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("empty_flat.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let path = dir.path().join("multi.pqlite");
+        let db = Arc::new(HeedDB::open(&path).unwrap());
+
+        // Distinct byte per row so the asserts can catch any overlap or gap.
+        let total = CHUNK_ROWS + 5;
+        let mut w = db.create_table("t").unwrap();
+        for i in 0..total {
+            w.push_row(&[i as u8]).unwrap();
+        }
+        w.commit().unwrap();
+
+        let mut src = source_for(&db, "t");
+
+        src.load_next_chunk().unwrap();
+        assert_eq!(src.offsets.len(), CHUNK_ROWS);
+        assert!(!src.exhausted);
+        assert_eq!(
+            src.resume_after,
+            Some((CHUNK_ROWS as u64 - 1).to_be_bytes())
+        );
+        let chunk1: Vec<u8> = src.bytes.clone();
+        assert_eq!(chunk1, (0..CHUNK_ROWS as u8).collect::<Vec<u8>>());
+
+        src.load_next_chunk().unwrap();
+        assert_eq!(src.offsets.len(), 5);
+        assert!(src.exhausted);
+        let chunk2: Vec<u8> = src.bytes.clone();
+        assert_eq!(
+            chunk2[0], CHUNK_ROWS as u8,
+            "chunk 2 resumes at row 64, no re-read"
+        );
+        assert_eq!(chunk2, (CHUNK_ROWS as u8..total as u8).collect::<Vec<u8>>());
+
+        let mut all = chunk1;
+        all.extend_from_slice(&chunk2);
+        assert_eq!(all, (0..total as u8).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn streaming_empty_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.pqlite");
+        let db = Arc::new(HeedDB::open(&path).unwrap());
         db.create_table("t").unwrap().commit().unwrap();
 
-        let (bytes, rows) = read_all_rows(&db, "t").unwrap();
-        assert!(bytes.is_empty());
-        assert!(rows.is_empty());
+        let mut src = source_for(&db, "t");
+        src.load_next_chunk().unwrap();
+
+        assert!(src.offsets.is_empty());
+        assert!(src.bytes.is_empty());
+        assert!(src.exhausted);
+    }
+
+    #[test]
+    fn streaming_reads_sparse_keys_within_one_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse.pqlite");
+        let db = Arc::new(HeedDB::open(&path).unwrap());
+        db.create_table("t").unwrap().commit().unwrap();
+
+        // inject bypasses the encoder to make the gapped keys a DELETE would leave.
+        let keys = [0u64, 1, 2, 100, 101, 200];
+        for (i, &k) in keys.iter().enumerate() {
+            db.inject_row_for_tests("t", k, &[i as u8]);
+        }
+
+        let mut src = source_for(&db, "t");
+        src.load_next_chunk().unwrap();
+
+        assert_eq!(src.offsets.len(), 6);
+        assert!(src.exhausted);
+        assert_eq!(src.bytes, (0u8..6).collect::<Vec<u8>>());
+        assert_eq!(src.resume_after, Some(200u64.to_be_bytes()));
+    }
+
+    #[test]
+    fn streaming_keyset_resume_survives_gaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gaps.pqlite");
+        let db = Arc::new(HeedDB::open(&path).unwrap());
+        db.create_table("t").unwrap().commit().unwrap();
+
+        // Dense keys 0..64 (payload = low byte, so key 63 = 0x3F), a gap, then
+        // keys 1000.. (payload 0xF0..) — distinct so chunk 2's first row is identifiable.
+        for k in 0..CHUNK_ROWS as u64 {
+            db.inject_row_for_tests("t", k, &[k as u8]);
+        }
+        for (i, k) in (1000u64..1006).enumerate() {
+            db.inject_row_for_tests("t", k, &[0xF0 | i as u8]);
+        }
+
+        let mut src = source_for(&db, "t");
+
+        src.load_next_chunk().unwrap();
+        assert_eq!(src.offsets.len(), CHUNK_ROWS);
+        assert!(!src.exhausted);
+        assert_eq!(
+            src.resume_after,
+            Some((CHUNK_ROWS as u64 - 1).to_be_bytes())
+        );
+
+        src.load_next_chunk().unwrap();
+        assert_eq!(src.offsets.len(), 6);
+        assert!(src.exhausted);
+        let first = &src.bytes[src.offsets[0].start as usize..src.offsets[0].end as usize];
+        assert_eq!(
+            first,
+            &[0xF0],
+            "chunk 2 resumes at key 1000, not a re-read of 63"
+        );
+        assert_eq!(src.resume_after, Some(1005u64.to_be_bytes()));
     }
 
     #[test]

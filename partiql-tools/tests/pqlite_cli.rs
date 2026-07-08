@@ -357,6 +357,37 @@ fn ctas_then_select_10k_rows_completes() {
     assert!(stderr.contains("(10000 rows "), "stderr: {stderr}");
 }
 
+/// Streaming chunk-boundary regression: a table whose row count is an EXACT
+/// multiple of the internal CHUNK_ROWS (64) exercises the path where a full
+/// chunk is followed by an empty trailing chunk that signals end-of-scan. A
+/// resume-cursor or exhausted-flag off-by-one here would drop the last row or
+/// loop forever. `mem(64,1)` and `mem(128,1)` sit exactly on the 1x and 2x
+/// boundaries; every other end-to-end test lands on a partial final chunk.
+#[test]
+fn ctas_then_select_exact_chunk_multiple_rows() {
+    for (n, last) in [(64u32, 63u32), (128, 127)] {
+        let dir = tempfile::tempdir().unwrap();
+        let dbp = dir.path().join(format!("chunk_{n}.pqlite"));
+
+        let (ok, _, stderr) = run_exec(
+            &format!("CREATE TABLE t AS (SELECT t.a FROM mem({n},1) t)"),
+            Some(&dbp),
+        );
+        assert!(ok, "{n}-row CTAS should succeed; stderr: {stderr}");
+
+        let (ok, stdout, stderr) = run_exec("SELECT * FROM t", Some(&dbp));
+        assert!(ok, "{n}-row SELECT should succeed; stderr: {stderr}");
+        // Exactly N rows — no dropped last row, no phantom extra row.
+        assert!(stderr.contains(&format!("({n} rows ")), "stderr: {stderr}");
+        // The final row (a = N-1) survives the full-chunk -> empty-chunk handoff.
+        assert!(
+            stdout.contains(&format!("'a': {last}")),
+            "expected final row a={last} visible for n={n}; got tail: {:?}",
+            &stdout[stdout.len().saturating_sub(200)..]
+        );
+    }
+}
+
 #[test]
 fn two_tables_in_one_db_two_selects_in_one_run() {
     // The pqlite binary does not support multi-statement input (`;`-separated
