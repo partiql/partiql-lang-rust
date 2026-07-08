@@ -226,9 +226,6 @@ impl DataSource for HeedTableSource {
 mod tests {
     use super::*;
 
-    // 0x06 (TAG_NULL): parseable single-byte row; only used to confirm catalog plumbing.
-    const TAG_NULL_PLACEHOLDER: u8 = 0x06;
-
     #[test]
     fn metadata_resolve_returns_none() {
         let m = HeedTableMetadata;
@@ -283,7 +280,9 @@ mod tests {
         let path = dir.path().join("cat.pqlite");
         let db = Arc::new(HeedDB::open(&path).unwrap());
         let mut w = db.create_table("widgets").unwrap();
-        w.push_row(&[TAG_NULL_PLACEHOLDER]).unwrap();
+        // TAG_NULL: a complete single-byte NULL row (NULL has no payload);
+        // only used to confirm catalog plumbing.
+        w.push_row(&[crate::row_codec::TAG_NULL]).unwrap();
         w.commit().unwrap();
 
         let cat = HeedCompilationCatalog::new(Arc::clone(&db));
