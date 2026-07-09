@@ -1539,3 +1539,30 @@ fn ctas_then_select_null_inside_list_distinct_from_missing() {
         "an explicit NULL element must not render as MISSING; got: {out}"
     );
 }
+
+#[test]
+fn ctas_from_stored_table_roundtrips() {
+    // Disk-to-disk CTAS: the source read txn must close before the write txn opens
+    // (else MDB_BAD_DBI).
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("d2d.pqlite");
+
+    let (ok, _, err) = run_exec(
+        "CREATE TABLE src AS (SELECT m.a FROM mem(3,1) m)",
+        Some(&dbp),
+    );
+    assert!(ok, "seed CTAS should succeed; stderr: {err}");
+
+    let (ok, _, err) = run_exec("CREATE TABLE dest AS (SELECT src.a FROM src)", Some(&dbp));
+    assert!(ok, "CTAS from a stored table should succeed; stderr: {err}");
+
+    let (ok, out, err) = run_exec("SELECT * FROM dest", Some(&dbp));
+    assert!(ok, "SELECT from dest should succeed; stderr: {err}");
+    assert!(out.contains("'a': 0"), "got: {out}");
+    assert!(out.contains("'a': 1"), "got: {out}");
+    assert!(out.contains("'a': 2"), "got: {out}");
+    assert!(
+        err.contains("(3 rows "),
+        "dest should have 3 rows; stderr: {err}"
+    );
+}
