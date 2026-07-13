@@ -238,7 +238,7 @@ impl<'c> PlanTyper<'c> {
                 } else {
                     self.errors.push(TypingError::IllegalState(format!(
                         "Expecting Collection for the output Schema but found {:?}",
-                        &ty
+                        ty
                     )));
                     ty
                 };
@@ -264,7 +264,7 @@ impl<'c> PlanTyper<'c> {
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported BindingOperator: {:?}",
-                &op
+                op
             ))),
         }
     }
@@ -373,7 +373,7 @@ impl<'c> PlanTyper<'c> {
                 if v.is_empty() {
                     self.errors.push(TypingError::IllegalState(format!(
                         "Unexpected Empty DynamicLookup found: {:?}",
-                        &v
+                        v
                     )));
                 }
 
@@ -384,7 +384,7 @@ impl<'c> PlanTyper<'c> {
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
-                &v
+                v
             ))),
         }
     }
@@ -459,7 +459,7 @@ impl<'c> PlanTyper<'c> {
                     TypingMode::Strict => {
                         self.errors.push(TypingError::TypeCheck(format!(
                             "No Typing Information for {:?} in closed Schema {:?}",
-                            &key, &derived_type
+                            key, derived_type
                         )));
                         None
                     }
@@ -470,7 +470,7 @@ impl<'c> PlanTyper<'c> {
         } else {
             self.errors.push(TypingError::IllegalState(format!(
                 "Illegal Derive Type {:?}",
-                &derived_type
+                derived_type
             )));
             None
         }
@@ -565,7 +565,7 @@ impl<'c> PlanTyper<'c> {
         if env.len() != 1 {
             self.errors.push(TypingError::IllegalState(format!(
                 "Unexpected Typing Environment; expected typing environment with only one type but found {:?} types",
-                &env.len()
+                env.len()
             )));
             self.bld.new_undefined()
         } else {

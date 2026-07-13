@@ -90,8 +90,8 @@ fn main() {
 | :x: Failing | {} | {} | {} |
 | :large_orange_diamond: Ignored | {} | {} | {} |
 | Total Tests | {} | {} | {} |\n",
-                &orig_report.commit_hash,
-                &new_report.commit_hash,
+                orig_report.commit_hash,
+                new_report.commit_hash,
                 orig_passing,
                 new_passing,
                 new_passing - orig_passing,
@@ -122,9 +122,9 @@ Number failing in Base ({}) but now pass: {}
 ",
                 passing_in_both.count(),
                 failing_in_both.count(),
-                &orig_report.commit_hash,
+                orig_report.commit_hash,
                 passing_orig_failing_new.len(),
-                &orig_report.commit_hash,
+                orig_report.commit_hash,
                 failure_orig_passing_new.len()
             )
             .as_bytes(),

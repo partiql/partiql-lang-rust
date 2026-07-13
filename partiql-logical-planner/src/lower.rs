@@ -2123,7 +2123,7 @@ mod tests {
         let logical = planner.lower(&parsed).expect("Expect successful lowering");
         assert_eq!(expected_logical, logical);
 
-        println!("logical: {:?}", &logical);
+        println!("logical: {:?}", logical);
     }
 
     #[test]

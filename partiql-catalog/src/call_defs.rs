@@ -84,7 +84,7 @@ pub struct CallSpec {
 
 impl Debug for CallSpec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CallSpec [{:?}]", &self.input)
+        write!(f, "CallSpec [{:?}]", self.input)
     }
 }
 
@@ -105,6 +105,6 @@ pub struct ScalarFnCallSpec {
 
 impl Debug for ScalarFnCallSpec {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ScalarFnCallSpec [{:?}]", &self.input)
+        write!(f, "ScalarFnCallSpec [{:?}]", self.input)
     }
 }
