@@ -72,11 +72,47 @@ impl<'c> LogicalPlanner<'c> {
                 }
             }
             ast::Statement::Ddl(_) => Err(ddl_not_yet_implemented()),
-            ast::Statement::Dml(_) => Err(AstTransformationError {
-                errors: vec![AstTransformError::NotYetImplemented(
-                    "DML statement lowering".to_string(),
-                )],
-            }),
+            ast::Statement::Dml(dml) => match &dml.op {
+                ast::DmlOp::Insert(insert) => {
+                    // The spec-general Expr target is narrowed to a bare table-name
+                    // VarRef here; qualified/path targets are spec-legal but not yet
+                    // lowered.
+                    let table_name = match &*insert.target {
+                        ast::Expr::VarRef(v) => AstToLogical::symprim_to_binding(&v.node.name),
+                        _ => {
+                            return Err(AstTransformationError {
+                                errors: vec![AstTransformError::NotYetImplemented(
+                                    "INSERT target other than a bare table name".to_string(),
+                                )],
+                            })
+                        }
+                    };
+                    // `Expr::Query` holds a bare `Query`, but `lower_query` needs a
+                    // `TopLevelQuery`; `with: None` is inert (a bare Query carries no CTE).
+                    let query = match &*insert.values {
+                        ast::Expr::Query(q) => {
+                            let wrapped = ast::TopLevelQuery {
+                                with: None,
+                                query: q.clone(),
+                            };
+                            self.lower_query(&wrapped, stmt.id)?
+                        }
+                        _ => {
+                            return Err(AstTransformationError {
+                                errors: vec![AstTransformError::NotYetImplemented(
+                                    "INSERT source must be a query".to_string(),
+                                )],
+                            })
+                        }
+                    };
+                    Ok(logical::LogicalStatement::InsertInto { table_name, query })
+                }
+                _ => Err(AstTransformationError {
+                    errors: vec![AstTransformError::NotYetImplemented(
+                        "non-INSERT DML".to_string(),
+                    )],
+                }),
+            },
         }
     }
 
@@ -99,17 +135,24 @@ impl<'c> LogicalPlanner<'c> {
                 )],
             });
         };
-        // Reject DDL at the front door, before any inner-query lowering, so this
-        // shim returns a uniform `NotYetImplemented("DDL statement lowering")`
-        // rather than leaking an inner-query error (e.g. an unresolved table in a
-        // CTAS source). CTAS is surfaced as a plan via `lower_statement`.
-        if matches!(stmt.node, ast::Statement::Ddl(_)) {
-            return Err(ddl_not_yet_implemented());
+        // Reject DDL/DML at the front door so this shim returns a uniform category
+        // error rather than leaking an inner-query error. These are surfaced as
+        // plans via `lower_statement`.
+        match stmt.node {
+            ast::Statement::Ddl(_) => return Err(ddl_not_yet_implemented()),
+            ast::Statement::Dml(_) => {
+                return Err(AstTransformationError {
+                    errors: vec![AstTransformError::NotYetImplemented(
+                        "DML statement lowering".to_string(),
+                    )],
+                })
+            }
+            ast::Statement::Query(_) => {}
         }
         match self.lower_statement(stmt)? {
             logical::LogicalStatement::Query(plan) => Ok(plan),
-            // DDL is already rejected at the front door above, so only a query plan
-            // reaches here. This arm is a defensive fallback for any non-query result.
+            // Non-query statements are rejected at the front door above; this arm
+            // is a defensive fallback.
             _ => Err(ddl_not_yet_implemented()),
         }
     }

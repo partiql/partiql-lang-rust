@@ -31,6 +31,11 @@ grammar<'input, 'state, Id>(input: &'input str, state: &'state mut ParserState<'
 pub(crate) Statement: ast::AstNode<ast::Statement> = {
     <lo:@L> <query:TopLevelQuery> <hi:@R> => state.node(ast::Statement::Query(query.node), lo..hi),
     <lo:@L> <ddl_op:DdlOp> <hi:@R> => state.node(ast::Statement::Ddl(ddl_op), lo..hi),
+    <lo:@L> <dml_op:DmlOp> <hi:@R> => state.node(
+        ast::Statement::Dml(ast::Dml {
+            op: dml_op, from_clause: None, where_clause: None, returning: None,
+        }),
+        lo..hi),
 }
 
 TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
@@ -58,6 +63,26 @@ CreateTable: ast::CreateTable = {
 #[inline]
 CtasClause: Box<ast::AstNode<ast::TopLevelQuery>> = {
     "AS" "(" <query:TopLevelQuery> ")" => Box::new(query),
+}
+
+DmlOp: ast::DmlOp = {
+    <i:Insert> => ast::DmlOp::Insert(i),
+}
+
+// `INSERT INTO <name> <query>`. The source is bare: the only spec paren-slot
+// after a table name is the (unsupported) column list. `Query` not
+// `TopLevelQuery`, so a leading `WITH` source is out of scope.
+Insert: ast::Insert = {
+    "INSERT" "INTO" <lo:@L> <target:SymbolPrimitive> <hi:@R> <source:Query> => {
+        let target_ref = state.node(
+            ast::VarRef { name: target, qualifier: ast::ScopeQualifier::Unqualified },
+            lo..hi,
+        );
+        ast::Insert {
+            target: Box::new(ast::Expr::VarRef(target_ref)),
+            values: Box::new(ast::Expr::Query(source)),
+        }
+    }
 }
 
 Query: ast::AstNode<ast::Query> = {
@@ -2211,7 +2236,9 @@ extern {
         "HAVING" => lexer::Token::Having,
         "IN" => lexer::Token::In,
         "INNER" => lexer::Token::Inner,
+        "INSERT" => lexer::Token::Insert,
         "INTERSECT" => lexer::Token::Intersect,
+        "INTO" => lexer::Token::Into,
         "IS" => lexer::Token::Is,
         "JOIN" => lexer::Token::Join,
         "KEEP" => lexer::Token::Keep,

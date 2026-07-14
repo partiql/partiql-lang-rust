@@ -2307,4 +2307,137 @@ mod tests {
             [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
         );
     }
+
+    #[test]
+    fn test_insert_lowers_to_insert_into() {
+        use partiql_logical::{BindingsOp, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT a FROM foo WHERE a > 1")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let (table_name, query) = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { table_name, query } => (table_name, query)
+        );
+        // Target carried verbatim, case-insensitive (bare identifier).
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+        // Inner plan is the ordinary relational DAG, terminating in Sink.
+        assert!(
+            query.operator_count() >= 2,
+            "expected a non-trivial inner plan"
+        );
+        assert_matches!(
+            query.operators().last(),
+            Some(BindingsOp::Sink),
+            "inner plan must terminate in Sink"
+        );
+    }
+
+    #[test]
+    fn test_insert_preserves_quoted_target_casing() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO \"T\" SELECT a FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { table_name, .. } => table_name
+        );
+        // Quoted identifier -> CaseSensitive, value preserved verbatim.
+        assert_eq!(table_name, BindingsName::CaseSensitive("T".into()));
+    }
+
+    #[test]
+    fn test_insert_inner_source_resolves_through_existing_path() {
+        use partiql_logical::{self as logical, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
+
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT customers.name FROM customers AS c")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let query = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { query, .. } => query
+        );
+        // The catalog-registered source lowers to a Scan over a DBRef (not a
+        // fallback Global VarRef), proving the wrapped inner query used the normal
+        // resolution path — the same assertion the CTAS twin makes.
+        let has_dbref_scan = query.operators().iter().any(|op| {
+            matches!(
+                op,
+                BindingsOp::Scan(logical::Scan { expr: ValueExpr::DBRef(db), .. })
+                    if db.catalog == "default"
+                        && db.path == vec![BindingsName::CaseInsensitive("customers".into())]
+            )
+        });
+        assert!(
+            has_dbref_scan,
+            "inner source `customers` must resolve to a DBRef Scan"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_insert() {
+        // Same back-compat contract as the DDL arms: the legacy `lower` shim must
+        // reject DML with the uniform error, not silently change its return type.
+        // INSERT is surfaced via `lower_statement`.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT a FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject INSERT")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DML statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_short_circuits_dml_before_inner_query() {
+        // The shim must reject DML at the front door, BEFORE lowering the inner
+        // query. The INSERT source references an undefined function that would
+        // itself error, but `lower()` must still return the uniform DML rejection.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT undefined_fn(a) FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject INSERT")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DML statement lowering"
+        );
+    }
 }

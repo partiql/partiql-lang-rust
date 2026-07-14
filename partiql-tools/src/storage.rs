@@ -190,16 +190,23 @@ impl HeedDB {
         })
     }
 
-    /// Open a write handle for a new table. `name` must already be
-    /// canonicalized by the caller (lowercase for bare identifiers, verbatim
-    /// for quoted).
-    pub fn create_table(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
+    /// Reject names the storage layer refuses: `_`-prefixed (reserved for the
+    /// system catalog) and interior NUL (would panic heed's key encoding).
+    fn guard_name(name: &str) -> Result<(), StorageError> {
         if name.starts_with('_') {
             return Err(StorageError::ReservedName(name.to_string()));
         }
         if name.contains('\0') {
             return Err(StorageError::InvalidName(name.to_string()));
         }
+        Ok(())
+    }
+
+    /// Open a write handle for a new table. `name` must already be
+    /// canonicalized by the caller (lowercase for bare identifiers, verbatim
+    /// for quoted).
+    pub fn create_table(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
+        Self::guard_name(name)?;
         let mut wtxn = self.env.write_txn()?;
         if self.tables.get(&wtxn, name)?.is_some() {
             return Err(StorageError::TableExists(name.to_string()));
@@ -211,6 +218,49 @@ impl HeedDB {
             wtxn,
             table,
             row_id: 0,
+            key_buf: [0u8; 8],
+        })
+    }
+
+    /// Open an existing table for appending. Errors if the table is absent, and
+    /// seeds the writer's `row_id` at the current high-water key + 1 so appended
+    /// rows get fresh keys after the max.
+    pub fn open_table_for_append(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
+        Self::guard_name(name)?;
+        let wtxn = self.env.write_txn()?;
+        // Catalog membership defines existence for reads (see `open_table`), so
+        // the append path checks it too: a table absent from `_tables` is not
+        // appendable, matching what a subsequent SELECT would see.
+        if self.tables.get(&wtxn, name)?.is_none() {
+            return Err(StorageError::TableMissing(name.to_string()));
+        }
+        // Open (not create): fail loudly if the named db is absent, rather than
+        // silently re-creating an empty table and appending at row_id 0 on a
+        // catalog/data drift. (`&wtxn` coerces to `&RoTxn` via Deref.)
+        let table: RowDb = self
+            .env
+            .open_database(&wtxn, Some(name))?
+            .ok_or_else(|| StorageError::TableMissing(name.to_string()))?;
+        // Keys are 8-byte BE u64, so byte order equals numeric order and the last
+        // key is the highest row_id. A non-8-byte key means the row-id scheme
+        // changed; fail loudly rather than truncate.
+        let next_row_id = match table.last(&wtxn)? {
+            Some((k, _)) => {
+                let arr = <[u8; 8]>::try_from(k).map_err(|_| {
+                    StorageError::Codec(format!(
+                        "table {}: row key is {} bytes, expected 8 (BE u64)",
+                        name,
+                        k.len()
+                    ))
+                })?;
+                u64::from_be_bytes(arr) + 1
+            }
+            None => 0,
+        };
+        Ok(TableWriter {
+            wtxn,
+            table,
+            row_id: next_row_id,
             key_buf: [0u8; 8],
         })
     }
@@ -563,6 +613,58 @@ mod tests {
             "expected TableMissing; got {:?}",
             res
         );
+    }
+
+    #[test]
+    fn append_to_existing_table_continues_row_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        let mut w = db.create_table("t").unwrap();
+        w.push_row(&[0xAA]).unwrap();
+        w.push_row(&[0xBB]).unwrap();
+        w.push_row(&[0xCC]).unwrap();
+        w.commit().unwrap();
+        let mut a = db.open_table_for_append("t").unwrap();
+        a.push_row(&[0xDD]).unwrap();
+        a.push_row(&[0xEE]).unwrap();
+        let final_row_id = a.commit().unwrap();
+        assert_eq!(final_row_id, 5, "row_id counter should be 5 after 3+2 rows");
+        assert_eq!(db.read_row_for_tests("t", 3), vec![0xDD]);
+        assert_eq!(db.read_row_for_tests("t", 4), vec![0xEE]);
+        assert_eq!(db.read_row_for_tests("t", 0), vec![0xAA]);
+    }
+
+    #[test]
+    fn append_to_empty_table_starts_at_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        db.create_table("t").unwrap().commit().unwrap(); // empty table, no rows
+        let mut a = db.open_table_for_append("t").unwrap();
+        a.push_row(&[0x01]).unwrap();
+        assert_eq!(a.commit().unwrap(), 1);
+        assert_eq!(db.read_row_for_tests("t", 0), vec![0x01]);
+    }
+
+    #[test]
+    fn append_to_missing_table_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        let r = db.open_table_for_append("ghost");
+        assert!(matches!(r, Err(StorageError::TableMissing(_))));
+    }
+
+    #[test]
+    fn append_rejects_reserved_and_invalid_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        assert!(matches!(
+            db.open_table_for_append("_x"),
+            Err(StorageError::ReservedName(_))
+        ));
+        assert!(matches!(
+            db.open_table_for_append("a\0b"),
+            Err(StorageError::InvalidName(_))
+        ));
     }
 
     #[test]

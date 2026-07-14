@@ -1018,4 +1018,71 @@ mod tests {
             assert!(res.is_err());
         }
     }
+
+    mod dml {
+        use super::*;
+
+        // `INSERT INTO <name> <query>` lands as `Statement::Dml` with a
+        // `DmlOp::Insert`; the target is a `VarRef` and the source is `Expr::Query`.
+        #[test]
+        fn insert_into_select() {
+            let stmt = parse!(r"INSERT INTO foo SELECT m.a FROM mem(5, 2) m");
+            match stmt.node {
+                ast::Statement::Dml(ast::Dml {
+                    op: ast::DmlOp::Insert(insert),
+                    ..
+                }) => {
+                    assert!(matches!(*insert.target, ast::Expr::VarRef(_)));
+                    assert!(matches!(*insert.values, ast::Expr::Query(_)));
+                }
+                other => panic!("expected Dml(Insert), got {other:?}"),
+            }
+        }
+
+        // The source is the full `Query` rule, so ORDER BY / LIMIT are accepted.
+        #[test]
+        fn insert_into_select_complex() {
+            parse!(
+                r"INSERT INTO summary SELECT m.a FROM mem(5, 2) m WHERE m.a > 1 ORDER BY m.a DESC LIMIT 10"
+            );
+        }
+
+        // A quoted target identifier is accepted (SymbolPrimitive covers it).
+        #[test]
+        fn insert_into_quoted_target() {
+            parse!(r#"INSERT INTO "my table" SELECT m.a FROM mem(2, 1) m"#);
+        }
+
+        // VALUES is a keyword-initial query source, so it is a valid INSERT source.
+        #[test]
+        fn insert_into_values() {
+            parse!(r"INSERT INTO foo VALUES (1), (2)");
+        }
+
+        // Negative: `INSERT INTO` alone (no target, no source) must fail gracefully.
+        #[test]
+        fn insert_missing_target_and_source() {
+            assert!(parse_partiql(r"INSERT INTO").is_err());
+        }
+
+        // Negative: `INTO` is required after `INSERT`.
+        #[test]
+        fn insert_missing_into() {
+            assert!(parse_partiql(r"INSERT foo SELECT 1").is_err());
+        }
+
+        // Negative: a target with no source query must fail gracefully.
+        #[test]
+        fn insert_missing_source() {
+            assert!(parse_partiql(r"INSERT INTO foo").is_err());
+        }
+
+        // `INSERT`/`INTO` are reserved keywords, so they can no longer be used as
+        // bare identifiers. This documents the intended reservation.
+        #[test]
+        fn insert_into_are_reserved_keywords() {
+            assert!(parse_partiql(r"SELECT insert FROM t").is_err());
+            assert!(parse_partiql(r"SELECT into FROM t").is_err());
+        }
+    }
 }

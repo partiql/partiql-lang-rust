@@ -326,6 +326,24 @@ fn print_ddl_planned_footer(elapsed: std::time::Duration) {
     );
 }
 
+/// Per-stage timing footer for the write statements (CTAS / INSERT).
+fn print_write_footer(
+    parse: std::time::Duration,
+    lower: std::time::Duration,
+    compile: std::time::Duration,
+    exec: std::time::Duration,
+) {
+    let total = parse + lower + compile + exec;
+    eprintln!(
+        "(took {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+        total.as_secs_f64() * 1000.0,
+        parse.as_secs_f64() * 1000.0,
+        lower.as_secs_f64() * 1000.0,
+        compile.as_secs_f64() * 1000.0,
+        exec.as_secs_f64() * 1000.0,
+    );
+}
+
 /// Bundles `HeedCompilationCatalog` with the existing `TableFnCompilationCatalog`
 /// under `PlanCompiler`'s single `"default"` catalog name. Also records the
 /// first unresolved bare table name so `build_compiled` can fail fast with
@@ -430,6 +448,55 @@ fn build_exec_context(
     exec_context
 }
 
+/// Buffered source rows plus the timing a write-path caller needs to finish its
+/// own exec timer: `(encoded rows, compile time, exec start instant)`.
+type DrainedSource = (Vec<Vec<u8>>, std::time::Duration, Instant);
+
+/// Compile the source plan, run it, and buffer every result row into owned
+/// bytes. The source is fully drained here — before any caller opens a write
+/// txn — because a streaming source holds a read txn open across iteration, and
+/// LMDB rejects opening a table handle in a write txn while one is live
+/// (MDB_BAD_DBI). Returns the buffered rows, the compile time, and the exec
+/// start instant so the caller can finish timing after its own write + commit.
+fn drain_source_rows(
+    query: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
+    debug: &DebugFlags,
+    db: &Arc<HeedDB>,
+) -> Result<DrainedSource, Box<dyn std::error::Error>> {
+    let compile_start = Instant::now();
+    let (compiled, catalog_id) = build_compiled(query, debug, Some(Arc::clone(db)))?;
+    let compile_time = compile_start.elapsed();
+
+    let exec_start = Instant::now();
+    let exec_context = build_exec_context(Some(Arc::clone(db)), catalog_id, &compiled);
+    let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+        .map_err(|e| format!("Execution setup error: {:?}", e))?;
+
+    // Snapshot RowShape before vm.execute() borrows the VM mutably.
+    let row_shape = vm.shape().row_shape().clone();
+
+    let mut rows: Vec<Vec<u8>> = Vec::new();
+    // Reused warm across rows (serialize_row clears on entry); each retained row
+    // is a tight clone (cap == len), so no per-row 4 KiB is held.
+    let mut scratch: Vec<u8> = Vec::with_capacity(4096);
+    match vm.execute() {
+        Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+            // SAFETY: QueryIterator::next lifetime-extends its RegisterReader;
+            // aliasing across next() is UB. Consume `row` before the next pull.
+            for r in iter {
+                let row = r.map_err(|e| {
+                    format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
+                })?;
+                partiql_tools::row_codec::serialize_row(&row, &row_shape, &mut scratch)
+                    .map_err(|e| format!("Error: {}", StorageError::Codec(format!("{e}"))))?;
+                rows.push(scratch.clone());
+            }
+        }
+        Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
+    }
+    Ok((rows, compile_time, exec_start))
+}
+
 fn execute_query(
     query_str: &str,
     debug: &DebugFlags,
@@ -467,42 +534,7 @@ fn execute_query(
                 .as_ref()
                 .ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE AS.")?;
 
-            let compile_start = Instant::now();
-            let (compiled, catalog_id) = build_compiled(&query, debug, Some(Arc::clone(db)))?;
-            let compile_time = compile_start.elapsed();
-
-            let exec_start = Instant::now();
-            let exec_context = build_exec_context(Some(Arc::clone(db)), catalog_id, &compiled);
-            let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
-                .map_err(|e| format!("Execution setup error: {:?}", e))?;
-
-            // Snapshot RowShape before vm.execute() borrows the VM mutably.
-            let row_shape = vm.shape().row_shape().clone();
-
-            // 4 KiB scratch matches LMDB's typical page size; reused per row.
-            let mut scratch_buf: Vec<u8> = Vec::with_capacity(4096);
-
-            // Drain the source before opening the write txn: a streaming source
-            // holds a read txn open across iteration, and LMDB rejects opening a
-            // table handle in a write txn while one is live (MDB_BAD_DBI).
-            let mut rows: Vec<Vec<u8>> = Vec::new();
-            match vm.execute() {
-                Ok(partiql_eval::ExecutionResult::Query(iter)) => {
-                    // SAFETY: QueryIterator::next lifetime-extends its RegisterReader;
-                    // aliasing across next() is UB. Consume `row` before the next pull.
-                    for r in iter {
-                        let row = r.map_err(|e| {
-                            format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
-                        })?;
-                        partiql_tools::row_codec::serialize_row(&row, &row_shape, &mut scratch_buf)
-                            .map_err(|e| {
-                                format!("Error: {}", StorageError::Codec(format!("{e}")))
-                            })?;
-                        rows.push(scratch_buf.clone());
-                    }
-                }
-                Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
-            }
+            let (rows, compile_time, exec_start) = drain_source_rows(&query, debug, db)?;
 
             let n = {
                 let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
@@ -520,15 +552,43 @@ fn execute_query(
                 format_table_name(&table_name),
                 n
             );
-            let total_time = parse_time + lower_time + compile_time + exec_time;
+            print_write_footer(parse_time, lower_time, compile_time, exec_time);
+            return Ok(());
+        }
+        LogicalStatement::InsertInto { table_name, query } => {
+            let key = canonical_table_key(&table_name);
+
+            // Resolve --db before compile + VM setup so a missing flag fails
+            // cleanly before any expensive work.
+            let db = db
+                .as_ref()
+                .ok_or("Error: The `--db <PATH>` option is required for INSERT.")?;
+
+            let (rows, compile_time, exec_start) = drain_source_rows(&query, debug, db)?;
+
+            // Row count is tallied here, not from commit(): open_table_for_append
+            // seeds row_id at the high-water mark, so commit() returns the absolute
+            // counter (existing + inserted), not this statement's insert count.
+            let inserted = rows.len() as u64;
+            {
+                let mut writer = db
+                    .open_table_for_append(&key)
+                    .map_err(|e| format!("Error: {}", e))?;
+                for encoded in &rows {
+                    writer
+                        .push_row(encoded)
+                        .map_err(|e| format!("Error: {}", e))?;
+                }
+                writer.commit().map_err(|e| format!("Error: {}", e))?;
+            }
+            let exec_time = exec_start.elapsed();
+
             eprintln!(
-                "(took {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
-                total_time.as_secs_f64() * 1000.0,
-                parse_time.as_secs_f64() * 1000.0,
-                lower_time.as_secs_f64() * 1000.0,
-                compile_time.as_secs_f64() * 1000.0,
-                exec_time.as_secs_f64() * 1000.0,
+                "Inserted {} rows into {}",
+                inserted,
+                format_table_name(&table_name)
             );
+            print_write_footer(parse_time, lower_time, compile_time, exec_time);
             return Ok(());
         }
         LogicalStatement::CreateTable { table_name } => {

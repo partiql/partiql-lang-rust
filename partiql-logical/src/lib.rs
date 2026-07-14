@@ -487,6 +487,11 @@ pub enum LogicalStatement {
     },
     /// `CREATE TABLE <name>` — the target only, no source query.
     CreateTable { table_name: BindingsName<'static> },
+    /// `INSERT INTO <name> <query>` — target table plus the lowered source query.
+    InsertInto {
+        table_name: BindingsName<'static>,
+        query: LogicalPlan<BindingsOp>,
+    },
 }
 
 /// Represents a `PartiQL` value expression. Evaluation of a [`ValueExpr`] leads to a `PartiQL` value as
