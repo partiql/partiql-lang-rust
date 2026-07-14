@@ -111,13 +111,9 @@ impl<'input, 'tracker> TokenParser<'input, 'tracker> {
     #[inline]
     fn buffer(&mut self, upto: usize) -> Option<Result<(), Spanned<LexError<'input>, ByteOffset>>> {
         while upto > self.buffered.len() - self.consumed_c {
-            if let Some(tok) = self.lexer.next_internal() {
-                match tok {
-                    Ok(tok) => self.buffered.push_back((tok, self.lexer.slice())),
-                    Err(e) => return Some(Err(e)),
-                }
-            } else {
-                return None;
+            match self.lexer.next_internal()? {
+                Ok(tok) => self.buffered.push_back((tok, self.lexer.slice())),
+                Err(e) => return Some(Err(e)),
             }
         }
         Some(Ok(()))

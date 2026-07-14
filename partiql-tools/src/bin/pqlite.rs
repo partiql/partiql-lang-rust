@@ -482,12 +482,14 @@ fn execute_query(
             // 4 KiB scratch matches LMDB's typical page size; reused per row.
             let mut scratch_buf: Vec<u8> = Vec::with_capacity(4096);
 
-            let n = match vm.execute() {
+            // Drain the source before opening the write txn: a streaming source
+            // holds a read txn open across iteration, and LMDB rejects opening a
+            // table handle in a write txn while one is live (MDB_BAD_DBI).
+            let mut rows: Vec<Vec<u8>> = Vec::new();
+            match vm.execute() {
                 Ok(partiql_eval::ExecutionResult::Query(iter)) => {
-                    let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
-                    // SAFETY: QueryIterator::next uses unsafe lifetime extension on its
-                    // RegisterReader. Aliasing across iter.next() is UB. Consume `row`
-                    // synchronously, drop it, then push the bytes.
+                    // SAFETY: QueryIterator::next lifetime-extends its RegisterReader;
+                    // aliasing across next() is UB. Consume `row` before the next pull.
                     for r in iter {
                         let row = r.map_err(|e| {
                             format!("Error: {}", StorageError::Execution(format!("{:?}", e)))
@@ -496,13 +498,20 @@ fn execute_query(
                             .map_err(|e| {
                                 format!("Error: {}", StorageError::Codec(format!("{e}")))
                             })?;
-                        writer
-                            .push_row(&scratch_buf)
-                            .map_err(|e| format!("Error: {}", e))?;
+                        rows.push(scratch_buf.clone());
                     }
-                    writer.commit().map_err(|e| format!("Error: {}", e))?
                 }
                 Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
+            }
+
+            let n = {
+                let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
+                for encoded in &rows {
+                    writer
+                        .push_row(encoded)
+                        .map_err(|e| format!("Error: {}", e))?;
+                }
+                writer.commit().map_err(|e| format!("Error: {}", e))?
             };
             let exec_time = exec_start.elapsed();
 
