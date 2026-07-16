@@ -377,6 +377,10 @@ pub enum Token<'input> {
     In,
     #[regex("(?i:Inner)")]
     Inner,
+    #[regex("(?i:Insert)")]
+    Insert,
+    #[regex("(?i:Into)")]
+    Into,
     #[regex("(?i:Is)")]
     Is,
     #[regex("(?i:Intersect)")]
@@ -652,6 +656,8 @@ impl Token<'_> {
                 | Token::Having
                 | Token::In
                 | Token::Inner
+                | Token::Insert
+                | Token::Into
                 | Token::Is
                 | Token::Intersect
                 | Token::Join

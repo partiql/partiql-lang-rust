@@ -1566,3 +1566,204 @@ fn ctas_from_stored_table_roundtrips() {
         "dest should have 3 rows; stderr: {err}"
     );
 }
+
+// End-to-end `INSERT INTO t SELECT ...` tests. INSERT appends onto an existing
+// table (CTAS creates a fresh one), so these seed a table via CTAS first, then
+// append and re-read. INSERT source is BARE (no wrapping parens), unlike CTAS.
+
+#[test]
+fn insert_select_roundtrip_cases() {
+    // (setup DDL, insert stmt, values expected present after SELECT, total row count)
+    let cases: &[(&str, &str, &[&str], u32)] = &[
+        // Append 3 rows onto a seeded 2-row table -> 5 total.
+        (
+            "CREATE TABLE t AS (SELECT m.a FROM mem(2,1) m)",
+            "INSERT INTO t SELECT m.a FROM mem(3,1) m",
+            &["0", "1", "2"],
+            5,
+        ),
+        // Append onto a seeded 1-row table -> 3 total.
+        (
+            "CREATE TABLE t AS (SELECT m.a FROM mem(1,1) m)",
+            "INSERT INTO t SELECT m.a FROM mem(2,1) m",
+            &["0", "1"],
+            3,
+        ),
+    ];
+    for (i, (setup, insert, expected, total)) in cases.iter().enumerate() {
+        let dir = tempfile::tempdir().unwrap();
+        let dbp = dir.path().join(format!("ins_{i}.pqlite"));
+        let (ok, _o, err) = run_exec(setup, Some(&dbp));
+        assert!(ok, "case {i} setup failed: {err}");
+        let (ok, _o, err) = run_exec(insert, Some(&dbp));
+        assert!(ok, "case {i} INSERT failed: {err}");
+        assert!(
+            err.contains("Inserted"),
+            "case {i} missing confirmation: {err}"
+        );
+        let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+        assert!(ok, "case {i} SELECT failed: {err}");
+        for v in *expected {
+            assert!(
+                out.contains(&format!("'a': {v}")),
+                "case {i} missing {v}: {out}"
+            );
+        }
+        assert!(
+            err.contains(&format!("({total} rows ")),
+            "case {i} count: {err}"
+        );
+    }
+}
+
+#[test]
+fn insert_into_missing_table_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("m.pqlite");
+    // Create an unrelated table so the env/file exists.
+    run_exec(
+        "CREATE TABLE other AS (SELECT m.a FROM mem(1,1) m)",
+        Some(&dbp),
+    );
+    let (ok, _o, err) = run_exec("INSERT INTO ghost SELECT m.a FROM mem(1,1) m", Some(&dbp));
+    assert!(!ok, "INSERT into missing table must fail");
+    assert!(err.contains("table not found: ghost"), "got: {err}");
+}
+
+#[test]
+fn insert_preserves_existing_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("p.pqlite");
+    run_exec("CREATE TABLE t AS (SELECT m.a FROM mem(3,1) m)", Some(&dbp)); // 0,1,2
+    let (ok, _o, err) = run_exec("INSERT INTO t SELECT m.a FROM mem(2,1) m", Some(&dbp)); // +0,1
+    assert!(ok, "{err}");
+    let (ok, out, _e) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok);
+    // a=2 only exists in the seeded batch; it must survive the append.
+    assert!(
+        out.contains("'a': 2"),
+        "seeded rows must survive append: {out}"
+    );
+}
+
+#[test]
+fn insert_row_ids_continue_after_max() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("k.pqlite");
+    run_exec("CREATE TABLE t AS (SELECT m.a FROM mem(3,1) m)", Some(&dbp)); // keys 0,1,2
+    run_exec("INSERT INTO t SELECT m.a FROM mem(2,1) m", Some(&dbp)); // keys 3,4
+    let db = partiql_tools::storage::HeedDB::open(&dbp).unwrap();
+    // read_row panics if a key is absent, so reading 3,4 asserts they exist.
+    // Appended rows come from mem(2,1) = a:0,1 — byte-identical to the seed's
+    // first two rows (mem(3,1) = a:0,1,2), so keys 3,4 must equal keys 0,1.
+    let (k0, k1) = (
+        partiql_tools::test_support::read_row(&db, "t", 0),
+        partiql_tools::test_support::read_row(&db, "t", 1),
+    );
+    assert_eq!(
+        partiql_tools::test_support::read_row(&db, "t", 3),
+        k0,
+        "appended key 3 must equal the seed's a:0 row"
+    );
+    assert_eq!(
+        partiql_tools::test_support::read_row(&db, "t", 4),
+        k1,
+        "appended key 4 must equal the seed's a:1 row"
+    );
+}
+
+#[test]
+fn insert_without_db_errors() {
+    let (ok, _o, err) = run_exec("INSERT INTO t SELECT m.a FROM mem(1,1) m", None);
+    assert!(!ok, "INSERT without --db must fail");
+    assert!(err.contains("--db"), "got: {err}");
+}
+
+#[test]
+fn insert_empty_select_is_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("e.pqlite");
+    run_exec("CREATE TABLE t AS (SELECT m.a FROM mem(2,1) m)", Some(&dbp));
+    // WHERE FALSE yields zero source rows (house idiom for an empty result).
+    let (ok, _o, err) = run_exec(
+        "INSERT INTO t SELECT m.a FROM mem(1,1) m WHERE FALSE",
+        Some(&dbp),
+    );
+    assert!(ok, "empty INSERT should succeed: {err}");
+    assert!(err.contains("Inserted 0 rows"), "got: {err}");
+    // The pre-existing rows are untouched.
+    let (ok, out, _e) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok);
+    assert!(
+        out.contains("'a': 0") && out.contains("'a': 1"),
+        "got: {out}"
+    );
+}
+
+#[test]
+fn insert_from_stored_table() {
+    // Disk-to-disk INSERT: source is a stored table (incl. the destination
+    // itself), so the source read txn must close before the append write txn
+    // opens (else MDB_BAD_DBI).
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("d2d_ins.pqlite");
+    run_exec(
+        "CREATE TABLE src AS (SELECT m.a FROM mem(3,1) m)",
+        Some(&dbp),
+    );
+    run_exec("CREATE TABLE t AS (SELECT m.a FROM mem(2,1) m)", Some(&dbp));
+
+    // Append from another stored table.
+    let (ok, _o, err) = run_exec("INSERT INTO t SELECT src.a FROM src", Some(&dbp));
+    assert!(
+        ok,
+        "INSERT from a stored table should succeed; stderr: {err}"
+    );
+    assert!(err.contains("Inserted 3 rows"), "got: {err}");
+
+    // Self-insert: read and write the same table in one statement.
+    let (ok, _o, err) = run_exec("INSERT INTO t SELECT t.a FROM t", Some(&dbp));
+    assert!(ok, "self-insert should succeed; stderr: {err}");
+    assert!(err.contains("Inserted 5 rows"), "got: {err}");
+
+    let (ok, _out, err) = run_exec("SELECT * FROM t", Some(&dbp));
+    assert!(ok);
+    assert!(
+        err.contains("(10 rows "),
+        "expected 10 rows total; stderr: {err}"
+    );
+}
+
+#[test]
+fn insert_into_quoted_case_sensitive_target() {
+    // Parity with CTAS's quoted-name roundtrip: a case-sensitive quoted target
+    // must resolve to the same physical table for CREATE, INSERT, and SELECT.
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("quoted_ins.pqlite");
+
+    let (ok, _o, err) = run_exec(
+        r#"CREATE TABLE "MyTable" AS (SELECT m.a FROM mem(2,1) m)"#,
+        Some(&dbp),
+    );
+    assert!(ok, "quoted CTAS should succeed; stderr: {err}");
+
+    let (ok, _o, err) = run_exec(
+        r#"INSERT INTO "MyTable" SELECT m.a FROM mem(3,1) m"#,
+        Some(&dbp),
+    );
+    assert!(
+        ok,
+        "INSERT into quoted target should succeed; stderr: {err}"
+    );
+    assert!(err.contains("Inserted 3 rows"), "got: {err}");
+
+    let (ok, _out, err) = run_exec(r#"SELECT * FROM "MyTable""#, Some(&dbp));
+    assert!(
+        ok,
+        "SELECT from quoted target should succeed; stderr: {err}"
+    );
+    assert!(
+        err.contains("(5 rows "),
+        "expected 5 rows total; stderr: {err}"
+    );
+}

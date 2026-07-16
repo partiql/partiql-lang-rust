@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - *BREAKING* partiql-parser: `Parsed`'s `ast` field replaced by `statements: Vec<AstNode<Statement>>`. The `Item` enum is renamed to `Statement` with bare variants (`Statement::Query(TopLevelQuery)`, `Statement::Ddl(DdlOp)`, `Statement::Dml(Dml)`). The single-field `Ddl` wrapper struct is removed; `DdlOp` is held directly. Code that accessed `parsed.ast` must now use `parsed.statements[0]` and match on `Statement` variants.
+- *BREAKING* partiql-parser: `INSERT` and `INTO` are now reserved keywords (per SQL:2003), so they can no longer be used as bare identifiers. A query such as `SELECT x AS into FROM t` must now quote the identifier (`"into"`).
 
 ### Added
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
+- partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
 
 ### Removed
 
