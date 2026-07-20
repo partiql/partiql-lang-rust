@@ -89,6 +89,41 @@ pub fn serialize_row(
     }
 }
 
+/// Encode a `_tables` catalog row: `{ name: [<elements>] }`, where `name` is a
+/// PartiQL list of the (unescaped) path elements. Single-element today
+/// (`["foo"]`); multi-element paths are the forward-compatible shape. `buf` is
+/// cleared on entry. Hand-mirrors the wire format — no VM `RegisterReader` needed.
+pub fn serialize_name_row(elements: &[&str], buf: &mut Vec<u8>) -> Result<(), SerializeError> {
+    buf.clear();
+    if elements.len() > MAX_CONTAINER_ELEMENTS as usize {
+        return Err(SerializeError::Unsupported(format!(
+            "name path has {} elements, exceeds MAX_CONTAINER_ELEMENTS ({})",
+            elements.len(),
+            MAX_CONTAINER_ELEMENTS
+        )));
+    }
+    buf.push(TAG_TUPLE);
+    buf.extend_from_slice(&1u32.to_le_bytes()); // field_count = 1
+    buf.extend_from_slice(&4u32.to_le_bytes()); // name_len = 4
+    buf.extend_from_slice(b"name");
+    buf.push(TAG_LIST);
+    buf.extend_from_slice(&(elements.len() as u32).to_le_bytes());
+    for (i, el) in elements.iter().enumerate() {
+        let bytes = el.as_bytes();
+        if bytes.len() > MAX_STRING_LEN as usize {
+            return Err(SerializeError::Unsupported(format!(
+                "name element {i}: length {} exceeds MAX_STRING_LEN ({})",
+                bytes.len(),
+                MAX_STRING_LEN
+            )));
+        }
+        buf.push(TAG_STRING);
+        buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(bytes);
+    }
+    Ok(())
+}
+
 fn write_value_at_root(
     row: &RegisterReader<'_>,
     slot: usize,
@@ -855,5 +890,56 @@ mod deserialize_tests {
             format!("{}", DeserializeError::Unsupported("x".to_string())),
             "unsupported: x"
         );
+    }
+}
+
+#[cfg(test)]
+mod name_row_tests {
+    use super::*;
+
+    #[test]
+    fn serialize_name_row_single_element_exact_bytes() {
+        let mut buf = Vec::new();
+        serialize_name_row(&["foo"], &mut buf).unwrap();
+        let expected: Vec<u8> = vec![
+            TAG_TUPLE, 0x01, 0x00, 0x00, 0x00, // field_count = 1
+            0x04, 0x00, 0x00, 0x00, // name_len = 4
+            b'n', b'a', b'm', b'e', TAG_LIST, 0x01, 0x00, 0x00, 0x00, // element_count = 1
+            TAG_STRING, 0x03, 0x00, 0x00, 0x00, // str_len = 3
+            b'f', b'o', b'o',
+        ];
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn serialize_name_row_multi_element_forward_compat() {
+        let mut buf = Vec::new();
+        serialize_name_row(&["a", "bb"], &mut buf).unwrap();
+        let expected: Vec<u8> = vec![
+            TAG_TUPLE, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, b'n', b'a', b'm', b'e',
+            TAG_LIST, 0x02, 0x00, 0x00, 0x00, TAG_STRING, 0x01, 0x00, 0x00, 0x00, b'a', TAG_STRING,
+            0x02, 0x00, 0x00, 0x00, b'b', b'b',
+        ];
+        assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn serialize_name_row_clears_buf_on_entry() {
+        let mut buf = vec![0xFF, 0xFF];
+        serialize_name_row(&["x"], &mut buf).unwrap();
+        assert_eq!(buf[0], TAG_TUPLE, "buf must be cleared before writing");
+    }
+
+    #[test]
+    fn serialize_name_row_empty_elements_is_empty_list() {
+        let mut buf = Vec::new();
+        serialize_name_row(&[], &mut buf).unwrap();
+        // { name: [] } — TAG_TUPLE, field_count=1, name_len=4, "name", TAG_LIST, count=0.
+        let expected: Vec<u8> = vec![
+            TAG_TUPLE, 0x01, 0x00, 0x00, 0x00, // field_count = 1
+            0x04, 0x00, 0x00, 0x00, // name_len = 4
+            b'n', b'a', b'm', b'e', TAG_LIST, 0x00, 0x00, 0x00, 0x00, // element_count = 0
+        ];
+        assert_eq!(buf, expected);
     }
 }
