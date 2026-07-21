@@ -32,6 +32,7 @@ itertools = "0.14"
 unicase = "2.7"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
 ion-rs_old = { version = "0.18", package = "ion-rs" }
+# TODO(#655): relax exact pin once ion-rs RC output is reproducible.
 ion-rs = { version = "=1.0.0-rc.11", features = ["experimental"] }
 time = { version = "0.3", features = ["macros"] }
 once_cell = "1"
