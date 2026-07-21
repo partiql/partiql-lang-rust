@@ -1,6 +1,5 @@
 ---
 source: extension/partiql-extension-ion/tests/test.rs
-assertion_line: 485
 expression: result
 ---
 
