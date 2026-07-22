@@ -38,6 +38,20 @@ pub(crate) Statement: ast::AstNode<ast::Statement> = {
         lo..hi),
 }
 
+// A `;`-separated sequence of statements with an optional trailing `;`, e.g.
+// `CREATE TABLE a; INSERT INTO a ...;`. Mirrors the `CommaTermStar` pattern but
+// with `Semicolon` as the terminator so scripts (bootstrap, multi-statement
+// input) can be parsed as a unit instead of split by hand.
+pub(crate) StatementList: Vec<ast::AstNode<ast::Statement>> = {
+    <mut v:(<Statement> ";")*> <e:Statement?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+}
+
 TopLevelQuery: ast::AstNode<ast::TopLevelQuery> = {
     <lo:@L>
     <with:WithClause?>

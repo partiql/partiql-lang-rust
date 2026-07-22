@@ -1,6 +1,6 @@
 use partiql_tools::common;
 
-use common::{create_table_fn_catalog, lower_statement, parse};
+use common::{create_table_fn_catalog, lower_statement, parse, parse_statements};
 use partiql_common::catalog::CatalogId;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
@@ -126,26 +126,6 @@ fn normalize_query(input: &str) -> &str {
     trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end()
 }
 
-/// Split a trusted bootstrap script on `;`. Strips `--` line comments first so a
-/// `;` in a comment doesn't split. Only `--` comments are handled: no `/* */`,
-/// and no `;` inside string literals.
-fn split_script_statements(script: &str) -> Vec<String> {
-    let stripped: String = script
-        .lines()
-        .map(|line| match line.find("--") {
-            Some(i) => &line[..i],
-            None => line,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    stripped
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 /// Open the DB and bring it to CURRENT_SCHEMA_VERSION. Idempotent + crash-safe.
 fn open_and_bootstrap(path: &std::path::Path) -> Result<Arc<HeedDB>, Box<dyn std::error::Error>> {
     let db = Arc::new(HeedDB::open(path)?);
@@ -183,14 +163,24 @@ fn open_and_bootstrap(path: &std::path::Path) -> Result<Arc<HeedDB>, Box<dyn std
     Ok(db)
 }
 
-/// Run the v1 bootstrap script. Idempotent: a crash-recovery DB whose _tables
-/// already exists yields a typed StorageError::TableExists, reconciled against
-/// the self-entry; any other error propagates.
+/// Run the v1 bootstrap script. The `;`-separated script is parsed as a unit
+/// and each statement executed in order. Idempotent: a crash-recovery DB whose
+/// _tables already exists yields a typed StorageError::TableExists, reconciled
+/// against the self-entry; any other error propagates.
 fn bootstrap_v1(db: &Arc<HeedDB>) -> Result<(), Box<dyn std::error::Error>> {
     let script = include_str!("../bootstrap/v1.pql");
     let debug = DebugFlags::from_args(&[]);
-    for stmt in split_script_statements(script) {
-        match execute_query(&stmt, &debug, Some(Arc::clone(db)), OutputMode::Silent) {
+    let parsed = parse_statements(script).map_err(|e| format!("Parse error: {:?}", e))?;
+    for stmt in &parsed.statements {
+        // parse_time is a bootstrap step, not user-facing; Silent mode prints no
+        // timing footer, so a zero placeholder is never observed.
+        match execute_statement(
+            stmt,
+            &debug,
+            Some(Arc::clone(db)),
+            OutputMode::Silent,
+            std::time::Duration::ZERO,
+        ) {
             Ok(()) => {}
             Err(e) => {
                 let is_self_tables_exists = e
@@ -594,8 +584,6 @@ fn execute_query(
     db: Option<Arc<HeedDB>>,
     mode: OutputMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let catalog = create_table_fn_catalog();
-
     let parse_start = Instant::now();
     let parsed = parse(query_str).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
@@ -604,12 +592,28 @@ fn execute_query(
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // Lowering operates on a single statement.
+    // `exec` and the REPL run one statement at a time; a `;`-separated script is
+    // parsed with `parse_statements` and each statement run via `execute_statement`
+    // in a loop (see `bootstrap_v1`).
     let stmt = match parsed.statements.as_slice() {
         [stmt] => stmt,
         // Wording matches `LogicalPlanner::lower` for parity across error sites.
         _ => return Err("Lower error: multi-statement input".into()),
     };
+    execute_statement(stmt, debug, db, mode, parse_time)
+}
+
+/// Execute a single already-parsed statement. Split from [`execute_query`] so a
+/// parsed script can dispatch each statement in a loop without re-parsing.
+fn execute_statement(
+    stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
+    debug: &DebugFlags,
+    db: Option<Arc<HeedDB>>,
+    mode: OutputMode,
+    parse_time: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let catalog = create_table_fn_catalog();
+
     let lower_start = Instant::now();
     let statement =
         lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;

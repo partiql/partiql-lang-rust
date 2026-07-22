@@ -31,6 +31,7 @@ mod grammar {
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 type LalrpopResult<'input> = Result<ast::AstNode<ast::Statement>, LalrpopError<'input>>;
+type LalrpopListResult<'input> = Result<Vec<ast::AstNode<ast::Statement>>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
@@ -52,6 +53,13 @@ pub(crate) type AstResult<'input> = Result<AstData, ErrorData<'input>>;
 /// Parse `PartiQL` query text into an AST.
 pub(crate) fn parse_partiql(s: &str) -> AstResult<'_> {
     parse_partiql_with_state(s, ParserState::default())
+}
+
+/// Parse a `;`-separated `PartiQL` script into a list of statement ASTs.
+/// A trailing `;` is optional; an empty (or all-comment) script yields no
+/// statements.
+pub(crate) fn parse_partiql_statements(s: &str) -> AstResult<'_> {
+    parse_partiql_statements_with_state(s, ParserState::default())
 }
 
 fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
@@ -86,6 +94,44 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
         }
         (Ok(stmt), true) => Ok(AstData {
             statements: vec![stmt],
+            locations,
+            offsets,
+        }),
+    }
+}
+
+fn parse_partiql_statements_with_state<'input, Id: NodeIdGenerator>(
+    s: &'input str,
+    mut state: ParserState<'input, Id>,
+) -> AstResult<'input> {
+    let mut offsets = LineOffsetTracker::default();
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
+    let lexer = CommentSkippingLexer::new(lexer);
+
+    let result: LalrpopListResult<'_> =
+        grammar::StatementListParser::new().parse(s, &mut state, lexer);
+
+    let ParserState {
+        locations, errors, ..
+    } = state;
+
+    let mut errors: Vec<_> = errors
+        .into_iter()
+        .map(|e| ParseError::from(e.error))
+        .collect();
+
+    match (result, errors.is_empty()) {
+        (Ok(_), false) => Err(ErrorData { errors, offsets }),
+        (Err(e), true) => {
+            let errors = vec![ParseError::from(e)];
+            Err(ErrorData { errors, offsets })
+        }
+        (Err(e), false) => {
+            errors.push(ParseError::from(e));
+            Err(ErrorData { errors, offsets })
+        }
+        (Ok(statements), true) => Ok(AstData {
+            statements,
             locations,
             offsets,
         }),
@@ -1083,6 +1129,65 @@ mod tests {
         fn insert_into_are_reserved_keywords() {
             assert!(parse_partiql(r"SELECT insert FROM t").is_err());
             assert!(parse_partiql(r"SELECT into FROM t").is_err());
+        }
+    }
+
+    mod statement_list {
+        use super::*;
+
+        fn statements(s: &str) -> usize {
+            super::super::parse_partiql_statements(s)
+                .unwrap_or_else(|e| panic!("{e:?}"))
+                .statements
+                .len()
+        }
+
+        #[test]
+        fn multiple_statements() {
+            assert_eq!(statements("CREATE TABLE a; SELECT b FROM a"), 2);
+        }
+
+        #[test]
+        fn trailing_semicolon_is_optional() {
+            assert_eq!(statements("CREATE TABLE a; SELECT b FROM a;"), 2);
+            assert_eq!(statements("CREATE TABLE a"), 1);
+            assert_eq!(statements("CREATE TABLE a;"), 1);
+        }
+
+        #[test]
+        fn empty_and_comment_only_yield_no_statements() {
+            assert_eq!(statements(""), 0);
+            assert_eq!(statements("   \n  "), 0);
+            assert_eq!(statements("-- just a comment\n"), 0);
+        }
+
+        #[test]
+        fn comments_between_statements_are_skipped() {
+            assert_eq!(statements("CREATE TABLE a; -- make a\nSELECT b FROM a"), 2);
+        }
+
+        // The single-statement `parse` entry still rejects `;`-separated input,
+        // so callers opt into multi-statement explicitly via `parse_statements`.
+        #[test]
+        fn single_statement_parse_still_rejects_multi() {
+            assert!(parse_partiql("CREATE TABLE a; SELECT b FROM a").is_err());
+        }
+
+        // A malformed statement anywhere in the list fails the whole parse.
+        #[test]
+        fn malformed_statement_in_list_errors() {
+            assert!(super::super::parse_partiql_statements("CREATE TABLE a; SELECT FROM").is_err());
+        }
+
+        // Empty statements are rejected (no `;;`, leading `;`, or lone `;`),
+        // unlike the prior string splitter which silently dropped empty chunks.
+        #[test]
+        fn empty_statements_are_rejected() {
+            assert!(
+                super::super::parse_partiql_statements("CREATE TABLE a;; SELECT b FROM a").is_err()
+            );
+            assert!(super::super::parse_partiql_statements("; CREATE TABLE a").is_err());
+            assert!(super::super::parse_partiql_statements(";").is_err());
         }
     }
 }
