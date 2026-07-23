@@ -72,6 +72,24 @@ fn plain_select_via_exec_needs_no_db_and_creates_no_file() {
 }
 
 #[test]
+fn fresh_db_bootstraps_and_select_star_from_tables_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("boot.pqlite");
+    let (ok, stdout, stderr) = run_exec("SELECT t.a FROM mem(1,1) t", Some(&db));
+    assert!(ok, "stderr: {stderr}");
+    assert!(
+        !stdout.contains("_tables") && !stderr.contains("Created table _tables"),
+        "bootstrap must be silent: out={stdout} err={stderr}"
+    );
+    let (ok2, stdout2, stderr2) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(ok2, "stderr: {stderr2}");
+    assert!(
+        stdout2.contains("_tables"),
+        "expected self-entry: {stdout2}"
+    );
+}
+
+#[test]
 fn ctas_without_db_errors_cleanly() {
     let (ok, stdout, stderr) = run_exec("CREATE TABLE t AS (SELECT t.a FROM mem(1,2) t)", None);
 
@@ -1765,5 +1783,179 @@ fn insert_into_quoted_case_sensitive_target() {
     assert!(
         err.contains("(5 rows "),
         "expected 5 rows total; stderr: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end bootstrap + system-table (`_tables`) acceptance suite. These drive
+// the built binary against a fresh `--db` to verify the startup bootstrap:
+// the `_tables` catalog is created on first run, a schema version is stamped,
+// user tables register in the catalog, and the system table is read-only.
+
+#[test]
+fn select_star_from_tables_shows_self_and_user_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("intro.pqlite");
+    let (ok, _, err) = run_exec(
+        "CREATE TABLE users AS (SELECT t.a FROM mem(1,1) t)",
+        Some(&db),
+    );
+    assert!(ok, "stderr: {err}");
+    let (ok2, out, err2) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(ok2, "stderr: {err2}");
+    assert!(
+        out.contains("_tables") && out.contains("users"),
+        "got: {out}"
+    );
+}
+
+#[test]
+fn bare_create_table_registers_in_catalog() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("bare.pqlite");
+    let (ok, _, err) = run_exec("CREATE TABLE widgets", Some(&db));
+    assert!(ok, "stderr: {err}");
+    let (ok2, out, _) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(
+        ok2 && out.contains("widgets"),
+        "bare CREATE must register: {out}"
+    );
+}
+
+#[test]
+fn fresh_bootstrap_stamps_version_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("stamp.pqlite");
+    assert!(run_exec("SELECT t.a FROM mem(1,1) t", Some(&db_path)).0);
+    let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+    assert_eq!(db.read_schema_version().unwrap(), 1);
+    assert!(db.tables_has_self_entry().unwrap());
+}
+
+#[test]
+fn second_startup_skips_bootstrap_and_keeps_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("second.pqlite");
+    assert!(run_exec("SELECT t.a FROM mem(1,1) t", Some(&db_path)).0);
+    let (ok2, out2, err2) = run_exec("SELECT t.a FROM mem(1,1) t", Some(&db_path));
+    assert!(ok2, "stderr: {err2}");
+    assert!(
+        !out2.contains("_tables") && !err2.contains("Created table _tables"),
+        "no re-bootstrap"
+    );
+    let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+    assert_eq!(db.read_schema_version().unwrap(), 1);
+}
+
+#[test]
+fn insert_into_tables_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("ins.pqlite");
+    let (ok, _, err) = run_exec("INSERT INTO _tables SELECT t.a FROM mem(1,1) t", Some(&db));
+    assert!(!ok && err.contains("system table"), "got: {err}");
+}
+
+#[test]
+fn create_table_as_system_table_is_rejected_after_bootstrap_catalog_intact() {
+    // After bootstrap _tables holds its self-entry, so a user CREATE TABLE _tables
+    // fails cleanly with a duplicate error — and the catalog stays queryable.
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("dupsys.pqlite");
+    let (ok0, _, err0) = run_exec(
+        "CREATE TABLE users AS (SELECT t.a FROM mem(1,1) t)",
+        Some(&db),
+    );
+    assert!(ok0, "stderr: {err0}");
+    let (ok, _, err) = run_exec(
+        "CREATE TABLE _tables AS (SELECT t.a FROM mem(1,1) t)",
+        Some(&db),
+    );
+    assert!(
+        !ok && err.contains("already exists"),
+        "CREATE TABLE _tables after bootstrap must fail with a duplicate error; err: {err}"
+    );
+    // Catalog intact: still queryable, still shows the real tables.
+    let (ok2, out, err2) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(
+        ok2,
+        "catalog must survive the rejected create; stderr: {err2}"
+    );
+    assert!(
+        out.contains("_tables") && out.contains("users"),
+        "got: {out}"
+    );
+}
+
+#[test]
+fn create_table_named_schema_version_still_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("sv.pqlite");
+    let (ok, _, err) = run_exec(
+        "CREATE TABLE \"schema_version\" AS (SELECT t.a FROM mem(1,1) t)",
+        Some(&db),
+    );
+    assert!(ok, "stderr: {err}");
+    let (ok2, out, _) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(ok2 && out.contains("schema_version"), "got: {out}");
+}
+
+#[test]
+fn underscore_prefixed_user_table_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("under.pqlite");
+    assert!(
+        run_exec(
+            "CREATE TABLE _scratch AS (SELECT t.a FROM mem(1,1) t)",
+            Some(&db)
+        )
+        .0
+    );
+    let (ok2, out, _) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(ok2 && out.contains("_scratch"), "got: {out}");
+}
+
+#[test]
+fn newer_schema_version_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("newer.pqlite");
+    {
+        let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+        db.set_schema_version(2).unwrap();
+    }
+    let (ok, _, err) = run_exec("SELECT t.a FROM mem(1,1) t", Some(&db_path));
+    assert!(!ok && err.contains("newer than this binary"), "got: {err}");
+}
+
+#[test]
+fn version_one_without_self_entry_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("inv.pqlite");
+    {
+        let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+        db.set_schema_version(1).unwrap();
+    }
+    let (ok, _, err) = run_exec("SELECT t.a FROM mem(1,1) t", Some(&db_path));
+    assert!(!ok && err.contains("missing or incomplete"), "got: {err}");
+}
+
+#[test]
+fn bootstrap_reconciles_when_self_entry_present_but_version_zero() {
+    // Crash-after-create, before-stamp: self-entry exists, version still 0.
+    // Bootstrap must run CREATE (hitting TableExists) and reconcile, NOT skip.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("recover.pqlite");
+    {
+        let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+        let mut v = Vec::new();
+        partiql_tools::row_codec::serialize_name_row(&["_tables"], &mut v).unwrap();
+        db.create_table("_tables", &v).unwrap().commit().unwrap(); // version still 0
+    }
+    let (ok, _, err) = run_exec("SELECT * FROM _tables", Some(&db_path));
+    assert!(ok, "recovery must succeed; stderr: {err}");
+    let db = partiql_tools::storage::HeedDB::open(&db_path).unwrap();
+    assert_eq!(
+        db.read_schema_version().unwrap(),
+        1,
+        "recovery stamps version 1"
     );
 }

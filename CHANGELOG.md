@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
 - partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
+- partiql-parser: `Parser::parse_statements` parses a `;`-separated script into multiple statements (optional trailing `;`). Single-statement `Parser::parse` is unchanged and still rejects `;`.
 
 ### Removed
 

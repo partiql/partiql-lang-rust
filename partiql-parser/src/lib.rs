@@ -58,7 +58,7 @@ mod parse;
 mod preprocessor;
 mod token_parser;
 
-use parse::{parse_partiql, AstData, ErrorData};
+use parse::{parse_partiql, parse_partiql_statements, AstData, ErrorData};
 use partiql_ast::ast;
 use partiql_common::syntax::line_offset_tracker::LineOffsetTracker;
 use partiql_common::syntax::location::BytePosition;
@@ -81,9 +81,32 @@ pub type ParserResult<'input> = Result<Parsed<'input>, ParserError<'input>>;
 pub struct Parser {}
 
 impl Parser {
-    /// Parse a `PartiQL` statement into an AST.
+    /// Parse a single `PartiQL` statement into an AST.
     pub fn parse<'input>(&self, text: &'input str) -> ParserResult<'input> {
         match parse_partiql(text) {
+            Ok(AstData {
+                statements,
+                locations,
+                offsets,
+            }) => Ok(Parsed {
+                text,
+                offsets,
+                statements,
+                locations,
+            }),
+            Err(ErrorData { errors, offsets }) => Err(ParserError {
+                text,
+                offsets,
+                errors,
+            }),
+        }
+    }
+
+    /// Parse a `;`-separated `PartiQL` script into a `Parsed` whose
+    /// `statements` holds each statement in source order. A trailing `;` is
+    /// optional; an empty or all-comment script yields no statements.
+    pub fn parse_statements<'input>(&self, text: &'input str) -> ParserResult<'input> {
+        match parse_partiql_statements(text) {
             Ok(AstData {
                 statements,
                 locations,

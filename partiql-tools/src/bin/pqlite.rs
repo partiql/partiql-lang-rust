@@ -1,6 +1,6 @@
 use partiql_tools::common;
 
-use common::{create_table_fn_catalog, lower_statement, parse};
+use common::{create_table_fn_catalog, lower_statement, parse, parse_statements};
 use partiql_common::catalog::CatalogId;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
@@ -20,6 +20,16 @@ use reedline::{
 };
 
 const HISTORY_CAPACITY: usize = 1000;
+
+/// The schema version this binary bootstraps to and requires.
+const CURRENT_SCHEMA_VERSION: u32 = 1;
+
+/// Whether `execute_query` prints. Bootstrap runs muted.
+#[derive(Clone, Copy)]
+enum OutputMode {
+    User,
+    Silent,
+}
 
 /// Crate version joined with the git commit SHA captured in build.rs.
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_SHA"));
@@ -82,8 +92,8 @@ fn main() {
                 std::process::exit(1);
             }
             let db = match cli.db.as_deref() {
-                Some(p) => match HeedDB::open(p) {
-                    Ok(db) => Some(Arc::new(db)),
+                Some(p) => match open_and_bootstrap(p) {
+                    Ok(db) => Some(db),
                     Err(e) => {
                         eprintln!("Error: could not open database at {}: {}", p.display(), e);
                         std::process::exit(1);
@@ -91,7 +101,7 @@ fn main() {
                 },
                 None => None,
             };
-            if let Err(e) = execute_query(query, &debug, db) {
+            if let Err(e) = execute_query(query, &debug, db, OutputMode::User) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
@@ -114,6 +124,79 @@ fn main() {
 fn normalize_query(input: &str) -> &str {
     let trimmed = input.trim();
     trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end()
+}
+
+/// Open the DB and bring it to CURRENT_SCHEMA_VERSION. Idempotent + crash-safe.
+fn open_and_bootstrap(path: &std::path::Path) -> Result<Arc<HeedDB>, Box<dyn std::error::Error>> {
+    let db = Arc::new(HeedDB::open(path)?);
+    let version = db.read_schema_version()?;
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(format!(
+            "database schema version {version} is newer than this binary \
+             supports ({CURRENT_SCHEMA_VERSION}); upgrade pqlite"
+        )
+        .into());
+    }
+    // A stamped current version must satisfy its postcondition (one extra
+    // catalog lookup at startup — a deliberate integrity check).
+    if version == CURRENT_SCHEMA_VERSION && !db.tables_has_self_entry()? {
+        return Err("database reports schema version 1 but the _tables catalog \
+                    is missing or incomplete"
+            .into());
+    }
+    // Migration ladder: each future migration is its own `version < N` block
+    // that stamps N, so an older DB runs every step in order. Bumping
+    // CURRENT_SCHEMA_VERSION alone is not enough — add a block.
+    if version < 1 {
+        bootstrap_v1(&db)?;
+        let stamped = db.set_schema_version(1)?;
+        // Guards a concurrent writer that stamped a newer version between our
+        // read above and this stamp; monotonic set returns that higher version.
+        if stamped > CURRENT_SCHEMA_VERSION {
+            return Err(format!(
+                "database schema version {stamped} is newer than this binary \
+                 supports ({CURRENT_SCHEMA_VERSION}); upgrade pqlite"
+            )
+            .into());
+        }
+    }
+    Ok(db)
+}
+
+/// Run the v1 bootstrap script. The `;`-separated script is parsed as a unit
+/// and each statement executed in order. Idempotent: a crash-recovery DB whose
+/// _tables already exists yields a typed StorageError::TableExists, reconciled
+/// against the self-entry; any other error propagates.
+fn bootstrap_v1(db: &Arc<HeedDB>) -> Result<(), Box<dyn std::error::Error>> {
+    let script = include_str!("../bootstrap/v1.pql");
+    let debug = DebugFlags::from_args(&[]);
+    let parsed = parse_statements(script).map_err(|e| format!("Parse error: {:?}", e))?;
+    for stmt in &parsed.statements {
+        // parse_time is a bootstrap step, not user-facing; Silent mode prints no
+        // timing footer, so a zero placeholder is never observed.
+        match execute_statement(
+            stmt,
+            &debug,
+            Some(Arc::clone(db)),
+            OutputMode::Silent,
+            std::time::Duration::ZERO,
+        ) {
+            Ok(()) => {}
+            Err(e) => {
+                let is_self_tables_exists = e
+                    .downcast_ref::<StorageError>()
+                    .map(|se| matches!(se, StorageError::TableExists(n) if n == "_tables"))
+                    .unwrap_or(false);
+                // Crash-recovery: _tables already created on a prior run. Skip and
+                // continue; any other error is real and aborts bootstrap.
+                if is_self_tables_exists && db.tables_has_self_entry()? {
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
 }
 
 struct PqlitePrompt;
@@ -238,8 +321,8 @@ fn print_startup_banner(db_path: &std::path::Path) {
 fn run_repl(debug: &DebugFlags, db_path: &std::path::Path) {
     // Hard-fail rather than fall back to in-memory: a silently non-persisting
     // db is worse than refusing to start.
-    let db = match HeedDB::open(db_path) {
-        Ok(db) => Arc::new(db),
+    let db = match open_and_bootstrap(db_path) {
+        Ok(db) => db,
         Err(e) => {
             eprintln!(
                 "Error: could not open database at {}: {}",
@@ -279,7 +362,8 @@ fn run_repl(debug: &DebugFlags, db_path: &std::path::Path) {
                     continue;
                 }
 
-                if let Err(e) = execute_query(query, debug, Some(Arc::clone(&db))) {
+                if let Err(e) = execute_query(query, debug, Some(Arc::clone(&db)), OutputMode::User)
+                {
                     eprintln!("{}", e);
                 }
             }
@@ -319,11 +403,8 @@ fn canonical_table_key(name: &partiql_value::BindingsName<'_>) -> String {
     }
 }
 
-fn print_ddl_planned_footer(elapsed: std::time::Duration) {
-    eprintln!(
-        "(planned in {:.1}ms — execution not yet implemented)",
-        elapsed.as_secs_f64() * 1000.0
-    );
+fn print_ddl_executed_footer(elapsed: std::time::Duration) {
+    eprintln!("(took {:.1}ms)", elapsed.as_secs_f64() * 1000.0);
 }
 
 /// Per-stage timing footer for the write statements (CTAS / INSERT).
@@ -501,9 +582,8 @@ fn execute_query(
     query_str: &str,
     debug: &DebugFlags,
     db: Option<Arc<HeedDB>>,
+    mode: OutputMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let catalog = create_table_fn_catalog();
-
     let parse_start = Instant::now();
     let parsed = parse(query_str).map_err(|e| format!("Parse error: {:?}", e))?;
     let parse_time = parse_start.elapsed();
@@ -512,12 +592,28 @@ fn execute_query(
         eprintln!("[AST] {:?}", parsed);
     }
 
-    // Lowering operates on a single statement.
+    // `exec` and the REPL run one statement at a time; a `;`-separated script is
+    // parsed with `parse_statements` and each statement run via `execute_statement`
+    // in a loop (see `bootstrap_v1`).
     let stmt = match parsed.statements.as_slice() {
         [stmt] => stmt,
         // Wording matches `LogicalPlanner::lower` for parity across error sites.
         _ => return Err("Lower error: multi-statement input".into()),
     };
+    execute_statement(stmt, debug, db, mode, parse_time)
+}
+
+/// Execute a single already-parsed statement. Split from [`execute_query`] so a
+/// parsed script can dispatch each statement in a loop without re-parsing.
+fn execute_statement(
+    stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
+    debug: &DebugFlags,
+    db: Option<Arc<HeedDB>>,
+    mode: OutputMode,
+    parse_time: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let catalog = create_table_fn_catalog();
+
     let lower_start = Instant::now();
     let statement =
         lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
@@ -534,10 +630,18 @@ fn execute_query(
                 .as_ref()
                 .ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE AS.")?;
 
+            // Encode the catalog value before draining so a deterministic
+            // encode error fails fast, ahead of any query execution.
+            let mut tables_value = Vec::new();
+            partiql_tools::row_codec::serialize_name_row(&[&key], &mut tables_value)
+                .map_err(|e| format!("Error: {}", e))?;
+
             let (rows, compile_time, exec_start) = drain_source_rows(&query, debug, db)?;
 
             let n = {
-                let mut writer = db.create_table(&key).map_err(|e| format!("Error: {}", e))?;
+                let mut writer = db
+                    .create_table(&key, &tables_value)
+                    .map_err(|e| format!("Error: {}", e))?;
                 for encoded in &rows {
                     writer
                         .push_row(encoded)
@@ -547,16 +651,22 @@ fn execute_query(
             };
             let exec_time = exec_start.elapsed();
 
-            eprintln!(
-                "Created table {} ({} rows)",
-                format_table_name(&table_name),
-                n
-            );
-            print_write_footer(parse_time, lower_time, compile_time, exec_time);
+            if matches!(mode, OutputMode::User) {
+                eprintln!(
+                    "Created table {} ({} rows)",
+                    format_table_name(&table_name),
+                    n
+                );
+                print_write_footer(parse_time, lower_time, compile_time, exec_time);
+            }
             return Ok(());
         }
         LogicalStatement::InsertInto { table_name, query } => {
             let key = canonical_table_key(&table_name);
+
+            if partiql_tools::storage::is_system_table(&key) {
+                return Err("Error: cannot INSERT into system table '_tables'".into());
+            }
 
             // Resolve --db before compile + VM setup so a missing flag fails
             // cleanly before any expensive work.
@@ -583,20 +693,35 @@ fn execute_query(
             }
             let exec_time = exec_start.elapsed();
 
-            eprintln!(
-                "Inserted {} rows into {}",
-                inserted,
-                format_table_name(&table_name)
-            );
-            print_write_footer(parse_time, lower_time, compile_time, exec_time);
+            if matches!(mode, OutputMode::User) {
+                eprintln!(
+                    "Inserted {} rows into {}",
+                    inserted,
+                    format_table_name(&table_name)
+                );
+                print_write_footer(parse_time, lower_time, compile_time, exec_time);
+            }
             return Ok(());
         }
         LogicalStatement::CreateTable { table_name } => {
-            println!(
-                "Planned CREATE TABLE {} (no source query)",
-                format_table_name(&table_name)
-            );
-            print_ddl_planned_footer(parse_time + lower_time);
+            let key = canonical_table_key(&table_name);
+            let db = db
+                .as_ref()
+                .ok_or("Error: The `--db <PATH>` option is required for CREATE TABLE.")?;
+
+            // Bare `?` (not `.map_err(format!)`) so the typed StorageError /
+            // SerializeError boxes intact — the startup bootstrap downcasts to
+            // StorageError::TableExists to reconcile a crash-recovery re-run.
+            let mut tables_value = Vec::new();
+            partiql_tools::row_codec::serialize_name_row(&[&key], &mut tables_value)?;
+            let exec_start = Instant::now();
+            db.create_table(&key, &tables_value)?.commit()?;
+            let exec_time = exec_start.elapsed();
+
+            if matches!(mode, OutputMode::User) {
+                eprintln!("Created table {}", format_table_name(&table_name));
+                print_ddl_executed_footer(parse_time + lower_time + exec_time);
+            }
             return Ok(());
         }
     };
@@ -619,33 +744,40 @@ fn execute_query(
         Shape::Single(_) => (None, "", None),
     };
 
+    let user_output = matches!(mode, OutputMode::User);
     let mut is_first = true;
     match vm.execute() {
         Ok(partiql_eval::ExecutionResult::Query(iter)) => {
-            if let Some(p) = prefix {
-                println!("{}", p);
+            if user_output {
+                if let Some(p) = prefix {
+                    println!("{}", p);
+                }
             }
             for row_result in iter {
                 match row_result {
                     Ok(row) => {
                         row_count += 1;
-                        if is_first {
-                            is_first = false;
-                        } else {
-                            println!(",");
+                        if user_output {
+                            if is_first {
+                                is_first = false;
+                            } else {
+                                println!(",");
+                            }
+                            let value = row_to_value(&row, &shape);
+                            print!("{}", tab);
+                            print!("{:?}", value);
                         }
-                        let value = row_to_value(&row, &shape);
-                        print!("{}", tab);
-                        print!("{:?}", value);
                     }
                     Err(e) => {
                         return Err(format!("Execution error: {:?}", e).into());
                     }
                 }
             }
-            println!();
-            if let Some(s) = suffix {
-                println!("{}", s);
+            if user_output {
+                println!();
+                if let Some(s) = suffix {
+                    println!("{}", s);
+                }
             }
         }
         Err(e) => {
@@ -654,16 +786,18 @@ fn execute_query(
     }
     let exec_time = exec_start.elapsed();
 
-    let total_time = parse_time + lower_time + compile_time + exec_time;
-    eprintln!(
-        "({} rows in {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
-        row_count,
-        total_time.as_secs_f64() * 1000.0,
-        parse_time.as_secs_f64() * 1000.0,
-        lower_time.as_secs_f64() * 1000.0,
-        compile_time.as_secs_f64() * 1000.0,
-        exec_time.as_secs_f64() * 1000.0,
-    );
+    if user_output {
+        let total_time = parse_time + lower_time + compile_time + exec_time;
+        eprintln!(
+            "({} rows in {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+            row_count,
+            total_time.as_secs_f64() * 1000.0,
+            parse_time.as_secs_f64() * 1000.0,
+            lower_time.as_secs_f64() * 1000.0,
+            compile_time.as_secs_f64() * 1000.0,
+            exec_time.as_secs_f64() * 1000.0,
+        );
+    }
 
     Ok(())
 }

@@ -8,7 +8,17 @@ const DEFAULT_MAP_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
 /// One catalog plus headroom for one named db per user table.
 const MAX_DBS: u32 = 128;
 
-const TABLES_DB: &str = "_tables";
+pub(crate) const TABLES_DB: &str = "_tables";
+
+/// NUL-prefixed so a user table (names can't contain NUL) can't collide.
+const SCHEMA_VERSION_KEY: &str = "\0schema_version";
+
+/// True for exact system-table names (currently just `_tables`). `pub` because
+/// the binary is a separate crate target and needs it for the INSERT guard —
+/// the single definition of "system name" that every guard checks against.
+pub fn is_system_table(name: &str) -> bool {
+    name == TABLES_DB
+}
 
 type TablesDb = heed::Database<heed::types::Str, heed::types::Bytes>;
 
@@ -58,8 +68,7 @@ pub enum StorageError {
     Io(std::io::Error),
     Heed(heed::Error),
     TableExists(String),
-    /// `_`-prefixed name; the namespace is reserved.
-    ReservedName(String),
+    SystemTableReadOnly(String),
     /// Interior NUL byte (heed would otherwise panic).
     InvalidName(String),
     TableMissing(String),
@@ -86,10 +95,9 @@ impl std::fmt::Display for StorageError {
             StorageError::Io(e) => write!(f, "storage I/O error: {e}"),
             StorageError::Heed(e) => write!(f, "storage engine error: {e}"),
             StorageError::TableExists(name) => write!(f, "table already exists: {name}"),
-            StorageError::ReservedName(name) => write!(
-                f,
-                "reserved table name '{name}' (names starting with '_' are for system use)"
-            ),
+            StorageError::SystemTableReadOnly(name) => {
+                write!(f, "cannot modify system table '{name}'")
+            }
             StorageError::InvalidName(name) => {
                 write!(f, "invalid table name {name:?}: contains a NUL byte")
             }
@@ -117,7 +125,7 @@ impl std::error::Error for StorageError {
             StorageError::Io(e) => Some(e),
             StorageError::Heed(e) => Some(e),
             StorageError::TableExists(_)
-            | StorageError::ReservedName(_)
+            | StorageError::SystemTableReadOnly(_)
             | StorageError::InvalidName(_)
             | StorageError::TableMissing(_)
             | StorageError::Execution(_)
@@ -152,18 +160,21 @@ fn normalize_db_path(path: &Path) -> PathBuf {
     }
 }
 
-/// The `_tables` catalog handle is valid only while the env is alive, so
-/// both live together.
+/// The named-database handles are valid only while the env is alive, so they
+/// live together with it.
 #[derive(Debug)]
 pub struct HeedDB {
     env: heed::Env,
-    tables: TablesDb,
+    /// Unnamed LMDB db holding raw schema-version bytes (NUL-prefixed key).
+    default_db: heed::Database<heed::types::Str, heed::types::Bytes>,
     path: PathBuf,
 }
 
 impl HeedDB {
-    /// Open (or create) the LMDB environment at `path` as a single file, and
-    /// open/create the `_tables` system catalog inside it.
+    /// Open (or create) the LMDB environment at `path` as a single file. The
+    /// `_tables` system catalog is NOT created here — it is materialized by the
+    /// startup bootstrap running `CREATE TABLE _tables` through the query
+    /// pipeline, and opened on demand thereafter.
     pub fn open(path: &Path) -> Result<HeedDB, StorageError> {
         let normalized = normalize_db_path(path);
 
@@ -180,22 +191,25 @@ impl HeedDB {
 
         let mut wtxn = env.write_txn()?;
         // `create_database` is idempotent.
-        let tables: TablesDb = env.create_database(&mut wtxn, Some(TABLES_DB))?;
+        let default_db = env.create_database(&mut wtxn, None)?;
         wtxn.commit()?;
 
         Ok(HeedDB {
             env,
-            tables,
+            default_db,
             path: path.to_path_buf(),
         })
     }
 
-    /// Reject names the storage layer refuses: `_`-prefixed (reserved for the
-    /// system catalog) and interior NUL (would panic heed's key encoding).
+    /// Open `_tables` for reading if it exists yet. `None` on a fresh DB whose
+    /// catalog the bootstrap has not created.
+    fn tables_ro(&self, txn: &heed::RoTxn<'_>) -> Result<Option<TablesDb>, StorageError> {
+        Ok(self.env.open_database(txn, Some(TABLES_DB))?)
+    }
+
+    /// Reject names the storage layer refuses: interior NUL (would panic heed's
+    /// key encoding).
     fn guard_name(name: &str) -> Result<(), StorageError> {
-        if name.starts_with('_') {
-            return Err(StorageError::ReservedName(name.to_string()));
-        }
         if name.contains('\0') {
             return Err(StorageError::InvalidName(name.to_string()));
         }
@@ -204,16 +218,28 @@ impl HeedDB {
 
     /// Open a write handle for a new table. `name` must already be
     /// canonicalized by the caller (lowercase for bare identifiers, verbatim
-    /// for quoted).
-    pub fn create_table(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
+    /// for quoted). `tables_value` is the caller-encoded catalog row stored in
+    /// `_tables` under `name` — storage stays codec-free and writes opaque bytes.
+    pub fn create_table(
+        &self,
+        name: &str,
+        tables_value: &[u8],
+    ) -> Result<TableWriter<'_>, StorageError> {
         Self::guard_name(name)?;
         let mut wtxn = self.env.write_txn()?;
-        if self.tables.get(&wtxn, name)?.is_some() {
+        // Create the target DB FIRST. For the bootstrap call `name == "_tables"`
+        // this brings the catalog into existence (self-referential, no special-
+        // casing). When txn ownership moves to the app layer for streaming, this
+        // registration relocates to the binary.
+        let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
+        let tables = self
+            .env
+            .open_database::<heed::types::Str, heed::types::Bytes>(&wtxn, Some(TABLES_DB))?
+            .ok_or_else(|| StorageError::TableMissing(TABLES_DB.to_string()))?;
+        if tables.get(&wtxn, name)?.is_some() {
             return Err(StorageError::TableExists(name.to_string()));
         }
-        let table: RowDb = self.env.create_database(&mut wtxn, Some(name))?;
-        // Catalog cell records existence only.
-        self.tables.put(&mut wtxn, name, &[])?;
+        tables.put(&mut wtxn, name, tables_value)?;
         Ok(TableWriter {
             wtxn,
             table,
@@ -227,11 +253,20 @@ impl HeedDB {
     /// rows get fresh keys after the max.
     pub fn open_table_for_append(&self, name: &str) -> Result<TableWriter<'_>, StorageError> {
         Self::guard_name(name)?;
+        if is_system_table(name) {
+            return Err(StorageError::SystemTableReadOnly(name.to_string()));
+        }
         let wtxn = self.env.write_txn()?;
         // Catalog membership defines existence for reads (see `open_table`), so
         // the append path checks it too: a table absent from `_tables` is not
-        // appendable, matching what a subsequent SELECT would see.
-        if self.tables.get(&wtxn, name)?.is_none() {
+        // appendable, matching what a subsequent SELECT would see. `_tables`
+        // must exist to append to any table — a fresh, un-bootstrapped DB has
+        // no appendable tables.
+        let tables = self
+            .env
+            .open_database::<heed::types::Str, heed::types::Bytes>(&wtxn, Some(TABLES_DB))?
+            .ok_or_else(|| StorageError::TableMissing(TABLES_DB.to_string()))?;
+        if tables.get(&wtxn, name)?.is_none() {
             return Err(StorageError::TableMissing(name.to_string()));
         }
         // Open (not create): fail loudly if the named db is absent, rather than
@@ -274,8 +309,9 @@ impl HeedDB {
     /// database called `name` exists in the env (i.e., the table was never
     /// created or was dropped).
     pub fn open_table(&self, txn: &heed::RoTxn<'_>, name: &str) -> Result<RowDb, StorageError> {
-        if self.tables.get(txn, name)?.is_none() {
-            return Err(StorageError::TableMissing(name.to_string()));
+        match self.tables_ro(txn)? {
+            Some(tables) if tables.get(txn, name)?.is_some() => {}
+            _ => return Err(StorageError::TableMissing(name.to_string())),
         }
         self.env
             .open_database(txn, Some(name))?
@@ -283,23 +319,69 @@ impl HeedDB {
     }
 
     /// Enumerate every table name in `_tables`, in lexicographic key order.
+    /// A fresh DB whose catalog the bootstrap has not created yields an empty
+    /// list.
     pub fn list_table_names(&self, txn: &heed::RoTxn<'_>) -> Result<Vec<String>, StorageError> {
-        let mut out = Vec::with_capacity(self.tables.len(txn)? as usize);
-        for result in self.tables.iter(txn)? {
+        let Some(tables) = self.tables_ro(txn)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::with_capacity(tables.len(txn)? as usize);
+        for result in tables.iter(txn)? {
             let (k, _v) = result?;
             out.push(k.to_string());
         }
         Ok(out)
     }
 
-    #[cfg(test)]
-    pub(crate) fn env(&self) -> &heed::Env {
-        &self.env
+    pub fn read_schema_version(&self) -> Result<u32, StorageError> {
+        let rtxn = self.env.read_txn()?;
+        match self.default_db.get(&rtxn, SCHEMA_VERSION_KEY)? {
+            Some(b) => Ok(u32::from_le_bytes(<[u8; 4]>::try_from(b).map_err(
+                |_| {
+                    StorageError::Codec(format!(
+                        "schema_version is {} bytes, expected 4 (u32 LE)",
+                        b.len()
+                    ))
+                },
+            )?)),
+            None => Ok(0),
+        }
+    }
+
+    /// Stamp the version (raw u32 LE). Monotonic: never decreases. Returns the
+    /// version now on disk (>= requested) so the caller can detect a concurrent
+    /// newer stamp and reject the DB.
+    pub fn set_schema_version(&self, version: u32) -> Result<u32, StorageError> {
+        let mut wtxn = self.env.write_txn()?;
+        let current = match self.default_db.get(&wtxn, SCHEMA_VERSION_KEY)? {
+            Some(b) => u32::from_le_bytes(<[u8; 4]>::try_from(b).map_err(|_| {
+                StorageError::Codec(format!(
+                    "schema_version is {} bytes, expected 4 (u32 LE)",
+                    b.len()
+                ))
+            })?),
+            None => 0,
+        };
+        if current >= version {
+            return Ok(current);
+        }
+        self.default_db
+            .put(&mut wtxn, SCHEMA_VERSION_KEY, &version.to_le_bytes())?;
+        wtxn.commit()?;
+        Ok(version)
+    }
+
+    pub fn tables_has_self_entry(&self) -> Result<bool, StorageError> {
+        let rtxn = self.env.read_txn()?;
+        match self.tables_ro(&rtxn)? {
+            Some(tables) => Ok(tables.get(&rtxn, TABLES_DB)?.is_some()),
+            None => Ok(false),
+        }
     }
 
     #[cfg(test)]
-    pub(crate) fn tables(&self) -> &TablesDb {
-        &self.tables
+    pub(crate) fn env(&self) -> &heed::Env {
+        &self.env
     }
 
     pub fn path(&self) -> &Path {
@@ -344,20 +426,167 @@ impl HeedDB {
 mod tests {
     use super::*;
 
+    fn tables_value(name: &str) -> Vec<u8> {
+        let mut v = Vec::new();
+        crate::row_codec::serialize_name_row(&[name], &mut v).unwrap();
+        v
+    }
+
+    /// Open a DB and bootstrap `_tables` so user-table creates can proceed.
+    fn open_bootstrapped(path: &std::path::Path) -> HeedDB {
+        let db = HeedDB::open(path).unwrap();
+        db.create_table("_tables", &tables_value("_tables"))
+            .unwrap()
+            .commit()
+            .unwrap();
+        db
+    }
+
+    /// Open the `_tables` catalog for reading; panics if it does not exist.
+    fn tables_of(
+        db: &HeedDB,
+        rtxn: &heed::RoTxn<'_>,
+    ) -> heed::Database<heed::types::Str, heed::types::Bytes> {
+        db.env()
+            .open_database(rtxn, Some("_tables"))
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn open_does_not_create_tables_catalog_eagerly() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("lazy.pqlite")).unwrap();
+        let rtxn = db.env().read_txn().unwrap();
+        let named = db
+            .env()
+            .open_database::<heed::types::Str, heed::types::Bytes>(&rtxn, Some("_tables"))
+            .unwrap();
+        assert!(named.is_none(), "_tables must not be created eagerly");
+    }
+
+    #[test]
+    fn create_user_table_before_catalog_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("nocat.pqlite")).unwrap();
+        let res = db.create_table("foo", &tables_value("foo"));
+        assert!(matches!(res, Err(StorageError::TableMissing(ref n)) if n == "_tables"));
+    }
+
+    #[test]
+    fn self_referential_create_tables_bootstraps_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("selfref.pqlite")).unwrap();
+        db.create_table("_tables", &tables_value("_tables"))
+            .unwrap()
+            .commit()
+            .unwrap();
+        assert!(db.tables_has_self_entry().unwrap());
+        db.create_table("foo", &tables_value("foo"))
+            .unwrap()
+            .commit()
+            .unwrap();
+    }
+
+    #[test]
+    fn create_table_stores_caller_supplied_tables_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open_bootstrapped(&dir.path().join("val.pqlite"));
+        let value = tables_value("widgets");
+        db.create_table("widgets", &value)
+            .unwrap()
+            .commit()
+            .unwrap();
+        let rtxn = db.env().read_txn().unwrap();
+        let tables = tables_of(&db, &rtxn);
+        assert_eq!(tables.get(&rtxn, "widgets").unwrap().unwrap(), &value[..]);
+    }
+
+    #[test]
+    fn schema_version_absent_reads_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("v.pqlite")).unwrap();
+        assert_eq!(db.read_schema_version().unwrap(), 0);
+    }
+
+    #[test]
+    fn schema_version_round_trips_raw_le_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("v.pqlite")).unwrap();
+        assert_eq!(db.set_schema_version(1).unwrap(), 1);
+        assert_eq!(db.read_schema_version().unwrap(), 1);
+        let rtxn = db.env().read_txn().unwrap();
+        let d: heed::Database<heed::types::Str, heed::types::Bytes> =
+            db.env().open_database(&rtxn, None).unwrap().unwrap();
+        assert_eq!(
+            d.get(&rtxn, "\0schema_version").unwrap().unwrap(),
+            &1u32.to_le_bytes()
+        );
+    }
+
+    #[test]
+    fn set_schema_version_is_monotonic_and_returns_observed() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("v.pqlite")).unwrap();
+        assert_eq!(db.set_schema_version(2).unwrap(), 2);
+        assert_eq!(
+            db.set_schema_version(1).unwrap(),
+            2,
+            "downgrade no-ops, returns observed"
+        );
+        assert_eq!(db.read_schema_version().unwrap(), 2);
+    }
+
+    #[test]
+    fn malformed_version_bytes_error_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("v.pqlite")).unwrap();
+        {
+            let mut wtxn = db.env().write_txn().unwrap();
+            let d: heed::Database<heed::types::Str, heed::types::Bytes> =
+                db.env().create_database(&mut wtxn, None).unwrap();
+            d.put(&mut wtxn, "\0schema_version", &[0x01, 0x02, 0x03])
+                .unwrap();
+            wtxn.commit().unwrap();
+        }
+        assert!(matches!(
+            db.read_schema_version(),
+            Err(StorageError::Codec(_))
+        ));
+    }
+
+    #[test]
+    fn tables_has_self_entry_reflects_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("v.pqlite")).unwrap();
+        // No catalog exists until _tables is created as a table.
+        assert!(!db.tables_has_self_entry().unwrap());
+        db.create_table("_tables", &tables_value("_tables"))
+            .unwrap()
+            .commit()
+            .unwrap();
+        assert!(db.tables_has_self_entry().unwrap());
+    }
+
     #[test]
     fn table_writer_round_trip_via_push_and_commit() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("writer.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
-        let mut w = db.create_table("widgets").expect("create_table");
+        let mut w = db
+            .create_table("widgets", &tables_value("widgets"))
+            .expect("create_table");
         w.push_row(&[0xDE, 0xAD]).unwrap();
         w.push_row(&[0xBE, 0xEF, 0x01]).unwrap();
         let n = w.commit().unwrap();
         assert_eq!(n, 2);
 
         let rtxn = db.env().read_txn().unwrap();
-        assert!(db.tables().get(&rtxn, "widgets").unwrap().is_some());
+        assert!(tables_of(&db, &rtxn)
+            .get(&rtxn, "widgets")
+            .unwrap()
+            .is_some());
         let rowdb: RowDb = db
             .env()
             .open_database(&rtxn, Some("widgets"))
@@ -370,14 +599,16 @@ mod tests {
     fn create_table_writes_bytes_verbatim_and_registers_catalog() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ctas.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
         let payloads: [&[u8]; 3] = [
             &[0xDE, 0xAD, 0xBE, 0xEF],
             &[0x01],
             &[0xFF, 0x00, 0xFF, 0x00, 0xFF],
         ];
-        let mut w = db.create_table("widgets").unwrap();
+        let mut w = db
+            .create_table("widgets", &tables_value("widgets"))
+            .unwrap();
         for p in payloads.iter() {
             w.push_row(p).unwrap();
         }
@@ -386,7 +617,10 @@ mod tests {
 
         let rtxn = db.env().read_txn().unwrap();
         assert!(
-            db.tables().get(&rtxn, "widgets").unwrap().is_some(),
+            tables_of(&db, &rtxn)
+                .get(&rtxn, "widgets")
+                .unwrap()
+                .is_some(),
             "widgets should be registered in _tables"
         );
 
@@ -410,13 +644,17 @@ mod tests {
     fn create_table_with_no_rows_creates_empty_table() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
-        let n = db.create_table("blank").unwrap().commit().unwrap();
+        let n = db
+            .create_table("blank", &tables_value("blank"))
+            .unwrap()
+            .commit()
+            .unwrap();
         assert_eq!(n, 0);
 
         let rtxn = db.env().read_txn().unwrap();
-        assert!(db.tables().get(&rtxn, "blank").unwrap().is_some());
+        assert!(tables_of(&db, &rtxn).get(&rtxn, "blank").unwrap().is_some());
         let rowdb: RowDb = db
             .env()
             .open_database::<RowKey, heed::types::Bytes>(&rtxn, Some("blank"))
@@ -429,12 +667,12 @@ mod tests {
     fn create_table_rejects_duplicate_name() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("dup.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
-        let mut w1 = db.create_table("t").unwrap();
+        let mut w1 = db.create_table("t", &tables_value("t")).unwrap();
         w1.push_row(&[0x01]).unwrap();
         w1.commit().unwrap();
-        let again = db.create_table("t");
+        let again = db.create_table("t", &tables_value("t"));
         assert!(
             matches!(again, Err(StorageError::TableExists(ref n)) if n == "t"),
             "expected TableExists; got {:?}",
@@ -442,36 +680,43 @@ mod tests {
         );
 
         let rtxn = db.env().read_txn().unwrap();
-        assert_eq!(db.tables().len(&rtxn).unwrap(), 1);
+        // _tables (self-entry) plus the one user table t.
+        assert_eq!(tables_of(&db, &rtxn).len(&rtxn).unwrap(), 2);
+        // Release the read txn before read_row_for_tests opens its own; LMDB
+        // rejects a second concurrent read txn on the same thread (BadRslot).
+        drop(rtxn);
+
+        // Rejected re-create must not clear the original row: create_table now
+        // creates the target DB before the duplicate check, so a future
+        // clear-then-recreate regression would silently drop existing data.
+        assert_eq!(db.read_row_for_tests("t", 0), vec![0x01]);
     }
 
     #[test]
-    fn create_table_rejects_reserved_names() {
+    fn create_table_allows_underscore_prefixed_names_and_persists() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("reserved.pqlite");
-        let db = HeedDB::open(&path).unwrap();
-
-        for name in ["_tables", "_x", "_"] {
-            let res = db.create_table(name);
-            assert!(
-                matches!(res, Err(StorageError::ReservedName(_))),
-                "expected ReservedName for {name:?}; got {:?}",
-                res
-            );
+        let db = open_bootstrapped(&dir.path().join("underscore.pqlite"));
+        for name in ["_x", "_temp", "_internal"] {
+            db.create_table(name, &tables_value(name))
+                .unwrap()
+                .commit()
+                .unwrap(); // commit → prove persistence
         }
-
         let rtxn = db.env().read_txn().unwrap();
-        assert_eq!(db.tables().len(&rtxn).unwrap(), 0);
+        let names = db.list_table_names(&rtxn).unwrap();
+        for name in ["_x", "_temp", "_internal"] {
+            assert!(names.contains(&name.to_string()), "{name} should persist");
+        }
     }
 
     #[test]
     fn create_table_rejects_interior_nul_names() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nul.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
         // Interior NUL would otherwise panic heed's CString::new.
-        let res = db.create_table("a\0b");
+        let res = db.create_table("a\0b", &tables_value("x"));
         assert!(
             matches!(res, Err(StorageError::InvalidName(_))),
             "expected InvalidName; got {:?}",
@@ -479,22 +724,28 @@ mod tests {
         );
 
         let rtxn = db.env().read_txn().unwrap();
-        assert_eq!(db.tables().len(&rtxn).unwrap(), 0);
+        // Only the bootstrapped _tables self-entry; the rejected name added nothing.
+        assert_eq!(tables_of(&db, &rtxn).len(&rtxn).unwrap(), 1);
     }
 
     #[test]
     fn dropping_writer_rolls_back_uncommitted_rows() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rb.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
         {
-            let mut w = db.create_table("partial").unwrap();
+            let mut w = db
+                .create_table("partial", &tables_value("partial"))
+                .unwrap();
             w.push_row(&[0x42]).unwrap();
             // Drop without commit — wtxn rolls back.
         }
         let rtxn = db.env().read_txn().unwrap();
         assert!(
-            db.tables().get(&rtxn, "partial").unwrap().is_none(),
+            tables_of(&db, &rtxn)
+                .get(&rtxn, "partial")
+                .unwrap()
+                .is_none(),
             "rolled-back create must leave no catalog entry"
         );
     }
@@ -515,10 +766,10 @@ mod tests {
         assert!(te.to_string().contains("already exists"), "got: {te}");
         assert!(te.to_string().contains("foo"), "got: {te}");
 
-        let rn = StorageError::ReservedName("_x".to_string());
-        let s = rn.to_string();
-        assert!(s.contains("reserved"), "got: {s}");
-        assert!(s.contains("_x"), "got: {s}");
+        let sr = StorageError::SystemTableReadOnly("_tables".to_string());
+        let s = sr.to_string();
+        assert!(s.contains("system table"), "got: {s}");
+        assert!(s.contains("_tables"), "got: {s}");
 
         let inv = StorageError::InvalidName("a\0b".to_string());
         let s = inv.to_string();
@@ -544,30 +795,6 @@ mod tests {
     }
 
     #[test]
-    fn open_creates_empty_tables_catalog() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("cat.pqlite");
-        let db = HeedDB::open(&path).unwrap();
-
-        // NO_SUB_DIR stores the environment as a single file.
-        assert!(path.is_file(), "db should be a single file (NO_SUB_DIR)");
-
-        let rtxn = db.env().read_txn().unwrap();
-
-        // Look up by literal name so renaming the TABLES_DB constant can't pass spuriously.
-        let named = db
-            .env()
-            .open_database::<heed::types::Str, heed::types::Bytes>(&rtxn, Some("_tables"))
-            .unwrap();
-        assert!(
-            named.is_some(),
-            "the `_tables` catalog should exist by name"
-        );
-
-        assert_eq!(db.tables().len(&rtxn).unwrap(), 0);
-    }
-
-    #[test]
     fn open_is_idempotent_on_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("reopen.pqlite");
@@ -582,9 +809,9 @@ mod tests {
     fn open_table_yields_pushed_rows_in_insertion_order() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("read.pqlite");
-        let db = HeedDB::open(&path).unwrap();
+        let db = open_bootstrapped(&path);
 
-        let mut w = db.create_table("t").unwrap();
+        let mut w = db.create_table("t", &tables_value("t")).unwrap();
         w.push_row(&[0x01, 0x02]).unwrap();
         w.push_row(&[0x03, 0x04, 0x05]).unwrap();
         w.commit().unwrap();
@@ -618,8 +845,8 @@ mod tests {
     #[test]
     fn append_to_existing_table_continues_row_ids() {
         let dir = tempfile::tempdir().unwrap();
-        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
-        let mut w = db.create_table("t").unwrap();
+        let db = open_bootstrapped(&dir.path().join("t.pqlite"));
+        let mut w = db.create_table("t", &tables_value("t")).unwrap();
         w.push_row(&[0xAA]).unwrap();
         w.push_row(&[0xBB]).unwrap();
         w.push_row(&[0xCC]).unwrap();
@@ -637,8 +864,11 @@ mod tests {
     #[test]
     fn append_to_empty_table_starts_at_zero() {
         let dir = tempfile::tempdir().unwrap();
-        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
-        db.create_table("t").unwrap().commit().unwrap(); // empty table, no rows
+        let db = open_bootstrapped(&dir.path().join("t.pqlite"));
+        db.create_table("t", &tables_value("t"))
+            .unwrap()
+            .commit()
+            .unwrap(); // empty table, no rows
         let mut a = db.open_table_for_append("t").unwrap();
         a.push_row(&[0x01]).unwrap();
         assert_eq!(a.commit().unwrap(), 1);
@@ -648,23 +878,36 @@ mod tests {
     #[test]
     fn append_to_missing_table_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        let db = open_bootstrapped(&dir.path().join("t.pqlite"));
         let r = db.open_table_for_append("ghost");
-        assert!(matches!(r, Err(StorageError::TableMissing(_))));
+        assert!(matches!(r, Err(StorageError::TableMissing(ref n)) if n == "ghost"));
     }
 
     #[test]
-    fn append_rejects_reserved_and_invalid_names() {
+    fn append_rejects_nul_names() {
         let dir = tempfile::tempdir().unwrap();
         let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
-        assert!(matches!(
-            db.open_table_for_append("_x"),
-            Err(StorageError::ReservedName(_))
-        ));
         assert!(matches!(
             db.open_table_for_append("a\0b"),
             Err(StorageError::InvalidName(_))
         ));
+    }
+
+    #[test]
+    fn append_rejects_exact_system_table_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = HeedDB::open(&dir.path().join("t.pqlite")).unwrap();
+        assert!(
+            matches!(db.open_table_for_append("_tables"), Err(StorageError::SystemTableReadOnly(ref n)) if n == "_tables"),
+            "INSERT into _tables must be rejected to protect the catalog"
+        );
+    }
+
+    #[test]
+    fn is_system_table_matches_only_tables_db() {
+        assert!(is_system_table("_tables"));
+        assert!(!is_system_table("_foo"));
+        assert!(!is_system_table("tables"));
     }
 
     #[test]

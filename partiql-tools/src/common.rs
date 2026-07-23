@@ -50,6 +50,11 @@ pub fn parse(statement: &str) -> Result<Parsed<'_>, ParserError<'_>> {
     Parser::default().parse(statement)
 }
 
+/// Parse a `;`-separated PartiQL script into its individual statements.
+pub fn parse_statements(script: &str) -> Result<Parsed<'_>, ParserError<'_>> {
+    Parser::default().parse_statements(script)
+}
+
 /// Lower AST to logical plan
 pub fn lower(
     catalog: &dyn SharedCatalog,
