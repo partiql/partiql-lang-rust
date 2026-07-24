@@ -2,6 +2,8 @@
 test_data/
 data/
 *.ion
+# but keep checked-in e2e fixtures
+!tests/pqlite/cases/**/*.test.ion
 *.10n
 *.arrow
 *.parquet

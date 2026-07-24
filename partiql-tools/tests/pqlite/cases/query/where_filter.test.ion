@@ -1,0 +1,2 @@
+// Truthy WHERE predicate — only WHERE FALSE is exercised elsewhere.
+{ sql: "SELECT * FROM << {'n':1},{'n':2},{'n':3} >> t WHERE t.n > 1", expect: { rows: $bag::[ { n: 2 }, { n: 3 } ] } }

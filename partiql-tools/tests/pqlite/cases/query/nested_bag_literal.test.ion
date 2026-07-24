@@ -1,0 +1,4 @@
+// Nested struct values survive insert and read-back.
+{ sql: "CREATE TABLE issues" }
+{ sql: "INSERT INTO issues SELECT * FROM << {'number':1, 'author':{'login':'alice'}}, {'number':2, 'author':{'login':'bob'}} >>", expect: { affected_rows: 2 } }
+{ sql: "SELECT * FROM issues", expect: { rows: $bag::[ { number: 1, author: { login: "alice" } }, { number: 2, author: { login: "bob" } } ] } }

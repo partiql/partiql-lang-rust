@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod common;
 pub mod row_codec;
+pub mod session;
 pub mod storage;
 
 #[cfg(any(test, feature = "test-support"))]

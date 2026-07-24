@@ -1,0 +1,5 @@
+// Field-not-present projection on a stored row: reading absent field `b` from
+// a stored `{a:1}` produces MISSING at read time (persistence of MISSING itself
+// isn't reachable via SQL literals today).
+{ sql: "CREATE TABLE t AS (SELECT * FROM << {'a': 1} >>)", expect: { created_table: { name: ["t"], rows: 1 } } }
+{ sql: "SELECT t.b AS x FROM t", expect: { rows: $bag::[ { x: $missing::null } ] } }

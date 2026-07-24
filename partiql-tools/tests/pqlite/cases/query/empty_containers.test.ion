@@ -1,0 +1,5 @@
+// Empty user table renders as $bag::[] — pins the empty-scan envelope shape.
+{ sql: "CREATE TABLE empt" }
+{ sql: "SELECT * FROM empt", expect: { rows: $bag::[] } }
+// Empty list, empty bag, and non-empty bag as projected column values.
+{ sql: "SELECT [] AS xs, << >> AS ys, << 100, 200 >> AS zs FROM << {'a': 1} >> m", expect: { rows: $bag::[ { xs: [], ys: $bag::[], zs: $bag::[100, 200] } ] } }

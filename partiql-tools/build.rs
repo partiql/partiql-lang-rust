@@ -37,6 +37,9 @@ fn main() {
             println!("cargo:rerun-if-changed={}", packed.display());
         }
     }
+
+    // Re-discover `.test.ion` fixtures when the cases directory changes.
+    println!("cargo:rerun-if-changed=tests/pqlite/cases");
 }
 
 /// Run a git command, returning trimmed stdout on success, or `None` on any

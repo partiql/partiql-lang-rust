@@ -1,0 +1,6 @@
+// CTAS a single table with a mix of value types (int, string, null, decimal,
+// list) so wire-format encode/decode is exercised for each type in one shot.
+// Decimal (3.14) must round-trip exactly (no float drift); the list column
+// covers container encoding through disk.
+{ sql: "CREATE TABLE t AS (SELECT * FROM << {'i': 1, 's': 'hello', 'n': NULL, 'd': 3.14, 'xs': [10, 20, 30]}, {'i': 2, 's': 'world', 'n': NULL, 'd': 2.5, 'xs': [40, 50]} >>)", expect: { created_table: { name: ["t"], rows: 2 } } }
+{ sql: "SELECT * FROM t", expect: { rows: $bag::[ { i: 1, s: "hello", n: null, d: 3.14, xs: [10, 20, 30] }, { i: 2, s: "world", n: null, d: 2.5, xs: [40, 50] } ] } }
