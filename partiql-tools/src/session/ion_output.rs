@@ -1,76 +1,15 @@
-//! PartiQL-encoded-Ion rendering. `stream_query_ion` streams row-by-row (peak
-//! memory O(1) in rows); `write_outcome_ion` renders a single small envelope.
+//! PartiQL-encoded-Ion envelope for non-query statement outcomes plus the
+//! control-char escape used by every Ion emit path. Streaming Query row
+//! rendering lives in `session::render::render_query_ion`.
 
 use std::io::{self, Write};
 
 use ion_rs::element::writer::TextKind;
 use ion_rs::element::{Element, Sequence, Struct};
-use partiql_eval::value::Shape;
 
 use crate::session::outcome::StatementOutcome;
-use crate::session::value::{row_to_value, value_to_element, RowConvertError};
-
-/// Emit `{rows: $bag::[...]}` (Bag), `{rows: [...]}` (List), or `{rows: v}`
-/// (Single). Each row is serialised and written before the next VM row is
-/// pulled.
-pub(super) fn stream_query_ion(
-    iter: partiql_eval::QueryIterator<'_>,
-    shape: &Shape,
-    out: &mut dyn Write,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    // Spacing matches ion_rs' Struct/Sequence Compact writer.
-    let (open, close) = match shape {
-        Shape::Bag(_) => ("{rows: $bag::[", "]}"),
-        Shape::List(_) => ("{rows: [", "]}"),
-        Shape::Single(_) => ("{rows: ", "}"),
-    };
-
-    let mut count: u64 = 0;
-    let mut opened = false;
-    for row_result in iter {
-        let row = row_result.map_err(|e| format!("Execution error: {:?}", e))?;
-        let value = row_to_value(&row, shape).map_err(|e| format!("Execution error: {e}"))?;
-        let element = value_to_element(&value).map_err(|e: RowConvertError| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })?;
-        let text = element
-            .to_text(TextKind::Compact)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        // ion_rs 0.18.1's writer doesn't escape C0 controls in quoted regions.
-        let escaped = escape_control_chars_in_strings(&text);
-
-        // Reject before the second row is serialised. Note: partial stdout
-        // (opener + first row, no closer) can already be on `out`; per design,
-        // non-zero exit signals consumers to discard.
-        if matches!(shape, Shape::Single(_)) && count >= 1 {
-            return Err(
-                "single-row query produced more than one row (invalid Ion envelope)".into(),
-            );
-        }
-
-        if !opened {
-            out.write_all(open.as_bytes())?;
-        } else {
-            out.write_all(b", ")?;
-        }
-        out.write_all(escaped.as_bytes())?;
-        opened = true;
-        count += 1;
-    }
-
-    if matches!(shape, Shape::Single(_)) && count == 0 {
-        return Err("single-row query produced no row".into());
-    }
-
-    // Empty Bag/List still owes the opener.
-    if !opened {
-        out.write_all(open.as_bytes())?;
-    }
-    out.write_all(close.as_bytes())?;
-    out.write_all(b"\n")?;
-    out.flush()?;
-    Ok(count)
-}
+#[cfg(test)]
+use crate::session::value::value_to_element;
 
 /// Checked cast: LMDB stores row counts as `u64`; `Element::integer` takes
 /// `i64`. A count that exceeds `i64::MAX` is reported as an I/O error rather

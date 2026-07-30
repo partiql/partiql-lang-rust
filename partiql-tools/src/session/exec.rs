@@ -1,34 +1,122 @@
 //! Parse + lower + compile + execute one statement.
 //!
-//! SELECT streams row-by-row into `out`; non-query statements buffer a small
-//! `StatementOutcome` for the caller to render.
+//! Non-query statements are executed to completion and returned as a
+//! `StatementOutcome`. Queries return `RunOutcome::Query` carrying a handle
+//! the caller drives via `QueryHandle::drain(render_fn)`. Session never writes
+//! to stdout/stderr.
 
-use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use partiql_ast::ast;
-use partiql_eval::value::Shape;
+use partiql_eval::value::{RegisterReader, Shape};
 use partiql_logical::{BindingsOp, LogicalPlan, LogicalStatement};
 
 use crate::common;
 use crate::session::debug::DebugFlags;
-use crate::session::ion_output::stream_query_ion;
 use crate::session::naming::{canonical_table_key, normalize_query};
-use crate::session::outcome::{DebugCapture, OutputFormat, StatementOutcome, StatementTiming};
+use crate::session::outcome::{DebugCapture, StatementOutcome, StatementTiming};
 use crate::session::planner;
-use crate::session::value;
 use crate::storage::{self, HeedDB};
 
-/// What `exec::run` streamed to `out`. Query rows are already on the wire; the
-/// caller only needs count + timing for the footer. Non-query outcomes carry
-/// their own metadata for the caller to render.
-pub(super) enum RunResult {
-    Query {
-        row_count: u64,
-        timing: StatementTiming,
-    },
-    NonQuery(StatementOutcome),
+/// Result of dispatching a statement. Queries hand back a `QueryHandle` so the
+/// caller can drain rows on its own terms; non-query statements are already
+/// complete.
+pub enum RunOutcome {
+    Query(QueryHandle),
+    Statement(StatementOutcome),
+}
+
+/// A compiled query the caller must drive to completion via `drain`. Owns the
+/// VM so rows stay valid for the drain call's lifetime; the exec-time clock
+/// starts inside `drain` (NOT at handle construction) so caller-side stalls
+/// between `run` and `drain` don't count as execution.
+pub struct QueryHandle {
+    vm: Box<partiql_eval::PartiQLVM>,
+    shape: Shape,
+    debug: DebugCapture,
+    parse_time: Duration,
+    lower_time: Duration,
+    compile_time: Duration,
+}
+
+impl QueryHandle {
+    pub fn shape(&self) -> &Shape {
+        &self.shape
+    }
+
+    /// Take the debug capture out of the handle. Call this BEFORE `drain` if
+    /// the caller wants `--debug` output on stderr to precede rows on stdout.
+    pub fn take_debug(&mut self) -> DebugCapture {
+        std::mem::take(&mut self.debug)
+    }
+
+    /// Drive the query to completion. The renderer receives a row-counting
+    /// iterator plus the shape; whatever it returns comes back paired with a
+    /// finalized `QueryFooter`. Session owns the exec-time clock. After the
+    /// renderer returns `Ok`, any rows it did NOT consume are drained here so
+    /// `row_count` is authoritative — a lazy renderer cannot silently under-
+    /// count. A row error surfaced during that post-drain becomes the return
+    /// value's error.
+    ///
+    /// Consumes `self`: a handle cannot be executed twice.
+    pub fn drain<F, R>(mut self, render: F) -> Result<(R, QueryFooter), Box<dyn std::error::Error>>
+    where
+        F: FnOnce(&mut CountingRows<'_>, &Shape) -> Result<R, Box<dyn std::error::Error>>,
+    {
+        let exec_start = Instant::now();
+        let iter = match self.vm.execute() {
+            Ok(partiql_eval::ExecutionResult::Query(it)) => it,
+            Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
+        };
+        let mut counter = CountingRows {
+            inner: iter,
+            count: 0,
+        };
+        let user_result = render(&mut counter, &self.shape)?;
+        // Post-drain: if the renderer stopped early, finish consuming the
+        // iterator so row_count is complete and any late row error surfaces.
+        for row in counter.by_ref() {
+            row.map_err(|e| format!("Execution error: {:?}", e))?;
+        }
+        let row_count = counter.count;
+        Ok((
+            user_result,
+            QueryFooter {
+                row_count,
+                timing: StatementTiming {
+                    parse: self.parse_time,
+                    lower: self.lower_time,
+                    compile: self.compile_time,
+                    exec: exec_start.elapsed(),
+                },
+            },
+        ))
+    }
+}
+
+/// Row-count + timing for a completed Query, ready to render.
+pub struct QueryFooter {
+    pub row_count: u64,
+    pub timing: StatementTiming,
+}
+
+/// Row iterator adapter: session owns the counter, renderer just pulls rows.
+pub struct CountingRows<'vm> {
+    inner: partiql_eval::QueryIterator<'vm>,
+    count: u64,
+}
+
+impl<'vm> Iterator for CountingRows<'vm> {
+    type Item = Result<RegisterReader<'vm>, partiql_eval::EngineError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.inner.next()?;
+        if item.is_ok() {
+            self.count += 1;
+        }
+        Some(item)
+    }
 }
 
 struct StatementCtx<'a> {
@@ -50,17 +138,13 @@ impl StatementCtx<'_> {
     }
 }
 
-/// Parse + lower + dispatch. On the Query path, AST/plan/program flush to
-/// `err` BEFORE row iteration so debug precedes results (dev parity). On Err,
-/// any capture built up so far is returned in the second position.
+/// Parse + lower + dispatch. On error, the compile-time debug capture is
+/// returned in the second position so the caller can flush it.
 pub(super) fn run(
     db: Option<&Arc<HeedDB>>,
     debug: &DebugFlags,
     sql: &str,
-    format: OutputFormat,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> (Result<RunResult, Box<dyn std::error::Error>>, DebugCapture) {
+) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
     let sql = normalize_query(sql);
     if sql.is_empty() {
         return (Err("empty query".into()), DebugCapture::default());
@@ -88,15 +172,14 @@ pub(super) fn run(
         None => return (Err("no statements after parse".into()), capture),
     };
 
-    match dispatch(stmt, debug, db, parse_time, &mut capture, format, out, err) {
-        Ok(res) => (Ok(res), DebugCapture::default()),
+    match dispatch(stmt, debug, db, parse_time, &mut capture) {
+        Ok(out) => (Ok(out), DebugCapture::default()),
         Err(e) => (Err(e), capture),
     }
 }
 
-/// Bootstrap entry: no debug capture, no rendering. Query statements route
-/// their output to `io::sink()` so future SELECTs in the bootstrap script
-/// don't brick startup.
+/// Bootstrap entry: no debug capture, no rendering. Query statements drain
+/// their rows internally so their side effects run without needing a renderer.
 pub(super) fn execute_statement_silent(
     stmt: &ast::AstNode<ast::Statement>,
     debug: &DebugFlags,
@@ -117,32 +200,26 @@ pub(super) fn execute_statement_silent(
 
     match statement {
         LogicalStatement::Query(plan) => {
-            let mut sink_out = std::io::sink();
-            let mut sink_err = std::io::sink();
-            stream_query(
-                plan,
-                &mut ctx,
-                OutputFormat::Text,
-                &mut sink_out,
-                &mut sink_err,
-            )
-            .map(|_| ())
+            let handle = compile_query(plan, &mut ctx)?;
+            handle.drain(|rows, _shape| {
+                for row in rows {
+                    row.map_err(|e| format!("Execution error: {:?}", e))?;
+                }
+                Ok(())
+            })?;
+            Ok(())
         }
         other => dispatch_write(other, &mut ctx).map(|_| ()),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn dispatch(
     stmt: &ast::AstNode<ast::Statement>,
     debug: &DebugFlags,
     db: Option<&Arc<HeedDB>>,
     parse_time: Duration,
     capture: &mut DebugCapture,
-    format: OutputFormat,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> Result<RunResult, Box<dyn std::error::Error>> {
+) -> Result<RunOutcome, Box<dyn std::error::Error>> {
     let catalog = common::create_table_fn_catalog();
 
     let lower_start = Instant::now();
@@ -159,8 +236,11 @@ fn dispatch(
     };
 
     match statement {
-        LogicalStatement::Query(plan) => stream_query(plan, &mut ctx, format, out, err),
-        other => dispatch_write(other, &mut ctx).map(RunResult::NonQuery),
+        LogicalStatement::Query(plan) => {
+            let handle = compile_query(plan, &mut ctx)?;
+            Ok(RunOutcome::Query(handle))
+        }
+        other => dispatch_write(other, &mut ctx).map(RunOutcome::Statement),
     }
 }
 
@@ -177,83 +257,31 @@ fn dispatch_write(
     }
 }
 
-fn stream_query(
+/// Compile a query plan into a handle ready to execute. VM setup
+/// (build_exec_context + PartiQLVM::new) is folded into `compile_time` so the
+/// footer accounts for all pre-execution work.
+fn compile_query(
     plan: LogicalPlan<BindingsOp>,
     ctx: &mut StatementCtx<'_>,
-    format: OutputFormat,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> Result<RunResult, Box<dyn std::error::Error>> {
+) -> Result<QueryHandle, Box<dyn std::error::Error>> {
     let compile_start = Instant::now();
     let (compiled, catalog_id) =
         planner::build_compiled(&plan, ctx.debug, ctx.db.cloned(), ctx.capture)?;
+    let exec_context = planner::build_exec_context(ctx.db.cloned(), catalog_id, &compiled);
+    let vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+        .map_err(|e| format!("Execution setup error: {:?}", e))?;
     let compile_time = compile_start.elapsed();
 
-    let exec_start = Instant::now();
-    let exec_context = planner::build_exec_context(ctx.db.cloned(), catalog_id, &compiled);
-    let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
-        .map_err(|e| format!("Execution setup error: {:?}", e))?;
     let shape = vm.shape().clone();
 
-    // Flush AST/plan/program NOW so debug on stderr precedes results on stdout.
-    crate::session::flush_debug(ctx.capture, err)?;
-    *ctx.capture = DebugCapture::default();
-
-    let row_count = match vm.execute() {
-        Ok(partiql_eval::ExecutionResult::Query(iter)) => match format {
-            OutputFormat::Text => stream_query_text(iter, &shape, out)?,
-            OutputFormat::Ion => stream_query_ion(iter, &shape, out)?,
-        },
-        Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
-    };
-    let exec_time = exec_start.elapsed();
-
-    Ok(RunResult::Query {
-        row_count,
-        timing: StatementTiming {
-            parse: ctx.parse_time,
-            lower: ctx.lower_time,
-            compile: compile_time,
-            exec: exec_time,
-        },
+    Ok(QueryHandle {
+        vm: Box::new(vm),
+        shape,
+        debug: std::mem::take(ctx.capture),
+        parse_time: ctx.parse_time,
+        lower_time: ctx.lower_time,
+        compile_time,
     })
-}
-
-/// Human-readable text: `<<\n  <row>,\n  ...\n>>\n` for Bag, `[`/`]` for List,
-/// bare `{value:?}` for Single.
-fn stream_query_text(
-    iter: partiql_eval::QueryIterator<'_>,
-    shape: &Shape,
-    out: &mut dyn Write,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let (prefix, tab, suffix) = match shape {
-        Shape::Bag(_) => (Some("<<"), "  ", Some(">>")),
-        Shape::List(_) => (Some("["), "  ", Some("]")),
-        Shape::Single(_) => (None, "", None),
-    };
-    if let Some(p) = prefix {
-        writeln!(out, "{}", p)?;
-    }
-
-    let mut count: u64 = 0;
-    let mut is_first = true;
-    for row_result in iter {
-        let row = row_result.map_err(|e| format!("Execution error: {:?}", e))?;
-        let v = value::row_to_value(&row, shape).map_err(|e| format!("Execution error: {e}"))?;
-        if is_first {
-            is_first = false;
-        } else {
-            writeln!(out, ",")?;
-        }
-        write!(out, "{tab}{v:?}")?;
-        count += 1;
-    }
-    writeln!(out)?;
-    if let Some(s) = suffix {
-        writeln!(out, "{}", s)?;
-    }
-    out.flush()?;
-    Ok(count)
 }
 
 fn exec_ctas(

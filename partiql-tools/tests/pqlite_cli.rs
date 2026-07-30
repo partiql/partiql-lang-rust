@@ -22,10 +22,11 @@ const PQLITE: &str = env!("CARGO_BIN_EXE_pqlite");
 /// (exit_success, stdout, stderr).
 fn run_exec(query: &str, db: Option<&std::path::Path>) -> (bool, String, String) {
     let mut cmd = Command::new(PQLITE);
-    cmd.arg("exec").arg(query);
+    cmd.arg("exec");
     if let Some(path) = db {
         cmd.arg("--db").arg(path);
     }
+    cmd.arg(query);
     let out = cmd.output().expect("failed to spawn pqlite");
     (
         out.status.success(),
@@ -123,9 +124,9 @@ fn empty_query_with_db_does_not_create_file() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("empty.pqlite");
     let out = Command::new(PQLITE)
+        .arg("exec")
         .arg("--db")
         .arg(&dbp)
-        .arg("exec")
         .arg("   ")
         .output()
         .expect("failed to spawn pqlite");
@@ -269,16 +270,16 @@ fn ctas_with_db_creates_table_and_persists_file() {
 
 #[test]
 fn ctas_with_bare_db_filename_creates_file_in_cwd() {
-    // Regression: `pqlite --db foo.pqlite` with a BARE filename (no directory
-    // component) must create the file in the current directory, like any UNIX
-    // tool — not fail with ENOENT. The child runs with its cwd set to a temp
-    // dir, so the bare name resolves there.
+    // Regression: `pqlite exec --db foo.pqlite ...` with a BARE filename (no
+    // directory component) must create the file in the current directory,
+    // like any UNIX tool — not fail with ENOENT. The child runs with its cwd
+    // set to a temp dir, so the bare name resolves there.
     let dir = tempfile::tempdir().unwrap();
 
     let out = Command::new(PQLITE)
+        .arg("exec")
         .arg("--db")
         .arg("bare.pqlite") // bare name: parent() is "" — the bug case
-        .arg("exec")
         .arg("CREATE TABLE t AS (SELECT t.a FROM mem(2,2) t)")
         .current_dir(dir.path())
         .output()

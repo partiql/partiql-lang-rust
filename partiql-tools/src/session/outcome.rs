@@ -1,5 +1,7 @@
-//! Non-query outcomes (CTAS / INSERT / CREATE TABLE). Query results stream
-//! directly to `out`; they do not flow through this type.
+//! Non-query outcomes (CTAS / INSERT / CREATE TABLE). Query results are
+//! delivered as a live handle in `RunOutcome::Query` and do not flow through
+//! this type — the caller renders rows and their footer directly from the
+//! handle's timing/row-count fields.
 
 use std::time::Duration;
 
@@ -66,9 +68,17 @@ pub enum StatementOutcome {
 impl StatementOutcome {
     pub fn debug(&self) -> &DebugCapture {
         match self {
-            StatementOutcome::CreateTableAs { debug, .. } => debug,
-            StatementOutcome::InsertInto { debug, .. } => debug,
-            StatementOutcome::CreateTable { debug, .. } => debug,
+            StatementOutcome::CreateTableAs { debug, .. }
+            | StatementOutcome::InsertInto { debug, .. }
+            | StatementOutcome::CreateTable { debug, .. } => debug,
+        }
+    }
+
+    pub fn timing(&self) -> &StatementTiming {
+        match self {
+            StatementOutcome::CreateTableAs { timing, .. }
+            | StatementOutcome::InsertInto { timing, .. }
+            | StatementOutcome::CreateTable { timing, .. } => timing,
         }
     }
 }

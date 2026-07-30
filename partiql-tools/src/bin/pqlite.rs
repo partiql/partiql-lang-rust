@@ -1,8 +1,13 @@
 use std::borrow::Cow;
+use std::io::Write;
 
-use partiql_tools::session::{normalize_query, Commands, DebugFlags, OutputFormat, PqliteSession};
+use partiql_tools::session::{
+    flush_debug, normalize_query, render_outcome_ion, render_outcome_text,
+    render_query_footer_text, render_query_ion, render_query_text, Commands, DebugFlags,
+    OutputFormat, PqliteSession, RunOutcome,
+};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
     ValidationResult, Validator,
@@ -25,12 +30,28 @@ struct Cli {
     #[arg(long, global = true, value_delimiter = ',')]
     debug: Vec<String>,
 
-    /// Path to the database file. The parent directory must already exist.
-    #[arg(long, global = true)]
-    db: Option<std::path::PathBuf>,
-
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: CliCommand,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Open a database file and start the interactive REPL.
+    Open {
+        /// Path to the database file. The parent directory must already exist.
+        db: std::path::PathBuf,
+    },
+    /// Execute a single query immediately, optionally against a database file.
+    Exec {
+        /// The PartiQL query string to run.
+        query: String,
+        /// Path to the database file. Omit for db-free queries.
+        #[arg(long)]
+        db: Option<std::path::PathBuf>,
+        /// Output format: `text` (default) or `ion`.
+        #[arg(long, default_value_t = OutputFormat::Text, value_enum)]
+        format: OutputFormat,
+    },
 }
 
 fn main() {
@@ -38,15 +59,15 @@ fn main() {
     let debug = DebugFlags::from_args(&cli.debug);
 
     match cli.command {
-        Some(Commands::Exec { query, format }) => {
+        CliCommand::Exec { query, db, format } => {
             // Reject empty query before opening the database so a `--db <path>`
             // invocation with a blank query does not create the file on disk.
             if normalize_query(&query).is_empty() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            let cmd = Commands::Exec { query, format };
-            let session = match cli.db.as_deref() {
+            let cmd = Commands::Exec { query };
+            let session = match db.as_deref() {
                 Some(p) => match PqliteSession::open(p, debug) {
                     Ok(s) => s,
                     Err(e) => {
@@ -58,19 +79,55 @@ fn main() {
             };
             let mut stdout = std::io::stdout();
             let mut stderr = std::io::stderr();
-            if let Err(e) = session.run(&cmd, &mut stdout, &mut stderr) {
+            if let Err(e) = dispatch(&session, &cmd, format, &mut stdout, &mut stderr) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
         }
-        None => {
-            // Require explicit --db rather than inventing a default path.
-            let db_path = cli.db.clone().unwrap_or_else(|| {
-                eprintln!("Error: The `--db <PATH>` option is required to open the database.");
-                std::process::exit(1);
-            });
+        CliCommand::Open { db } => run_repl(debug, &db),
+    }
+}
 
-            run_repl(debug, &db_path);
+/// Render a session outcome to `stdout`/`stderr`. Debug capture flushes to
+/// stderr BEFORE any query rows land on stdout so the ordering matches every
+/// `--debug` test expectation.
+fn dispatch(
+    session: &PqliteSession,
+    cmd: &Commands,
+    format: OutputFormat,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (result, on_error_capture) = session.run(cmd);
+    let outcome = match result {
+        Ok(o) => o,
+        Err(e) => {
+            flush_debug(&on_error_capture, stderr)?;
+            return Err(e);
+        }
+    };
+
+    match outcome {
+        RunOutcome::Query(mut handle) => {
+            flush_debug(&handle.take_debug(), stderr)?;
+            let ((), footer) = handle.drain(|rows, shape| match format {
+                OutputFormat::Text => render_query_text(rows, shape, stdout),
+                OutputFormat::Ion => render_query_ion(rows, shape, stdout),
+            })?;
+            // Ion mode is silent on stderr for successful queries; the caller
+            // pipes stdout to an Ion parser and expects no interleaved lines.
+            if !matches!(format, OutputFormat::Ion) {
+                render_query_footer_text(&footer, stderr)?;
+            }
+            Ok(())
+        }
+        RunOutcome::Statement(outcome) => {
+            flush_debug(outcome.debug(), stderr)?;
+            match format {
+                OutputFormat::Ion => render_outcome_ion(&outcome, stdout)?,
+                OutputFormat::Text => render_outcome_text(&outcome, stderr)?,
+            }
+            Ok(())
         }
     }
 }
@@ -193,7 +250,7 @@ fn print_startup_banner(db_path: &std::path::Path) {
     eprintln!("For usage information, enter \".help\".");
 }
 
-/// `exec_one` errors are reported but never terminate the session.
+/// Per-statement errors are reported but never terminate the session.
 fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
     // Hard-fail rather than fall back to in-memory: a silently non-persisting
     // db is worse than refusing to start.
@@ -242,9 +299,10 @@ fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
                 let mut stderr = std::io::stderr();
                 let cmd = Commands::Exec {
                     query: query.to_string(),
-                    format: OutputFormat::Text,
                 };
-                if let Err(e) = session.run(&cmd, &mut stdout, &mut stderr) {
+                if let Err(e) =
+                    dispatch(&session, &cmd, OutputFormat::Text, &mut stdout, &mut stderr)
+                {
                     eprintln!("{}", e);
                 }
             }
