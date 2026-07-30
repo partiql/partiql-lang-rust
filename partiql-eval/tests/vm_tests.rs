@@ -611,3 +611,20 @@ fn limit_with_true_filter() {
         "$bag::[10, 20]",
     );
 }
+
+/// The row bank holds both the ingested row and the per-field temporaries
+/// computed from it. When temporaries accumulate enough to force the bank to
+/// grow, the row must not move — later fields still read it.
+#[test]
+fn wide_row_crossing_row_bank() {
+    let s = "x".repeat(400);
+    let n = 48;
+    let pairs: Vec<String> = (0..n).map(|i| format!("'k{i}': d.s || 'y'")).collect();
+    let query = format!("SELECT VALUE {{{}}} FROM data AS d", pairs.join(", "));
+    let expected: Vec<String> = (0..n).map(|i| format!("k{i}: \"{s}y\"")).collect();
+    assert_vm_eval(
+        &query,
+        &[("data", &format!("[{{s: \"{s}\"}}]"))],
+        &format!("$bag::[{{{}}}]", expected.join(", ")),
+    );
+}
