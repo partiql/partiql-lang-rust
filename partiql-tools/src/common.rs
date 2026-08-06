@@ -26,8 +26,10 @@ use partiql_value::{BindingsName, Tuple, Value};
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
+use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Format a number with comma separators (e.g., 1000000 -> "1,000,000")
 pub fn format_with_commas(n: usize) -> String {
@@ -337,7 +339,6 @@ pub fn create_catalog(data_source: String, data_path: Option<String>) -> Box<dyn
         .add_table_function(data_fn)
         .expect("Failed to add table function");
 
-    // Register table functions for the VM path (rand, mem, scan_ion)
     register_table_fn_stubs(&mut catalog);
 
     // Add type entry for "data" table so it can be referenced without parentheses
@@ -368,30 +369,22 @@ pub fn create_table_fn_catalog() -> Box<dyn SharedCatalog> {
 }
 
 fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) {
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "rand",
-            vec![
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-            ],
-        ))))
-        .expect("Failed to add rand table function");
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "mem",
-            vec![
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-            ],
-        ))))
-        .expect("Failed to add mem table function");
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "scan_ion",
-            vec![partiql_catalog::call_defs::CallSpecArg::Positional],
-        ))))
-        .expect("Failed to add scan_ion table function");
+    use partiql_catalog::call_defs::CallSpecArg::Positional;
+    let stubs: &[(&'static str, usize)] = &[
+        ("mem", 2),
+        ("read", 1),
+        ("stdin", 0),
+        ("exec", 1),
+        ("curl", 1),
+    ];
+    for (name, arity) in stubs {
+        catalog
+            .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
+                name,
+                vec![Positional; *arity],
+            ))))
+            .unwrap_or_else(|_| panic!("Failed to add {name} table function"));
+    }
 }
 
 /// Stub table function for the frontend planner. Only provides `call_def()` so
@@ -860,26 +853,76 @@ impl DataSourceMetadata for InMemTableConfig {
 
 use ion_rs::{IonReader, IonType, ReaderBuilder as IonReaderBuilder};
 
-/// Streaming Ion text reader with projection pushdown
-///
-/// Uses the ion_rs streaming API to read Ion data directly into row slots.
-///
-/// # Performance Characteristics
-/// - Zero-copy for primitives (i64, f64, bool)
-/// - Minimal string allocations (only for projected string fields)
-/// - True projection pushdown (only reads requested fields)
-/// - Uses FxHashMap for O(1) field lookups
+pub type IonReaderFactory =
+    Box<dyn Fn() -> EvalResult<Box<dyn Read + Send>> + Send + Sync + 'static>;
+
+fn open_file_reader(path: &str) -> EvalResult<Box<dyn Read + Send>> {
+    let file = File::open(path)
+        .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion open failed: {e}")))?;
+    Ok(Box::new(file))
+}
+
+fn open_stdin_reader() -> EvalResult<Box<dyn Read + Send>> {
+    Ok(Box::new(std::io::stdin()))
+}
+
+/// Buffers the whole subprocess output in memory; not for GB-scale producers.
+fn open_exec_reader(cmd: &str) -> EvalResult<Box<dyn Read + Send>> {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .output()
+        .map_err(|e| partiql_eval::EngineError::ReaderError(format!("exec spawn failed: {e}")))?;
+    if !output.status.success() {
+        // Truncate at the byte level: `String::truncate` panics on a
+        // non-char boundary; `from_utf8_lossy` substitutes U+FFFD instead.
+        let truncated = output.stderr.len() > 4096;
+        let bytes = &output.stderr[..output.stderr.len().min(4096)];
+        let mut stderr = String::from_utf8_lossy(bytes).into_owned();
+        if truncated {
+            stderr.push_str("...(truncated)");
+        }
+        return Err(partiql_eval::EngineError::ReaderError(format!(
+            "exec `{cmd}` failed ({}): {stderr}",
+            output.status
+        )));
+    }
+    Ok(Box::new(std::io::Cursor::new(output.stdout)))
+}
+
+fn open_curl_reader(url: &str) -> EvalResult<Box<dyn Read + Send>> {
+    const ONE_GIB: u64 = 1024 * 1024 * 1024;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into();
+    let response = agent
+        .get(url)
+        .call()
+        .map_err(|e| partiql_eval::EngineError::ReaderError(format!("curl `{url}` failed: {e}")))?;
+    let reader = response
+        .into_body()
+        .into_with_config()
+        .limit(ONE_GIB)
+        .reader();
+    Ok(Box::new(reader))
+}
+
+/// Streaming Ion / JSON reader with projection pushdown. Ion text is a JSON
+/// superset — `{...}{...}` streams and single `[...]` wrappers are both
+/// accepted; row values may include nested objects and lists.
 pub struct IonDataSource {
-    path: String,
+    factory: IonReaderFactory,
     reader: Option<Box<ion_rs::Reader<'static>>>,
+    /// Derived from `ScanLayout` at construction; must survive close/open.
     field_to_slot: FxHashMap<String, u16>,
-    /// If set, we're in whole-value mode: build a Tuple into this slot
     whole_value_slot: Option<u16>,
     string_storage: Vec<String>,
+    in_top_level_array: bool,
 }
 
 impl IonDataSource {
-    fn new(path: String, layout: ScanLayout) -> Self {
+    fn new(factory: IonReaderFactory, layout: ScanLayout) -> Self {
         let mut field_to_slot = FxHashMap::default();
         let mut whole_value_slot = None;
         for proj in &layout.projections {
@@ -895,246 +938,343 @@ impl IonDataSource {
         }
 
         IonDataSource {
-            path,
+            factory,
             reader: None,
             field_to_slot,
             whole_value_slot,
             string_storage: Vec::new(),
+            in_top_level_array: false,
         }
     }
 }
 
 impl DataSource for IonDataSource {
     fn open(&mut self) -> EvalResult<()> {
-        let file = File::open(&self.path)
-            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion open failed: {e}")))?;
-        let buf_reader = BufReader::new(file);
-
-        let ion_reader = IonReaderBuilder::new().build(buf_reader).map_err(|e| {
-            partiql_eval::EngineError::ReaderError(format!("ion reader creation failed: {e}"))
-        })?;
-
-        let boxed_reader: Box<ion_rs::Reader<'static>> =
-            unsafe { std::mem::transmute(Box::new(ion_reader)) };
-
-        self.reader = Some(boxed_reader);
+        self.in_top_level_array = false;
+        self.string_storage.clear();
+        // Wrap once here — ion-rs's builder needs a `ToIonDataSource` type
+        // and sub-readers deliberately return raw readers to avoid stacking
+        // 8 KiB buffers.
+        let byte_source: Box<dyn Read + Send + 'static> = (self.factory)()?;
+        let ion_reader: ion_rs::Reader<'static> = IonReaderBuilder::new()
+            .build(BufReader::new(byte_source))
+            .map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("ion reader creation failed: {e}"))
+            })?;
+        self.reader = Some(Box::new(ion_reader));
         Ok(())
     }
 
     fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<bool> {
-        let reader = match self.reader.as_mut() {
-            Some(r) => r,
-            None => return Ok(false),
-        };
+        loop {
+            self.string_storage.clear();
+            if self.reader.is_none() {
+                return Ok(false);
+            }
 
-        self.string_storage.clear();
+            let stream_item = {
+                let reader = self.reader.as_mut().unwrap();
+                reader.next().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!("ion read failed: {e}"))
+                })?
+            };
 
-        let stream_item = reader
-            .next()
-            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion read failed: {e}")))?;
-
-        match stream_item {
-            ion_rs::StreamItem::Value(_ion_type) => {
-                reader.step_in().map_err(|e| {
-                    partiql_eval::EngineError::ReaderError(format!(
-                        "failed to step into struct: {e}"
-                    ))
-                })?;
-
-                // Whole-value mode: build a Tuple with all fields
-                if let Some(target_slot) = self.whole_value_slot {
-                    let mut vw = writer.value_writer(target_slot)?;
-                    vw.step_in_tuple()?;
-
-                    loop {
-                        match reader.next().map_err(|e| {
-                            partiql_eval::EngineError::ReaderError(format!(
-                                "error reading struct field: {e}"
-                            ))
-                        })? {
-                            ion_rs::StreamItem::Value(ion_type) => {
-                                let field_name = reader.field_name().map_err(|e| {
-                                    partiql_eval::EngineError::ReaderError(format!(
-                                        "failed to get field name: {e}"
-                                    ))
-                                })?;
-                                let field_text = field_name.text().ok_or_else(|| {
-                                    partiql_eval::EngineError::ReaderError(
-                                        "field name has no text".to_string(),
-                                    )
-                                })?;
-
-                                // Store field name in string_storage for arena lifetime
-                                self.string_storage.push(field_text.to_string());
-                                let name_idx = self.string_storage.len() - 1;
-                                let name_ref = unsafe {
-                                    std::mem::transmute::<&str, &str>(
-                                        self.string_storage[name_idx].as_str(),
-                                    )
-                                };
-                                vw.put_field_name(name_ref)?;
-
-                                match ion_type {
-                                    IonType::Int => {
-                                        let val = reader.read_i64().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
-                                                "failed to read i64: {e}"
-                                            ))
-                                        })?;
-                                        vw.put_i64(val)?;
-                                    }
-                                    IonType::Float => {
-                                        let val = reader.read_f64().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
-                                                "failed to read f64: {e}"
-                                            ))
-                                        })?;
-                                        vw.put_f64(val)?;
-                                    }
-                                    IonType::Bool => {
-                                        let val = reader.read_bool().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
-                                                "failed to read bool: {e}"
-                                            ))
-                                        })?;
-                                        vw.put_bool(val)?;
-                                    }
-                                    IonType::String => {
-                                        let val = reader.read_str().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
-                                                "failed to read string: {e}"
-                                            ))
-                                        })?;
-                                        self.string_storage.push(val.to_string());
-                                        let str_idx = self.string_storage.len() - 1;
-                                        let str_ref = unsafe {
-                                            std::mem::transmute::<&str, &str>(
-                                                self.string_storage[str_idx].as_str(),
-                                            )
-                                        };
-                                        vw.put_str(str_ref)?;
-                                    }
-                                    IonType::Null => {
-                                        vw.put_null()?;
-                                    }
-                                    other_type => {
-                                        return Err(partiql_eval::EngineError::ReaderError(
-                                            format!(
-                                                "unsupported ion type in whole-value mode: {:?}",
-                                                other_type
-                                            ),
-                                        ));
-                                    }
-                                }
-                            }
-                            ion_rs::StreamItem::Nothing => break,
-                            ion_rs::StreamItem::Null(_) => continue,
+            if self.in_top_level_array {
+                match stream_item {
+                    ion_rs::StreamItem::Value(inner_ty) => {
+                        if inner_ty != IonType::Struct {
+                            return Err(partiql_eval::EngineError::ReaderError(format!(
+                                "top-level array element must be an object; got {inner_ty:?}"
+                            )));
                         }
+                        return self.read_row_struct(writer).map(|()| true);
                     }
-
-                    vw.step_out()?;
-                    vw.finish()?;
-                } else {
-                    // Column-projection mode: write individual fields to slots
-                    loop {
-                        match reader.next().map_err(|e| {
+                    ion_rs::StreamItem::Nothing => {
+                        self.in_top_level_array = false;
+                        self.reader.as_mut().unwrap().step_out().map_err(|e| {
                             partiql_eval::EngineError::ReaderError(format!(
-                                "error reading struct field: {e}"
+                                "failed to step out of top-level array: {e}"
                             ))
-                        })? {
-                            ion_rs::StreamItem::Value(ion_type) => {
-                                let field_name = reader.field_name().map_err(|e| {
-                                    partiql_eval::EngineError::ReaderError(format!(
-                                        "failed to get field name: {e}"
-                                    ))
-                                })?;
-
-                                let field_text = field_name.text().ok_or_else(|| {
-                                    partiql_eval::EngineError::ReaderError(
-                                        "field name has no text".to_string(),
-                                    )
-                                })?;
-
-                                if let Some(&target_slot) = self.field_to_slot.get(field_text) {
-                                    match ion_type {
-                                        IonType::Int => {
-                                            let val = reader.read_i64().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
-                                                    "failed to read i64: {e}"
-                                                ))
-                                            })?;
-                                            writer.write_i64(target_slot, val)?;
-                                        }
-                                        IonType::Float => {
-                                            let val = reader.read_f64().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
-                                                    "failed to read f64: {e}"
-                                                ))
-                                            })?;
-                                            writer.write_f64(target_slot, val)?;
-                                        }
-                                        IonType::Bool => {
-                                            let val = reader.read_bool().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
-                                                    "failed to read bool: {e}"
-                                                ))
-                                            })?;
-                                            writer.write_bool(target_slot, val)?;
-                                        }
-                                        IonType::String => {
-                                            let val = reader.read_str().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
-                                                    "failed to read string: {e}"
-                                                ))
-                                            })?;
-                                            self.string_storage.push(val.to_string());
-                                            let idx = self.string_storage.len() - 1;
-                                            let str_ref = unsafe {
-                                                std::mem::transmute::<&str, &str>(
-                                                    self.string_storage[idx].as_str(),
-                                                )
-                                            };
-                                            writer.write_str(target_slot, str_ref)?;
-                                        }
-                                        IonType::Null => {
-                                            writer.write_null(target_slot)?;
-                                        }
-                                        other_type => {
-                                            return Err(partiql_eval::EngineError::ReaderError(
-                                                format!(
-                                                    "unsupported ion type for projection: {:?}",
-                                                    other_type
-                                                ),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                            ion_rs::StreamItem::Nothing => break,
-                            ion_rs::StreamItem::Null(_) => continue,
-                        }
+                        })?;
+                        continue;
+                    }
+                    ion_rs::StreamItem::Null(_) => {
+                        return Err(partiql_eval::EngineError::ReaderError(
+                            "top-level array element must be an object; got null".to_string(),
+                        ));
                     }
                 }
-
-                reader.step_out().map_err(|e| {
-                    partiql_eval::EngineError::ReaderError(format!(
-                        "failed to step out of struct: {e}"
-                    ))
-                })?;
-
-                Ok(true)
             }
-            ion_rs::StreamItem::Nothing => Ok(false),
-            ion_rs::StreamItem::Null(_) => self.next_row(writer),
+
+            match stream_item {
+                ion_rs::StreamItem::Value(top_ty) => match top_ty {
+                    IonType::List => {
+                        self.reader.as_mut().unwrap().step_in().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "failed to step into top-level array: {e}"
+                            ))
+                        })?;
+                        self.in_top_level_array = true;
+                        continue;
+                    }
+                    IonType::Struct => {
+                        return self.read_row_struct(writer).map(|()| true);
+                    }
+                    other => {
+                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                            "top-level value must be an object or an array; got {other:?}"
+                        )));
+                    }
+                },
+                ion_rs::StreamItem::Nothing => return Ok(false),
+                ion_rs::StreamItem::Null(_) => continue,
+            }
         }
     }
 
     fn close(&mut self) -> EvalResult<()> {
+        // `field_to_slot` / `whole_value_slot` are layout-derived — do not
+        // clear them; the VM may re-open this cursor.
         self.reader = None;
         self.string_storage.clear();
-        self.field_to_slot.clear();
+        self.in_top_level_array = false;
         Ok(())
     }
+}
+
+impl IonDataSource {
+    /// Precondition: reader is positioned on `StreamItem::Value(IonType::Struct)`.
+    fn read_row_struct(&mut self, writer: &mut RegisterWriter<'_, '_>) -> EvalResult<()> {
+        let reader = self.reader.as_mut().unwrap();
+        reader.step_in().map_err(|e| {
+            partiql_eval::EngineError::ReaderError(format!("failed to step into struct: {e}"))
+        })?;
+
+        if let Some(target_slot) = self.whole_value_slot {
+            let mut vw = writer.value_writer(target_slot)?;
+            vw.step_in_tuple()?;
+            loop {
+                let item = reader.next().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "error reading struct field: {e}"
+                    ))
+                })?;
+                match item {
+                    ion_rs::StreamItem::Value(ion_type) => {
+                        let name = read_field_name(reader, &mut self.string_storage)?;
+                        vw.put_field_name(name)?;
+                        decode_ion_value(reader, &mut self.string_storage, &mut vw, ion_type)?;
+                    }
+                    ion_rs::StreamItem::Null(_) => {
+                        let name = read_field_name(reader, &mut self.string_storage)?;
+                        vw.put_field_name(name)?;
+                        vw.put_null()?;
+                    }
+                    ion_rs::StreamItem::Nothing => break,
+                }
+            }
+            vw.step_out()?;
+            vw.finish()?;
+        } else {
+            loop {
+                let item = reader.next().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "error reading struct field: {e}"
+                    ))
+                })?;
+                let ion_type = match item {
+                    ion_rs::StreamItem::Value(t) => t,
+                    // The field name is present; the value is null.
+                    ion_rs::StreamItem::Null(_) => IonType::Null,
+                    ion_rs::StreamItem::Nothing => break,
+                };
+                let field_name_sym = reader.field_name().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!("failed to get field name: {e}"))
+                })?;
+                let field_text = field_name_sym.text().ok_or_else(|| {
+                    partiql_eval::EngineError::ReaderError("field name has no text".to_string())
+                })?;
+                let Some(&target_slot) = self.field_to_slot.get(field_text) else {
+                    continue;
+                };
+                match ion_type {
+                    IonType::Int => {
+                        let v = reader.read_i64().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "failed to read i64: {e}"
+                            ))
+                        })?;
+                        writer.write_i64(target_slot, v)?;
+                    }
+                    IonType::Float => {
+                        let v = reader.read_f64().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "failed to read f64: {e}"
+                            ))
+                        })?;
+                        writer.write_f64(target_slot, v)?;
+                    }
+                    IonType::Bool => {
+                        let v = reader.read_bool().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "failed to read bool: {e}"
+                            ))
+                        })?;
+                        writer.write_bool(target_slot, v)?;
+                    }
+                    IonType::String => {
+                        let v = reader.read_str().map_err(|e| {
+                            partiql_eval::EngineError::ReaderError(format!(
+                                "failed to read string: {e}"
+                            ))
+                        })?;
+                        let s = store_str(&mut self.string_storage, v);
+                        writer.write_str(target_slot, s)?;
+                    }
+                    IonType::Null => writer.write_null(target_slot)?,
+                    IonType::Struct | IonType::List => {
+                        let mut vw = writer.value_writer(target_slot)?;
+                        decode_ion_value(reader, &mut self.string_storage, &mut vw, ion_type)?;
+                        vw.finish()?;
+                    }
+                    other => {
+                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                            "unsupported ion type for projection: {other:?}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        self.reader.as_mut().unwrap().step_out().map_err(|e| {
+            partiql_eval::EngineError::ReaderError(format!("failed to step out of struct: {e}"))
+        })?;
+        Ok(())
+    }
+}
+
+/// Copy `text` into `storage`; returned `&str` lives until the next
+/// `storage.clear()` (called once per row). Vec spine may realloc; inner
+/// `String` buffers are stable across pushes.
+fn store_str<'s>(storage: &mut Vec<String>, text: &str) -> &'s str {
+    storage.push(text.to_string());
+    let idx = storage.len() - 1;
+    unsafe { std::mem::transmute::<&str, &str>(storage[idx].as_str()) }
+}
+
+fn read_field_name<'s>(
+    reader: &ion_rs::Reader<'static>,
+    storage: &mut Vec<String>,
+) -> EvalResult<&'s str> {
+    let field_name = reader.field_name().map_err(|e| {
+        partiql_eval::EngineError::ReaderError(format!("failed to get field name: {e}"))
+    })?;
+    let text = field_name.text().ok_or_else(|| {
+        partiql_eval::EngineError::ReaderError("field name has no text".to_string())
+    })?;
+    Ok(store_str(storage, text))
+}
+
+/// Caller positions `vw` (for a tuple field, calls `put_field_name`) before
+/// invoking. Handles scalars plus nested Struct / List.
+fn decode_ion_value(
+    reader: &mut ion_rs::Reader<'static>,
+    string_storage: &mut Vec<String>,
+    vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    ion_type: IonType,
+) -> EvalResult<()> {
+    match ion_type {
+        IonType::Int => {
+            let v = reader.read_i64().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to read i64: {e}"))
+            })?;
+            vw.put_i64(v)?;
+        }
+        IonType::Float => {
+            let v = reader.read_f64().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to read f64: {e}"))
+            })?;
+            vw.put_f64(v)?;
+        }
+        IonType::Bool => {
+            let v = reader.read_bool().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to read bool: {e}"))
+            })?;
+            vw.put_bool(v)?;
+        }
+        IonType::String => {
+            let v = reader.read_str().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to read string: {e}"))
+            })?;
+            let s = store_str(string_storage, v);
+            vw.put_str(s)?;
+        }
+        IonType::Null => vw.put_null()?,
+        IonType::Struct => {
+            vw.step_in_tuple()?;
+            reader.step_in().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!(
+                    "failed to step into nested struct: {e}"
+                ))
+            })?;
+            loop {
+                let item = reader.next().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "error reading nested struct field: {e}"
+                    ))
+                })?;
+                match item {
+                    ion_rs::StreamItem::Value(inner_ty) => {
+                        let name = read_field_name(reader, string_storage)?;
+                        vw.put_field_name(name)?;
+                        decode_ion_value(reader, string_storage, vw, inner_ty)?;
+                    }
+                    ion_rs::StreamItem::Null(_) => {
+                        let name = read_field_name(reader, string_storage)?;
+                        vw.put_field_name(name)?;
+                        vw.put_null()?;
+                    }
+                    ion_rs::StreamItem::Nothing => break,
+                }
+            }
+            reader.step_out().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!(
+                    "failed to step out of nested struct: {e}"
+                ))
+            })?;
+            vw.step_out()?;
+        }
+        IonType::List => {
+            vw.step_in_list()?;
+            reader.step_in().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to step into list: {e}"))
+            })?;
+            loop {
+                let item = reader.next().map_err(|e| {
+                    partiql_eval::EngineError::ReaderError(format!(
+                        "error reading list element: {e}"
+                    ))
+                })?;
+                match item {
+                    ion_rs::StreamItem::Value(inner_ty) => {
+                        decode_ion_value(reader, string_storage, vw, inner_ty)?;
+                    }
+                    ion_rs::StreamItem::Null(_) => vw.put_null()?,
+                    ion_rs::StreamItem::Nothing => break,
+                }
+            }
+            reader.step_out().map_err(|e| {
+                partiql_eval::EngineError::ReaderError(format!("failed to step out of list: {e}"))
+            })?;
+            vw.step_out()?;
+        }
+        other => {
+            return Err(partiql_eval::EngineError::ReaderError(format!(
+                "unsupported ion type in JSON/Ion decoder: {other:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Compile-time configuration for Ion data sources
@@ -1305,7 +1445,9 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
                 layout.clone(),
             ))),
             CompiledSourceFactory::Ion { path } => {
-                Ok(Box::new(IonDataSource::new(path.clone(), layout.clone())))
+                let path = path.clone();
+                let factory: IonReaderFactory = Box::new(move || open_file_reader(&path));
+                Ok(Box::new(IonDataSource::new(factory, layout.clone())))
             }
         }
     }
@@ -1331,7 +1473,7 @@ pub fn simple_catalog(
 // =============================================================================
 
 /// Compile-time metadata for table functions that produce columnar integer data.
-/// Used by `rand()` and `mem()` table functions.
+/// Used by `mem()`.
 pub struct ColumnarIntMetadata {
     column_names: Vec<String>,
 }
@@ -1368,32 +1510,6 @@ impl DataSourceMetadata for DynamicSchemaMetadata {
     }
 }
 
-/// Table function: `rand(total_rows, num_columns)`
-///
-/// Generates random integer data. Each column gets a random i64 value per row.
-pub struct RandTableFunction;
-
-impl VmTableFunction for RandTableFunction {
-    fn create(
-        &self,
-        reader: &RegisterReader<'_>,
-        arg_slots: &[SlotId],
-        layout: &ScanLayout,
-    ) -> EvalResult<Box<dyn DataSource>> {
-        let total_rows = reader.get_i64(arg_slots[0] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("rand: arg 0 must be integer".into())
-        })? as usize;
-        let num_columns = reader.get_i64(arg_slots[1] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("rand: arg 1 must be integer".into())
-        })? as usize;
-        Ok(Box::new(RandomDataSource::new(
-            total_rows,
-            num_columns,
-            layout.clone(),
-        )))
-    }
-}
-
 /// Table function: `mem(total_rows, num_columns)`
 ///
 /// Generates sequential integer data. Row N has value N in all columns.
@@ -1420,26 +1536,69 @@ impl VmTableFunction for MemTableFunction {
     }
 }
 
-/// Table function: `scan_ion(path)`
-///
-/// Reads Ion data from a file path, streaming rows lazily.
-pub struct ScanIonTableFunction;
+/// JSON/Ion ingestion — `read(path)`, `stdin()`, `exec(cmd)`, `curl(url)`. The
+/// four differ only in where their bytes come from, so they share one type;
+/// the extractor closure captures the arg and returns a factory that opens
+/// a fresh reader on demand.
+pub struct JsonIonTableFunction {
+    extract: fn(&RegisterReader<'_>, &[SlotId]) -> EvalResult<IonReaderFactory>,
+}
 
-impl VmTableFunction for ScanIonTableFunction {
+impl JsonIonTableFunction {
+    pub fn read() -> Self {
+        Self {
+            extract: |r, s| {
+                let path = get_str_arg(r, s, "read")?;
+                Ok(Box::new(move || open_file_reader(&path)))
+            },
+        }
+    }
+    pub fn stdin() -> Self {
+        Self {
+            extract: |_, _| Ok(Box::new(open_stdin_reader)),
+        }
+    }
+    pub fn exec() -> Self {
+        Self {
+            extract: |r, s| {
+                let cmd = get_str_arg(r, s, "exec")?;
+                Ok(Box::new(move || open_exec_reader(&cmd)))
+            },
+        }
+    }
+    pub fn curl() -> Self {
+        Self {
+            extract: |r, s| {
+                let url = get_str_arg(r, s, "curl")?;
+                Ok(Box::new(move || open_curl_reader(&url)))
+            },
+        }
+    }
+}
+
+impl VmTableFunction for JsonIonTableFunction {
     fn create(
         &self,
         reader: &RegisterReader<'_>,
         arg_slots: &[SlotId],
         layout: &ScanLayout,
     ) -> EvalResult<Box<dyn DataSource>> {
-        let path = reader
-            .get_str(arg_slots[0] as usize)
-            .ok_or_else(|| {
-                partiql_eval::EngineError::ReaderError("scan_ion: arg 0 must be string".into())
-            })?
-            .to_string();
-        Ok(Box::new(IonDataSource::new(path, layout.clone())))
+        let factory = (self.extract)(reader, arg_slots)?;
+        Ok(Box::new(IonDataSource::new(factory, layout.clone())))
     }
+}
+
+fn get_str_arg(
+    reader: &RegisterReader<'_>,
+    arg_slots: &[SlotId],
+    fn_name: &'static str,
+) -> EvalResult<String> {
+    reader
+        .get_str(arg_slots[0] as usize)
+        .ok_or_else(|| {
+            partiql_eval::EngineError::ReaderError(format!("{fn_name}: arg 0 must be string"))
+        })
+        .map(str::to_string)
 }
 
 /// CompilationCatalog that provides table function metadata for pqlite.
@@ -1460,10 +1619,12 @@ impl CompilationCatalog for TableFnCompilationCatalog {
 
     fn get_table_function(&self, name: &str) -> Option<VmTableFunctionHandle> {
         match name {
-            "rand" | "mem" => Some(VmTableFunctionHandle::new(Arc::new(
+            "mem" => Some(VmTableFunctionHandle::new(Arc::new(
                 ColumnarIntMetadata::new(self.column_names.clone()),
             ))),
-            "scan_ion" => Some(VmTableFunctionHandle::new(Arc::new(DynamicSchemaMetadata))),
+            "read" | "stdin" | "exec" | "curl" => {
+                Some(VmTableFunctionHandle::new(Arc::new(DynamicSchemaMetadata)))
+            }
             _ => None,
         }
     }
