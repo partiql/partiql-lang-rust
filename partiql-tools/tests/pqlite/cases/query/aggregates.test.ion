@@ -1,0 +1,5 @@
+// Aggregate functions over an inline bag: COUNT/SUM and GROUP BY.
+{ sql: "SELECT COUNT(*) AS c, SUM(t.a) AS s FROM << {'a': 1}, {'a': 2}, {'a': 3} >> t", expect: { rows: $bag::[ { c: 3, s: 6 } ] } }
+// Single-group GROUP BY: one output row avoids hash-iteration-order flake
+// while still exercising the aggregate path.
+{ sql: "SELECT g.k AS k, COUNT(*) AS n FROM << {'k':'x'}, {'k':'x'}, {'k':'x'} >> g GROUP BY g.k", expect: { rows: $bag::[ { k: "x", n: 3 } ] } }

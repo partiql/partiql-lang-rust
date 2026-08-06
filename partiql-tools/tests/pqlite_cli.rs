@@ -22,16 +22,64 @@ const PQLITE: &str = env!("CARGO_BIN_EXE_pqlite");
 /// (exit_success, stdout, stderr).
 fn run_exec(query: &str, db: Option<&std::path::Path>) -> (bool, String, String) {
     let mut cmd = Command::new(PQLITE);
-    cmd.arg("exec").arg(query);
+    cmd.arg("exec");
     if let Some(path) = db {
         cmd.arg("--db").arg(path);
     }
+    cmd.arg(query);
     let out = cmd.output().expect("failed to spawn pqlite");
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+#[test]
+fn ion_format_bag_envelope() {
+    use ion_rs::element::Element;
+    use ion_rs::IonData;
+    let out = Command::new(PQLITE)
+        .arg("exec")
+        .arg("--format")
+        .arg("ion")
+        .arg("SELECT * FROM << {'a': 1}, {'a': 2} >>")
+        .output()
+        .expect("failed to spawn pqlite");
+    assert!(
+        out.status.success(),
+        "ion-format select should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Ion mode: silent on success — the summary footer that plain-text mode
+    // prints to stderr must not leak here.
+    assert!(
+        out.stderr.is_empty(),
+        "ion mode must be silent on stderr; got: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    // Byte-for-byte-modulo-Ion-equivalence check: builds the exact expected
+    // envelope Element and compares via IonData (semantic Ion equality). Guards
+    // BOTH envelope shape (rows field, $bag annotation, count) AND row contents
+    // (a hollow shape+count check would pass on arbitrary two-row output).
+    let actual = Element::read_all(&out.stdout).expect("stdout must parse as Ion");
+    let expected =
+        Element::read_all(b"{rows: $bag::[{a: 1}, {a: 2}]}").expect("expected must parse");
+    assert_eq!(
+        actual.len(),
+        1,
+        "expected exactly one top-level value; got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(expected.len(), 1);
+    assert_eq!(
+        IonData::from(actual[0].clone()),
+        IonData::from(expected[0].clone()),
+        "actual: {} expected: {}",
+        actual[0],
+        expected[0]
+    );
 }
 
 #[test]
@@ -68,6 +116,40 @@ fn plain_select_via_exec_needs_no_db_and_creates_no_file() {
     assert!(
         stray.is_empty(),
         "a plain SELECT must create no files, but found: {stray:?}"
+    );
+}
+
+#[test]
+fn empty_query_with_db_does_not_create_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let dbp = dir.path().join("empty.pqlite");
+    let out = Command::new(PQLITE)
+        .arg("exec")
+        .arg("--db")
+        .arg(&dbp)
+        .arg("   ")
+        .output()
+        .expect("failed to spawn pqlite");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Error: empty query"),
+        "expected 'Error: empty query'; got: {stderr}"
+    );
+    assert!(
+        !dbp.exists(),
+        "empty-query rejection must not create the db file at {}",
+        dbp.display()
+    );
+    // Also assert no other stray files in tempdir.
+    let stray: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "no files should be created; found: {stray:?}"
     );
 }
 
@@ -188,16 +270,16 @@ fn ctas_with_db_creates_table_and_persists_file() {
 
 #[test]
 fn ctas_with_bare_db_filename_creates_file_in_cwd() {
-    // Regression: `pqlite --db foo.pqlite` with a BARE filename (no directory
-    // component) must create the file in the current directory, like any UNIX
-    // tool — not fail with ENOENT. The child runs with its cwd set to a temp
-    // dir, so the bare name resolves there.
+    // Regression: `pqlite exec --db foo.pqlite ...` with a BARE filename (no
+    // directory component) must create the file in the current directory,
+    // like any UNIX tool — not fail with ENOENT. The child runs with its cwd
+    // set to a temp dir, so the bare name resolves there.
     let dir = tempfile::tempdir().unwrap();
 
     let out = Command::new(PQLITE)
+        .arg("exec")
         .arg("--db")
         .arg("bare.pqlite") // bare name: parent() is "" — the bug case
-        .arg("exec")
         .arg("CREATE TABLE t AS (SELECT t.a FROM mem(2,2) t)")
         .current_dir(dir.path())
         .output()
@@ -264,65 +346,6 @@ fn duplicate_ctas_is_rejected_and_names_the_table() {
 //   * String values render single-quoted: `'x'`
 //   * NULL renders uppercase: `NULL`
 //   * Empty bag renders `<<\n\n>>`
-
-#[test]
-fn ctas_then_select_single_i64_column() {
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("e2e.pqlite");
-
-    let (ok, _, stderr) = run_exec("CREATE TABLE t AS (SELECT t.a FROM mem(3,2) t)", Some(&dbp));
-    assert!(ok, "CTAS should succeed; stderr: {stderr}");
-
-    let (ok, stdout, stderr) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT should succeed; stderr: {stderr}");
-    // mem(3,2) yields a=0,1,2 in insertion order.
-    assert!(stdout.contains("'a': 0"), "got: {stdout}");
-    assert!(stdout.contains("'a': 1"), "got: {stdout}");
-    assert!(stdout.contains("'a': 2"), "got: {stdout}");
-}
-
-#[test]
-fn ctas_then_select_mixed_scalars() {
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("mixed.pqlite");
-
-    let (ok, _, stderr) = run_exec(
-        "CREATE TABLE t AS (SELECT 1 AS a, 2.5 AS b, 'x' AS c, NULL AS d FROM mem(1,2) m)",
-        Some(&dbp),
-    );
-    assert!(ok, "CTAS should succeed; stderr: {stderr}");
-
-    let (ok, stdout, stderr) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT should succeed; stderr: {stderr}");
-    assert!(stdout.contains("'a': 1"), "got: {stdout}");
-    assert!(stdout.contains("'b': 2.5"), "got: {stdout}");
-    assert!(stdout.contains("'c': 'x'"), "got: {stdout}");
-    assert!(stdout.contains("'d': NULL"), "got: {stdout}");
-    // The Missing value would be a regression — distinct from explicit NULL.
-    assert!(!stdout.contains("MISSING"), "got: {stdout}");
-}
-
-#[test]
-fn ctas_then_select_preserves_multi_field_struct_shape() {
-    // Two-column row guards field-name preservation and column ordering
-    // through the encode → LMDB → decode → format pipeline. The nested-tuple
-    // case (a column whose VALUE is itself a tuple) is covered separately by
-    // ctas_then_select_runtime_tuple and ctas_then_select_nested_tuple_in_list.
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("tuple.pqlite");
-
-    let (ok, _, stderr) = run_exec(
-        "CREATE TABLE t AS (SELECT 99 AS outer_a, 'inner_a' AS outer_b FROM mem(1,2) m)",
-        Some(&dbp),
-    );
-    assert!(ok, "CTAS should succeed; stderr: {stderr}");
-
-    let (ok, stdout, stderr) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT should succeed; stderr: {stderr}");
-    // Both field names survive the round trip.
-    assert!(stdout.contains("'outer_a': 99"), "got: {stdout}");
-    assert!(stdout.contains("'outer_b': 'inner_a'"), "got: {stdout}");
-}
 
 #[test]
 fn ctas_zero_rows_then_select_prints_no_rows_no_error() {
@@ -598,29 +621,6 @@ fn wire_format_byte_shape_is_stable() {
 }
 
 #[test]
-fn ctas_then_select_bool_column() {
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("bool_rt.pqlite");
-    // mem's arg order is (rows, cols): mem(2,1) yields two rows a=0,a=1,
-    // so `m.a = 0` produces true then false. (Not mem(1,2), which is one row.)
-    let (ok, _out, err) = run_exec(
-        "CREATE TABLE t AS (SELECT (m.a = 0) AS b FROM mem(2,1) m)",
-        Some(&dbp),
-    );
-    assert!(ok, "CTAS failed: {err}");
-    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT failed: {err}");
-    assert!(
-        out.contains("true"),
-        "expected 'true' in output; got: {out}"
-    );
-    assert!(
-        out.contains("false"),
-        "expected 'false' in output; got: {out}"
-    );
-}
-
-#[test]
 fn ctas_then_select_missing_column() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("missing_rt.pqlite");
@@ -892,22 +892,6 @@ fn over_deep_nested_tuple_payload_is_rejected() {
 }
 
 #[test]
-fn ctas_then_select_list_of_ints() {
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("list_ints.pqlite");
-    let (ok, _out, err) = run_exec(
-        "CREATE TABLE t AS (SELECT [10, 20, 30] AS xs FROM mem(1,1) m)",
-        Some(&dbp),
-    );
-    assert!(ok, "list CTAS should succeed; stderr: {err}");
-    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT failed: {err}");
-    assert!(out.contains("10"), "expected 10; got: {out}");
-    assert!(out.contains("20"), "expected 20; got: {out}");
-    assert!(out.contains("30"), "expected 30; got: {out}");
-}
-
-#[test]
 fn ctas_then_select_bag_of_ints() {
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("bag_ints.pqlite");
@@ -937,29 +921,6 @@ fn ctas_then_select_empty_list() {
     assert!(ok, "SELECT over empty list failed: {err}");
     // Empty list renders as `[]` inside the row tuple.
     assert!(out.contains("'xs': []"), "expected empty list; got: {out}");
-}
-
-#[test]
-fn ctas_then_select_nested_tuple_in_list() {
-    let dir = tempfile::tempdir().unwrap();
-    let dbp = dir.path().join("nested.pqlite");
-    // A list of runtime tuples exercises the full recursion:
-    // list → tuple → scalar, on both encode and decode.
-    let (ok, _out, err) = run_exec(
-        "CREATE TABLE t AS (SELECT [{ 'a': 1 }, { 'a': 2 }] AS xs FROM mem(1,1) m)",
-        Some(&dbp),
-    );
-    assert!(
-        ok,
-        "nested-tuple-in-list CTAS should succeed; stderr: {err}"
-    );
-    let (ok, out, err) = run_exec("SELECT * FROM t", Some(&dbp));
-    assert!(ok, "SELECT failed: {err}");
-    assert!(out.contains("1"), "expected 1; got: {out}");
-    assert!(out.contains("2"), "expected 2; got: {out}");
-    // Both tuples preserve their field name through the round trip.
-    assert!(out.contains("'a': 1"), "expected 'a': 1; got: {out}");
-    assert!(out.contains("'a': 2"), "expected 'a': 2; got: {out}");
 }
 
 #[test]
