@@ -58,10 +58,71 @@ Plugin crates for Ion, CSV, DDL, and additional scalar functions. Each registers
 
 ### Binaries (`partiql-tools`)
 
+- `pqlite` — Interactive REPL / one-shot exec runner for the bytecode engine backed by an LMDB store. See "pqlite: testing & debugging" below.
 - `partiql-hybrid` — CLI runner for bytecode engine with data source options (mem/ion/rand).
 - `partiql-legacy` — CLI runner for legacy evaluator.
 - `partiql-benchmarks` — Benchmark harness.
 - `partiql-profile` — Profiling harness.
+
+## pqlite: testing & debugging
+
+`pqlite` is the fastest way to poke at the bytecode engine end-to-end. It has two subcommands: `open` (interactive REPL against a db file) and `exec` (single-shot, script-friendly).
+
+### One-shot execution
+
+```bash
+# db-free query — no file is created
+cargo run --bin pqlite -- exec "SELECT t.a FROM mem(3, 2) t"
+
+# persistent db — parent dir must exist; the file is created on first CREATE TABLE
+cargo run --bin pqlite -- exec --db /tmp/scratch.pqlite "CREATE TABLE users"
+cargo run --bin pqlite -- exec --db /tmp/scratch.pqlite \
+    "INSERT INTO users SELECT * FROM << {'id':1,'name':'alice'} >>"
+cargo run --bin pqlite -- exec --db /tmp/scratch.pqlite "SELECT * FROM users"
+
+# Ion output — pipe stdout to another Ion consumer; stderr is silent on success
+cargo run --bin pqlite -- exec --format ion "SELECT * FROM << {'a': 1}, {'a': 2} >>"
+```
+
+Query rows and Ion output go to **stdout**; the timing footer, debug dumps, and errors go to **stderr**. That split is load-bearing for scripting — `2>/dev/null` gets you clean data.
+
+Built-in table functions available inside queries: `mem(rows, cols)` (sequential ints), `rand(rows, cols)` (random ints), `scan_ion(path)` (read an Ion file).
+
+### `--debug` pipeline dumps
+
+`--debug` is a global flag (goes before the subcommand). Values are comma-separated; each value prints one stage of the compile pipeline to stderr before the result:
+
+| Flag | Emits |
+|---|---|
+| `--debug ast` | Parsed AST (`[AST] Parsed { ... }`) |
+| `--debug plan` | Logical plan graph (`[Plan] LogicalPlan { nodes, edges }`) |
+| `--debug program` | Compiled bytecode: `CompiledPlan` with slot count, registers, cursors, constants, and the `Inst` stream |
+| `--debug '*'` | All three |
+| `--debug ast,plan` | Any comma-separated subset |
+
+```bash
+cargo run --bin pqlite -- --debug program exec "SELECT t.a FROM mem(3, 2) t"
+cargo run --bin pqlite -- --debug ast,plan exec "SELECT 1"
+```
+
+Inside the REPL, pass `--debug` at launch (`pqlite --debug plan open db.pqlite`); every subsequent statement prints its stage dump.
+
+### End-to-end test harness
+
+Golden-file tests live under `partiql-tools/tests/pqlite/cases/**/*.test.ion`. Each `.test.ion` file is a sequence of Ion structs of the form `{ sql: "...", expect: { rows: $bag::[...] } }`. `expect` supports `rows`, `affected_rows`, `created_table`, or `error: "substring"`; annotate a struct with `skip::` to keep a known-broken case in tree. The `partiql_tools::pqlite_e2e::case` test runs them via `rstest` file globbing.
+
+```bash
+# Run every fixture (each file is its own test case)
+cargo test -p partiql-tools --test pqlite_e2e
+
+# Run one fixture by name-substring
+cargo test -p partiql-tools --test pqlite_e2e select_projection
+
+# CLI-contract tests (spawn the built binary as a subprocess)
+cargo test -p partiql-tools --test pqlite_cli
+```
+
+When adding a new engine feature, the usual loop is: write a `.test.ion` under `cases/query/`, run it with `cargo test -p partiql-tools --test pqlite_e2e <name>`, and when it fails inspect the pipeline with `pqlite --debug '*' exec "<your sql>"` to see where the compile pipeline diverges from expectation.
 
 ## Bytecode VM (engine module)
 
