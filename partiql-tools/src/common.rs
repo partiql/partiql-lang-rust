@@ -27,7 +27,7 @@ use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufReader, Read};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -866,28 +866,117 @@ fn open_stdin_reader() -> EvalResult<Box<dyn Read + Send>> {
     Ok(Box::new(std::io::stdin()))
 }
 
-/// Buffers the whole subprocess output in memory; not for GB-scale producers.
+/// Streams the child's stdout so the Ion decoder can start reading before the
+/// subprocess exits. Non-zero exit surfaces on the final read (the one that
+/// would return EOF). A background thread drains stderr to keep a large
+/// stderr from filling its pipe and deadlocking the child.
+struct ExecReader {
+    stdout: std::process::ChildStdout,
+    stderr_handle: Option<std::thread::JoinHandle<Vec<u8>>>,
+    child: Option<std::process::Child>,
+    cmd: String,
+    finished: bool,
+}
+
+impl Read for ExecReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.finished {
+            return Ok(0);
+        }
+        let n = self.stdout.read(buf)?;
+        if n == 0 {
+            self.finished = true;
+            let stderr_bytes = self
+                .stderr_handle
+                .take()
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
+            if let Some(mut child) = self.child.take() {
+                match child.wait() {
+                    Ok(status) if !status.success() => {
+                        // Truncate at the byte level: `String::truncate` panics
+                        // on a non-char boundary; `from_utf8_lossy` substitutes
+                        // U+FFFD instead.
+                        let truncated = stderr_bytes.len() > 4096;
+                        let bytes = &stderr_bytes[..stderr_bytes.len().min(4096)];
+                        let mut stderr = String::from_utf8_lossy(bytes).into_owned();
+                        if truncated {
+                            stderr.push_str("...(truncated)");
+                        }
+                        return Err(std::io::Error::other(format!(
+                            "exec `{}` failed ({status}): {stderr}",
+                            self.cmd
+                        )));
+                    }
+                    Err(e) => {
+                        return Err(std::io::Error::other(format!(
+                            "exec `{}` wait failed: {e}",
+                            self.cmd
+                        )));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(n)
+    }
+}
+
+impl Drop for ExecReader {
+    fn drop(&mut self) {
+        // Reap on early teardown (parse error, LIMIT); otherwise the child
+        // lingers until SIGPIPE and the drain thread stays alive on the pipe.
+        if !self.finished {
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            if let Some(handle) = self.stderr_handle.take() {
+                let _ = handle.join();
+            }
+            self.finished = true;
+        }
+    }
+}
+
 fn open_exec_reader(cmd: &str) -> EvalResult<Box<dyn Read + Send>> {
-    let output = Command::new("sh")
+    let mut child = Command::new("sh")
         .arg("-c")
         .arg(cmd)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| partiql_eval::EngineError::ReaderError(format!("exec spawn failed: {e}")))?;
-    if !output.status.success() {
-        // Truncate at the byte level: `String::truncate` panics on a
-        // non-char boundary; `from_utf8_lossy` substitutes U+FFFD instead.
-        let truncated = output.stderr.len() > 4096;
-        let bytes = &output.stderr[..output.stderr.len().min(4096)];
-        let mut stderr = String::from_utf8_lossy(bytes).into_owned();
-        if truncated {
-            stderr.push_str("...(truncated)");
+    let stdout = child.stdout.take().ok_or_else(|| {
+        partiql_eval::EngineError::ReaderError("exec: failed to capture stdout".to_string())
+    })?;
+    let mut stderr_pipe = child.stderr.take().ok_or_else(|| {
+        partiql_eval::EngineError::ReaderError("exec: failed to capture stderr".to_string())
+    })?;
+    // Keep draining the pipe (so the child never blocks on a full stderr
+    // buffer) but cap retained bytes to what the error message can surface.
+    let stderr_handle = std::thread::spawn(move || {
+        const CAP: usize = 4096;
+        let mut buf = Vec::with_capacity(CAP);
+        let mut scratch = [0u8; 1024];
+        while let Ok(n) = stderr_pipe.read(&mut scratch) {
+            if n == 0 {
+                break;
+            }
+            if buf.len() < CAP {
+                let take = (CAP - buf.len()).min(n);
+                buf.extend_from_slice(&scratch[..take]);
+            }
         }
-        return Err(partiql_eval::EngineError::ReaderError(format!(
-            "exec `{cmd}` failed ({}): {stderr}",
-            output.status
-        )));
-    }
-    Ok(Box::new(std::io::Cursor::new(output.stdout)))
+        buf
+    });
+    Ok(Box::new(ExecReader {
+        stdout,
+        stderr_handle: Some(stderr_handle),
+        child: Some(child),
+        cmd: cmd.to_string(),
+        finished: false,
+    }))
 }
 
 fn open_curl_reader(url: &str) -> EvalResult<Box<dyn Read + Send>> {
