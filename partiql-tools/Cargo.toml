@@ -71,7 +71,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 heed = { version = "0.20", default-features = false }
 reedline = "0.48.0"
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
-ureq = "3"
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "platform-verifier", "_ring"] }
 
 [dev-dependencies]
 criterion = "0.5"

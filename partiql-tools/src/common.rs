@@ -981,8 +981,14 @@ fn open_exec_reader(cmd: &str) -> EvalResult<Box<dyn Read + Send>> {
 
 fn open_curl_reader(url: &str) -> EvalResult<Box<dyn Read + Send>> {
     const ONE_GIB: u64 = 1024 * 1024 * 1024;
+    // Trust the OS root store via rustls-platform-verifier rather than the
+    // compiled-in Mozilla bundle.
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
+        .tls_config(tls)
         .build()
         .into();
     let response = agent
