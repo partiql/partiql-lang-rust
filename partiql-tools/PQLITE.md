@@ -6,17 +6,21 @@ Project Repo: [https://github.com/partiql/partiql-lang-rust/tree/dev](https://gi
 
 Maintainers: hashPirate, johnedquinn
 
+## Background
+
+partiql-lang-rust currently uses a tree-walker structure, and is transitioning to a fast bytecode VM on the `dev` branch. This experimental VM gives us the correct shape to stream rows out of a real storage backend.
+
 ## Usage
 
-As of August 18th 2026, Ingestion Functions (curl(),read(),stdin(),exec()) are present on `feat/pqlite-ingestion-functions` branch. There is an open PR for this, and switching to that branch will allow for usage of these functions.
+As of August 18th 2026, Ingestion Functions (`curl()`,`read()`,`stdin()`,`exec()`) are present on `feat/pqlite-ingestion-functions` branch. There is an open PR for this ([#661](https://github.com/partiql/partiql-lang-rust/pull/661)), and switching to that branch will allow for usage of these functions.
 
-Build
+**Build**
 
 ```
 cargo build --release --bin pqlite
 ```
 
-Usage
+**Usage**
 
 ```
 pqlite open <db>                              # REPL against <db>
@@ -25,14 +29,14 @@ pqlite --version
 pqlite --debug ast,plan,program ...           # or --debug '*'
 ```
 
-REPL meta commands
+**REPL meta commands**
 
 ```
 .help
 .quit    (alias .exit)
 ```
 
-Table functions
+**Table functions**
 
 ```
 mem(rows, cols)      generated integer data (cols named 'a', 'b'; use cols<=2)
@@ -42,7 +46,7 @@ exec(command)        sh -c <command>, read stdout
 curl(url)            HTTPS GET, read body
 ```
 
-Examples
+**Examples**
 
 ```
 pqlite exec "SELECT * FROM mem(5, 2)"
@@ -66,7 +70,7 @@ pqlite exec --db repos.pqlite "SELECT * FROM _tables"
 pqlite open repos.pqlite -> opens the REPL for commands like CREATE TABLE/INSERT directly 
 ```
 
-Files
+**Files**
 
 ```
 <name>.pqlite         LMDB env
@@ -115,9 +119,6 @@ partiql-eval/src/engine/       # bytecode VM
 
 ```
 
-## Background
-
-partiql-lang-rust currently uses a tree-walker structure, and is transitioning to a fast bytecode VM on the `dev` branch. This experimental VM gives us the correct shape to stream rows out of a real storage backend.
 
 ## What was built
 
@@ -197,13 +198,13 @@ Every test is a  `.test.ion`  file in  `partiql-tools/tests/pqlite/cases`  a
 ## Common Issues
 
 
-- `Error: storage engine error: MDB_MAP_FULL: Environment mapsize limit reached` - There is a 1GiB map size cap ( `storage.rs:6` , `DEFAULT_MAP_SIZE`). Increase and rebuild
-- `Table alias fails: SELECT t.x FROM foo t returns MISSING` - Known bug in stored-table aliasing (issue #657)
+- `Error: storage engine error: MDB_MAP_FULL: Environment mapsize limit reached` happens because there is a 1GiB map size cap ( `storage.rs:6` , `DEFAULT_MAP_SIZE`). Increase and rebuild
+ - `Table alias fails: SELECT t.x FROM foo t returns MISSING` - Known bug in stored-table aliasing ([#657](https://github.com/partiql/partiql-lang-rust/issues/657))
 - Wrapped-array API response returns one row because currently curl() unwraps a top-level JSON array but not a wrapper struct. `SELECT * FROM curl('.../search/issues')` returns one row containing `{total_count, items: [...]}`. Workaround: remove wrapper with jq till fixed.
 
 ## Next Steps
 
-- Engine-owned transactions - The write path buffers all source rows in RAM before opening the LMDB write transaction. LMDB rejects opening a table handle inside a write txn while another txn (the streaming reader's) is live. The fix is that the engine owns a RwTxn that the reader and writer share.
+- Application-owned transactions - The write path currently buffers all source rows in RAM before opening the LMDB write transaction. Problem is `Box<dyn DataSource>` requires `'static` but `heed::RoTxn<'env>` borrows, so a live read txn can't be held inside a trait. Fix is a LazyHeedSource that owns its own RoTxn for reads, and the pqlite session owns a separate RwTxn so CTAS and row writes commit atomically as one write txn.
 - Storage trait - HeedDB is concrete so a Storage trait that would abstract Env / RwTxn / RoTxn / Database / Cursor, would allow for other non-LMDB backends. Deferred until a second backend is needed.
 - DROP TABLE - Parser grammar contains `DdlOp::DropTable` but it is rejected by the lowerer. Wiring it end-to-end would need extending LogicalStatement with a DropTable variant, executing it in `session/exec.rs`.
 
