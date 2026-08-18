@@ -12,7 +12,7 @@ partiql-lang-rust currently uses a tree-walker structure, and is transitioning t
 
 ### Conformance status on the VM
 
-The VM on `dev` currently passes ~70% of the PartiQL conformance suite versus ~88% for the legacy tree-walker on `main` — a ~17.5 point gap (~1,239 tests that pass on `main` but fail on the VM, offset by ~70 that fail on `main` but pass on the VM). This gap is the ongoing evaluator work upstream of pqlite; pqlite itself does not sit in the conformance-test call graph. Any conformance regression flagged on a pqlite PR is attributable to VM changes on `dev`, not to code under `partiql-tools/`. Reviewers should route conformance concerns to the VM effort rather than to this doc.
+pqlite does not sit on the conformance-test call graph. Any regression is due to ongoing experimental VM changes on `dev` branch. 
 
 ## Usage
 
