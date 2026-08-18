@@ -10,6 +10,10 @@ Maintainers: hashPirate, johnedquinn
 
 partiql-lang-rust currently uses a tree-walker structure, and is transitioning to a fast bytecode VM on the `dev` branch. This experimental VM gives us the correct shape to stream rows out of a real storage backend.
 
+### Conformance status on the VM
+
+The VM on `dev` currently passes ~70% of the PartiQL conformance suite versus ~88% for the legacy tree-walker on `main` — a ~17.5 point gap (~1,239 tests that pass on `main` but fail on the VM, offset by ~70 that fail on `main` but pass on the VM). This gap is the ongoing evaluator work upstream of pqlite; pqlite itself does not sit in the conformance-test call graph. Any conformance regression flagged on a pqlite PR is attributable to VM changes on `dev`, not to code under `partiql-tools/`. Reviewers should route conformance concerns to the VM effort rather than to this doc.
+
 ## Usage
 
 As of August 18th 2026, Ingestion Functions (`curl()`,`read()`,`stdin()`,`exec()`) are present on `feat/pqlite-ingestion-functions` branch. There is an open PR for this ([#661](https://github.com/partiql/partiql-lang-rust/pull/661)), and switching to that branch will allow for usage of these functions.
@@ -79,6 +83,8 @@ pqlite open repos.pqlite -> opens the REPL for commands like CREATE TABLE/INSERT
 ```
 
 ## File Structure
+
+`partiql-tools/` also hosts other tools (`partiql-legacy`, `partiql-hybrid`, benchmarks, profilers). The tree below lists only the files relevant to pqlite.
 
 ```
 partiql-tools/
