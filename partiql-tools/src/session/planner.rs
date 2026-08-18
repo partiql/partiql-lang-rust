@@ -107,9 +107,11 @@ pub(super) fn build_exec_context(
     compiled: &partiql_eval::CompiledPlan,
 ) -> ExecutionContext {
     let mut exec_context = ExecutionContext::new();
-    exec_context.register_table_function("rand", Arc::new(common::RandTableFunction));
     exec_context.register_table_function("mem", Arc::new(common::MemTableFunction));
-    exec_context.register_table_function("scan_ion", Arc::new(common::ScanIonTableFunction));
+    exec_context.register_table_function("read", Arc::new(common::JsonIonTableFunction::read()));
+    exec_context.register_table_function("stdin", Arc::new(common::JsonIonTableFunction::stdin()));
+    exec_context.register_table_function("exec", Arc::new(common::JsonIonTableFunction::exec()));
+    exec_context.register_table_function("curl", Arc::new(common::JsonIonTableFunction::curl()));
 
     if let Some(db) = db {
         let mut heed_exec = HeedExecutionCatalog::new(db);

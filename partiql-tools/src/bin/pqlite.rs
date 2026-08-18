@@ -22,7 +22,7 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 ///
 /// Use table functions in queries to access data:
 ///   SELECT t.a FROM mem(100, 2) t;
-///   SELECT t.name FROM scan_ion('data.ion') t;
+///   SELECT t.name FROM read('data.json') t;
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
@@ -218,8 +218,10 @@ fn print_help() {
     println!("To run a query, type any PartiQL statement and press Enter.");
     println!("Available table functions:");
     println!("  mem(rows, cols)       — sequential integer data");
-    println!("  rand(rows, cols)      — random integer data");
-    println!("  scan_ion(path)        — read Ion file");
+    println!("  read(path)            — read Ion or JSON from a file");
+    println!("  stdin()               — read Ion or JSON from stdin");
+    println!("  exec(command)         — run `sh -c <command>`, read its stdout");
+    println!("  curl(url)             — HTTP GET, read the response body");
     println!();
     println!("Example: SELECT t.a, t.b FROM mem(100, 2) t LIMIT 5;");
 }
