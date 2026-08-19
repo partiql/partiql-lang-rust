@@ -49,3 +49,30 @@ fn tupleconcat() {
 
     insta::assert_debug_snapshot!(tuple);
 }
+
+/// `tupleunion`/`tupleconcat` are defined only over tuples (PartiQL spec, SELECT * semantics).
+/// A non-tuple argument is rejected rather than silently coerced: `MISSING` in permissive mode,
+/// an error in strict mode.
+#[test]
+fn tupleunion_non_tuple_arg_permissive() {
+    let res = eval("tupleunion('x')", EvaluationMode::Permissive);
+    assert_matches!(res.unwrap().result, Value::Missing);
+}
+
+#[test]
+fn tupleunion_non_tuple_arg_strict() {
+    let res = eval("tupleunion('x')", EvaluationMode::Strict);
+    assert_matches!(res, Err(TestError::Eval(_)));
+}
+
+#[test]
+fn tupleconcat_non_tuple_arg_permissive() {
+    let res = eval("tupleconcat({ 'a': 1 }, 2)", EvaluationMode::Permissive);
+    assert_matches!(res.unwrap().result, Value::Missing);
+}
+
+#[test]
+fn tupleconcat_non_tuple_arg_strict() {
+    let res = eval("tupleconcat({ 'a': 1 }, 2)", EvaluationMode::Strict);
+    assert_matches!(res, Err(TestError::Eval(_)));
+}
