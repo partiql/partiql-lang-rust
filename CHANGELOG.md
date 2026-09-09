@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Fixed
+- Fixed user-registered scalar functions silently returning `MISSING` (permissive) or
+  erroring (strict) when called with a non-struct argument. Scalar-function arguments are
+  now checked against `DYNAMIC` rather than a struct-of-dynamic type, so `String`,
+  `Integer`, and other scalar arguments reach the function body.
+- `tupleunion`/`tupleconcat` (in `partiql-extension-value-functions`) now reject a non-tuple
+  argument (`MISSING` in permissive mode, an error in strict mode) instead of silently
+  coercing it to a single-attribute tuple. Per the PartiQL specification these functions are
+  defined only over tuples; scalar coercion for `SELECT *` remains the planner's concern.
+
 ### Removed
 
 ## [0.14.0]

@@ -5,7 +5,7 @@ use crate::eval::eval_expr_wrapper::{
 use crate::eval::expr::{BindError, BindEvalExpr, EvalExpr};
 use crate::eval::EvalContext;
 
-use partiql_types::PartiqlNoIdShapeBuilder;
+use partiql_types::TYPE_DYNAMIC;
 use partiql_value::Value;
 
 use std::borrow::Cow;
@@ -44,9 +44,10 @@ impl<const STRICT: bool> EvalExpr for EvalExprFnScalar<STRICT> {
         'a: 'o,
     {
         type Check<const STRICT: bool> = DefaultArgChecker<STRICT, PropagateMissing<true>>;
-        // use DummyShapeBuilder, as we don't care about shape Ids for evaluation dispatch
-        let mut bld = PartiqlNoIdShapeBuilder::default();
-        let typ = bld.new_struct_of_dyn();
+        // Scalar function arguments carry no declared type in `ScalarFnCallSpec` (its
+        // `CallSpecArg`s are only `Positional`/`Named`), so accept any value here and let
+        // the function body validate.
+        let typ = TYPE_DYNAMIC;
         match evaluate_and_validate_args::<{ STRICT }, Check<STRICT>, _>(
             &self.args,
             |_| &typ,
