@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1768240144087,
+  "lastUpdate": 1788988290964,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -43937,6 +43937,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 21180,
             "range": "± 196",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lewistm@gmail.com",
+            "name": "TerenceLewis",
+            "username": "TerenceLewis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4ae23cb5a5c3e47c6a4f72dcd5097dc50dc9617b",
+          "message": "Accept scalar arguments to user-registered scalar functions (#663)\n\nA user-registered scalar function (`Catalog::add_scalar_function`) called\nwith a non-struct argument silently returns MISSING in permissive mode and\nerrors in strict mode -- the function body is never invoked.\n\n`EvalExprFnScalar::evaluate` built the expected argument type as\n`PartiqlNoIdShapeBuilder::default().new_struct_of_dyn()` and validated every\nargument against it via `DefaultArgChecker<STRICT, PropagateMissing<true>>`.\nOnly a struct/tuple satisfies that type, so a String, Integer, etc. fails\n`typ.satisfies(val)` and short-circuits before the function runs.\n\n`ScalarFnCallSpec` carries no declared per-argument type (`CallSpecArg` is\nonly `Positional`/`Named`), so the struct-of-dynamic expectation is\narbitrary. Use `TYPE_DYNAMIC`, which is satisfied by any value; the function\nbody is responsible for validating its own arguments.\n\nAdds a regression test in partiql/tests/scalar_fns.rs that registers a\ntest-only `str_length(<string>) -> int` scalar UDF (the shipped\ntupleunion/tupleconcat take tuples, which is why this was never surfaced) and\nasserts `str_length('hello') == 5` in both permissive and strict modes. The\ntest fails on main and passes with the fix.\n\nBecause scalar arguments now reach the function body, `tupleunion` and\n`tupleconcat` -- which previously relied on the struct-of-dynamic dispatcher\nguard to reject non-tuple arguments -- would otherwise silently coerce a\nscalar into a single-attribute tuple (e.g. `tupleunion('x')` -> `{'_1': 'x'}`).\nPer the PartiQL specification these functions are defined only over tuples;\nscalar coercion for `SELECT *` is the planner's concern and uses positional\nsynthetic names. Both functions now reject a non-tuple argument (MISSING in\npermissive mode, an error in strict mode), preserving their prior behavior,\nwith regression tests in partiql/tests/tuple_ops.rs.",
+          "timestamp": "2026-09-09T13:47:43-07:00",
+          "tree_id": "ca78e7272ad66e436afc02a97cfa63b4c4464fc9",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/4ae23cb5a5c3e47c6a4f72dcd5097dc50dc9617b"
+        },
+        "date": 1788988289261,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 672557,
+            "range": "± 7450",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 953984,
+            "range": "± 2612",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 920083,
+            "range": "± 4467",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 951054,
+            "range": "± 5441",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 921974,
+            "range": "± 14767",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 953363,
+            "range": "± 2222",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 929221,
+            "range": "± 3200",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 959742,
+            "range": "± 4288",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 921331,
+            "range": "± 2557",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 953166,
+            "range": "± 6508",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1183180,
+            "range": "± 10121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1488384,
+            "range": "± 21722",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2049097,
+            "range": "± 18126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1336941,
+            "range": "± 6221",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1658950,
+            "range": "± 15684",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2231532,
+            "range": "± 12487",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 3698,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 33630,
+            "range": "± 211",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 65745,
+            "range": "± 335",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4183,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 30857,
+            "range": "± 181",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 63636,
+            "range": "± 233",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 53691,
+            "range": "± 216",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 851834,
+            "range": "± 1792",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1713248,
+            "range": "± 83484",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 14055844,
+            "range": "± 182262",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 84858158,
+            "range": "± 520905",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 164443205,
+            "range": "± 425000",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 484749373,
+            "range": "± 4448591",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 458895987,
+            "range": "± 1796143",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10067,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2762,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 351,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 76,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 578,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1599,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 5224,
+            "range": "± 105",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 13099,
+            "range": "± 268",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 19368,
+            "range": "± 81",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 16659,
+            "range": "± 86",
             "unit": "ns/iter"
           }
         ]
