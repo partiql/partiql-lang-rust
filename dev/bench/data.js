@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788988290964,
+  "lastUpdate": 1789084013733,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -44201,6 +44201,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 16659,
             "range": "± 86",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lewistm@gmail.com",
+            "name": "TerenceLewis",
+            "username": "TerenceLewis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f15130d655fbc2879c3bc2f279f183d1ff41c917",
+          "message": "Lower scalar-position SELECT subqueries to SubQueryExpr (#664)\n\nScalar-position `SELECT` subqueries failed AST-to-logical-plan lowering, even\nthough the evaluator already supports them (see the `subquery_in_project`\nevaluator test). Lowering a subquery in a projection-list item or a\n`SELECT VALUE` produced `NotYetImplemented(\"Subquery within project\")`, and a\nsubquery in a function-call argument or a struct value produced\n`IllegalState(\"env.len() != 1\")` / `IllegalState(\"env.len() is not even\")`.\n\nThe gap: a `Query` node always pushed its output onto the current `benv` (a\nquery-position operand), so a subquery appearing where a *value* is expected\nleft the scalar operator short an `env` operand and its `benv` non-empty.\n\nRoute a scalar-position SELECT subquery through `env` as an ordinary operand:\n\n- `enter_expr` sets a one-shot `pending_query_is_scalar` flag when the next\n  `Query` is reached through an `Expr` (i.e. it is a subquery) and the current\n  context is not `FromLet` (FROM-source derived tables stay query-position;\n  set-operation operands are bare `Query` nodes and never reach `enter_expr`).\n- `enter_query` consumes the flag onto a `scalar_query_stack` and, for a scalar\n  `SELECT` subquery, isolates its operators in a fresh `plan_stack` entry.\n- `exit_query` pops the stack and, for a scalar subquery, wraps the isolated\n  sub-plan as `ValueExpr::SubQueryExpr` pushed onto `env` (tagged in source\n  order with sibling operands). Query-position subqueries are unchanged\n  (`push_bexpr`).\n\nBecause the subquery now arrives as an ordinary `env` operand, the existing\nprojection / struct / call-argument consumers need no changes.\n\nThis is a lowering change only; `SubQueryExpr` evaluation is unchanged. A\nscalar-position subquery returns the subquery's result collection as-is -- it\nis not coerced to a scalar (SQL-style scalar-subquery coercion is a separate,\nunimplemented concern). Empty result -> empty bag; N rows -> N-element bag.\n\nScope: only scalar-position `SELECT` subqueries are lowered. Set-operation\n(`UNION`/`EXCEPT`/`INTERSECT`) subqueries in scalar position remain\n`NotYetImplemented(\"Subquery within project\")` (possible follow-up).\n\nAdds `partiql/tests/subquery_lowering.rs` covering a subquery in a\nprojection-list item, as a `SELECT VALUE` struct value, in a function-call\nargument, and in a `CASE` branch (all fail on main with the errors above and\npass with this change), plus an empty-result subquery (-> empty bag,\ndocumenting the no-coercion semantics) and a set-operation subquery in scalar\nposition (asserted still rejected, bounding the change). Existing\nsubquery-in-FROM and correlated-subquery tests continue to pass.",
+          "timestamp": "2026-09-10T16:23:00-07:00",
+          "tree_id": "b7c62efadda50eb9f0c0239c45cf9f30e7fb3df7",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/f15130d655fbc2879c3bc2f279f183d1ff41c917"
+        },
+        "date": 1789084012549,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 787811,
+            "range": "± 89009",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 874525,
+            "range": "± 9540",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 835364,
+            "range": "± 6313",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 872161,
+            "range": "± 2198",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 841427,
+            "range": "± 23513",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 873285,
+            "range": "± 14714",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 848632,
+            "range": "± 2301",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 885495,
+            "range": "± 2818",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 840876,
+            "range": "± 5012",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 874259,
+            "range": "± 3121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1127182,
+            "range": "± 22652",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1491202,
+            "range": "± 9851",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2064048,
+            "range": "± 248470",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1327651,
+            "range": "± 13793",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1758200,
+            "range": "± 8253",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2316106,
+            "range": "± 6131",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 4789,
+            "range": "± 29",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 41011,
+            "range": "± 372",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 79757,
+            "range": "± 1336",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4129,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 30023,
+            "range": "± 232",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 61750,
+            "range": "± 289",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 64336,
+            "range": "± 371",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1010593,
+            "range": "± 24340",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2021084,
+            "range": "± 10478",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12568963,
+            "range": "± 115019",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 91805708,
+            "range": "± 1679740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 176650710,
+            "range": "± 2188608",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 473462235,
+            "range": "± 7736685",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 419193832,
+            "range": "± 1267922",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10534,
+            "range": "± 546",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2451,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 369,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 681,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2099,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6507,
+            "range": "± 88",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 17004,
+            "range": "± 56",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 24030,
+            "range": "± 127",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21381,
+            "range": "± 104",
             "unit": "ns/iter"
           }
         ]
