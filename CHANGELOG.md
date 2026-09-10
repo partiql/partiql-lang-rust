@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Added
+- partiql-logical-planner: Lower scalar-position `SELECT` subqueries — projection-list
+  items, `SELECT VALUE` struct values, function-call arguments, and subqueries nested in
+  other scalar operators (`CASE`, binary operators, ...) — to `ValueExpr::SubQueryExpr`.
+  Previously these produced `NotYetImplemented("Subquery within project")` or `IllegalState`
+  during lowering. Set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subqueries in scalar position
+  remain unsupported. No scalar coercion is introduced: the subquery's result collection is
+  returned as-is (matching existing `SubQueryExpr` evaluation).
 
 ### Fixed
 - Fixed user-registered scalar functions silently returning `MISSING` (permissive) or
