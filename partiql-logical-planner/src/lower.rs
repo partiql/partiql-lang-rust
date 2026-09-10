@@ -171,6 +171,10 @@ pub struct AstToLogical<'a> {
 
     q_stack: Vec<QueryClauses>,
     ctx_stack: Vec<QueryContext>,
+    // whether the next entered query is a scalar-position subquery
+    pending_query_is_scalar: bool,
+    // scalar-position flag per enclosing query
+    scalar_query_stack: Vec<bool>,
     bexpr_stack: Vec<Vec<logical::OpId>>,
     vexpr_stack: Vec<Vec<(NodeId, ValueExpr)>>,
     arg_stack: Vec<Vec<CallArgument>>,
@@ -239,6 +243,8 @@ impl<'a> AstToLogical<'a> {
 
             q_stack: Default::default(),
             ctx_stack: Default::default(),
+            pending_query_is_scalar: false,
+            scalar_query_stack: Default::default(),
             bexpr_stack: Default::default(),
             vexpr_stack: Default::default(),
             arg_stack: Default::default(),
@@ -731,25 +737,58 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
+    fn enter_expr(&mut self, expr: &'ast Expr) -> Traverse {
+        // A `Query` node reached through an `Expr` is a subquery in *scalar*
+        // (value) position — and must be lowered to a `ValueExpr::SubQueryExpr`
+        // operand — UNLESS it is the immediate expression of a FROM source
+        // (`FromLet.expr`), which is a *query*-position derived table handled via
+        // `benv`. (Set-operation operands are bare `Query` nodes, not wrapped in
+        // `Expr`, so they never reach here and default to query position.)
+        self.pending_query_is_scalar = matches!(expr, Expr::Query(_))
+            && !matches!(self.current_ctx(), Some(QueryContext::FromLet));
+        Traverse::Continue
+    }
+
     fn enter_query(&mut self, query: &'ast Query) -> Traverse {
+        let is_scalar = std::mem::take(&mut self.pending_query_is_scalar);
+        let is_select = matches!(query.set.node, QuerySet::Select(_));
+        self.scalar_query_stack.push(is_scalar);
+        // Isolate a scalar SELECT subquery's operators in their own sub-plan so
+        // it can be wrapped as a self-contained `SubQueryExpr`.
+        if is_scalar && is_select {
+            self.enter_plan();
+        }
         self.enter_benv();
-        if let QuerySet::Select(_) = query.set.node {
+        if is_select {
             self.enter_q();
         }
         Traverse::Continue
     }
 
     fn exit_query(&mut self, query: &'ast Query) -> Traverse {
+        let is_scalar = self.scalar_query_stack.pop().expect("scalar query level");
         let benv = self.exit_benv();
         match query.set.node {
             QuerySet::Select(_) => {
                 let clauses = self.exit_q();
                 let mut clauses = clauses.evaluation_order().into_iter();
+                let mut last_id = None;
                 if let Some(mut src_id) = clauses.next() {
                     for dst_id in clauses {
                         self.curr_plan().add_flow(src_id, dst_id);
                         src_id = dst_id;
                     }
+                    last_id = Some(src_id);
+                }
+                if is_scalar {
+                    // Scalar-position subquery: pop the isolated sub-plan and hand
+                    // it to the enclosing scalar operator as an ordinary `env`
+                    // operand (interleaves in source order with sibling operands).
+                    let subplan = self.exit_plan();
+                    self.push_vexpr(ValueExpr::SubQueryExpr(logical::SubQueryExpr {
+                        plan: subplan,
+                    }));
+                } else if let Some(src_id) = last_id {
                     self.push_bexpr(src_id);
                 }
             }
