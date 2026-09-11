@@ -753,6 +753,7 @@ pub enum CallName {
     Abs,
     Mod,
     Cardinality,
+    CollToScalar,
     ExtractYear,
     ExtractMonth,
     ExtractDay,
