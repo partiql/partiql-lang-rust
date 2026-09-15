@@ -177,7 +177,7 @@ impl Generator {
                 self.gen_tests(module.scope(), &contents);
                 self.pop_scope();
 
-                let out_file = format!("{}.rs", &mod_name);
+                let out_file = format!("{}.rs", mod_name);
                 let path: Vec<_> = self
                     .curr_path
                     .iter()
@@ -206,7 +206,7 @@ impl Generator {
         self.collapse_test_entry(module.scope(), entry);
         self.pop_scope();
 
-        let out_file = format!("{}.rs", &mod_name.escape_path());
+        let out_file = format!("{}.rs", mod_name.escape_path());
         let path: Vec<_> = self
             .curr_path
             .iter()
@@ -402,7 +402,7 @@ impl Generator {
         test_fn.attr("test");
         test_fn.attr("allow(text_direction_codepoint_in_literal)");
 
-        let doc = format!("Generated test for test named `{}`", &test_case.name);
+        let doc = format!("Generated test for test named `{}`", test_case.name);
         test_fn.doc(&doc);
 
         let env = if let Some(env) = &test_case.env {
