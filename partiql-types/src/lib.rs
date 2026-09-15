@@ -163,7 +163,7 @@ macro_rules! struct_fields {
 #[macro_export]
 macro_rules! type_bag {
     ($bld:expr) => {
-        $bld.new_bag(BagType::new_any());
+        $bld.new_bag(BagType::new_any())
     };
     ($bld:expr, $elem:expr) => {{
         let elem = $elem;
@@ -174,7 +174,7 @@ macro_rules! type_bag {
 #[macro_export]
 macro_rules! type_array {
     ($bld:expr) => {
-        $bld.new_array(ArrayType::new_any());
+        $bld.new_array(ArrayType::new_any())
     };
     ($bld:expr, $elem:expr) => {{
         let elem = $elem;

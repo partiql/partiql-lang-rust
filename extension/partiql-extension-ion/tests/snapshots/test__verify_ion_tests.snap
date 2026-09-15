@@ -2,6 +2,7 @@
 source: extension/partiql-extension-ion/tests/test.rs
 expression: result
 ---
+
 =====================
 /UnicodeNullInFieldName.ion
 ---------------------
@@ -725,7 +726,7 @@ Err: `Latent Type Error for Boxed Document Error reading Ion `integer size is cu
 =====================
 /intBigSize16.10n
 ---------------------
-Err: `Latent Type Error for Boxed Document Error reading Ion `could not safely convert value 340272423131748694355562029545669544747 of type 'u128' to Int: TryFromIntError(())``
+Err: `Latent Type Error for Boxed Document Error reading Ion `could not safely convert value 340272423131748694355562029545669544747 of type 'u128' to Int: TryFromIntError(PosOverflow)``
 =====================
 
 =====================
