@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789502491273,
+  "lastUpdate": 1789520652118,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -44729,6 +44729,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 20666,
             "range": "± 230",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lewistm@gmail.com",
+            "name": "TerenceLewis",
+            "username": "TerenceLewis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "84b84e1e48fb8d1232c7c06c2921b168a74e2563",
+          "message": "Clear cargo clippy -D warnings failures on the current toolchain (#665)\n\nThe CI clippy gate (cargo clippy --all-features --workspace -- -D warnings) fails\non current stable: newer clippy enforces several clippy::all lints across the\nworkspace, and the crates that set #![deny(clippy::all)] turn them into hard\nerrors. Clear them so CI can go green again (complements #654, which fixed the\ntest/ion side but not clippy).\n\nAll changes are mechanical and behavior-preserving:\n- useless_borrows_in_formatting: drop the redundant `&` in format!/write! args\n  (partiql-conformance-test-generator, partiql-conformance-tests,\n  partiql-logical-planner/typer, partiql-extension-visualize, partiql-catalog,\n  partiql-eval).\n- useless_conversion: drop the redundant `.into_iter()` on `.zip(..)` arguments\n  (which already accept IntoIterator) in partiql-value/graph.rs.\n- question_mark: partiql-parser/token_parser.rs\n  `if let Some(tok) = .. { .. } else { return None }` -> `let tok = ..?;`.\n- match-arm simplification: partiql-eval EvalLimitOffset\n  `Value::Integer(i) => if *i >= 0 { *i as usize } else { 0 }` ->\n  `Value::Integer(i) if *i >= 0 => *i as usize` (negatives fall through to the\n  existing `_ => 0`; unchanged behavior).\n\nProduced with `cargo clippy --fix` + `cargo fmt`; no logic or public-API change.\n\nCo-authored-by: Terence Lewis <terenlew@amazon.com>",
+          "timestamp": "2026-09-15T17:47:37-07:00",
+          "tree_id": "5043d0c5e061937ddb460edc6d3a06fa4e7827f1",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/84b84e1e48fb8d1232c7c06c2921b168a74e2563"
+        },
+        "date": 1789520650620,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 780626,
+            "range": "± 19202",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 869094,
+            "range": "± 2598",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 836488,
+            "range": "± 4676",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 861428,
+            "range": "± 2697",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 837234,
+            "range": "± 2219",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 862798,
+            "range": "± 2744",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 846752,
+            "range": "± 3074",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 873620,
+            "range": "± 2662",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 839726,
+            "range": "± 5154",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 866720,
+            "range": "± 4283",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1128152,
+            "range": "± 15704",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1490341,
+            "range": "± 8396",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2078157,
+            "range": "± 26185",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1318635,
+            "range": "± 19324",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1698313,
+            "range": "± 15255",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2282089,
+            "range": "± 17168",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 4869,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 42997,
+            "range": "± 246",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 84116,
+            "range": "± 683",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4019,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 29329,
+            "range": "± 304",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 61020,
+            "range": "± 263",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 60371,
+            "range": "± 499",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 964322,
+            "range": "± 3143",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1934344,
+            "range": "± 12857",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12973415,
+            "range": "± 219376",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 90510894,
+            "range": "± 1205980",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 173998529,
+            "range": "± 815647",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 499466666,
+            "range": "± 8984535",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 416099160,
+            "range": "± 2739935",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10545,
+            "range": "± 107",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2369,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 343,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 700,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2111,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6440,
+            "range": "± 63",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 17079,
+            "range": "± 221",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 24368,
+            "range": "± 198",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 22330,
+            "range": "± 154",
             "unit": "ns/iter"
           }
         ]
