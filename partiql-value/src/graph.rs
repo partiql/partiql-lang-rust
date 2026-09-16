@@ -178,11 +178,7 @@ impl SimpleGraph {
         let (ids, labels, values) = node_specs;
         assert_eq!(ids.len(), labels.len());
         assert_eq!(ids.len(), values.len());
-        for ((id, labels), value) in ids
-            .into_iter()
-            .zip(labels.into_iter())
-            .zip(values.into_iter())
-        {
+        for ((id, labels), value) in ids.into_iter().zip(labels).zip(values) {
             let nid = node_ids.get_or_intern(id);
             let labels: HashSet<_> = labels
                 .into_iter()
@@ -204,11 +200,7 @@ impl SimpleGraph {
         assert_eq!(ids.len(), labels.len());
         assert_eq!(ids.len(), ends.len());
         assert_eq!(ids.len(), values.len());
-        for (((id, labels), edge_spec), value) in ids
-            .into_iter()
-            .zip(labels.into_iter())
-            .zip(ends.into_iter())
-            .zip(values.into_iter())
+        for (((id, labels), edge_spec), value) in ids.into_iter().zip(labels).zip(ends).zip(values)
         {
             let eid = edge_ids.get_or_intern(id);
             let labels: HashSet<_> = labels

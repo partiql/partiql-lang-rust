@@ -43,8 +43,8 @@ impl PlanToDot {
             BindingsOp::Unpivot(u) => format!(
                 "{{unpivot | {}  | as {} | at {} }}",
                 expr_to_str(&u.expr),
-                &u.as_key,
-                &u.at_key.as_deref().unwrap_or("")
+                u.as_key,
+                u.at_key.as_deref().unwrap_or("")
             ),
             BindingsOp::Filter(f) => format!("{{filter | {} }}", expr_to_str(&f.expr)),
             BindingsOp::OrderBy(o) => {

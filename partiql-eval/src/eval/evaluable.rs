@@ -166,7 +166,7 @@ pub(crate) enum EvalJoinKind {
 
 impl Debug for EvalJoin {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?} JOIN", &self.kind)?;
+        write!(f, "{:#?} JOIN", self.kind)?;
         if let Some(on) = &self.on {
             write!(f, " ON ")?;
             on.fmt(f)?;
@@ -1012,13 +1012,7 @@ impl Evaluable for EvalLimitOffset {
         let offset = match &self.offset {
             None => 0,
             Some(expr) => match expr.evaluate(&empty_bindings, ctx).as_ref() {
-                Value::Integer(i) => {
-                    if *i >= 0 {
-                        *i as usize
-                    } else {
-                        0
-                    }
-                }
+                Value::Integer(i) if *i >= 0 => *i as usize,
                 _ => 0,
             },
         };
