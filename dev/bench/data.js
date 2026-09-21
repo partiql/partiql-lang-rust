@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789520652118,
+  "lastUpdate": 1790022111316,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -44993,6 +44993,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 22330,
             "range": "± 154",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lewistm@gmail.com",
+            "name": "TerenceLewis",
+            "username": "TerenceLewis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5d8fa75342100ece552938787052b0d1adce3d95",
+          "message": "Allow the Unicode-3.0 license, superseding ICU / Unicode-DFS-2016 (#667)\n\nThe ICU crates (icu_collections, icu_segmenter, icu_locale_*, litemap,\npotential_utf, ...) and `unicode-ident` relicensed from `ICU`/`Unicode-DFS-2016`\nto `Unicode-3.0`, and newer `textwrap` (0.16.4, pulled transitively via `miette`)\nnow brings the ICU stack in. Since no `Cargo.lock` is committed, CI resolves to\nthese versions and `cargo deny check bans licenses sources` rejects the\nnot-yet-allowed `Unicode-3.0`.\n\nUpdate the license config to match the crates as they are now, rather than just\nadding a new entry on top of stale ones:\n\n- deny.toml: replace the now-unused `ICU` allowance with `Unicode-3.0`\n  (OSI-approved, permissive; ICU's successor), and remove the `unicode-ident`\n  per-crate exception, which is obsolete now that `unicode-ident` is\n  `(MIT OR Apache-2.0) AND Unicode-3.0` (no longer `Unicode-DFS-2016`, which is\n  now used by no crate).\n- about.toml: mirror it in `accepted` (drop `ICU` and the now-unused\n  `Unicode-DFS-2016`), keeping the two files reconciled.\n\n`cargo deny check bans licenses sources` passes.\n\nCo-authored-by: Terence Lewis <terenlew@amazon.com>",
+          "timestamp": "2026-09-21T12:59:39-07:00",
+          "tree_id": "d5b6ff10a60b2983c4ac7a889410e12a1ba653d4",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/5d8fa75342100ece552938787052b0d1adce3d95"
+        },
+        "date": 1790022110335,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 782437,
+            "range": "± 3918",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 866295,
+            "range": "± 2473",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 828150,
+            "range": "± 2978",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 858407,
+            "range": "± 8017",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 834180,
+            "range": "± 11647",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 860810,
+            "range": "± 4837",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 838560,
+            "range": "± 3055",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 872396,
+            "range": "± 12412",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 832170,
+            "range": "± 7718",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 861844,
+            "range": "± 5834",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1121543,
+            "range": "± 10153",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1482611,
+            "range": "± 14734",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2039978,
+            "range": "± 21060",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1300324,
+            "range": "± 25553",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1704181,
+            "range": "± 18682",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2238889,
+            "range": "± 13460",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 4844,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 42690,
+            "range": "± 205",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 83026,
+            "range": "± 448",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4118,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 30278,
+            "range": "± 140",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 62029,
+            "range": "± 211",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 60728,
+            "range": "± 214",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1008694,
+            "range": "± 17605",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2013912,
+            "range": "± 9634",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 13024843,
+            "range": "± 192202",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 93461845,
+            "range": "± 731600",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 180098359,
+            "range": "± 484261",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 486165552,
+            "range": "± 8138053",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 418068814,
+            "range": "± 1636048",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10052,
+            "range": "± 137",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2418,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 339,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 675,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2121,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6309,
+            "range": "± 29",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 16889,
+            "range": "± 164",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 23932,
+            "range": "± 141",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21234,
+            "range": "± 192",
             "unit": "ns/iter"
           }
         ]
