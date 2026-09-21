@@ -38,7 +38,7 @@ allow = [
     "CC0-1.0",
     "ISC",
     "Zlib",
-    "ICU",
+    "Unicode-3.0",
 ]
 
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
@@ -47,9 +47,7 @@ allow = [
 # This list must be manually reconciled with the `accepted` in `about.toml`
 # If you change this list, please also change `about.toml`
 #    see https://github.com/EmbarkStudios/cargo-about/issues/201
-exceptions = [
-    { allow = ["Unicode-DFS-2016", "Unicode-3.0"], name = "unicode-ident" },
-]
+exceptions = []
 
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
