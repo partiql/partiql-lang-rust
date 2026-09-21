@@ -446,3 +446,37 @@ impl BindEvalExpr for EvalFnCardinality {
         })
     }
 }
+
+/// Represents PartiQL's `COLL_TO_SCALAR` coercion (spec §9.1): a collection consisting of a
+/// single tuple with a single attribute coerces to that attribute's value; every other input
+/// (empty, multiple elements, an element that is not a single-attribute tuple, or a non-collection)
+/// produces `MISSING`. It never fails.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct EvalFnCollToScalar {}
+
+impl BindEvalExpr for EvalFnCollToScalar {
+    fn bind<const STRICT: bool>(
+        self,
+        args: Vec<Box<dyn EvalExpr>>,
+    ) -> Result<Box<dyn EvalExpr>, BindError> {
+        // `NullArgChecker` so NULL/MISSING reach the closure and coerce to MISSING too (spec: every
+        // non-conforming input, including NULL, yields MISSING) rather than propagating NULL.
+        UnaryValueExpr::create_checked::<{ STRICT }, NullArgChecker, _>(
+            [PartiqlShape::Dynamic; 1],
+            args,
+            |v| {
+                let elem = match v {
+                    Value::List(l) if l.len() == 1 => l.get(0),
+                    Value::Bag(b) if b.len() == 1 => b.iter().next(),
+                    _ => None,
+                };
+                match elem {
+                    Some(Value::Tuple(t)) if t.len() == 1 => {
+                        t.values().next().cloned().unwrap_or(Missing)
+                    }
+                    _ => Missing,
+                }
+            },
+        )
+    }
+}

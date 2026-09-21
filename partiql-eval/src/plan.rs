@@ -7,10 +7,11 @@ use crate::eval::evaluable::{
 };
 use crate::eval::expr::{
     BindError, BindEvalExpr, EvalBagExpr, EvalBetweenExpr, EvalCollFn, EvalDynamicLookup, EvalExpr,
-    EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnExists, EvalFnOverlay,
-    EvalFnPosition, EvalFnSubstring, EvalGraphMatch, EvalIsTypeExpr, EvalLikeMatch,
-    EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary, EvalOpUnary,
-    EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr, EvalVarRef,
+    EvalExtractFn, EvalFnAbs, EvalFnBaseTableExpr, EvalFnCardinality, EvalFnCollToScalar,
+    EvalFnExists, EvalFnOverlay, EvalFnPosition, EvalFnSubstring, EvalGraphMatch, EvalIsTypeExpr,
+    EvalLikeMatch, EvalLikeNonStringNonLiteralMatch, EvalListExpr, EvalLitExpr, EvalOpBinary,
+    EvalOpUnary, EvalPath, EvalSearchedCaseExpr, EvalStringFn, EvalTrimFn, EvalTupleExpr,
+    EvalVarRef,
 };
 use crate::eval::graph::plan::ValueFilter;
 use crate::eval::graph::string_graph::StringGraphTypes;
@@ -672,6 +673,10 @@ impl<'c> EvaluatorPlanner<'c> {
                     CallName::Cardinality => {
                         ("cardinality", EvalFnCardinality {}.bind::<{ STRICT }>(args))
                     }
+                    CallName::CollToScalar => (
+                        "coll_to_scalar",
+                        EvalFnCollToScalar {}.bind::<{ STRICT }>(args),
+                    ),
                     CallName::ExtractYear => {
                         ("extract year", EvalExtractFn::Year.bind::<{ STRICT }>(args))
                     }

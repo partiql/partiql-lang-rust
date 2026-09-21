@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   during lowering. Set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subqueries in scalar position
   remain unsupported. No scalar coercion is introduced: the subquery's result collection is
   returned as-is (matching existing `SubQueryExpr` evaluation).
+- partiql-logical-planner: Coerce a scalar-position SQL `SELECT` subquery to a single value per
+  the PartiQL specification (§9.1), so e.g. `1 + (SELECT v.n FROM t AS v)` yields the singleton's
+  value instead of `MISSING`. The coercion is context-sensitive, matching the reference
+  partiql-lang-kotlin `SubqueryCoercionVisitorTransform`: it applies only where the enclosing
+  context expects a single value (operands of arithmetic/logical/comparison/concatenation
+  operators, `BETWEEN`/`LIKE`, and the `WHERE`/`HAVING`/`ORDER BY`/`LIMIT`/`OFFSET` clauses and
+  projection-list items), and not in collection- or multi-value contexts (struct/bag/list
+  constructors, `CASE`, the `IN` right-hand side, and function-call arguments incl. `EXISTS`).
+  `SELECT VALUE` explicitly constructs a collection and is never coerced. Implemented via an
+  internal definitional builtin `coll_to_scalar` (`CallName::CollToScalar` + `EvalFnCollToScalar`):
+  a collection of a single single-attribute tuple coerces to that attribute's value; every other
+  input (empty, multiple elements, multi-attribute tuple, non-collection, `NULL`, `MISSING`)
+  yields `MISSING`, never failing. It is not registered as a user-callable function.
 
 ### Fixed
 - Fixed user-registered scalar functions silently returning `MISSING` (permissive) or
