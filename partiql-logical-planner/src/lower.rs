@@ -175,6 +175,15 @@ pub struct AstToLogical<'a> {
     pending_query_is_scalar: bool,
     // scalar-position flag per enclosing query
     scalar_query_stack: Vec<bool>,
+    // whether the next entered query, being a scalar-position subquery, is ALSO in a
+    // context that expects a single value (spec §9.1) and so should coerce to scalar
+    pending_query_should_coerce: bool,
+    // should-coerce flag per enclosing query
+    coerce_query_stack: Vec<bool>,
+    // whether the current expression context expects a single value; a scalar-position
+    // SQL `SELECT` subquery is coerced to a scalar (§9.1) only when the enclosing
+    // operator/clause demands one. Pushed/popped by the structural visitor hooks.
+    coerce_ctx_stack: Vec<bool>,
     bexpr_stack: Vec<Vec<logical::OpId>>,
     vexpr_stack: Vec<Vec<(NodeId, ValueExpr)>>,
     arg_stack: Vec<Vec<CallArgument>>,
@@ -245,6 +254,9 @@ impl<'a> AstToLogical<'a> {
             ctx_stack: Default::default(),
             pending_query_is_scalar: false,
             scalar_query_stack: Default::default(),
+            pending_query_should_coerce: false,
+            coerce_query_stack: Default::default(),
+            coerce_ctx_stack: Default::default(),
             bexpr_stack: Default::default(),
             vexpr_stack: Default::default(),
             arg_stack: Default::default(),
@@ -746,13 +758,27 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         // `Expr`, so they never reach here and default to query position.)
         self.pending_query_is_scalar = matches!(expr, Expr::Query(_))
             && !matches!(self.current_ctx(), Some(QueryContext::FromLet));
+        // A scalar-position SQL `SELECT` is coerced to a single value only when its
+        // immediate context expects one (spec §9.1); the enclosing structural hook
+        // records that on `coerce_ctx_stack`. A top-level query (empty stack) and
+        // non-coercing contexts (struct/case/call/bag/list/IN-collection) leave the
+        // subquery uncoerced.
+        self.pending_query_should_coerce =
+            self.pending_query_is_scalar && self.coerce_ctx_stack.last().copied().unwrap_or(false);
         Traverse::Continue
     }
 
     fn enter_query(&mut self, query: &'ast Query) -> Traverse {
         let is_scalar = std::mem::take(&mut self.pending_query_is_scalar);
+        let should_coerce = std::mem::take(&mut self.pending_query_should_coerce);
         let is_select = matches!(query.set.node, QuerySet::Select(_));
         self.scalar_query_stack.push(is_scalar);
+        self.coerce_query_stack.push(should_coerce);
+        // A query body is a fresh coercion scope: reset the context so its interior
+        // coerces only where its own clauses/operators demand, never inheriting the
+        // enclosing context (which would wrongly coerce e.g. a bare `SELECT` that is a
+        // `SELECT VALUE` value-expr, or a FROM/`ON` source). Popped in `exit_query`.
+        self.coerce_ctx_stack.push(false);
         // Isolate a scalar SELECT subquery's operators in their own sub-plan so
         // it can be wrapped as a self-contained `SubQueryExpr`.
         if is_scalar && is_select {
@@ -766,10 +792,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_query(&mut self, query: &'ast Query) -> Traverse {
+        // Pop the query-body coercion boundary pushed in `enter_query`.
+        self.coerce_ctx_stack.pop();
         let is_scalar = self.scalar_query_stack.pop().expect("scalar query level");
+        let should_coerce = self.coerce_query_stack.pop().expect("coerce query level");
         let benv = self.exit_benv();
         match query.set.node {
-            QuerySet::Select(_) => {
+            QuerySet::Select(ref select) => {
                 let clauses = self.exit_q();
                 let mut clauses = clauses.evaluation_order().into_iter();
                 let mut last_id = None;
@@ -785,9 +814,25 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                     // it to the enclosing scalar operator as an ordinary `env`
                     // operand (interleaves in source order with sibling operands).
                     let subplan = self.exit_plan();
-                    self.push_vexpr(ValueExpr::SubQueryExpr(logical::SubQueryExpr {
-                        plan: subplan,
-                    }));
+                    let subquery = ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: subplan });
+                    // Coercion of a SELECT subquery into a scalar (spec §9.1): an SQL-style
+                    // `SELECT` (projection list or `*`) coerces to the single contained value
+                    // via `coll_to_scalar`, but only in a context that expects a single value
+                    // (`should_coerce`, per `coerce_ctx_stack`). `SELECT VALUE` (`ProjectValue`)
+                    // explicitly constructs a collection and is left uncoerced.
+                    let value = if should_coerce
+                        && matches!(
+                            select.node.project.node.kind,
+                            ProjectionKind::ProjectStar | ProjectionKind::ProjectList(_)
+                        ) {
+                        ValueExpr::Call(logical::CallExpr {
+                            name: logical::CallName::CollToScalar,
+                            arguments: vec![subquery],
+                        })
+                    } else {
+                        subquery
+                    };
+                    self.push_vexpr(value);
                 } else if let Some(src_id) = last_id {
                     self.push_bexpr(src_id);
                 }
@@ -1014,7 +1059,15 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
+    fn enter_project_expr(&mut self, _project_expr: &'ast ProjectExpr) -> Traverse {
+        // An SQL projection-list item is a single-value context (§9.1); this hook fires
+        // only for `ProjectList` items, never `SELECT VALUE` (`ProjectValue`).
+        self.coerce_ctx_stack.push(true);
+        Traverse::Continue
+    }
+
     fn exit_project_expr(&mut self, _project_expr: &'ast ProjectExpr) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let as_key: &name_resolver::Symbol = self
             .key_registry
             .aliases
@@ -1031,10 +1084,14 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
         self.enter_env();
+        // Operands of arithmetic/logical/concat/comparison operators are single-value
+        // contexts (§9.1); `IS` (type predicate) is not.
+        self.coerce_ctx_stack.push(_bin_op.kind != BinOpKind::Is);
         Traverse::Continue
     }
 
     fn exit_bin_op(&mut self, _bin_op: &'ast BinOp) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
@@ -1087,10 +1144,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_uni_op(&mut self, _uni_op: &'ast UniOp) -> Traverse {
         self.enter_env();
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_uni_op(&mut self, _uni_op: &'ast UniOp) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
@@ -1106,10 +1165,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_between(&mut self, _between: &'ast Between) -> Traverse {
         self.enter_env();
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_between(&mut self, _between: &'ast Between) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 3, "env.len() != 3");
 
@@ -1122,9 +1183,14 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_in(&mut self, _in: &'ast ast::In) -> Traverse {
         self.enter_env();
+        // `<x> IN <collection>`: the RHS is a collection, not a single value, so it must
+        // not be coerced. (The LHS element could be, but we leave both uncoerced for
+        // simplicity, which only under-coerces a bare-`SELECT` LHS.)
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
     fn exit_in(&mut self, _in: &'ast ast::In) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 2, "env.len() != 2");
 
@@ -1140,10 +1206,12 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_like(&mut self, _like: &'ast Like) -> Traverse {
         self.enter_env();
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_like(&mut self, _like: &'ast Like) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         true_or_fault!(
             self,
@@ -1186,10 +1254,16 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_call(&mut self, _call: &'ast Call) -> Traverse {
         self.enter_call();
+        // A function/operator call is not a single-value context: its arguments may be
+        // collections (e.g. `EXISTS`, `CARDINALITY`), so a bare-`SELECT` argument is not
+        // coerced (matches `SubqueryCoercionVisitorTransform`, which leaves `Call` --
+        // incl. `EXISTS`/`CAST`/`COALESCE` -- uncoerced).
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_call(&mut self, call: &'ast Call) -> Traverse {
+        self.coerce_ctx_stack.pop();
         // TODO better argument validation/error messaging
         let args = self.exit_call();
         let name = call.func_name.value.to_lowercase();
@@ -1268,10 +1342,14 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_struct(&mut self, _struct: &'ast Struct) -> Traverse {
         self.enter_env();
+        // A struct/tuple constructor value is not a single-value context; a bare-`SELECT`
+        // attribute value is left as its collection, uncoerced.
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_struct(&mut self, _struct: &'ast Struct) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let env = self.exit_env();
         true_or_fault!(self, env.len().is_even(), "env.len() is not even");
 
@@ -1292,10 +1370,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_bag(&mut self, _bag: &'ast Bag) -> Traverse {
         self.enter_env();
+        // A bag constructor element is not a single-value context; uncoerced.
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_bag(&mut self, _bag: &'ast Bag) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let elements = self.exit_env().into_iter().map(|(_, v)| v).collect();
         self.push_vexpr(ValueExpr::BagExpr(BagExpr { elements }));
         Traverse::Continue
@@ -1303,10 +1384,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_list(&mut self, _list: &'ast List) -> Traverse {
         self.enter_env();
+        // A list/array constructor element is not a single-value context; uncoerced.
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_list(&mut self, _list: &'ast List) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let elements = self.exit_env().into_iter().map(|(_, v)| v).collect();
         self.push_vexpr(ValueExpr::ListExpr(ListExpr { elements }));
         Traverse::Continue
@@ -1314,10 +1398,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_call_agg(&mut self, _call_agg: &'ast CallAgg) -> Traverse {
         self.enter_call();
+        // An aggregate-function call argument is not a single-value context; uncoerced.
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_call_agg(&mut self, call_agg: &'ast CallAgg) -> Traverse {
+        self.coerce_ctx_stack.pop();
         // Relates to the SQL aggregation functions (e.g. AVG, COUNT, SUM) -- not the `COLL_`
         // functions
         let mut env = self.exit_call();
@@ -1442,10 +1529,17 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn enter_path(&mut self, _path: &'ast Path) -> Traverse {
         self.enter_env();
         self.enter_path();
+        // A path is not a single-value context for its root/steps: navigation consumes the
+        // collection, so a bare-`SELECT` path root must not inherit an enclosing coercing
+        // context (matches `SubqueryCoercionVisitorTransform`, which returns `Path`
+        // unchanged). An inner coercing operator within a step re-enables coercion via its
+        // own hook.
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_path(&mut self, _path: &'ast Path) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
@@ -1681,10 +1775,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) -> Traverse {
         self.enter_env();
+        // A `WHERE` predicate is a single-value context (§9.1).
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_where_clause(&mut self, _where_clause: &'ast ast::WhereClause) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() != 1");
 
@@ -1699,10 +1796,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) -> Traverse {
         self.enter_env();
+        // A `HAVING` predicate is a single-value context (§9.1).
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_having_clause(&mut self, _having_clause: &'ast ast::HavingClause) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
@@ -1857,10 +1957,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_sort_spec(&mut self, _sort_spec: &'ast SortSpec) -> Traverse {
         self.enter_env();
+        // An `ORDER BY` sort key is a single-value context (§9.1).
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_sort_spec(&mut self, sort_spec: &'ast SortSpec) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         eq_or_fault!(self, env.len(), 1, "env.len() is 1");
 
@@ -1896,10 +1999,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         _limit_offset: &'ast ast::LimitOffsetClause,
     ) -> Traverse {
         self.enter_env();
+        // `LIMIT`/`OFFSET` operands are single-value contexts (§9.1).
+        self.coerce_ctx_stack.push(true);
         Traverse::Continue
     }
 
     fn exit_limit_offset_clause(&mut self, limit_offset: &'ast ast::LimitOffsetClause) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         true_or_fault!(
             self,
@@ -1930,10 +2036,15 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Traverse {
         self.enter_env();
+        // `CASE` operands/branches are not single-value contexts, so a bare-`SELECT`
+        // branch is left uncoerced (matches `SubqueryCoercionVisitorTransform`, which
+        // leaves `Case` uncoerced).
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_simple_case(&mut self, _simple_case: &'ast SimpleCase) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         true_or_fault!(self, env.len() >= 2, "env.len < 2");
 
@@ -1967,10 +2078,15 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_searched_case(&mut self, _searched_case: &'ast SearchedCase) -> Traverse {
         self.enter_env();
+        // `CASE` operands/branches are not single-value contexts, so a bare-`SELECT`
+        // branch is left uncoerced (matches `SubqueryCoercionVisitorTransform`, which
+        // leaves `Case` uncoerced).
+        self.coerce_ctx_stack.push(false);
         Traverse::Continue
     }
 
     fn exit_searched_case(&mut self, _searched_case: &'ast SearchedCase) -> Traverse {
+        self.coerce_ctx_stack.pop();
         let mut env = self.exit_env();
         true_or_fault!(self, !env.is_empty(), "env is empty");
 
