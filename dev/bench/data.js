@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790022111316,
+  "lastUpdate": 1790022376798,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -45257,6 +45257,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 21234,
             "range": "± 192",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lewistm@gmail.com",
+            "name": "TerenceLewis",
+            "username": "TerenceLewis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e72c25f9e5ad4d4b96ebfebb4a3d2136e545678c",
+          "message": "Coerce SQL SELECT subqueries to scalars, context-sensitively (spec section 9.1) (#666)\n\nPartiQL's coercion of a SELECT subquery into a scalar (spec section 9.1) was not\nimplemented: an SQL-style `SELECT` in a scalar-expecting position (e.g. an operand\nof an arithmetic/comparison/`||` expression) was left as a bag, so\n`1 + (SELECT v.n FROM t AS v)` evaluated to MISSING instead of coercing the\nsingleton result to its scalar value.\n\nImplement the coercion in AST-to-logical lowering, mirroring the reference\npartiql-lang-kotlin (`SubqueryCoercionVisitorTransform` + `ExprFunctionCollToScalar`):\n\n- `coll_to_scalar` is added as an INTERNAL definitional builtin\n  (`CallName::CollToScalar` + `EvalFnCollToScalar`): a collection of a single\n  single-attribute tuple coerces to that attribute's value; every other input\n  (empty, multiple elements, multi-attribute tuple, non-collection, NULL, MISSING)\n  yields MISSING, never failing. It is intentionally NOT registered as a\n  user-callable function -- like Kotlin, it is reachable only via the coercion the\n  engine injects.\n\n- A scalar-position subquery (already identified for `SubQueryExpr` lowering) whose\n  projection is an SQL projection (`ProjectList`/`ProjectStar`) has its\n  `SubQueryExpr` wrapped in `CallName::CollToScalar`, but only where the enclosing\n  context expects a single value. A `coerce_ctx_stack`, pushed/popped by the\n  structural visitor hooks, records this: operands of arithmetic/logical/comparison/\n  concatenation operators (not `IS`), unary operators, `BETWEEN`, `LIKE`, the\n  `WHERE`/`HAVING`/`ORDER BY`/`LIMIT`/`OFFSET` clauses, and projection-list items\n  coerce; struct/bag/list constructors, `CASE`, the `IN` right-hand side,\n  function-call arguments (incl. `EXISTS`/`CAST`/`COALESCE`), and path roots/steps do\n  not. A query body is a fresh coercion scope, so it never inherits the enclosing\n  context. `SELECT VALUE` (`ProjectValue`) explicitly constructs a collection and is\n  left uncoerced in every context.\n\nTests in partiql/tests/subquery_coercion.rs cover: an SQL SELECT subquery coercing\nto a scalar; empty and multi-row results coercing to MISSING; a `SELECT VALUE`\nsubquery remaining an uncoerced collection; `coll_to_scalar` not resolving as a\nuser-callable function; and the context-sensitivity -- a subquery in a struct value\n/ `CASE` branch / non-`EXISTS` call argument staying a collection, while one in a\nprojection item / comparison operand coerces.\n\nCo-authored-by: Terence Lewis <terenlew@amazon.com>",
+          "timestamp": "2026-09-21T13:04:09-07:00",
+          "tree_id": "9dfc8daed4f42b71ea80b01ec2e681fd96b61308",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/e72c25f9e5ad4d4b96ebfebb4a3d2136e545678c"
+        },
+        "date": 1790022375786,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 781225,
+            "range": "± 13281",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 866435,
+            "range": "± 3903",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 830863,
+            "range": "± 4088",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 860828,
+            "range": "± 3176",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 836289,
+            "range": "± 2454",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 864309,
+            "range": "± 11970",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 843218,
+            "range": "± 3442",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 872298,
+            "range": "± 3046",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 834942,
+            "range": "± 3480",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 868784,
+            "range": "± 5304",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1122973,
+            "range": "± 7327",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1531994,
+            "range": "± 7614",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2108553,
+            "range": "± 11014",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1307534,
+            "range": "± 20744",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1691693,
+            "range": "± 16578",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2274847,
+            "range": "± 18883",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 4873,
+            "range": "± 163",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 41762,
+            "range": "± 277",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 81841,
+            "range": "± 356",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4251,
+            "range": "± 148",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 29905,
+            "range": "± 74",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 61564,
+            "range": "± 250",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 60636,
+            "range": "± 198",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 1006596,
+            "range": "± 8669",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 2015394,
+            "range": "± 29398",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12761678,
+            "range": "± 162618",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 93878169,
+            "range": "± 1713923",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 181338344,
+            "range": "± 1584696",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 480980516,
+            "range": "± 4666544",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 415868401,
+            "range": "± 1035725",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10366,
+            "range": "± 69",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2347,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 340,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 108,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 631,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2051,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6527,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 16993,
+            "range": "± 275",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 23861,
+            "range": "± 141",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21703,
+            "range": "± 233",
             "unit": "ns/iter"
           }
         ]
