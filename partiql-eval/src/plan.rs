@@ -254,6 +254,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     self.get_eval_node::<{ STRICT }>(left),
                     self.get_eval_node::<{ STRICT }>(right),
                     on,
+                    STRICT,
                 ))
             }
             BindingsOp::GroupBy(logical::GroupBy {

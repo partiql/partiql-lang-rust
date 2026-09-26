@@ -154,6 +154,9 @@ pub(crate) struct EvalJoin {
 
     pub(crate) left: Box<dyn Evaluable>,
     pub(crate) right: Box<dyn Evaluable>,
+
+    // in strict mode, stop once either side has reported an error
+    pub(crate) strict: bool,
 }
 
 #[derive(Debug)]
@@ -181,6 +184,7 @@ impl EvalJoin {
         left: Box<dyn Evaluable>,
         right: Box<dyn Evaluable>,
         on: Option<Box<dyn EvalExpr>>,
+        strict: bool,
     ) -> Self {
         EvalJoin {
             kind,
@@ -188,6 +192,7 @@ impl EvalJoin {
 
             left,
             right,
+            strict,
         }
     }
 }
@@ -207,6 +212,11 @@ impl Evaluable for EvalJoin {
         let mut output_bag = bag![];
         let input_env = inputs[0].take().unwrap_or_else(|| Value::from(tuple![]));
         let lhs_values = self.left.evaluate([Some(input_env.clone()), None], ctx);
+        // A failed base table expression evaluates to `Missing`, which `SCAN` turns into a
+        // single binding; in strict mode don't go on to evaluate the right side for it.
+        if self.strict && ctx.has_errors() {
+            return Missing;
+        }
         let left_bindings = match lhs_values {
             Value::Bag(t) => *t,
             _ => {
@@ -228,6 +238,9 @@ impl Evaluable for EvalJoin {
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
                     let rhs_values = self.right.evaluate([Some(Value::from(env_b_l)), None], ctx);
+                    if self.strict && ctx.has_errors() {
+                        return;
+                    }
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,
@@ -272,6 +285,9 @@ impl Evaluable for EvalJoin {
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
                     let rhs_values = self.right.evaluate([Some(Value::from(env_b_l)), None], ctx);
+                    if self.strict && ctx.has_errors() {
+                        return;
+                    }
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,

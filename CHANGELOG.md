@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument (`MISSING` in permissive mode, an error in strict mode) instead of silently
   coercing it to a single-attribute tuple. Per the PartiQL specification these functions are
   defined only over tuples; scalar coercion for `SELECT *` remains the planner's concern.
+- Fixed a strict-mode `JOIN` evaluating its right side after the left side had already
+  failed. A failed base table expression evaluates to `MISSING`, which `SCAN` turned into a
+  single binding, so the right-hand table function still ran and its error was appended to
+  the left side's.
 
 ### Removed
 
