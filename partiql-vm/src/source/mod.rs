@@ -8,15 +8,15 @@ pub use api::{
 };
 
 // Re-export ScanId and CatalogScans for catalog implementations
-pub use crate::engine::catalog::CatalogScans;
-pub use crate::engine::plan::ScanId;
+pub use crate::catalog::CatalogScans;
+pub use crate::plan::ScanId;
 
 // RegisterWriter module
 mod value_writer;
 pub use value_writer::{RegisterWriter, ValueWriter};
 
-use crate::engine::error::Result;
-use crate::engine::value::{ValueOwned, ValueRef};
+use crate::error::Result;
+use crate::value::{ValueOwned, ValueRef};
 use partiql_common::catalog::EntryId;
 use std::sync::Arc;
 

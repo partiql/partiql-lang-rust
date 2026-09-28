@@ -1,5 +1,5 @@
 pub(super) use super::internal::ValueRef;
-use crate::engine::error::{EngineError, Result};
+use crate::error::{EngineError, Result};
 
 /// Type identifier for PartiQL values
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

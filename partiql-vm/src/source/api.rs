@@ -1,6 +1,6 @@
-use crate::engine::arena::SlotId;
-use crate::engine::error::Result;
-use crate::engine::value::RegisterReader;
+use crate::arena::SlotId;
+use crate::error::Result;
+use crate::value::RegisterReader;
 use std::sync::Arc;
 
 /// Indicates how long data in a buffer remains valid after a read operation.

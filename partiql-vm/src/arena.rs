@@ -1,4 +1,4 @@
-use crate::engine::value::{TupleField, TupleRef, ValueRef};
+use crate::value::{TupleField, TupleRef, ValueRef};
 use std::cell::{Cell, UnsafeCell};
 
 pub type SlotId = u16;

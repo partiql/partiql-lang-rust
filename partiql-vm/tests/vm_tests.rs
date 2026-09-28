@@ -2,22 +2,22 @@ use std::sync::Arc;
 
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, TypeEnvEntry};
 use partiql_common::catalog::EntryId;
-use partiql_eval::plan::EvaluationMode;
-use partiql_eval::source::{
-    BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
-    RegisterWriter, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
-};
-use partiql_eval::value::{RegisterReader, RowShape, Shape, ValueType, ValueView};
-use partiql_eval::{
-    CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext, ExecutionResult,
-    PartiQLVM, PlanCompiler,
-};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::Parser;
 use partiql_types::{PartiqlShapeBuilder, StructConstraint, StructType};
 use partiql_value::{Bag, BindingsName, List, Tuple, Value};
+use partiql_vm::source::{
+    BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
+    RegisterWriter, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
+};
+use partiql_vm::value::{RegisterReader, RowShape, Shape, ValueType, ValueView};
+use partiql_vm::EvaluationMode;
+use partiql_vm::{
+    CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext, ExecutionResult,
+    PartiQLVM, PlanCompiler,
+};
 
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
@@ -85,12 +85,12 @@ impl InMemorySource {
 }
 
 impl DataSource for InMemorySource {
-    fn open(&mut self) -> partiql_eval::Result<()> {
+    fn open(&mut self) -> partiql_vm::Result<()> {
         self.cursor = 0;
         Ok(())
     }
 
-    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> partiql_eval::Result<bool> {
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> partiql_vm::Result<bool> {
         if self.cursor >= self.rows.len() {
             return Ok(false);
         }
@@ -118,7 +118,7 @@ impl DataSource for InMemorySource {
         Ok(true)
     }
 
-    fn close(&mut self) -> partiql_eval::Result<()> {
+    fn close(&mut self) -> partiql_vm::Result<()> {
         Ok(())
     }
 }
@@ -127,7 +127,7 @@ fn write_value_to_slot(
     writer: &mut RegisterWriter<'_, '_>,
     slot: u16,
     value: &Value,
-) -> partiql_eval::Result<()> {
+) -> partiql_vm::Result<()> {
     match value {
         Value::Null => writer.write_null(slot),
         Value::Missing => writer.write_missing(slot),
@@ -172,7 +172,7 @@ fn write_value_to_slot(
     }
 }
 
-fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_eval::Result<()> {
+fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm::Result<()> {
     match value {
         Value::Null | Value::Missing => vw.put_null(),
         Value::Boolean(b) => vw.put_bool(*b),
@@ -247,7 +247,7 @@ impl CompilationCatalog for TestCompilationCatalog {
 /// Stores Ion text (Send+Sync safe) and parses to Value on create().
 struct TestExecutionCatalog {
     table_ion: FxHashMap<EntryId, String>,
-    scan_mappings: FxHashMap<partiql_eval::source::ScanId, (EntryId, ScanLayout)>,
+    scan_mappings: FxHashMap<partiql_vm::source::ScanId, (EntryId, ScanLayout)>,
 }
 
 impl ExecutionCatalog for TestExecutionCatalog {
@@ -261,13 +261,13 @@ impl ExecutionCatalog for TestExecutionCatalog {
 
     fn create(
         &self,
-        scan_id: partiql_eval::source::ScanId,
-    ) -> partiql_eval::Result<Box<dyn DataSource>> {
+        scan_id: partiql_vm::source::ScanId,
+    ) -> partiql_vm::Result<Box<dyn DataSource>> {
         let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!("ScanId {:?} not prepared", scan_id))
+            partiql_vm::EngineError::IllegalState(format!("ScanId {:?} not prepared", scan_id))
         })?;
         let ion_text = self.table_ion.get(entry_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!("EntryId {:?} not found", entry_id))
+            partiql_vm::EngineError::IllegalState(format!("EntryId {:?} not found", entry_id))
         })?;
         let rows = ion_to_rows(ion_text);
         Ok(Box::new(InMemorySource::new(rows, layout.clone())))
@@ -277,7 +277,7 @@ impl ExecutionCatalog for TestExecutionCatalog {
 // --- Result extraction ---
 
 fn row_to_value(row: &RegisterReader<'_>, shape: &Shape) -> Value {
-    use partiql_eval::value::FieldName;
+    use partiql_vm::value::FieldName;
 
     match shape.row_shape() {
         RowShape::Struct(fields) => {

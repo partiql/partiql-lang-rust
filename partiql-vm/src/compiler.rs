@@ -1,16 +1,16 @@
-use crate::engine::arena::SlotId;
-use crate::engine::catalog::CompilationContext;
-use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::AggFunc;
-use crate::engine::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
-use crate::engine::field_resolver::{CompileContext, ExprFieldExtractor};
-use crate::engine::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
-use crate::engine::source::{
+use crate::arena::SlotId;
+use crate::catalog::CompilationContext;
+use crate::error::{EngineError, Result};
+use crate::expr::AggFunc;
+use crate::expr::SlotResolver;
+use crate::expr::{lit_to_value, Inst, LogicalExprCompiler, ProgramBuilder};
+use crate::field_resolver::{CompileContext, ExprFieldExtractor};
+use crate::plan::EvaluationMode;
+use crate::plan::{CompiledPlan, CursorInfo, ObjectId, ScanId, ScanMetadata};
+use crate::source::{
     DataSourceHandle, ScanLayout, ScanProjection, ScanSource, TableFunctionHandle,
 };
-use crate::engine::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
-use crate::engine::SlotResolver;
-use crate::plan::EvaluationMode;
+use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
     BindingsOp, CallName, DBRef, GroupBy, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
     ProjectValue, Scan, ValueExpr, VarRefType,
@@ -247,7 +247,7 @@ impl<'a> PlanCompiler<'a> {
                 let arg_slots = self.table_fn_arg_slots.remove(&id).unwrap_or_default();
                 (
                     id,
-                    crate::engine::plan::TableFnScanMetadata {
+                    crate::plan::TableFnScanMetadata {
                         func_name: info.func_name,
                         layout: info.layout,
                         arg_slots,
@@ -259,7 +259,7 @@ impl<'a> PlanCompiler<'a> {
         let sorter_metadata = self
             .sorter_infos
             .iter()
-            .map(|s| crate::engine::plan::SorterMetadata {
+            .map(|s| crate::plan::SorterMetadata {
                 key_count: s.key_count,
             })
             .collect();
@@ -305,7 +305,7 @@ impl<'a> PlanCompiler<'a> {
         sink_id: OpId,
         result: &SubtreeResult,
         ctx: &mut CompileContext,
-    ) -> Result<(crate::engine::expr::Program, Vec<CursorInfo>)> {
+    ) -> Result<(crate::expr::Program, Vec<CursorInfo>)> {
         let mut builder = ProgramBuilder::new(result.slot_count as u16);
         let mut cursor_infos: Vec<CursorInfo> = Vec::new();
 
@@ -555,8 +555,7 @@ impl<'a> PlanCompiler<'a> {
         // so it doesn't conflict with any temp registers used by filter/project code.
         let decr_jump_idx = if let Some(limit) = limit_value {
             let counter_reg = builder.alloc_reg_pub();
-            let const_idx =
-                builder.push_const_pub(crate::engine::value::ValueOwned::I64(limit as i64));
+            let const_idx = builder.push_const_pub(crate::value::ValueOwned::I64(limit as i64));
             // Patch the placeholder LoadConst at the beginning
             builder.insts[limit_loadconst_idx.unwrap() as usize] = Inst::LoadConst {
                 dst: counter_reg,
@@ -1109,11 +1108,7 @@ impl<'a> PlanCompiler<'a> {
     ///
     /// This copies all instructions from a sub-program into the main program builder.
     /// Constants and keys are merged, and register/const/key indices are remapped.
-    fn inline_program(
-        &self,
-        sub_program: &crate::engine::expr::Program,
-        builder: &mut ProgramBuilder,
-    ) {
+    fn inline_program(&self, sub_program: &crate::expr::Program, builder: &mut ProgramBuilder) {
         // For now, simply append instructions directly.
         // This works because the sub-program was compiled with the same slot_count
         // and registers start from slot_count, which matches the main builder.
@@ -1806,11 +1801,9 @@ fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
                     _ => return None,
                 };
                 let value = try_expr_to_single_value(val)?;
-                fields.push(crate::engine::value::TupleFieldOwned { name, value });
+                fields.push(crate::value::TupleFieldOwned { name, value });
             }
-            Some(ValueOwned::Tuple(crate::engine::value::TupleOwned {
-                fields,
-            }))
+            Some(ValueOwned::Tuple(crate::value::TupleOwned { fields }))
         }
         ValueExpr::ListExpr(list) => {
             let items: Vec<ValueOwned> = list

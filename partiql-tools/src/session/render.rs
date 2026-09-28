@@ -5,7 +5,7 @@
 use std::io::{self, Write};
 use std::time::Duration;
 
-use partiql_eval::value::{RegisterReader, Shape};
+use partiql_vm::value::{RegisterReader, Shape};
 
 use crate::session::exec::QueryFooter;
 use crate::session::ion_output::{escape_control_chars_in_strings, write_outcome_ion};
@@ -38,7 +38,7 @@ pub fn render_query_text<'vm, I>(
     out: &mut dyn Write,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    I: Iterator<Item = Result<RegisterReader<'vm>, partiql_eval::EngineError>>,
+    I: Iterator<Item = Result<RegisterReader<'vm>, partiql_vm::EngineError>>,
 {
     let (prefix, tab, suffix) = match shape {
         Shape::Bag(_) => (Some("<<"), "  ", Some(">>")),
@@ -77,7 +77,7 @@ pub fn render_query_ion<'vm, I>(
     out: &mut dyn Write,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    I: Iterator<Item = Result<RegisterReader<'vm>, partiql_eval::EngineError>>,
+    I: Iterator<Item = Result<RegisterReader<'vm>, partiql_vm::EngineError>>,
 {
     let (open, close) = match shape {
         Shape::Bag(_) => ("{rows: $bag::[", "]}"),

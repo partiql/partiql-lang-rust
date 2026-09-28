@@ -1,6 +1,6 @@
-use crate::engine::arena::{Arena, SlotId};
-use crate::engine::error::{EngineError, Result};
-use crate::engine::value::{TupleField, TupleRef, ValueRef};
+use crate::arena::{Arena, SlotId};
+use crate::error::{EngineError, Result};
+use crate::value::{TupleField, TupleRef, ValueRef};
 
 /// Type-safe interface for readers to populate row data
 ///

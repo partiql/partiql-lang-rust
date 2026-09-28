@@ -1,9 +1,8 @@
-use crate::engine::arena::{Arena, SlotId};
-use crate::engine::error::{EngineError, Result};
-use crate::engine::value::{value_get_field_ref, ValueOwned, ValueRef};
+use crate::arena::{Arena, SlotId};
+use crate::error::{EngineError, Result};
+use crate::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
-use regex;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 

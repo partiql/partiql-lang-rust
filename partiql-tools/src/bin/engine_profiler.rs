@@ -2,10 +2,10 @@ use partiql_catalog::context::SystemContext;
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::PlanCompiler;
 use partiql_logical_planner::VarRefResolution;
 use partiql_tools::common::{compile, create_catalog, lower, parse};
 use partiql_value::{DateTime, Value};
+use partiql_vm::PlanCompiler;
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -172,7 +172,7 @@ impl LegacyPlan {
 
 /// Compiled plan for Hybrid engine
 struct HybridPlan {
-    compiled: std::sync::Arc<partiql_eval::CompiledPlan>,
+    compiled: std::sync::Arc<partiql_vm::CompiledPlan>,
 }
 
 impl HybridPlan {
@@ -181,8 +181,9 @@ impl HybridPlan {
         let parsed = parse(query).expect("Parse failed");
         let logical = lower(&*catalog, &parsed, VarRefResolution::Static).expect("Lower failed");
 
-        let compilation_ctx = partiql_eval::CompilationContext::new();
-        let mut compiler = PlanCompiler::new(&compilation_ctx, EvaluationMode::Permissive);
+        let compilation_ctx = partiql_vm::CompilationContext::new();
+        let mut compiler =
+            PlanCompiler::new(&compilation_ctx, partiql_vm::EvaluationMode::Permissive);
         let compiled = compiler.compile(&logical).expect("Compile failed");
 
         Self {
@@ -190,9 +191,9 @@ impl HybridPlan {
         }
     }
 
-    fn create_vm(&self) -> partiql_eval::PartiQLVM {
-        let exec_context = partiql_eval::ExecutionContext::new();
-        partiql_eval::PartiQLVM::new((*self.compiled).clone(), &exec_context)
+    fn create_vm(&self) -> partiql_vm::PartiQLVM {
+        let exec_context = partiql_vm::ExecutionContext::new();
+        partiql_vm::PartiQLVM::new((*self.compiled).clone(), &exec_context)
             .expect("VM creation failed")
     }
 }
@@ -214,7 +215,7 @@ impl Plan {
                 let mut row_count = 0;
 
                 match vm.execute() {
-                    Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+                    Ok(partiql_vm::ExecutionResult::Query(iter)) => {
                         for row_result in iter {
                             match row_result {
                                 Ok(_row) => row_count += 1,

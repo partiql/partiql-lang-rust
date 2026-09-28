@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use partiql_common::catalog::CatalogId;
-use partiql_eval::plan::EvaluationMode;
-use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
+use partiql_vm::EvaluationMode;
+use partiql_vm::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 
 use crate::catalog::{HeedCompilationCatalog, HeedExecutionCatalog};
 use crate::common;
@@ -24,11 +24,11 @@ struct CombinedCatalog {
     unresolved_table_name: Arc<Mutex<Option<String>>>,
 }
 
-impl partiql_eval::CompilationCatalog for CombinedCatalog {
+impl partiql_vm::CompilationCatalog for CombinedCatalog {
     fn get_table(
         &self,
         path: &[partiql_value::BindingsName<'_>],
-    ) -> Option<partiql_eval::source::DataSourceHandle> {
+    ) -> Option<partiql_vm::source::DataSourceHandle> {
         if let Some(handle) = self.heed.as_ref().and_then(|h| h.get_table(path)) {
             return Some(handle);
         }
@@ -49,7 +49,7 @@ impl partiql_eval::CompilationCatalog for CombinedCatalog {
         None
     }
 
-    fn get_table_function(&self, name: &str) -> Option<partiql_eval::source::TableFunctionHandle> {
+    fn get_table_function(&self, name: &str) -> Option<partiql_vm::source::TableFunctionHandle> {
         self.table_fns.get_table_function(name)
     }
 }
@@ -60,7 +60,7 @@ pub(super) fn build_compiled(
     debug: &DebugFlags,
     db: Option<Arc<HeedDB>>,
     capture: &mut DebugCapture,
-) -> Result<(partiql_eval::CompiledPlan, CatalogId), Box<dyn std::error::Error>> {
+) -> Result<(partiql_vm::CompiledPlan, CatalogId), Box<dyn std::error::Error>> {
     if debug.plan {
         capture.plan = Some(format!("[Plan] {:?}", logical));
     }
@@ -74,7 +74,7 @@ pub(super) fn build_compiled(
         heed: db.map(HeedCompilationCatalog::new),
         unresolved_table_name: Arc::clone(&unresolved_table_name),
     };
-    let catalog: Arc<dyn partiql_eval::CompilationCatalog> = Arc::new(combined);
+    let catalog: Arc<dyn partiql_vm::CompilationCatalog> = Arc::new(combined);
     let catalog_id = context.add_catalog("default", catalog);
 
     let mut compiler = PlanCompiler::new(&context, EvaluationMode::Permissive);
@@ -104,7 +104,7 @@ pub(super) fn build_compiled(
 pub(super) fn build_exec_context(
     db: Option<Arc<HeedDB>>,
     catalog_id: CatalogId,
-    compiled: &partiql_eval::CompiledPlan,
+    compiled: &partiql_vm::CompiledPlan,
 ) -> ExecutionContext {
     let mut exec_context = ExecutionContext::new();
     exec_context.register_table_function("rand", Arc::new(common::RandTableFunction));
@@ -143,7 +143,7 @@ pub(super) fn drain_source_rows(
 
     let exec_start = Instant::now();
     let exec_context = build_exec_context(Some(Arc::clone(db)), catalog_id, &compiled);
-    let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+    let mut vm = partiql_vm::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
     // Snapshot RowShape before vm.execute() borrows the VM mutably.
@@ -154,7 +154,7 @@ pub(super) fn drain_source_rows(
     // is a tight clone (cap == len), so no per-row 4 KiB is held.
     let mut scratch: Vec<u8> = Vec::with_capacity(4096);
     match vm.execute() {
-        Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+        Ok(partiql_vm::ExecutionResult::Query(iter)) => {
             // SAFETY: QueryIterator::next lifetime-extends its RegisterReader;
             // aliasing across next() is UB. Consume `row` before the next pull.
             for r in iter {

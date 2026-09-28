@@ -2,20 +2,20 @@ use std::sync::Arc;
 
 use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, TypeEnvEntry};
 use partiql_common::catalog::EntryId;
-use partiql_eval::source::{
-    BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
-    RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
-};
-use partiql_eval::value::{FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView};
-use partiql_eval::{
-    CompilationCatalog, CompilationContext, EngineError, ExecutionCatalog, ExecutionContext,
-    ExecutionResult, PartiQLVM, PlanCompiler,
-};
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_types::{PartiqlShapeBuilder, StructConstraint, StructType};
 use partiql_value::{Bag, BindingsName, List, Tuple, Value};
+use partiql_vm::source::{
+    BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata, PhysicalType,
+    RegisterWriter, ScanId, ScanLayout, ScanSource, ScanSourceType, ValueWriter,
+};
+use partiql_vm::value::{FieldName, RegisterReader, RowShape, Shape, ValueType, ValueView};
+use partiql_vm::{
+    CompilationCatalog, CompilationContext, EngineError, ExecutionCatalog, ExecutionContext,
+    ExecutionResult, PartiQLVM, PlanCompiler,
+};
 
 use indexmap::IndexSet;
 use rustc_hash::FxHashMap;
@@ -149,12 +149,12 @@ impl InMemorySource {
 }
 
 impl DataSource for InMemorySource {
-    fn open(&mut self) -> partiql_eval::Result<()> {
+    fn open(&mut self) -> partiql_vm::Result<()> {
         self.cursor = 0;
         Ok(())
     }
 
-    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> partiql_eval::Result<bool> {
+    fn next_row(&mut self, writer: &mut RegisterWriter<'_, '_>) -> partiql_vm::Result<bool> {
         if self.cursor >= self.rows.len() {
             return Ok(false);
         }
@@ -182,7 +182,7 @@ impl DataSource for InMemorySource {
         Ok(true)
     }
 
-    fn close(&mut self) -> partiql_eval::Result<()> {
+    fn close(&mut self) -> partiql_vm::Result<()> {
         Ok(())
     }
 }
@@ -191,7 +191,7 @@ fn write_value_to_slot(
     writer: &mut RegisterWriter<'_, '_>,
     slot: u16,
     value: &Value,
-) -> partiql_eval::Result<()> {
+) -> partiql_vm::Result<()> {
     match value {
         Value::Null => writer.write_null(slot),
         Value::Missing => writer.write_missing(slot),
@@ -236,7 +236,7 @@ fn write_value_to_slot(
     }
 }
 
-fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_eval::Result<()> {
+fn write_nested_value(vw: &mut ValueWriter<'_, '_>, value: &Value) -> partiql_vm::Result<()> {
     match value {
         Value::Null | Value::Missing => vw.put_null(),
         Value::Boolean(b) => vw.put_bool(*b),
@@ -324,7 +324,7 @@ impl ExecutionCatalog for ConformanceExecutionCatalog {
         }
     }
 
-    fn create(&self, scan_id: ScanId) -> partiql_eval::Result<Box<dyn DataSource>> {
+    fn create(&self, scan_id: ScanId) -> partiql_vm::Result<Box<dyn DataSource>> {
         let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
             EngineError::IllegalState(format!("ScanId {:?} not prepared", scan_id))
         })?;
@@ -452,7 +452,7 @@ pub(crate) fn eval_via_vm<'a>(
 
     let mut context = CompilationContext::new();
     let catalog_id = context.add_catalog("default", comp_catalog);
-    let eval_mode: partiql_eval::plan::EvaluationMode = mode.into();
+    let eval_mode: partiql_vm::EvaluationMode = mode.into();
     let mut compiler = PlanCompiler::new(&context, eval_mode);
     let compiled = compiler
         .compile(&logical)

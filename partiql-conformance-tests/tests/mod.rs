@@ -49,11 +49,11 @@ impl From<EvaluationMode> for eval::plan::EvaluationMode {
 }
 
 #[cfg(feature = "eval_vm")]
-impl From<EvaluationMode> for partiql_eval::plan::EvaluationMode {
+impl From<EvaluationMode> for partiql_vm::EvaluationMode {
     fn from(value: EvaluationMode) -> Self {
         match value {
-            EvaluationMode::Coerce => partiql_eval::plan::EvaluationMode::Permissive,
-            EvaluationMode::Error => partiql_eval::plan::EvaluationMode::Strict,
+            EvaluationMode::Coerce => partiql_vm::EvaluationMode::Permissive,
+            EvaluationMode::Error => partiql_vm::EvaluationMode::Strict,
         }
     }
 }

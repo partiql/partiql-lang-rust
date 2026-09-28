@@ -60,6 +60,7 @@ partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-common = { path = "../partiql-common" }
 partiql-eval = { path = "../partiql-eval" }
+partiql-vm = { path = "../partiql-vm" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }

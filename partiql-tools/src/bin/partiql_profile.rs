@@ -4,9 +4,9 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
-use partiql_eval::PlanCompiler;
 use partiql_logical_planner::VarRefResolution;
 use partiql_value::{DateTime, Value};
+use partiql_vm::PlanCompiler;
 use std::time::Instant;
 
 /// Engine type to profile
@@ -244,7 +244,7 @@ fn run_hybrid_profile(format: &DataFormat, query: &str, iterations: usize) -> us
 
         let mut row_count = 0;
         match vm.execute() {
-            Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+            Ok(partiql_vm::ExecutionResult::Query(iter)) => {
                 for row_result in iter {
                     match row_result {
                         Ok(_row) => row_count += 1,
@@ -270,12 +270,13 @@ fn compile_hybrid(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     _format: &DataFormat,
     _total_rows: usize,
-) -> partiql_eval::Result<partiql_eval::PartiQLVM> {
-    let compilation_context = partiql_eval::CompilationContext::new();
-    let mut compiler = PlanCompiler::new(&compilation_context, EvaluationMode::Permissive);
+) -> partiql_vm::Result<partiql_vm::PartiQLVM> {
+    let compilation_context = partiql_vm::CompilationContext::new();
+    let mut compiler =
+        PlanCompiler::new(&compilation_context, partiql_vm::EvaluationMode::Permissive);
     let compiled = compiler.compile(logical)?;
-    let exec_context = partiql_eval::ExecutionContext::new();
-    partiql_eval::PartiQLVM::new(compiled, &exec_context)
+    let exec_context = partiql_vm::ExecutionContext::new();
+    partiql_vm::PartiQLVM::new(compiled, &exec_context)
 }
 
 fn format_number(n: usize) -> String {

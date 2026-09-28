@@ -53,7 +53,7 @@ macro_rules! correct_num_args_or_err {
     };
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum EvaluationMode {
     Strict,
     Permissive,

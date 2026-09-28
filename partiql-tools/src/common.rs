@@ -11,11 +11,6 @@ use partiql_catalog::table_fn::{
 use partiql_eval::error::PlanErr;
 use partiql_eval::eval::EvalPlan;
 use partiql_eval::plan::{EvaluationMode, EvaluatorPlanner};
-use partiql_eval::source::DataSourceHandle;
-use partiql_eval::source::{
-    TableFunction as VmTableFunction, TableFunctionHandle as VmTableFunctionHandle,
-};
-use partiql_eval::CompilationCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::LogicalPlan;
@@ -23,6 +18,11 @@ use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::{Parsed, Parser, ParserError};
 use partiql_types::{PartiqlShapeBuilder, Static, StructConstraint, StructField, StructType};
 use partiql_value::{BindingsName, Tuple, Value};
+use partiql_vm::source::DataSourceHandle;
+use partiql_vm::source::{
+    TableFunction as VmTableFunction, TableFunctionHandle as VmTableFunctionHandle,
+};
+use partiql_vm::CompilationCatalog;
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
@@ -459,12 +459,12 @@ impl BaseTableExpr for StubTableExpr {
 // This is a complete example using ONLY public APIs from partiql-eval.
 
 use partiql_common::catalog::EntryId;
-use partiql_eval::source::{
+use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceMetadata, PhysicalType, RegisterWriter,
     ScanId, ScanLayout, ScanSource, ScanSourceType,
 };
-use partiql_eval::value::RegisterReader;
-use partiql_eval::{ExecutionCatalog, Result as EvalResult};
+use partiql_vm::value::RegisterReader;
+use partiql_vm::{ExecutionCatalog, Result as EvalResult};
 
 type SlotId = u16;
 use rand::Rng;
@@ -513,7 +513,7 @@ impl DataSource for RandomDataSource {
                         let random_value: i64 = rng.gen();
                         writer.write_i64(target, random_value)?;
                     } else {
-                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                        return Err(partiql_vm::EngineError::ReaderError(format!(
                             "Column index {} out of bounds (max: {})",
                             index,
                             self.num_columns - 1
@@ -521,12 +521,12 @@ impl DataSource for RandomDataSource {
                     }
                 }
                 ScanSourceType::WholeValue => {
-                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                    return Err(partiql_vm::EngineError::UnsupportedExpr(
                         "Random reader only supports ColumnIndex projections".to_string(),
                     ));
                 }
                 ScanSourceType::FieldPath(_) => {
-                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                    return Err(partiql_vm::EngineError::UnsupportedExpr(
                         "Random reader only supports ColumnIndex projections".to_string(),
                     ));
                 }
@@ -671,7 +671,7 @@ impl ExecutionCatalog for RandomExecutionCatalog {
     fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
         // Look up the scan mapping
         let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
+            partiql_vm::EngineError::IllegalState(format!(
                 "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
                 scan_id
             ))
@@ -679,7 +679,7 @@ impl ExecutionCatalog for RandomExecutionCatalog {
 
         // Look up the table metadata by entry_id
         let meta = self.tables.get(entry_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
+            partiql_vm::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
                 entry_id
             ))
@@ -786,7 +786,7 @@ impl DataSource for InMemGeneratedReader {
                     if *index < self.num_columns {
                         writer.write_i64(target, row_value)?;
                     } else {
-                        return Err(partiql_eval::EngineError::ReaderError(format!(
+                        return Err(partiql_vm::EngineError::ReaderError(format!(
                             "Column index {} out of bounds (max: {})",
                             index,
                             self.num_columns - 1
@@ -811,7 +811,7 @@ impl DataSource for InMemGeneratedReader {
                     vw.finish()?;
                 }
                 ScanSourceType::FieldPath(_) => {
-                    return Err(partiql_eval::EngineError::UnsupportedExpr(
+                    return Err(partiql_vm::EngineError::UnsupportedExpr(
                         "InMem reader only supports ColumnIndex and WholeValue projections"
                             .to_string(),
                     ));
@@ -908,11 +908,11 @@ impl IonDataSource {
 impl DataSource for IonDataSource {
     fn open(&mut self) -> EvalResult<()> {
         let file = File::open(&self.path)
-            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion open failed: {e}")))?;
+            .map_err(|e| partiql_vm::EngineError::ReaderError(format!("ion open failed: {e}")))?;
         let buf_reader = BufReader::new(file);
 
         let ion_reader = IonReaderBuilder::new().build(buf_reader).map_err(|e| {
-            partiql_eval::EngineError::ReaderError(format!("ion reader creation failed: {e}"))
+            partiql_vm::EngineError::ReaderError(format!("ion reader creation failed: {e}"))
         })?;
 
         let boxed_reader: Box<ion_rs::Reader<'static>> =
@@ -932,14 +932,12 @@ impl DataSource for IonDataSource {
 
         let stream_item = reader
             .next()
-            .map_err(|e| partiql_eval::EngineError::ReaderError(format!("ion read failed: {e}")))?;
+            .map_err(|e| partiql_vm::EngineError::ReaderError(format!("ion read failed: {e}")))?;
 
         match stream_item {
             ion_rs::StreamItem::Value(_ion_type) => {
                 reader.step_in().map_err(|e| {
-                    partiql_eval::EngineError::ReaderError(format!(
-                        "failed to step into struct: {e}"
-                    ))
+                    partiql_vm::EngineError::ReaderError(format!("failed to step into struct: {e}"))
                 })?;
 
                 // Whole-value mode: build a Tuple with all fields
@@ -949,18 +947,18 @@ impl DataSource for IonDataSource {
 
                     loop {
                         match reader.next().map_err(|e| {
-                            partiql_eval::EngineError::ReaderError(format!(
+                            partiql_vm::EngineError::ReaderError(format!(
                                 "error reading struct field: {e}"
                             ))
                         })? {
                             ion_rs::StreamItem::Value(ion_type) => {
                                 let field_name = reader.field_name().map_err(|e| {
-                                    partiql_eval::EngineError::ReaderError(format!(
+                                    partiql_vm::EngineError::ReaderError(format!(
                                         "failed to get field name: {e}"
                                     ))
                                 })?;
                                 let field_text = field_name.text().ok_or_else(|| {
-                                    partiql_eval::EngineError::ReaderError(
+                                    partiql_vm::EngineError::ReaderError(
                                         "field name has no text".to_string(),
                                     )
                                 })?;
@@ -978,7 +976,7 @@ impl DataSource for IonDataSource {
                                 match ion_type {
                                     IonType::Int => {
                                         let val = reader.read_i64().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
+                                            partiql_vm::EngineError::ReaderError(format!(
                                                 "failed to read i64: {e}"
                                             ))
                                         })?;
@@ -986,7 +984,7 @@ impl DataSource for IonDataSource {
                                     }
                                     IonType::Float => {
                                         let val = reader.read_f64().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
+                                            partiql_vm::EngineError::ReaderError(format!(
                                                 "failed to read f64: {e}"
                                             ))
                                         })?;
@@ -994,7 +992,7 @@ impl DataSource for IonDataSource {
                                     }
                                     IonType::Bool => {
                                         let val = reader.read_bool().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
+                                            partiql_vm::EngineError::ReaderError(format!(
                                                 "failed to read bool: {e}"
                                             ))
                                         })?;
@@ -1002,7 +1000,7 @@ impl DataSource for IonDataSource {
                                     }
                                     IonType::String => {
                                         let val = reader.read_str().map_err(|e| {
-                                            partiql_eval::EngineError::ReaderError(format!(
+                                            partiql_vm::EngineError::ReaderError(format!(
                                                 "failed to read string: {e}"
                                             ))
                                         })?;
@@ -1019,12 +1017,10 @@ impl DataSource for IonDataSource {
                                         vw.put_null()?;
                                     }
                                     other_type => {
-                                        return Err(partiql_eval::EngineError::ReaderError(
-                                            format!(
-                                                "unsupported ion type in whole-value mode: {:?}",
-                                                other_type
-                                            ),
-                                        ));
+                                        return Err(partiql_vm::EngineError::ReaderError(format!(
+                                            "unsupported ion type in whole-value mode: {:?}",
+                                            other_type
+                                        )));
                                     }
                                 }
                             }
@@ -1039,19 +1035,19 @@ impl DataSource for IonDataSource {
                     // Column-projection mode: write individual fields to slots
                     loop {
                         match reader.next().map_err(|e| {
-                            partiql_eval::EngineError::ReaderError(format!(
+                            partiql_vm::EngineError::ReaderError(format!(
                                 "error reading struct field: {e}"
                             ))
                         })? {
                             ion_rs::StreamItem::Value(ion_type) => {
                                 let field_name = reader.field_name().map_err(|e| {
-                                    partiql_eval::EngineError::ReaderError(format!(
+                                    partiql_vm::EngineError::ReaderError(format!(
                                         "failed to get field name: {e}"
                                     ))
                                 })?;
 
                                 let field_text = field_name.text().ok_or_else(|| {
-                                    partiql_eval::EngineError::ReaderError(
+                                    partiql_vm::EngineError::ReaderError(
                                         "field name has no text".to_string(),
                                     )
                                 })?;
@@ -1060,7 +1056,7 @@ impl DataSource for IonDataSource {
                                     match ion_type {
                                         IonType::Int => {
                                             let val = reader.read_i64().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
+                                                partiql_vm::EngineError::ReaderError(format!(
                                                     "failed to read i64: {e}"
                                                 ))
                                             })?;
@@ -1068,7 +1064,7 @@ impl DataSource for IonDataSource {
                                         }
                                         IonType::Float => {
                                             let val = reader.read_f64().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
+                                                partiql_vm::EngineError::ReaderError(format!(
                                                     "failed to read f64: {e}"
                                                 ))
                                             })?;
@@ -1076,7 +1072,7 @@ impl DataSource for IonDataSource {
                                         }
                                         IonType::Bool => {
                                             let val = reader.read_bool().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
+                                                partiql_vm::EngineError::ReaderError(format!(
                                                     "failed to read bool: {e}"
                                                 ))
                                             })?;
@@ -1084,7 +1080,7 @@ impl DataSource for IonDataSource {
                                         }
                                         IonType::String => {
                                             let val = reader.read_str().map_err(|e| {
-                                                partiql_eval::EngineError::ReaderError(format!(
+                                                partiql_vm::EngineError::ReaderError(format!(
                                                     "failed to read string: {e}"
                                                 ))
                                             })?;
@@ -1101,7 +1097,7 @@ impl DataSource for IonDataSource {
                                             writer.write_null(target_slot)?;
                                         }
                                         other_type => {
-                                            return Err(partiql_eval::EngineError::ReaderError(
+                                            return Err(partiql_vm::EngineError::ReaderError(
                                                 format!(
                                                     "unsupported ion type for projection: {:?}",
                                                     other_type
@@ -1118,7 +1114,7 @@ impl DataSource for IonDataSource {
                 }
 
                 reader.step_out().map_err(|e| {
-                    partiql_eval::EngineError::ReaderError(format!(
+                    partiql_vm::EngineError::ReaderError(format!(
                         "failed to step out of struct: {e}"
                     ))
                 })?;
@@ -1283,14 +1279,14 @@ impl ExecutionCatalog for SimpleExecutionCatalog {
 
     fn create(&self, scan_id: ScanId) -> EvalResult<Box<dyn DataSource>> {
         let (entry_id, layout) = self.scan_mappings.get(&scan_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
+            partiql_vm::EngineError::IllegalState(format!(
                 "ScanId {:?} not found in catalog mappings. Did you call prepare()?",
                 scan_id
             ))
         })?;
 
         let meta = self.tables.get(entry_id).ok_or_else(|| {
-            partiql_eval::EngineError::IllegalState(format!(
+            partiql_vm::EngineError::IllegalState(format!(
                 "Table with entry_id {:?} not found",
                 entry_id
             ))
@@ -1382,10 +1378,10 @@ impl VmTableFunction for RandTableFunction {
         layout: &ScanLayout,
     ) -> EvalResult<Box<dyn DataSource>> {
         let total_rows = reader.get_i64(arg_slots[0] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("rand: arg 0 must be integer".into())
+            partiql_vm::EngineError::ReaderError("rand: arg 0 must be integer".into())
         })? as usize;
         let num_columns = reader.get_i64(arg_slots[1] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("rand: arg 1 must be integer".into())
+            partiql_vm::EngineError::ReaderError("rand: arg 1 must be integer".into())
         })? as usize;
         Ok(Box::new(RandomDataSource::new(
             total_rows,
@@ -1408,10 +1404,10 @@ impl VmTableFunction for MemTableFunction {
         layout: &ScanLayout,
     ) -> EvalResult<Box<dyn DataSource>> {
         let total_rows = reader.get_i64(arg_slots[0] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("mem: arg 0 must be integer".into())
+            partiql_vm::EngineError::ReaderError("mem: arg 0 must be integer".into())
         })? as usize;
         let num_columns = reader.get_i64(arg_slots[1] as usize).ok_or_else(|| {
-            partiql_eval::EngineError::ReaderError("mem: arg 1 must be integer".into())
+            partiql_vm::EngineError::ReaderError("mem: arg 1 must be integer".into())
         })? as usize;
         Ok(Box::new(InMemGeneratedReader::new(
             total_rows,
@@ -1436,7 +1432,7 @@ impl VmTableFunction for ScanIonTableFunction {
         let path = reader
             .get_str(arg_slots[0] as usize)
             .ok_or_else(|| {
-                partiql_eval::EngineError::ReaderError("scan_ion: arg 0 must be string".into())
+                partiql_vm::EngineError::ReaderError("scan_ion: arg 0 must be string".into())
             })?
             .to_string();
         Ok(Box::new(IonDataSource::new(path, layout.clone())))

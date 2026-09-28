@@ -1,6 +1,6 @@
 use super::value_owned::{TupleFieldOwned, TupleOwned, ValueOwned};
-use crate::engine::arena::Arena;
-use crate::engine::error::{EngineError, Result};
+use crate::arena::Arena;
+use crate::error::{EngineError, Result};
 use ordered_float::OrderedFloat;
 use rust_decimal::Decimal as RustDecimal;
 

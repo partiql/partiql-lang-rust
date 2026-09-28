@@ -28,6 +28,7 @@ members = [
     "partiql-tools",
     "partiql-types",
     "partiql-value",
+    "partiql-vm",
     "extension/partiql-extension-ddl",
     "extension/partiql-extension-ion",
     "extension/partiql-extension-ion-functions",

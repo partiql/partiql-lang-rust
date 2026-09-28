@@ -5,7 +5,7 @@
 //! to understand how to interpret the rows returned by `QueryIterator`.
 
 // Re-export PhysicalType for convenience
-pub use crate::engine::source::PhysicalType;
+pub use crate::source::PhysicalType;
 
 /// Shape of query results, describing both iteration behavior and row structure.
 ///

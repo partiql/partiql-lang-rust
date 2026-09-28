@@ -59,6 +59,11 @@ thiserror = "1.0"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
+[dev-dependencies]
+# Backs the `eval_vm` feature; lives in tests/support/eval_vm.rs. partiql-vm is unpublished,
+# so it must stay a dev-dependency to keep this crate publishable.
+partiql-vm = { path = "../partiql-vm" }
+
 [features]
 default = ["base"]
 base = ["syntax", "semantics", "strict", "permissive"]

@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::engine::arena::Arena;
-use crate::engine::builtins::BuiltinFunctions;
-use crate::engine::catalog::ExecutionContext;
-use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::{AggFunc, Inst, Program};
-use crate::engine::source::RegisterWriter;
-use crate::engine::source::{DataSourceImpl, InlineDataSource, ScanLayout};
-use crate::engine::value::{value_ref_to_owned, RegisterReader, Shape, ValueOwned, ValueRef};
+use crate::arena::Arena;
+use crate::builtins::BuiltinFunctions;
+use crate::catalog::ExecutionContext;
+use crate::error::{EngineError, Result};
+use crate::expr::{AggFunc, Inst, Program};
+use crate::source::RegisterWriter;
+use crate::source::{DataSourceImpl, InlineDataSource, ScanLayout};
+use crate::value::{value_ref_to_owned, RegisterReader, Shape, ValueOwned, ValueRef};
 
 /// Unique identifier for a scan operation within a compiled plan.
 ///
@@ -32,6 +32,13 @@ impl ScanId {
 // Re-export ObjectId from partiql_common for convenience
 pub use partiql_common::catalog::ObjectId;
 
+/// Controls runtime error handling: coerce-to-MISSING (`Permissive`) vs. error (`Strict`).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EvaluationMode {
+    Strict,
+    Permissive,
+}
+
 /// Metadata for a scan operation, known at compile time.
 ///
 /// Associates a scan with its layout and the table being scanned.
@@ -49,7 +56,7 @@ pub struct ScanMetadata {
 pub struct TableFnScanMetadata {
     pub func_name: String,
     pub layout: ScanLayout,
-    pub arg_slots: Vec<crate::engine::arena::SlotId>,
+    pub arg_slots: Vec<crate::arena::SlotId>,
 }
 
 /// Metadata for a cursor in bytecode mode.
@@ -147,13 +154,13 @@ impl fmt::Display for CompiledPlan {
                         write!(f, ", ")?;
                     }
                     match &proj.source.source_type {
-                        crate::engine::source::ScanSourceType::WholeValue => {
+                        crate::source::ScanSourceType::WholeValue => {
                             write!(f, "slot {} ← WholeValue", proj.target_slot)?;
                         }
-                        crate::engine::source::ScanSourceType::FieldPath(name) => {
+                        crate::source::ScanSourceType::FieldPath(name) => {
                             write!(f, "slot {} ← Field(\"{}\")", proj.target_slot, name)?;
                         }
-                        crate::engine::source::ScanSourceType::ColumnIndex(idx) => {
+                        crate::source::ScanSourceType::ColumnIndex(idx) => {
                             write!(f, "slot {} ← Column({})", proj.target_slot, idx)?;
                         }
                     }
@@ -166,13 +173,13 @@ impl fmt::Display for CompiledPlan {
                         write!(f, ", ")?;
                     }
                     match &proj.source.source_type {
-                        crate::engine::source::ScanSourceType::WholeValue => {
+                        crate::source::ScanSourceType::WholeValue => {
                             write!(f, "slot {} ← WholeValue", proj.target_slot)?;
                         }
-                        crate::engine::source::ScanSourceType::FieldPath(name) => {
+                        crate::source::ScanSourceType::FieldPath(name) => {
                             write!(f, "slot {} ← Field(\"{}\")", proj.target_slot, name)?;
                         }
-                        crate::engine::source::ScanSourceType::ColumnIndex(idx) => {
+                        crate::source::ScanSourceType::ColumnIndex(idx) => {
                             write!(f, "slot {} ← Column({})", proj.target_slot, idx)?;
                         }
                     }
@@ -184,17 +191,17 @@ impl fmt::Display for CompiledPlan {
         }
         write!(f, "  output: ")?;
         match &self.shape {
-            crate::engine::value::Shape::Bag(row) => {
+            crate::value::Shape::Bag(row) => {
                 write!(f, "Bag(")?;
                 fmt_row_shape(f, row)?;
                 writeln!(f, ")")?;
             }
-            crate::engine::value::Shape::List(row) => {
+            crate::value::Shape::List(row) => {
                 write!(f, "List(")?;
                 fmt_row_shape(f, row)?;
                 writeln!(f, ")")?;
             }
-            crate::engine::value::Shape::Single(row) => {
+            crate::value::Shape::Single(row) => {
                 write!(f, "Single(")?;
                 fmt_row_shape(f, row)?;
                 writeln!(f, ")")?;
@@ -216,8 +223,8 @@ impl fmt::Display for CompiledPlan {
     }
 }
 
-fn fmt_row_shape(f: &mut fmt::Formatter<'_>, row: &crate::engine::value::RowShape) -> fmt::Result {
-    use crate::engine::value::{FieldName, RowShape};
+fn fmt_row_shape(f: &mut fmt::Formatter<'_>, row: &crate::value::RowShape) -> fmt::Result {
+    use crate::value::{FieldName, RowShape};
     match row {
         RowShape::Register(idx, _) => write!(f, "slot {idx}"),
         RowShape::Struct(fields) => {
@@ -285,8 +292,8 @@ impl CompiledPlan {
     pub fn scans_for_catalog(
         &self,
         catalog_id: partiql_common::catalog::CatalogId,
-    ) -> crate::engine::catalog::CatalogScans {
-        let mut scans = crate::engine::catalog::CatalogScans::new();
+    ) -> crate::catalog::CatalogScans {
+        let mut scans = crate::catalog::CatalogScans::new();
         for (scan_id, scan_meta) in self.scan_metadata.iter() {
             if scan_meta.object_id.catalog_id() == catalog_id {
                 scans.add(
@@ -336,9 +343,9 @@ pub struct PartiQLVM {
     /// Built-in function registry.
     builtins: BuiltinFunctions,
     /// Registered table functions, keyed by name.
-    table_functions: HashMap<String, Arc<dyn crate::engine::source::TableFunction>>,
+    table_functions: HashMap<String, Arc<dyn crate::source::TableFunction>>,
     /// Sorters for GROUP BY (indexed by sorter_id from bytecode).
-    sorters: Vec<Option<crate::engine::sorter::Sorter>>,
+    sorters: Vec<Option<crate::sorter::Sorter>>,
 }
 
 impl PartiQLVM {
@@ -363,14 +370,11 @@ impl PartiQLVM {
 
         // Pre-allocate banks: bank[0]=query, bank[1]=row, bank[2..]=sorters
         let mut banks = vec![Arena::new(4096), Arena::new(16384)];
-        let mut sorters: Vec<Option<crate::engine::sorter::Sorter>> = Vec::new();
+        let mut sorters: Vec<Option<crate::sorter::Sorter>> = Vec::new();
         for (i, meta) in compiled.sorter_metadata.iter().enumerate() {
             let bank_id = 2 + i;
             banks.push(Arena::new(16384));
-            sorters.push(Some(crate::engine::sorter::Sorter::new(
-                bank_id,
-                meta.key_count,
-            )));
+            sorters.push(Some(crate::sorter::Sorter::new(bank_id, meta.key_count)));
         }
 
         let mut vm = PartiQLVM {
@@ -728,7 +732,7 @@ impl<'vm> QueryIterator<'vm> {
                         };
                         fields.push(copied);
                     }
-                    sorter.insert(crate::engine::sorter::SorterRecord { fields });
+                    sorter.insert(crate::sorter::SorterRecord { fields });
                 }
 
                 Inst::SorterSort {
@@ -862,7 +866,7 @@ impl<'vm> QueryIterator<'vm> {
                     let lhs = regs[*lhs_reg as usize];
                     let rhs = regs[*rhs_reg as usize];
                     regs[*dst_reg as usize] =
-                        ValueRef::Bool(crate::engine::sorter::value_ref_eq(&lhs, &rhs));
+                        ValueRef::Bool(crate::sorter::value_ref_eq(&lhs, &rhs));
                 }
 
                 // All scalar instructions delegate to eval_inst
@@ -935,7 +939,7 @@ fn copy_value_ref_to_bank<'a>(value: ValueRef<'_>, bank: &'a Arena) -> ValueRef<
         }
         // Tuple/List/Bag: deep copy into bank
         ValueRef::Tuple(t) => {
-            use crate::engine::value::{TupleField, TupleRef};
+            use crate::value::{TupleField, TupleRef};
             let fields: Vec<TupleField<'a>> = t
                 .fields
                 .iter()

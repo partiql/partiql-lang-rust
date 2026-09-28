@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use partiql_common::catalog::EntryId;
-use partiql_eval::source::{
+use partiql_value::BindingsName;
+use partiql_vm::source::{
     BufferStability, CatalogScans, DataSource, DataSourceHandle, DataSourceMetadata,
     RegisterWriter, ScanId, ScanSource,
 };
-use partiql_eval::{CompilationCatalog, EngineError, ExecutionCatalog};
-use partiql_value::BindingsName;
+use partiql_vm::{CompilationCatalog, EngineError, ExecutionCatalog};
 use smallvec::SmallVec;
 
 use crate::row_codec::{deserialize_row_into, DeserializeError};

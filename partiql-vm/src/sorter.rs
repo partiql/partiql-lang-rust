@@ -1,4 +1,4 @@
-use crate::engine::value::ValueRef;
+use crate::value::ValueRef;
 
 /// A record stored in the sorter. Fields are ValueRefs pointing into the sorter's bank.
 pub(crate) struct SorterRecord {

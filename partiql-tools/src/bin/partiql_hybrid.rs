@@ -4,11 +4,11 @@ use common::{
     count_rows_from_file, create_catalog, lower, parse, random_catalog, simple_catalog,
     CompiledSourceFactory,
 };
-use partiql_eval::plan::EvaluationMode;
-use partiql_eval::value::Shape;
-use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use partiql_logical_planner::VarRefResolution;
 use partiql_value::{Tuple, Value};
+use partiql_vm::value::Shape;
+use partiql_vm::EvaluationMode;
+use partiql_vm::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -204,7 +204,7 @@ fn execute_query(
         ExecCatalog::Simple(exec) => exec_context.add_catalog(catalog_id, Box::new(exec)),
     }
 
-    let mut vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+    let mut vm = partiql_vm::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
     let shape = vm.shape().clone();
@@ -221,7 +221,7 @@ fn execute_query(
 
     let mut is_first = true;
     match vm.execute() {
-        Ok(partiql_eval::ExecutionResult::Query(iter)) => {
+        Ok(partiql_vm::ExecutionResult::Query(iter)) => {
             if let Some(p) = prefix {
                 println!("{}", p);
             }
@@ -279,10 +279,10 @@ fn execute_query(
 }
 
 fn row_to_value(
-    row: &partiql_eval::value::RegisterReader<'_>,
-    shape: &partiql_eval::value::Shape,
+    row: &partiql_vm::value::RegisterReader<'_>,
+    shape: &partiql_vm::value::Shape,
 ) -> Value {
-    use partiql_eval::value::{FieldName, RowShape};
+    use partiql_vm::value::{FieldName, RowShape};
 
     match shape.row_shape() {
         RowShape::Struct(fields) => {
@@ -315,8 +315,8 @@ fn row_to_value(
 }
 
 /// Convert a ValueView cursor to a Value
-fn value_view_to_value(view: &mut partiql_eval::value::ValueView<'_>) -> Value {
-    use partiql_eval::value::ValueType;
+fn value_view_to_value(view: &mut partiql_vm::value::ValueView<'_>) -> Value {
+    use partiql_vm::value::ValueType;
 
     match view.get_type() {
         ValueType::Missing => Value::Missing,

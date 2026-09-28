@@ -1,33 +1,11 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
-mod engine;
 pub mod env;
 pub mod error;
 pub mod eval;
 pub mod plan;
 pub mod test_value;
-
-// Public API from engine module (as per design.md Section 5.9)
-
-// Catalog Support
-pub use engine::{CompilationCatalog, CompilationContext, ExecutionCatalog, ExecutionContext};
-
-// Compilation & Execution
-pub use engine::{CompiledPlan, ExecutionResult, PartiQLVM, PlanCompiler, QueryIterator};
-
-// Reader Contract (for custom data sources)
-pub mod source {
-    pub use crate::engine::source::*;
-}
-
-// Value types for query results
-pub mod value {
-    pub use crate::engine::value::*;
-}
-
-// Error Handling
-pub use engine::{EngineError, Result};
 
 #[cfg(test)]
 mod tests {

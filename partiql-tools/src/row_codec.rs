@@ -10,7 +10,7 @@
 //! big-endian (encoded as `row_id.to_be_bytes()` under `heed::types::Bytes`)
 //! so the B+tree's lexicographic order matches numeric order.
 
-use partiql_eval::value::{FieldName, RegisterReader, RowShape, ValueType, ValueView};
+use partiql_vm::value::{FieldName, RegisterReader, RowShape, ValueType, ValueView};
 
 /// Cap on `field_count` to bound `Vec::with_capacity` against a flipped byte.
 pub const MAX_FIELDS_PER_ROW: u32 = 1024;
@@ -150,7 +150,7 @@ fn check_encode_depth(depth: u32) -> Result<(), SerializeError> {
 
 fn write_tuple(
     row: &RegisterReader<'_>,
-    fields: &[partiql_eval::value::FieldShape],
+    fields: &[partiql_vm::value::FieldShape],
     depth: u32,
     buf: &mut Vec<u8>,
 ) -> Result<(), SerializeError> {
@@ -475,7 +475,7 @@ impl std::error::Error for DeserializeError {}
 /// `ValueWriter` frame-stack path in `deserialize_row_into`.
 unsafe fn decode_top_scalar_into(
     bytes: &[u8],
-    writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+    writer: &mut partiql_vm::source::RegisterWriter<'_, '_>,
     target_slot: u16,
 ) -> Result<(), DeserializeError> {
     let mut cursor = 0usize;
@@ -517,7 +517,7 @@ unsafe fn decode_top_scalar_into(
 /// string is read; no pre-pass is required.
 pub unsafe fn deserialize_row_into(
     bytes: &[u8],
-    writer: &mut partiql_eval::source::RegisterWriter<'_, '_>,
+    writer: &mut partiql_vm::source::RegisterWriter<'_, '_>,
     target_slot: u16,
 ) -> Result<(), DeserializeError> {
     if bytes.is_empty() {
@@ -627,7 +627,7 @@ unsafe fn decode_scalar_payload<'a>(
 }
 
 fn decode_tagged_into(
-    vw: &mut partiql_eval::source::ValueWriter<'_, '_>,
+    vw: &mut partiql_vm::source::ValueWriter<'_, '_>,
     bytes: &[u8],
     cursor: &mut usize,
     depth: u32,
@@ -776,7 +776,7 @@ unsafe fn extend_bytes_to_arena_lifetime<'out>(b: &[u8]) -> &'out [u8] {
 }
 
 #[inline]
-fn io_err(e: partiql_eval::EngineError) -> DeserializeError {
+fn io_err(e: partiql_vm::EngineError) -> DeserializeError {
     DeserializeError::Unsupported(format!("writer error: {e}"))
 }
 

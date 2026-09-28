@@ -1,7 +1,7 @@
-use crate::engine::arena::Arena;
-use crate::engine::error::{EngineError, Result};
-use crate::engine::expr::UdfRegistry;
-use crate::engine::value::ValueRef;
+use crate::arena::Arena;
+use crate::error::{EngineError, Result};
+use crate::expr::UdfRegistry;
+use crate::value::ValueRef;
 
 pub(crate) struct BuiltinFunctions;
 

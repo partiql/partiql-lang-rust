@@ -1,0 +1,43 @@
+[package]
+name = "partiql-vm"
+description = "PartiQL bytecode virtual machine"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["sql", "query", "compilers", "interpreters"]
+categories = ["database", "compilers"]
+exclude = [
+    "**/.git/**",
+    "**/.github/**",
+    "**/.travis.yml",
+    "**/.appveyor.yml",
+]
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+bench = false
+
+[dependencies]
+partiql-common = { path = "../partiql-common" }
+partiql-logical = { path = "../partiql-logical" }
+partiql-value = { path = "../partiql-value" }
+ordered-float = "5"
+rust_decimal = { version = "1", default-features = false, features = ["std"] }
+thiserror = "1"
+regex = "1"
+regex-syntax = "0.8"
+rustc-hash = "2"
+delegate = "0.13"
+
+[dev-dependencies]
+ion-rs_old = { version = "0.18", package = "ion-rs" }
+indexmap = "2"
+partiql-catalog = { path = "../partiql-catalog" }
+partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
+partiql-logical-planner = { path = "../partiql-logical-planner" }
+partiql-parser = { path = "../partiql-parser" }
+partiql-types = { path = "../partiql-types" }

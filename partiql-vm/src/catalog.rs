@@ -32,11 +32,9 @@
 //! vm.execute()?;
 //! ```
 
-use crate::engine::error::Result;
-use crate::engine::plan::ScanId;
-use crate::engine::source::{
-    DataSource, DataSourceHandle, ScanLayout, TableFunction, TableFunctionHandle,
-};
+use crate::error::Result;
+use crate::plan::ScanId;
+use crate::source::{DataSource, DataSourceHandle, ScanLayout, TableFunction, TableFunctionHandle};
 use partiql_common::catalog::{CatalogId, EntryId};
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -426,7 +424,7 @@ impl Default for ExecutionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::source::{BufferStability, DataSourceMetadata, PhysicalType, ScanSource};
+    use crate::source::{BufferStability, DataSourceMetadata, PhysicalType, ScanSource};
     use partiql_common::catalog::EntryId;
     use std::sync::Arc;
 

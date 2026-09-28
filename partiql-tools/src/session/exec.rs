@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use partiql_ast::ast;
-use partiql_eval::value::{RegisterReader, Shape};
 use partiql_logical::{BindingsOp, LogicalPlan, LogicalStatement};
+use partiql_vm::value::{RegisterReader, Shape};
 
 use crate::common;
 use crate::session::debug::DebugFlags;
@@ -32,7 +32,7 @@ pub enum RunOutcome {
 /// starts inside `drain` (NOT at handle construction) so caller-side stalls
 /// between `run` and `drain` don't count as execution.
 pub struct QueryHandle {
-    vm: Box<partiql_eval::PartiQLVM>,
+    vm: Box<partiql_vm::PartiQLVM>,
     shape: Shape,
     debug: DebugCapture,
     parse_time: Duration,
@@ -66,7 +66,7 @@ impl QueryHandle {
     {
         let exec_start = Instant::now();
         let iter = match self.vm.execute() {
-            Ok(partiql_eval::ExecutionResult::Query(it)) => it,
+            Ok(partiql_vm::ExecutionResult::Query(it)) => it,
             Err(e) => return Err(format!("Execution setup error: {:?}", e).into()),
         };
         let mut counter = CountingRows {
@@ -103,12 +103,12 @@ pub struct QueryFooter {
 
 /// Row iterator adapter: session owns the counter, renderer just pulls rows.
 pub struct CountingRows<'vm> {
-    inner: partiql_eval::QueryIterator<'vm>,
+    inner: partiql_vm::QueryIterator<'vm>,
     count: u64,
 }
 
 impl<'vm> Iterator for CountingRows<'vm> {
-    type Item = Result<RegisterReader<'vm>, partiql_eval::EngineError>;
+    type Item = Result<RegisterReader<'vm>, partiql_vm::EngineError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.inner.next()?;
@@ -268,7 +268,7 @@ fn compile_query(
     let (compiled, catalog_id) =
         planner::build_compiled(&plan, ctx.debug, ctx.db.cloned(), ctx.capture)?;
     let exec_context = planner::build_exec_context(ctx.db.cloned(), catalog_id, &compiled);
-    let vm = partiql_eval::PartiQLVM::new(compiled, &exec_context)
+    let vm = partiql_vm::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
     let compile_time = compile_start.elapsed();
 

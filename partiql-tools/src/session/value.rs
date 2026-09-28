@@ -44,10 +44,10 @@ pub(super) fn value_to_element(value: &Value) -> Result<ion_rs::element::Element
 /// rather than fabricated (no `"?"` field names, no silent `continue`, no
 /// `unwrap`s over reader state).
 pub(super) fn row_to_value(
-    row: &partiql_eval::value::RegisterReader<'_>,
-    shape: &partiql_eval::value::Shape,
+    row: &partiql_vm::value::RegisterReader<'_>,
+    shape: &partiql_vm::value::Shape,
 ) -> Result<Value, RowConvertError> {
-    use partiql_eval::value::{FieldName, RowShape};
+    use partiql_vm::value::{FieldName, RowShape};
 
     match shape.row_shape() {
         RowShape::Struct(fields) => {
@@ -87,9 +87,9 @@ pub(super) fn row_to_value(
 }
 
 fn value_view_to_value(
-    view: &mut partiql_eval::value::ValueView<'_>,
+    view: &mut partiql_vm::value::ValueView<'_>,
 ) -> Result<Value, RowConvertError> {
-    use partiql_eval::value::ValueType;
+    use partiql_vm::value::ValueType;
 
     Ok(match view.get_type() {
         ValueType::Missing => Value::Missing,
@@ -120,8 +120,8 @@ fn walk_err<E: std::fmt::Debug>(op: &'static str) -> impl FnOnce(E) -> RowConver
 /// an empty container rather than an Ok+empty walk. That is a legitimate case
 /// for us — an empty bag is a valid result. Distinguish it from real errors
 /// on the message so we can yield an empty sequence instead of propagating.
-fn is_empty_container_error(e: &partiql_eval::EngineError) -> bool {
-    matches!(e, partiql_eval::EngineError::IllegalState(msg)
+fn is_empty_container_error(e: &partiql_vm::EngineError) -> bool {
+    matches!(e, partiql_vm::EngineError::IllegalState(msg)
         if msg.starts_with("cannot step into empty"))
 }
 
@@ -130,7 +130,7 @@ fn is_empty_container_error(e: &partiql_eval::EngineError) -> bool {
 /// walks differ (they also read a field name per iteration), so they have
 /// their own helper.
 fn walk_sequence(
-    view: &mut partiql_eval::value::ValueView<'_>,
+    view: &mut partiql_vm::value::ValueView<'_>,
 ) -> Result<Vec<Value>, RowConvertError> {
     if let Err(e) = view.step_in() {
         if is_empty_container_error(&e) {
@@ -149,7 +149,7 @@ fn walk_sequence(
     Ok(items)
 }
 
-fn walk_struct(view: &mut partiql_eval::value::ValueView<'_>) -> Result<Tuple, RowConvertError> {
+fn walk_struct(view: &mut partiql_vm::value::ValueView<'_>) -> Result<Tuple, RowConvertError> {
     if let Err(e) = view.step_in() {
         if is_empty_container_error(&e) {
             return Ok(Tuple::new());
