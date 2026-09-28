@@ -15,33 +15,8 @@ path = "src/lib.rs"
 test-support = []
 
 [[bin]]
-name = "partiql-legacy"
-path = "src/bin/partiql_legacy.rs"
-bench = false
-
-[[bin]]
-name = "partiql-hybrid"
-path = "src/bin/partiql_hybrid.rs"
-bench = false
-
-[[bin]]
 name = "pqlite"
 path = "src/bin/pqlite.rs"
-bench = false
-
-[[bin]]
-name = "partiql-benchmarks"
-path = "src/bin/partiql_benchmarks.rs"
-bench = false
-
-[[bin]]
-name = "partiql-profile"
-path = "src/bin/partiql_profile.rs"
-bench = false
-
-[[bin]]
-name = "engine_profiler"
-path = "src/bin/engine_profiler.rs"
 bench = false
 
 [dependencies]
