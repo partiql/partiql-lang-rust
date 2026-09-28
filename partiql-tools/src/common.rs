@@ -19,7 +19,7 @@ use partiql_eval::CompilationCatalog;
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
 use partiql_logical::LogicalPlan;
-use partiql_logical_planner::LogicalPlanner;
+use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::{Parsed, Parser, ParserError};
 use partiql_types::{PartiqlShapeBuilder, Static, StructConstraint, StructField, StructType};
 use partiql_value::{BindingsName, Tuple, Value};
@@ -59,8 +59,9 @@ pub fn parse_statements(script: &str) -> Result<Parsed<'_>, ParserError<'_>> {
 pub fn lower(
     catalog: &dyn SharedCatalog,
     parsed: &Parsed<'_>,
+    var_resolution: VarRefResolution,
 ) -> Result<LogicalPlan<partiql_logical::BindingsOp>, AstTransformationError> {
-    let planner = LogicalPlanner::new(catalog);
+    let planner = LogicalPlanner::with_var_resolution(catalog, var_resolution);
     planner.lower(parsed)
 }
 
@@ -72,7 +73,7 @@ pub fn lower_statement(
     catalog: &dyn SharedCatalog,
     stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
 ) -> Result<partiql_logical::LogicalStatement, AstTransformationError> {
-    let planner = LogicalPlanner::new(catalog);
+    let planner = LogicalPlanner::with_var_resolution(catalog, VarRefResolution::Static);
     planner.lower_statement(stmt)
 }
 

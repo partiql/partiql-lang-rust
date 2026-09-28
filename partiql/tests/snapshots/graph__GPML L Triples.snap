@@ -1,0 +1,57 @@
+---
+source: partiql/tests/graph.rs
+expression: res.unwrap().result
+---
+<<
+  { 'x': { 'owner': 'Scott', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'y': { 'name': 'Ankh-Morpork' }
+  },
+  { 'x': { 'owner': 'Mike', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'y': { 'name': 'Ankh-Morpork' }
+  },
+  { 'x': { 'owner': 'Charles', 'isBlocked': 'no' }, 'y': { 'name': 'Zembla' } },
+  {
+    'x': { 'owner': 'Scott', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-01-01 0:00:00.0', 'amount': 8000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-02-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Aretha', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Aretha', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-03-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Jay', 'isBlocked': 'yes' }
+  },
+  {
+    'x': { 'owner': 'Jay', 'isBlocked': 'yes' },
+    'e': { 'date': TIMESTAMP '2020-04-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Dave', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-06-01 0:00:00.0', 'amount': 10000000.00 },
+    'y': { 'owner': 'Mike', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Dave', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-07-01 0:00:00.0', 'amount': 4000000.00 },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Mike', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-08-01 0:00:00.0', 'amount': 6000000.00 },
+    'y': { 'owner': 'Charles', 'isBlocked': 'no' }
+  },
+  {
+    'x': { 'owner': 'Charles', 'isBlocked': 'no' },
+    'e': { 'date': TIMESTAMP '2020-09-01 0:00:00.0', 'amount': 9000000.00 },
+    'y': { 'owner': 'Scott', 'isBlocked': 'no' }
+  }
+>>

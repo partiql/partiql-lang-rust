@@ -18,8 +18,11 @@ mod graph;
 mod lower;
 mod typer;
 
+pub use crate::lower::VarRefResolution;
+
 pub struct LogicalPlanner<'c> {
     catalog: &'c dyn SharedCatalog,
+    var_resolution: VarRefResolution,
 }
 
 /// The uniform "DDL not yet lowerable" error, shared by every DDL-rejection site.
@@ -34,7 +37,17 @@ fn ddl_not_yet_implemented() -> AstTransformationError {
 
 impl<'c> LogicalPlanner<'c> {
     pub fn new(catalog: &'c dyn SharedCatalog) -> Self {
-        LogicalPlanner { catalog }
+        Self::with_var_resolution(catalog, VarRefResolution::default())
+    }
+
+    pub fn with_var_resolution(
+        catalog: &'c dyn SharedCatalog,
+        var_resolution: VarRefResolution,
+    ) -> Self {
+        LogicalPlanner {
+            catalog,
+            var_resolution,
+        }
     }
 
     /// Lower a single parsed statement into a top-level [`logical::LogicalStatement`].
@@ -166,7 +179,7 @@ impl<'c> LogicalPlanner<'c> {
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         let mut resolver = NameResolver::new(self.catalog);
         let registry = resolver.resolve(query, stmt_id)?;
-        let planner = AstToLogical::new(self.catalog, registry);
+        let planner = AstToLogical::new(self.catalog, registry, self.var_resolution);
         planner.lower_query(query, stmt_id)
     }
 }

@@ -5,6 +5,7 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::PlanCompiler;
+use partiql_logical_planner::VarRefResolution;
 use partiql_value::{DateTime, Value};
 use std::time::Instant;
 
@@ -198,7 +199,7 @@ fn run_legacy_profile(format: &DataFormat, query: &str, iterations: usize) -> us
 
     // Parse and compile once
     let parsed = parse(&non_vec_query).expect("Parse failed");
-    let logical = lower(&*catalog, &parsed).expect("Lower failed");
+    let logical = lower(&*catalog, &parsed, VarRefResolution::Dynamic).expect("Lower failed");
     let plan = compile(EvaluationMode::Permissive, &*catalog, logical).expect("Compile failed");
 
     // Run iterations
@@ -235,7 +236,7 @@ fn run_hybrid_profile(format: &DataFormat, query: &str, iterations: usize) -> us
     let catalog = create_catalog("mem".to_string(), None);
 
     let parsed = parse(&hybrid_query).expect("Parse failed");
-    let logical = lower(&*catalog, &parsed).expect("Lower failed");
+    let logical = lower(&*catalog, &parsed, VarRefResolution::Static).expect("Lower failed");
 
     let mut output_rows = 0;
     for _ in 0..iterations {

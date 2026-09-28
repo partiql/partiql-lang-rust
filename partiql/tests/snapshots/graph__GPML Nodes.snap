@@ -1,0 +1,20 @@
+---
+source: partiql/tests/graph.rs
+expression: res.unwrap().result
+---
+<<
+  { 'x': { 'owner': 'Scott', 'isBlocked': 'no' } },
+  { 'x': { 'owner': 'Aretha', 'isBlocked': 'no' } },
+  { 'x': { 'owner': 'Mike', 'isBlocked': 'no' } },
+  { 'x': { 'owner': 'Jay', 'isBlocked': 'yes' } },
+  { 'x': { 'owner': 'Charles', 'isBlocked': 'no' } },
+  { 'x': { 'owner': 'Dave', 'isBlocked': 'no' } },
+  { 'x': { 'name': 'Zembla' } },
+  { 'x': { 'name': 'Ankh-Morpork' } },
+  { 'x': { 'number': '123.111', 'isBlocked': 'no' } },
+  { 'x': { 'number': '123.222', 'isBlocked': 'no' } },
+  { 'x': { 'number': '111', 'isBlocked': 'no' } },
+  { 'x': { 'number': '222', 'isBlocked': 'no' } },
+  { 'x': { 'number': '333', 'isBlocked': 'no' } },
+  { 'x': { 'number': '444', 'isBlocked': 'no' } }
+>>

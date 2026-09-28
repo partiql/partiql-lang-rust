@@ -14,7 +14,7 @@ use partiql_eval::{
 };
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use partiql_logical_planner::LogicalPlanner;
+use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::Parser;
 use partiql_types::{PartiqlShapeBuilder, StructConstraint, StructType};
 use partiql_value::{Bag, BindingsName, List, Tuple, Value};
@@ -392,7 +392,7 @@ fn eval_vm(query: &str, tables: &[(&str, &str)]) -> Value {
 
     // Parse + Lower
     let parsed = Parser::default().parse(query).expect("parse failed");
-    let planner = LogicalPlanner::new(&shared_catalog);
+    let planner = LogicalPlanner::with_var_resolution(&shared_catalog, VarRefResolution::Static);
     let logical = planner.lower(&parsed).expect("lower failed");
 
     // Compile

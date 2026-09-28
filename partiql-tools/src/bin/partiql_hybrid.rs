@@ -7,6 +7,7 @@ use common::{
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::value::Shape;
 use partiql_eval::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
+use partiql_logical_planner::VarRefResolution;
 use partiql_value::{Tuple, Value};
 use std::time::Instant;
 
@@ -125,7 +126,8 @@ fn execute_query(
 
     // Phase 2: Lower (AST → Logical Plan)
     let lower_start = Instant::now();
-    let logical = lower(&*catalog, &parsed).map_err(|e| format!("Lower error: {:?}", e))?;
+    let logical = lower(&*catalog, &parsed, VarRefResolution::Static)
+        .map_err(|e| format!("Lower error: {:?}", e))?;
     let lower_time = lower_start.elapsed();
 
     // === PIPELINE TRACE: LOGICAL PLAN ===

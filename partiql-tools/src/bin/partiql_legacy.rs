@@ -4,6 +4,7 @@ use common::{compile, count_rows_from_file, create_catalog, lower, parse};
 use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
+use partiql_logical_planner::VarRefResolution;
 use partiql_value::{DateTime, Value};
 use std::time::Instant;
 
@@ -134,7 +135,7 @@ fn main() {
 
     // Phase 2: Lower (AST → Logical Plan)
     let lower_start = Instant::now();
-    let logical = match lower(&*catalog, &parsed) {
+    let logical = match lower(&*catalog, &parsed, VarRefResolution::Dynamic) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("Lower error: {:?}", e);

@@ -13,7 +13,7 @@ use partiql_eval::{
 };
 use partiql_extension_ion::decode::{IonDecoderBuilder, IonDecoderConfig};
 use partiql_extension_ion::Encoding;
-use partiql_logical_planner::LogicalPlanner;
+use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_types::{PartiqlShapeBuilder, StructConstraint, StructType};
 use partiql_value::{Bag, BindingsName, List, Tuple, Value};
 
@@ -443,7 +443,7 @@ pub(crate) fn eval_via_vm<'a>(
     let shared_catalog = catalog.to_shared_catalog();
 
     let parsed = parse(statement)?;
-    let planner = LogicalPlanner::new(&shared_catalog);
+    let planner = LogicalPlanner::with_var_resolution(&shared_catalog, VarRefResolution::Static);
     let logical = planner.lower(&parsed).map_err(TestError::Lower)?;
 
     let comp_catalog = Arc::new(ConformanceCompilationCatalog {

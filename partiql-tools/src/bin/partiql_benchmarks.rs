@@ -5,6 +5,7 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::PlanCompiler;
+use partiql_logical_planner::VarRefResolution;
 use partiql_value::{DateTime, Value};
 use std::{
     io::{self, Write},
@@ -363,7 +364,7 @@ fn run_legacy_benchmark(
         }
     };
 
-    let logical = match lower(&*catalog, &parsed) {
+    let logical = match lower(&*catalog, &parsed, VarRefResolution::Dynamic) {
         Ok(l) => l,
         Err(e) => {
             return BenchmarkResult {
@@ -496,7 +497,7 @@ fn run_hybrid_benchmark(
         }
     };
 
-    let logical = match lower(&*catalog, &parsed) {
+    let logical = match lower(&*catalog, &parsed, VarRefResolution::Static) {
         Ok(l) => l,
         Err(e) => {
             return BenchmarkResult {

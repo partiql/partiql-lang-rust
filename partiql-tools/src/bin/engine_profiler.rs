@@ -3,6 +3,7 @@ use partiql_eval::env::basic::MapBindings;
 use partiql_eval::eval::BasicContext;
 use partiql_eval::plan::EvaluationMode;
 use partiql_eval::PlanCompiler;
+use partiql_logical_planner::VarRefResolution;
 use partiql_tools::common::{compile, create_catalog, lower, parse};
 use partiql_value::{DateTime, Value};
 use std::hint::black_box;
@@ -146,7 +147,7 @@ impl LegacyPlan {
 
         let catalog = create_catalog(format.to_string(), data_path);
         let parsed = parse(&non_vec_query).expect("Parse failed");
-        let logical = lower(&*catalog, &parsed).expect("Lower failed");
+        let logical = lower(&*catalog, &parsed, VarRefResolution::Dynamic).expect("Lower failed");
         let plan = compile(EvaluationMode::Permissive, &*catalog, logical).expect("Compile failed");
 
         Self { plan }
@@ -178,7 +179,7 @@ impl HybridPlan {
     fn new(query: &str, _format: &str, _size: usize, _data_path: Option<String>) -> Self {
         let catalog = create_catalog("mem".to_string(), None);
         let parsed = parse(query).expect("Parse failed");
-        let logical = lower(&*catalog, &parsed).expect("Lower failed");
+        let logical = lower(&*catalog, &parsed, VarRefResolution::Static).expect("Lower failed");
 
         let compilation_ctx = partiql_eval::CompilationContext::new();
         let mut compiler = PlanCompiler::new(&compilation_ctx, EvaluationMode::Permissive);
