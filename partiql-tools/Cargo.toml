@@ -20,26 +20,19 @@ path = "src/bin/pqlite.rs"
 bench = false
 
 [dependencies]
-glob = "0.3"
-indexmap = "2"
-memmap2 = "0.9"
 smallvec = "1.13"
-wide = "0.7"
 rustc-hash = "2.0"
 ion-rs = "0.18.1"
-bytes = "1.9"
 rand = "0.8"
 partiql-logical = { path = "../partiql-logical" }
 partiql-ast = { path = "../partiql-ast" }
 partiql-ast-passes = { path = "../partiql-ast-passes" }
 partiql-catalog = { path = "../partiql-catalog" }
 partiql-common = { path = "../partiql-common" }
-partiql-eval = { path = "../partiql-eval" }
 partiql-vm = { path = "../partiql-vm" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion" }
 partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
-partiql-types = { path = "../partiql-types" }
 partiql-value = { path = "../partiql-value" }
 clap = { version = "4.6.1", features = ["derive"] }
 # default-features disabled drops the serde / serde-json / serde-bincode codecs
@@ -49,8 +42,6 @@ reedline = "0.48.0"
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-criterion = "0.5"
-proptest = "1.0"
 rstest = "0.23"
 tempfile = "3.0"
 # Self-activate `test-support` for integration tests in `tests/` so the gated

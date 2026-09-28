@@ -84,8 +84,6 @@ pqlite open repos.pqlite -> opens the REPL for commands like CREATE TABLE/INSERT
 
 ## File Structure
 
-`partiql-tools/` also hosts other tools (`partiql-legacy`, `partiql-hybrid`, benchmarks, profilers). The tree below lists only the files relevant to pqlite.
-
 ```
 partiql-tools/
 ├── src/
@@ -107,7 +105,7 @@ partiql-tools/
 │   ├── storage.rs              # HeedDB: LMDB env, tables, writers
 │   ├── catalog.rs              # HeedTableSource (chunked reader), metadata
 │   ├── row_codec.rs            # tagged binary row format
-│   ├── common.rs               # ingestion functions (mem/read/stdin/exec/curl)
+│   ├── common.rs               # parse/lower helpers; mem, rand, scan_ion table functions
 │   └── lib.rs
 └── tests/
     ├── pqlite_cli.rs           # CLI integration tests via subprocess

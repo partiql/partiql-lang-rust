@@ -1,5 +1,5 @@
-pub mod catalog;
-pub mod common;
+mod catalog;
+mod common;
 pub mod row_codec;
 pub mod session;
 pub mod storage;

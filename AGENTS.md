@@ -59,10 +59,6 @@ Plugin crates for Ion, CSV, DDL, and additional scalar functions. Each registers
 ### Binaries (`partiql-tools`)
 
 - `pqlite` — Interactive REPL / one-shot exec runner for the bytecode engine backed by an LMDB store. See "pqlite: testing & debugging" below.
-- `partiql-hybrid` — CLI runner for bytecode engine with data source options (mem/ion/rand).
-- `partiql-legacy` — CLI runner for legacy evaluator.
-- `partiql-benchmarks` — Benchmark harness.
-- `partiql-profile` — Profiling harness.
 
 ## pqlite: testing & debugging
 
