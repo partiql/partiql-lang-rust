@@ -1,6 +1,6 @@
 [package]
 name = "partiql-tools"
-version = "0.15.0-alpha.1"
+version.workspace = true
 edition = "2021"
 publish = false
 autobins = false
