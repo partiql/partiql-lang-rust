@@ -1,6 +1,6 @@
 # VM Evaluator Conformance Plan
 
-This document tracks the gaps between the new VM evaluator (`partiql-eval/src/engine/`) and the legacy evaluator, prioritized by impact on the conformance test suite.
+This document tracks the gaps between the new VM evaluator (`partiql-vm/src/`) and the legacy evaluator, prioritized by impact on the conformance test suite.
 
 ## Conformance Report Tooling
 
@@ -76,25 +76,25 @@ The `stdout` field of failed tests contains the error classification:
 
 | # | Root Cause | Tests Blocked | Cumulative | Key Files |
 |--:|:--|--:|--:|:--|
-| 1 | Missing built-in functions | ~170 remaining | — | `engine/builtins.rs` (trim/exists DONE; extract blocked on DateTime in ValueRef) |
-| 2 | Unresolved DB objects / globals | ~126 remaining | — | `engine/compiler.rs` (DONE: implicit scans for ExprQuery) |
-| 3 | GROUP BY operator | 688 (12.4%) | 64.7% | `engine/compiler.rs` |
-| 4 | Scan expression types | ~57 remaining | — | `engine/compiler.rs` (DONE: inline scans for literals) |
-| 5 | Unary negation (`-x`) | 0 remaining | — | `engine/expr.rs` (DONE) |
-| 6 | Variant/Ion literals | 162 (2.9%) | 75.9% | `engine/expr.rs:2285` |
-| 7 | LIKE (PatternMatchExpr) | ~128 WrongResult remaining | — | `engine/expr.rs` (DONE: impl works, failures are projection wrapping) |
-| 8 | JOIN operator | 84 (1.5%) | 79.2% | `engine/compiler.rs` |
-| 9 | ORDER BY operator | 60 (1.1%) | 80.3% | `engine/compiler.rs` |
-| 10 | UNION/INTERSECT/EXCEPT (BagOp) | 59 (1.1%) | 81.4% | `engine/compiler.rs` |
-| 11 | Typed literals | 58 (1.0%) | 82.4% | `engine/expr.rs` |
-| 12 | Path traversal (PathForEach/Unpivot) | 54+50 (1.9%) | 84.3% | `engine/expr.rs` |
-| 13 | IS TYPE expression | 46 (0.8%) | 85.1% | `engine/expr.rs:2226` |
+| 1 | Missing built-in functions | ~170 remaining | — | `partiql-vm/src/builtins.rs` (trim/exists DONE; extract blocked on DateTime in ValueRef) |
+| 2 | Unresolved DB objects / globals | ~126 remaining | — | `partiql-vm/src/compiler.rs` (DONE: implicit scans for ExprQuery) |
+| 3 | GROUP BY operator | 688 (12.4%) | 64.7% | `partiql-vm/src/compiler.rs` |
+| 4 | Scan expression types | ~57 remaining | — | `partiql-vm/src/compiler.rs` (DONE: inline scans for literals) |
+| 5 | Unary negation (`-x`) | 0 remaining | — | `partiql-vm/src/expr.rs` (DONE) |
+| 6 | Variant/Ion literals | 162 (2.9%) | 75.9% | `partiql-vm/src/expr.rs:2285` |
+| 7 | LIKE (PatternMatchExpr) | ~128 WrongResult remaining | — | `partiql-vm/src/expr.rs` (DONE: impl works, failures are projection wrapping) |
+| 8 | JOIN operator | 84 (1.5%) | 79.2% | `partiql-vm/src/compiler.rs` |
+| 9 | ORDER BY operator | 60 (1.1%) | 80.3% | `partiql-vm/src/compiler.rs` |
+| 10 | UNION/INTERSECT/EXCEPT (BagOp) | 59 (1.1%) | 81.4% | `partiql-vm/src/compiler.rs` |
+| 11 | Typed literals | 58 (1.0%) | 82.4% | `partiql-vm/src/expr.rs` |
+| 12 | Path traversal (PathForEach/Unpivot) | 54+50 (1.9%) | 84.3% | `partiql-vm/src/expr.rs` |
+| 13 | IS TYPE expression | 46 (0.8%) | 85.1% | `partiql-vm/src/expr.rs:2226` |
 | 14 | IllegalState bugs | 44 (0.8%) | 85.9% | Various |
-| 15 | DISTINCT operator | 34 (0.6%) | 86.5% | `engine/compiler.rs` |
-| 16 | NULLIF expression | 26 (0.5%) | 87.0% | `engine/expr.rs:2229` |
-| 17 | BETWEEN expression | 24 (0.4%) | 87.5% | `engine/expr.rs:2211` |
-| 18 | COALESCE expression | 15 (0.3%) | 87.7% | `engine/expr.rs:2232` |
-| 19 | Subquery in project | 15 (0.3%) | 88.0% | `engine/compiler.rs` |
+| 15 | DISTINCT operator | 34 (0.6%) | 86.5% | `partiql-vm/src/compiler.rs` |
+| 16 | NULLIF expression | 26 (0.5%) | 87.0% | `partiql-vm/src/expr.rs:2229` |
+| 17 | BETWEEN expression | 24 (0.4%) | 87.5% | `partiql-vm/src/expr.rs:2211` |
+| 18 | COALESCE expression | 15 (0.3%) | 87.7% | `partiql-vm/src/expr.rs:2232` |
+| 19 | Subquery in project | 15 (0.3%) | 88.0% | `partiql-vm/src/compiler.rs` |
 
 ---
 
@@ -102,7 +102,7 @@ The `stdout` field of failed tests contains the error classification:
 
 ### Task 1: Built-in Functions (~170 tests remaining)
 
-The VM dispatches function calls via `UdfRegistry` trait in `engine/builtins.rs`. The `BuiltinFunctions` struct implements this and is wired into `PartiQLVM` (passed to `eval_inst` in the dispatch loop at `plan.rs`).
+The VM dispatches function calls via `UdfRegistry` trait in `partiql-vm/src/builtins.rs`. The `BuiltinFunctions` struct implements this and is wired into `PartiQLVM` (passed to `eval_inst` in the dispatch loop at `plan.rs`).
 
 **Completed:**
 
@@ -135,10 +135,10 @@ The VM dispatches function calls via `UdfRegistry` trait in `engine/builtins.rs`
 - [ ] `coll_min` — 13 tests
 
 **Key files:**
-- VM built-in implementations: `partiql-eval/src/engine/builtins.rs`
+- VM built-in implementations: `partiql-vm/src/builtins.rs`
 - Legacy implementations (reference): `partiql-eval/src/eval/expr/strings.rs`, `functions.rs`, `datetime.rs`
-- VM UDF dispatch: `partiql-eval/src/engine/expr.rs` (search for `CallUdf`)
-- VM wiring: `partiql-eval/src/engine/plan.rs` (builtins field on `PartiQLVM`)
+- VM UDF dispatch: `partiql-vm/src/expr.rs` (search for `CallUdf`)
+- VM wiring: `partiql-vm/src/plan.rs` (builtins field on `PartiQLVM`)
 
 **How to add a new built-in:** Add a match arm in `BuiltinFunctions::call()` mapping the `CallName` debug string (e.g., `"LTrim"`) to a handler function. The function receives `&[ValueRef<'a>]` args and returns `Result<ValueRef<'a>>`.
 
@@ -152,7 +152,7 @@ Many conformance tests pass an environment like `{i: 1, f: 2.0, s: "hello"}` and
 
 **Key files:**
 - `partiql-conformance-tests/tests/support/eval_vm.rs` — how environment is provided
-- `partiql-eval/src/engine/compiler.rs` — where "unresolved DB object" error occurs
+- `partiql-vm/src/compiler.rs` — where "unresolved DB object" error occurs
 - `partiql-logical-planner/src/lower.rs` — how variable references are lowered
 
 ### Task 3: GROUP BY Operator (688 tests)
@@ -169,25 +169,25 @@ The `GroupBy` and `Having` BindingsOp variants (discriminants 13, 14) aren't com
 
 **Key files:**
 - Legacy implementation: `partiql-eval/src/eval/evaluable.rs` (search for `EvalGroupBy`)
-- VM compiler: `partiql-eval/src/engine/compiler.rs:667` (the catch-all for unsupported ops)
+- VM compiler: `partiql-vm/src/compiler.rs:667` (the catch-all for unsupported ops)
 
 ### Task 4: Scan Expression Types (273 tests)
 
 Certain scan source expressions aren't handled. For example, scanning from a literal collection (`SELECT * FROM [1, 2, 3]`) or other non-variable scan sources.
 
 **Key files:**
-- `partiql-eval/src/engine/compiler.rs:813-814` — "unsupported scan expression type"
+- `partiql-vm/src/compiler.rs:813-814` — "unsupported scan expression type"
 
 ### Task 5: Unary Negation (191 tests)
 
 The unary `-` operator on expressions isn't compiled. This affects integer/float literals like `-1`, `-3.14` and expressions like `-x`.
 
 **Key files:**
-- `partiql-eval/src/engine/expr.rs:2171` — `Err(EngineError::UnsupportedExpr(format!("unary op {op:?}")))`
+- `partiql-vm/src/expr.rs:2171` — `Err(EngineError::UnsupportedExpr(format!("unary op {op:?}")))`
 
 ### Task 6: Variant/Ion Literals (162 tests)
 
-A `todo!()` panic at `engine/expr.rs:2285` for `Lit::Variant(_, _)`.
+A `todo!()` panic at `partiql-vm/src/expr.rs:2285` for `Lit::Variant(_, _)`.
 
 ### Task 7: LIKE / Pattern Match (100 tests)
 
@@ -195,7 +195,7 @@ A `todo!()` panic at `engine/expr.rs:2285` for `Lit::Variant(_, _)`.
 
 **Key files:**
 - Legacy implementation: `partiql-eval/src/eval/expr/pattern_match.rs`
-- VM: `partiql-eval/src/engine/expr.rs:2214`
+- VM: `partiql-vm/src/expr.rs:2214`
 
 ### Task 8: JOIN Operator (84 tests)
 
@@ -216,7 +216,7 @@ The `OrderBy` BindingsOp (discriminant 4) isn't compiled.
 
 ## Approach for Working on a Task
 
-1. **Find the relevant error** in `engine/compiler.rs` or `engine/expr.rs`
+1. **Find the relevant error** in `partiql-vm/src/compiler.rs` or `partiql-vm/src/expr.rs`
 2. **Look at the legacy implementation** for the same feature (paths listed above)
 3. **Implement the feature** in the VM, following the existing VM patterns:
    - Operators → compile to bytecode instructions in `compiler.rs`

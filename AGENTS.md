@@ -40,9 +40,9 @@ The compilation pipeline flows through these crates in order:
 3. **partiql-ast-passes** — AST transformations (name resolution).
 4. **partiql-logical-planner** — Lowers AST to a logical plan. Contains the type checker (`typer.rs`) and built-in function registry (`builtins.rs`).
 5. **partiql-logical** — Graph-based logical plan representation. Nodes are `BindingsOp` (relational) and leaves are `ValueExpr` (scalar).
-6. **partiql-eval** — Two evaluation backends:
-   - **Legacy tree-walker** (`eval/` module) — interprets logical plan nodes via `Evaluable` trait.
-   - **Bytecode VM** (`engine/` module) — compiles logical plan to flat `Inst` bytecode, executes in a register-based VM with cursors. This is the actively developed path (`partiql-vm` branch).
+6. **Evaluation** — Two backends, in separate crates:
+   - **partiql-eval** — Legacy tree-walker; interprets logical plan nodes via the `Evaluable` trait. Uses the planner's default `VarRefResolution::Dynamic`.
+   - **partiql-vm** — Bytecode VM (unpublished); compiles the logical plan to flat `Inst` bytecode and executes it in a register-based VM with cursors. This is the actively developed path. Requires plans lowered with `VarRefResolution::Static` (`LogicalPlanner::with_var_resolution`).
 
 ### Key supporting crates
 
@@ -120,9 +120,9 @@ cargo test -p partiql-tools --test pqlite_cli
 
 When adding a new engine feature, the usual loop is: write a `.test.ion` under `cases/query/`, run it with `cargo test -p partiql-tools --test pqlite_e2e <name>`, and when it fails inspect the pipeline with `pqlite --debug '*' exec "<your sql>"` to see where the compile pipeline diverges from expectation.
 
-## Bytecode VM (engine module)
+## Bytecode VM (`partiql-vm`)
 
-The new engine in `partiql-eval/src/engine/`:
+The VM lives in `partiql-vm/src/`:
 - `compiler.rs` — Walks the `LogicalPlan` graph and emits bytecode (`Inst` stream) + metadata.
 - `expr.rs` — Defines `Inst` (typed register-machine instructions) and `Expr` (expression tree for fallback).
 - `plan.rs` — `CompiledPlan` struct holding the program, scan metadata, cursor info, constants.

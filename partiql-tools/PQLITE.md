@@ -114,7 +114,7 @@ partiql-tools/
     ├── pqlite/cases/           # .test.ion case files under catalog/, errors/, query/
     └── pqlite_ingestion.rs     # ingestion-function integration tests
 
-partiql-eval/src/engine/       # bytecode VM
+partiql-vm/src/                # bytecode VM
 ├── compiler.rs                 # logical plan → Inst stream
 ├── expr.rs                     # Inst enum
 ├── plan.rs                     # CompiledPlan, agg_step, sorter
