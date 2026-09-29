@@ -10,36 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Added
-- partiql-logical-planner: Lower scalar-position `SELECT` subqueries — projection-list
-  items, `SELECT VALUE` struct values, function-call arguments, and subqueries nested in
-  other scalar operators (`CASE`, binary operators, ...) — to `ValueExpr::SubQueryExpr`.
-  Previously these produced `NotYetImplemented("Subquery within project")` or `IllegalState`
-  during lowering. Set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subqueries in scalar position
-  remain unsupported. No scalar coercion is introduced: the subquery's result collection is
-  returned as-is (matching existing `SubQueryExpr` evaluation).
-- partiql-logical-planner: Coerce a scalar-position SQL `SELECT` subquery to a single value per
-  the PartiQL specification (§9.1), so e.g. `1 + (SELECT v.n FROM t AS v)` yields the singleton's
-  value instead of `MISSING`. The coercion is context-sensitive, matching the reference
-  partiql-lang-kotlin `SubqueryCoercionVisitorTransform`: it applies only where the enclosing
-  context expects a single value (operands of arithmetic/logical/comparison/concatenation
-  operators, `BETWEEN`/`LIKE`, and the `WHERE`/`HAVING`/`ORDER BY`/`LIMIT`/`OFFSET` clauses and
-  projection-list items), and not in collection- or multi-value contexts (struct/bag/list
-  constructors, `CASE`, the `IN` right-hand side, and function-call arguments incl. `EXISTS`).
-  `SELECT VALUE` explicitly constructs a collection and is never coerced. Implemented via an
-  internal definitional builtin `coll_to_scalar` (`CallName::CollToScalar` + `EvalFnCollToScalar`):
-  a collection of a single single-attribute tuple coerces to that attribute's value; every other
-  input (empty, multiple elements, multi-attribute tuple, non-collection, `NULL`, `MISSING`)
-  yields `MISSING`, never failing. It is not registered as a user-callable function.
 
-### Fixed
-- Fixed user-registered scalar functions silently returning `MISSING` (permissive) or
-  erroring (strict) when called with a non-struct argument. Scalar-function arguments are
-  now checked against `DYNAMIC` rather than a struct-of-dynamic type, so `String`,
-  `Integer`, and other scalar arguments reach the function body.
-- `tupleunion`/`tupleconcat` (in `partiql-extension-value-functions`) now reject a non-tuple
-  argument (`MISSING` in permissive mode, an error in strict mode) instead of silently
-  coercing it to a single-attribute tuple. Per the PartiQL specification these functions are
-  defined only over tuples; scalar coercion for `SELECT *` remains the planner's concern.
+### Removed
+
+## [0.15.0]
+### Changed
+- *BREAKING* partiql-logical: Added `CallName::CollToScalar` for subquery coercion.
+  Downstream exhaustive matches over this public enum need to handle the new variant.
+- Registered scalar functions now accept strings, integers, and other values under a
+  `DYNAMIC` argument constraint instead of rejecting non-struct arguments.
+  `tupleunion` and `tupleconcat` now require tuple arguments, returning `MISSING` in
+  permissive mode or an error in strict mode for non-tuples.
+- Updated GitHub Actions versions, Rust toolchain configuration, and workflow token
+  permissions, and switched CI to run workspace Clippy checks directly.
+- Updated code for stricter Clippy lints.
+- partiql-types: Removed trailing semicolons from the `type_bag!` and `type_array!`
+  macros so they can be used in expression positions on current Rust toolchains.
+- Pinned `ion-rs` to `=1.0.0-rc.11` in the Ion, Ion-functions, and CSV extensions and
+  updated the Ion corpus snapshot to restore the expected test output.
+- Updated dependency license policy to allow `Unicode-3.0`, removing obsolete
+  `ICU` and `Unicode-DFS-2016` allowances and the `unicode-ident` exception.
+- Corrected the commit ID recorded when CI regenerates the target branch's
+  conformance report.
+
+### Added
+- partiql-logical-planner: Added lowering for SQL `SELECT` subqueries in projection
+  expressions, struct values, function-call arguments, and other scalar expressions.
+  Set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subqueries in scalar positions remain
+  unsupported.
+- partiql-logical-planner: Added scalar coercion for SQL `SELECT` subqueries in
+  arithmetic, logical, comparison, and concatenation operands, `BETWEEN`/`LIKE`,
+  projection-list items, and `WHERE`/`HAVING`/`ORDER BY`/`LIMIT`/`OFFSET` clauses.
+  A single-row, single-column result yields that value; empty, multi-row, or
+  multi-column results yield `MISSING`. Direct subquery arguments in collection
+  constructors, `CASE`, function calls, and `IN` retain their collections.
+  The uncoerced `IN` left-hand side remains a known limitation. `SELECT VALUE`
+  subqueries are never scalar-coerced.
+- Added Makefile targets for local build, test, format, Clippy, dependency,
+  conformance, and coverage checks, with usage instructions in the README.
 
 ### Removed
 
@@ -381,7 +389,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PartiQL Playground proof of concept (POC)
 - PartiQL CLI with REPL and query visualization features
 
-[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.15.0
 [0.14.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.14.0
 [0.13.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.13.0
 [0.12.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.12.0
