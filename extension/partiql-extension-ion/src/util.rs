@@ -5,6 +5,7 @@ use partiql_value::{DateTime, Value};
 use std::num::NonZeroU8;
 use std::str::FromStr;
 
+#[non_exhaustive]
 pub enum PartiqlValueTarget<T> {
     Atom(Value),
     List(Vec<T>),

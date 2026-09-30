@@ -187,6 +187,7 @@ macro_rules! type_array {
 // With this implementation `Dynamic` and `AnyOf` cannot have `nullability`; this does not mean their
 // `null` value at runtime cannot belong to their domain.
 // TODO adopt the correct model Pending PartiQL Types semantics finalization: https://github.com/partiql/partiql-lang/issues/18
+#[non_exhaustive]
 pub enum PartiqlShape {
     Dynamic,
     AnyOf(AnyOf),
@@ -739,6 +740,7 @@ impl Display for StaticType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub enum Static {
     // Scalar Types
     Int,
@@ -770,6 +772,7 @@ pub enum Static {
     // TODO Add BitString, ByteString, Blob, Clob, and Graph types
 }
 
+#[non_exhaustive]
 pub enum StaticCategory<'a> {
     Graph(),
     Tuple(),

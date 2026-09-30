@@ -8,6 +8,7 @@ use unicase::UniCase;
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BindingsName<'s> {
     CaseSensitive(Cow<'s, str>),
     CaseInsensitive(Cow<'s, str>),
@@ -20,6 +21,7 @@ impl<'s> BindingsName<'s> {
 }
 
 #[derive(Clone, Hash, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum BindingsMatcher<'s> {
     CaseSensitive(&'s str),
     CaseInsensitive(UniCase<&'s str>),
@@ -45,6 +47,7 @@ impl<'s> From<&'s BindingsName<'s>> for BindingsMatcher<'s> {
     }
 }
 
+#[non_exhaustive]
 pub enum BindingIter<'a> {
     Tuple(PairsIter<'a>),
     Dynamic(Box<dyn Iterator<Item = (Option<&'a str>, &'a Value)> + 'a>),
@@ -76,6 +79,7 @@ impl<'a> Iterator for BindingIter<'a> {
     }
 }
 
+#[non_exhaustive]
 pub enum BindingIntoIter {
     Tuple(PairsIntoIter),
     Single(Once<Value>),

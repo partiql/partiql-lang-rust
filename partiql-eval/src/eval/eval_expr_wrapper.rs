@@ -56,6 +56,7 @@ impl TypeSatisfier for Static {
                 DatumValueRef::Dynamic(_) => {
                     unreachable!("Value must be 'lower'ed before trying to satisfy")
                 }
+                _ => false,
             },
             (StaticCategory::Sequence(shape), DatumCategoryRef::Sequence(seq)) => match shape {
                 PartiqlShape::Dynamic | PartiqlShape::Undefined => true,

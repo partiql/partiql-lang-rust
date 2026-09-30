@@ -83,6 +83,7 @@ impl PlanToDot {
                     JoinKind::Right => "right",
                     JoinKind::Full => "full",
                     JoinKind::Cross => "cross",
+                    _ => "unknown",
                 };
                 format!(
                     "{{ {} join | {} }}",
@@ -124,6 +125,7 @@ impl PlanToDot {
                 format!("{{ having | {} }}", expr_to_str(&h.expr))
             }
             BindingsOp::Sink => "sink".to_string(),
+            _ => "unknown operator".to_string(),
         };
         node.set_shape(Shape::Mrecord).set_label(&label.to_string());
 

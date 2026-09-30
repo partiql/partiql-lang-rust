@@ -27,6 +27,7 @@ const PARTIQL_DATA_TYPE_SYNTAX: &str = "partiql_datatype_syntax";
 
 /// Represents s PartiQL DDL Format
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DdlFormat {
     Compact,
     Pretty,

@@ -59,6 +59,7 @@ pub trait DatumCategory<'a> {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumCategoryRef<'a> {
     Null,
     Missing,
@@ -69,6 +70,7 @@ pub enum DatumCategoryRef<'a> {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumCategoryOwned {
     Null,
     Missing,
@@ -79,6 +81,7 @@ pub enum DatumCategoryOwned {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumTupleRef<'a> {
     /// A Tuple with no bindings
     Empty,
@@ -95,6 +98,7 @@ pub enum DatumTupleRef<'a> {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumSeqRef<'a> {
     List(&'a List),
     Bag(&'a Bag),
@@ -102,23 +106,27 @@ pub enum DatumSeqRef<'a> {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumValueRef<'a> {
     Value(&'a Value),
     Dynamic(&'a dyn DatumLower<Value>),
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumGraphRef<'a> {
     Graph(&'a Graph),
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumTupleOwned {
     Tuple(Box<Tuple>),
     Dynamic(Box<dyn OwnedTupleView<Value>>),
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumSeqOwned {
     List(Box<List>),
     Bag(Box<Bag>),
@@ -126,11 +134,13 @@ pub enum DatumSeqOwned {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumValueOwned {
     Value(Value),
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DatumGraphOwned {
     Graph(Box<Graph>),
 }
@@ -281,6 +291,7 @@ impl<'a> IntoIterator for &'a DatumTupleRef<'a> {
     }
 }
 
+#[non_exhaustive]
 pub enum DatumTupleRefIterator<'a> {
     Empty,
     Tuple(PairsIter<'a>),
@@ -426,6 +437,7 @@ impl IntoIterator for DatumTupleOwned {
     }
 }
 
+#[non_exhaustive]
 pub enum DatumTupleOwnedIterator {
     Tuple(PairsIntoIter),
     Dynamic(Box<dyn Iterator<Item = OwnedFieldView<Value>>>),
@@ -457,6 +469,7 @@ impl IntoIterator for DatumSeqOwned {
     }
 }
 
+#[non_exhaustive]
 pub enum DatumSeqOwnedIterator {
     List(ListIntoIterator),
     Bag(BagIntoIterator),

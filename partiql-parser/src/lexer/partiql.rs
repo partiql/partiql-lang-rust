@@ -140,6 +140,7 @@ impl<'input> Iterator for PartiqlLexer<'input, '_> {
 // TODO make pub(crate) ?
 // Skip whitespace
 #[logos(skip r"[ \t\f]+")]
+#[non_exhaustive]
 pub enum Token<'input> {
     // Skip newlines, but record their position.
     // For line break recommendations,

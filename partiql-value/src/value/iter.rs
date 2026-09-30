@@ -2,6 +2,7 @@ use crate::{
     BagIntoIterator, BagIter, ListIntoIterator, ListIter, Value, VariantIntoIterator, VariantIter,
 };
 
+#[non_exhaustive]
 pub enum ValueIter<'a> {
     List(ListIter<'a>),
     Bag(BagIter<'a>),
@@ -52,6 +53,7 @@ impl IntoIterator for Value {
     }
 }
 
+#[non_exhaustive]
 pub enum ValueIntoIterator {
     List(ListIntoIterator),
     Bag(BagIntoIterator),

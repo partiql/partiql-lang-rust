@@ -239,6 +239,7 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
+#[non_exhaustive]
 pub enum PartiqlMetaValue<T>
 where
     T: Eq + Clone + Hash + Borrow<str>,

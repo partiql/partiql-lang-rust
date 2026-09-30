@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Graph {
     Simple(Rc<SimpleGraph>),
 }
@@ -142,6 +143,7 @@ impl Debug for DebugGElem<'_> {
 }
 
 /// Specification for an edge; Direciton and end-points.
+#[non_exhaustive]
 pub enum EdgeSpec {
     Directed(String, String),   // from node, to node
     Undirected(String, String), // node, node

@@ -33,6 +33,7 @@ pub struct GraphPattern {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphMatchMode {
     /// Edges are not allowed to bind to more than one edge variable in a path
     DifferentEdges,
@@ -50,6 +51,7 @@ pub struct GraphTableShape {
 
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphTableRows {
     #[default]
     OneRowPerMatch,
@@ -73,6 +75,7 @@ pub struct GraphTableColumns {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphTableColumnDef {
     Expr(Box<Expr>, Option<SymbolPrimitive>),
     AllProperties(SymbolPrimitive),
@@ -80,6 +83,7 @@ pub enum GraphTableColumnDef {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphTableExport {
     AllSingletons {
         except: Option<Vec<SymbolPrimitive>>,
@@ -103,6 +107,7 @@ pub enum GraphTableExport {
 /// | Left, undirected or right | −[ spec ]−   | −            |
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphMatchDirection {
     Left,
     Undirected,
@@ -124,6 +129,7 @@ pub struct GraphMatchQuantifier {
 /// Filters paths. Options other than `Walk` ensure a finite number of matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphPathMode {
     /// No filtering of edges/nodes.
     Walk,
@@ -168,6 +174,7 @@ pub struct GraphMatchEdge {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphMatchLabel {
     Name(SymbolPrimitive),
     Wildcard,
@@ -204,6 +211,7 @@ pub struct GraphPathSubPattern {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphMatchPathPattern {
     Path(Vec<AstNode<GraphMatchPathPattern>>),
     Union(Vec<AstNode<GraphMatchPathPattern>>),
@@ -249,6 +257,7 @@ pub struct GraphMatchSimplified {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphMatchSimplifiedPattern {
     Union(Vec<AstNode<GraphMatchSimplifiedPattern>>),
     Multiset(Vec<AstNode<GraphMatchSimplifiedPattern>>),
@@ -284,6 +293,7 @@ pub struct GraphMatchSimplifiedPatternDirected {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphPathPrefix {
     Mode(GraphPathMode),
     Search(GraphPathSearchPrefix, Option<GraphPathMode>),
@@ -300,6 +310,7 @@ pub enum GraphPathPrefix {
 /// | SHORTEST k GROUP
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GraphPathSearchPrefix {
     All,
     Any,

@@ -36,6 +36,7 @@ macro_rules! take_input {
 
 /// Whether an [`Evaluable`] takes input from the plan graph or manages its own iteration.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[non_exhaustive]
 pub enum EvalType {
     SelfManaged,
     GraphManaged,

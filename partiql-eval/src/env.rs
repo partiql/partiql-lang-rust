@@ -53,6 +53,7 @@ pub mod basic {
                 BindingsName::CaseInsensitive(s) => {
                     self.insensitive.get(&UniCase::new(s.to_string()))
                 }
+                _ => None,
             };
             idx.and_then(|idx| self.values.get(*idx).map(Cow::Borrowed))
         }

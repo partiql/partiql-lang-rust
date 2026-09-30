@@ -7,6 +7,7 @@ use std::rc::Rc;
 /// A plan specification for an edge's direction filtering.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum DirectionFilter {
     L,   // <-
     U,   //  ~
@@ -19,6 +20,7 @@ pub enum DirectionFilter {
 
 /// A plan specification for a path's matching mode.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum PathMode {
     /// No filtering of edges/nodes.
     Walk,
@@ -36,6 +38,7 @@ pub struct BindSpec<GT: GraphTypes>(pub GT::Binder);
 
 /// A plan specification for label filtering.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub enum LabelFilter<GT: GraphTypes> {
     #[default]
     Always,
@@ -48,6 +51,7 @@ pub enum LabelFilter<GT: GraphTypes> {
 
 /// A plan specification for value filtering.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub enum ValueFilter {
     #[default]
     Always,
@@ -101,6 +105,7 @@ pub struct TripleStepMatch<GT: GraphTypes> {
 
 /// A plan specification for path patterns (i.e., sequences of [`TripleStepMatch`]s) matching.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PathPatternMatch<GT: GraphTypes> {
     Node(NodeMatch<GT>),
     Match(TripleStepMatch<GT>),
