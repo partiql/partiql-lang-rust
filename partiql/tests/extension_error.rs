@@ -251,3 +251,62 @@ fn test_context_runtime_strict() -> Result<(), TestError<'static>> {
 
     Ok(())
 }
+
+#[test]
+fn test_join_stops_after_left_error_strict() -> Result<(), TestError<'static>> {
+    use assert_matches::assert_matches;
+    // Both table functions fail on load. In strict mode the plan must stop at the first
+    // failure instead of scanning the right side for the `Missing` the left side produced.
+    let query =
+        "SELECT * FROM test_user_context(1) AS a LEFT JOIN test_user_context(2) AS b ON TRUE";
+
+    let mut catalog = PartiqlCatalog::default();
+    let ext = UserCtxTestExtension {};
+    ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
+
+    let parsed = parse(query);
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
+    let bindings = Default::default();
+
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(EvaluationMode::Strict, &catalog, lowered, bindings, &ctx);
+
+    assert!(out.is_err());
+    let err = out.unwrap_err();
+    assert_eq!(err.errors.len(), 1);
+    assert_matches!(&err.errors[0], EvaluationError::ExtensionResultError(err) => {
+        assert_eq!(err.to_string(), "Scan error: `bad arguments`")
+    });
+
+    Ok(())
+}
+
+#[test]
+fn test_join_stops_after_right_error_strict() -> Result<(), TestError<'static>> {
+    use assert_matches::assert_matches;
+    // The left side yields three bindings and the right side fails on load for each of
+    // them. In strict mode the first failure must end the evaluation.
+    let query = "SELECT * FROM [1, 2, 3] AS a LEFT JOIN test_user_context(1) AS b ON TRUE";
+
+    let mut catalog = PartiqlCatalog::default();
+    let ext = UserCtxTestExtension {};
+    ext.load(&mut catalog).expect("extension load to succeed");
+    let catalog = catalog.to_shared_catalog();
+
+    let parsed = parse(query);
+    let lowered = lower(&catalog, &parsed.expect("parse"))?;
+    let bindings = Default::default();
+
+    let ctx: [(String, &dyn Any); 0] = [];
+    let out = evaluate(EvaluationMode::Strict, &catalog, lowered, bindings, &ctx);
+
+    assert!(out.is_err());
+    let err = out.unwrap_err();
+    assert_eq!(err.errors.len(), 1);
+    assert_matches!(&err.errors[0], EvaluationError::ExtensionResultError(err) => {
+        assert_eq!(err.to_string(), "Scan error: `bad arguments`")
+    });
+
+    Ok(())
+}
