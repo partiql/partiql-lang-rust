@@ -3,6 +3,10 @@ use crate::Lit;
 use partiql_value::{Bag, List, Tuple, Value};
 
 impl From<Value> for Lit {
+    /// # Panics
+    ///
+    /// Panics for value variants this conversion does not support, including
+    /// variants introduced by newer versions of `partiql-value`.
     fn from(value: Value) -> Self {
         match value {
             Value::Null => Lit::Null,
@@ -25,6 +29,7 @@ impl From<Value> for Lit {
             Value::Variant(_) => {
                 todo!("Value to Lit: Variant")
             }
+            _ => unimplemented!("Value to Lit: unsupported value variant"),
         }
     }
 }

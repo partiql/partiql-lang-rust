@@ -17,6 +17,13 @@ to make applications needing only some sub-component of the PartiQL implementati
 that only requires the PartiQL parser can depend on `partiql-parser` directly).
 
 ## Development
+
+Public enums are marked `#[non_exhaustive]` so that new variants can be added without
+requiring every consumer to update its matches. Matches in other crates, including
+other crates in this workspace, must handle unrecognized variants with a catch-all
+arm. Choose fallback behavior appropriate to the operation, such as returning an
+unsupported-operation error.
+
 This project uses a [git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) to pull in 
 [partiql-tests](https://github.com/partiql/partiql-tests). The easiest way to pull everything in is to clone the 
 repository recursively:

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING* Marked public enums across the workspace as `#[non_exhaustive]`.
+  Matches in other crates must include a catch-all arm for future variants.
+  Updated planners, evaluators, encoders, and visualization to handle unsupported variants.
 
 ### Added
 - partiql-logical-planner: Lower scalar-position `SELECT` subqueries — projection-list

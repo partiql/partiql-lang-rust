@@ -10,6 +10,7 @@ pub mod bind_name;
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum DirectionFilter {
     L,   // <-
     U,   //  ~
@@ -23,6 +24,7 @@ pub enum DirectionFilter {
 /// A plan specification for a path's matching mode.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum PathMode {
     /// No filtering of edges/nodes.
     Walk,
@@ -50,6 +52,7 @@ impl BindSpec {
 /// A plan specification for label filtering.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum LabelFilter {
     #[default]
     Always,
@@ -63,6 +66,7 @@ pub enum LabelFilter {
 /// A plan specification for value filtering.
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ValueFilter {
     #[default]
     Always,
@@ -171,6 +175,7 @@ pub struct TripleSeriesMatch {
 /// A plan specification for path patterns (i.e., sequences of [`TripleMatch`]s) matching.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum PathPatternMatch {
     Node(NodeMatch),
     Match(TripleMatch),

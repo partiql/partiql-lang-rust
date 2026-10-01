@@ -103,6 +103,7 @@ pub struct FunctionEntry<'a> {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FunctionEntryFunction {
     Table(TableFunction),
     Scalar(ScalarFnCallSpecs),

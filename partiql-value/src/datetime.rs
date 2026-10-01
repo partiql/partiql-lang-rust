@@ -8,6 +8,7 @@ use time::{Duration, UtcOffset};
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum DateTime {
     Date(time::Date),
     Time(time::Time),

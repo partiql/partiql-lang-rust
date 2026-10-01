@@ -1,5 +1,6 @@
 /// The encoding to use when decoding/encoding Ion to/from `PartiQL` [`partiql_value::Value`]
 #[derive(Copy, Clone, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Encoding {
     /// 'Unlifted'/'Unlowered' Ion to/from PartiQL [`partiql_value::Value`]. [`partiql_value::Value`]s that do not have a direct
     /// Ion analog will result in an error (e.g. PartiQL [`partiql_value::Value`] has a 'bag' type, but Ion does not,

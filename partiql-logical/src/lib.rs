@@ -223,6 +223,7 @@ where
 /// binding tuples as specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BindingsOp {
     Scan(Scan),
     Pivot(Pivot),
@@ -245,6 +246,7 @@ pub enum BindingsOp {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ProjectAllMode {
     /// Unwrap the outer alias when project *
     ///     (e.g., for `<< {'_1': {'a': 1, 'b': 2}} >>`, 'unwrap' the `'_1'` to project `a` and `b`)
@@ -307,6 +309,7 @@ pub struct OrderBy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum SortSpecOrder {
     Asc,
     Desc,
@@ -314,6 +317,7 @@ pub enum SortSpecOrder {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum SortSpecNullOrder {
     First,
     Last,
@@ -347,6 +351,7 @@ pub struct BagOp {
 /// Represents the supported bag operator types.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BagOperator {
     Union,
     Except,
@@ -370,6 +375,7 @@ pub struct Join {
 /// Represents join types.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum JoinKind {
     Inner,
     Left,
@@ -391,6 +397,7 @@ pub struct AggregateExpression {
 /// SQL aggregate function
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum AggFunc {
     // TODO: modeling of COUNT(*)
     /// Represents SQL's `AVG` aggregation function
@@ -422,6 +429,7 @@ pub struct GroupBy {
 /// Grouping qualifier: ALL or PARTIAL
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GroupingStrategy {
     GroupFull,
     GroupPartial,
@@ -453,6 +461,7 @@ pub struct ExprQuery {
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ValueExpr {
     UnExpr(UnaryOp, Box<ValueExpr>),
     BinaryExpr(BinaryOp, Box<ValueExpr>, Box<ValueExpr>),
@@ -478,6 +487,7 @@ pub enum ValueExpr {
 /// Represents a `PartiQL` literal value.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Lit {
     Null,
     Missing,
@@ -498,6 +508,7 @@ pub enum Lit {
 /// Represents logical plan's unary operators.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum UnaryOp {
     Pos,
     Neg,
@@ -508,6 +519,7 @@ pub enum UnaryOp {
 /// Represents logical plan's binary operators.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BinaryOp {
     And,
     Or,
@@ -533,6 +545,7 @@ pub enum BinaryOp {
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 /// Represents a path component in a plan.
+#[non_exhaustive]
 pub enum PathComponent {
     /// E.g. `b` in `a.b`
     Key(BindingsName<'static>),
@@ -607,6 +620,7 @@ pub struct PatternMatchExpr {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Pattern {
     Like(LikeMatch), // TODO other e.g., SIMILAR_TO, or regex match
     LikeNonStringNonLiteral(LikeNonStringNonLiteralMatch),
@@ -680,6 +694,7 @@ pub struct IsTypeExpr {
 /// Represents a `PartiQL` Type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Type {
     NullType,
     BooleanType,
@@ -737,6 +752,7 @@ pub struct CallExpr {
 /// Represents a known function.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CallName {
     Lower,
     Upper,
@@ -774,8 +790,39 @@ pub enum CallName {
 }
 
 /// Indicates if a set should be reduced to its distinct elements or not.
+///
+/// Consumers must account for future variants:
+///
+/// ```
+/// use partiql_logical::SetQuantifier;
+///
+/// fn is_distinct(quantifier: &SetQuantifier) -> Option<bool> {
+///     match quantifier {
+///         SetQuantifier::All => Some(false),
+///         SetQuantifier::Distinct => Some(true),
+///         _ => None, // An unsupported quantifier.
+///     }
+/// }
+///
+/// assert_eq!(is_distinct(&SetQuantifier::All), Some(false));
+/// assert_eq!(is_distinct(&SetQuantifier::Distinct), Some(true));
+/// ```
+///
+/// Listing only today's variants is not exhaustive outside this crate:
+///
+/// ```compile_fail
+/// use partiql_logical::SetQuantifier;
+///
+/// fn is_distinct(quantifier: &SetQuantifier) -> bool {
+///     match quantifier {
+///         SetQuantifier::All => false,
+///         SetQuantifier::Distinct => true,
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum SetQuantifier {
     All,
     Distinct,
@@ -784,6 +831,7 @@ pub enum SetQuantifier {
 /// Indicates whether to look in the local/lexical or global environment when resolving a variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum VarRefType {
     /// Resolve the variable by looking in the global environment.
     Global,

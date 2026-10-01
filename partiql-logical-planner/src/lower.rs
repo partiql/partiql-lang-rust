@@ -324,35 +324,41 @@ impl<'a> AstToLogical<'a> {
             .unwrap_or_else(|| self.gen_id())
     }
 
-    fn resolve_varref(&self, varref: &ast::VarRef) -> logical::ValueExpr {
-        fn binding_to_static<'a>(binding: &'a BindingsName<'a>) -> BindingsName<'static> {
-            match binding {
+    fn resolve_varref(
+        &self,
+        varref: &ast::VarRef,
+    ) -> Result<logical::ValueExpr, AstTransformError> {
+        fn binding_to_static<'a>(
+            binding: &'a BindingsName<'a>,
+        ) -> Result<BindingsName<'static>, AstTransformError> {
+            Ok(match binding {
                 BindingsName::CaseSensitive(n) => {
                     BindingsName::CaseSensitive(Cow::Owned(n.as_ref().to_string()))
                 }
                 BindingsName::CaseInsensitive(n) => {
                     BindingsName::CaseInsensitive(Cow::Owned(n.as_ref().to_string()))
                 }
-            }
+                _ => return Err(AstTransformError::NotYetImplemented("binding name".into())),
+            })
         }
 
         // Convert a `SymbolPrimitive` into a `BindingsName`
-        fn symprim_to_binding(sym: &SymbolPrimitive) -> BindingsName<'static> {
-            match sym.case {
+        fn symprim_to_binding(
+            sym: &SymbolPrimitive,
+        ) -> Result<BindingsName<'static>, AstTransformError> {
+            Ok(match sym.case {
                 CaseSensitivity::CaseSensitive => {
                     BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
                 }
                 CaseSensitivity::CaseInsensitive => {
                     BindingsName::CaseInsensitive(Cow::Owned(sym.value.clone()))
                 }
-            }
-        }
-        // Convert a `name_resolver::Symbol` into a `BindingsName`
-        fn sym_to_binding(sym: &name_resolver::Symbol) -> Option<BindingsName<'static>> {
-            match sym {
-                name_resolver::Symbol::Known(sym) => Some(symprim_to_binding(sym)),
-                name_resolver::Symbol::Unknown(_) => None,
-            }
+                _ => {
+                    return Err(AstTransformError::NotYetImplemented(
+                        "case sensitivity".into(),
+                    ))
+                }
+            })
         }
 
         for id in self.id_stack.iter().rev() {
@@ -365,7 +371,7 @@ impl<'a> AstToLogical<'a> {
                     .find(|name_ref| name_ref.sym == varref.name)
                     .expect("NameRef");
 
-                let var_binding = symprim_to_binding(&name_ref.sym);
+                let var_binding = symprim_to_binding(&name_ref.sym)?;
                 let mut lookups = vec![];
 
                 if matches!(self.current_ctx(), Some(QueryContext::Order)) {
@@ -377,12 +383,13 @@ impl<'a> AstToLogical<'a> {
                                 match case {
                                     CaseSensitivity::CaseSensitive => value == *k,
                                     CaseSensitivity::CaseInsensitive => unicase::eq(value, *k),
+                                    _ => false, // Rejected by symprim_to_binding above.
                                 }
                             })
                             .map_or_else(
                                 || symprim_to_binding(&name_ref.sym),
                                 |(_k, v)| binding_to_static(v),
-                            );
+                            )?;
 
                         lookups.push(DynamicLookup(Box::new(vec![ValueExpr::VarRef(
                             binding,
@@ -430,9 +437,7 @@ impl<'a> AstToLogical<'a> {
                                                         == ast::CaseSensitivity::CaseInsensitive)
                                             {
                                                 let expr = ValueExpr::VarRef(
-                                                    sym_to_binding(produce).unwrap_or_else(|| {
-                                                        symprim_to_binding(&self.gen_id())
-                                                    }),
+                                                    symprim_to_binding(sym)?,
                                                     VarRefType::Local,
                                                 );
                                                 if !lookups.contains(&expr) {
@@ -455,9 +460,7 @@ impl<'a> AstToLogical<'a> {
                                             } else {
                                                 let path = logical::ValueExpr::Path(
                                                     Box::new(ValueExpr::VarRef(
-                                                        sym_to_binding(produce).unwrap_or_else(
-                                                            || symprim_to_binding(&self.gen_id()),
-                                                        ),
+                                                        symprim_to_binding(sym)?,
                                                         VarRefType::Local,
                                                     )),
                                                     vec![PathComponent::Key(var_binding.clone())],
@@ -484,11 +487,9 @@ impl<'a> AstToLogical<'a> {
                                             } else {
                                                 let path = logical::ValueExpr::Path(
                                                     Box::new(ValueExpr::VarRef(
-                                                        sym_to_binding(produce).unwrap_or({
-                                                            BindingsName::CaseInsensitive(
-                                                                Cow::Owned(formatted_num),
-                                                            )
-                                                        }),
+                                                        BindingsName::CaseInsensitive(Cow::Owned(
+                                                            formatted_num,
+                                                        )),
                                                         VarRefType::Local,
                                                     )),
                                                     vec![PathComponent::Key(var_binding.clone())],
@@ -498,21 +499,31 @@ impl<'a> AstToLogical<'a> {
                                                     lookups.push(path);
                                                 }
                                             }
+                                        } else {
+                                            return Err(AstTransformError::NotYetImplemented(
+                                                "name resolution symbol".into(),
+                                            ));
                                         }
                                     }
                                 }
                             }
                         }
+                        _ => {
+                            return Err(AstTransformError::NotYetImplemented("name lookup".into()))
+                        }
                     }
                 }
-                return ValueExpr::DynamicLookup(Box::new(lookups));
+                return Ok(ValueExpr::DynamicLookup(Box::new(lookups)));
             }
         }
 
         // TODO in the presence of schema, error if the variable reference doesn't correspond to a data table
 
         // assume global
-        ValueExpr::VarRef(symprim_to_binding(&varref.name), VarRefType::Global)
+        Ok(ValueExpr::VarRef(
+            symprim_to_binding(&varref.name)?,
+            VarRefType::Global,
+        ))
     }
 
     #[inline]
@@ -868,6 +879,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             QuerySet::Table(_) => {
                 not_yet_implemented_fault!(self, "QuerySet::Table".to_string());
             }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported query set");
+            }
         }
         Traverse::Continue
     }
@@ -889,11 +903,17 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                     BagOperator::OuterUnion => logical::BagOperator::OuterUnion,
                     BagOperator::OuterExcept => logical::BagOperator::OuterExcept,
                     BagOperator::OuterIntersect => logical::BagOperator::OuterIntersect,
+                    _ => {
+                        not_yet_implemented_fault!(self, "Unsupported bag operator");
+                    }
                 };
                 let setq = match bag_op.node.setq {
                     Some(SetQuantifier::All) => logical::SetQuantifier::All,
                     Some(SetQuantifier::Distinct) => logical::SetQuantifier::Distinct,
                     None => logical::SetQuantifier::Distinct,
+                    Some(_) => {
+                        not_yet_implemented_fault!(self, "Unsupported set quantifier");
+                    }
                 };
 
                 let id = self.curr_plan().add_operator(BindingsOp::BagOp(BagOp {
@@ -917,6 +937,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             }
             QuerySet::Table(_) => {
                 not_yet_implemented_fault!(self, "QuerySet::Table".to_string());
+            }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported query set");
             }
         }
         Traverse::Continue
@@ -1053,6 +1076,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 let (_, expr) = env.into_iter().next().unwrap();
                 logical::BindingsOp::ProjectValue(logical::ProjectValue { expr })
             }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported projection kind");
+            }
         };
         let id = self.curr_plan().add_operator(select);
         self.current_clauses_mut().select_clause.replace(id);
@@ -1077,6 +1103,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let as_key = match as_key {
             name_resolver::Symbol::Known(sym) => sym.value.clone(),
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported projection alias");
+            }
         };
         self.push_lit(logical::Lit::String(as_key));
         Traverse::Continue
@@ -1136,6 +1165,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 BinOpKind::Lte => logical::BinaryOp::Lteq,
                 BinOpKind::Ne => logical::BinaryOp::Neq,
                 BinOpKind::Is => unreachable!(),
+                _ => {
+                    not_yet_implemented_fault!(self, "Unsupported binary operator");
+                }
             };
             self.push_vexpr(ValueExpr::BinaryExpr(op, Box::new(lhs), Box::new(rhs)));
         }
@@ -1158,6 +1190,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             UniOpKind::Pos => logical::UnaryOp::Pos,
             UniOpKind::Neg => logical::UnaryOp::Neg,
             UniOpKind::Not => logical::UnaryOp::Not,
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported unary operator");
+            }
         };
         self.push_vexpr(ValueExpr::UnExpr(op, Box::new(expr)));
         Traverse::Continue
@@ -1321,6 +1356,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             CallArg::NamedType(_) => {
                 not_yet_implemented_fault!(self, "NamedType call argument".to_string());
             }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported call argument");
+            }
         }
         Traverse::Continue
     }
@@ -1437,6 +1475,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 logical::SetQuantifier::All,
                 ValueExpr::Lit(Box::new(logical::Lit::Int8(1))),
             ),
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported aggregate argument");
+            }
         };
 
         let agg_expr = match name.as_str() {
@@ -1502,7 +1543,13 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     fn enter_var_ref(&mut self, var_ref: &'ast VarRef) -> Traverse {
         let is_path = matches!(self.current_ctx(), Some(QueryContext::Path));
         if !is_path {
-            let options = self.resolve_varref(var_ref);
+            let options = match self.resolve_varref(var_ref) {
+                Ok(options) => options,
+                Err(err) => {
+                    self.errors.push(err);
+                    return Traverse::Stop;
+                }
+            };
             self.push_vexpr(options);
         } else {
             let VarRef {
@@ -1515,6 +1562,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 }
                 CaseSensitivity::CaseInsensitive => {
                     BindingsName::CaseInsensitive(Cow::Owned(value.clone()))
+                }
+                _ => {
+                    not_yet_implemented_fault!(self, "Unsupported case sensitivity");
                 }
             };
             self.push_vexpr(ValueExpr::VarRef(name, VarRefType::Local));
@@ -1601,6 +1651,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             }
             PathStep::PathUnpivot => {
                 not_yet_implemented_fault!(self, "PathStep::PathUnpivot".to_string());
+            }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported path step");
             }
         };
 
@@ -1697,6 +1750,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
                 }),
                 ProjectAllMode::Unwrap,
             ),
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported FROM kind");
+            }
         };
 
         let id = self.curr_plan().add_operator(bexpr);
@@ -1737,6 +1793,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             JoinKind::Right => logical::JoinKind::Right,
             JoinKind::Full => logical::JoinKind::Full,
             JoinKind::Cross => logical::JoinKind::Cross,
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported join kind");
+            }
         };
 
         let on = env.pop().map(|(_, v)| v);
@@ -1768,6 +1827,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             }
             JoinSpec::Natural => {
                 not_yet_implemented_fault!(self, "JoinSpec::Natural".to_string());
+            }
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported join specification");
             }
         };
         Traverse::Continue
@@ -1841,6 +1903,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
             None => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupFull) => logical::GroupingStrategy::GroupFull,
             Some(GroupingStrategy::GroupPartial) => logical::GroupingStrategy::GroupPartial,
+            Some(_) => {
+                not_yet_implemented_fault!(self, "Unsupported grouping strategy");
+            }
         };
 
         // What follows is an approach to implement section 11.2.1 of the PartiQL spec
@@ -1933,6 +1998,9 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         let as_key = match as_key {
             name_resolver::Symbol::Known(sym) => sym.value.clone(),
             name_resolver::Symbol::Unknown(id) => format!("_{id}"),
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported group alias");
+            }
         };
         self.push_lit(logical::Lit::String(as_key));
         Traverse::Continue
@@ -1975,15 +2043,24 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         {
             OrderingSpec::Asc => logical::SortSpecOrder::Asc,
             OrderingSpec::Desc => logical::SortSpecOrder::Desc,
+            _ => {
+                not_yet_implemented_fault!(self, "Unsupported sort order");
+            }
         };
 
         let null_order = match sort_spec.null_ordering_spec {
             None => match order {
                 SortSpecOrder::Asc => logical::SortSpecNullOrder::Last,
                 SortSpecOrder::Desc => logical::SortSpecNullOrder::First,
+                _ => {
+                    not_yet_implemented_fault!(self, "Unsupported sort order");
+                }
             },
             Some(NullOrderingSpec::First) => logical::SortSpecNullOrder::First,
             Some(NullOrderingSpec::Last) => logical::SortSpecNullOrder::Last,
+            Some(_) => {
+                not_yet_implemented_fault!(self, "Unsupported null ordering");
+            }
         };
 
         self.push_sort_spec(logical::SortSpec {
@@ -2212,6 +2289,11 @@ fn lit_to_lit(lit: &Lit) -> Result<logical::Lit, AstTransformError> {
         Lit::TypedLit(_, _) => {
             return Err(AstTransformError::NotYetImplemented(
                 "Lit::TypedLit".to_string(),
+            ))
+        }
+        _ => {
+            return Err(AstTransformError::NotYetImplemented(
+                "literal variant".into(),
             ))
         }
     };

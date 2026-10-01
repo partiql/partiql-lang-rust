@@ -137,6 +137,7 @@ where
             Value::Tuple(t) => self.encode_tuple(t.as_ref()),
             Value::Graph(_) => todo!("Graph: encode_value"),
             Value::Variant(v) => self.encode_variant(v),
+            _ => Err(IonEncodeError::UnsupportedType("unknown value variant")),
         }
     }
 

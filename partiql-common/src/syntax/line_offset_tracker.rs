@@ -47,6 +47,7 @@ impl Default for LineOffsetTracker {
 /// Errors that can be encountered when indexing by byte offset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum LineOffsetError {
     /// Requested `offset` is past end of input
     EndOfInput,

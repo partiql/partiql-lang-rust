@@ -61,6 +61,9 @@ impl From<CallLookupError> for AstTransformError {
             CallLookupError::InvalidNumberOfArguments(e) => {
                 AstTransformError::InvalidNumberOfArguments(e)
             }
+            CallLookupError::UnsupportedFunction(name) => {
+                AstTransformError::UnsupportedFunction(name)
+            }
             e => AstTransformError::Unknown(e.to_string()),
         }
     }

@@ -65,6 +65,7 @@ pub enum TypingError {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum TypingMode {
     Permissive,
     Strict,
@@ -270,8 +271,8 @@ impl<'c> PlanTyper<'c> {
     }
 
     fn type_vexpr(&mut self, v: &ValueExpr, lookup_order: LookupOrder) {
-        fn binding_to_sym(binding: &BindingsName<'_>) -> SymbolPrimitive {
-            match binding {
+        fn binding_to_sym(binding: &BindingsName<'_>) -> Result<SymbolPrimitive, TypingError> {
+            Ok(match binding {
                 BindingsName::CaseSensitive(s) => SymbolPrimitive {
                     value: s.to_string(),
                     case: CaseSensitivity::CaseSensitive,
@@ -280,12 +281,19 @@ impl<'c> PlanTyper<'c> {
                     value: s.to_string(),
                     case: CaseSensitivity::CaseInsensitive,
                 },
-            }
+                _ => return Err(TypingError::NotYetImplemented("binding name".into())),
+            })
         }
 
         match v {
             ValueExpr::VarRef(binding_name, _) => {
-                let key = binding_to_sym(binding_name);
+                let key = match binding_to_sym(binding_name) {
+                    Ok(key) => key,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
                 match lookup_order {
                     GlobalLocal => {
                         let ty = self.resolve_global_then_local(&key);
@@ -295,7 +303,16 @@ impl<'c> PlanTyper<'c> {
                         let ty = self.resolve_local_then_global(&key);
                         self.type_varef(&key, &ty);
                     }
-                    LookupOrder::Delegate => self.type_vexpr(v, self.lookup_order(v)),
+                    LookupOrder::Delegate => {
+                        let order = match self.lookup_order(v) {
+                            Ok(order) => order,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+                        self.type_vexpr(v, order);
+                    }
                 };
             }
             ValueExpr::Path(v, components) => {
@@ -306,7 +323,13 @@ impl<'c> PlanTyper<'c> {
                             let var = ValueExpr::VarRef(key.clone(), VarRefType::Local);
                             self.type_vexpr(&var, LookupOrder::LocalGlobal);
 
-                            let key_as_sym = binding_to_sym(key);
+                            let key_as_sym = match binding_to_sym(key) {
+                                Ok(key) => key,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
+                            };
                             if let Some(ty) = self.retrieve_type_from_local_ctx(&key_as_sym) {
                                 let ctx = ty_ctx![(&ty_env![(key_as_sym, ty.clone())], &ty)];
                                 self.type_env_stack.push(ctx);
@@ -333,6 +356,9 @@ impl<'c> PlanTyper<'c> {
                                 "Typing [IndexExpr] [PathComponent]s".to_string(),
                             ));
                         }
+                        _ => self
+                            .errors
+                            .push(TypingError::NotYetImplemented("path component".into())),
                     }
                 }
             }
@@ -350,6 +376,11 @@ impl<'c> PlanTyper<'c> {
                     Lit::Struct(_) => type_struct!(self.bld),
                     Lit::Bag(_) => type_bag!(self.bld),
                     Lit::List(_) => type_array!(self.bld),
+                    _ => {
+                        self.errors
+                            .push(TypingError::NotYetImplemented("literal variant".into()));
+                        return;
+                    }
                 };
 
                 let new_type_env = IndexMap::from([(string_to_sym("_1"), ty.clone())]);
@@ -366,7 +397,14 @@ impl<'c> PlanTyper<'c> {
                 // TODO for Typing we handle multiple lookups through `[LookupOrder]` hence using
                 // the first element. Remove this workaround once we remove DynamicLookup
                 let expr = &v[0];
-                self.type_vexpr(expr, self.lookup_order(expr));
+                let order = match self.lookup_order(expr) {
+                    Ok(order) => order,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+                self.type_vexpr(expr, order);
             }
             _ => self.errors.push(TypingError::NotYetImplemented(format!(
                 "Unsupported Value Expression: {:?}",
@@ -426,6 +464,11 @@ impl<'c> PlanTyper<'c> {
                 todo!("type_undefined type in catalog")
             }
             PartiqlShape::AnyOf(_any_of) => ty.clone(),
+            _ => {
+                self.errors
+                    .push(TypingError::NotYetImplemented("type shape".into()));
+                self.bld.new_undefined()
+            }
         }
     }
 
@@ -482,17 +525,22 @@ impl<'c> PlanTyper<'c> {
         }
     }
 
-    fn lookup_order(&self, v: &ValueExpr) -> LookupOrder {
-        match v {
+    fn lookup_order(&self, v: &ValueExpr) -> Result<LookupOrder, TypingError> {
+        Ok(match v {
             ValueExpr::VarRef(_, varef_type) => match varef_type {
                 VarRefType::Global => GlobalLocal,
                 VarRefType::Local => LocalGlobal,
+                _ => {
+                    return Err(TypingError::NotYetImplemented(
+                        "variable reference type".into(),
+                    ))
+                }
             },
             _ => match self.current_bindings_op {
                 Some(BindingsOp::Scan(_)) => GlobalLocal,
                 _ => LocalGlobal,
             },
-        }
+        })
     }
 
     fn resolve_global_then_local(&mut self, key: &SymbolPrimitive) -> PartiqlShape {

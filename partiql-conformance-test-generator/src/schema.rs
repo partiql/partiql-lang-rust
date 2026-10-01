@@ -5,6 +5,7 @@ pub mod structure {
     pub struct TestRoot(pub Vec<TestEntry>);
 
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum TestEntry {
         Dir(TestDir),
         Doc(TestFile),
@@ -27,6 +28,7 @@ pub mod spec {
     use ion_rs_old::element::{Element, Struct};
 
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum TestVariant {
         TestCase(TestCase),
         Namespace(Namespace),
@@ -63,6 +65,7 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum TestStatement {
         Statement(String),
         EquivalenceClass(String),
@@ -71,6 +74,7 @@ pub mod spec {
     #[derive(Debug, Clone)]
     // Assertions model the partiql-tests DSL; there are some spurious warnings before code generation.
     #[allow(dead_code)]
+    #[non_exhaustive]
     pub enum Assertion {
         SyntaxSuccess(SyntaxSuccessAssertion),
         SyntaxFail(SyntaxFailAssertion),
@@ -110,6 +114,7 @@ pub mod spec {
     }
 
     #[derive(Debug, Clone)]
+    #[non_exhaustive]
     pub enum EvaluationMode {
         EvalModeError,
         EvalModeCoerce,
