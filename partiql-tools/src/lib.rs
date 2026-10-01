@@ -3,6 +3,7 @@ mod common;
 pub mod row_codec;
 pub mod session;
 pub mod storage;
+pub mod table_fns;
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
