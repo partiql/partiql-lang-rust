@@ -165,6 +165,7 @@ impl ToDot<ast::Expr> for AstToDot {
             Expr::Query(q) => self.to_dot(&mut expr_subgraph, q),
             Expr::Error => todo!(),
             Expr::GraphMatch(_) => todo!(),
+            _ => vec![expr_subgraph.node_auto_labelled("Unknown expression").id()],
         }
     }
 }
@@ -196,6 +197,7 @@ fn lit_to_str(ast: &ast::Lit) -> String {
         Lit::TypedLit(val_str, ty) => {
             format!("{} '{}'", type_to_str(ty), val_str)
         }
+        _ => format!("{ast:?}"),
     }
 }
 
@@ -205,6 +207,7 @@ fn custom_type_param_to_str(param: &ast::CustomTypeParam) -> String {
     match param {
         CustomTypeParam::Lit(lit) => lit_to_str(lit),
         CustomTypeParam::Type(ty) => type_to_str(ty),
+        _ => format!("{param:?}"),
     }
 }
 
@@ -222,6 +225,7 @@ fn custom_type_part_to_str(part: &ast::CustomTypePart) -> String {
                 .join(",");
             format!("{name}({args})")
         }
+        _ => format!("{part:?}"),
     }
 }
 
@@ -270,6 +274,7 @@ impl ToDot<ast::BinOp> for AstToDot {
             BinOpKind::Lte => "<=",
             BinOpKind::Ne => "<>",
             BinOpKind::Is => "IS",
+            _ => "Unknown binary operator",
         };
         let id = out.node_auto_labelled(lbl).id();
 
@@ -287,6 +292,7 @@ impl ToDot<ast::UniOp> for AstToDot {
             UniOpKind::Pos => "+",
             UniOpKind::Neg => "-",
             UniOpKind::Not => "NOT",
+            _ => "Unknown unary operator",
         };
         let id = out.node_auto_labelled(lbl).id();
 
@@ -351,6 +357,7 @@ impl ToDot<ast::QuerySet> for AstToDot {
             QuerySet::Expr(e) => self.to_dot(out, e),
             QuerySet::Values(_) => todo!(),
             QuerySet::Table(_) => todo!(),
+            _ => vec![out.node_auto_labelled("Unknown query set").id()],
         }
     }
 }
@@ -419,6 +426,7 @@ impl ToDot<ast::Projection> for AstToDot {
                 }
                 ProjectionKind::ProjectPivot { .. } => todo!(),
                 ProjectionKind::ProjectValue(_) => todo!(),
+                _ => vec![expr_subgraph.node_auto_labelled("Unknown projection").id()],
             }
         };
 
@@ -442,6 +450,7 @@ impl ToDot<ast::ProjectItem> for AstToDot {
                 self.to_dot(out, &expr.as_alias).edges(out, &id, "as");
                 vec![id]
             }
+            _ => vec![out.node_auto_labelled("Unknown project item").id()],
         }
     }
 }
@@ -451,6 +460,7 @@ fn symbol_primitive_to_label(sym: &ast::SymbolPrimitive) -> String {
     match &sym.case {
         CaseSensitivity::CaseSensitive => format!("'{}'", sym.value),
         CaseSensitivity::CaseInsensitive => sym.value.to_string(),
+        _ => format!("{sym:?}"),
     }
 }
 
@@ -468,6 +478,7 @@ impl ToDot<ast::VarRef> for AstToDot {
         let lbl = match &ast.qualifier {
             ast::ScopeQualifier::Unqualified => lbl,
             ast::ScopeQualifier::Qualified => format!("@{lbl}"),
+            _ => format!("Unknown scope: {lbl}"),
         };
         let id = out.node_auto_labelled(&lbl).id();
 
@@ -498,6 +509,7 @@ impl ToDot<ast::FromSource> for AstToDot {
         match &ast {
             ast::FromSource::FromLet(fl) => self.to_dot(out, fl),
             ast::FromSource::Join(j) => self.to_dot(out, j),
+            _ => vec![out.node_auto_labelled("Unknown FROM source").id()],
         }
     }
 }
@@ -508,6 +520,7 @@ impl ToDot<ast::FromLet> for AstToDot {
             ast::FromLetKind::Scan => "Scan",
             ast::FromLetKind::Unpivot => "Unpivot",
             ast::FromLetKind::GraphTable => "GRAPH_TABLE",
+            _ => "Unknown FROM kind",
         };
         let id = out.node_auto_labelled(lbl).id();
 
@@ -528,6 +541,7 @@ impl ToDot<ast::Join> for AstToDot {
             ast::JoinKind::Right => "Right Join",
             ast::JoinKind::Full => "Full Join",
             ast::JoinKind::Cross => "Cross Join",
+            _ => "Unknown Join",
         };
         let id = out.node_auto_labelled(lbl).id();
 
@@ -554,6 +568,7 @@ impl ToDot<ast::JoinSpec> for AstToDot {
                 vec![id]
             }
             ast::JoinSpec::Natural => vec![out.node_auto_labelled("Natural").id()],
+            _ => vec![out.node_auto_labelled("Unknown join specification").id()],
         }
     }
 }
@@ -602,6 +617,7 @@ impl ToDot<ast::CallArg> for AstToDot {
 
                 vec![id]
             }
+            _ => vec![out.node_auto_labelled("Unknown call argument").id()],
         }
     }
 }
@@ -636,6 +652,7 @@ impl ToDot<ast::PathStep> for AstToDot {
             ast::PathStep::PathIndex(e) => self.to_dot(out, e),
             ast::PathStep::PathForEach => vec![out.node_auto_labelled("*").id()],
             ast::PathStep::PathUnpivot => vec![out.node_auto_labelled("Unpivot").id()],
+            _ => vec![out.node_auto_labelled("Unknown path step").id()],
         }
     }
 }

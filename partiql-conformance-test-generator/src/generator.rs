@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 #[allow(dead_code)]
+#[non_exhaustive]
 pub enum TreeDepth {
     Full,
     N(u8),
@@ -39,12 +40,14 @@ impl GeneratorConfig {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TestTree {
     Node(Node),
     Namespace(NamespaceNode),
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Node {
     Test(TestNode),
     Value(TestValueNode),

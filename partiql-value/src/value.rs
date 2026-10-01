@@ -27,6 +27,7 @@ use std::cmp::Ordering;
 
 #[derive(Hash, PartialEq, Eq, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Value {
     Null,
     #[default]

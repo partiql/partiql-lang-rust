@@ -36,6 +36,7 @@ macro_rules! take_input {
 
 /// Whether an [`Evaluable`] takes input from the plan graph or manages its own iteration.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[non_exhaustive]
 pub enum EvalType {
     SelfManaged,
     GraphManaged,
@@ -154,6 +155,9 @@ pub(crate) struct EvalJoin {
 
     pub(crate) left: Box<dyn Evaluable>,
     pub(crate) right: Box<dyn Evaluable>,
+
+    // in strict mode, stop once either side has reported an error
+    pub(crate) strict: bool,
 }
 
 #[derive(Debug)]
@@ -181,6 +185,7 @@ impl EvalJoin {
         left: Box<dyn Evaluable>,
         right: Box<dyn Evaluable>,
         on: Option<Box<dyn EvalExpr>>,
+        strict: bool,
     ) -> Self {
         EvalJoin {
             kind,
@@ -188,6 +193,7 @@ impl EvalJoin {
 
             left,
             right,
+            strict,
         }
     }
 }
@@ -207,6 +213,11 @@ impl Evaluable for EvalJoin {
         let mut output_bag = bag![];
         let input_env = inputs[0].take().unwrap_or_else(|| Value::from(tuple![]));
         let lhs_values = self.left.evaluate([Some(input_env.clone()), None], ctx);
+        // A failed base table expression evaluates to `Missing`, which `SCAN` turns into a
+        // single binding; in strict mode don't go on to evaluate the right side for it.
+        if self.strict && ctx.has_errors() {
+            return Missing;
+        }
         let left_bindings = match lhs_values {
             Value::Bag(t) => *t,
             _ => {
@@ -222,12 +233,15 @@ impl Evaluable for EvalJoin {
         match self.kind {
             EvalJoinKind::Inner => {
                 // for each binding b_l in eval(p0, p, l)
-                left_bindings.iter().for_each(|b_l| {
+                for b_l in &left_bindings {
                     let env_b_l = input_env
                         .as_tuple_ref()
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
                     let rhs_values = self.right.evaluate([Some(Value::from(env_b_l)), None], ctx);
+                    if self.strict && ctx.has_errors() {
+                        return Missing;
+                    }
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,
@@ -260,11 +274,11 @@ impl Evaluable for EvalJoin {
                             }
                         }
                     }
-                });
+                }
             }
             EvalJoinKind::Left => {
                 // for each binding b_l in eval(p0, p, l)
-                left_bindings.iter().for_each(|b_l| {
+                for b_l in &left_bindings {
                     // define empty bag q_r
                     let mut output_bag_left = bag![];
                     let env_b_l = input_env
@@ -272,6 +286,9 @@ impl Evaluable for EvalJoin {
                         .as_ref()
                         .tuple_concat(b_l.as_tuple_ref().borrow());
                     let rhs_values = self.right.evaluate([Some(Value::from(env_b_l)), None], ctx);
+                    if self.strict && ctx.has_errors() {
+                        return Missing;
+                    }
 
                     let right_bindings = match rhs_values {
                         Value::Bag(t) => *t,
@@ -320,7 +337,7 @@ impl Evaluable for EvalJoin {
                             output_bag.push(elem);
                         }
                     }
-                });
+                }
             }
             EvalJoinKind::Full | EvalJoinKind::Right => {
                 ctx.add_error(EvaluationError::NotYetImplemented(

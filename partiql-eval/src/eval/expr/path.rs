@@ -33,6 +33,7 @@ impl Debug for EvalPathComponent {
             EvalPathComponent::Key(name) => match name {
                 BindingsName::CaseSensitive(s) => write!(f, ".\"{s}\""),
                 BindingsName::CaseInsensitive(s) => write!(f, ".{s}"),
+                _ => write!(f, ".{name:?}"),
             },
             EvalPathComponent::KeyExpr(ke) => {
                 write!(f, "[")?;
@@ -231,6 +232,7 @@ impl Debug for EvalLocalVarRef {
         match &self.name {
             BindingsName::CaseSensitive(s) => write!(f, "@\"{s}\"",),
             BindingsName::CaseInsensitive(s) => write!(f, "@{s}",),
+            name => write!(f, "@{name:?}"),
         }
     }
 }
@@ -246,6 +248,7 @@ impl Debug for EvalGlobalVarRef {
         match &self.name {
             BindingsName::CaseSensitive(s) => write!(f, "^\"{s}\"",),
             BindingsName::CaseInsensitive(s) => write!(f, "^{s}",),
+            name => write!(f, "^{name:?}"),
         }
     }
 }

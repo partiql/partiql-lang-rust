@@ -44,6 +44,7 @@ impl<T> IdAnnotated<NodeId> for AstNode<T> {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Item {
     // Data Definition Language statements
     Ddl(Ddl),
@@ -68,6 +69,7 @@ pub struct Ddl {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum DdlOp {
     /// `CREATE TABLE <symbol>`
     CreateTable(CreateTable),
@@ -122,6 +124,7 @@ pub struct Dml {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum DmlOp {
     /// `INSERT INTO <expr> <expr>`
     Insert(Insert),
@@ -154,6 +157,7 @@ pub struct ReturningElem {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ColumnComponent {
     ReturningWildcard,
     ReturningColumn(ReturningColumn),
@@ -168,6 +172,7 @@ pub struct ReturningColumn {
 /// ( MODIFIED | ALL ) ( NEW | OLD )
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ReturningMapping {
     ModifiedNew,
     ModifiedOld,
@@ -228,6 +233,7 @@ pub struct OnConflict {
 /// `CONFLICT_ACTION <action>`
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ConflictAction {
     DoNothing,
 }
@@ -279,6 +285,7 @@ pub struct WithElement {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum QuerySet {
     BagOp(Box<AstNode<BagOpExpr>>),
     Select(Box<AstNode<Select>>),
@@ -300,6 +307,7 @@ pub struct BagOpExpr {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BagOperator {
     Union,
     Except,
@@ -312,6 +320,7 @@ pub enum BagOperator {
 /// Indicates if a set should be reduced to its distinct elements or not.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum SetQuantifier {
     All,
     Distinct,
@@ -347,6 +356,7 @@ pub struct Projection {
 /// Indicates the type of projection in a SFW query.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ProjectionKind {
     #[visit(skip)]
     ProjectStar,
@@ -358,6 +368,7 @@ pub enum ProjectionKind {
 /// An item to be projected in a `SELECT`-list.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ProjectItem {
     /// For `.*` in SELECT list
     ProjectAll(ProjectAll), // TODO remove this?
@@ -395,6 +406,7 @@ pub struct Exclusion {
 /// The expressions that can result in values.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Expr {
     Lit(AstNode<Lit>),
     /// Variable reference
@@ -459,6 +471,7 @@ impl IdAnnotated<NodeId> for Expr {
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[visit(skip_recurse)]
+#[non_exhaustive]
 pub enum Lit {
     #[visit(skip)]
     Null,
@@ -543,6 +556,7 @@ pub struct VarRef {
 /// Has no effect except within `FROM` sources.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ScopeQualifier {
     /// The variable was *NOT* prefixed with `@`.
     /// Resolve the variable by looking first in the database environment, then in the 'lexical' scope.
@@ -563,6 +577,7 @@ pub struct BinOp {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum BinOpKind {
     // Arithmetic
     Add,
@@ -596,6 +611,7 @@ pub struct UniOp {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum UniOpKind {
     Pos,
     Neg,
@@ -627,6 +643,7 @@ pub struct In {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Case {
     /// CASE <expr> [ WHEN <expr> THEN <expr> ]... [ ELSE <expr> ] END
     SimpleCase(SimpleCase),
@@ -694,6 +711,7 @@ pub struct Call {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CallArg {
     /// `*` used as an argument to a function call (e.g., in `count(*)`)
     #[visit(skip)]
@@ -736,6 +754,7 @@ pub struct Path {
 /// A "step" within a path expression; that is the components of the expression following the root.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum PathStep {
     PathProject(PathExpr),
     PathIndex(PathExpr),
@@ -761,6 +780,7 @@ pub struct ExcludePath {
 /// A "step" within an exclude path; that is the components of the exclude path following the root.
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum ExcludePathStep {
     #[visit(skip)]
     PathProject(AstNode<SymbolPrimitive>),
@@ -796,10 +816,20 @@ pub struct FromClause {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum FromSource {
     FromLet(AstNode<FromLet>),
     /// <from_source> JOIN \[INNER | LEFT | RIGHT | FULL\] <from_source> ON <expr>
     Join(AstNode<Join>),
+}
+
+impl IdAnnotated<NodeId> for FromSource {
+    fn id(&self) -> NodeId {
+        match self {
+            Self::FromLet(node) => node.id,
+            Self::Join(node) => node.id,
+        }
+    }
 }
 
 #[derive(Visit, Clone, Debug, PartialEq)]
@@ -832,6 +862,7 @@ pub struct FromLet {
 /// https:///github.com/partiql/partiql-lang-kotlin/issues/242
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum FromLetKind {
     Scan,
     Unpivot,
@@ -851,6 +882,7 @@ pub struct Join {
 /// Indicates the logical type of join.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum JoinKind {
     Inner,
     Left,
@@ -861,6 +893,7 @@ pub enum JoinKind {
 
 #[derive(Visit, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum JoinSpec {
     On(Box<Expr>),
     Using(Vec<Path>),
@@ -883,6 +916,7 @@ pub struct GroupByExpr {
 /// needed to avoid naming clashes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum GroupingStrategy {
     GroupFull,
     GroupPartial,
@@ -924,6 +958,7 @@ pub struct SortSpec {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum OrderingSpec {
     Asc,
     Desc,
@@ -931,6 +966,7 @@ pub enum OrderingSpec {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum NullOrderingSpec {
     First,
     Last,
@@ -939,6 +975,7 @@ pub enum NullOrderingSpec {
 /// Represents all possible `PartiQL` data types.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum Type {
     NullType,
     BooleanType,
@@ -971,6 +1008,7 @@ pub enum Type {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CustomTypeParam {
     /// E.g. `2` in `VARCHAR(2)`
     Lit(Lit),
@@ -980,6 +1018,7 @@ pub enum CustomTypeParam {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CustomTypePart {
     /// E.g. any of `WITH`, `TIME`, and`ZONE` in `TIME(20) WITH TIME ZONE`
     Name(SymbolPrimitive),
@@ -1004,6 +1043,7 @@ pub struct SymbolPrimitive {
 /// Is used to determine if variable lookup should be case-sensitive or not.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum CaseSensitivity {
     CaseSensitive,
     CaseInsensitive,

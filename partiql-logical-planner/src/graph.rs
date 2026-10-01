@@ -147,6 +147,7 @@ impl<'a> Normalize<'a> {
                             normalized_pattern.filter = filter;
                             path_patterns.push(normalized_pattern);
                         }
+                        _ => return Err("Unsupported MATCH value filter".into()),
                     }
                 }
             }
@@ -230,6 +231,7 @@ impl GraphToLogical {
             None => (None, None),
             Some(GraphPathPrefix::Mode(mode)) => (Some(mode), None),
             Some(GraphPathPrefix::Search(prefix, mode)) => (mode.as_ref(), Some(prefix)),
+            _ => return Err("Unsupported MATCH path prefix".into()),
         };
         if prefix.is_some() {
             not_yet_implemented_result!("MATCH pattern SEARCH prefix are not yet supported.");
@@ -305,6 +307,7 @@ impl GraphToLogical {
                     "MATCH expression Simplified Edge Expressions are not yet supported."
                 );
             }
+            _ => Err("Unsupported MATCH path pattern".into()),
         }
     }
 
@@ -345,6 +348,7 @@ impl GraphToLogical {
             ast::GraphMatchDirection::UndirectedOrRight => DirectionFilter::UR,
             ast::GraphMatchDirection::LeftOrRight => DirectionFilter::LR,
             ast::GraphMatchDirection::LeftOrUndirectedOrRight => DirectionFilter::LUR,
+            _ => return Err("Unsupported MATCH edge direction".into()),
         };
         let binder = match &edge.variable {
             None => self.id_generator.edge(),
@@ -464,6 +468,7 @@ fn plan_path_mode(mode: Option<&ast::GraphPathMode>) -> Result<PathMode, String>
         Some(ast::GraphPathMode::Trail) => PathMode::Trail,
         Some(ast::GraphPathMode::Acyclic) => PathMode::Acyclic,
         Some(ast::GraphPathMode::Simple) => PathMode::Simple,
+        _ => return Err("Unsupported MATCH path mode".into()),
     })
 }
 
@@ -490,6 +495,7 @@ fn plan_graph_pattern_label(label: Option<&ast::GraphMatchLabel>) -> Result<Labe
                     .collect();
                 Ok(LabelFilter::Disjunction(inner?))
             }
+            _ => Err("Unsupported MATCH label filter".into()),
         }
     } else {
         Ok(LabelFilter::Always)

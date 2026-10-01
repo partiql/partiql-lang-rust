@@ -36,6 +36,7 @@ pub struct PathPatternNodes<GT: GraphTypes> {
 
 /// A graph 'element'; either a node or an edge.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[non_exhaustive]
 pub enum GraphElement<'a, GT: GraphTypes> {
     Node(&'a GT::NodeId),
     Edge(&'a GT::EdgeId),

@@ -106,6 +106,7 @@ impl Unparsed {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum VariantError {
     #[error("Latent Type Error for Boxed Document {0}")]
     LatentTypeError(BoxedVariantError, BoxedVariantTypeTag),

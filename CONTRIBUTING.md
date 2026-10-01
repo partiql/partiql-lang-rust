@@ -40,6 +40,16 @@ GitHub provides additional document on [forking a repository](https://help.githu
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
 
+## Public Enum Compatibility
+
+Until the project reaches version `1.x`, all public enums in library code must use `#[non_exhaustive]`, including enums
+whose current variants appear complete. This allows variants to be added without requiring downstream matches to be
+rewritten. Matches outside the defining crate, including in other workspace crates, must include a catch-all arm for
+future variants.
+
+Reassess this policy when preparing a `1.x` release.
+
+
 ## Finding contributions to work on
 Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
 

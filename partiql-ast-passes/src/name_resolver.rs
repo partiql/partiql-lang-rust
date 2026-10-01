@@ -19,12 +19,14 @@ pub struct NameRef {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub enum NameLookup {
     Global,
     Local,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub enum Symbol {
     Known(ast::SymbolPrimitive),
     Unknown(u32),
@@ -371,6 +373,12 @@ impl<'ast> Visitor<'ast> for NameResolver<'_> {
                     sym: var_ref.name.clone(),
                     lookup: vec![NameLookup::Local, NameLookup::Global],
                 },
+                _ => {
+                    self.errors.push(AstTransformError::NotYetImplemented(
+                        "scope qualifier".into(),
+                    ));
+                    return Traverse::Stop;
+                }
             }
         } else {
             NameRef {

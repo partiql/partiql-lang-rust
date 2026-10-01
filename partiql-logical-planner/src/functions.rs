@@ -19,6 +19,7 @@ impl Function for FunctionEntry<'_> {
             FunctionEntryFunction::Aggregate() => {
                 todo!("Aggregate function resolution")
             }
+            _ => Err(CallLookupError::UnsupportedFunction(name.into())),
         }
     }
 }

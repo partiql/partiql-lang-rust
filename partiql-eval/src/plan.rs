@@ -17,7 +17,7 @@ use crate::eval::graph::plan::ValueFilter;
 use crate::eval::graph::string_graph::StringGraphTypes;
 use crate::eval::EvalPlan;
 use eval::graph::plan as physical;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use partiql_catalog::catalog::{FunctionEntryFunction, SharedCatalog};
 use partiql_extension_ion::boxed_ion::BoxedIonType;
 use partiql_logical as logical;
@@ -55,6 +55,7 @@ macro_rules! correct_num_args_or_err {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum EvaluationMode {
     Strict,
     Permissive,
@@ -84,28 +85,36 @@ impl From<(&str, BindError)> for PlanningError {
     }
 }
 
-impl From<&logical::SetQuantifier> for eval::evaluable::SetQuantifier {
-    fn from(setq: &SetQuantifier) -> Self {
-        match setq {
+impl TryFrom<&logical::SetQuantifier> for eval::evaluable::SetQuantifier {
+    type Error = BindError;
+
+    fn try_from(setq: &SetQuantifier) -> Result<Self, Self::Error> {
+        Ok(match setq {
             SetQuantifier::All => eval::evaluable::SetQuantifier::All,
             SetQuantifier::Distinct => eval::evaluable::SetQuantifier::Distinct,
-        }
+            _ => return Err(BindError::NotYetImplemented("set quantifier".into())),
+        })
     }
 }
 
-impl From<&UnaryOp> for EvalOpUnary {
-    fn from(op: &UnaryOp) -> Self {
-        match op {
+impl TryFrom<&UnaryOp> for EvalOpUnary {
+    type Error = BindError;
+
+    fn try_from(op: &UnaryOp) -> Result<Self, Self::Error> {
+        Ok(match op {
             UnaryOp::Pos => EvalOpUnary::Pos,
             UnaryOp::Neg => EvalOpUnary::Neg,
             UnaryOp::Not => EvalOpUnary::Not,
-        }
+            _ => return Err(BindError::NotYetImplemented("unary operator".into())),
+        })
     }
 }
 
-impl From<&BinaryOp> for EvalOpBinary {
-    fn from(op: &BinaryOp) -> Self {
-        match op {
+impl TryFrom<&BinaryOp> for EvalOpBinary {
+    type Error = BindError;
+
+    fn try_from(op: &BinaryOp) -> Result<Self, Self::Error> {
+        Ok(match op {
             BinaryOp::And => EvalOpBinary::And,
             BinaryOp::Or => EvalOpBinary::Or,
             BinaryOp::Concat => EvalOpBinary::Concat,
@@ -122,7 +131,8 @@ impl From<&BinaryOp> for EvalOpBinary {
             BinaryOp::Mod => EvalOpBinary::Mod,
             BinaryOp::Exp => EvalOpBinary::Exp,
             BinaryOp::In => EvalOpBinary::In,
-        }
+            _ => return Err(BindError::NotYetImplemented("binary operator".into())),
+        })
     }
 }
 
@@ -202,9 +212,14 @@ impl<'c> EvaluatorPlanner<'c> {
                     .collect();
                 Box::new(eval::evaluable::EvalSelect::new(exprs))
             }
-            BindingsOp::ProjectAll(mode) => Box::new(eval::evaluable::EvalSelectAll::new(
-                mode == &ProjectAllMode::PassThrough,
-            )),
+            BindingsOp::ProjectAll(mode) => {
+                let pass_through = match mode {
+                    ProjectAllMode::PassThrough => true,
+                    ProjectAllMode::Unwrap => false,
+                    _ => return self.err_nyi("project-all mode"),
+                };
+                Box::new(eval::evaluable::EvalSelectAll::new(pass_through))
+            }
             BindingsOp::ProjectValue(logical::ProjectValue { expr }) => {
                 let expr = self.plan_value::<{ STRICT }>(expr);
                 Box::new(eval::evaluable::EvalSelectValue::new(expr))
@@ -245,6 +260,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     JoinKind::Left => EvalJoinKind::Left,
                     JoinKind::Right => EvalJoinKind::Right,
                     JoinKind::Full => EvalJoinKind::Full,
+                    _ => return self.err_nyi("join kind"),
                 };
                 let on = on
                     .as_ref()
@@ -254,6 +270,7 @@ impl<'c> EvaluatorPlanner<'c> {
                     self.get_eval_node::<{ STRICT }>(left),
                     self.get_eval_node::<{ STRICT }>(right),
                     on,
+                    STRICT,
                 ))
             }
             BindingsOp::GroupBy(logical::GroupBy {
@@ -265,13 +282,16 @@ impl<'c> EvaluatorPlanner<'c> {
                 let strategy = match strategy {
                     GroupingStrategy::GroupFull => EvalGroupingStrategy::GroupFull,
                     GroupingStrategy::GroupPartial => EvalGroupingStrategy::GroupPartial,
+                    _ => return self.err_nyi("grouping strategy"),
                 };
                 let (aliases, exprs): (Vec<String>, Vec<Box<dyn EvalExpr>>) = exprs
                     .iter()
                     .map(|(k, v)| (k.clone(), self.plan_value::<{ STRICT }>(v)))
                     .unzip();
 
-                let mut plan_agg = |a_e: &logical::AggregateExpression| {
+                let mut aggs = Vec::new();
+                let mut distinct_aggs = Vec::new();
+                for a_e in aggregate_exprs {
                     let func = match &a_e.func {
                         AggFunc::AggAvg => Box::new(Avg {}) as Box<dyn AggregateFunction>,
                         AggFunc::AggCount => Box::new(Count {}) as Box<dyn AggregateFunction>,
@@ -280,19 +300,19 @@ impl<'c> EvaluatorPlanner<'c> {
                         AggFunc::AggSum => Box::new(Sum {}) as Box<dyn AggregateFunction>,
                         AggFunc::AggAny => Box::new(Any {}) as Box<dyn AggregateFunction>,
                         AggFunc::AggEvery => Box::new(Every {}) as Box<dyn AggregateFunction>,
+                        _ => return self.err_nyi("aggregate function"),
                     };
-                    eval::evaluable::AggregateExpression {
+                    let agg = eval::evaluable::AggregateExpression {
                         name: a_e.name.to_string(),
                         expr: self.plan_value::<{ STRICT }>(&a_e.expr),
                         func,
+                    };
+                    match a_e.setq {
+                        SetQuantifier::All => aggs.push(agg),
+                        SetQuantifier::Distinct => distinct_aggs.push(agg),
+                        _ => return self.err_nyi("aggregate set quantifier"),
                     }
-                };
-
-                let (aggs, distinct_aggs) =
-                    aggregate_exprs.iter().partition_map(|ae| match ae.setq {
-                        SetQuantifier::All => Either::Left(plan_agg(ae)),
-                        SetQuantifier::Distinct => Either::Right(plan_agg(ae)),
-                    });
+                }
 
                 let group_as_alias = group_as_alias
                     .as_ref()
@@ -311,27 +331,26 @@ impl<'c> EvaluatorPlanner<'c> {
                 Box::new(eval::evaluable::EvalExprQuery::new(expr))
             }
             BindingsOp::OrderBy(logical::OrderBy { specs }) => {
-                let cmp = specs
-                    .iter()
-                    .map(|spec| {
-                        let expr = self.plan_value::<{ STRICT }>(&spec.expr);
-                        let spec = match (&spec.order, &spec.null_order) {
-                            (SortSpecOrder::Asc, SortSpecNullOrder::First) => {
-                                EvalOrderBySortSpec::AscNullsFirst
-                            }
-                            (SortSpecOrder::Asc, SortSpecNullOrder::Last) => {
-                                EvalOrderBySortSpec::AscNullsLast
-                            }
-                            (SortSpecOrder::Desc, SortSpecNullOrder::First) => {
-                                EvalOrderBySortSpec::DescNullsFirst
-                            }
-                            (SortSpecOrder::Desc, SortSpecNullOrder::Last) => {
-                                EvalOrderBySortSpec::DescNullsLast
-                            }
-                        };
-                        EvalOrderBySortCondition { expr, spec }
-                    })
-                    .collect_vec();
+                let mut cmp = Vec::with_capacity(specs.len());
+                for spec in specs {
+                    let expr = self.plan_value::<{ STRICT }>(&spec.expr);
+                    let spec = match (&spec.order, &spec.null_order) {
+                        (SortSpecOrder::Asc, SortSpecNullOrder::First) => {
+                            EvalOrderBySortSpec::AscNullsFirst
+                        }
+                        (SortSpecOrder::Asc, SortSpecNullOrder::Last) => {
+                            EvalOrderBySortSpec::AscNullsLast
+                        }
+                        (SortSpecOrder::Desc, SortSpecNullOrder::First) => {
+                            EvalOrderBySortSpec::DescNullsFirst
+                        }
+                        (SortSpecOrder::Desc, SortSpecNullOrder::Last) => {
+                            EvalOrderBySortSpec::DescNullsLast
+                        }
+                        _ => return self.err_nyi("sort specification"),
+                    };
+                    cmp.push(EvalOrderBySortCondition { expr, spec });
+                }
                 Box::new(EvalOrderBy { cmp })
             }
             BindingsOp::LimitOffset(logical::LimitOffset { limit, offset }) => {
@@ -344,7 +363,10 @@ impl<'c> EvaluatorPlanner<'c> {
                 bag_op: setop,
                 setq,
             }) => {
-                let setq = setq.into();
+                let setq = match setq.try_into() {
+                    Ok(setq) => setq,
+                    Err(err) => return self.err(("set quantifier", err).into()),
+                };
                 match setop {
                     BagOperator::Union => self.err_nyi("BagOperator::Union"),
                     BagOperator::Intersect => self.err_nyi("BagOperator::Intersect"),
@@ -352,8 +374,10 @@ impl<'c> EvaluatorPlanner<'c> {
                     BagOperator::OuterUnion => Box::new(EvalOuterUnion::new(setq)),
                     BagOperator::OuterIntersect => Box::new(EvalOuterIntersect::new(setq)),
                     BagOperator::OuterExcept => Box::new(EvalOuterExcept::new(setq)),
+                    _ => self.err_nyi("bag operator"),
                 }
             }
+            _ => self.err_nyi("bindings operator"),
         }
     }
 
@@ -396,11 +420,13 @@ impl<'c> EvaluatorPlanner<'c> {
         let (name, bind) = match ve {
             ValueExpr::UnExpr(op, operand) => (
                 "unary operator",
-                EvalOpUnary::from(op).bind::<{ STRICT }>(plan_args(&[operand])),
+                EvalOpUnary::try_from(op)
+                    .and_then(|op| op.bind::<{ STRICT }>(plan_args(&[operand]))),
             ),
             ValueExpr::BinaryExpr(op, lhs, rhs) => (
                 "binary operator",
-                EvalOpBinary::from(op).bind::<{ STRICT }>(plan_args(&[lhs, rhs])),
+                EvalOpBinary::try_from(op)
+                    .and_then(|op| op.bind::<{ STRICT }>(plan_args(&[lhs, rhs]))),
             ),
             ValueExpr::Lit(lit) => (
                 "literal",
@@ -409,32 +435,36 @@ impl<'c> EvaluatorPlanner<'c> {
                     Err(e) => Ok(self.err(e) as Box<dyn EvalExpr>),
                 },
             ),
-            ValueExpr::Path(expr, components) => (
-                "path",
-                Ok(Box::new(EvalPath {
-                    expr: self.plan_value::<{ STRICT }>(expr),
-                    components: components
-                        .iter()
-                        .map(|c| match c {
-                            PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
-                            PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
-                            PathComponent::KeyExpr(k) => eval::expr::EvalPathComponent::KeyExpr(
-                                self.plan_value::<{ STRICT }>(k),
-                            ),
-                            PathComponent::IndexExpr(i) => {
-                                eval::expr::EvalPathComponent::IndexExpr(
-                                    self.plan_value::<{ STRICT }>(i),
-                                )
-                            }
-                        })
-                        .collect(),
-                }) as Box<dyn EvalExpr>),
-            ),
+            ValueExpr::Path(expr, components) => {
+                let expr = self.plan_value::<{ STRICT }>(expr);
+                let mut planned_components = Vec::with_capacity(components.len());
+                for c in components {
+                    planned_components.push(match c {
+                        PathComponent::Key(k) => eval::expr::EvalPathComponent::Key(k.clone()),
+                        PathComponent::Index(i) => eval::expr::EvalPathComponent::Index(*i),
+                        PathComponent::KeyExpr(k) => {
+                            eval::expr::EvalPathComponent::KeyExpr(self.plan_value::<{ STRICT }>(k))
+                        }
+                        PathComponent::IndexExpr(i) => eval::expr::EvalPathComponent::IndexExpr(
+                            self.plan_value::<{ STRICT }>(i),
+                        ),
+                        _ => return self.err_nyi("path component"),
+                    });
+                }
+                (
+                    "path",
+                    Ok(Box::new(EvalPath {
+                        expr,
+                        components: planned_components,
+                    }) as Box<dyn EvalExpr>),
+                )
+            }
             ValueExpr::VarRef(name, var_ref_type) => (
                 "var ref",
                 match var_ref_type {
                     VarRefType::Global => EvalVarRef::Global(name.clone()),
                     VarRefType::Local => EvalVarRef::Local(name.clone()),
+                    _ => return self.err_nyi("variable reference type"),
                 }
                 .bind::<{ STRICT }>(vec![]),
             ),
@@ -495,6 +525,7 @@ impl<'c> EvaluatorPlanner<'c> {
                         let args = plan_args(&[value, pattern, escape]);
                         EvalLikeNonStringNonLiteralMatch {}.bind::<{ STRICT }>(args)
                     }
+                    _ => Err(BindError::NotYetImplemented("pattern variant".into())),
                 };
 
                 ("pattern expr", expr)
@@ -709,31 +740,38 @@ impl<'c> EvaluatorPlanner<'c> {
 
                     CallName::CollAvg(setq) => (
                         "coll_avg",
-                        EvalCollFn::Avg(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Avg(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollCount(setq) => (
                         "coll_count",
-                        EvalCollFn::Count(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Count(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollMax(setq) => (
                         "coll_max",
-                        EvalCollFn::Max(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Max(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollMin(setq) => (
                         "coll_min",
-                        EvalCollFn::Min(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Min(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollSum(setq) => (
                         "coll_sum",
-                        EvalCollFn::Sum(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Sum(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollAny(setq) => (
                         "coll_any",
-                        EvalCollFn::Any(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Any(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::CollEvery(setq) => (
                         "coll_every",
-                        EvalCollFn::Every(setq.into()).bind::<{ STRICT }>(args),
+                        setq.try_into()
+                            .and_then(|setq| EvalCollFn::Every(setq).bind::<{ STRICT }>(args)),
                     ),
                     CallName::ByName(name) => {
                         let plan = match self.catalog.get_function(name) {
@@ -757,6 +795,9 @@ impl<'c> EvaluatorPlanner<'c> {
                                 FunctionEntryFunction::Aggregate() => {
                                     todo!("Aggregate functions in catalog by name")
                                 }
+                                _ => Err(BindError::NotYetImplemented(
+                                    "catalog function variant".into(),
+                                )),
                             },
                         };
                         (name.as_str(), plan)
@@ -783,6 +824,9 @@ impl<'c> EvaluatorPlanner<'c> {
                                 FunctionEntryFunction::Aggregate() => {
                                     todo!("Aggregate functions in catalog by id")
                                 }
+                                _ => Err(BindError::NotYetImplemented(
+                                    "catalog function variant".into(),
+                                )),
                             },
                             None => {
                                 self.errors.push(PlanningError::IllegalState(format!(
@@ -794,8 +838,16 @@ impl<'c> EvaluatorPlanner<'c> {
                         };
                         (name.as_str(), plan)
                     }
+                    _ => (
+                        "function",
+                        Err(BindError::NotYetImplemented("function variant".into())),
+                    ),
                 }
             }
+            _ => (
+                "expression",
+                Err(BindError::NotYetImplemented("expression variant".into())),
+            ),
         };
 
         self.unwrap_bind(name, bind)
@@ -841,6 +893,11 @@ impl<'c> EvaluatorPlanner<'c> {
                     .collect();
                 physical::LabelFilter::Disjunction(inner?)
             }
+            _ => {
+                return Err(PlanningError::NotYetImplemented(
+                    "graph label filter".into(),
+                ))
+            }
         })
     }
 
@@ -853,6 +910,11 @@ impl<'c> EvaluatorPlanner<'c> {
             logical::graph::ValueFilter::Filter(exprs) => {
                 let filters = self.plan_values::<{ STRICT }, _>(exprs.iter());
                 physical::ValueFilter::Filter(filters.into_iter().map(Rc::from).collect())
+            }
+            _ => {
+                return Err(PlanningError::NotYetImplemented(
+                    "graph value filter".into(),
+                ))
             }
         })
     }
@@ -889,6 +951,11 @@ impl<'c> EvaluatorPlanner<'c> {
             logical::graph::DirectionFilter::UR => physical::DirectionFilter::UR,
             logical::graph::DirectionFilter::LR => physical::DirectionFilter::LR,
             logical::graph::DirectionFilter::LUR => physical::DirectionFilter::LUR,
+            _ => {
+                return Err(PlanningError::NotYetImplemented(
+                    "graph direction filter".into(),
+                ))
+            }
         };
         Ok(physical::TripleStepFilter {
             dir,
@@ -974,6 +1041,11 @@ impl<'c> EvaluatorPlanner<'c> {
                     .collect();
                 physical::PathPatternMatch::Concat(matches?, ValueFilter::Always, path_mode)
             }
+            _ => {
+                return Err(PlanningError::NotYetImplemented(
+                    "graph path pattern".into(),
+                ))
+            }
         })
     }
 }
@@ -986,6 +1058,7 @@ fn plan_path_mode(
         logical::graph::PathMode::Trail => physical::PathMode::Trail,
         logical::graph::PathMode::Acyclic => physical::PathMode::Acyclic,
         logical::graph::PathMode::Simple => physical::PathMode::Simple,
+        _ => return Err(PlanningError::NotYetImplemented("graph path mode".into())),
     })
 }
 
@@ -1023,6 +1096,7 @@ fn plan_lit(lit: &Lit) -> Result<Value, PlanningError> {
             .map(lit_to_val)
             .collect::<Result<List, _>>()?
             .into(),
+        _ => return Err(PlanningError::NotYetImplemented("literal variant".into())),
     })
 }
 

@@ -14,6 +14,7 @@ mod writer;
 
 // TODO docs
 #[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
 pub enum OverwriteStrategy {
     Overwrite,
     Backup,

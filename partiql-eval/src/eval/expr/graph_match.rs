@@ -38,6 +38,12 @@ impl BindEvalExpr for EvalGraphMatch {
                         let ge = GraphEvaluator::new(engine);
                         ge.eval(&self.pattern, ctx)
                     }
+                    _ => {
+                        ctx.add_error(crate::error::EvaluationError::NotYetImplemented(
+                            "graph representation".into(),
+                        ));
+                        Missing
+                    }
                 },
                 _ => Missing,
             },

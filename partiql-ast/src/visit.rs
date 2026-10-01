@@ -3,6 +3,7 @@ use partiql_common::node::NodeId;
 
 /// Indicates if tree traversal of the entire tree should continue or not.
 #[derive(PartialEq, Debug)]
+#[non_exhaustive]
 pub enum Traverse {
     /// Signals tree traversal of entire tree should continue.
     Continue,

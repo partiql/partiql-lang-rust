@@ -15,8 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.15.0]
 ### Changed
-- *BREAKING* partiql-logical: Added `CallName::CollToScalar` for subquery coercion.
-  Downstream exhaustive matches over this public enum need to handle the new variant.
+- *BREAKING* Marked public enums across the workspace as `#[non_exhaustive]`.
+  Matches in other crates must include a catch-all arm for future variants.
+  Updated planners, evaluators, encoders, and visualization to handle unsupported variants.
+- partiql-logical: Added `CallName::CollToScalar` for subquery coercion.
+- partiql-eval: Fixed strict-mode `JOIN` evaluation continuing after an error.
+  A left-side failure now prevents evaluation of the right side, and a right-side
+  failure is no longer repeated for each left binding.
 - Registered scalar functions now accept strings, integers, and other values under a
   `DYNAMIC` argument constraint instead of rejecting non-struct arguments.
   `tupleunion` and `tupleconcat` now require tuple arguments, returning `MISSING` in
@@ -48,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subqueries are never scalar-coerced.
 - Added Makefile targets for local build, test, format, Clippy, dependency,
   conformance, and coverage checks, with usage instructions in the README.
+- partiql-ast: Added `IdAnnotated<NodeId>` support for `FromSource` to expose node IDs
+  through the AST API.
+- Added contributor guidance to keep public enums non-exhaustive until version `1.x`.
 
 ### Removed
 

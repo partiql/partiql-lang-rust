@@ -26,6 +26,7 @@ fn require_tuple(func: &str, arg: &Value) -> Result<(), ExtensionResultError> {
         DatumCategoryRef::Sequence(_) => "sequence",
         DatumCategoryRef::Scalar(_) => "scalar",
         DatumCategoryRef::Graph(_) => "graph",
+        _ => "unknown datum category",
     };
     Err(ExtensionResultError::DataError(
         format!("`{func}` expects tuple arguments, found {found}").into(),

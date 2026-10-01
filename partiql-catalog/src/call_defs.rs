@@ -14,6 +14,10 @@ pub enum CallLookupError {
     /// Invalid number of arguments to the function call.
     #[error("Invalid number of arguments: {0}")]
     InvalidNumberOfArguments(String),
+
+    /// The function's implementation kind is not supported by the consumer.
+    #[error("Unsupported function: {0}")]
+    UnsupportedFunction(String),
 }
 
 #[derive(Debug)]
@@ -49,6 +53,7 @@ impl CallDef {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CallArgument {
     Positional(ValueExpr),
     Named(String, ValueExpr),
@@ -56,6 +61,7 @@ pub enum CallArgument {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
 pub enum CallSpecArg {
     Positional,
     Named(UniCase<&'static str>),
