@@ -226,12 +226,12 @@ impl PluginDataSource {
         // `stream` and `err` are valid out-params.
         let rc = unsafe { open(vt.plugin_data, &req, &mut stream, &mut err) };
         if rc != 0 {
-            let msg = self.take_plugin_string(err);
-            return Err(reader_err(format!(
-                "{}: plugin open failed ({rc}){}",
-                self.name,
-                msg.map(|m| format!(": {m}")).unwrap_or_default()
-            )));
+            // The plugin's message is reported as-is; it usually names the
+            // function already.
+            let msg = self
+                .take_plugin_string(err)
+                .unwrap_or_else(|| format!("{}: plugin open failed ({rc})", self.name));
+            return Err(reader_err(msg));
         }
         if !err.is_null() {
             let _ = self.take_plugin_string(err);
