@@ -302,6 +302,7 @@ impl CompilationCatalog for ConformanceCompilationCatalog {
         let name = match &path[0] {
             BindingsName::CaseSensitive(s) => s.as_ref(),
             BindingsName::CaseInsensitive(s) => s.as_ref(),
+            _ => return None,
         };
         self.tables
             .iter()
