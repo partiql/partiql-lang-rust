@@ -166,6 +166,7 @@ impl IdGenerator {
 
 /// How variable references are lowered.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VarRefResolution {
     /// Emit a [`ValueExpr::DynamicLookup`] over every candidate binding, resolved at evaluation
     /// time. This is what the `partiql-eval` evaluator expects.

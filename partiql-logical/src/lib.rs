@@ -485,6 +485,7 @@ pub struct DBRef {
 /// consumer orchestrates storage/transactions around query execution.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub enum LogicalStatement {
     /// An ordinary data-retrieval query.
     Query(LogicalPlan<BindingsOp>),

@@ -254,6 +254,7 @@ fn dispatch_write(
         LogicalStatement::CreateTableAs { table_name, query } => exec_ctas(table_name, query, ctx),
         LogicalStatement::InsertInto { table_name, query } => exec_insert(table_name, query, ctx),
         LogicalStatement::CreateTable { table_name } => exec_create_table(table_name, ctx),
+        other => Err(format!("unsupported statement: {other:?}").into()),
     }
 }
 
