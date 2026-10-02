@@ -78,8 +78,10 @@ is kept for one extra batch after its last row.
   change: an empty layout for "rows only".
 * `COUNT(*)` over an empty input returns no row. This is an existing VM
   bug, and it happens with the built-in sources too.
-* A nested path in `WHERE` (`t.a.b = 1`) fails to compile for
-  table-function scans. This is an existing VM issue. Projecting `t.a.b`
-  works.
+* A nested path (`t.a.b`) fails to compile with "unresolved var" when the
+  same scan also reads another field, or when it appears in `WHERE`.
+  `scan_ion` fails the same way, so this is an existing VM compiler issue.
+  `SELECT t.a.b FROM f() t` on its own works, and so does reading the whole
+  `t.a`.
 * A runtime `.load` meta-command isn't supported. The function set is fixed
   when the session opens.
