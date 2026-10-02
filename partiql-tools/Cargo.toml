@@ -13,6 +13,9 @@ path = "src/lib.rs"
 
 [features]
 test-support = []
+# Load table functions from C-ABI shared libraries (`pqlite --load`). See
+# include/pqlite_plugin.h. Off by default.
+plugins = ["dep:libloading", "dep:arrow-array", "dep:arrow-schema"]
 
 [[bin]]
 name = "pqlite"
@@ -42,6 +45,9 @@ clap_complete = "4.6"
 heed = { version = "0.20", default-features = false }
 reedline = "0.48.0"
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
+libloading = { version = "0.8", optional = true }
+arrow-array = { version = "58", default-features = false, features = ["ffi"], optional = true }
+arrow-schema = { version = "58", default-features = false, optional = true }
 
 [dev-dependencies]
 rstest = "0.23"

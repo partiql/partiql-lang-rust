@@ -75,7 +75,8 @@ impl TableFnRegistry {
             },
         ];
         for def in defs {
-            reg.add(def).expect("built-in table function names are unique");
+            reg.add(def)
+                .expect("built-in table function names are unique");
         }
         reg
     }
@@ -84,7 +85,10 @@ impl TableFnRegistry {
     /// case) is already registered.
     pub fn add(&mut self, def: TableFnDef) -> Result<(), String> {
         if self.get(def.name).is_some() {
-            return Err(format!("table function '{}' is already registered", def.name));
+            return Err(format!(
+                "table function '{}' is already registered",
+                def.name
+            ));
         }
         self.fns.push(Arc::new(def));
         Ok(())

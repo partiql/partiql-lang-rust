@@ -9,10 +9,10 @@ use partiql_vm::EvaluationMode;
 use partiql_vm::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 
 use crate::catalog::{HeedCompilationCatalog, HeedExecutionCatalog};
-use crate::table_fns::TableFnRegistry;
 use crate::session::debug::DebugFlags;
 use crate::session::outcome::DebugCapture;
 use crate::storage::{HeedDB, StorageError};
+use crate::table_fns::TableFnRegistry;
 
 /// Bundles `HeedCompilationCatalog` with the session's table functions
 /// under `PlanCompiler`'s single `"default"` catalog name. Also records the

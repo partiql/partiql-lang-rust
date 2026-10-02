@@ -1,5 +1,7 @@
 mod catalog;
 mod common;
+#[cfg(feature = "plugins")]
+pub mod plugin;
 pub mod row_codec;
 pub mod session;
 pub mod storage;

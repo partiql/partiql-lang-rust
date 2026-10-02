@@ -6,6 +6,7 @@ use partiql_tools::session::{
     render_query_footer_text, render_query_ion, render_query_text, Commands, DebugFlags,
     OutputFormat, PqliteSession, RunOutcome,
 };
+use partiql_tools::table_fns::TableFnRegistry;
 
 use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -33,6 +34,16 @@ struct Cli {
     /// Print debug info for pipeline stages. Accepts: ast, plan, program, or all (alias '*').
     #[arg(long, global = true, value_delimiter = ',', value_parser = debug_values())]
     debug: Vec<String>,
+
+    /// Load table functions from a plugin shared library. Repeatable.
+    #[cfg(feature = "plugins")]
+    #[arg(long = "load", global = true, value_name = "PATH")]
+    load: Vec<std::path::PathBuf>,
+
+    /// `key=value` option passed to every loaded plugin. Repeatable.
+    #[cfg(feature = "plugins")]
+    #[arg(long = "plugin-opt", global = true, value_name = "KEY=VALUE", value_parser = parse_kv)]
+    plugin_opts: Vec<(String, String)>,
 
     #[command(subcommand)]
     command: CliCommand,
@@ -77,9 +88,40 @@ enum CliCommand {
     },
 }
 
+#[cfg(feature = "plugins")]
+fn parse_kv(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("expected KEY=VALUE, got '{s}'"))
+}
+
+/// Built-in table functions plus any `--load`ed plugins. Exits on a load error.
+fn table_fns(cli: &Cli) -> TableFnRegistry {
+    #[allow(unused_mut)]
+    let mut fns = TableFnRegistry::builtin();
+    #[cfg(feature = "plugins")]
+    for path in &cli.load {
+        if let Err(e) = partiql_tools::plugin::load_plugin(path, &cli.plugin_opts, &mut fns) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+    #[cfg(not(feature = "plugins"))]
+    let _ = cli;
+    fns
+}
+
 fn main() {
     let cli = Cli::parse();
     let debug = DebugFlags::from_args(&cli.debug);
+    // Before loading plugins: completions never need to run plugin code.
+    if let CliCommand::Completions { shell } = cli.command {
+        let mut command = Cli::command();
+        let bin_name = command.get_name().to_string();
+        clap_complete::generate(shell, &mut command, bin_name, &mut std::io::stdout());
+        return;
+    }
+    let fns = table_fns(&cli);
 
     match cli.command {
         CliCommand::Exec { query, db, format } => {
@@ -92,13 +134,13 @@ fn main() {
             let cmd = Commands::Exec { query };
             let session = match db.as_deref() {
                 Some(p) => match PqliteSession::open(p, debug) {
-                    Ok(s) => s,
+                    Ok(s) => s.with_table_fns(fns),
                     Err(e) => {
                         eprintln!("Error: could not open database at {}: {}", p.display(), e);
                         std::process::exit(1);
                     }
                 },
-                None => PqliteSession::open_without_db(debug),
+                None => PqliteSession::open_without_db(debug).with_table_fns(fns),
             };
             let mut stdout = std::io::stdout();
             let mut stderr = std::io::stderr();
@@ -107,12 +149,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        CliCommand::Open { db } => run_repl(debug, &db),
-        CliCommand::Completions { shell } => {
-            let mut command = Cli::command();
-            let bin_name = command.get_name().to_string();
-            clap_complete::generate(shell, &mut command, bin_name, &mut std::io::stdout());
-        }
+        CliCommand::Open { db } => run_repl(debug, fns, &db),
+        CliCommand::Completions { .. } => unreachable!("handled above"),
     }
 }
 
@@ -237,7 +275,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
     std::env::home_dir()
 }
 
-fn print_help() {
+fn print_help(session: &PqliteSession) {
     println!("PartiQL REPL — available commands:");
     println!("  .help     Show this help message");
     println!("  .quit     Exit the REPL (alias: .exit)");
@@ -245,9 +283,9 @@ fn print_help() {
     println!();
     println!("To run a query, type any PartiQL statement and press Enter.");
     println!("Available table functions:");
-    println!("  mem(rows, cols)       — sequential integer data");
-    println!("  rand(rows, cols)      — random integer data");
-    println!("  scan_ion(path)        — read Ion file");
+    for f in session.table_fns().iter() {
+        println!("  {}", f.usage);
+    }
     println!();
     println!("Example: SELECT t.a, t.b FROM mem(100, 2) t LIMIT 5;");
 }
@@ -257,11 +295,11 @@ enum MetaOutcome {
     Quit,
 }
 
-fn handle_meta_command(input: &str) -> MetaOutcome {
+fn handle_meta_command(input: &str, session: &PqliteSession) -> MetaOutcome {
     match input {
         ".quit" | ".exit" => MetaOutcome::Quit,
         ".help" => {
-            print_help();
+            print_help(session);
             MetaOutcome::Handled
         }
         _ => {
@@ -279,11 +317,11 @@ fn print_startup_banner(db_path: &std::path::Path) {
 }
 
 /// Per-statement errors are reported but never terminate the session.
-fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
+fn run_repl(debug: DebugFlags, fns: TableFnRegistry, db_path: &std::path::Path) {
     // Hard-fail rather than fall back to in-memory: a silently non-persisting
     // db is worse than refusing to start.
     let session = match PqliteSession::open(db_path, debug) {
-        Ok(s) => s,
+        Ok(s) => s.with_table_fns(fns),
         Err(e) => {
             eprintln!(
                 "Error: could not open database at {}: {}",
@@ -310,7 +348,7 @@ fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
                 }
 
                 if trimmed.starts_with('.') {
-                    match handle_meta_command(trimmed) {
+                    match handle_meta_command(trimmed, &session) {
                         MetaOutcome::Handled => continue,
                         MetaOutcome::Quit => break,
                     }

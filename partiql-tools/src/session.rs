@@ -90,7 +90,9 @@ impl PqliteSession {
         command: &Commands,
     ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
         match command {
-            Commands::Exec { query } => exec::run(self.db.as_ref(), &self.debug, &self.table_fns, query),
+            Commands::Exec { query } => {
+                exec::run(self.db.as_ref(), &self.debug, &self.table_fns, query)
+            }
         }
     }
 
