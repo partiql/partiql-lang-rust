@@ -8,3 +8,9 @@ coverage:
       default:
         target: 85%
         threshold: 5%
+
+# Unpublished crates; excluded from coverage reporting and status checks.
+# TODO: remove these exclusions once we begin to use partiql-vm.
+ignore:
+  - "partiql-tools/**"
+  - "partiql-vm/**"

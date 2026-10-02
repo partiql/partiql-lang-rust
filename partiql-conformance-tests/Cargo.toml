@@ -41,9 +41,13 @@ partiql-logical-planner = { path = "../partiql-logical-planner", version = "0.15
 partiql-logical = { path = "../partiql-logical", version = "0.15.*" }
 partiql-value = { path = "../partiql-value", version = "0.15.*" }
 partiql-eval = { path = "../partiql-eval", version = "0.15.*" }
+partiql-types = { path = "../partiql-types", version = "0.15.*" }
 partiql-extension-ion = { path = "../extension/partiql-extension-ion", version = "0.15.*" }
 
 ion-rs_old = { version = "0.18", package = "ion-rs" }
+indexmap = "2"
+ordered-float = "5"
+rustc-hash = "2"
 
 regex = "1.10"
 once_cell = "1"
@@ -55,6 +59,11 @@ thiserror = "1.0"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
+[dev-dependencies]
+# Backs the `eval_vm` feature; lives in tests/support/eval_vm.rs. partiql-vm is unpublished,
+# so it must stay a dev-dependency to keep this crate publishable.
+partiql-vm = { path = "../partiql-vm" }
+
 [features]
 default = ["base"]
 base = ["syntax", "semantics", "strict", "permissive"]
@@ -64,6 +73,7 @@ strict = []
 permissive = []
 experimental = []
 conformance_test = []
+eval_vm = []
 report_tool = ["serde"]
 test_pretty_print = []
 serde = ["dep:serde", "dep:serde_json"]

@@ -30,13 +30,14 @@ mod grammar {
 
 type LalrpopError<'input> =
     lpop::ParseError<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
-type LalrpopResult<'input> = Result<ast::AstNode<ast::TopLevelQuery>, LalrpopError<'input>>;
+type LalrpopResult<'input> = Result<ast::AstNode<ast::Statement>, LalrpopError<'input>>;
+type LalrpopListResult<'input> = Result<Vec<ast::AstNode<ast::Statement>>, LalrpopError<'input>>;
 type LalrpopErrorRecovery<'input> =
     lpop::ErrorRecovery<ByteOffset, lexer::Token<'input>, ParseError<'input, BytePosition>>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AstData {
-    pub ast: ast::AstNode<ast::TopLevelQuery>,
+    pub statements: Vec<ast::AstNode<ast::Statement>>,
     pub locations: LocationMap,
     pub offsets: LineOffsetTracker,
 }
@@ -54,6 +55,13 @@ pub(crate) fn parse_partiql(s: &str) -> AstResult<'_> {
     parse_partiql_with_state(s, ParserState::default())
 }
 
+/// Parse a `;`-separated `PartiQL` script into a list of statement ASTs.
+/// A trailing `;` is optional; an empty (or all-comment) script yields no
+/// statements.
+pub(crate) fn parse_partiql_statements(s: &str) -> AstResult<'_> {
+    parse_partiql_statements_with_state(s, ParserState::default())
+}
+
 fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
     s: &'input str,
     mut state: ParserState<'input, Id>,
@@ -62,7 +70,7 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
     let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
     let lexer = CommentSkippingLexer::new(lexer);
 
-    let result: LalrpopResult<'_> = grammar::TopLevelQueryParser::new().parse(s, &mut state, lexer);
+    let result: LalrpopResult<'_> = grammar::StatementParser::new().parse(s, &mut state, lexer);
 
     let ParserState {
         locations, errors, ..
@@ -84,8 +92,46 @@ fn parse_partiql_with_state<'input, Id: NodeIdGenerator>(
             errors.push(ParseError::from(e));
             Err(ErrorData { errors, offsets })
         }
-        (Ok(ast), true) => Ok(AstData {
-            ast,
+        (Ok(stmt), true) => Ok(AstData {
+            statements: vec![stmt],
+            locations,
+            offsets,
+        }),
+    }
+}
+
+fn parse_partiql_statements_with_state<'input, Id: NodeIdGenerator>(
+    s: &'input str,
+    mut state: ParserState<'input, Id>,
+) -> AstResult<'input> {
+    let mut offsets = LineOffsetTracker::default();
+    let lexer = PreprocessingPartiqlLexer::new(s, &mut offsets, &BUILT_INS);
+    let lexer = CommentSkippingLexer::new(lexer);
+
+    let result: LalrpopListResult<'_> =
+        grammar::StatementListParser::new().parse(s, &mut state, lexer);
+
+    let ParserState {
+        locations, errors, ..
+    } = state;
+
+    let mut errors: Vec<_> = errors
+        .into_iter()
+        .map(|e| ParseError::from(e.error))
+        .collect();
+
+    match (result, errors.is_empty()) {
+        (Ok(_), false) => Err(ErrorData { errors, offsets }),
+        (Err(e), true) => {
+            let errors = vec![ParseError::from(e)];
+            Err(ErrorData { errors, offsets })
+        }
+        (Err(e), false) => {
+            errors.push(ParseError::from(e));
+            Err(ErrorData { errors, offsets })
+        }
+        (Ok(statements), true) => Ok(AstData {
+            statements,
             locations,
             offsets,
         }),
@@ -150,7 +196,7 @@ mod tests {
             let res = parse_partiql($q);
             println!("{:#?}", res);
             match res {
-                Ok(data) => data.ast,
+                Ok(data) => data.statements.into_iter().next().unwrap(),
                 _ => panic!("{:?}", res),
             }
         }};
@@ -361,7 +407,7 @@ mod tests {
 
             if let ast::AstNode {
                 node:
-                    ast::TopLevelQuery {
+                    ast::Statement::Query(ast::TopLevelQuery {
                         query:
                             ast::AstNode {
                                 node:
@@ -376,7 +422,7 @@ mod tests {
                                 ..
                             },
                         ..
-                    },
+                    }),
                 ..
             } = res
             {
@@ -559,7 +605,7 @@ mod tests {
                 let res = parse_partiql_null_id($q);
                 println!("{:#?}", res);
                 match res {
-                    Ok(data) => data.ast,
+                    Ok(data) => data.statements.into_iter().next().unwrap(),
                     _ => panic!("{:?}", res),
                 }
             }};
@@ -966,6 +1012,182 @@ mod tests {
                     },
                 })
             );
+        }
+    }
+
+    mod ddl {
+        use super::*;
+
+        // `CREATE TABLE <name>` with no `AS (...)` clause is valid; the CtasClause
+        // is optional (`<as_query:CtasClause?>`) and leaves `as_query` as `None`.
+        #[test]
+        fn create_table_plain() {
+            parse!(r"CREATE TABLE my_table");
+        }
+
+        // CTAS over the upstream table-function layout: a function-call FROM source
+        // (`mem(5, 2)`) with alias `m` and a qualified projection `m.a`.
+        #[test]
+        fn create_table_as_select() {
+            parse!(r"CREATE TABLE new_table AS (SELECT m.a FROM mem(5, 2) m)");
+        }
+
+        // The parenthesized query is the full `TopLevelQuery` rule, so WHERE,
+        // ORDER BY, and LIMIT are all accepted inside `AS (...)`.
+        #[test]
+        fn create_table_as_complex() {
+            parse!(
+                r"CREATE TABLE summary AS (SELECT m.a FROM mem(5, 2) m WHERE m.a > 1 ORDER BY m.a DESC LIMIT 10)"
+            );
+        }
+
+        // CTAS source is a `TopLevelQuery`, so it may carry a `WITH` (CTE) clause,
+        // per the SQL specification.
+        #[test]
+        fn create_table_as_with_cte() {
+            parse!(
+                r"CREATE TABLE t AS (WITH q AS (SELECT m.a FROM mem(2, 1) m) SELECT q.a FROM q)"
+            );
+        }
+
+        // Negative: a missing closing parenthesis must fail gracefully (Err), not panic.
+        #[test]
+        fn create_table_as_missing_close_paren() {
+            let res = parse_partiql(r"CREATE TABLE foo AS (SELECT 1");
+            assert!(res.is_err());
+        }
+
+        // Negative: a missing table identifier must fail gracefully (Err), not panic.
+        #[test]
+        fn create_table_missing_identifier() {
+            let res = parse_partiql(r"CREATE TABLE");
+            assert!(res.is_err());
+        }
+    }
+
+    mod dml {
+        use super::*;
+
+        // `INSERT INTO <name> <query>` lands as `Statement::Dml` with a
+        // `DmlOp::Insert`; the target is a `VarRef` and the source is `Expr::Query`.
+        #[test]
+        fn insert_into_select() {
+            let stmt = parse!(r"INSERT INTO foo SELECT m.a FROM mem(5, 2) m");
+            match stmt.node {
+                ast::Statement::Dml(ast::Dml {
+                    op: ast::DmlOp::Insert(insert),
+                    ..
+                }) => {
+                    assert!(matches!(*insert.target, ast::Expr::VarRef(_)));
+                    assert!(matches!(*insert.values, ast::Expr::Query(_)));
+                }
+                other => panic!("expected Dml(Insert), got {other:?}"),
+            }
+        }
+
+        // The source is the full `Query` rule, so ORDER BY / LIMIT are accepted.
+        #[test]
+        fn insert_into_select_complex() {
+            parse!(
+                r"INSERT INTO summary SELECT m.a FROM mem(5, 2) m WHERE m.a > 1 ORDER BY m.a DESC LIMIT 10"
+            );
+        }
+
+        // A quoted target identifier is accepted (SymbolPrimitive covers it).
+        #[test]
+        fn insert_into_quoted_target() {
+            parse!(r#"INSERT INTO "my table" SELECT m.a FROM mem(2, 1) m"#);
+        }
+
+        // VALUES is a keyword-initial query source, so it is a valid INSERT source.
+        #[test]
+        fn insert_into_values() {
+            parse!(r"INSERT INTO foo VALUES (1), (2)");
+        }
+
+        // Negative: `INSERT INTO` alone (no target, no source) must fail gracefully.
+        #[test]
+        fn insert_missing_target_and_source() {
+            assert!(parse_partiql(r"INSERT INTO").is_err());
+        }
+
+        // Negative: `INTO` is required after `INSERT`.
+        #[test]
+        fn insert_missing_into() {
+            assert!(parse_partiql(r"INSERT foo SELECT 1").is_err());
+        }
+
+        // Negative: a target with no source query must fail gracefully.
+        #[test]
+        fn insert_missing_source() {
+            assert!(parse_partiql(r"INSERT INTO foo").is_err());
+        }
+
+        // `INSERT`/`INTO` are reserved keywords, so they can no longer be used as
+        // bare identifiers. This documents the intended reservation.
+        #[test]
+        fn insert_into_are_reserved_keywords() {
+            assert!(parse_partiql(r"SELECT insert FROM t").is_err());
+            assert!(parse_partiql(r"SELECT into FROM t").is_err());
+        }
+    }
+
+    mod statement_list {
+        use super::*;
+
+        fn statements(s: &str) -> usize {
+            super::super::parse_partiql_statements(s)
+                .unwrap_or_else(|e| panic!("{e:?}"))
+                .statements
+                .len()
+        }
+
+        #[test]
+        fn multiple_statements() {
+            assert_eq!(statements("CREATE TABLE a; SELECT b FROM a"), 2);
+        }
+
+        #[test]
+        fn trailing_semicolon_is_optional() {
+            assert_eq!(statements("CREATE TABLE a; SELECT b FROM a;"), 2);
+            assert_eq!(statements("CREATE TABLE a"), 1);
+            assert_eq!(statements("CREATE TABLE a;"), 1);
+        }
+
+        #[test]
+        fn empty_and_comment_only_yield_no_statements() {
+            assert_eq!(statements(""), 0);
+            assert_eq!(statements("   \n  "), 0);
+            assert_eq!(statements("-- just a comment\n"), 0);
+        }
+
+        #[test]
+        fn comments_between_statements_are_skipped() {
+            assert_eq!(statements("CREATE TABLE a; -- make a\nSELECT b FROM a"), 2);
+        }
+
+        // The single-statement `parse` entry still rejects `;`-separated input,
+        // so callers opt into multi-statement explicitly via `parse_statements`.
+        #[test]
+        fn single_statement_parse_still_rejects_multi() {
+            assert!(parse_partiql("CREATE TABLE a; SELECT b FROM a").is_err());
+        }
+
+        // A malformed statement anywhere in the list fails the whole parse.
+        #[test]
+        fn malformed_statement_in_list_errors() {
+            assert!(super::super::parse_partiql_statements("CREATE TABLE a; SELECT FROM").is_err());
+        }
+
+        // Empty statements are rejected (no `;;`, leading `;`, or lone `;`),
+        // unlike the prior string splitter which silently dropped empty chunks.
+        #[test]
+        fn empty_statements_are_rejected() {
+            assert!(
+                super::super::parse_partiql_statements("CREATE TABLE a;; SELECT b FROM a").is_err()
+            );
+            assert!(super::super::parse_partiql_statements("; CREATE TABLE a").is_err());
+            assert!(super::super::parse_partiql_statements(";").is_err());
         }
     }
 }

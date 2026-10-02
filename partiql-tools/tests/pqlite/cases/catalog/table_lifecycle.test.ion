@@ -1,0 +1,5 @@
+// Full table lifecycle: create, insert inline rows, catalog listing, read back.
+{ sql: "CREATE TABLE orders", expect: { created_table: { name: ["orders"], rows: 0 } } }
+{ sql: "INSERT INTO orders SELECT * FROM << {'a': 1}, {'a': 2} >>", expect: { affected_rows: 2 } }
+{ sql: "SELECT name FROM _tables", expect: { rows: $bag::[ { name: ["_tables"] }, { name: ["orders"] } ] } }
+{ sql: "SELECT * FROM orders", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }

@@ -6,6 +6,9 @@ env:
   CARGO_TEST_RESULT_NAME: cargo_test_results.json
   CONFORMANCE_REPORT_NAME: cts_report.json
   COMPARISON_REPORT_NAME: cts-comparison-report.md
+  VM_CARGO_TEST_RESULT_NAME: vm_cargo_test_results.json
+  VM_CONFORMANCE_REPORT_NAME: vm_cts_report.json
+  VM_COMPARISON_REPORT_NAME: vm-cts-comparison-report.md
 
 permissions:
   contents: read
@@ -111,6 +114,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: ${{ env.CONFORMANCE_REPORT_NAME }}
+      # (Informational, pull_request only) Run the conformance tests against the `partiql-vm` evaluator. These steps
+      # never fail the job; the result is reported in the PR comment alongside the legacy comparison.
+      - name: (Informational) Cargo Test of the conformance tests against partiql-vm and save to json file
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: cargo test --verbose --package partiql-conformance-tests --features "conformance_test, eval_vm, experimental" --release -- -Z unstable-options --format json > ${{ env.VM_CARGO_TEST_RESULT_NAME }}
+      - name: (Informational) Create partiql-vm conformance report
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: cargo run --features report_tool --bin generate_cts_report ${{ env.VM_CARGO_TEST_RESULT_NAME }} partiql-vm ${{ env.VM_CONFORMANCE_REPORT_NAME }}
       # Cache the `cargo build` and conformance report for `conformance-report-comparison` job (pull_request event only)
       - name: Cache `cargo build` and conformance report
         if: github.event_name == 'pull_request'
@@ -178,6 +191,35 @@ jobs:
       # Print conformance report to GitHub actions workflow summary page
       - name: print markdown in run
         run: cat ${{ env.COMPARISON_REPORT_NAME }} >> $GITHUB_STEP_SUMMARY
+      # (Informational) Compare this commit's legacy evaluator against `partiql-vm`. The full test lists go to the
+      # workflow summary; only the summary table and counts are appended to the PR comment, which keeps it well under
+      # GitHub's comment size limit.
+      - name: (Informational) Compare legacy and partiql-vm conformance reports
+        continue-on-error: true
+        run: |
+          if [ ! -f "$VM_CONFORMANCE_REPORT_NAME" ]; then
+            echo "No partiql-vm conformance report; skipping."
+            exit 0
+          fi
+          cargo run --features report_tool --bin generate_comparison_report $CONFORMANCE_REPORT_NAME $VM_CONFORMANCE_REPORT_NAME $VM_COMPARISON_REPORT_NAME
+          {
+            echo ""
+            echo "### partiql-vm conformance (informational, non-blocking)"
+            echo ""
+            echo "Legacy evaluator vs. \`partiql-vm\` on this commit. Full test lists are in the workflow run summary."
+            echo ""
+            sed -e '/^### Conformance comparison report/d' \
+                -e '/:interrobang:/,$d' \
+                -e '/previously failing but now pass/,$d' \
+                -e 's/Base (/Legacy (/g' \
+                "$VM_COMPARISON_REPORT_NAME"
+          } > vm-comment-section.md
+          cat vm-comment-section.md >> $COMPARISON_REPORT_NAME
+          {
+            echo ""
+            echo "## partiql-vm conformance (informational)"
+            sed -e 's/Base (/Legacy (/g' "$VM_COMPARISON_REPORT_NAME"
+          } >> $GITHUB_STEP_SUMMARY
       # Find comment w/ conformance comparison if previous comment published
       - name: Find Comment
         uses: peter-evans/find-comment@v2

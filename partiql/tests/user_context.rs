@@ -146,7 +146,7 @@ pub(crate) fn evaluate(
     catalog: &dyn SharedCatalog,
     logical: partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     bindings: MapBindings<Value>,
-    ctx_vals: &[(String, &(dyn Any))],
+    ctx_vals: &[(String, &dyn Any)],
 ) -> Value {
     let mut planner =
         partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Permissive, catalog);

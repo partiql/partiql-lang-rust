@@ -1,0 +1,2 @@
+// Truncated query surfaces a parse error.
+{ sql: "SELECT * FROM foo WHERE", expect: { error: "Parse error:" } }

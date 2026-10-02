@@ -1,0 +1,5 @@
+// SELECT VALUE unwraps the row shape: rows are bare values inside $bag::[...],
+// not {'_1': v} structs. Exercises the Shape::Bag(Register) render path.
+{ sql: "SELECT VALUE t.a FROM << {'a':10},{'a':20},{'a':30} >> t", expect: { rows: $bag::[ 10, 20, 30 ] } }
+// SELECT VALUE with a container expression: each row is itself a list.
+{ sql: "SELECT VALUE [m.a, m.a + 10] FROM << {'a': 1}, {'a': 2} >> m", expect: { rows: $bag::[ [1, 11], [2, 12] ] } }

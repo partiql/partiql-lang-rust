@@ -1,0 +1,4 @@
+// Aliased projection over inline-inserted rows.
+{ sql: "CREATE TABLE t" }
+{ sql: "INSERT INTO t SELECT * FROM << {'id':1,'name':'alice'}, {'id':2,'name':'bob'} >>", expect: { affected_rows: 2 } }
+{ sql: "SELECT t.id AS user_id, t.name AS nm FROM t", expect: { rows: $bag::[ { user_id: 1, nm: "alice" }, { user_id: 2, nm: "bob" } ] } }
