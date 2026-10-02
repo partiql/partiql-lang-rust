@@ -332,6 +332,8 @@ pub enum Token<'input> {
     Case,
     #[regex("(?i:Columns)")]
     Columns,
+    #[regex("(?i:Create)")]
+    Create,
     #[regex("(?i:Cross)")]
     Cross,
     #[regex("(?i:Cycle)")]
@@ -376,6 +378,10 @@ pub enum Token<'input> {
     In,
     #[regex("(?i:Inner)")]
     Inner,
+    #[regex("(?i:Insert)")]
+    Insert,
+    #[regex("(?i:Into)")]
+    Into,
     #[regex("(?i:Is)")]
     Is,
     #[regex("(?i:Intersect)")]
@@ -633,6 +639,7 @@ impl Token<'_> {
                 | Token::Between
                 | Token::By
                 | Token::Case
+                | Token::Create
                 | Token::Cross
                 | Token::Cycle
                 | Token::Date
@@ -650,6 +657,8 @@ impl Token<'_> {
                 | Token::Having
                 | Token::In
                 | Token::Inner
+                | Token::Insert
+                | Token::Into
                 | Token::Is
                 | Token::Intersect
                 | Token::Join

@@ -457,6 +457,51 @@ pub struct ExprQuery {
     pub expr: ValueExpr,
 }
 
+/// Represents a database object reference with a catalog name and path.
+/// Used for qualified table references like `my_catalog.schema.table`.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DBRef {
+    /// Name of the catalog
+    pub catalog: String,
+
+    /// Path to the database object - each component with case sensitivity
+    /// Examples:
+    /// - Single table: vec![BindingsName("users")]
+    /// - Schema.table: vec![BindingsName("public"), BindingsName("users")]
+    /// - Schema.schema.table: vec![BindingsName("db"), BindingsName("public"), BindingsName("users")]
+    pub path: Vec<BindingsName<'static>>,
+}
+
+/// A top-level `PartiQL` statement produced by the planner.
+///
+/// DDL is a statement *category* that contains a query, not a relational
+/// operator — so it lives here, above [`LogicalPlan`], rather than inside
+/// [`BindingsOp`]. The relational operator graph is left untouched.
+///
+/// The target `table_name` is a name being *defined*, carried verbatim as a
+/// case-preserving [`BindingsName`] (single identifier, no catalog/path). The
+/// library never resolves the destination catalog or performs writes; a
+/// consumer orchestrates storage/transactions around query execution.
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum LogicalStatement {
+    /// An ordinary data-retrieval query.
+    Query(LogicalPlan<BindingsOp>),
+    /// `CREATE TABLE <name> AS (<query>)` — the target plus the lowered source query.
+    CreateTableAs {
+        table_name: BindingsName<'static>,
+        query: LogicalPlan<BindingsOp>,
+    },
+    /// `CREATE TABLE <name>` — the target only, no source query.
+    CreateTable { table_name: BindingsName<'static> },
+    /// `INSERT INTO <name> <query>` — target table plus the lowered source query.
+    InsertInto {
+        table_name: BindingsName<'static>,
+        query: LogicalPlan<BindingsOp>,
+    },
+}
+
 /// Represents a `PartiQL` value expression. Evaluation of a [`ValueExpr`] leads to a `PartiQL` value as
 /// specified by [PartiQL Specification 2019](https://partiql.org/assets/PartiQL-Specification.pdf).
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -469,6 +514,7 @@ pub enum ValueExpr {
     DynamicLookup(Box<Vec<ValueExpr>>),
     Path(Box<ValueExpr>, Vec<PathComponent>),
     VarRef(BindingsName<'static>, VarRefType),
+    DBRef(DBRef),
     TupleExpr(TupleExpr),
     ListExpr(ListExpr),
     BagExpr(BagExpr),

@@ -1,0 +1,4 @@
+// A step known to fail today; skip it so the rest of the case still runs.
+skip::"SELECT does_not_exist_yet FROM ghost"
+// Real step that must still pass.
+{ sql: "SELECT * FROM << {'a': 1} >>", expect: { rows: $bag::[ { a: 1 } ] } }

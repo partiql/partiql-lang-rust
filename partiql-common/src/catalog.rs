@@ -11,6 +11,18 @@ impl From<u64> for CatalogId {
     }
 }
 
+impl From<CatalogId> for u64 {
+    fn from(id: CatalogId) -> Self {
+        id.0
+    }
+}
+
+impl From<EntryId> for u64 {
+    fn from(id: EntryId) -> Self {
+        id.0
+    }
+}
+
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EntryId(u64);

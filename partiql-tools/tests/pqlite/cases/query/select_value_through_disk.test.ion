@@ -1,0 +1,3 @@
+// SELECT VALUE with a persisted source — exercises RowShape::Register through disk.
+{ sql: "CREATE TABLE t AS (SELECT * FROM << {'n':10},{'n':20},{'n':30} >>)", expect: { created_table: { name: ["t"], rows: 3 } } }
+{ sql: "SELECT VALUE t.n FROM t", expect: { rows: $bag::[ 10, 20, 30 ] } }

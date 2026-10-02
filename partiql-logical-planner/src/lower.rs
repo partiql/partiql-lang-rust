@@ -5,12 +5,12 @@ use ordered_float::OrderedFloat;
 use partiql_ast::ast;
 use partiql_ast::ast::{
     Assignment, Bag, BagOpExpr, BagOperator, Between, BinOp, BinOpKind, Call, CallAgg, CallArg,
-    CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, Ddl, DdlOp, Delete, Dml, DmlOp,
-    DropIndex, DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
-    GroupingStrategy, Insert, InsertValue, Item, Join, JoinKind, JoinSpec, Like, List, Lit,
+    CallArgNamed, CaseSensitivity, CreateIndex, CreateTable, DdlOp, Delete, Dml, DmlOp, DropIndex,
+    DropTable, Exclusion, Expr, FromClause, FromLet, FromLetKind, GroupByExpr, GroupKey,
+    GroupingStrategy, Insert, InsertValue, Join, JoinKind, JoinSpec, Like, List, Lit,
     NullOrderingSpec, OnConflict, OrderByExpr, OrderingSpec, Path, PathStep, ProjectExpr,
     Projection, ProjectionKind, Query, QuerySet, Remove, SearchedCase, Select, Set, SetQuantifier,
-    SimpleCase, SortSpec, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
+    SimpleCase, SortSpec, Statement, Struct, SymbolPrimitive, UniOp, UniOpKind, VarRef,
 };
 use partiql_ast::visit::{Traverse, Visit, Visitor};
 use partiql_logical as logical;
@@ -164,6 +164,18 @@ impl IdGenerator {
     }
 }
 
+/// How variable references are lowered.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum VarRefResolution {
+    /// Emit a [`ValueExpr::DynamicLookup`] over every candidate binding, resolved at evaluation
+    /// time. This is what the `partiql-eval` evaluator expects.
+    #[default]
+    Dynamic,
+    /// Resolve each reference at plan time to a single local `VarRef`/`Path` or a catalog
+    /// [`logical::DBRef`]. Used by the `partiql-vm` engine.
+    Static,
+}
+
 #[derive(Debug)]
 pub struct AstToLogical<'a> {
     // current stack of node ids
@@ -205,6 +217,7 @@ pub struct AstToLogical<'a> {
     key_registry: name_resolver::KeyRegistry,
     fnsym_tab: &'static FnSymTab,
     catalog: &'a dyn SharedCatalog,
+    var_resolution: VarRefResolution,
 
     // list of errors encountered during AST lowering
     errors: Vec<AstTransformError>,
@@ -245,7 +258,11 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
 }
 
 impl<'a> AstToLogical<'a> {
-    pub fn new(catalog: &'a dyn SharedCatalog, registry: name_resolver::KeyRegistry) -> Self {
+    pub fn new(
+        catalog: &'a dyn SharedCatalog,
+        registry: name_resolver::KeyRegistry,
+        var_resolution: VarRefResolution,
+    ) -> Self {
         let fnsym_tab: &FnSymTab = &FN_SYM_TAB;
         AstToLogical {
             id_stack: Default::default(),
@@ -278,6 +295,7 @@ impl<'a> AstToLogical<'a> {
             key_registry: registry,
             fnsym_tab,
             catalog,
+            var_resolution,
 
             errors: vec![],
         }
@@ -285,10 +303,13 @@ impl<'a> AstToLogical<'a> {
 
     pub fn lower_query(
         mut self,
-        query: &ast::AstNode<ast::TopLevelQuery>,
+        query: &ast::TopLevelQuery,
+        stmt_id: NodeId,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
         self.enter_plan();
+        self.id_stack.push(stmt_id);
         query.visit(&mut self);
+        self.id_stack.pop();
         true_or_fault_err!(
             self,
             self.plan_stack.len() == 1,
@@ -324,7 +345,154 @@ impl<'a> AstToLogical<'a> {
             .unwrap_or_else(|| self.gen_id())
     }
 
+    /// Convert a `SymbolPrimitive` into a `BindingsName`
+    pub(crate) fn symprim_to_binding(
+        sym: &SymbolPrimitive,
+    ) -> Result<BindingsName<'static>, AstTransformError> {
+        Ok(match sym.case {
+            CaseSensitivity::CaseSensitive => {
+                BindingsName::CaseSensitive(Cow::Owned(sym.value.clone()))
+            }
+            CaseSensitivity::CaseInsensitive => {
+                BindingsName::CaseInsensitive(Cow::Owned(sym.value.clone()))
+            }
+            _ => {
+                return Err(AstTransformError::NotYetImplemented(
+                    "case sensitivity".into(),
+                ))
+            }
+        })
+    }
+
+    /// Convert a `name_resolver::Symbol` into the variable name it binds.
+    fn symbol_name(sym: &name_resolver::Symbol) -> Result<String, AstTransformError> {
+        match sym {
+            name_resolver::Symbol::Known(sym) => Ok(sym.value.clone()),
+            name_resolver::Symbol::Unknown(id) => Ok(format!("_{id}")),
+            _ => Err(AstTransformError::NotYetImplemented(
+                "name resolution symbol".into(),
+            )),
+        }
+    }
+
+    /// Check if two variable names match (considering case sensitivity)
+    fn names_match(a: &str, a_case: &CaseSensitivity, b: &str, b_case: &CaseSensitivity) -> bool {
+        match (a_case, b_case) {
+            (CaseSensitivity::CaseSensitive, CaseSensitivity::CaseSensitive) => a == b,
+            _ => unicase::eq(a, b),
+        }
+    }
+
+    /// Search for a variable in local scope (schema variables)
+    fn search_locals(
+        &self,
+        varref: &ast::VarRef,
+    ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
+        // Walk up the id_stack to find variables in scope
+        for id in self.id_stack.iter().rev() {
+            if let Some(scope_ids) = self.key_registry.in_scope.get(id) {
+                // Collect all variables produced in this scope
+                let mut scope_vars: Vec<String> = Vec::new();
+                for scope_id in scope_ids {
+                    if let Some(schema) = self.key_registry.schema.get(scope_id) {
+                        for produce in &schema.produce {
+                            scope_vars.push(Self::symbol_name(produce)?);
+                        }
+                    }
+                }
+
+                if scope_vars.is_empty() {
+                    continue;
+                }
+
+                // Try exact match against any scope variable
+                for var_name in &scope_vars {
+                    if Self::names_match(
+                        &varref.name.value,
+                        &varref.name.case,
+                        var_name,
+                        &CaseSensitivity::CaseInsensitive,
+                    ) {
+                        return Ok(Some(ValueExpr::VarRef(
+                            Self::symprim_to_binding(&varref.name)?,
+                            VarRefType::Local,
+                        )));
+                    }
+                }
+
+                // No exact match — collect only FROM source variables (first
+                // produce from each scope_id, skipping GROUP BY key scopes which
+                // register after FROM in traversal order). We identify FROM sources
+                // as the first scope_id that produces variables.
+                // If exactly one FROM source, resolve as a field path on it.
+                // If multiple FROM sources, ambiguous — return None (will error).
+                let first_scope_vars: Vec<String> = if let Some(&first_scope_id) = scope_ids.first()
+                {
+                    if let Some(schema) = self.key_registry.schema.get(&first_scope_id) {
+                        schema
+                            .produce
+                            .iter()
+                            .map(Self::symbol_name)
+                            .collect::<Result<_, _>>()?
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
+                if first_scope_vars.len() == 1 {
+                    let from_var = &first_scope_vars[0];
+                    if !Self::names_match(
+                        &varref.name.value,
+                        &varref.name.case,
+                        from_var,
+                        &CaseSensitivity::CaseInsensitive,
+                    ) {
+                        let from_var_binding =
+                            BindingsName::CaseInsensitive(Cow::Owned(from_var.clone()));
+                        return Ok(Some(ValueExpr::Path(
+                            Box::new(ValueExpr::VarRef(from_var_binding, VarRefType::Local)),
+                            vec![PathComponent::Key(Self::symprim_to_binding(&varref.name)?)],
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Search for a variable in global scope (catalog)
+    fn search_globals(
+        &self,
+        varref: &ast::VarRef,
+    ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
+        // Check if catalog has this as a type entry (table/view)
+        if self.catalog.resolve_type(&varref.name.value).is_some() {
+            // Return a DBRef for catalog-registered database objects
+            return Ok(Some(ValueExpr::DBRef(logical::DBRef {
+                catalog: self.catalog.name().to_string(),
+                path: vec![Self::symprim_to_binding(&varref.name)?],
+            })));
+        }
+
+        Ok(None)
+    }
+
     fn resolve_varref(
+        &self,
+        varref: &ast::VarRef,
+    ) -> Result<logical::ValueExpr, AstTransformError> {
+        match self.var_resolution {
+            VarRefResolution::Dynamic => self.resolve_varref_dynamic(varref),
+            VarRefResolution::Static => self.resolve_varref_static(varref),
+        }
+    }
+
+    /// [`VarRefResolution::Dynamic`]: emit a [`ValueExpr::DynamicLookup`] of every candidate
+    /// binding and let the evaluator pick at runtime.
+    fn resolve_varref_dynamic(
         &self,
         varref: &ast::VarRef,
     ) -> Result<logical::ValueExpr, AstTransformError> {
@@ -526,6 +694,40 @@ impl<'a> AstToLogical<'a> {
         ))
     }
 
+    /// [`VarRefResolution::Static`]: resolve eagerly to a single `VarRef`, `Path`, or `DBRef`.
+    fn resolve_varref_static(
+        &self,
+        varref: &ast::VarRef,
+    ) -> Result<logical::ValueExpr, AstTransformError> {
+        // Resolution order depends on qualifier:
+        // - Unqualified (no @): search globals first, then locals
+        // - Qualified (with @): search locals first, then globals
+        let resolved = match varref.qualifier {
+            ast::ScopeQualifier::Unqualified => match self.search_globals(varref)? {
+                Some(expr) => Some(expr),
+                None => self.search_locals(varref)?,
+            },
+            ast::ScopeQualifier::Qualified => match self.search_locals(varref)? {
+                Some(expr) => Some(expr),
+                None => self.search_globals(varref)?,
+            },
+            _ => {
+                return Err(AstTransformError::NotYetImplemented(
+                    "scope qualifier".into(),
+                ))
+            }
+        };
+
+        // If not found in either scope, assume global (for backward compatibility)
+        match resolved {
+            Some(expr) => Ok(expr),
+            None => Ok(ValueExpr::VarRef(
+                Self::symprim_to_binding(&varref.name)?,
+                VarRefType::Global,
+            )),
+        }
+    }
+
     #[inline]
     fn enter_q(&mut self) {
         self.q_stack.push(Default::default());
@@ -683,12 +885,8 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
         Traverse::Continue
     }
 
-    fn enter_item(&mut self, _item: &'ast Item) -> Traverse {
-        not_yet_implemented_fault!(self, "Item");
-    }
-
-    fn enter_ddl(&mut self, _ddl: &'ast Ddl) -> Traverse {
-        not_yet_implemented_fault!(self, "Ddl".to_string());
+    fn enter_statement(&mut self, _statement: &'ast Statement) -> Traverse {
+        not_yet_implemented_fault!(self, "Statement");
     }
 
     fn enter_ddl_op(&mut self, _ddl_op: &'ast DdlOp) -> Traverse {
@@ -2416,5 +2614,386 @@ mod tests {
         assert_eq!(expected_logical, logical);
 
         println!("logical: {:?}", &logical);
+    }
+
+    #[test]
+    fn test_plan_type_entry_in_catalog_static() {
+        // Expected Logical Plan
+        let mut expected_logical = LogicalPlan::new();
+
+        // c.id resolves to VarRef(Local) since c is a local alias
+        let my_id = ValueExpr::Path(
+            Box::new(ValueExpr::VarRef(
+                BindingsName::CaseInsensitive("c".to_string().into()),
+                VarRefType::Local,
+            )),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                "id".to_string().into(),
+            ))],
+        );
+
+        // customers.name resolves to DBRef since customers is in the catalog
+        let my_name = ValueExpr::Path(
+            Box::new(ValueExpr::DBRef(logical::DBRef {
+                catalog: "default".to_string(),
+                path: vec![BindingsName::CaseInsensitive(
+                    "customers".to_string().into(),
+                )],
+            })),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                "name".to_string().into(),
+            ))],
+        );
+
+        let project = expected_logical.add_operator(Project(logical::Project {
+            exprs: Vec::from([
+                ("my_id".to_string(), my_id),
+                ("my_name".to_string(), my_name),
+            ]),
+        }));
+
+        // Scan expr resolves to DBRef since customers is in the catalog
+        let scan = expected_logical.add_operator(BindingsOp::Scan(logical::Scan {
+            expr: ValueExpr::DBRef(logical::DBRef {
+                catalog: "default".to_string(),
+                path: vec![BindingsName::CaseInsensitive(
+                    "customers".to_string().into(),
+                )],
+            }),
+            as_key: "c".to_string(),
+            at_key: None,
+        }));
+        let sink = expected_logical.add_operator(BindingsOp::Sink);
+        expected_logical.add_flow_with_branch_num(scan, project, 0);
+        expected_logical.add_flow_with_branch_num(project, sink, 0);
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
+        let statement = "SELECT c.id AS my_id, customers.name AS my_name FROM customers AS c";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+        let logical = planner.lower(&parsed).expect("Expect successful lowering");
+        assert_eq!(expected_logical, logical);
+
+        println!("logical: {:?}", logical);
+    }
+
+    #[test]
+    fn test_ctas_lowers_to_create_table_as() {
+        use partiql_logical::{BindingsOp, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let statement = "CREATE TABLE t AS (SELECT a FROM foo WHERE a > 1)";
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let (table_name, query) = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { table_name, query } => (table_name, query)
+        );
+
+        // Target carried verbatim, case-insensitive (bare identifier).
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+
+        // Inner plan is the ordinary relational DAG, terminating in Sink.
+        assert!(
+            query.operator_count() >= 2,
+            "expected a non-trivial inner plan"
+        );
+        assert_matches!(
+            query.operators().last(),
+            Some(BindingsOp::Sink),
+            "inner plan must terminate in Sink"
+        );
+    }
+
+    #[test]
+    fn test_plain_create_table_lowers_to_create_table() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTable { table_name } => table_name
+        );
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+    }
+
+    #[test]
+    fn test_ctas_preserves_quoted_target_casing() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE \"T\" AS (SELECT a FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { table_name, .. } => table_name
+        );
+        // Quoted identifier -> CaseSensitive, value preserved verbatim.
+        assert_eq!(table_name, BindingsName::CaseSensitive("T".into()));
+    }
+
+    #[test]
+    fn test_ctas_inner_source_resolves_through_existing_path() {
+        use partiql_logical::{self as logical, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
+
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT customers.name FROM customers AS c)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let query = assert_matches!(
+            stmt,
+            LogicalStatement::CreateTableAs { query, .. } => query
+        );
+
+        // The catalog-registered source lowered to a Scan over a DBRef (not a fallback
+        // Global VarRef), proving the inner query used the normal resolution path.
+        let has_dbref_scan = query.operators().iter().any(|op| {
+            matches!(
+                op,
+                BindingsOp::Scan(logical::Scan { expr: ValueExpr::DBRef(db), .. })
+                    if db.catalog == "default"
+                        && db.path == vec![BindingsName::CaseInsensitive("customers".into())]
+            )
+        });
+        assert!(
+            has_dbref_scan,
+            "inner source `customers` must resolve to a DBRef Scan"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_ctas() {
+        // Back-compat contract: the legacy `lower` entry point (used by ~16 callers
+        // that only handle relational plans) must still reject DDL rather than
+        // silently changing its return type. CTAS is surfaced via `lower_statement`.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT a FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject CTAS")
+            .errors;
+        // Assert the specific rejection error, not merely that *some* error occurred,
+        // so a future change that swapped this for a different error (a parse error,
+        // the inner query's error, etc.) would fail rather than silently pass.
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_short_circuits_ddl_before_inner_query() {
+        // The legacy `lower` shim must reject DDL at the front door, BEFORE lowering
+        // the inner query. Here the CTAS source references an undefined function, which
+        // would itself produce a lowering error — but `lower()` must still return the
+        // uniform DDL rejection, never leak the inner-query error.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t AS (SELECT undefined_fn(a) FROM foo)")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject CTAS")
+            .errors;
+        // Uniform DDL error — NOT the inner UnsupportedFunction("undefined_fn") error.
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_plain_create_table() {
+        // The no-AS form (`CreateTable`, as_query: None) must also be rejected by the
+        // legacy `lower` shim with the same uniform DDL error — covering the
+        // CreateTable branch of the shim, not just CTAS.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("CREATE TABLE t")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject plain CREATE TABLE")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DDL statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_insert_lowers_to_insert_into() {
+        use partiql_logical::{BindingsOp, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT a FROM foo WHERE a > 1")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let (table_name, query) = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { table_name, query } => (table_name, query)
+        );
+        // Target carried verbatim, case-insensitive (bare identifier).
+        assert_eq!(table_name, BindingsName::CaseInsensitive("t".into()));
+        // Inner plan is the ordinary relational DAG, terminating in Sink.
+        assert!(
+            query.operator_count() >= 2,
+            "expected a non-trivial inner plan"
+        );
+        assert_matches!(
+            query.operators().last(),
+            Some(BindingsOp::Sink),
+            "inner plan must terminate in Sink"
+        );
+    }
+
+    #[test]
+    fn test_insert_preserves_quoted_target_casing() {
+        use partiql_logical::LogicalStatement;
+        use partiql_value::BindingsName;
+
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO \"T\" SELECT a FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let table_name = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { table_name, .. } => table_name
+        );
+        // Quoted identifier -> CaseSensitive, value preserved verbatim.
+        assert_eq!(table_name, BindingsName::CaseSensitive("T".into()));
+    }
+
+    #[test]
+    fn test_insert_inner_source_resolves_through_existing_path() {
+        use partiql_logical::{self as logical, LogicalStatement};
+        use partiql_value::BindingsName;
+
+        let mut catalog = PartiqlCatalog::default();
+        let _oid =
+            catalog.add_type_entry(TypeEnvEntry::new("customers", &[], PartiqlShape::Dynamic));
+        let catalog = catalog.to_shared_catalog();
+
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT customers.name FROM customers AS c")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static);
+        let stmt = planner
+            .lower_statement(&parsed.statements[0])
+            .expect("Expect successful lowering");
+
+        let query = assert_matches!(
+            stmt,
+            LogicalStatement::InsertInto { query, .. } => query
+        );
+        // The catalog-registered source lowers to a Scan over a DBRef (not a
+        // fallback Global VarRef), proving the wrapped inner query used the normal
+        // resolution path — the same assertion the CTAS twin makes.
+        let has_dbref_scan = query.operators().iter().any(|op| {
+            matches!(
+                op,
+                BindingsOp::Scan(logical::Scan { expr: ValueExpr::DBRef(db), .. })
+                    if db.catalog == "default"
+                        && db.path == vec![BindingsName::CaseInsensitive("customers".into())]
+            )
+        });
+        assert!(
+            has_dbref_scan,
+            "inner source `customers` must resolve to a DBRef Scan"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_rejects_insert() {
+        // Same back-compat contract as the DDL arms: the legacy `lower` shim must
+        // reject DML with the uniform error, not silently change its return type.
+        // INSERT is surfaced via `lower_statement`.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT a FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject INSERT")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DML statement lowering"
+        );
+    }
+
+    #[test]
+    fn test_legacy_lower_short_circuits_dml_before_inner_query() {
+        // The shim must reject DML at the front door, BEFORE lowering the inner
+        // query. The INSERT source references an undefined function that would
+        // itself error, but `lower()` must still return the uniform DML rejection.
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("INSERT INTO t SELECT undefined_fn(a) FROM foo")
+            .expect("Expect successful parse");
+        let planner = LogicalPlanner::new(&catalog);
+        let errs = planner
+            .lower(&parsed)
+            .expect_err("legacy lower() must reject INSERT")
+            .errors;
+        assert_matches!(
+            errs.as_slice(),
+            [AstTransformError::NotYetImplemented(msg)] if msg == "DML statement lowering"
+        );
     }
 }

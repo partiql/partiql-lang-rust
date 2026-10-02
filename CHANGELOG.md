@@ -8,8 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+- *BREAKING* partiql-parser: `Parsed`'s `ast` field replaced by `statements: Vec<AstNode<Statement>>`. The `Item` enum is renamed to `Statement` with bare variants (`Statement::Query(TopLevelQuery)`, `Statement::Ddl(DdlOp)`, `Statement::Dml(Dml)`). The single-field `Ddl` wrapper struct is removed; `DdlOp` is held directly. Code that accessed `parsed.ast` must now use `parsed.statements[0]` and match on `Statement` variants.
+- *BREAKING* partiql-parser: `INSERT` and `INTO` are now reserved keywords (per SQL:2003), so they can no longer be used as bare identifiers. A query such as `SELECT x AS into FROM t` must now quote the identifier (`"into"`).
+- *BREAKING* partiql-catalog: `ReadOnlyCatalog` gains a required `fn name(&self) -> &str`. External implementors must add it.
+- *BREAKING* partiql-logical: `ValueExpr` gains a `DBRef(DBRef)` variant, so exhaustive matches on `ValueExpr` must handle it.
+- *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
 
 ### Added
+- partiql-parser: Parsing support for `CREATE TABLE <name>` and `CREATE TABLE <name> AS (<query>)` (CTAS). DDL lowering/evaluation is not yet implemented and surfaces a `NotYetImplemented` error.
+- partiql-parser: Parsing support for `INSERT INTO <name> <query>` (INSERT ... SELECT), lowered to `LogicalStatement::InsertInto`. Other DML forms surface a `NotYetImplemented` error.
+- partiql-parser: `Parser::parse_statements` parses a `;`-separated script into multiple statements (optional trailing `;`). Single-statement `Parser::parse` is unchanged and still rejects `;`.
+- partiql-logical: `LogicalStatement` (`Query`, `CreateTable`, `CreateTableAs`, `InsertInto`) plus `LogicalPlanner::lower_statement`, which lowers a single statement while keeping its category.
+- partiql-logical-planner: `VarRefResolution` and `LogicalPlanner::with_var_resolution`. The default is `Dynamic`, which keeps the existing `DynamicLookup` lowering. `Static` resolves variable references at plan time, emitting `VarRef`, `Path`, or `DBRef`; the VM needs this mode.
+- New unpublished (`publish = false`) crates: `partiql-vm`, the experimental bytecode VM, and `partiql-tools`, the `pqlite` CLI.
 
 ### Removed
 
@@ -58,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added contributor guidance to keep public enums non-exhaustive until version `1.x`.
 
 ### Removed
+
+## [0.15.0-alpha.1]
+### Added
+- Added an experimental PartiQLVM evaluator. This exhibits significant performance improvements with the ability to
+zero-copy data, however, it is notably **experimental** and subject to changes.
 
 ## [0.14.0]
 ### Changed
@@ -399,6 +415,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/partiql/partiql-lang-rust/compare/v0.15.0...HEAD
 [0.15.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.15.0
+[0.15.0-alpha.1]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.15.0-alpha.1
 [0.14.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.14.0
 [0.13.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.13.0
 [0.12.0]: https://github.com/partiql/partiql-lang-rust/releases/tag/v0.12.0

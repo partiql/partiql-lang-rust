@@ -1,0 +1,3 @@
+// Case-sensitive quoted identifier — write and read.
+{ sql: "CREATE TABLE \"MyTable\" AS (SELECT * FROM << {'a': 1} >>)", expect: { created_table: { name: ["MyTable"], rows: 1 } } }
+{ sql: "SELECT * FROM \"MyTable\"", expect: { rows: $bag::[ { a: 1 } ] } }
