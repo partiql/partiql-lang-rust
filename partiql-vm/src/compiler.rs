@@ -1658,15 +1658,9 @@ impl<'a> PlanCompiler<'a> {
 
     /// Search all catalogs for a table function by name.
     fn resolve_table_function(&self, name: &str) -> Option<TableFunctionHandle> {
-        // Search through all registered catalogs
-        for catalog_name in ["default"] {
-            if let Some((_id, catalog)) = self.compilation_context.get_catalog(catalog_name) {
-                if let Some(handle) = catalog.get_table_function(name) {
-                    return Some(handle);
-                }
-            }
-        }
-        None
+        // Only the "default" catalog is searched for now.
+        let (_id, catalog) = self.compilation_context.get_catalog("default")?;
+        catalog.get_table_function(name)
     }
 
     // -----------------------------------------------------------------------
