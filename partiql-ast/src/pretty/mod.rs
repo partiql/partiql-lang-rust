@@ -32,8 +32,65 @@ impl PrettyDoc for Statement {
         match self {
             Statement::Query(q) => q.pretty_doc(arena),
             Statement::Ddl(ddl_op) => ddl_op.pretty_doc(arena),
-            Statement::Dml(_) => arena.nil(),
+            Statement::Dml(dml) => dml.pretty_doc(arena),
         }
+    }
+}
+
+impl PrettyDoc for Dml {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        // The grammar does not yet produce the FROM, WHERE, or RETURNING clauses.
+        self.op.pretty_doc(arena)
+    }
+}
+
+impl PrettyDoc for DmlOp {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            DmlOp::Insert(insert) => insert.pretty_doc(arena),
+            // The remaining DML operations are not yet produced by the grammar; emit
+            // an empty document rather than panicking until they are implemented.
+            DmlOp::InsertValue(_) | DmlOp::Set(_) | DmlOp::Remove(_) | DmlOp::Delete(_) => {
+                arena.nil()
+            }
+        }
+    }
+}
+
+impl PrettyDoc for Insert {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let Insert { target, values } = self;
+        // `INSERT INTO <name>`
+        let insert = arena
+            .text("INSERT")
+            .append(arena.space())
+            .append(arena.text("INTO"))
+            .append(arena.space())
+            .append(target.pretty_doc(arena));
+        // The grammar takes the source query bare (`INSERT INTO <name> <query>`), so
+        // print it without the parentheses `Expr::Query` would otherwise add.
+        let source = match values.as_ref() {
+            Expr::Query(query) => query.pretty_doc(arena),
+            other => other.pretty_doc(arena),
+        };
+        arena
+            .intersperse([insert, source], arena.softline())
+            .group()
     }
 }
 
