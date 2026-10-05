@@ -82,6 +82,53 @@ fn ion_format_bag_envelope() {
     );
 }
 
+/// Run `pqlite exec --format ion <query>` and assert stdout is Ion-equivalent
+/// to `expected`.
+fn assert_exec_ion(query: &str, expected: &str) {
+    use ion_rs::element::Element;
+    use ion_rs::IonData;
+    let out = Command::new(PQLITE)
+        .arg("exec")
+        .arg("--format")
+        .arg("ion")
+        .arg(query)
+        .output()
+        .expect("failed to spawn pqlite");
+    assert!(
+        out.status.success(),
+        "query should succeed; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let actual = Element::read_one(&out.stdout).expect("stdout must be one Ion value");
+    let expected = Element::read_one(expected.as_bytes()).expect("expected must parse");
+    assert_eq!(
+        IonData::from(actual.clone()),
+        IonData::from(expected.clone()),
+        "actual: {actual} expected: {expected}"
+    );
+}
+
+#[test]
+fn scan_ion_preserves_null_fields() {
+    // Ion null-valued struct fields must surface as NULL, not be dropped
+    // (which would make them read as MISSING). Covers both the whole-value and
+    // column-projection scan modes.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nulls.ion");
+    std::fs::write(&path, "{a: null, b: 1}\n{a: null.int, b: 2}\n").unwrap();
+    let path = path.display();
+    let expected = "{rows: $bag::[{a: null, b: 1}, {a: null, b: 2}]}";
+
+    assert_exec_ion(
+        &format!("SELECT VALUE t FROM scan_ion('{path}') t"),
+        expected,
+    );
+    assert_exec_ion(
+        &format!("SELECT t.a, t.b FROM scan_ion('{path}') t"),
+        expected,
+    );
+}
+
 #[test]
 fn plain_select_via_exec_needs_no_db_and_creates_no_file() {
     // Run from inside a temp dir so we can assert nothing was written there.
