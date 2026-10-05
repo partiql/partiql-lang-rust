@@ -577,9 +577,10 @@ impl DataSource for IonDataSource {
     }
 
     fn close(&mut self) -> EvalResult<()> {
+        // `field_to_slot` is layout configuration, not per-open state; keep it so
+        // the source can be re-opened.
         self.reader = None;
         self.string_storage.clear();
-        self.field_to_slot.clear();
         Ok(())
     }
 }
@@ -723,6 +724,32 @@ impl CompilationCatalog for TableFnCompilationCatalog {
             ))),
             "scan_ion" => Some(VmTableFunctionHandle::new(Arc::new(DynamicSchemaMetadata))),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partiql_vm::source::ScanProjection;
+
+    #[test]
+    fn ion_data_source_keeps_layout_across_close() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "{a: 1}").unwrap();
+        let layout = ScanLayout {
+            projections: vec![ScanProjection {
+                source: ScanSource::field("a", PhysicalType::Dynamic),
+                target_slot: 0,
+            }],
+        };
+        let mut source = IonDataSource::new(file.path().display().to_string(), layout);
+
+        // Re-opening after close must still project `a` into slot 0.
+        for _ in 0..2 {
+            source.open().unwrap();
+            source.close().unwrap();
+            assert_eq!(source.field_to_slot.get("a"), Some(&0));
         }
     }
 }
