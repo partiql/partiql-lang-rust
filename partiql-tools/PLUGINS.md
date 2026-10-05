@@ -3,10 +3,15 @@
 pqlite can load table functions from native shared libraries through a small,
 versioned C ABI. The ABI is defined in
 [`include/pqlite_plugin.h`](include/pqlite_plugin.h), and that header is the
-source of truth for the contract. This feature is off by default.
+source of truth for the contract.
+
+> **Unstable.** Plugin support is in development; the ABI and CLI flags may
+> change without notice. It is not a Cargo feature: it is compiled in only when
+> rustc gets `--cfg pqlite_unstable_plugins`, so `--all-features` and
+> dependent crates never enable it.
 
 ```bash
-cargo build --release -p partiql-tools --features plugins
+RUSTFLAGS="--cfg pqlite_unstable_plugins" cargo build --release -p partiql-tools
 target/release/pqlite --load ./libmyplugin.so --plugin-opt my.key=value \
   exec "SELECT t.a FROM my_fn({'x': 1}) AS t"
 ```

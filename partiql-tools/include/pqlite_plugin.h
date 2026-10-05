@@ -2,11 +2,14 @@
  * pqlite_plugin.h — C ABI for pqlite table-function plugins (ABI version 1).
  *
  * A plugin is a shared library that exports one symbol, `pqlite_plugin_init`.
- * The host (pqlite, built with `--features plugins`) loads it with
- * `pqlite --load <path>`, passes it a host context, and receives a vtable of
- * table functions. Rows cross the boundary as Arrow C Data Interface record
- * batches inside an Arrow C Stream (`struct ArrowArrayStream`). Plugins never
- * see PartiQL types; the host never sees plugin types.
+ * The host (pqlite, built with RUSTFLAGS="--cfg pqlite_unstable_plugins")
+ * loads it with `pqlite --load <path>`, passes it a host context, and receives
+ * a vtable of table functions. Rows cross the boundary as Arrow C Data
+ * Interface record batches inside an Arrow C Stream (`struct
+ * ArrowArrayStream`). Plugins never see PartiQL types; the host never sees
+ * plugin types.
+ *
+ * UNSTABLE: this interface is in development and may change without notice.
  *
  * ---------------------------------------------------------------------------
  * Contract

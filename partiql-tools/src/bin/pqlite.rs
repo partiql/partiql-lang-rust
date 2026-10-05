@@ -35,13 +35,13 @@ struct Cli {
     #[arg(long, global = true, value_delimiter = ',', value_parser = debug_values())]
     debug: Vec<String>,
 
-    /// Load table functions from a plugin shared library. Repeatable.
-    #[cfg(feature = "plugins")]
+    /// UNSTABLE: load table functions from a plugin shared library. Repeatable.
+    #[cfg(pqlite_unstable_plugins)]
     #[arg(long = "load", global = true, value_name = "PATH")]
     load: Vec<std::path::PathBuf>,
 
-    /// `key=value` option passed to every loaded plugin. Repeatable.
-    #[cfg(feature = "plugins")]
+    /// UNSTABLE: `key=value` option passed to every loaded plugin. Repeatable.
+    #[cfg(pqlite_unstable_plugins)]
     #[arg(long = "plugin-opt", global = true, value_name = "KEY=VALUE", value_parser = parse_kv)]
     plugin_opts: Vec<(String, String)>,
 
@@ -88,7 +88,7 @@ enum CliCommand {
     },
 }
 
-#[cfg(feature = "plugins")]
+#[cfg(pqlite_unstable_plugins)]
 fn parse_kv(s: &str) -> Result<(String, String), String> {
     s.split_once('=')
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -99,14 +99,18 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
 fn table_fns(cli: &Cli) -> TableFnRegistry {
     #[allow(unused_mut)]
     let mut fns = TableFnRegistry::builtin();
-    #[cfg(feature = "plugins")]
+    #[cfg(pqlite_unstable_plugins)]
+    if !cli.load.is_empty() {
+        eprintln!("warning: plugin support is unstable and in development; the ABI may change without notice");
+    }
+    #[cfg(pqlite_unstable_plugins)]
     for path in &cli.load {
         if let Err(e) = partiql_tools::plugin::load_plugin(path, &cli.plugin_opts, &mut fns) {
             eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }
-    #[cfg(not(feature = "plugins"))]
+    #[cfg(not(pqlite_unstable_plugins))]
     let _ = cli;
     fns
 }

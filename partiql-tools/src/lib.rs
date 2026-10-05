@@ -1,6 +1,6 @@
 mod catalog;
 mod common;
-#[cfg(feature = "plugins")]
+#[cfg(pqlite_unstable_plugins)]
 pub mod plugin;
 pub mod row_codec;
 pub mod session;
