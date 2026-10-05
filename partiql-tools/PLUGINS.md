@@ -76,6 +76,20 @@ See the module docs in `src/plugin/source.rs`. In summary:
 Borrowed strings are sound under `BufferStability::UntilNext`, because a batch
 is kept for one extra batch after its last row.
 
+## Tests
+
+* `src/plugin/tests.rs` covers the host side in-process: a Rust plugin goes
+  through the same loader, skipping only `dlopen`.
+* `tests/pqlite_plugin_c.rs` covers the full path. It compiles
+  [`tests/plugins/c_plugin.c`](tests/plugins/c_plugin.c), a plugin in plain
+  C99 that uses only the header (no Arrow library), and loads it into the
+  `pqlite` binary with `--load`. The C plugin is also a small reference for
+  plugin authors.
+
+```bash
+RUSTFLAGS="--cfg pqlite_unstable_plugins" cargo test -p partiql-tools
+```
+
 ## Known limits
 
 * `COUNT(*)` and other queries that read no specific fields request the whole
