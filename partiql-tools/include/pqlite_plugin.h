@@ -152,7 +152,7 @@ typedef struct PqliteHostV1 {
 
   /* Key/value options the user passed for plugins (`--plugin-opt k=v`).
    * Borrowed: valid only during pqlite_plugin_init. Keys are conventionally
-   * prefixed with the plugin's name, e.g. "cairns.cache_dir". */
+   * prefixed with the plugin's name, e.g. "myplugin.cache_dir". */
   const PqliteKeyValue* config;
   size_t n_config;
 } PqliteHostV1;
@@ -185,7 +185,7 @@ typedef struct PqliteArg {
 
 typedef struct PqliteTableFnDef {
   uint32_t struct_size;
-  PqliteStr name;  /* SQL name, e.g. "scan_cairns_partition"; unique per host */
+  PqliteStr name;  /* SQL name, e.g. "scan_parquet"; unique per host */
   PqliteStr usage; /* one line for `.help`, e.g. "scan_x(spec) — ..." */
   uint32_t min_args;
   uint32_t max_args;
