@@ -19,7 +19,6 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - 'NOTICE'
-  workflow_dispatch:
 
 # Supersede in-progress runs for the same PR. `head_ref` is only set for `pull_request` events, so pushes to long-lived
 # branches each get a unique group and are never cancelled (or replaced while pending).
