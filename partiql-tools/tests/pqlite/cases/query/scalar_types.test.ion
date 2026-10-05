@@ -1,0 +1,2 @@
+// Decimal, Bool, and Null value types survive projection over an inline bag.
+{ sql: "SELECT * FROM << {'d': 3.14, 'b': true, 'n': NULL}, {'d': 2.5, 'b': false, 'n': NULL} >> q", expect: { rows: $bag::[ { d: 3.14, b: true, n: null }, { d: 2.5, b: false, n: null } ] } }

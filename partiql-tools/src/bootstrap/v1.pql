@@ -1,0 +1,5 @@
+-- pqlite bootstrap v1
+-- Executed once on first startup (schema_version < 1). Registers the _tables
+-- system catalog as a queryable table. Statements are separated by `;`; `--`
+-- line comments are ignored (including any `;` within them).
+CREATE TABLE _tables;

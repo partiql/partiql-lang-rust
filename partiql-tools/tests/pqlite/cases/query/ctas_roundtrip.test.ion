@@ -1,0 +1,7 @@
+// CTAS from an inline bag literal, then read the stored table back.
+{ sql: "CREATE TABLE nums AS (SELECT * FROM << {'a': 1}, {'a': 2}, {'a': 3} >>)", expect: { created_table: { name: ["nums"], rows: 3 } } }
+{ sql: "SELECT * FROM nums", expect: { rows: $bag::[ { a: 1 }, { a: 2 }, { a: 3 } ] } }
+// Bool round-trip through disk: a regression in the bool wire-format encode
+// or decode would slip past inline-only tests that never persist to storage.
+{ sql: "CREATE TABLE flags AS (SELECT * FROM << {'b': true}, {'b': false} >>)", expect: { created_table: { name: ["flags"], rows: 2 } } }
+{ sql: "SELECT * FROM flags", expect: { rows: $bag::[ { b: true }, { b: false } ] } }

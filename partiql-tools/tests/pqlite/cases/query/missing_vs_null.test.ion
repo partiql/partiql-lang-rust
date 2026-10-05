@@ -1,0 +1,6 @@
+// A referenced-but-absent field must render as $missing::null, not null.
+// Locks in the MISSING_ANNOT branch in value_to_element.
+{ sql: "SELECT m.nope AS x FROM << {'a': 1} >> m", expect: { rows: $bag::[ { x: $missing::null } ] } }
+// NULL and MISSING side-by-side inside a list — the annotation must survive
+// container recursion.
+{ sql: "SELECT [NULL, m.nope] AS xs FROM << {'a': 1} >> m", expect: { rows: $bag::[ { xs: [null, $missing::null] } ] } }

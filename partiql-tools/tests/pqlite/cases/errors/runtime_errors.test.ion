@@ -1,0 +1,15 @@
+// Runtime error surface. Each fixture asserts on a substring of the error
+// message so a downstream rewording that loses the anchor phrase fails loudly.
+// Whitespace-only input trips the pre-parse empty-query guard.
+{ sql: "   ", expect: { error: "empty query" } }
+// SELECT from a name that isn't in _tables.
+{ sql: "SELECT * FROM ghost", expect: { error: "Table 'ghost' not found" } }
+// Duplicate CREATE TABLE surfaces the storage-layer TableExists error.
+{ sql: "CREATE TABLE t" }
+{ sql: "CREATE TABLE t", expect: { error: "already exists" } }
+// INSERT INTO a table that was never created.
+{ sql: "INSERT INTO ghost SELECT * FROM << {'a':1} >>", expect: { error: "table not found: ghost" } }
+// The system catalog is read-only from user-space.
+{ sql: "INSERT INTO _tables SELECT * FROM << {'name': ['x']} >>", expect: { error: "system table" } }
+// An INSERT that produces zero source rows must still succeed with count 0.
+{ sql: "INSERT INTO t SELECT * FROM << {'a':99} >> WHERE FALSE", expect: { affected_rows: 0 } }

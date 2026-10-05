@@ -19,7 +19,7 @@ mod tests {
         catalog: &dyn SharedCatalog,
         logical: &LogicalPlan<partiql_logical::BindingsOp>,
         bindings: MapBindings<Value>,
-        ctx_vals: &[(String, &(dyn Any))],
+        ctx_vals: &[(String, &dyn Any)],
     ) -> Result<Value, EvalErr> {
         let mut planner =
             partiql_eval::plan::EvaluatorPlanner::new(EvaluationMode::Strict, catalog);
