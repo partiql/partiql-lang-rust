@@ -44,8 +44,23 @@ impl PrettyDoc for Dml {
         D::Doc: Clone,
         A: Clone,
     {
+        let Dml {
+            op,
+            from_clause,
+            where_clause,
+            returning,
+        } = self;
         // The grammar does not yet produce the FROM, WHERE, or RETURNING clauses.
-        self.op.pretty_doc(arena)
+        if from_clause.is_some() {
+            todo!("DML FROM clause")
+        }
+        if where_clause.is_some() {
+            todo!("DML WHERE clause")
+        }
+        if returning.is_some() {
+            todo!("DML RETURNING clause")
+        }
+        op.pretty_doc(arena)
     }
 }
 
@@ -58,11 +73,11 @@ impl PrettyDoc for DmlOp {
     {
         match self {
             DmlOp::Insert(insert) => insert.pretty_doc(arena),
-            // The remaining DML operations are not yet produced by the grammar; emit
-            // an empty document rather than panicking until they are implemented.
-            DmlOp::InsertValue(_) | DmlOp::Set(_) | DmlOp::Remove(_) | DmlOp::Delete(_) => {
-                arena.nil()
-            }
+            // The remaining DML operations are not yet produced by the grammar.
+            DmlOp::InsertValue(_) => todo!("DmlOp::InsertValue"),
+            DmlOp::Set(_) => todo!("DmlOp::Set"),
+            DmlOp::Remove(_) => todo!("DmlOp::Remove"),
+            DmlOp::Delete(_) => todo!("DmlOp::Delete"),
         }
     }
 }
@@ -103,9 +118,10 @@ impl PrettyDoc for DdlOp {
     {
         match self {
             DdlOp::CreateTable(create_table) => create_table.pretty_doc(arena),
-            // The remaining DDL operations are not yet produced by the grammar; emit
-            // an empty document rather than panicking until they are implemented.
-            DdlOp::DropTable(_) | DdlOp::CreateIndex(_) | DdlOp::DropIndex(_) => arena.nil(),
+            // The remaining DDL operations are not yet produced by the grammar.
+            DdlOp::DropTable(_) => todo!("DdlOp::DropTable"),
+            DdlOp::CreateIndex(_) => todo!("DdlOp::CreateIndex"),
+            DdlOp::DropIndex(_) => todo!("DdlOp::DropIndex"),
         }
     }
 }
