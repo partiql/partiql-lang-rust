@@ -31,7 +31,49 @@ pqlite open <db>                              # REPL against <db>
 pqlite exec [--db <path>] [--format text|ion] "<query>"
 pqlite --version
 pqlite --debug ast,plan,program ...           # or --debug '*'
+pqlite complete [--shell <shell>] [--print]   # shell completions (see below)
 ```
+
+**Shell completions**
+
+`pqlite complete` (from [`clap_autocomplete`](https://crates.io/crates/clap_autocomplete))
+generates completion scripts for `bash`, `zsh`, `fish`, `powershell` (alias `pwsh`) and
+`elvish`. Without `--shell` it tries to detect your shell. Completions cover subcommands,
+flags, `--format`/`--debug`/`--shell` values, and file paths for `open <db>` and `exec --db`.
+
+On Linux/macOS, `--print` writes the script to stdout. Without `--print`, bash, zsh and
+fish scripts are written to these default locations (the first two usually need `sudo`):
+
+| Shell | Default location |
+|---|---|
+| bash | `/usr/share/bash-completion/completions/pqlite` |
+| zsh | `/usr/share/zsh/functions/Completion/Base/_pqlite` |
+| fish | `$XDG_CONFIG_HOME/fish/completions/pqlite.fish` |
+
+PowerShell and Elvish scripts always go to stdout (and on Windows every shell does; `--print`
+doesn't exist there). To install per-user without root:
+
+```
+# bash
+mkdir -p ~/.local/share/bash-completion/completions
+pqlite complete --shell bash --print > ~/.local/share/bash-completion/completions/pqlite
+
+# zsh: put the file in a directory on $fpath, before `compinit` runs in ~/.zshrc
+mkdir -p ~/.zfunc
+pqlite complete --shell zsh --print > ~/.zfunc/_pqlite
+#   in ~/.zshrc:  fpath=(~/.zfunc $fpath); autoload -Uz compinit && compinit
+
+# fish
+pqlite complete --shell fish            # writes ~/.config/fish/completions/pqlite.fish
+
+# PowerShell: add to $PROFILE
+pqlite complete --shell powershell | Out-String | Invoke-Expression
+
+# elvish: add to ~/.config/elvish/rc.elv
+eval (pqlite complete --shell elvish | slurp)
+```
+
+Regenerate the script whenever you upgrade pqlite, so new flags show up.
 
 **REPL meta commands**
 

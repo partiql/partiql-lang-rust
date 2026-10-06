@@ -7,7 +7,8 @@ use partiql_tools::session::{
     OutputFormat, PqliteSession, RunOutcome,
 };
 
-use clap::{Parser, Subcommand};
+use clap::builder::PossibleValuesParser;
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueHint};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
     ValidationResult, Validator,
@@ -23,11 +24,19 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 /// Use table functions in queries to access data:
 ///   SELECT t.a FROM mem(100, 2) t;
 ///   SELECT t.name FROM scan_ion('data.ion') t;
+///
+/// Shell completions: `pqlite complete --shell <bash|zsh|fish|powershell|elvish> --print`.
+/// See PQLITE.md for install instructions.
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
     /// Print debug info for pipeline stages. Accepts: ast, plan, program, or * for all.
-    #[arg(long, global = true, value_delimiter = ',')]
+    #[arg(
+        long,
+        global = true,
+        value_delimiter = ',',
+        value_parser = PossibleValuesParser::new(["ast", "plan", "program", "*"]),
+    )]
     debug: Vec<String>,
 
     #[command(subcommand)]
@@ -39,14 +48,16 @@ enum CliCommand {
     /// Open a database file and start the interactive REPL.
     Open {
         /// Path to the database file. The parent directory must already exist.
+        #[arg(value_hint = ValueHint::FilePath)]
         db: std::path::PathBuf,
     },
     /// Execute a single query immediately, optionally against a database file.
     Exec {
         /// The PartiQL query string to run.
+        #[arg(value_hint = ValueHint::Other)]
         query: String,
         /// Path to the database file. Omit for db-free queries.
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::FilePath)]
         db: Option<std::path::PathBuf>,
         /// Output format: `text` (default) or `ion`.
         #[arg(long, default_value_t = OutputFormat::Text, value_enum)]
@@ -54,8 +65,34 @@ enum CliCommand {
     },
 }
 
+/// Name of the shell-completion subcommand registered by `clap_autocomplete`.
+const COMPLETE_SUBCOMMAND: &str = "complete";
+
+/// Shells accepted by `clap_autocomplete`'s `--shell` argument.
+const COMPLETION_SHELLS: [&str; 6] = ["bash", "zsh", "fish", "powershell", "pwsh", "elvish"];
+
+/// Build the full clap command: the derived `Cli` plus `clap_autocomplete`'s
+/// `complete` subcommand, with its `--shell` restricted to the supported shells
+/// so they show up in completions themselves.
+fn build_command() -> clap::Command {
+    clap_autocomplete::add_subcommand(Cli::command()).mut_subcommand(COMPLETE_SUBCOMMAND, |c| {
+        c.mut_arg("shell", |a| {
+            a.value_parser(PossibleValuesParser::new(COMPLETION_SHELLS))
+        })
+    })
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let command = build_command();
+    let matches = command.clone().get_matches();
+    if let Some(result) = clap_autocomplete::test_subcommand(&matches, command) {
+        if let Err(e) = result {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     let debug = DebugFlags::from_args(&cli.debug);
 
     match cli.command {
