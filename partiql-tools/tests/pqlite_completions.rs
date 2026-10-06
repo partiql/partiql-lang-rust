@@ -63,12 +63,46 @@ fn zsh_completions_carry_value_hints() {
     );
     // value_enum / PossibleValuesParser surface as literal alternatives.
     assert!(script.contains(":FORMAT:(text ion)"), "{script}");
-    assert!(script.contains(":DEBUG:(ast plan program *)"), "{script}");
+    assert!(script.contains(":DEBUG:(ast plan program all)"), "{script}");
     assert!(
         script.contains(
             ":shell -- The shell to generate completions for:(bash elvish fish powershell zsh)"
         ),
         "{script}"
+    );
+}
+
+/// A bare `*` among the listed values is glob-expanded by the shell, which
+/// floods `--debug <TAB>` with the current directory's files.
+#[rstest]
+#[case("bash")]
+#[case("zsh")]
+#[case("fish")]
+fn completions_do_not_emit_glob_values(#[case] shell: &str) {
+    let script = run_completions(shell);
+    for needle in ["program *", "*\\t''"] {
+        assert!(
+            !script.contains(needle),
+            "{shell} script contains glob value {needle:?}"
+        );
+    }
+}
+
+#[test]
+fn debug_star_alias_still_accepted() {
+    let out = Command::new(PQLITE)
+        .args(["--debug", "*", "exec", "SELECT t.a FROM mem(1, 1) t"])
+        .output()
+        .expect("failed to spawn pqlite");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("[AST]") && stderr.contains("[Plan]"),
+        "{stderr}"
     );
 }
 

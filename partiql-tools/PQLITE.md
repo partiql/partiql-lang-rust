@@ -87,7 +87,7 @@ cargo build --release --bin pqlite
 pqlite open <db>                              # REPL against <db>
 pqlite exec [--db <path>] [--format text|ion] "<query>"
 pqlite --version
-pqlite --debug ast,plan,program ...           # or --debug '*'
+pqlite --debug ast,plan,program ...           # or --debug all (alias '*')
 pqlite completions <shell>                    # print a shell completion script (see Installation)
 ```
 

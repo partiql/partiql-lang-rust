@@ -10,7 +10,7 @@ pub struct DebugFlags {
 
 impl DebugFlags {
     pub fn from_args(args: &[String]) -> Self {
-        let all = args.iter().any(|s| s == "*");
+        let all = args.iter().any(|s| s == "all" || s == "*");
         DebugFlags {
             ast: all || args.iter().any(|s| s == "ast"),
             plan: all || args.iter().any(|s| s == "plan"),

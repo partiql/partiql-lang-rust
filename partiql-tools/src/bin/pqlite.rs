@@ -7,7 +7,7 @@ use partiql_tools::session::{
     OutputFormat, PqliteSession, RunOutcome,
 };
 
-use clap::builder::PossibleValuesParser;
+use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
@@ -30,17 +30,24 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
-    /// Print debug info for pipeline stages. Accepts: ast, plan, program, or * for all.
-    #[arg(
-        long,
-        global = true,
-        value_delimiter = ',',
-        value_parser = PossibleValuesParser::new(["ast", "plan", "program", "*"]),
-    )]
+    /// Print debug info for pipeline stages. Accepts: ast, plan, program, or all (alias '*').
+    #[arg(long, global = true, value_delimiter = ',', value_parser = debug_values())]
     debug: Vec<String>,
 
     #[command(subcommand)]
     command: CliCommand,
+}
+
+/// Values accepted by `--debug`. `*` is a hidden alias of `all`: completion
+/// generators emit possible values unquoted, so a visible `*` would be
+/// glob-expanded into the current directory's file names.
+fn debug_values() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("ast"),
+        PossibleValue::new("plan"),
+        PossibleValue::new("program"),
+        PossibleValue::new("all").alias("*"),
+    ])
 }
 
 #[derive(Subcommand)]
