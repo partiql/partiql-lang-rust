@@ -1905,6 +1905,12 @@ impl ProgramBuilder {
         self.consts.len()
     }
 
+    /// The first register not yet allocated; scratch registers of an inlined
+    /// sub-program must start at or above it.
+    pub fn next_reg(&self) -> u16 {
+        self.next_reg
+    }
+
     /// Update next_reg to at least the given value (for merging sub-programs).
     pub fn update_next_reg(&mut self, reg_count: u16) {
         if reg_count > self.next_reg {
@@ -2366,10 +2372,30 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 Err(EngineError::UnsupportedExpr("dynamic lookup".to_string()))
             }
             ValueExpr::Path(base, components) => {
-                // First, try to resolve the first component directly as a field
-                if let Some(PathComponent::Key(name)) = components.first() {
+                // First, try to resolve the first component as a pushed-down field of the
+                // base binding; any remaining components navigate within that field.
+                if let (ValueExpr::VarRef(..), Some(PathComponent::Key(name))) =
+                    (&**base, components.first())
+                {
                     if let Some(slot) = self.resolver.resolve_field(name) {
-                        return Ok(Expr::SlotRef(slot));
+                        let mut current = Expr::SlotRef(slot);
+                        for component in &components[1..] {
+                            match component {
+                                PathComponent::Key(name) => {
+                                    current = Expr::GetField(
+                                        current.into(),
+                                        bindings_name_to_string(name),
+                                    );
+                                }
+                                _ => {
+                                    return Err(EngineError::UnsupportedExpr(format!(
+                                        "unsupported path component: {:?}",
+                                        component
+                                    )));
+                                }
+                            }
+                        }
+                        return Ok(current);
                     }
                 }
 

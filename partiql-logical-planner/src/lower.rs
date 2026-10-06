@@ -3215,4 +3215,39 @@ mod tests {
             if db.path == vec![BindingsName::CaseInsensitive("orders".into())]);
         assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("t", "a"))]);
     }
+
+    #[test]
+    fn test_static_from_infers_alias_from_table_name_or_last_path_step() {
+        let mut catalog = PartiqlCatalog::default();
+        let _oid = catalog.add_type_entry(TypeEnvEntry::new("onek", &[], PartiqlShape::Dynamic));
+        let with_catalog = catalog.to_shared_catalog();
+        let without_catalog = PartiqlCatalog::default().to_shared_catalog();
+        for catalog in [&with_catalog, &without_catalog] {
+            let lower = |statement: &str| {
+                let parsed = partiql_parser::Parser::default()
+                    .parse(statement)
+                    .expect("Expect successful parse");
+                LogicalPlanner::with_var_resolution(catalog, VarRefResolution::Static)
+                    .lower(&parsed)
+                    .expect("lower")
+            };
+
+            // `FROM onek` binds `onek` (not a generated `_1`), whether or not the catalog
+            // knows the table.
+            let plan = lower("SELECT onek.x FROM onek WHERE onek.x > 1");
+            scan_expr(&plan, "onek");
+            assert_eq!(
+                project_exprs(&plan),
+                &[("x".to_string(), attr("onek", "x"))]
+            );
+
+            // A path source binds its last step.
+            let plan = lower("SELECT unique1.y FROM onek.unique1");
+            scan_expr(&plan, "unique1");
+            assert_eq!(
+                project_exprs(&plan),
+                &[("y".to_string(), attr("unique1", "y"))]
+            );
+        }
+    }
 }
