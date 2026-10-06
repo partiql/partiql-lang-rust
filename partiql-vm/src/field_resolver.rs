@@ -12,7 +12,7 @@
 
 use partiql_logical::{PathComponent, ValueExpr};
 use partiql_value::BindingsName;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Unique identifier for a field request (used for deduplication).
 type FieldRequestId = u32;
@@ -35,6 +35,12 @@ pub(crate) struct CompileContext {
     next_id: FieldRequestId,
     /// Deduplication: (alias, field) → existing request ID
     seen: FxHashMap<(String, String), FieldRequestId>,
+    /// Aliases whose whole row value is referenced (e.g. a bare `VarRef(alias)`), so their
+    /// scans must load the whole value rather than only the requested fields.
+    whole_values: FxHashSet<String>,
+    /// Some expression may reference any scan's whole value (`SELECT *`, or an expression
+    /// the extractor does not walk), so no scan may rely on field pushdown alone.
+    whole_values_all: bool,
 }
 
 impl CompileContext {
@@ -59,6 +65,25 @@ impl CompileContext {
     }
 
     /// Get all requests targeting a specific alias.
+    /// Request the whole value of the scan bound to `alias`.
+    pub fn request_whole_value(&mut self, alias: &str) {
+        self.whole_values.insert(alias.to_string());
+    }
+
+    /// Request the whole value of every scan.
+    pub fn request_all_whole_values(&mut self) {
+        self.whole_values_all = true;
+    }
+
+    /// Whether the scan bound to `alias` (or named `table_name`) must load its whole value.
+    pub fn needs_whole_value(&self, alias: &str, table_name: Option<&str>) -> bool {
+        self.whole_values_all
+            || self.whole_values.iter().any(|a| {
+                a.eq_ignore_ascii_case(alias)
+                    || table_name.is_some_and(|t| a.eq_ignore_ascii_case(t))
+            })
+    }
+
     pub fn requests_for_alias<'a>(
         &'a self,
         alias: &str,
@@ -118,11 +143,16 @@ impl<'a> ExprFieldExtractor<'a> {
             ValueExpr::UnExpr(_op, operand) => {
                 self.walk(operand);
             }
+            // A bare variable needs the whole value bound to it.
+            ValueExpr::VarRef(alias, _) => {
+                self.ctx
+                    .request_whole_value(&bindings_name_to_string(alias));
+            }
             // Leaf expressions — no field accesses to extract
-            ValueExpr::Lit(_) | ValueExpr::VarRef(_, _) | ValueExpr::DBRef(_) => {}
-            // For other expression types, just skip for now.
-            // Complex expressions (Case, Call, etc.) can be extended later.
-            _ => {}
+            ValueExpr::Lit(_) | ValueExpr::DBRef(_) => {}
+            // Other expression types (Case, Call, etc.) are not walked yet; they may use
+            // any variable, so conservatively disable pushdown.
+            _ => self.ctx.request_all_whole_values(),
         }
     }
 }

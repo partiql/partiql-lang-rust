@@ -1225,6 +1225,7 @@ impl<'a> PlanCompiler<'a> {
             BindingsOp::ProjectAll(mode) => {
                 let input_id = graph.single_input(id)?;
                 let mode = mode.clone();
+                ctx.request_all_whole_values();
                 let mut result = self.compile_node(graph, input_id, ctx)?;
                 self.apply_project_all_metadata(&mut result, &mode)?;
                 Ok(result)
@@ -1296,7 +1297,8 @@ impl<'a> PlanCompiler<'a> {
         let mut column_slots = FxHashMap::default();
         let mut base_row_slot: Option<SlotId> = None;
         let mut next_slot: SlotId = 0;
-        let mut needs_whole_value = my_requests.is_empty();
+        let mut needs_whole_value =
+            my_requests.is_empty() || ctx.needs_whole_value(&scan.as_key, table_name.as_deref());
 
         if !needs_whole_value {
             for req in &my_requests {
@@ -1586,7 +1588,8 @@ impl<'a> PlanCompiler<'a> {
         let mut column_slots = FxHashMap::default();
         let mut base_row_slot: Option<SlotId> = None;
         let mut next_slot: SlotId = 0;
-        let mut needs_whole_value = my_requests.is_empty();
+        let mut needs_whole_value =
+            my_requests.is_empty() || ctx.needs_whole_value(&scan.as_key, table_name.as_deref());
 
         if !needs_whole_value {
             for req in &my_requests {

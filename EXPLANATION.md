@@ -32,9 +32,15 @@ gave the right answer.
    it read the wrong field: `SUM(e.a), SUM(b)` computed `SUM(b)` twice. This bug has
    nothing to do with aliases, but every interesting aliased query also runs into it.
 
-Both are fixed on the branch, in two separate commits. You asked for lateral joins and
-ambiguity to be handled, so the lowering fix grew from "hide the item's own alias" into a
-small, explicit set of scoping rules (below).
+Both are fixed on the branch. You asked for lateral joins and ambiguity to be handled, so
+the lowering fix grew from "hide the item's own alias" into a small, explicit set of
+scoping rules (below). After your review, three more changes landed:
+
+- Outside FROM, Static resolution now uses Kotlin's order: local bindings before globals.
+- The conformance harness accepts an `AmbiguousReference` lowering error where a test
+  expects the query to fail.
+- Two latent bugs that the old (wrong) plans had been hiding are fixed. They are
+  described under "Follow-up fixes" below.
 
 ## How a query flows: AST → logical plan → VM program
 
@@ -188,13 +194,24 @@ All the changes are in `search_locals` (Static mode only; Dynamic is untouched):
    now records `KeyRegistry::from_lets: FROM item → owning query`. A FROM item is visible
    only if its owner is the current query or one that encloses it. Without this,
    `SELECT a FROM e … WHERE EXISTS (SELECT 1 FROM t)` would make `a` ambiguous.
-5. **Exact match first, then the implicit attribute rule.** Pass 1 looks for an exact
-   binding match at every level, innermost first, so a correlated outer variable wins over
-   an inner implicit-attribute guess. Pass 2 applies your rule: at the innermost level
-   that has FROM bindings, if there is **exactly one**, `a` becomes `binding.a` (using its
-   `AS` name; `AT` names are not candidates). If there are several, lowering fails with the
-   new `AstTransformError::AmbiguousReference { name, candidates }`. GROUP BY keys are
-   never candidates.
+5. **Resolution order** follows Kotlin's `TypeEnv` (and spec section 10).
+   `resolve_varref_static` decides the order; `search_locals(…, LocalPass)` runs one
+   pass at a time.
+   - An unqualified name *in a FROM source*: global table, then an exact local binding.
+   - Anything else (SELECT, WHERE, GROUP BY, …, or `@name` anywhere): an exact local
+     binding, then a global table.
+   - After both of those fail, the *implicit attribute* rule applies (never in FROM). At
+     the innermost level that has FROM bindings, if there is **exactly one** binding, `a`
+     becomes `binding.a`, using its `AS` name (`AT` names are not candidates). If there
+     are several, lowering fails with the new
+     `AstTransformError::AmbiguousReference { name, candidates }`. GROUP BY keys are
+     never candidates.
+
+   The exact-match pass covers every level, innermost first, so a correlated outer
+   variable wins over an inner implicit-attribute guess. A local binding also shadows a
+   catalog table with the same name. In the conformance suite, `FROM animals AS a WHERE
+   a.name = 'Kumo'` used to bind `a.name` to the *global* table `a` from the test
+   environment.
 
 ## What Kotlin does (partiql-lang-kotlin, `partiql-planner/.../internal`)
 
@@ -227,11 +244,10 @@ All the changes are in `search_locals` (Static mode only; Dynamic is untouched):
 - Rust has no types at lowering time, so every binding counts as "unknown". The rules
   agree with Kotlin's open-type behaviour, except that Rust reports a dedicated
   `AmbiguousReference` error where Kotlin reports "not found".
-- Rust tries globals first for unqualified names everywhere. Kotlin does that only in
-  FROM, and tries locals first in SELECT and WHERE. This is harmless in pqlite, where
-  tables are not in the planning catalog. Once they are, though,
-  `SELECT example.a FROM example` would bind `example` to the global table rather than
-  the local binding (see question 2).
+- Resolution order now matches Kotlin: globals first only in FROM, locals first
+  elsewhere. One difference remains. Kotlin's `@name` still falls back to globals, and so
+  does Rust's, but Rust never applies the implicit attribute rule inside FROM, even for
+  `@name`.
 - Rust has no closed-schema disambiguation. That is what would let `SELECT x FROM t1,
   t1.nodes n` work once `t1`'s schema is known.
 
@@ -267,9 +283,17 @@ hidden = id_stack ∪ { f | from_lets[f] ∉ query_id_stack }
 if in FROM item F of query Q:
     levels = [in_scope[F]];  hidden ∪= in_scope[Q] \ in_scope[F];  skip id_stack up to Q
 levels += in_scope[ancestor] for remaining ancestors
-pass 1: exact match on produced names in visible scopes  -> VarRef(name, Local)
-if in FROM: return None                                    -> Global
-pass 2: innermost level with FROM bindings: 1 -> Path(b, [name]); >1 -> AmbiguousReference
+Exact:        match on produced names in visible scopes   -> VarRef(name, Local)
+ImplicitAttr: (not in FROM) innermost level with FROM bindings:
+              1 -> Path(b, [name]); >1 -> AmbiguousReference
+
+// resolve_varref_static
+unqualified in FROM : globals ?: Exact ?: ImplicitAttr(=None) ?: Global VarRef
+otherwise           : Exact ?: globals ?: ImplicitAttr ?: Global VarRef
+
+// partiql-vm/src/field_resolver.rs — whole-value requests
+VarRef(alias) -> request_whole_value(alias); ProjectAll / unwalked expr -> request_all
+compile_scan: needs_whole_value = no requests || ctx.needs_whole_value(alias, table)
 ```
 
 The lowering diff is about 100 lines plus 7 unit tests in `lower.rs`. It is bigger than
@@ -278,26 +302,52 @@ minimal version, rule 1 alone is about 8 lines and fixes the headline bug. It *r
 `SELECT c … FROM example GROUP BY c` (the source turns into `c.example`), though, so it
 isn't safe on its own. Rule 2 is the smallest addition that makes it safe.
 
+### Follow-up fixes (exposed by the locals-first order)
+
+Once local bindings shadow globals, plans for catalog-registered tables became correct,
+and that exposed two bugs:
+
+- **`infer_id` ignored `DBRef`** (`lower.rs`). `FROM onek` over a catalog table got the
+  generated scan alias `_1`, while the name resolver (correctly) named the binding
+  `onek`. `WHERE onek.unique1 < 10` then failed with `unresolved var`. The fix infers the
+  last `DBRef` path component, just as it already did for a `VarRef`.
+- **Projection pushdown dropped the whole row** (`partiql-vm/src/field_resolver.rs`).
+  When a WHERE clause asked for `a.name`, the scan loaded only that field. `SELECT *`, a
+  bare `a`, and the expressions the extractor doesn't walk (`Call`, `CASE`, …) still need
+  the whole row, so they failed with `unresolved var a`. `CompileContext` now records
+  whole-value requests: a bare `VarRef(alias)` requests that alias, while `ProjectAll` and
+  unwalked expressions request all aliases. A scan then loads the whole value whenever it
+  has been requested. pqlite's LMDB source never pushes down, so only sources that
+  support pushdown (e.g. the conformance catalog) were affected.
+
+### Conformance harness
+
+`fail_eval` (`partiql-conformance-tests/tests/mod.rs`) now accepts a lowering error where
+the test expects `EvaluationFail`, *if every error is `AmbiguousReference`*. Other lowering
+errors still fail the test. A blanket "any lowering error" rule would have produced 27
+false passes in the legacy run: queries whose `CAST` lowering is simply
+`UnsupportedFunction("cast")`. When a planner resolves names statically, it rejects an
+invalid query before evaluation, so this is the right reading of "query must fail". The
+diff is 3 lines.
+
 ### Risks
 
-- **Conformance under `eval_vm`** improves from 4696 to 4706 passing: 18 tests newly pass
-  and 8 newly fail. The 8 are all of the form "GROUP BY / GROUP AS binding referenced in
-  FROM / WHERE", e.g.
-  `SELECT gb_binding FROM sales_report, gb_binding WHERE … GROUP BY rep AS gb_binding`.
-  These are negative tests that expect `EvaluationFail`. They are still rejected, but now
-  at lowering (`AmbiguousReference` for `rep`, since there are two FROM bindings), and the
-  harness counts an unexpected *lowering* error as a test failure. Before, they "passed"
-  by failing at runtime for the wrong reason. Kotlin would also reject them at planning
-  time. Question 1 asks how you want to handle this.
-- The default (non-VM) conformance run is unchanged: 5668/787, with an identical failure
-  set. Dynamic mode doesn't use `search_locals`.
+- **Conformance under `eval_vm`** improves from 4696 to **4776** passing, with **no
+  newly failing tests** compared with main. Of the 80 tests that now pass, 36 are `int_8`
+  tests, 24 are `select` tests and 10 are `group_by` tests. The "GROUP BY / GROUP AS
+  binding referenced in FROM / WHERE" negative tests are rejected at lowering
+  (`AmbiguousReference`), which the harness now accepts.
+- The default (non-VM) conformance run is unchanged: 5668/787, with a failure set
+  identical to main's. Dynamic mode doesn't use `search_locals`.
+- Pushdown is now more conservative. Any `Call`/`CASE`/… in a projection, filter or
+  aggregate disables pushdown for the whole query. That can cost performance, but not
+  correctness. Making the extractor walk those expressions would win the pushdown back.
 - `KeyRegistry` gains a public field. It isn't `#[non_exhaustive]`, so code outside the
   crate that builds it with a struct literal would break. Within the workspace it is only
   built by the resolver.
 - The new ambiguity error is a behaviour change. Queries that used to silently pick the
   first FROM binding now fail at lowering. That is intended, but a user could notice it.
-- `@name` (qualified) still runs locals → globals through the same code. FROM items
-  inside GROUP BY or HAVING expressions, and `WITH`, were not exercised.
+- FROM items inside GROUP BY or HAVING expressions, and `WITH`, were not exercised.
 
 ## Remaining gaps (not name resolution; kept as `skip::` fixtures)
 
@@ -315,18 +365,12 @@ All of these now produce **correct logical plans**. They fail later, in the VM:
   information reaches lowering. That information is what would allow Kotlin-style
   type-based disambiguation.
 
-## Questions for you
+## Decisions (from review)
 
-1. The 8 `simple_group_by_fail` conformance tests under `eval_vm` now fail at lowering
-   (`AmbiguousReference`) rather than at evaluation. You can (a) accept this, (b) make the
-   VM conformance harness accept a lowering error where the test expects `EvaluationFail`,
-   which is arguably correct for a static planner, or (c) make ambiguity a deferred
-   runtime error. Which would you prefer?
-2. Should Static resolution switch to Kotlin's order for unqualified names outside FROM,
-   i.e. locals before globals? It makes no difference in pqlite today, but it will once
-   stored tables are registered in the planning catalog.
-3. Do you want the full lowering fix kept as is, or split further (for example, land
-   rules 1–2 first and rules 4–5, the ambiguity error, separately)?
+1. Conformance harness: accept lowering errors for expected failures. Done, restricted
+   to `AmbiguousReference`; see "Conformance harness".
+2. Locals before globals outside FROM: done; see rule 5 and "Follow-up fixes".
+3. Commit layout doesn't matter, since PRs are squashed on merge.
 
 ## Tests added
 
@@ -339,8 +383,9 @@ All of these now produce **correct logical plans**. They fail later, in the VM:
 - `…/errors/ambiguous_reference.test.ion`: `SELECT x FROM t1, t1.nodes n` and
   `t1, t2` both give `Ambiguous`
 - `…/query/aliased_known_gaps.test.ion`: `skip::` steps for the gaps above
-- `lower.rs` unit tests `test_static_*` (7): plan-level checks for alias, implicit
-  attribute, GROUP BY, lateral, non-lateral global, ambiguity, subquery isolation. These
+- `lower.rs` unit tests `test_static_*` (8, including the case where a local binding shadows a global): plan-level checks for alias, implicit
+  attribute, GROUP BY, lateral, non-lateral global, ambiguity, subquery isolation,
+  locals-before-globals. These
   cover joins even though the VM can't run them yet.
 
 On `main`, `aliased_refs`, `aliased_nested_paths`, `aliased_inline_sources` and
