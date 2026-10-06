@@ -12,6 +12,13 @@ pub struct AstTransformationError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum AstTransformError {
+    /// Indicates an unqualified name that could be an attribute of more than one `FROM` binding.
+    #[error("Ambiguous reference `{name}`: could be an attribute of any of {candidates:?}")]
+    AmbiguousReference {
+        name: String,
+        candidates: Vec<String>,
+    },
+
     /// Indicates that AST lowering has not yet been implemented for this feature.
     #[error("Not yet implemented: {0}")]
     NotYetImplemented(String),
