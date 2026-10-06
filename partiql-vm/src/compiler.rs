@@ -1045,8 +1045,10 @@ impl<'a> PlanCompiler<'a> {
             exprs.push((target_slot, expr.clone()));
         }
 
-        let program =
-            expr_compiler.compile_to_program_multi(&exprs, (output_start + num_outputs) as u16)?;
+        // Scratch registers start above both the outputs and every register already
+        // in use (e.g. the GROUP BY phase's record and key registers).
+        let temp_base = ((output_start + num_outputs) as u16).max(builder.next_reg());
+        let program = expr_compiler.compile_to_program_multi(&exprs, temp_base)?;
         self.inline_program(&program, builder);
         Ok(())
     }
@@ -1060,11 +1062,9 @@ impl<'a> PlanCompiler<'a> {
         builder: &mut ProgramBuilder,
     ) -> Result<()> {
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program = expr_compiler.compile_to_program(
-            &pv.expr,
-            output_slot as SlotId,
-            (output_slot + 1) as u16,
-        )?;
+        let temp_base = ((output_slot + 1) as u16).max(builder.next_reg());
+        let program =
+            expr_compiler.compile_to_program(&pv.expr, output_slot as SlotId, temp_base)?;
         self.inline_program(&program, builder);
         Ok(())
     }
@@ -1091,7 +1091,8 @@ impl<'a> PlanCompiler<'a> {
             VarRefType::Local,
         );
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program = expr_compiler.compile_to_program(&copy_expr, output_slot, output_slot + 1)?;
+        let temp_base = (output_slot + 1).max(builder.next_reg());
+        let program = expr_compiler.compile_to_program(&copy_expr, output_slot, temp_base)?;
         self.inline_program(&program, builder);
 
         match self.mode {

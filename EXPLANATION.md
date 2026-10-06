@@ -292,7 +292,8 @@ unqualified in FROM : globals ?: Exact ?: ImplicitAttr(=None) ?: Global VarRef
 otherwise           : Exact ?: globals ?: ImplicitAttr ?: Global VarRef
 
 // partiql-vm/src/field_resolver.rs — whole-value requests
-VarRef(alias) -> request_whole_value(alias); ProjectAll / unwalked expr -> request_all
+alias.f... -> request_field(alias, f); VarRef(alias) -> request_whole_value(alias)
+ProjectAll / SubQuery / GraphMatch / unknown -> request_all; everything else: walk children
 compile_scan: needs_whole_value = no requests || ctx.needs_whole_value(alias, table)
 ```
 
@@ -312,13 +313,27 @@ and that exposed two bugs:
   `onek`. `WHERE onek.unique1 < 10` then failed with `unresolved var`. The fix infers the
   last `DBRef` path component, just as it already did for a `VarRef`.
 - **Projection pushdown dropped the whole row** (`partiql-vm/src/field_resolver.rs`).
-  When a WHERE clause asked for `a.name`, the scan loaded only that field. `SELECT *`, a
-  bare `a`, and the expressions the extractor doesn't walk (`Call`, `CASE`, …) still need
-  the whole row, so they failed with `unresolved var a`. `CompileContext` now records
-  whole-value requests: a bare `VarRef(alias)` requests that alias, while `ProjectAll` and
-  unwalked expressions request all aliases. A scan then loads the whole value whenever it
-  has been requested. pqlite's LMDB source never pushes down, so only sources that
-  support pushdown (e.g. the conformance catalog) were affected.
+  When a WHERE clause asked for `a.name`, the scan loaded only that field. `SELECT *` and
+  a bare `a` still need the whole row, so they failed with `unresolved var a`.
+  - The extractor now walks every expression kind (calls, CASE, tuple/list/bag
+    constructors, BETWEEN, LIKE, COALESCE, NULLIF, IS). For each binding it records
+    either the fields it needs or that it needs the whole value.
+  - `alias.f…` requests `f`, and any further steps navigate within that field. A bare
+    `alias` requests that binding's whole value. `SELECT *` requests every whole value.
+  - Only subqueries, graph matches and future expression kinds fall back to "whole value
+    for everything".
+  - pqlite's LMDB source never pushes down, so only sources that support pushdown (e.g.
+    the conformance catalog) were affected.
+- **Nested path over a pushed-down field lost its tail** (`partiql-vm/src/expr.rs`).
+  `a.x.y` compiled to the pushed-down slot for `x` and silently dropped `.y`. It now
+  navigates the remaining steps. This is the VM side of the earlier "nested path `t.a.b`
+  fails when combined with another field" report.
+- **Projection scratch registers clashed with GROUP BY registers** (`compiler.rs`,
+  `emit_project*_at`). Projections after GROUP BY took their scratch registers from just
+  past the output slot, which overwrote the sorter's record and key registers. For
+  example, `SELECT VALUE {'col1': col1} … GROUP BY col1` produced
+  `{col1: {col1: 1}}`. Scratch registers now start at the builder's register
+  high-water mark. This bug was only hidden when scans happened to load the whole row.
 
 ### Conformance harness
 
@@ -339,9 +354,10 @@ diff is 3 lines.
   (`AmbiguousReference`), which the harness now accepts.
 - The default (non-VM) conformance run is unchanged: 5668/787, with a failure set
   identical to main's. Dynamic mode doesn't use `search_locals`.
-- Pushdown is now more conservative. Any `Call`/`CASE`/… in a projection, filter or
-  aggregate disables pushdown for the whole query. That can cost performance, but not
-  correctness. Making the extractor walk those expressions would win the pushdown back.
+- Pushdown now applies to more queries than on main, because calls, CASE and the like
+  are walked. Bugs like the register clash, which only show when a scan loads individual
+  fields, are therefore more likely to surface. The conformance VM run found one, and
+  it is fixed.
 - `KeyRegistry` gains a public field. It isn't `#[non_exhaustive]`, so code outside the
   crate that builds it with a struct literal would break. Within the workspace it is only
   built by the resolver.
@@ -383,10 +399,17 @@ All of these now produce **correct logical plans**. They fail later, in the VM:
 - `…/errors/ambiguous_reference.test.ion`: `SELECT x FROM t1, t1.nodes n` and
   `t1, t2` both give `Ambiguous`
 - `…/query/aliased_known_gaps.test.ion`: `skip::` steps for the gaps above
-- `lower.rs` unit tests `test_static_*` (8, including the case where a local binding shadows a global): plan-level checks for alias, implicit
-  attribute, GROUP BY, lateral, non-lateral global, ambiguity, subquery isolation,
-  locals-before-globals. These
-  cover joins even though the VM can't run them yet.
+- `lower.rs` unit tests `test_static_*` (9): plan-level checks covering
+  - FROM aliases, including aliases inferred from a table name or the last step of a
+    path (`FROM onek` → `onek`, `FROM onek.unique1` → `unique1`);
+  - the implicit attribute rule and GROUP BY keys;
+  - lateral items, and a second FROM source resolving as a global;
+  - ambiguity, subquery isolation, and local bindings before globals.
+
+  These cover joins even though the VM can't run them yet.
+- `field_resolver.rs` unit tests (3) for the extractor: a nested path requests its
+  first field; arguments of calls and CASE are walked; a bare variable requests only its
+  own binding's whole value.
 
 On `main`, `aliased_refs`, `aliased_nested_paths`, `aliased_inline_sources` and
 `ambiguous_reference` all fail. On the branch, all fixtures pass and `make ci-check` passes.
