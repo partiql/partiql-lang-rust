@@ -14,38 +14,36 @@ partiql-lang-rust currently uses a tree-walker structure, and is transitioning t
 
 pqlite does not sit on the conformance-test call graph. Any regression is due to ongoing experimental VM changes on `dev` branch. 
 
-## Usage
+## Installation
 
-As of August 18th 2026, Ingestion Functions (`curl()`,`read()`,`stdin()`,`exec()`) are present on `feat/pqlite-ingestion-functions` branch. There is an open PR for this ([#661](https://github.com/partiql/partiql-lang-rust/pull/661)), and switching to that branch will allow for usage of these functions.
+### Install via Homebrew
 
-**Build**
+Not available yet.
+
+<!-- TODO: when the Homebrew formula is added, generate shell completions at install time by
+adding this to the formula's `install` block (runs `pqlite completions bash|zsh|fish` and
+installs the results into Homebrew's completion directories):
+
+    generate_completions_from_executable(bin/"pqlite", "completions")
+-->
+
+### Install from source
+
+From a checkout of this repository:
 
 ```
-cargo build --release --bin pqlite
+cargo install --path partiql-tools --bin pqlite
 ```
 
-**Usage**
-
-```
-pqlite open <db>                              # REPL against <db>
-pqlite exec [--db <path>] [--format text|ion] "<query>"
-pqlite --version
-pqlite --debug ast,plan,program ...           # or --debug '*'
-pqlite completions <shell>                    # print a shell completion script (see below)
-```
+This puts `pqlite` in `~/.cargo/bin` (make sure it's on your `PATH`). Re-run it to pick up
+local changes.
 
 **Shell completions**
 
 `pqlite completions <bash|zsh|fish|powershell|elvish>` prints a
-[`clap_complete`](https://crates.io/crates/clap_complete) script to stdout. Completions
-cover subcommands, flags, `--format`/`--debug` values, shell names, and file paths for
-`open <db>` and `exec --db`.
-
-The scripts are static: they describe the CLI of the binary that produced them. The
-"eval at shell startup" setup below regenerates on every new shell, so it always matches
-whichever `pqlite` is on your `PATH`, which suits local development
-(`cargo install --path partiql-tools` after changing flags, then open a new shell).
-Completions apply to the `pqlite` command, not to `cargo run --bin pqlite --`.
+[`clap_complete`](https://crates.io/crates/clap_complete) completion script to stdout.
+Completions cover subcommands, flags, `--format`/`--debug` values, shell names, and file
+paths for `open <db>` and `exec --db`. Add the line for your shell to its startup file:
 
 ```
 # bash (~/.bashrc)
@@ -64,15 +62,34 @@ pqlite completions powershell | Out-String | Invoke-Expression
 eval (pqlite completions elvish | slurp)
 ```
 
+The script is regenerated every time a shell starts, so it always matches the installed
+`pqlite`: after `cargo install` picks up new flags, open a new shell. Completions apply to
+the `pqlite` command, not to `cargo run --bin pqlite --`.
+
 To install a file once instead, write it to the shell's completion directory, e.g.
 `pqlite completions fish > ~/.config/fish/completions/pqlite.fish` or
-`pqlite completions zsh > ~/.zfunc/_pqlite` (with `~/.zfunc` on `$fpath`). Regenerate it
+`pqlite completions zsh > ~/.zfunc/_pqlite` (with `~/.zfunc` on `$fpath`), and regenerate it
 after upgrading pqlite.
 
-Package managers can generate the files at install time. Homebrew:
-`generate_completions_from_executable(bin/"pqlite", "completions")` in the formula's
-`install` block runs `pqlite completions bash|zsh|fish` and installs the results into
-Homebrew's completion directories.
+## Usage
+
+As of August 18th 2026, Ingestion Functions (`curl()`,`read()`,`stdin()`,`exec()`) are present on `feat/pqlite-ingestion-functions` branch. There is an open PR for this ([#661](https://github.com/partiql/partiql-lang-rust/pull/661)), and switching to that branch will allow for usage of these functions.
+
+**Build**
+
+```
+cargo build --release --bin pqlite
+```
+
+**Usage**
+
+```
+pqlite open <db>                              # REPL against <db>
+pqlite exec [--db <path>] [--format text|ion] "<query>"
+pqlite --version
+pqlite --debug ast,plan,program ...           # or --debug '*'
+pqlite completions <shell>                    # print a shell completion script (see Installation)
+```
 
 **REPL meta commands**
 
