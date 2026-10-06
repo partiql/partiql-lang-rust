@@ -37,7 +37,7 @@ use partiql_common::node::{IdAnnotated, NodeId};
 
 use partiql_logical::AggFunc::{AggAny, AggAvg, AggCount, AggEvery, AggMax, AggMin, AggSum};
 use partiql_logical::ValueExpr::DynamicLookup;
-use rustc_hash::{FxBuildHasher, FxHashMap};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
@@ -207,6 +207,11 @@ pub struct AstToLogical<'a> {
 
     aliases: FnvIndexMap<NodeId, SymbolPrimitive>,
 
+    // node ids of the enclosing queries and FROM items, innermost last; used by static
+    // resolution to scope a FROM item's source expression
+    query_id_stack: Vec<NodeId>,
+    from_let_id_stack: Vec<NodeId>,
+
     // generator of 'fresh' ids
     id: IdGenerator,
     agg_id: IdGenerator,
@@ -285,6 +290,9 @@ impl<'a> AstToLogical<'a> {
             projection_renames: Default::default(),
 
             aliases: Default::default(),
+
+            query_id_stack: Default::default(),
+            from_let_id_stack: Default::default(),
 
             // generator of 'fresh' ids
             id: Default::default(),
@@ -384,34 +392,88 @@ impl<'a> AstToLogical<'a> {
         }
     }
 
-    /// Search for a variable in local scope (schema variables)
+    /// If the node being lowered is (within) the source expression of a FROM item of the
+    /// innermost query, returns that FROM item's id and the id of the query owning it.
+    fn current_from_source(&self) -> Option<(NodeId, NodeId)> {
+        let from_let = *self.from_let_id_stack.last()?;
+        let query = *self.query_id_stack.last()?;
+        let pos = |id: NodeId| self.id_stack.iter().position(|n| *n == id);
+        // The FROM item must be nested inside the innermost query; otherwise we are in a
+        // subquery nested inside the FROM item, which has its own scopes.
+        match (pos(from_let), pos(query)) {
+            (Some(f), Some(q)) if f > q => Some((from_let, query)),
+            _ => None,
+        }
+    }
+
+    /// Search for a variable in local scope (schema variables).
+    ///
+    /// The name resolver's `in_scope` registers every binding on all of its AST ancestors, so
+    /// the scopes found walking up the `id_stack` over-approximate what is visible; the
+    /// `hidden` scopes below trim that to the PartiQL scoping rules. Resolution then runs in
+    /// two passes: an exact match on a visible variable at any level, else an implicit
+    /// attribute of the single FROM binding at the innermost level that has FROM bindings.
     fn search_locals(
         &self,
         varref: &ast::VarRef,
     ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
-        // Walk up the id_stack to find variables in scope
-        for id in self.id_stack.iter().rev() {
-            if let Some(scope_ids) = self.key_registry.in_scope.get(id) {
-                // Collect all variables produced in this scope
-                let mut scope_vars: Vec<String> = Vec::new();
-                for scope_id in scope_ids {
-                    if let Some(schema) = self.key_registry.schema.get(scope_id) {
-                        for produce in &schema.produce {
-                            scope_vars.push(Self::symbol_name(produce)?);
-                        }
-                    }
-                }
+        let mut ids: Vec<NodeId> = self.id_stack.iter().rev().copied().collect();
+        // A node never sees its own bindings (e.g. `example` in `FROM example e` must not
+        // resolve against `e`), nor FROM items of queries other than the current one and
+        // those enclosing it (e.g. those of a nested subquery).
+        let mut hidden: FxHashSet<NodeId> = self.id_stack.iter().copied().collect();
+        hidden.extend(
+            self.key_registry
+                .from_lets
+                .iter()
+                .filter(|(_, query)| !self.query_id_stack.contains(query))
+                .map(|(from_let, _)| *from_let),
+        );
+        let mut levels: Vec<&[NodeId]> = vec![];
+        let from_source = self.current_from_source();
+        if let Some((from_let, query)) = from_source {
+            // A FROM item's source sees the FROM items before it (lateral) and the scopes of
+            // enclosing queries -- never other bindings of its own query (GROUP BY keys,
+            // later FROM items, ...).
+            if let Some(scope_ids) = self.key_registry.in_scope.get(&from_let) {
+                levels.push(scope_ids);
+            }
+            if let Some(own) = self.key_registry.in_scope.get(&query) {
+                hidden.extend(own.iter().filter(|id| {
+                    self.key_registry
+                        .in_scope
+                        .get(&from_let)
+                        .is_none_or(|l| !l.contains(id))
+                }));
+            }
+            let q = ids
+                .iter()
+                .position(|id| *id == query)
+                .expect("query on id_stack");
+            ids.drain(..=q);
+        }
+        levels.extend(
+            ids.iter()
+                .filter_map(|id| self.key_registry.in_scope.get(id))
+                .map(Vec::as_slice),
+        );
 
-                if scope_vars.is_empty() {
-                    continue;
-                }
+        let visible = |scope_ids: &[NodeId]| -> Vec<(NodeId, &name_resolver::KeySchema)> {
+            scope_ids
+                .iter()
+                .filter(|id| !hidden.contains(*id))
+                .filter_map(|id| self.key_registry.schema.get(id).map(|schema| (*id, schema)))
+                .collect()
+        };
 
-                // Try exact match against any scope variable
-                for var_name in &scope_vars {
+        // Pass 1: exact match against any visible variable, innermost first
+        for scope_ids in &levels {
+            for (_, schema) in visible(scope_ids) {
+                for produce in &schema.produce {
                     if Self::names_match(
                         &varref.name.value,
                         &varref.name.case,
-                        var_name,
+                        &Self::symbol_name(produce)?,
                         &CaseSensitivity::CaseInsensitive,
                     ) {
                         return Ok(Some(ValueExpr::VarRef(
@@ -420,43 +482,42 @@ impl<'a> AstToLogical<'a> {
                         )));
                     }
                 }
+            }
+        }
 
-                // No exact match — collect only FROM source variables (first
-                // produce from each scope_id, skipping GROUP BY key scopes which
-                // register after FROM in traversal order). We identify FROM sources
-                // as the first scope_id that produces variables.
-                // If exactly one FROM source, resolve as a field path on it.
-                // If multiple FROM sources, ambiguous — return None (will error).
-                let first_scope_vars: Vec<String> = if let Some(&first_scope_id) = scope_ids.first()
-                {
-                    if let Some(schema) = self.key_registry.schema.get(&first_scope_id) {
-                        schema
-                            .produce
-                            .iter()
-                            .map(Self::symbol_name)
-                            .collect::<Result<_, _>>()?
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                };
+        // An unmatched name in a FROM source is a global (table), not an implicit attribute
+        // of a preceding item: `FROM t1, t2` must not become `t1.t2`; a lateral reference
+        // must be explicit (`FROM t1, t1.nodes n`).
+        if from_source.is_some() {
+            return Ok(None);
+        }
 
-                if first_scope_vars.len() == 1 {
-                    let from_var = &first_scope_vars[0];
-                    if !Self::names_match(
-                        &varref.name.value,
-                        &varref.name.case,
-                        from_var,
-                        &CaseSensitivity::CaseInsensitive,
-                    ) {
-                        let from_var_binding =
-                            BindingsName::CaseInsensitive(Cow::Owned(from_var.clone()));
-                        return Ok(Some(ValueExpr::Path(
-                            Box::new(ValueExpr::VarRef(from_var_binding, VarRefType::Local)),
-                            vec![PathComponent::Key(Self::symprim_to_binding(&varref.name)?)],
-                        )));
-                    }
+        // Pass 2: with no schema for the FROM bindings, an unqualified name is an attribute of
+        // a FROM binding. That is only decidable when exactly one FROM item (its `AS` binding,
+        // the first produced name) is in scope at the innermost level that has any; with
+        // several it is ambiguous. GROUP BY keys are not candidates.
+        for scope_ids in &levels {
+            let candidates: Vec<String> = visible(scope_ids)
+                .iter()
+                .filter(|(id, _)| self.key_registry.from_lets.contains_key(id))
+                .filter_map(|(_, schema)| schema.produce.first())
+                .map(Self::symbol_name)
+                .collect::<Result<_, _>>()?;
+            match candidates.as_slice() {
+                [] => continue,
+                [from_var] => {
+                    let from_var_binding =
+                        BindingsName::CaseInsensitive(Cow::Owned(from_var.clone()));
+                    return Ok(Some(ValueExpr::Path(
+                        Box::new(ValueExpr::VarRef(from_var_binding, VarRefType::Local)),
+                        vec![PathComponent::Key(Self::symprim_to_binding(&varref.name)?)],
+                    )));
+                }
+                _ => {
+                    return Err(AstTransformError::AmbiguousReference {
+                        name: varref.name.value.clone(),
+                        candidates,
+                    })
                 }
             }
         }
@@ -979,6 +1040,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn enter_query(&mut self, query: &'ast Query) -> Traverse {
+        self.query_id_stack.push(*self.current_node());
         let is_scalar = std::mem::take(&mut self.pending_query_is_scalar);
         let should_coerce = std::mem::take(&mut self.pending_query_should_coerce);
         let is_select = matches!(query.set.node, QuerySet::Select(_));
@@ -1002,6 +1064,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_query(&mut self, query: &'ast Query) -> Traverse {
+        self.query_id_stack.pop();
         // Pop the query-body coercion boundary pushed in `enter_query`.
         self.coerce_ctx_stack.pop();
         let is_scalar = self.scalar_query_stack.pop().expect("scalar query level");
@@ -1881,6 +1944,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
 
     fn enter_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
         *self.current_ctx_mut() = QueryContext::FromLet;
+        self.from_let_id_stack.push(*self.current_node());
         self.enter_plan();
         self.enter_benv();
         self.enter_env();
@@ -1897,6 +1961,7 @@ impl<'ast> Visitor<'ast> for AstToLogical<'_> {
     }
 
     fn exit_from_let(&mut self, from_let: &'ast FromLet) -> Traverse {
+        self.from_let_id_stack.pop();
         *self.current_ctx_mut() = QueryContext::Query;
         let subplan = self.exit_plan();
         let benv = self.exit_benv();
@@ -2996,5 +3061,109 @@ mod tests {
             errs.as_slice(),
             [AstTransformError::NotYetImplemented(msg)] if msg == "DML statement lowering"
         );
+    }
+
+    // --- Static resolution of FROM aliases, lateral items and unqualified names ---
+
+    fn lower_static(statement: &str) -> Result<LogicalPlan<BindingsOp>, AstTransformationError> {
+        let catalog = PartiqlCatalog::default().to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse(statement)
+            .expect("Expect successful parse");
+        LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static).lower(&parsed)
+    }
+
+    fn scan_expr<'p>(plan: &'p LogicalPlan<BindingsOp>, as_key: &str) -> &'p ValueExpr {
+        plan.operators()
+            .iter()
+            .find_map(|op| match op {
+                BindingsOp::Scan(logical::Scan {
+                    expr, as_key: k, ..
+                }) if k == as_key => Some(expr),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no scan `{as_key}` in {plan:?}"))
+    }
+
+    fn project_exprs(plan: &LogicalPlan<BindingsOp>) -> &[(String, ValueExpr)] {
+        plan.operators()
+            .iter()
+            .find_map(|op| match op {
+                Project(logical::Project { exprs }) => Some(exprs.as_slice()),
+                _ => None,
+            })
+            .expect("project")
+    }
+
+    fn global(name: &str) -> ValueExpr {
+        ValueExpr::VarRef(
+            BindingsName::CaseInsensitive(name.to_string().into()),
+            VarRefType::Global,
+        )
+    }
+
+    fn attr(var: &str, key: &str) -> ValueExpr {
+        ValueExpr::Path(
+            Box::new(ValueExpr::VarRef(
+                BindingsName::CaseInsensitive(var.to_string().into()),
+                VarRefType::Local,
+            )),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                key.to_string().into(),
+            ))],
+        )
+    }
+
+    #[test]
+    fn test_static_from_alias_does_not_capture_its_own_source() {
+        // `example` used to lower to `e.example`.
+        let plan = lower_static("SELECT e.a FROM example e").expect("lower");
+        assert_eq!(scan_expr(&plan, "e"), &global("example"));
+        assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
+    }
+
+    #[test]
+    fn test_static_unqualified_name_is_attribute_of_single_binding() {
+        let plan = lower_static("SELECT a FROM example AS e WHERE b > 1").expect("lower");
+        assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
+    }
+
+    #[test]
+    fn test_static_from_source_ignores_group_by_keys() {
+        // `example` used to lower to `c.example` (GROUP BY key registered on all ancestors).
+        let plan =
+            lower_static("SELECT c, COUNT(*) AS n FROM example e GROUP BY e.c").expect("lower");
+        assert_eq!(scan_expr(&plan, "e"), &global("example"));
+    }
+
+    #[test]
+    fn test_static_lateral_from_item_sees_preceding_binding() {
+        let plan = lower_static("SELECT n.x FROM table1 t1, t1.nodes n").expect("lower");
+        assert_eq!(scan_expr(&plan, "t1"), &global("table1"));
+        assert_eq!(scan_expr(&plan, "n"), &attr("t1", "nodes"));
+    }
+
+    #[test]
+    fn test_static_unqualified_from_source_is_global_not_lateral_attribute() {
+        // `FROM t1, t2` is a join of two tables, not `t1.t2`.
+        let plan = lower_static("SELECT u.x FROM table1 t, table2 u").expect("lower");
+        assert_eq!(scan_expr(&plan, "u"), &global("table2"));
+    }
+
+    #[test]
+    fn test_static_unqualified_name_with_two_bindings_is_ambiguous() {
+        let err = lower_static("SELECT x FROM table1 t1, t1.nodes n").expect_err("ambiguous");
+        assert_matches!(
+            err.errors.as_slice(),
+            [AstTransformError::AmbiguousReference { name, candidates }]
+                if name == "x" && candidates == &["t1".to_string(), "n".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_static_subquery_from_items_do_not_leak_into_outer_query() {
+        let plan = lower_static("SELECT a FROM example e WHERE EXISTS (SELECT 1 FROM table1 t)")
+            .expect("lower");
+        assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
     }
 }
