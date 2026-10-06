@@ -1,0 +1,8 @@
+// Aliases over inline bags and table functions (these never went through the
+// broken stored-table path), plus WHERE+SELECT sharing a field, which used to
+// fail with "invalid key index" (VM sub-program key remap).
+{ sql: "SELECT x.a FROM << {'a': 1}, {'a': 2} >> x", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT a FROM << {'a': 1}, {'a': 2} >> x", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT x.a, b FROM << {'a': 1, 'b': 3}, {'a': 2, 'b': 4} >> x WHERE x.a > 1 AND b > 3", expect: { rows: $bag::[ { a: 2, b: 4 } ] } }
+{ sql: "SELECT t.a FROM mem(3, 2) t", expect: { rows: $bag::[ { a: 0 }, { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT a FROM mem(3, 2) t", expect: { rows: $bag::[ { a: 0 }, { a: 1 }, { a: 2 } ] } }
