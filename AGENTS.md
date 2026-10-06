@@ -62,7 +62,7 @@ Plugin crates for Ion, CSV, DDL, and additional scalar functions. Each registers
 
 ## pqlite: testing & debugging
 
-`pqlite` is the fastest way to poke at the bytecode engine end-to-end. It has two main subcommands: `open` (interactive REPL against a db file) and `exec` (single-shot, script-friendly). `pqlite complete --shell <bash|zsh|fish|powershell|elvish> --print` prints a shell-completion script (install steps in `partiql-tools/PQLITE.md`).
+`pqlite` is the fastest way to poke at the bytecode engine end-to-end. It has two main subcommands: `open` (interactive REPL against a db file) and `exec` (single-shot, script-friendly). `pqlite completions <bash|zsh|fish|powershell|elvish>` prints a shell-completion script (install steps in `partiql-tools/PQLITE.md`).
 
 ### One-shot execution
 

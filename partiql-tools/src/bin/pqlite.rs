@@ -8,7 +8,7 @@ use partiql_tools::session::{
 };
 
 use clap::builder::PossibleValuesParser;
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueHint};
+use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
     ValidationResult, Validator,
@@ -25,7 +25,7 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 ///   SELECT t.a FROM mem(100, 2) t;
 ///   SELECT t.name FROM scan_ion('data.ion') t;
 ///
-/// Shell completions: `pqlite complete --shell <bash|zsh|fish|powershell|elvish> --print`.
+/// Shell completions: `pqlite completions <bash|zsh|fish|powershell|elvish>`.
 /// See PQLITE.md for install instructions.
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
@@ -63,36 +63,15 @@ enum CliCommand {
         #[arg(long, default_value_t = OutputFormat::Text, value_enum)]
         format: OutputFormat,
     },
-}
-
-/// Name of the shell-completion subcommand registered by `clap_autocomplete`.
-const COMPLETE_SUBCOMMAND: &str = "complete";
-
-/// Shells accepted by `clap_autocomplete`'s `--shell` argument.
-const COMPLETION_SHELLS: [&str; 6] = ["bash", "zsh", "fish", "powershell", "pwsh", "elvish"];
-
-/// Build the full clap command: the derived `Cli` plus `clap_autocomplete`'s
-/// `complete` subcommand, with its `--shell` restricted to the supported shells
-/// so they show up in completions themselves.
-fn build_command() -> clap::Command {
-    clap_autocomplete::add_subcommand(Cli::command()).mut_subcommand(COMPLETE_SUBCOMMAND, |c| {
-        c.mut_arg("shell", |a| {
-            a.value_parser(PossibleValuesParser::new(COMPLETION_SHELLS))
-        })
-    })
+    /// Print a shell completion script to stdout. See PQLITE.md for install steps.
+    Completions {
+        /// The shell to generate completions for.
+        shell: clap_complete::Shell,
+    },
 }
 
 fn main() {
-    let command = build_command();
-    let matches = command.clone().get_matches();
-    if let Some(result) = clap_autocomplete::test_subcommand(&matches, command) {
-        if let Err(e) = result {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    let cli = Cli::parse();
     let debug = DebugFlags::from_args(&cli.debug);
 
     match cli.command {
@@ -122,6 +101,11 @@ fn main() {
             }
         }
         CliCommand::Open { db } => run_repl(debug, &db),
+        CliCommand::Completions { shell } => {
+            let mut command = Cli::command();
+            let bin_name = command.get_name().to_string();
+            clap_complete::generate(shell, &mut command, bin_name, &mut std::io::stdout());
+        }
     }
 }
 

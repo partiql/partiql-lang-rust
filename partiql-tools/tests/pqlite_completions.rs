@@ -1,5 +1,5 @@
-//! Tests for `pqlite complete`, the shell-completion subcommand provided by
-//! `clap_autocomplete`. Drives the built binary as a subprocess and checks that
+//! Tests for `pqlite completions <shell>`, which prints a `clap_complete`
+//! script to stdout. Drives the built binary as a subprocess and checks that
 //! every supported shell gets a script and that the clap `ValueHint`s /
 //! possible values on pqlite's arguments make it into the generated output.
 
@@ -8,16 +8,12 @@ use std::process::Command;
 
 const PQLITE: &str = env!("CARGO_BIN_EXE_pqlite");
 
-/// Run `pqlite complete --shell <shell>` and return its stdout. On unix the
-/// `--print` flag forces stdout instead of installing into system directories;
-/// on other platforms the flag doesn't exist and stdout is the only mode.
-fn run_complete(shell: &str) -> String {
-    let mut cmd = Command::new(PQLITE);
-    cmd.arg("complete").arg("--shell").arg(shell);
-    if cfg!(unix) {
-        cmd.arg("--print");
-    }
-    let out = cmd.output().expect("failed to spawn pqlite");
+/// Run `pqlite completions <shell>` and return its stdout.
+fn run_completions(shell: &str) -> String {
+    let out = Command::new(PQLITE)
+        .args(["completions", shell])
+        .output()
+        .expect("failed to spawn pqlite");
     assert!(
         out.status.success(),
         "completion generation for {shell} should succeed; stderr: {}",
@@ -31,11 +27,18 @@ fn run_complete(shell: &str) -> String {
 #[case("zsh")]
 #[case("fish")]
 #[case("powershell")]
-#[case("pwsh")]
 #[case("elvish")]
 fn completions_generated_for_every_shell(#[case] shell: &str) {
-    let script = run_complete(shell);
-    for word in ["pqlite", "open", "exec", "db", "format", "debug"] {
+    let script = run_completions(shell);
+    for word in [
+        "pqlite",
+        "open",
+        "exec",
+        "completions",
+        "db",
+        "format",
+        "debug",
+    ] {
         assert!(
             script.contains(word),
             "{shell} completion script should mention {word:?}; got:\n{script}"
@@ -45,7 +48,7 @@ fn completions_generated_for_every_shell(#[case] shell: &str) {
 
 #[test]
 fn zsh_completions_carry_value_hints() {
-    let script = run_complete("zsh");
+    let script = run_completions("zsh");
     // ValueHint::FilePath becomes zsh's `_files` completer, for both the
     // positional `open <db>` and `exec --db`.
     assert!(
@@ -62,14 +65,16 @@ fn zsh_completions_carry_value_hints() {
     assert!(script.contains(":FORMAT:(text ion)"), "{script}");
     assert!(script.contains(":DEBUG:(ast plan program *)"), "{script}");
     assert!(
-        script.contains("(bash zsh fish powershell pwsh elvish)"),
+        script.contains(
+            ":shell -- The shell to generate completions for:(bash elvish fish powershell zsh)"
+        ),
         "{script}"
     );
 }
 
 #[test]
 fn fish_completions_carry_value_hints() {
-    let script = run_complete("fish");
+    let script = run_completions("fish");
     // ValueHint::FilePath on `--db` becomes fish's `-F` (force file completion).
     assert!(
         script.contains("-l db -d 'Path to the database file. Omit for db-free queries' -r -F"),
@@ -80,9 +85,9 @@ fn fish_completions_carry_value_hints() {
 }
 
 #[test]
-fn complete_rejects_unknown_shell() {
+fn completions_rejects_unknown_shell() {
     let out = Command::new(PQLITE)
-        .args(["complete", "--shell", "tcsh"])
+        .args(["completions", "tcsh"])
         .output()
         .expect("failed to spawn pqlite");
     assert!(!out.status.success(), "unknown shell must be rejected");

@@ -31,49 +31,48 @@ pqlite open <db>                              # REPL against <db>
 pqlite exec [--db <path>] [--format text|ion] "<query>"
 pqlite --version
 pqlite --debug ast,plan,program ...           # or --debug '*'
-pqlite complete [--shell <shell>] [--print]   # shell completions (see below)
+pqlite completions <shell>                    # print a shell completion script (see below)
 ```
 
 **Shell completions**
 
-`pqlite complete` (from [`clap_autocomplete`](https://crates.io/crates/clap_autocomplete))
-generates completion scripts for `bash`, `zsh`, `fish`, `powershell` (alias `pwsh`) and
-`elvish`. Without `--shell` it tries to detect your shell. Completions cover subcommands,
-flags, `--format`/`--debug`/`--shell` values, and file paths for `open <db>` and `exec --db`.
+`pqlite completions <bash|zsh|fish|powershell|elvish>` prints a
+[`clap_complete`](https://crates.io/crates/clap_complete) script to stdout. Completions
+cover subcommands, flags, `--format`/`--debug` values, shell names, and file paths for
+`open <db>` and `exec --db`.
 
-On Linux/macOS, `--print` writes the script to stdout. Without `--print`, bash, zsh and
-fish scripts are written to these default locations (the first two usually need `sudo`):
-
-| Shell | Default location |
-|---|---|
-| bash | `/usr/share/bash-completion/completions/pqlite` |
-| zsh | `/usr/share/zsh/functions/Completion/Base/_pqlite` |
-| fish | `$XDG_CONFIG_HOME/fish/completions/pqlite.fish` |
-
-PowerShell and Elvish scripts always go to stdout (and on Windows every shell does; `--print`
-doesn't exist there). To install per-user without root:
+The scripts are static: they describe the CLI of the binary that produced them. The
+"eval at shell startup" setup below regenerates on every new shell, so it always matches
+whichever `pqlite` is on your `PATH`, which suits local development
+(`cargo install --path partiql-tools` after changing flags, then open a new shell).
+Completions apply to the `pqlite` command, not to `cargo run --bin pqlite --`.
 
 ```
-# bash
-mkdir -p ~/.local/share/bash-completion/completions
-pqlite complete --shell bash --print > ~/.local/share/bash-completion/completions/pqlite
+# bash (~/.bashrc)
+source <(pqlite completions bash)
 
-# zsh: put the file in a directory on $fpath, before `compinit` runs in ~/.zshrc
-mkdir -p ~/.zfunc
-pqlite complete --shell zsh --print > ~/.zfunc/_pqlite
-#   in ~/.zshrc:  fpath=(~/.zfunc $fpath); autoload -Uz compinit && compinit
+# zsh (~/.zshrc, after `compinit`)
+source <(pqlite completions zsh)
 
-# fish
-pqlite complete --shell fish            # writes ~/.config/fish/completions/pqlite.fish
+# fish (~/.config/fish/config.fish)
+pqlite completions fish | source
 
-# PowerShell: add to $PROFILE
-pqlite complete --shell powershell | Out-String | Invoke-Expression
+# PowerShell ($PROFILE)
+pqlite completions powershell | Out-String | Invoke-Expression
 
-# elvish: add to ~/.config/elvish/rc.elv
-eval (pqlite complete --shell elvish | slurp)
+# elvish (~/.config/elvish/rc.elv)
+eval (pqlite completions elvish | slurp)
 ```
 
-Regenerate the script whenever you upgrade pqlite, so new flags show up.
+To install a file once instead, write it to the shell's completion directory, e.g.
+`pqlite completions fish > ~/.config/fish/completions/pqlite.fish` or
+`pqlite completions zsh > ~/.zfunc/_pqlite` (with `~/.zfunc` on `$fpath`). Regenerate it
+after upgrading pqlite.
+
+Package managers can generate the files at install time. Homebrew:
+`generate_completions_from_executable(bin/"pqlite", "completions")` in the formula's
+`install` block runs `pqlite completions bash|zsh|fish` and installs the results into
+Homebrew's completion directories.
 
 **REPL meta commands**
 
