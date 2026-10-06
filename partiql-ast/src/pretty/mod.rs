@@ -32,8 +32,80 @@ impl PrettyDoc for Statement {
         match self {
             Statement::Query(q) => q.pretty_doc(arena),
             Statement::Ddl(ddl_op) => ddl_op.pretty_doc(arena),
-            Statement::Dml(_) => arena.nil(),
+            Statement::Dml(dml) => dml.pretty_doc(arena),
         }
+    }
+}
+
+impl PrettyDoc for Dml {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let Dml {
+            op,
+            from_clause,
+            where_clause,
+            returning,
+        } = self;
+        // The grammar does not yet produce the FROM, WHERE, or RETURNING clauses.
+        if from_clause.is_some() {
+            todo!("DML FROM clause")
+        }
+        if where_clause.is_some() {
+            todo!("DML WHERE clause")
+        }
+        if returning.is_some() {
+            todo!("DML RETURNING clause")
+        }
+        op.pretty_doc(arena)
+    }
+}
+
+impl PrettyDoc for DmlOp {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        match self {
+            DmlOp::Insert(insert) => insert.pretty_doc(arena),
+            // The remaining DML operations are not yet produced by the grammar.
+            DmlOp::InsertValue(_) => todo!("DmlOp::InsertValue"),
+            DmlOp::Set(_) => todo!("DmlOp::Set"),
+            DmlOp::Remove(_) => todo!("DmlOp::Remove"),
+            DmlOp::Delete(_) => todo!("DmlOp::Delete"),
+        }
+    }
+}
+
+impl PrettyDoc for Insert {
+    fn pretty_doc<'b, D, A>(&'b self, arena: &'b D) -> DocBuilder<'b, D, A>
+    where
+        D: DocAllocator<'b, A>,
+        D::Doc: Clone,
+        A: Clone,
+    {
+        let Insert { target, values } = self;
+        // `INSERT INTO <name>`
+        let insert = arena
+            .text("INSERT")
+            .append(arena.space())
+            .append(arena.text("INTO"))
+            .append(arena.space())
+            .append(target.pretty_doc(arena));
+        // The grammar takes the source query bare (`INSERT INTO <name> <query>`), so
+        // print it without the parentheses `Expr::Query` would otherwise add.
+        let source = match values.as_ref() {
+            Expr::Query(query) => query.pretty_doc(arena),
+            other => other.pretty_doc(arena),
+        };
+        arena
+            .intersperse([insert, source], arena.softline())
+            .group()
     }
 }
 
@@ -46,9 +118,10 @@ impl PrettyDoc for DdlOp {
     {
         match self {
             DdlOp::CreateTable(create_table) => create_table.pretty_doc(arena),
-            // The remaining DDL operations are not yet produced by the grammar; emit
-            // an empty document rather than panicking until they are implemented.
-            DdlOp::DropTable(_) | DdlOp::CreateIndex(_) | DdlOp::DropIndex(_) => arena.nil(),
+            // The remaining DDL operations are not yet produced by the grammar.
+            DdlOp::DropTable(_) => todo!("DdlOp::DropTable"),
+            DdlOp::CreateIndex(_) => todo!("DdlOp::CreateIndex"),
+            DdlOp::DropIndex(_) => todo!("DdlOp::DropIndex"),
         }
     }
 }

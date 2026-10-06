@@ -766,3 +766,15 @@ fn pretty_exclude() {
                 ",
     );
 }
+
+#[test]
+fn pretty_insert() {
+    pretty_print_test(
+        "pretty_insert_select",
+        "INSERT INTO t SELECT a, b FROM src WHERE a > 1",
+    );
+    pretty_print_test(
+        "pretty_insert_bag",
+        "INSERT INTO t << {'a': 1}, {'a': 2} >>",
+    );
+}
