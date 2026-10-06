@@ -20,10 +20,10 @@ on:
       - 'LICENSE'
       - 'NOTICE'
 
-# Supersede in-progress runs for the same PR. `head_ref` is only set for `pull_request` events, so pushes to long-lived
-# branches each get a unique group and are never cancelled (or replaced while pending).
+# Supersede in-progress runs for the same PR. The PR number is only set for `pull_request` events, so pushes to
+# long-lived branches each get a unique group and are never cancelled (or replaced while pending).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -156,7 +156,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: codecov.json
-          fail_ci_if_error: true
+          # `CODECOV_TOKEN` is unavailable to fork PRs; don't fail those on a (tokenless) upload error.
+          fail_ci_if_error: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
 
   # Generates the conformance report for this commit and uploads it as an artifact (consumed by later PRs targeting this
   # branch). On `pull_request`, additionally compares it against the base commit's report and the `partiql-vm` report,
