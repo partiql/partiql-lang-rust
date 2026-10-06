@@ -164,6 +164,15 @@ impl IdGenerator {
     }
 }
 
+/// Which match [`AstToLogical::search_locals`] looks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalPass {
+    /// A visible binding with exactly this name.
+    Exact,
+    /// An attribute of the single FROM binding in scope.
+    ImplicitAttr,
+}
+
 /// How variable references are lowered.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -259,6 +268,12 @@ fn infer_id(expr: &ValueExpr) -> Option<SymbolPrimitive> {
             _ => None,
         },
         ValueExpr::DynamicLookup(d) => infer_id(d.first().unwrap()),
+        // `FROM t` over a catalog table binds `t`, as the name resolver infers
+        ValueExpr::DBRef(db_ref) => match db_ref.path.last() {
+            Some(BindingsName::CaseInsensitive(s)) => insensitive(s.as_ref()),
+            Some(BindingsName::CaseSensitive(s)) => sensitive(s.as_ref()),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -410,12 +425,13 @@ impl<'a> AstToLogical<'a> {
     ///
     /// The name resolver's `in_scope` registers every binding on all of its AST ancestors, so
     /// the scopes found walking up the `id_stack` over-approximate what is visible; the
-    /// `hidden` scopes below trim that to the PartiQL scoping rules. Resolution then runs in
-    /// two passes: an exact match on a visible variable at any level, else an implicit
-    /// attribute of the single FROM binding at the innermost level that has FROM bindings.
+    /// `hidden` scopes below trim that to the PartiQL scoping rules. `pass` selects either an
+    /// exact match on a visible variable at any level, or an implicit attribute of the single
+    /// FROM binding at the innermost level that has FROM bindings.
     fn search_locals(
         &self,
         varref: &ast::VarRef,
+        pass: LocalPass,
     ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
         let mut ids: Vec<NodeId> = self.id_stack.iter().rev().copied().collect();
         // A node never sees its own bindings (e.g. `example` in `FROM example e` must not
@@ -466,23 +482,26 @@ impl<'a> AstToLogical<'a> {
                 .collect()
         };
 
-        // Pass 1: exact match against any visible variable, innermost first
-        for scope_ids in &levels {
-            for (_, schema) in visible(scope_ids) {
-                for produce in &schema.produce {
-                    if Self::names_match(
-                        &varref.name.value,
-                        &varref.name.case,
-                        &Self::symbol_name(produce)?,
-                        &CaseSensitivity::CaseInsensitive,
-                    ) {
-                        return Ok(Some(ValueExpr::VarRef(
-                            Self::symprim_to_binding(&varref.name)?,
-                            VarRefType::Local,
-                        )));
+        // Exact match against any visible variable, innermost first
+        if pass == LocalPass::Exact {
+            for scope_ids in &levels {
+                for (_, schema) in visible(scope_ids) {
+                    for produce in &schema.produce {
+                        if Self::names_match(
+                            &varref.name.value,
+                            &varref.name.case,
+                            &Self::symbol_name(produce)?,
+                            &CaseSensitivity::CaseInsensitive,
+                        ) {
+                            return Ok(Some(ValueExpr::VarRef(
+                                Self::symprim_to_binding(&varref.name)?,
+                                VarRefType::Local,
+                            )));
+                        }
                     }
                 }
             }
+            return Ok(None);
         }
 
         // An unmatched name in a FROM source is a global (table), not an implicit attribute
@@ -492,7 +511,7 @@ impl<'a> AstToLogical<'a> {
             return Ok(None);
         }
 
-        // Pass 2: with no schema for the FROM bindings, an unqualified name is an attribute of
+        // Implicit attribute: with no schema for the FROM bindings, an unqualified name is an attribute of
         // a FROM binding. That is only decidable when exactly one FROM item (its `AS` binding,
         // the first produced name) is in scope at the innermost level that has any; with
         // several it is ambiguous. GROUP BY keys are not candidates.
@@ -761,23 +780,33 @@ impl<'a> AstToLogical<'a> {
         &self,
         varref: &ast::VarRef,
     ) -> Result<logical::ValueExpr, AstTransformError> {
-        // Resolution order depends on qualifier:
-        // - Unqualified (no @): search globals first, then locals
-        // - Qualified (with @): search locals first, then globals
-        let resolved = match varref.qualifier {
-            ast::ScopeQualifier::Unqualified => match self.search_globals(varref)? {
-                Some(expr) => Some(expr),
-                None => self.search_locals(varref)?,
-            },
-            ast::ScopeQualifier::Qualified => match self.search_locals(varref)? {
-                Some(expr) => Some(expr),
-                None => self.search_globals(varref)?,
-            },
+        // Resolution order (spec section 10; matches partiql-lang-kotlin's `TypeEnv`):
+        // - unqualified in a FROM source: globals, then local bindings
+        // - otherwise (or qualified with `@`): local bindings, then globals
+        // and only then an implicit attribute of the single FROM binding in scope.
+        let globals_first = match varref.qualifier {
+            ast::ScopeQualifier::Unqualified => self.current_from_source().is_some(),
+            ast::ScopeQualifier::Qualified => false,
             _ => {
                 return Err(AstTransformError::NotYetImplemented(
                     "scope qualifier".into(),
                 ))
             }
+        };
+        let resolved = if globals_first {
+            match self.search_globals(varref)? {
+                Some(expr) => Some(expr),
+                None => self.search_locals(varref, LocalPass::Exact)?,
+            }
+        } else {
+            match self.search_locals(varref, LocalPass::Exact)? {
+                Some(expr) => Some(expr),
+                None => self.search_globals(varref)?,
+            }
+        };
+        let resolved = match resolved {
+            Some(expr) => Some(expr),
+            None => self.search_locals(varref, LocalPass::ImplicitAttr)?,
         };
 
         // If not found in either scope, assume global (for backward compatibility)
@@ -3165,5 +3194,25 @@ mod tests {
         let plan = lower_static("SELECT a FROM example e WHERE EXISTS (SELECT 1 FROM table1 t)")
             .expect("lower");
         assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
+    }
+
+    #[test]
+    fn test_static_local_binding_shadows_global_outside_from() {
+        // `t` is both a catalog table and the alias of `orders`: in FROM the table is used,
+        // elsewhere the local binding wins.
+        let mut catalog = PartiqlCatalog::default();
+        for name in ["t", "orders"] {
+            let _oid = catalog.add_type_entry(TypeEnvEntry::new(name, &[], PartiqlShape::Dynamic));
+        }
+        let catalog = catalog.to_shared_catalog();
+        let parsed = partiql_parser::Parser::default()
+            .parse("SELECT t.a FROM orders AS t")
+            .expect("Expect successful parse");
+        let plan = LogicalPlanner::with_var_resolution(&catalog, VarRefResolution::Static)
+            .lower(&parsed)
+            .expect("lower");
+        assert_matches!(scan_expr(&plan, "t"), ValueExpr::DBRef(db)
+            if db.path == vec![BindingsName::CaseInsensitive("orders".into())]);
+        assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("t", "a"))]);
     }
 }
