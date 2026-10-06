@@ -1125,21 +1125,23 @@ impl<'a> PlanCompiler<'a> {
 
         // Remap const indices
         let const_offset = builder.consts_len() as u16;
-        let key_offset = builder.keys_len() as u16;
 
         // Copy constants
         for c in sub_program.consts.iter() {
             builder.push_const_pub(c.clone());
         }
 
-        // Copy keys
-        for k in sub_program.keys.iter() {
-            builder.push_key_pub(k.clone());
-        }
+        // Copy keys. Keys are interned (deduplicated), so a key already in the
+        // pool keeps its existing index; remap per key rather than by offset.
+        let key_map: Vec<u16> = sub_program
+            .keys
+            .iter()
+            .map(|k| builder.push_key_pub(k.clone()))
+            .collect();
 
         // Copy instructions with remapped indices
         for inst in &sub_program.insts {
-            let remapped = remap_inst(inst, const_offset, key_offset);
+            let remapped = remap_inst(inst, const_offset, &key_map);
             builder.insts.push(remapped);
         }
 
@@ -1928,7 +1930,7 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
 }
 
 /// Remap constant and key indices in an instruction.
-fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
+fn remap_inst(inst: &Inst, const_offset: u16, key_map: &[u16]) -> Inst {
     match inst {
         Inst::LoadConst { dst, const_idx } => Inst::LoadConst {
             dst: *dst,
@@ -1937,7 +1939,7 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
         Inst::GetField { dst, base, key_idx } => Inst::GetField {
             dst: *dst,
             base: *base,
-            key_idx: *key_idx + key_offset,
+            key_idx: key_map[*key_idx as usize],
         },
         Inst::CallUdf {
             dst,
@@ -1945,7 +1947,7 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
             args,
         } => Inst::CallUdf {
             dst: *dst,
-            func_idx: *func_idx + key_offset,
+            func_idx: key_map[*func_idx as usize],
             args: args.clone(),
         },
         Inst::CoerceToTuple {

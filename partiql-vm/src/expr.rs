@@ -1905,11 +1905,6 @@ impl ProgramBuilder {
         self.consts.len()
     }
 
-    /// Get the number of keys currently in the pool.
-    pub fn keys_len(&self) -> usize {
-        self.keys.len()
-    }
-
     /// Update next_reg to at least the given value (for merging sub-programs).
     pub fn update_next_reg(&mut self, reg_count: u16) {
         if reg_count > self.next_reg {
