@@ -1,6 +1,6 @@
 // Aliased-reference queries that still fail for reasons unrelated to name
 // resolution (their logical plans are correct). Kept `skip::` so the suite
-// stays green; un-skip as the VM grows. See EXPLANATION.md "Remaining gaps".
+// stays green; un-skip as the VM grows.
 { sql: "CREATE TABLE example" }
 { sql: "INSERT INTO example SELECT * FROM << {'a':1,'b':4,'c':'x','d':1}, {'a':3,'b':6,'c':'x','d':1}, {'a':5,'b':9,'c':'y','d':2} >>", expect: { affected_rows: 3 } }
 { sql: "CREATE TABLE table1" }

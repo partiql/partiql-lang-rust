@@ -1,6 +1,6 @@
 // Variable references through a FROM alias over a stored table. Before the
 // static-resolution fix the scan source `example` lowered to `e.example`, so every
-// aliased query scanned a single MISSING row. See EXPLANATION.md.
+// aliased query scanned a single MISSING row.
 { sql: "CREATE TABLE example" }
 { sql: "INSERT INTO example SELECT * FROM << {'a':1,'b':4,'c':'x','d':1}, {'a':3,'b':6,'c':'x','d':1}, {'a':5,'b':9,'c':'y','d':2} >>", expect: { affected_rows: 3 } }
 
