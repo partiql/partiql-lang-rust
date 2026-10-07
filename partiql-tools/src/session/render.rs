@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use partiql_vm::value::{RegisterReader, Shape};
 
-use crate::session::exec::QueryFooter;
 use crate::session::ion_output::{escape_control_chars_in_strings, write_outcome_ion};
 use crate::session::naming::format_table_name;
 use crate::session::outcome::{DebugCapture, StatementOutcome, StatementTiming};
@@ -133,13 +132,9 @@ pub fn render_outcome_ion(outcome: &StatementOutcome, out: &mut dyn Write) -> io
 }
 
 /// Human-readable summary for a completed non-query outcome, written to
-/// `err`, followed by its `Statement N:` timing block. `statement` is the
-/// 1-based position of the statement in its script.
-pub fn render_outcome_text(
-    outcome: &StatementOutcome,
-    statement: usize,
-    err: &mut dyn Write,
-) -> io::Result<()> {
+/// `err`. Timing is rendered separately (`render_statement_timing` /
+/// `render_total_timing`).
+pub fn render_outcome_text(outcome: &StatementOutcome, err: &mut dyn Write) -> io::Result<()> {
     match outcome {
         StatementOutcome::CreateTableAs {
             table_name, rows, ..
@@ -161,45 +156,63 @@ pub fn render_outcome_text(
             writeln!(err, "Created table {}", format_table_name(table_name))?
         }
     }
-    write_timing(err, statement, None, outcome.timing())?;
     err.flush()
 }
 
-/// `Statement N: (R rows in ...)` timing block for a completed Query. Ion
-/// mode skips this to keep stderr clean for downstream Ion consumers.
-pub fn render_query_footer_text(
-    footer: &QueryFooter,
-    statement: usize,
-    err: &mut dyn Write,
-) -> io::Result<()> {
-    write_timing(err, statement, Some(footer.row_count), &footer.timing)?;
-    err.flush()
-}
-
-/// Two-line timing block, the per-phase breakdown nested under the label:
+/// One statement of a multi-statement script. Parse time is script-level, so
+/// it is reported only on the total line:
 ///
 /// ```text
-/// Statement 1: (3 rows in 0.5ms)
-///   parse: 0.1ms, lower: 0.1ms, compile: 0.2ms, exec: 0.1ms
+/// Statement 1: (3 rows in 0.5ms, lower: 0.3ms, compile: 0.1ms, exec: 0.1ms)
 /// ```
 ///
-/// Non-query statements omit the `R rows in` part.
-fn write_timing(
-    err: &mut dyn Write,
+/// `rows` is the query's row count or the rows written; `None` (CREATE TABLE)
+/// omits the `R rows in` part.
+pub fn render_statement_timing(
     statement: usize,
     rows: Option<u64>,
     timing: &StatementTiming,
+    err: &mut dyn Write,
 ) -> io::Result<()> {
-    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
-    let total = timing.parse + timing.lower + timing.compile + timing.exec;
-    let rows = rows.map(|n| format!("{n} rows in ")).unwrap_or_default();
-    writeln!(err, "Statement {statement}: ({rows}{:.1}ms)", ms(total))?;
     writeln!(
         err,
-        "  parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms",
+        "Statement {statement}: ({}{:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+        rows_prefix(rows),
+        ms(timing.lower + timing.compile + timing.exec),
+        ms(timing.lower),
+        ms(timing.compile),
+        ms(timing.exec),
+    )?;
+    err.flush()
+}
+
+/// Whole-script timing, including the script's parse time:
+///
+/// ```text
+/// Total Timing: (5 rows in 0.9ms, parse: 0.1ms, lower: 0.4ms, compile: 0.2ms, exec: 0.2ms)
+/// ```
+pub fn render_total_timing(
+    rows: Option<u64>,
+    timing: &StatementTiming,
+    err: &mut dyn Write,
+) -> io::Result<()> {
+    writeln!(
+        err,
+        "Total Timing: ({}{:.1}ms, parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
+        rows_prefix(rows),
+        ms(timing.total()),
         ms(timing.parse),
         ms(timing.lower),
         ms(timing.compile),
         ms(timing.exec),
-    )
+    )?;
+    err.flush()
+}
+
+fn rows_prefix(rows: Option<u64>) -> String {
+    rows.map(|n| format!("{n} rows in ")).unwrap_or_default()
+}
+
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1000.0
 }

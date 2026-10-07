@@ -83,7 +83,7 @@ cargo run --bin pqlite -- exec --format ion "SELECT * FROM << {'a': 1}, {'a': 2}
 cargo run --bin pqlite -- exec --format none "SELECT t.a FROM mem(1000, 2) t; SELECT t.a FROM mem(10, 2) t"
 ```
 
-Query rows and Ion output go to **stdout**; the per-statement timing footer (`Statement N: (...)`), debug dumps, and errors go to **stderr**. That split is load-bearing for scripting — `2>/dev/null` gets you clean data.
+Query rows and Ion output go to **stdout**; the timing lines (`Statement N: (...)` per statement when there are several, then `Total Timing: (...)`), debug dumps, and errors go to **stderr**. That split is load-bearing for scripting — `2>/dev/null` gets you clean data.
 
 Built-in table functions available inside queries: `mem(rows, cols)` (sequential ints), `rand(rows, cols)` (random ints), `scan_ion(path)` (read an Ion file).
 

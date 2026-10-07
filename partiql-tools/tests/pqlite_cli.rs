@@ -2070,7 +2070,7 @@ fn syntax_error_in_any_statement_runs_nothing() {
 }
 
 #[test]
-fn timing_is_labeled_per_statement_with_nested_phases() {
+fn timing_is_one_line_per_statement_plus_total() {
     let (ok, _, stderr) = run_exec_with(
         "SELECT VALUE 1 FROM << 1 >>; SELECT VALUE 2 FROM << 1, 2 >>",
         None,
@@ -2079,32 +2079,35 @@ fn timing_is_labeled_per_statement_with_nested_phases() {
     );
     assert!(ok, "stderr: {stderr}");
     let lines: Vec<&str> = stderr.lines().collect();
-    let label = |n: usize, rows: usize| {
-        let prefix = format!("Statement {n}: ({rows} rows in ");
-        let i = lines
+    let find = |prefix: &str, phases: &str| {
+        lines
             .iter()
-            .position(|l| l.starts_with(&prefix) && l.ends_with("ms)"))
-            .unwrap_or_else(|| panic!("missing {prefix:?} line; stderr: {stderr}"));
-        assert!(
-            lines[i + 1].starts_with("  parse: ") && lines[i + 1].contains(", exec: "),
-            "phase breakdown must be nested under the label; stderr: {stderr}"
-        );
-        i
+            .position(|l| l.starts_with(prefix) && l.contains(phases) && l.ends_with("ms)"))
+            .unwrap_or_else(|| panic!("missing {prefix:?} line; stderr: {stderr}"))
     };
-    assert!(label(1, 1) < label(2, 2), "labels out of order: {stderr}");
-    // --debug output is still emitted once per statement.
-    assert_eq!(stderr.matches("[AST]").count(), 2, "stderr: {stderr}");
+    // Statement lines omit parse (the script is parsed once, up front).
+    let s1 = find("Statement 1: (1 rows in ", "ms, lower: ");
+    let s2 = find("Statement 2: (2 rows in ", "ms, lower: ");
+    let total = find("Total Timing: (3 rows in ", "ms, parse: ");
+    assert!(s1 < s2 && s2 < total, "lines out of order: {stderr}");
+    assert!(
+        !lines[s1].contains("parse") && !lines[s2].contains("parse"),
+        "stderr: {stderr}"
+    );
+    assert!(lines[total].contains(", exec: "), "stderr: {stderr}");
+    // --debug ast dumps the whole script's AST once.
+    assert_eq!(stderr.matches("[AST]").count(), 1, "stderr: {stderr}");
 }
 
 #[test]
-fn single_statement_timing_is_labeled_statement_1() {
+fn single_statement_prints_only_total_timing() {
     let (ok, _, stderr) = run_exec("SELECT VALUE 1 FROM << 1 >>", None);
     assert!(ok, "stderr: {stderr}");
     assert!(
-        stderr.starts_with("Statement 1: (1 rows in "),
+        stderr.starts_with("Total Timing: (1 rows in ") && stderr.contains("ms, parse: "),
         "stderr: {stderr}"
     );
-    assert!(!stderr.contains("Statement 2"), "stderr: {stderr}");
+    assert_eq!(stderr.lines().count(), 1, "stderr: {stderr}");
 }
 
 #[test]
@@ -2130,6 +2133,10 @@ fn format_none_prints_nothing_to_stdout_but_keeps_timing() {
         "stderr: {stderr}"
     );
     assert!(
+        stderr.contains("Total Timing: (501 rows in "),
+        "stderr: {stderr}"
+    );
+    assert!(
         stderr.contains("[AST]"),
         "debug output still prints: {stderr}"
     );
@@ -2146,7 +2153,10 @@ fn format_none_still_runs_write_statements() {
         None,
     );
     assert!(ok && stdout.is_empty(), "stdout: {stdout} stderr: {stderr}");
-    assert!(stderr.contains("Statement 1: ("), "stderr: {stderr}");
+    assert!(
+        stderr.contains("Total Timing: (3 rows in "),
+        "stderr: {stderr}"
+    );
     let (_, rows, _) = run_exec("SELECT * FROM t", Some(&db));
     assert_eq!(rows.matches("'a'").count(), 3, "got: {rows}");
 }

@@ -23,10 +23,10 @@ pub use crate::session::exec::{QueryFooter, QueryHandle, RunOutcome};
 pub use crate::session::naming::normalize_query;
 pub use crate::session::outcome::{DebugCapture, OutputFormat, StatementOutcome, StatementTiming};
 pub use crate::session::render::{
-    flush_debug, render_outcome_ion, render_outcome_text, render_query_footer_text,
-    render_query_ion, render_query_text,
+    flush_debug, render_outcome_ion, render_outcome_text, render_query_ion, render_query_text,
+    render_statement_timing, render_total_timing,
 };
-pub use crate::session::script::split_statements;
+pub use crate::session::script::{parse_script, Script};
 
 /// The unit of work `PqliteSession::run` dispatches on. Rendering choices
 /// (output format, timing footer, etc.) are the caller's — session only cares
@@ -75,6 +75,16 @@ impl PqliteSession {
         match command {
             Commands::Exec { query } => exec::run(self.db.as_ref(), &self.debug, query),
         }
+    }
+
+    /// Lower + compile + run one statement of a `Script` (see `parse_script`). Like `run`,
+    /// but the statement is already parsed, so its timing has a zero `parse`
+    /// (the script's `parse_time` covers it).
+    pub fn run_statement(
+        &self,
+        stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
+    ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
+        exec::run_parsed(self.db.as_ref(), &self.debug, stmt)
     }
 
     pub fn debug_flags(&self) -> &DebugFlags {

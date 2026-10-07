@@ -39,6 +39,21 @@ pub struct StatementTiming {
     pub exec: Duration,
 }
 
+impl StatementTiming {
+    pub fn total(&self) -> Duration {
+        self.parse + self.lower + self.compile + self.exec
+    }
+}
+
+impl std::ops::AddAssign for StatementTiming {
+    fn add_assign(&mut self, other: Self) {
+        self.parse += other.parse;
+        self.lower += other.lower;
+        self.compile += other.compile;
+        self.exec += other.exec;
+    }
+}
+
 /// AST/plan/program captured under `--debug`, flushed to stderr.
 #[derive(Debug, Default)]
 pub struct DebugCapture {
@@ -77,6 +92,15 @@ impl StatementOutcome {
             StatementOutcome::CreateTableAs { debug, .. }
             | StatementOutcome::InsertInto { debug, .. }
             | StatementOutcome::CreateTable { debug, .. } => debug,
+        }
+    }
+
+    /// Rows written, or `None` for CREATE TABLE (no rows).
+    pub fn rows(&self) -> Option<u64> {
+        match self {
+            StatementOutcome::CreateTableAs { rows, .. }
+            | StatementOutcome::InsertInto { rows, .. } => Some(*rows),
+            StatementOutcome::CreateTable { .. } => None,
         }
     }
 

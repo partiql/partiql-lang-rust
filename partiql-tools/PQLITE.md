@@ -115,13 +115,17 @@ none   runs every statement to completion (all rows drained) but writes nothing
        to stdout; timing and --debug output still go to stderr. For benchmarking.
 ```
 
-In `text` and `none` mode each statement's timing is printed to stderr, labeled with
-its position in the input:
+In `text` and `none` mode, timing is printed to stderr, one line per statement. The
+input is parsed once up front, so parse time appears only on the total line. Rows are
+rows returned (queries) or written (CTAS / INSERT), and the total sums them:
 
 ```
-Statement 1: (3 rows in 0.6ms)
-  parse: 0.1ms, lower: 0.3ms, compile: 0.1ms, exec: 0.1ms
+Statement 1: (3 rows in 0.5ms, lower: 0.3ms, compile: 0.1ms, exec: 0.1ms)
+Statement 2: (2 rows in 0.3ms, lower: 0.1ms, compile: 0.1ms, exec: 0.1ms)
+Total Timing: (5 rows in 0.9ms, parse: 0.1ms, lower: 0.4ms, compile: 0.2ms, exec: 0.2ms)
 ```
+
+A single statement prints only the `Total Timing:` line.
 
 **REPL meta commands**
 
@@ -189,7 +193,7 @@ partiql-tools/
 │   │   ├── ion_output.rs       # Ion envelope for non-query outcomes + shared escape helper
 │   │   ├── value.rs            # VM register rows -> partiql_value::Value; Ion encoder adapter
 │   │   ├── debug.rs            # --debug ast|plan|program capture
-│   │   ├── script.rs           # split `;`-separated input into statements (via the parser)
+│   │   ├── script.rs           # parse `;`-separated input once into a Script (via the parser)
 │   │   └── naming.rs           # table-name canonicalization
 │   ├── bootstrap/
 │   │   └── v1.pql              # v1 DDL script, embedded via include_str!

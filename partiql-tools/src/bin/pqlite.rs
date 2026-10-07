@@ -2,9 +2,9 @@ use std::borrow::Cow;
 use std::io::Write;
 
 use partiql_tools::session::{
-    flush_debug, normalize_query, render_outcome_ion, render_outcome_text,
-    render_query_footer_text, render_query_ion, render_query_text, split_statements, Commands,
-    DebugFlags, OutputFormat, PqliteSession, RunOutcome,
+    flush_debug, normalize_query, parse_script, render_outcome_ion, render_outcome_text,
+    render_query_ion, render_query_text, render_statement_timing, render_total_timing, DebugFlags,
+    OutputFormat, PqliteSession, RunOutcome, Script, StatementTiming,
 };
 
 use clap::builder::{PossibleValue, PossibleValuesParser};
@@ -93,8 +93,8 @@ fn main() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            let statements = match split_statements(&query) {
-                Ok(s) if s.is_empty() => {
+            let script = match parse_script(&query, &debug) {
+                Ok(s) if s.statements().is_empty() => {
                     eprintln!("Error: empty query");
                     std::process::exit(1);
                 }
@@ -116,8 +116,7 @@ fn main() {
             };
             let mut stdout = std::io::stdout();
             let mut stderr = std::io::stderr();
-            if let Err(e) = run_statements(&session, &statements, format, &mut stdout, &mut stderr)
-            {
+            if let Err(e) = run_script(&session, &script, format, &mut stdout, &mut stderr) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
@@ -131,40 +130,61 @@ fn main() {
     }
 }
 
-/// Run `statements` (from `split_statements`) in order. Stops at the first
-/// failure and returns its error labeled with the 1-based statement number;
-/// output of the statements before it has already been written.
-fn run_statements(
+/// Run a parsed script's statements in order. Stops at the first failure and
+/// returns its error labeled with the 1-based statement number; output of the
+/// statements before it has already been written.
+///
+/// Outside Ion mode, timing goes to stderr: with several statements, one
+/// `Statement N:` line after each, then a `Total Timing:` line (which adds the
+/// script's parse time); with one statement, just the `Total Timing:` line.
+fn run_script(
     session: &PqliteSession,
-    statements: &[&str],
+    script: &Script<'_>,
     format: OutputFormat,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<(), String> {
-    for (i, sql) in statements.iter().enumerate() {
+    let io_err = |e: std::io::Error| e.to_string();
+    flush_debug(&script.debug, stderr).map_err(io_err)?;
+    // Ion mode is silent on stderr for successful statements; the caller
+    // pipes stdout to an Ion parser and expects no interleaved lines.
+    let show_timing = !matches!(format, OutputFormat::Ion);
+    let statements = script.statements();
+    let mut total = StatementTiming {
+        parse: script.parse_time,
+        ..Default::default()
+    };
+    let mut total_rows: Option<u64> = None;
+    for (i, stmt) in statements.iter().enumerate() {
         let n = i + 1;
-        let cmd = Commands::Exec {
-            query: sql.to_string(),
-        };
-        dispatch(session, &cmd, n, format, stdout, stderr)
+        let (rows, timing) = dispatch(session, stmt, format, stdout, stderr)
             .map_err(|e| format!("Statement {n}: {e}"))?;
+        total += timing;
+        if let Some(r) = rows {
+            *total_rows.get_or_insert(0) += r;
+        }
+        if show_timing && statements.len() > 1 {
+            render_statement_timing(n, rows, &timing, stderr).map_err(io_err)?;
+        }
+    }
+    if show_timing {
+        render_total_timing(total_rows, &total, stderr).map_err(io_err)?;
     }
     Ok(())
 }
 
-/// Render a session outcome to `stdout`/`stderr`. Debug capture flushes to
-/// stderr BEFORE any query rows land on stdout so the ordering matches every
-/// `--debug` test expectation. `statement` is the 1-based position used to
-/// label the timing footer.
+/// Run one statement and render its result to `stdout`/`stderr`, returning
+/// its row count (rows returned or written; `None` for CREATE TABLE) and
+/// timing. Debug capture flushes to stderr BEFORE any query rows land on
+/// stdout so the ordering matches every `--debug` test expectation.
 fn dispatch(
     session: &PqliteSession,
-    cmd: &Commands,
-    statement: usize,
+    stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
     format: OutputFormat,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (result, on_error_capture) = session.run(cmd);
+) -> Result<(Option<u64>, StatementTiming), Box<dyn std::error::Error>> {
+    let (result, on_error_capture) = session.run_statement(stmt);
     let outcome = match result {
         Ok(o) => o,
         Err(e) => {
@@ -183,22 +203,15 @@ fn dispatch(
                 // still runs to completion and the timing is real.
                 OutputFormat::None => Ok(()),
             })?;
-            // Ion mode is silent on stderr for successful queries; the caller
-            // pipes stdout to an Ion parser and expects no interleaved lines.
-            if !matches!(format, OutputFormat::Ion) {
-                render_query_footer_text(&footer, statement, stderr)?;
-            }
-            Ok(())
+            Ok((Some(footer.row_count), footer.timing))
         }
         RunOutcome::Statement(outcome) => {
             flush_debug(outcome.debug(), stderr)?;
             match format {
                 OutputFormat::Ion => render_outcome_ion(&outcome, stdout)?,
-                OutputFormat::Text | OutputFormat::None => {
-                    render_outcome_text(&outcome, statement, stderr)?
-                }
+                OutputFormat::Text | OutputFormat::None => render_outcome_text(&outcome, stderr)?,
             }
-            Ok(())
+            Ok((outcome.rows(), *outcome.timing()))
         }
     }
 }
@@ -351,9 +364,9 @@ fn handle_entry(
         return EntryOutcome::Continue;
     }
 
-    let result = split_statements(trimmed)
+    let result = parse_script(trimmed, session.debug_flags())
         .map_err(|e| e.to_string())
-        .and_then(|stmts| run_statements(session, &stmts, OutputFormat::Text, stdout, stderr));
+        .and_then(|script| run_script(session, &script, OutputFormat::Text, stdout, stderr));
     if let Err(e) = result {
         let _ = writeln!(stderr, "{}", e);
     }
@@ -440,7 +453,9 @@ mod tests {
         let (out, err) = entry("SELECT VALUE 'a;b' FROM << 1 >>;\nSELECT VALUE 2\n  FROM << 1 >>;");
         assert!(out.contains("'a;b'") && out.contains('2'), "stdout: {out}");
         assert!(
-            err.contains("Statement 1: (1 rows in") && err.contains("Statement 2: (1 rows in"),
+            err.contains("Statement 1: (1 rows in")
+                && err.contains("Statement 2: (1 rows in")
+                && err.contains("Total Timing: (2 rows in"),
             "stderr: {err}"
         );
         assert!(!err.contains("Statement 3"), "stderr: {err}");
