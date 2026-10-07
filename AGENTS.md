@@ -134,8 +134,40 @@ The VM lives in `partiql-vm/src/`:
 
 - Always run `make ci-check` before committing.
 - Commit messages follow conventional commits: `type(scope): description`
-  - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`
+  - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `ci`
   - Scope is the crate or module affected, e.g. `feat(eval): add OFFSET support`
+
+### Before opening or updating a PR
+
+1. **Local checks.** `make ci-check` (build, test, fmt, clippy, cargo-deny), or individually:
+   ```bash
+   cargo fmt --all -- --check
+   cargo clippy --all-features --workspace -- -D warnings
+   cargo test --workspace
+   ```
+   For pqlite plugin work, also run the clippy and test commands with `RUSTFLAGS='--cfg pqlite_unstable_plugins'`.
+2. **Local CI with [`act`](https://github.com/nektos/act)** for the jobs your change affects (`ci_build_test.yml` ignores `**.md`, `docs/**`, `LICENSE`, `NOTICE`, so docs-only changes need none). `-W` is required (`build` also exists in `nightly.yml`), and `-P` maps the custom runner label to a Docker image:
+   ```bash
+   W=".github/workflows/ci_build_test.yml"; P="partiql-lang-rust_ubuntu-24.04_4-core=catthehacker/ubuntu:act-latest"
+   act pull_request -W "$W" -P "$P" -j build      # lint, cargo-deny, build, test
+   act pull_request -W "$W" -P "$P" -j coverage   # only if coverage setup changes
+   act push -W "$W" -P "$P" -j conformance-report --artifact-server-path "$(mktemp -d)"  # conformance changes
+   ```
+   `act` copies the working tree instead of cloning, so run `git submodule update --init --recursive` first. act can't skip steps, so `coverage` always ends with a failed `Codecov Upload` locally; treat it as passing if `Cargo Test w/ Coverage` succeeds. Run `conformance-report` with `push`: its `pull_request`-only steps download the base report and comment on the PR, which can't work locally.
+3. **AI review before pushing.** Run the Copilot CLI review against the branch diff and address its findings:
+   ```bash
+   copilot -p "/review the changes on this branch vs origin/main" -s --allow-tool 'shell(git:*)'
+   ```
+   After opening the PR, also request a Copilot review on it: `gh pr edit <number> --add-reviewer @copilot`.
+
+### PR title and description
+
+- PRs are squash-merged, so the **PR title becomes the commit message**. It MUST be a conventional commit: `type(scope): description` (scope optional), imperative, lowercase after the colon, no trailing period. E.g. `fix(vm): handle null fields in scan_ion`.
+- Keep the description extremely concise and human-readable, filling the template in `.github/PULL_REQUEST_TEMPLATE.md` (keep its Apache 2.0 license line):
+  - **What and why**
+  - **How to use** (if applicable)
+  - **Testing**
+- Keep the title and description current whenever the PR changes (rebases, review fixes, scope changes): `gh pr edit <number> --title "..." --body-file <file>`.
 
 ## Conventions
 
