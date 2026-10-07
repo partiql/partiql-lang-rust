@@ -437,11 +437,17 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
         )),
         DataType::Date32 => {
             let v = arr.as_primitive::<Date32Type>().value(row);
-            Cell::Str(keep(scratch, fmt_opt(tc::as_date::<Date32Type>(v as i64))))
+            Cell::Str(keep(
+                scratch,
+                fmt_temporal(tc::as_date::<Date32Type>(v as i64), arr)?,
+            ))
         }
         DataType::Date64 => {
             let v = arr.as_primitive::<Date64Type>().value(row);
-            Cell::Str(keep(scratch, fmt_opt(tc::as_date::<Date64Type>(v))))
+            Cell::Str(keep(
+                scratch,
+                fmt_temporal(tc::as_date::<Date64Type>(v), arr)?,
+            ))
         }
         DataType::Time32(unit) => {
             let s = match unit {
@@ -452,7 +458,7 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
                     arr.as_primitive::<Time32MillisecondType>().value(row) as i64,
                 ),
             };
-            Cell::Str(keep(scratch, fmt_opt(s)))
+            Cell::Str(keep(scratch, fmt_temporal(s, arr)?))
         }
         DataType::Time64(unit) => {
             let s = match unit {
@@ -463,7 +469,7 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
                     arr.as_primitive::<Time64NanosecondType>().value(row),
                 ),
             };
-            Cell::Str(keep(scratch, fmt_opt(s)))
+            Cell::Str(keep(scratch, fmt_temporal(s, arr)?))
         }
         DataType::Timestamp(unit, tz) => {
             macro_rules! ts {
@@ -477,13 +483,9 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
                 TimeUnit::Microsecond => ts!(TimestampMicrosecondType),
                 TimeUnit::Nanosecond => ts!(TimestampNanosecondType),
             };
-            let s = match dt {
-                Some(dt) => {
-                    let z = if tz.is_some() { "Z" } else { "" };
-                    format!("{}{z}", dt.format("%Y-%m-%dT%H:%M:%S%.f"))
-                }
-                None => "<invalid timestamp>".to_string(),
-            };
+            let dt = dt.ok_or_else(|| out_of_range(arr))?;
+            let z = if tz.is_some() { "Z" } else { "" };
+            let s = format!("{}{z}", dt.format("%Y-%m-%dT%H:%M:%S%.f"));
             Cell::Str(keep(scratch, s))
         }
         DataType::Struct(_) => Cell::Struct,
@@ -502,9 +504,17 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
     })
 }
 
-fn fmt_opt<T: std::fmt::Display>(v: Option<T>) -> String {
-    v.map(|v| v.to_string())
-        .unwrap_or_else(|| "<invalid temporal value>".to_string())
+/// Arrow can represent temporal values chrono cannot; fail the read rather
+/// than substitute a placeholder that looks like data.
+fn fmt_temporal<T: std::fmt::Display>(v: Option<T>, arr: &dyn Array) -> Result<String> {
+    v.map(|v| v.to_string()).ok_or_else(|| out_of_range(arr))
+}
+
+fn out_of_range(arr: &dyn Array) -> EngineError {
+    reader_err(format!(
+        "plugin {} value is outside the supported range",
+        arr.data_type()
+    ))
 }
 
 fn dict_key(keys: &dyn Array, row: usize) -> Result<usize> {
@@ -669,4 +679,30 @@ pub(crate) fn read_static_schema(
     }
     let schema = arrow_schema::Schema::try_from(&out).map_err(|e| e.to_string())?;
     Ok(Some(Arc::new(schema)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{Date32Array, TimestampSecondArray};
+
+    #[test]
+    fn out_of_range_temporal_values_fail_the_read() {
+        let mut scratch = Vec::new();
+        let ok = Date32Array::from(vec![0]);
+        assert!(matches!(
+            cell(&ok, 0, &mut scratch),
+            Ok(Cell::Str("1970-01-01"))
+        ));
+        for arr in [
+            Arc::new(Date32Array::from(vec![i32::MAX])) as ArrayRef,
+            Arc::new(TimestampSecondArray::from(vec![i64::MAX])),
+        ] {
+            let err = cell(arr.as_ref(), 0, &mut scratch).err().unwrap();
+            assert!(
+                err.to_string().contains("outside the supported range"),
+                "{err}"
+            );
+        }
+    }
 }

@@ -20,7 +20,8 @@
  *   crosses the boundary starts with `struct_size` (sizeof as compiled by the
  *   producer). Within one major version, fields may only be APPENDED; a reader
  *   must treat fields past the producer's `struct_size` as absent/zero. Any
- *   other change bumps the major version.
+ *   other change bumps the major version. Hence arrays of these structs are
+ *   strided by the producer's `struct_size` (see `PqlitePluginV1.functions`).
  *
  * Threading.  `pqlite_plugin_init` is called once, from one thread. `open`
  *   may be called concurrently from several threads. A given ArrowArrayStream
@@ -36,8 +37,9 @@
  *   err` are freed by the host calling the plugin's `free_string`. Everything
  *   the host passes in (`PqliteStr`, `PqliteArg`, `PqliteOpenRequest`,
  *   config) is BORROWED for the duration of the call that receives it; copy
- *   anything retained. The `PqliteHostV1` struct itself and its callbacks stay
- *   valid for the life of the process.
+ *   anything retained. Once `pqlite_plugin_init` succeeds, the `PqliteHostV1`
+ *   struct itself and its callbacks stay valid for the life of the process; if
+ *   it fails, the host frees them, so a failing plugin must not retain them.
  *
  * Lifetime.  The host never unloads a plugin (`dlclose`): Arrow release
  *   callbacks point into the plugin's code. Plugins live for the process.
@@ -224,6 +226,10 @@ typedef struct PqlitePluginV1 {
   PqliteStr plugin_version;
   void* plugin_data; /* opaque, passed back to open/static_schema */
 
+  /* A plain C array of `n_functions` definitions. Readers step through it by
+   * `functions[0].struct_size`, not their own sizeof, so it stays readable
+   * when PqliteTableFnDef grows; every entry must have that same
+   * `struct_size`. */
   size_t n_functions;
   const PqliteTableFnDef* functions;
 

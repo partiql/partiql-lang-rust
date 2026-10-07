@@ -2,7 +2,7 @@
 //! through `load_from_init` (everything except the `dlopen`).
 
 use std::ffi::{c_char, c_void, CString};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow_array::builder::{Int32Builder, ListBuilder, StringBuilder};
 use arrow_array::ffi_stream::FFI_ArrowArrayStream;
@@ -116,6 +116,62 @@ unsafe extern "C" fn bad_abi_init(
     out: *mut *const PqlitePluginV1,
 ) -> i32 {
     *out = make_vtable(PQLITE_PLUGIN_ABI_VERSION + 1);
+    0
+}
+
+unsafe extern "C" fn failing_init(
+    _host: *const PqliteHostV1,
+    _out: *mut *const PqlitePluginV1,
+) -> i32 {
+    7
+}
+
+/// A definition as a newer plugin might compile it, with a trailing field
+/// this host doesn't know about.
+#[repr(C)]
+struct WideDef {
+    def: PqliteTableFnDef,
+    extra: u64,
+}
+
+const WIDE: usize = std::mem::size_of::<WideDef>();
+
+fn wide_vtable(sizes: [usize; 2]) -> &'static PqlitePluginV1 {
+    let wide = |name, size: usize| {
+        let mut def = def(name, "", 0, 0);
+        def.struct_size = size as u32;
+        WideDef {
+            def,
+            extra: u64::MAX,
+        }
+    };
+    let fns: &'static [WideDef; 2] = Box::leak(Box::new([
+        wide("wide_a", sizes[0]),
+        wide("wide_b", sizes[1]),
+    ]));
+    Box::leak(Box::new(PqlitePluginV1 {
+        struct_size: std::mem::size_of::<PqlitePluginV1>() as u32,
+        abi_version: PQLITE_PLUGIN_ABI_VERSION,
+        plugin_name: PqliteStr::new("wideplug"),
+        plugin_version: PqliteStr::new("0.0.1"),
+        plugin_data: std::ptr::null_mut(),
+        n_functions: fns.len(),
+        functions: fns.as_ptr().cast(),
+        open: Some(test_open),
+        free_string: Some(test_free_string),
+    }))
+}
+
+unsafe extern "C" fn wide_init(_host: *const PqliteHostV1, out: *mut *const PqlitePluginV1) -> i32 {
+    *out = wide_vtable([WIDE, WIDE]);
+    0
+}
+
+unsafe extern "C" fn mixed_wide_init(
+    _host: *const PqliteHostV1,
+    out: *mut *const PqlitePluginV1,
+) -> i32 {
+    *out = wide_vtable([WIDE, std::mem::size_of::<PqliteTableFnDef>()]);
     0
 }
 
@@ -270,13 +326,18 @@ fn seq_batches(n: usize, per: usize, whole_row: bool, fields: &[String]) -> Vec<
     out
 }
 
+/// Loaded plugins live for the process, so load once and hand out clones.
 fn registry() -> TableFnRegistry {
-    let mut reg = TableFnRegistry::builtin();
-    let cfg = vec![("testplug.k".to_string(), "v".to_string())];
-    let info = unsafe { load_from_init("libtest.so", test_init, &cfg, &mut reg) }.unwrap();
-    assert_eq!(info.name, "testplug");
-    assert_eq!(info.functions, ["seq", "boom", "typed", "echo"]);
-    reg
+    static REG: OnceLock<TableFnRegistry> = OnceLock::new();
+    REG.get_or_init(|| {
+        let mut reg = TableFnRegistry::builtin();
+        let cfg = vec![("testplug.k".to_string(), "v".to_string())];
+        let info = unsafe { load_from_init("libtest.so", test_init, &cfg, &mut reg) }.unwrap();
+        assert_eq!(info.name, "testplug");
+        assert_eq!(info.functions, ["seq", "boom", "typed", "echo"]);
+        reg
+    })
+    .clone()
 }
 
 fn run(sql: &str) -> Result<String, String> {
@@ -389,7 +450,10 @@ fn arguments_cross_as_scalars_or_ion_text() {
 #[test]
 fn config_is_passed_to_init() {
     let _g = serial();
-    let _ = registry();
+    // Load afresh: `registry()` is cached and other loads overwrite CONFIG_SEEN.
+    let mut reg = TableFnRegistry::builtin();
+    let cfg = vec![("testplug.k".to_string(), "v".to_string())];
+    unsafe { load_from_init("libtest.so", test_init, &cfg, &mut reg) }.unwrap();
     assert!(CONFIG_SEEN
         .lock()
         .unwrap()
@@ -415,4 +479,29 @@ fn duplicate_function_names_are_rejected() {
         .err()
         .unwrap();
     assert!(err.contains("already registered"), "{err}");
+}
+
+#[test]
+fn failed_init_is_reported() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let err = unsafe { load_from_init("libfail.so", failing_init, &[], &mut reg) }
+        .err()
+        .unwrap();
+    assert!(err.contains("pqlite_plugin_init failed (7)"), "{err}");
+}
+
+#[test]
+fn function_defs_are_strided_by_plugin_struct_size() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let info = unsafe { load_from_init("libwide.so", wide_init, &[], &mut reg) }.unwrap();
+    assert_eq!(info.functions, ["wide_a", "wide_b"]);
+
+    let mut reg = TableFnRegistry::builtin();
+    let err = unsafe { load_from_init("libwide.so", mixed_wide_init, &[], &mut reg) }
+        .err()
+        .unwrap();
+    assert!(err.contains("function #1 has struct_size"), "{err}");
+    assert!(reg.get("wide_a").is_none());
 }

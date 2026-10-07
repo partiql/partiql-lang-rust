@@ -73,10 +73,12 @@ pub unsafe fn load_from_init(
     config: &[(String, String)],
     registry: &mut TableFnRegistry,
 ) -> Result<PluginInfo, String> {
-    let host_state: &'static HostState = Box::leak(Box::new(HostState {
+    // Boxed until init succeeds; after that the plugin may keep `host`, so
+    // both are leaked for the process (see header).
+    let host_state = Box::new(HostState {
         label: label.to_string(),
         name: OnceLock::new(),
-    }));
+    });
     let kvs: Vec<PqliteKeyValue> = config
         .iter()
         .map(|(k, v)| PqliteKeyValue {
@@ -84,20 +86,20 @@ pub unsafe fn load_from_init(
             value: PqliteStr::new(v),
         })
         .collect();
-    let host: &'static mut PqliteHostV1 = Box::leak(Box::new(PqliteHostV1 {
+    let mut host = Box::new(PqliteHostV1 {
         struct_size: std::mem::size_of::<PqliteHostV1>() as u32,
         abi_version: ffi::PQLITE_PLUGIN_ABI_VERSION,
         host_name: PqliteStr::new("pqlite"),
         host_version: PqliteStr::new(HOST_VERSION),
-        host_data: host_state as *const HostState as *mut c_void,
+        host_data: &*host_state as *const HostState as *mut c_void,
         max_log_level: max_log_level(),
         log: Some(host_log),
         config: kvs.as_ptr(),
         n_config: kvs.len(),
-    }));
+    });
 
     let mut out: *const PqlitePluginV1 = std::ptr::null();
-    let rc = init(host, &mut out);
+    let rc = init(&*host, &mut out);
     // Config is only borrowed for the duration of init.
     host.config = std::ptr::null();
     host.n_config = 0;
@@ -105,6 +107,8 @@ pub unsafe fn load_from_init(
     if rc != 0 {
         return Err(format!("{label}: pqlite_plugin_init failed ({rc})"));
     }
+    let host_state: &'static HostState = Box::leak(host_state);
+    Box::leak(host);
     let vt = out
         .as_ref()
         .ok_or_else(|| format!("{label}: pqlite_plugin_init returned no vtable"))?;
@@ -138,18 +142,12 @@ pub unsafe fn load_from_init(
         vtable: vt,
     });
 
-    let defs: &[ffi::PqliteTableFnDef] = if vt.n_functions == 0 {
-        &[]
-    } else {
-        std::slice::from_raw_parts(vt.functions, vt.n_functions)
-    };
+    let defs = fn_defs(vt).map_err(|e| format!("{label}: {e}"))?;
     // Validate everything before registering anything, so a bad plugin
     // leaves the registry untouched.
-    let mut staged = Vec::with_capacity(defs.len());
-    for (i, def) in defs.iter().enumerate() {
-        if (def.struct_size as usize) < std::mem::size_of::<ffi::PqliteTableFnDef>() {
-            return Err(format!("{label}: function #{i} definition is truncated"));
-        }
+    let mut staged: Vec<(String, usize, &ffi::PqliteTableFnDef, String, _)> =
+        Vec::with_capacity(defs.len());
+    for (i, def) in defs.into_iter().enumerate() {
         let fn_name = utf8(def.name, label, "function name")?;
         if fn_name.is_empty() {
             return Err(format!("{label}: function #{i} has an empty name"));
@@ -163,7 +161,7 @@ pub unsafe fn load_from_init(
         if registry.get(&fn_name).is_some()
             || staged
                 .iter()
-                .any(|d: &TableFnDef| d.name.eq_ignore_ascii_case(&fn_name))
+                .any(|(name, ..)| name.eq_ignore_ascii_case(&fn_name))
         {
             return Err(format!(
                 "{label}: table function '{fn_name}' is already registered"
@@ -172,9 +170,15 @@ pub unsafe fn load_from_init(
         let usage = utf8(def.usage, label, "usage")?;
         let static_schema = source::read_static_schema(&plugin, i as u32, def)
             .map_err(|e| format!("{label}: {fn_name}: {e}"))?;
-        // CallDef names must be 'static; plugins are never unloaded.
+        staged.push((fn_name, i, def, usage, static_schema));
+    }
+    let mut functions = Vec::with_capacity(staged.len());
+    for (fn_name, i, def, usage, static_schema) in staged {
+        // CallDef names must be 'static; plugins are never unloaded. Leaked
+        // only once the whole plugin has validated.
         let name: &'static str = Box::leak(fn_name.into_boxed_str());
-        staged.push(TableFnDef {
+        functions.push(name.to_string());
+        registry.add(TableFnDef {
             name,
             arities: def.min_args as usize..=def.max_args as usize,
             metadata: Arc::new(source::PluginMetadata {
@@ -191,17 +195,42 @@ pub unsafe fn load_from_init(
             } else {
                 usage
             },
-        });
-    }
-    let functions = staged.iter().map(|d| d.name.to_string()).collect();
-    for def in staged {
-        registry.add(def)?;
+        })?;
     }
     Ok(PluginInfo {
         name,
         version,
         functions,
     })
+}
+
+/// The plugin's function definitions. The array is strided by the plugin's
+/// `struct_size` (see header), which may exceed ours.
+unsafe fn fn_defs(vt: &PqlitePluginV1) -> Result<Vec<&ffi::PqliteTableFnDef>, String> {
+    if vt.n_functions == 0 {
+        return Ok(Vec::new());
+    }
+    let stride = (*vt.functions).struct_size as usize;
+    if stride < std::mem::size_of::<ffi::PqliteTableFnDef>() {
+        return Err("function definitions are truncated".to_string());
+    }
+    // Alignment is a power of two (`is_multiple_of` is above MSRV).
+    if stride & (std::mem::align_of::<ffi::PqliteTableFnDef>() - 1) != 0 {
+        return Err(format!("function definition size {stride} is misaligned"));
+    }
+    let base = vt.functions.cast::<u8>();
+    (0..vt.n_functions)
+        .map(|i| {
+            let def = &*base.add(i * stride).cast::<ffi::PqliteTableFnDef>();
+            if def.struct_size as usize != stride {
+                return Err(format!(
+                    "function #{i} has struct_size {}, expected {stride}",
+                    def.struct_size
+                ));
+            }
+            Ok(def)
+        })
+        .collect()
 }
 
 /// Each arity becomes its own planner overload; keep that list small.
@@ -233,10 +262,17 @@ fn max_log_level() -> i32 {
         {
             "off" | "none" => 0,
             "error" => ffi::PQLITE_LOG_ERROR,
+            "" | "warn" => ffi::PQLITE_LOG_WARN,
             "info" => ffi::PQLITE_LOG_INFO,
             "debug" => ffi::PQLITE_LOG_DEBUG,
             "trace" => ffi::PQLITE_LOG_TRACE,
-            _ => ffi::PQLITE_LOG_WARN,
+            other => {
+                eprintln!(
+                    "pqlite: ignoring PQLITE_PLUGIN_LOG={other:?} \
+                     (expected off|error|warn|info|debug|trace); using warn"
+                );
+                ffi::PQLITE_LOG_WARN
+            }
         }
     })
 }
