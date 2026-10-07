@@ -7,7 +7,8 @@ use partiql_tools::session::{
     OutputFormat, PqliteSession, RunOutcome,
 };
 
-use clap::{Parser, Subcommand};
+use clap::builder::{PossibleValue, PossibleValuesParser};
+use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use reedline::{
     FileBackedHistory, History, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal,
     ValidationResult, Validator,
@@ -23,15 +24,30 @@ const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "@", env!("PQLITE_GIT_S
 /// Use table functions in queries to access data:
 ///   SELECT t.a FROM mem(100, 2) t;
 ///   SELECT t.name FROM scan_ion('data.ion') t;
+///
+/// Shell completions: `pqlite completions <bash|zsh|fish|powershell|elvish>`.
+/// See PQLITE.md for install instructions.
 #[derive(Parser)]
 #[command(name = "pqlite", version = VERSION)]
 struct Cli {
-    /// Print debug info for pipeline stages. Accepts: ast, plan, program, or * for all.
-    #[arg(long, global = true, value_delimiter = ',')]
+    /// Print debug info for pipeline stages. Accepts: ast, plan, program, or all (alias '*').
+    #[arg(long, global = true, value_delimiter = ',', value_parser = debug_values())]
     debug: Vec<String>,
 
     #[command(subcommand)]
     command: CliCommand,
+}
+
+/// Values accepted by `--debug`. `*` is a hidden alias of `all`: completion
+/// generators emit possible values unquoted, so a visible `*` would be
+/// glob-expanded into the current directory's file names.
+fn debug_values() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("ast"),
+        PossibleValue::new("plan"),
+        PossibleValue::new("program"),
+        PossibleValue::new("all").alias("*"),
+    ])
 }
 
 #[derive(Subcommand)]
@@ -39,18 +55,25 @@ enum CliCommand {
     /// Open a database file and start the interactive REPL.
     Open {
         /// Path to the database file. The parent directory must already exist.
+        #[arg(value_hint = ValueHint::FilePath)]
         db: std::path::PathBuf,
     },
     /// Execute a single query immediately, optionally against a database file.
     Exec {
         /// The PartiQL query string to run.
+        #[arg(value_hint = ValueHint::Other)]
         query: String,
         /// Path to the database file. Omit for db-free queries.
-        #[arg(long)]
+        #[arg(long, value_hint = ValueHint::FilePath)]
         db: Option<std::path::PathBuf>,
         /// Output format: `text` (default) or `ion`.
         #[arg(long, default_value_t = OutputFormat::Text, value_enum)]
         format: OutputFormat,
+    },
+    /// Print a shell completion script to stdout. See PQLITE.md for install steps.
+    Completions {
+        /// The shell to generate completions for.
+        shell: clap_complete::Shell,
     },
 }
 
@@ -85,6 +108,11 @@ fn main() {
             }
         }
         CliCommand::Open { db } => run_repl(debug, &db),
+        CliCommand::Completions { shell } => {
+            let mut command = Cli::command();
+            let bin_name = command.get_name().to_string();
+            clap_complete::generate(shell, &mut command, bin_name, &mut std::io::stdout());
+        }
     }
 }
 

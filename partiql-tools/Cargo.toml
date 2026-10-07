@@ -35,6 +35,8 @@ partiql-logical-planner = { path = "../partiql-logical-planner" }
 partiql-parser = { path = "../partiql-parser" }
 partiql-value = { path = "../partiql-value" }
 clap = { version = "4.6.1", features = ["derive"] }
+# Generates the scripts printed by `pqlite completions <shell>`.
+clap_complete = "4.6"
 # default-features disabled drops the serde / serde-json / serde-bincode codecs
 # we don't use; the LMDB backend and the Str/Bytes codecs are unaffected.
 heed = { version = "0.20", default-features = false }
