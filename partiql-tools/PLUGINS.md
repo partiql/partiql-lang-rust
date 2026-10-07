@@ -64,8 +64,9 @@ from that sketch, and the reasons for them:
 See the module docs in `src/plugin/source.rs`. In summary:
 
 * Integers map to int. `UInt64` values above `i64::MAX` become decimals.
-* Floats map to float. `Decimal128` with scale ≤ 28 maps to decimal.
-  Wider decimals become strings.
+* Floats map to float. A `Decimal128` value maps to decimal when it fits a
+  96-bit decimal with scale 0 to 28. Other values, and all `Decimal256`, become
+  strings, so a column's type can vary per row.
 * Strings and binaries are borrowed with no copy.
 * Dates, times and timestamps become ISO-8601 strings, because the VM has no
   datetime value.

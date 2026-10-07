@@ -141,13 +141,14 @@ typedef struct PqliteHostV1 {
   uint32_t struct_size; /* sizeof(PqliteHostV1) as compiled by the host */
   uint32_t abi_version; /* PQLITE_PLUGIN_ABI_VERSION of the host */
   PqliteStr host_name;    /* e.g. "pqlite" */
-  PqliteStr host_version; /* e.g. "0.14.0@abc1234" */
+  PqliteStr host_version; /* e.g. "0.15.0" */
 
   /* Opaque host pointer, passed back to every callback below. */
   void* host_data;
 
-  /* Most verbose level the host will print. Plugins should skip formatting
-   * messages above it. `log` may still be called with any level. */
+  /* Most verbose level the host will print, or 0 if logging is off.
+   * Plugins should skip formatting messages above it. `log` may still be
+   * called with any level. */
   int32_t max_log_level;
   /* Emit a log line attributed to this plugin. `target` is a free-form
    * sub-component name (may be empty). Thread-safe. */
@@ -188,10 +189,12 @@ typedef struct PqliteArg {
 
 typedef struct PqliteTableFnDef {
   uint32_t struct_size;
-  PqliteStr name;  /* SQL name, e.g. "scan_parquet"; unique per host */
+  /* SQL name, e.g. "scan_parquet". Non-empty and unique per host, compared
+   * ASCII-case-insensitively (built-ins included). */
+  PqliteStr name;
   PqliteStr usage; /* one line for `.help`, e.g. "scan_x(spec) — ..." */
   uint32_t min_args;
-  uint32_t max_args;
+  uint32_t max_args; /* at most 16; min_args <= max_args */
   /* Optional fixed output schema (a struct-typed ArrowSchema, one child per
    * column). NULL means schema-on-read: every field resolves and is typed per
    * row. When set, the host resolves field names against it at compile time.
@@ -207,9 +210,11 @@ typedef struct PqliteOpenRequest {
   size_t n_args;
   /* Projection pushdown. If `whole_row` is non-zero the query needs every
    * column (e.g. SELECT *, COUNT(*)) and `fields` is empty. Otherwise
-   * `fields` lists the field names the query reads; the stream may contain
-   * only those columns (extra columns are ignored, absent ones read as
-   * MISSING). */
+   * `fields` lists the field names the query reads, spelled as in the
+   * query; the stream may contain only those columns (extra columns are
+   * ignored, absent ones read as MISSING). The host matches stream columns to
+   * these names ASCII-case-insensitively, so plugins should match the same
+   * way. */
   int32_t whole_row;
   const PqliteStr* fields;
   size_t n_fields;

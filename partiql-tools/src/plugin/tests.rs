@@ -208,6 +208,21 @@ unsafe extern "C" fn wide_vtable_init(
     0
 }
 
+/// A vtable allocation that holds only `struct_size`.
+#[repr(C, align(8))]
+struct TinyVtable {
+    struct_size: u32,
+}
+
+unsafe extern "C" fn tiny_vtable_init(
+    _host: *const PqliteHostV1,
+    out: *mut *const PqlitePluginV1,
+) -> i32 {
+    let tiny: &'static TinyVtable = Box::leak(Box::new(TinyVtable { struct_size: 4 }));
+    *out = (tiny as *const TinyVtable).cast();
+    0
+}
+
 unsafe extern "C" fn test_free_string(s: *mut c_char) {
     drop(CString::from_raw(s));
 }
@@ -556,4 +571,14 @@ fn newer_larger_vtable_is_accepted() {
     let info = unsafe { load_from_init("libnew.so", wide_vtable_init, &[], &mut reg) }.unwrap();
     assert_eq!(info.name, "newplug");
     assert_eq!(info.functions, ["wide_a", "wide_b"]);
+}
+
+#[test]
+fn vtable_too_small_for_abi_version_is_rejected() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let err = unsafe { load_from_init("libtiny.so", tiny_vtable_init, &[], &mut reg) }
+        .err()
+        .unwrap();
+    assert!(err.contains("struct_size 4 is too small"), "{err}");
 }

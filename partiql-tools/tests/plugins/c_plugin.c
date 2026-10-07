@@ -395,13 +395,21 @@ static PqlitePluginV1 vtable = {
 };
 
 int32_t pqlite_plugin_init(const PqliteHostV1* host, const PqlitePluginV1** out) {
-  if (host->abi_version != PQLITE_PLUGIN_ABI_VERSION) return 1;
+  /* Check the host is new enough for every field read below. */
+  if (host->struct_size < offsetof(PqliteHostV1, n_config) + sizeof host->n_config) return 1;
+  if (host->abi_version != PQLITE_PLUGIN_ABI_VERSION) {
+    if (host->log) {
+      host->log(host->host_data, PQLITE_LOG_ERROR, cstr("init"),
+                cstr("unsupported host ABI version"));
+    }
+    return 1;
+  }
   for (size_t i = 0; i < host->n_config && n_config < MAX_CONFIG; i++) {
     config_keys[n_config] = dup_str(host->config[i].key);
     config_values[n_config] = dup_str(host->config[i].value);
     n_config++;
   }
-  if (host->max_log_level >= PQLITE_LOG_INFO) {
+  if (host->log && host->max_log_level >= PQLITE_LOG_INFO) {
     char msg[64];
     snprintf(msg, sizeof msg, "loaded with %zu option(s)", n_config);
     host->log(host->host_data, PQLITE_LOG_INFO, cstr("init"), cstr(msg));

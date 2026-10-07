@@ -10,7 +10,9 @@
 //!   i64, or decimal above `i64::MAX`; Float16/32/64 → f64
 //! * Utf8 / LargeUtf8 / Utf8View → string; Binary / LargeBinary / BinaryView /
 //!   FixedSizeBinary → bytes
-//! * Decimal128 with scale ≤ 28 → decimal; other decimals → string
+//! * Decimal128 that fits a 96-bit decimal with scale 0..=28 → decimal;
+//!   other decimals (including Decimal256) → string, so the type can vary
+//!   per row
 //! * Date32/64, Time32/64, Timestamp → ISO-8601 string (timestamps with a time
 //!   zone end in `Z`; Arrow stores them as UTC)
 //! * Struct → tuple; List / LargeList / FixedSizeList → list; Map → list of
@@ -291,6 +293,10 @@ impl PluginDataSource {
 
 impl DataSource for PluginDataSource {
     fn open(&mut self) -> Result<()> {
+        // A re-open after `close` must not start out cancelled. Release any
+        // previous stream first: it may still be reading the flag.
+        self.close()?;
+        self.cancelled.store(0, Ordering::Release);
         let stream = self.open_stream()?;
         self.stream = Some(stream);
         Ok(())
@@ -493,7 +499,7 @@ fn cell(arr: &dyn Array, row: usize, scratch: &mut Vec<String>) -> Result<Cell> 
         DataType::Map(_, _) => Cell::Map,
         DataType::Dictionary(_, _) => {
             let dict = arr.as_any_dictionary();
-            let key = dict_key(dict.keys(), row)?;
+            let key = dict_key(dict.keys(), row, dict.values().len())?;
             return cell(dict.values().as_ref(), key, scratch);
         }
         other => {
@@ -517,13 +523,15 @@ fn out_of_range(arr: &dyn Array) -> EngineError {
     ))
 }
 
-fn dict_key(keys: &dyn Array, row: usize) -> Result<usize> {
+/// The values index for `row`; plugin data is untrusted, so out-of-range
+/// (including negative) keys are an error rather than an arrow panic.
+fn dict_key(keys: &dyn Array, row: usize, n_values: usize) -> Result<usize> {
     macro_rules! k {
         ($t:ty) => {
-            keys.as_primitive::<$t>().value(row) as usize
+            usize::try_from(keys.as_primitive::<$t>().value(row)).ok()
         };
     }
-    Ok(match keys.data_type() {
+    let key = match keys.data_type() {
         DataType::Int8 => k!(Int8Type),
         DataType::Int16 => k!(Int16Type),
         DataType::Int32 => k!(Int32Type),
@@ -533,7 +541,9 @@ fn dict_key(keys: &dyn Array, row: usize) -> Result<usize> {
         DataType::UInt32 => k!(UInt32Type),
         DataType::UInt64 => k!(UInt64Type),
         other => return Err(reader_err(format!("invalid dictionary key type {other}"))),
-    })
+    };
+    key.filter(|&k| k < n_values)
+        .ok_or_else(|| reader_err("dictionary key out of range"))
 }
 
 /// Resolve a dictionary to its values array and index; identity otherwise.
@@ -541,7 +551,7 @@ fn undict(arr: &dyn Array, row: usize) -> Result<(&dyn Array, usize)> {
     match arr.data_type() {
         DataType::Dictionary(_, _) if !arr.is_null(row) => {
             let dict = arr.as_any_dictionary();
-            let key = dict_key(dict.keys(), row)?;
+            let key = dict_key(dict.keys(), row, dict.values().len())?;
             undict(dict.values().as_ref(), key)
         }
         _ => Ok((arr, row)),
@@ -684,7 +694,89 @@ pub(crate) fn read_static_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow_array::{Date32Array, TimestampSecondArray};
+    use crate::plugin::ffi::{PqliteOpenRequest, PqlitePluginV1, PqliteStr};
+    use arrow_array::{
+        Date32Array, DictionaryArray, Int8Array, RecordBatchIterator, StringArray,
+        TimestampSecondArray,
+    };
+    use std::ffi::c_void;
+
+    /// Fails if asked to open while the cancel flag is already set.
+    unsafe extern "C" fn open_unless_cancelled(
+        _data: *mut c_void,
+        req: *const PqliteOpenRequest,
+        out: *mut FFI_ArrowArrayStream,
+        _err: *mut *mut c_char,
+    ) -> i32 {
+        if (*(*req).cancelled) != 0 {
+            return 1;
+        }
+        let schema = Arc::new(arrow_schema::Schema::empty());
+        let reader = RecordBatchIterator::new(std::iter::empty(), schema);
+        std::ptr::write(out, FFI_ArrowArrayStream::new(Box::new(reader)));
+        0
+    }
+
+    unsafe extern "C" fn free_string(_s: *mut c_char) {}
+
+    fn source() -> PluginDataSource {
+        let plugin = Arc::new(LoadedPlugin {
+            name: "p".to_string(),
+            version: "0".to_string(),
+            vtable: PqlitePluginV1 {
+                struct_size: std::mem::size_of::<PqlitePluginV1>() as u32,
+                abi_version: crate::plugin::ffi::PQLITE_PLUGIN_ABI_VERSION,
+                plugin_name: PqliteStr::new("p"),
+                plugin_version: PqliteStr::new("0"),
+                plugin_data: std::ptr::null_mut(),
+                n_functions: 0,
+                functions: std::ptr::null(),
+                open: Some(open_unless_cancelled),
+                free_string: Some(free_string),
+            },
+        });
+        PluginDataSource {
+            stream: None,
+            current: None,
+            prev: None,
+            row: 0,
+            bindings: Vec::new(),
+            scratch: Vec::new(),
+            plugin,
+            fn_index: 0,
+            name: "f",
+            args: Vec::new(),
+            whole_row: true,
+            targets: Vec::new(),
+            cancelled: Box::new(AtomicU32::new(0)),
+        }
+    }
+
+    #[test]
+    fn reopen_after_close_is_not_cancelled() {
+        let mut src = source();
+        for _ in 0..2 {
+            src.open().unwrap();
+            src.close().unwrap();
+        }
+    }
+
+    #[test]
+    fn out_of_range_dictionary_keys_fail_the_read() {
+        let mut scratch = Vec::new();
+        let values = Arc::new(StringArray::from(vec!["a"]));
+        for key in [-1i8, 1] {
+            // Data imported over FFI isn't validated, so build it unchecked too.
+            let dict = unsafe {
+                DictionaryArray::new_unchecked(Int8Array::from(vec![key]), values.clone())
+            };
+            let err = cell(&dict, 0, &mut scratch).err().unwrap();
+            assert!(
+                err.to_string().contains("dictionary key out of range"),
+                "{err}"
+            );
+        }
+    }
 
     #[test]
     fn out_of_range_temporal_values_fail_the_read() {

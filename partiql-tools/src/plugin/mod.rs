@@ -118,7 +118,15 @@ pub unsafe fn load_from_init(
         return Err(format!("{label}: pqlite_plugin_init returned no vtable"));
     }
     // `struct_size` and `abi_version` lead every vtable version; check the
-    // version before trusting the rest of the layout.
+    // version before trusting the rest of the layout, and the size before
+    // reading the version.
+    let struct_size = std::ptr::addr_of!((*out).struct_size).read() as usize;
+    let header = std::mem::offset_of!(PqlitePluginV1, abi_version) + std::mem::size_of::<u32>();
+    if struct_size < header {
+        return Err(format!(
+            "{label}: plugin vtable struct_size {struct_size} is too small"
+        ));
+    }
     let abi_version = std::ptr::addr_of!((*out).abi_version).read();
     if abi_version != ffi::PQLITE_PLUGIN_ABI_VERSION {
         return Err(format!(
