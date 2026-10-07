@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791403989371,
+  "lastUpdate": 1791404098578,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -46841,6 +46841,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 15592,
             "range": "± 645",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "abe28b678520c49bfd301e8fafd6a0a14f3ee021",
+          "message": "ci(workflows): reduce GitHub Actions runner jobs per change (#681)\n\n* ci(workflows): reduce GitHub Actions runner jobs per change\n\n- Trigger `push` only for main/dev/release-*/tags; feature branches are\n  covered by `pull_request`, so PR pushes no longer run every workflow twice.\n- Cancel superseded PR runs via a concurrency group keyed on head_ref\n  (pushes to long-lived branches get unique groups and are never cancelled).\n- Skip CI for docs-only PRs (paths-ignore on pull_request only, so base\n  branches always produce conformance artifacts).\n- Merge fmt, clippy, cargo-deny (both checks), build and test on Linux into\n  a single job; macOS/Windows, coverage and conformance now `needs` it.\n- Merge conformance-report and conformance-report-comparison into one job,\n  dropping the whole-workspace `./*` cache handoff.\n- Fold coverage.yml into ci_build_test.yml; install cargo-llvm-cov as a\n  prebuilt binary instead of `cargo install`.\n- Replace sha-keyed `./*` caches with Swatinem/rust-cache, saved only from\n  non-PR runs.\n- Bump codecov-action v3 -> v5 and benchmark checkout v3 -> v4 (actionlint).\n\n* ci(workflows): drop workflow_dispatch to avoid CodeQL artifact-poisoning alert\n\n* ci(workflows): key PR concurrency on PR number; don't fail fork PRs on Codecov upload\n\n* ci(workflows): use dedicated runner, run jobs in parallel, move macOS/Windows to nightly\n\nPer open source office feedback: run Linux jobs on partiql-lang-rust_ubuntu-24.04_4-core, drop needs-gating so\nchanges queue once, drop fail-fast: false, and move macOS/Windows build+test to a nightly workflow (CI builds no\nplatform-specific artifacts). Also stop running push CI on dev.\n\n* ci(nightly): schedule off the hour",
+          "timestamp": "2026-10-07T12:55:57-07:00",
+          "tree_id": "8981407a0e3e8beea00175596e9365bad98355a5",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/abe28b678520c49bfd301e8fafd6a0a14f3ee021"
+        },
+        "date": 1791404097676,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 789852,
+            "range": "± 4905",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 875170,
+            "range": "± 2314",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 841744,
+            "range": "± 15242",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 868991,
+            "range": "± 2061",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 847043,
+            "range": "± 2719",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 871954,
+            "range": "± 4384",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 852960,
+            "range": "± 2362",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 883906,
+            "range": "± 3388",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 848392,
+            "range": "± 3628",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 877739,
+            "range": "± 6982",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1129440,
+            "range": "± 5409",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1535745,
+            "range": "± 12754",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2113259,
+            "range": "± 6237",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1322453,
+            "range": "± 17833",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1756617,
+            "range": "± 16445",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2336081,
+            "range": "± 6530",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5098,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 43862,
+            "range": "± 233",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 86787,
+            "range": "± 537",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 4091,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 30886,
+            "range": "± 88",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 63182,
+            "range": "± 287",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 62040,
+            "range": "± 256",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 971937,
+            "range": "± 3236",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1940576,
+            "range": "± 10979",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 12460755,
+            "range": "± 33736",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 90301802,
+            "range": "± 1095566",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 173178795,
+            "range": "± 646619",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 484406640,
+            "range": "± 5991600",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 413450329,
+            "range": "± 1135656",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10245,
+            "range": "± 36",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2440,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 401,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 108,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 716,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2106,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6508,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 16646,
+            "range": "± 62",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 23839,
+            "range": "± 109",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 21018,
+            "range": "± 149",
             "unit": "ns/iter"
           }
         ]
