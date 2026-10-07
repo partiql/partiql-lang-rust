@@ -1,0 +1,11 @@
+// Aliases over inline bags and table functions (these never went through the
+// broken stored-table path), plus WHERE+SELECT sharing a field, which used to
+// fail with "invalid key index" (VM sub-program key remap).
+{ sql: "SELECT x.a FROM << {'a': 1}, {'a': 2} >> x", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT a FROM << {'a': 1}, {'a': 2} >> x", expect: { rows: $bag::[ { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT x.a, b FROM << {'a': 1, 'b': 3}, {'a': 2, 'b': 4} >> x WHERE x.a > 1 AND b > 3", expect: { rows: $bag::[ { a: 2, b: 4 } ] } }
+{ sql: "SELECT t.a FROM mem(3, 2) t", expect: { rows: $bag::[ { a: 0 }, { a: 1 }, { a: 2 } ] } }
+{ sql: "SELECT a FROM mem(3, 2) t", expect: { rows: $bag::[ { a: 0 }, { a: 1 }, { a: 2 } ] } }
+// LIKE's pattern also lives in the shared key pool; with WHERE's keys merged first
+// it used to read `c` instead of the regex.
+{ sql: "SELECT e.c LIKE 'x%' AS m FROM << {'a': 1, 'c': 'xyz'}, {'a': 2, 'c': 'abc'}, {'a': 0, 'c': 'xx'} >> e WHERE e.a > 0", expect: { rows: $bag::[ { m: true }, { m: false } ] } }
