@@ -196,7 +196,7 @@ pub(crate) struct PluginDataSource {
 
 impl PluginDataSource {
     fn open_stream(&mut self) -> Result<ArrowArrayStreamReader> {
-        let vt = self.plugin.vtable;
+        let vt = &self.plugin.vtable;
         let ffi_args: Vec<_> = self.args.iter().map(OwnedArg::as_ffi).collect();
         let fields: Vec<PqliteStr> = if self.whole_row {
             Vec::new()

@@ -21,7 +21,8 @@ use ffi::{PluginInitFn, PqliteHostV1, PqliteKeyValue, PqlitePluginV1, PqliteStr}
 pub struct LoadedPlugin {
     pub name: String,
     pub version: String,
-    vtable: &'static PqlitePluginV1,
+    /// Our copy of the plugin's vtable (see `ffi::read_prefixed`).
+    vtable: PqlitePluginV1,
 }
 
 // SAFETY: the header requires `open` and the stream callbacks to be callable
@@ -107,45 +108,43 @@ pub unsafe fn load_from_init(
     if rc != 0 {
         return Err(format!("{label}: pqlite_plugin_init failed ({rc})"));
     }
+    // From here on the plugin is initialised and may hold on to `host` (and
+    // call `log` from its own threads), so it must stay valid for the process
+    // even if the checks below reject the plugin. The cost is two small
+    // allocations per plugin that loads.
     let host_state: &'static HostState = Box::leak(host_state);
     Box::leak(host);
-    let vt = out
-        .as_ref()
-        .ok_or_else(|| format!("{label}: pqlite_plugin_init returned no vtable"))?;
-    if vt.abi_version != ffi::PQLITE_PLUGIN_ABI_VERSION {
+    if out.is_null() {
+        return Err(format!("{label}: pqlite_plugin_init returned no vtable"));
+    }
+    // `struct_size` and `abi_version` lead every vtable version; check the
+    // version before trusting the rest of the layout.
+    let abi_version = std::ptr::addr_of!((*out).abi_version).read();
+    if abi_version != ffi::PQLITE_PLUGIN_ABI_VERSION {
         return Err(format!(
-            "{label}: plugin ABI version {} does not match host ABI version {}",
-            vt.abi_version,
+            "{label}: plugin ABI version {abi_version} does not match host ABI version {}",
             ffi::PQLITE_PLUGIN_ABI_VERSION
         ));
     }
-    if (vt.struct_size as usize) < std::mem::size_of::<PqlitePluginV1>() {
-        return Err(format!("{label}: plugin vtable is truncated"));
-    }
+    let (vt, _) = ffi::read_prefixed(out).map_err(|e| format!("{label}: plugin vtable: {e}"))?;
     if vt.open.is_none() || vt.free_string.is_none() {
         return Err(format!(
             "{label}: plugin vtable is missing open/free_string"
-        ));
-    }
-    if vt.n_functions > 0 && vt.functions.is_null() {
-        return Err(format!(
-            "{label}: plugin declares functions but none are given"
         ));
     }
 
     let name = utf8(vt.plugin_name, label, "plugin_name")?;
     let version = utf8(vt.plugin_version, label, "plugin_version")?;
     let _ = host_state.name.set(name.clone());
+    let defs = fn_defs(&vt).map_err(|e| format!("{label}: {e}"))?;
     let plugin = Arc::new(LoadedPlugin {
         name: name.clone(),
         version: version.clone(),
         vtable: vt,
     });
-
-    let defs = fn_defs(vt).map_err(|e| format!("{label}: {e}"))?;
     // Validate everything before registering anything, so a bad plugin
     // leaves the registry untouched.
-    let mut staged: Vec<(String, usize, &ffi::PqliteTableFnDef, String, _)> =
+    let mut staged: Vec<(String, usize, ffi::PqliteTableFnDef, String, _)> =
         Vec::with_capacity(defs.len());
     for (i, def) in defs.into_iter().enumerate() {
         let fn_name = utf8(def.name, label, "function name")?;
@@ -168,7 +167,7 @@ pub unsafe fn load_from_init(
             ));
         }
         let usage = utf8(def.usage, label, "usage")?;
-        let static_schema = source::read_static_schema(&plugin, i as u32, def)
+        let static_schema = source::read_static_schema(&plugin, i as u32, &def)
             .map_err(|e| format!("{label}: {fn_name}: {e}"))?;
         staged.push((fn_name, i, def, usage, static_schema));
     }
@@ -204,33 +203,35 @@ pub unsafe fn load_from_init(
     })
 }
 
-/// The plugin's function definitions. The array is strided by the plugin's
-/// `struct_size` (see header), which may exceed ours.
-unsafe fn fn_defs(vt: &PqlitePluginV1) -> Result<Vec<&ffi::PqliteTableFnDef>, String> {
+/// Copies of the plugin's function definitions. The array is strided by the
+/// plugin's `struct_size` (see header), which may differ from ours.
+unsafe fn fn_defs(vt: &PqlitePluginV1) -> Result<Vec<ffi::PqliteTableFnDef>, String> {
     if vt.n_functions == 0 {
         return Ok(Vec::new());
     }
-    let stride = (*vt.functions).struct_size as usize;
-    if stride < std::mem::size_of::<ffi::PqliteTableFnDef>() {
-        return Err("function definitions are truncated".to_string());
+    if vt.functions.is_null() {
+        return Err("plugin declares functions but none are given".to_string());
     }
+    let (first, stride) =
+        ffi::read_prefixed(vt.functions).map_err(|e| format!("function #0: {e}"))?;
     // Alignment is a power of two (`is_multiple_of` is above MSRV).
     if stride & (std::mem::align_of::<ffi::PqliteTableFnDef>() - 1) != 0 {
         return Err(format!("function definition size {stride} is misaligned"));
     }
     let base = vt.functions.cast::<u8>();
-    (0..vt.n_functions)
-        .map(|i| {
-            let def = &*base.add(i * stride).cast::<ffi::PqliteTableFnDef>();
-            if def.struct_size as usize != stride {
-                return Err(format!(
-                    "function #{i} has struct_size {}, expected {stride}",
-                    def.struct_size
-                ));
-            }
-            Ok(def)
-        })
-        .collect()
+    let mut defs = Vec::with_capacity(vt.n_functions);
+    defs.push(first);
+    for i in 1..vt.n_functions {
+        let ptr = base.add(i * stride).cast::<ffi::PqliteTableFnDef>();
+        let (def, size) = ffi::read_prefixed(ptr).map_err(|e| format!("function #{i}: {e}"))?;
+        if size != stride {
+            return Err(format!(
+                "function #{i} has struct_size {size}, expected {stride}"
+            ));
+        }
+        defs.push(def);
+    }
+    Ok(defs)
 }
 
 /// Each arity becomes its own planner overload; keep that list small.

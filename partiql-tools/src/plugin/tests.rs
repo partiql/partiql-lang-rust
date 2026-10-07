@@ -175,6 +175,39 @@ unsafe extern "C" fn mixed_wide_init(
     0
 }
 
+unsafe extern "C" fn short_def_init(
+    _host: *const PqliteHostV1,
+    out: *mut *const PqlitePluginV1,
+) -> i32 {
+    let short = <PqliteTableFnDef as SizePrefixed>::V1_SIZE - 8;
+    *out = wide_vtable([short, short]);
+    0
+}
+
+/// A vtable from a newer plugin, with a trailing field this host doesn't know.
+#[repr(C)]
+struct WideVtable {
+    vt: PqlitePluginV1,
+    extra: u64,
+}
+
+unsafe extern "C" fn wide_vtable_init(
+    _host: *const PqliteHostV1,
+    out: *mut *const PqlitePluginV1,
+) -> i32 {
+    let base = wide_vtable([WIDE, WIDE]);
+    let wide: &'static WideVtable = Box::leak(Box::new(WideVtable {
+        vt: PqlitePluginV1 {
+            struct_size: std::mem::size_of::<WideVtable>() as u32,
+            plugin_name: PqliteStr::new("newplug"),
+            ..std::ptr::read(base)
+        },
+        extra: u64::MAX,
+    }));
+    *out = &wide.vt;
+    0
+}
+
 unsafe extern "C" fn test_free_string(s: *mut c_char) {
     drop(CString::from_raw(s));
 }
@@ -504,4 +537,23 @@ fn function_defs_are_strided_by_plugin_struct_size() {
         .unwrap();
     assert!(err.contains("function #1 has struct_size"), "{err}");
     assert!(reg.get("wide_a").is_none());
+}
+
+#[test]
+fn defs_below_the_v1_size_are_rejected() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let err = unsafe { load_from_init("libshort.so", short_def_init, &[], &mut reg) }
+        .err()
+        .unwrap();
+    assert!(err.contains("smaller than the v1 layout"), "{err}");
+}
+
+#[test]
+fn newer_larger_vtable_is_accepted() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let info = unsafe { load_from_init("libnew.so", wide_vtable_init, &[], &mut reg) }.unwrap();
+    assert_eq!(info.name, "newplug");
+    assert_eq!(info.functions, ["wide_a", "wide_b"]);
 }

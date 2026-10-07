@@ -19,7 +19,8 @@
  *   its version, and the host refuses to load on mismatch. Every struct that
  *   crosses the boundary starts with `struct_size` (sizeof as compiled by the
  *   producer). Within one major version, fields may only be APPENDED; a reader
- *   must treat fields past the producer's `struct_size` as absent/zero. Any
+ *   must treat fields past the producer's `struct_size` as absent/zero, and
+ *   accept any `struct_size` at least as large as the first v1 layout. Any
  *   other change bumps the major version. Hence arrays of these structs are
  *   strided by the producer's `struct_size` (see `PqlitePluginV1.functions`).
  *

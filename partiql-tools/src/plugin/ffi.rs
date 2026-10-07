@@ -150,5 +150,54 @@ pub struct PqlitePluginV1 {
     pub free_string: Option<FreeStringFn>,
 }
 
+/// A struct that starts with `struct_size` and only ever grows by appending
+/// fields within one ABI major version.
+///
+/// # Safety
+/// All-zero bytes must be a valid value: fields past the producer's
+/// `struct_size` read as zero / NULL / `None`.
+pub unsafe trait SizePrefixed: Sized {
+    /// Size of the ABI v1 layout, i.e. the end of its last field. Fixed: later
+    /// fields are appended after it and must not change this value.
+    const V1_SIZE: usize;
+}
+
+unsafe impl SizePrefixed for PqliteTableFnDef {
+    const V1_SIZE: usize = std::mem::offset_of!(PqliteTableFnDef, static_schema)
+        + std::mem::size_of::<Option<StaticSchemaFn>>();
+}
+
+unsafe impl SizePrefixed for PqlitePluginV1 {
+    const V1_SIZE: usize = std::mem::offset_of!(PqlitePluginV1, free_string)
+        + std::mem::size_of::<Option<FreeStringFn>>();
+}
+
+/// Copy a producer's struct into our layout. Reads only the producer's
+/// `struct_size` bytes; any fields we know but it doesn't are zeroed, and any
+/// it has but we don't are ignored. Returns the copy and the producer's size.
+///
+/// # Safety
+/// `src`, if non-null, must point to at least `struct_size` readable bytes,
+/// aligned for `T`.
+pub unsafe fn read_prefixed<T: SizePrefixed>(src: *const T) -> Result<(T, usize), String> {
+    if src.is_null() {
+        return Err("null pointer".to_string());
+    }
+    let size = std::ptr::read(src.cast::<u32>()) as usize;
+    if size < T::V1_SIZE {
+        return Err(format!(
+            "struct_size {size} is smaller than the v1 layout ({})",
+            T::V1_SIZE
+        ));
+    }
+    let mut out = std::mem::MaybeUninit::<T>::zeroed();
+    std::ptr::copy_nonoverlapping(
+        src.cast::<u8>(),
+        out.as_mut_ptr().cast::<u8>(),
+        size.min(std::mem::size_of::<T>()),
+    );
+    Ok((out.assume_init(), size))
+}
+
 pub type PluginInitFn =
     unsafe extern "C" fn(host: *const PqliteHostV1, out: *mut *const PqlitePluginV1) -> i32;
