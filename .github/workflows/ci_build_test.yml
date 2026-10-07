@@ -2,13 +2,13 @@ name: CI Build
 
 # `push` runs only for long-lived branches and tags; feature branches are covered by `pull_request`. This avoids running
 # every workflow twice (once per event) for each push to a branch with an open PR.
-# `push` runs on `main`/`dev`/release branches are also what produce the conformance report artifact that PRs targeting
+# macOS and Windows run in `nightly.yml` instead, since CI produces no platform-specific artifacts.
+# `push` runs on `main`/release branches are also what produce the conformance report artifact that PRs targeting
 # those branches compare against (see `conformance-report`), so they must not be path-filtered.
 on:
   push:
     branches:
       - main
-      - dev
       - 'release-*'
       - 'release/**'
     tags:
@@ -42,11 +42,11 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Fast-failing lint + license checks + build + test on Linux, all in one runner. Every other job depends on this one,
-  # so a formatting or clippy failure doesn't consume additional runners.
+  # Lint + license checks + build + test on Linux, all in one runner. Jobs don't depend on each other, so each change
+  # queues for runners only once.
   build:
-    name: Build and Test (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: Lint, Build and Test (Linux)
+    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
@@ -91,43 +91,9 @@ jobs:
       - name: Cargo Test excluding conformance tests
         run: cargo test --verbose --workspace
 
-  build-cross-platform:
-    name: Build and Test (${{ matrix.os }})
-    needs: [ build ]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ windows-latest, macos-latest ]
-    steps:
-      - name: Remove MSys64 MingW64 Binaries
-        if: runner.os == 'Windows'
-        # remove this because there is a bad libclang.dll that confuses bindgen
-        run: Remove-Item -LiteralPath "C:\msys64\mingw64\bin" -Force -Recurse
-      - name: Install Dependencies
-        if: runner.os == 'Windows'
-        run: choco install llvm -y
-      - name: Git Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Rust Toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.event_name != 'pull_request' }}
-      - name: Cargo Build
-        run: cargo build --verbose --workspace
-      - name: Cargo Test excluding conformance tests
-        run: cargo test --verbose --workspace
-
   coverage:
     name: Code Coverage
-    needs: [ build ]
-    runs-on: ubuntu-latest
+    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
@@ -164,8 +130,7 @@ jobs:
   # and posts the result as a PR comment.
   conformance-report:
     name: Conformance report
-    needs: [ build ]
-    runs-on: ubuntu-latest
+    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
     steps:
       - uses: actions/checkout@v4
         with:

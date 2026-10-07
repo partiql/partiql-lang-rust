@@ -21,7 +21,7 @@ permissions:
 jobs:
   benchmark:
     name: Performance regression check
-    runs-on: ubuntu-latest
+    runs-on: partiql-lang-rust_ubuntu-24.04_4-core
     steps:
       - name: Git Checkout
         uses: actions/checkout@v4
