@@ -4,7 +4,7 @@ name: Nightly Cross-Platform Build
 # platform-specific artifacts, and the macOS runner pool is small and shared enterprise-wide.
 on:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '23 7 * * *'   # nightly, deliberately off the hour (top-of-hour schedules are often delayed or dropped)
   push:
     tags:
       - 'v*'
