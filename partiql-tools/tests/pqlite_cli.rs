@@ -486,9 +486,9 @@ fn ctas_then_select_exact_chunk_multiple_rows() {
 
 #[test]
 fn two_tables_in_one_db_two_selects_in_one_run() {
-    // The pqlite binary does not support multi-statement input (`;`-separated
-    // queries are rejected by the parser). Each statement is issued as a
-    // separate `pqlite exec` invocation against the same `--db` file.
+    // Each statement is issued as a separate `pqlite exec` invocation against
+    // the same `--db` file, so state must persist across processes. (Single-
+    // invocation multi-statement input is covered further below.)
     let dir = tempfile::tempdir().unwrap();
     let dbp = dir.path().join("two.pqlite");
 
@@ -1974,4 +1974,204 @@ fn bootstrap_reconciles_when_self_entry_present_but_version_zero() {
         1,
         "recovery stamps version 1"
     );
+}
+
+/// Run `pqlite [--debug <debug>] exec [--format <format>] [--db <db>] <query>`.
+fn run_exec_with(
+    query: &str,
+    db: Option<&std::path::Path>,
+    format: Option<&str>,
+    debug: Option<&str>,
+) -> (bool, String, String) {
+    let mut cmd = Command::new(PQLITE);
+    if let Some(d) = debug {
+        cmd.arg("--debug").arg(d);
+    }
+    cmd.arg("exec");
+    if let Some(f) = format {
+        cmd.arg("--format").arg(f);
+    }
+    if let Some(path) = db {
+        cmd.arg("--db").arg(path);
+    }
+    cmd.arg(query);
+    let out = cmd.output().expect("failed to spawn pqlite");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn multi_statement_exec_runs_in_order_and_semicolon_in_string_does_not_split() {
+    let (ok, stdout, stderr) = run_exec(
+        "SELECT VALUE 'a;b' FROM << 1 >>; -- c;d\nSELECT VALUE \"x;\".y FROM << {'y': 2} >> AS \"x;\";",
+        None,
+    );
+    assert!(ok, "stderr: {stderr}");
+    assert_eq!(stdout, "<<\n  'a;b'\n>>\n<<\n  2\n>>\n");
+}
+
+#[test]
+fn multi_statement_exec_shares_one_db() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("multi.pqlite");
+    let (ok, stdout, stderr) = run_exec(
+        "CREATE TABLE t; INSERT INTO t SELECT * FROM << {'id': 1} >>; SELECT * FROM t",
+        Some(&db),
+    );
+    assert!(ok, "stderr: {stderr}");
+    assert_eq!(stdout, "<<\n  { 'id': 1 }\n>>\n");
+    assert!(
+        stderr.contains("Created table t") && stderr.contains("Inserted 1 rows into t"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn error_in_statement_2_of_3_stops_and_exits_nonzero() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("err.pqlite");
+    let (ok, stdout, stderr) = run_exec(
+        "CREATE TABLE a; SELECT * FROM ghost; CREATE TABLE c",
+        Some(&db),
+    );
+    assert!(!ok, "a failing statement must exit non-zero");
+    assert!(stdout.is_empty(), "stdout: {stdout}");
+    assert!(stderr.contains("Created table a"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("Statement 2: ") && stderr.contains("Table 'ghost' not found"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("Statement 3"), "stderr: {stderr}");
+
+    // Statement 1 committed; statement 3 never ran.
+    let (ok, tables, stderr) = run_exec("SELECT * FROM _tables", Some(&db));
+    assert!(ok, "stderr: {stderr}");
+    assert!(
+        tables.contains("'a'") && !tables.contains("'c'") && tables.contains("_tables"),
+        "got: {tables}"
+    );
+}
+
+#[test]
+fn syntax_error_in_any_statement_runs_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("syntax.pqlite");
+    let (ok, stdout, stderr) = run_exec("CREATE TABLE a; SELECT FROM; CREATE TABLE c", Some(&db));
+    assert!(!ok);
+    assert!(stdout.is_empty(), "stdout: {stdout}");
+    assert!(stderr.contains("Parse error"), "stderr: {stderr}");
+    assert!(
+        !db.exists(),
+        "a script that fails to parse must not create the db"
+    );
+}
+
+#[test]
+fn timing_is_one_line_per_statement_plus_total() {
+    let (ok, _, stderr) = run_exec_with(
+        "SELECT VALUE 1 FROM << 1 >>; SELECT VALUE 2 FROM << 1, 2 >>",
+        None,
+        None,
+        Some("ast"),
+    );
+    assert!(ok, "stderr: {stderr}");
+    let lines: Vec<&str> = stderr.lines().collect();
+    let find = |prefix: &str, phases: &str| {
+        lines
+            .iter()
+            .position(|l| l.starts_with(prefix) && l.contains(phases) && l.ends_with("ms)"))
+            .unwrap_or_else(|| panic!("missing {prefix:?} line; stderr: {stderr}"))
+    };
+    // Statement lines omit parse (the script is parsed once, up front).
+    let s1 = find("Statement 1: (1 rows in ", "ms, lower: ");
+    let s2 = find("Statement 2: (2 rows in ", "ms, lower: ");
+    let total = find("Total Timing: (3 rows in ", "ms, parse: ");
+    assert!(s1 < s2 && s2 < total, "lines out of order: {stderr}");
+    assert!(
+        !lines[s1].contains("parse") && !lines[s2].contains("parse"),
+        "stderr: {stderr}"
+    );
+    assert!(lines[total].contains(", exec: "), "stderr: {stderr}");
+    // --debug ast dumps the whole script's AST once.
+    assert_eq!(stderr.matches("[AST]").count(), 1, "stderr: {stderr}");
+}
+
+#[test]
+fn single_statement_prints_only_total_timing() {
+    let (ok, _, stderr) = run_exec("SELECT VALUE 1 FROM << 1 >>", None);
+    assert!(ok, "stderr: {stderr}");
+    assert!(
+        stderr.starts_with("Total Timing: (1 rows in ") && stderr.contains("ms, parse: "),
+        "stderr: {stderr}"
+    );
+    assert_eq!(stderr.lines().count(), 1, "stderr: {stderr}");
+}
+
+#[test]
+fn format_none_prints_nothing_to_stdout_but_keeps_timing() {
+    let (ok, stdout, stderr) = run_exec_with(
+        "SELECT t.a FROM mem(500, 2) t; SELECT VALUE 'x' FROM << 1 >>",
+        None,
+        Some("none"),
+        Some("ast"),
+    );
+    assert!(ok, "stderr: {stderr}");
+    assert!(
+        stdout.is_empty(),
+        "--format none must not write stdout: {stdout}"
+    );
+    // All rows are drained, so the footer reports the full count.
+    assert!(
+        stderr.contains("Statement 1: (500 rows in "),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Statement 2: (1 rows in "),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Total Timing: (501 rows in "),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("[AST]"),
+        "debug output still prints: {stderr}"
+    );
+}
+
+#[test]
+fn format_none_still_runs_write_statements() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("none.pqlite");
+    let (ok, stdout, stderr) = run_exec_with(
+        "CREATE TABLE t AS (SELECT t.a FROM mem(3,1) t)",
+        Some(&db),
+        Some("none"),
+        None,
+    );
+    assert!(ok && stdout.is_empty(), "stdout: {stdout} stderr: {stderr}");
+    assert!(
+        stderr.contains("Total Timing: (3 rows in "),
+        "stderr: {stderr}"
+    );
+    let (_, rows, _) = run_exec("SELECT * FROM t", Some(&db));
+    assert_eq!(rows.matches("'a'").count(), 3, "got: {rows}");
+}
+
+#[test]
+fn ion_multi_statement_emits_one_envelope_per_statement() {
+    use ion_rs::element::Element;
+    let (ok, stdout, stderr) = run_exec_with(
+        "SELECT VALUE 1 FROM << 1 >>; SELECT VALUE 2 FROM << 1 >>",
+        None,
+        Some("ion"),
+        None,
+    );
+    assert!(ok && stderr.is_empty(), "stderr: {stderr}");
+    let actual = Element::read_all(stdout.as_bytes()).expect("stdout must parse as Ion");
+    let expected = Element::read_all(b"{rows: $bag::[1]} {rows: $bag::[2]}").unwrap();
+    assert_eq!(actual, expected, "stdout: {stdout}");
 }
