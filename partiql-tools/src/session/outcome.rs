@@ -12,6 +12,11 @@ use partiql_value::BindingsName;
 pub enum OutputFormat {
     Text,
     Ion,
+    // Run every statement to completion (draining all query rows) but write
+    // nothing to stdout; timing footers and `--debug` output still go to
+    // stderr. Plain comment, not `///`: a variant doc would become per-value
+    // help text in the generated shell completions.
+    None,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -19,6 +24,7 @@ impl std::fmt::Display for OutputFormat {
         let s = match self {
             OutputFormat::Text => "text",
             OutputFormat::Ion => "ion",
+            OutputFormat::None => "none",
         };
         f.write_str(s)
     }

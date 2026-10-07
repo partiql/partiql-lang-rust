@@ -10,7 +10,7 @@ use partiql_vm::value::{RegisterReader, Shape};
 use crate::session::exec::QueryFooter;
 use crate::session::ion_output::{escape_control_chars_in_strings, write_outcome_ion};
 use crate::session::naming::format_table_name;
-use crate::session::outcome::{DebugCapture, StatementOutcome};
+use crate::session::outcome::{DebugCapture, StatementOutcome, StatementTiming};
 use crate::session::value::{row_to_value, value_to_element, RowConvertError};
 
 /// Flush a captured AST/plan/program block to `err`. Callers invoke this in
@@ -132,100 +132,74 @@ pub fn render_outcome_ion(outcome: &StatementOutcome, out: &mut dyn Write) -> io
     write_outcome_ion(outcome, out)
 }
 
-/// Human-readable footer for a completed non-query outcome, written to `err`.
-pub fn render_outcome_text(outcome: &StatementOutcome, err: &mut dyn Write) -> io::Result<()> {
+/// Human-readable summary for a completed non-query outcome, written to
+/// `err`, followed by its `Statement N:` timing block. `statement` is the
+/// 1-based position of the statement in its script.
+pub fn render_outcome_text(
+    outcome: &StatementOutcome,
+    statement: usize,
+    err: &mut dyn Write,
+) -> io::Result<()> {
     match outcome {
         StatementOutcome::CreateTableAs {
-            table_name,
-            rows,
-            timing,
-            ..
-        } => {
-            writeln!(
-                err,
-                "Created table {} ({} rows)",
-                format_table_name(table_name),
-                rows
-            )?;
-            write_timing_line(
-                err,
-                "took",
-                timing.parse,
-                timing.lower,
-                timing.compile,
-                timing.exec,
-            )?;
-        }
+            table_name, rows, ..
+        } => writeln!(
+            err,
+            "Created table {} ({} rows)",
+            format_table_name(table_name),
+            rows
+        )?,
         StatementOutcome::InsertInto {
-            table_name,
+            table_name, rows, ..
+        } => writeln!(
+            err,
+            "Inserted {} rows into {}",
             rows,
-            timing,
-            ..
-        } => {
-            writeln!(
-                err,
-                "Inserted {} rows into {}",
-                rows,
-                format_table_name(table_name)
-            )?;
-            write_timing_line(
-                err,
-                "took",
-                timing.parse,
-                timing.lower,
-                timing.compile,
-                timing.exec,
-            )?;
-        }
-        StatementOutcome::CreateTable {
-            table_name, timing, ..
-        } => {
-            writeln!(err, "Created table {}", format_table_name(table_name))?;
-            write_timing_line(
-                err,
-                "took",
-                timing.parse,
-                timing.lower,
-                timing.compile,
-                timing.exec,
-            )?;
+            format_table_name(table_name)
+        )?,
+        StatementOutcome::CreateTable { table_name, .. } => {
+            writeln!(err, "Created table {}", format_table_name(table_name))?
         }
     }
+    write_timing(err, statement, None, outcome.timing())?;
     err.flush()
 }
 
-/// `(N rows in ...)` footer for a completed Query. Ion mode skips this line to
-/// keep stderr clean for downstream Ion consumers.
-pub fn render_query_footer_text(footer: &QueryFooter, err: &mut dyn Write) -> io::Result<()> {
-    write_timing_line(
-        err,
-        &format!("{} rows in", footer.row_count),
-        footer.timing.parse,
-        footer.timing.lower,
-        footer.timing.compile,
-        footer.timing.exec,
-    )?;
-    err.flush()
-}
-
-/// `(<prefix> Xms — parse: ..., lower: ..., compile: ..., exec: ...)` line.
-fn write_timing_line(
+/// `Statement N: (R rows in ...)` timing block for a completed Query. Ion
+/// mode skips this to keep stderr clean for downstream Ion consumers.
+pub fn render_query_footer_text(
+    footer: &QueryFooter,
+    statement: usize,
     err: &mut dyn Write,
-    prefix: &str,
-    parse: Duration,
-    lower: Duration,
-    compile: Duration,
-    exec: Duration,
 ) -> io::Result<()> {
-    let total = parse + lower + compile + exec;
+    write_timing(err, statement, Some(footer.row_count), &footer.timing)?;
+    err.flush()
+}
+
+/// Two-line timing block, the per-phase breakdown nested under the label:
+///
+/// ```text
+/// Statement 1: (3 rows in 0.5ms)
+///   parse: 0.1ms, lower: 0.1ms, compile: 0.2ms, exec: 0.1ms
+/// ```
+///
+/// Non-query statements omit the `R rows in` part.
+fn write_timing(
+    err: &mut dyn Write,
+    statement: usize,
+    rows: Option<u64>,
+    timing: &StatementTiming,
+) -> io::Result<()> {
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    let total = timing.parse + timing.lower + timing.compile + timing.exec;
+    let rows = rows.map(|n| format!("{n} rows in ")).unwrap_or_default();
+    writeln!(err, "Statement {statement}: ({rows}{:.1}ms)", ms(total))?;
     writeln!(
         err,
-        "({} {:.1}ms — parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms)",
-        prefix,
-        total.as_secs_f64() * 1000.0,
-        parse.as_secs_f64() * 1000.0,
-        lower.as_secs_f64() * 1000.0,
-        compile.as_secs_f64() * 1000.0,
-        exec.as_secs_f64() * 1000.0,
+        "  parse: {:.1}ms, lower: {:.1}ms, compile: {:.1}ms, exec: {:.1}ms",
+        ms(timing.parse),
+        ms(timing.lower),
+        ms(timing.compile),
+        ms(timing.exec),
     )
 }

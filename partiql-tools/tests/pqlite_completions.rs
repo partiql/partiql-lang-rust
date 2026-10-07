@@ -58,11 +58,12 @@ fn zsh_completions_carry_value_hints() {
     assert!(script.contains(":DB:_files"), "{script}");
     // ValueHint::Other on the query suppresses file completion (empty action).
     assert!(
-        script.contains("':query -- The PartiQL query string to run:'"),
+        script
+            .contains("':query -- The PartiQL statement(s) to run, e.g. \"SELECT 1; SELECT 2\":'"),
         "{script}"
     );
     // value_enum / PossibleValuesParser surface as literal alternatives.
-    assert!(script.contains(":FORMAT:(text ion)"), "{script}");
+    assert!(script.contains(":FORMAT:(text ion none)"), "{script}");
     assert!(script.contains(":DEBUG:(ast plan program all)"), "{script}");
     assert!(
         script.contains(
@@ -116,6 +117,7 @@ fn fish_completions_carry_value_hints() {
     );
     assert!(script.contains("-l format"), "{script}");
     assert!(script.contains("ion\\t''"), "{script}");
+    assert!(script.contains("none\\t''"), "{script}");
 }
 
 #[test]

@@ -12,6 +12,7 @@ mod naming;
 mod outcome;
 mod planner;
 mod render;
+mod script;
 mod value;
 
 use std::path::Path;
@@ -25,6 +26,7 @@ pub use crate::session::render::{
     flush_debug, render_outcome_ion, render_outcome_text, render_query_footer_text,
     render_query_ion, render_query_text,
 };
+pub use crate::session::script::split_statements;
 
 /// The unit of work `PqliteSession::run` dispatches on. Rendering choices
 /// (output format, timing footer, etc.) are the caller's — session only cares
