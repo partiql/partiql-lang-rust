@@ -445,8 +445,20 @@ impl<'a> AstToLogical<'a> {
     ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
         // A node never sees its own bindings (e.g. `example` in `FROM example e` must not
         // resolve against `e`), nor FROM items of queries other than the current one and
-        // those enclosing it (e.g. those of a nested subquery).
-        let mut hidden: FxHashSet<NodeId> = self.id_stack.iter().copied().collect();
+        // those enclosing it (e.g. those of a nested subquery). Nodes that scope their own
+        // bindings (a graph pattern's `n` in `MATCH (n WHERE n.a = 1)`) stay visible.
+        let self_scoped = |id: &NodeId| {
+            self.key_registry
+                .in_scope
+                .get(id)
+                .is_some_and(|scope| scope.contains(id))
+        };
+        let mut hidden: FxHashSet<NodeId> = self
+            .id_stack
+            .iter()
+            .copied()
+            .filter(|id| !self_scoped(id))
+            .collect();
         hidden.extend(
             self.key_registry
                 .from_lets
@@ -455,8 +467,10 @@ impl<'a> AstToLogical<'a> {
                 .map(|(from_let, _)| *from_let),
         );
 
-        // Scope levels, innermost first. A level flagged `false` is the lateral scope of a
-        // FROM source, where unmatched names are globals rather than implicit attributes.
+        // Scope levels, innermost first. A level flagged `false` is the lateral scope of the
+        // FROM source being lowered directly (not via a nested query), where unmatched names
+        // are globals rather than implicit attributes.
+        let innermost_query = self.query_id_stack.last().copied();
         let mut levels: Vec<(Vec<NodeId>, bool)> = vec![];
         let ids: Vec<NodeId> = self.id_stack.iter().rev().copied().collect();
         let mut i = 0;
@@ -475,7 +489,7 @@ impl<'a> AstToLogical<'a> {
                         .copied()
                         .filter(|n| !hidden.contains(n))
                         .collect(),
-                    false,
+                    innermost_query != Some(query),
                 ));
                 if let Some(own) = self.key_registry.in_scope.get(&query) {
                     hidden.extend(own.iter().filter(|n| !is_lateral(n)));
@@ -3270,6 +3284,29 @@ mod tests {
         assert_eq!(
             subquery_scan_project_exprs(&plan, "s"),
             &[("y".to_string(), attr("a", "x"))]
+        );
+    }
+
+    #[test]
+    fn test_static_from_less_lateral_subquery_sees_implicit_attribute() {
+        // The FROM-source rule (unmatched name is a global) applies to the FROM source
+        // itself, not to a query nested in it: `x` is `a.x`.
+        let plan = lower_static("SELECT s.y FROM <<{'x':1}>> a, (SELECT x AS y) s").expect("lower");
+        assert_eq!(
+            subquery_scan_project_exprs(&plan, "s"),
+            &[("y".to_string(), attr("a", "x"))]
+        );
+    }
+
+    #[test]
+    fn test_static_graph_pattern_predicate_sees_pattern_binding() {
+        let plan = lower_static("SELECT x.n FROM (g MATCH (n WHERE n.a = 1)) AS x").expect("lower");
+        let plan = format!("{plan:?}");
+        assert!(
+            plan.contains(
+                r#"Path(VarRef(CaseInsensitive("n"), Local), [Key(CaseInsensitive("a"))])"#
+            ),
+            "{plan}"
         );
     }
 
