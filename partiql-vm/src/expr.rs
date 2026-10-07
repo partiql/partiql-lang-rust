@@ -2378,24 +2378,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     (&**base, components.first())
                 {
                     if let Some(slot) = self.resolver.resolve_field(name) {
-                        let mut current = Expr::SlotRef(slot);
-                        for component in &components[1..] {
-                            match component {
-                                PathComponent::Key(name) => {
-                                    current = Expr::GetField(
-                                        current.into(),
-                                        bindings_name_to_string(name),
-                                    );
-                                }
-                                _ => {
-                                    return Err(EngineError::UnsupportedExpr(format!(
-                                        "unsupported path component: {:?}",
-                                        component
-                                    )));
-                                }
-                            }
-                        }
-                        return Ok(current);
+                        return path_tail(Expr::SlotRef(slot), &components[1..]);
                     }
                 }
 
@@ -2404,24 +2387,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                     if is_alias {
                         if let Some(base_slot) = base_slot {
                             // We have a resolved base slot - build GetField chain
-                            let mut current = Expr::SlotRef(base_slot);
-                            for component in components {
-                                match component {
-                                    PathComponent::Key(name) => {
-                                        current = Expr::GetField(
-                                            current.into(),
-                                            bindings_name_to_string(name),
-                                        );
-                                    }
-                                    _ => {
-                                        return Err(EngineError::UnsupportedExpr(format!(
-                                            "unsupported path component: {:?}",
-                                            component
-                                        )));
-                                    }
-                                }
-                            }
-                            return Ok(current);
+                            return path_tail(Expr::SlotRef(base_slot), components);
                         }
                         // is_alias=true but base_slot=None means VarRef(Local) that can't be resolved yet
                         // This can happen for table names in FROM clause - fall through to generic handling
@@ -2429,21 +2395,7 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 }
 
                 // Generic path handling - lower the base expression and build GetField chain
-                let mut current = self.lower_expr(base)?;
-                for component in components {
-                    match component {
-                        PathComponent::Key(name) => {
-                            current = Expr::GetField(current.into(), bindings_name_to_string(name));
-                        }
-                        _ => {
-                            return Err(EngineError::UnsupportedExpr(format!(
-                                "unsupported path component: {:?}",
-                                component
-                            )));
-                        }
-                    }
-                }
-                Ok(current)
+                path_tail(self.lower_expr(base)?, components)
             }
             ValueExpr::BinaryExpr(op, left, right) => {
                 let left = self.lower_expr(left)?;
@@ -2676,6 +2628,23 @@ fn bindings_name_to_string(name: &BindingsName<'_>) -> String {
         BindingsName::CaseInsensitive(s) => s.to_string(),
         other => format!("{other:?}"),
     }
+}
+
+/// Apply path `components` to `base` as a `GetField` chain. The VM has no index
+/// navigation yet, so `Index`/`IndexExpr`/`KeyExpr` components are unsupported on
+/// every path, pushed-down or not.
+fn path_tail(base: Expr, components: &[PathComponent]) -> Result<Expr> {
+    components
+        .iter()
+        .try_fold(base, |current, component| match component {
+            PathComponent::Key(name) => Ok(Expr::GetField(
+                current.into(),
+                bindings_name_to_string(name),
+            )),
+            _ => Err(EngineError::UnsupportedExpr(format!(
+                "unsupported path component: {component:?}"
+            ))),
+        })
 }
 
 fn resolve_alias_info<R: SlotResolver>(
