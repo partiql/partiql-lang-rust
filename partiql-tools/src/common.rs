@@ -1,23 +1,16 @@
 use partiql_ast_passes::error::AstTransformationError;
 use partiql_catalog::call_defs::{CallDef, CallSpec};
-use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog};
+use partiql_catalog::catalog::SharedCatalog;
 use partiql_catalog::context::SessionContext;
-use partiql_catalog::table_fn::{
-    BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo, TableFunction,
-};
+use partiql_catalog::table_fn::{BaseTableExpr, BaseTableExprResult, BaseTableFunctionInfo};
 use partiql_logical_planner::{LogicalPlanner, VarRefResolution};
 use partiql_parser::{Parsed, Parser, ParserError};
-use partiql_value::{BindingsName, Value};
-use partiql_vm::source::DataSourceHandle;
-use partiql_vm::source::{
-    TableFunction as VmTableFunction, TableFunctionHandle as VmTableFunctionHandle,
-};
-use partiql_vm::CompilationCatalog;
+use partiql_value::Value;
+use partiql_vm::source::TableFunction as VmTableFunction;
 use rustc_hash::FxHashMap;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Arc;
 
 /// Parse PartiQL query
 pub fn parse(statement: &str) -> Result<Parsed<'_>, ParserError<'_>> {
@@ -41,63 +34,35 @@ pub fn lower_statement(
     planner.lower_statement(stmt)
 }
 
-/// Create a frontend catalog with only table function stubs.
-/// Used by pqlite when table functions are the sole data source mechanism.
-pub fn create_table_fn_catalog() -> Box<dyn SharedCatalog> {
-    let mut catalog = PartiqlCatalog::default();
-    register_table_fn_stubs(&mut catalog);
-    Box::new(catalog.to_shared_catalog())
-}
-
-fn register_table_fn_stubs(catalog: &mut PartiqlCatalog) {
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "rand",
-            vec![
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-            ],
-        ))))
-        .expect("Failed to add rand table function");
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "mem",
-            vec![
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-                partiql_catalog::call_defs::CallSpecArg::Positional,
-            ],
-        ))))
-        .expect("Failed to add mem table function");
-    catalog
-        .add_table_function(TableFunction::new(Box::new(StubTableFn::new(
-            "scan_ion",
-            vec![partiql_catalog::call_defs::CallSpecArg::Positional],
-        ))))
-        .expect("Failed to add scan_ion table function");
-}
-
 /// Stub table function for the frontend planner. Only provides `call_def()` so
 /// the planner can validate the call and produce a `CallExpr` in the logical plan.
 /// The actual execution is handled by the VM's `TableFunction` implementations.
 #[derive(Debug)]
-struct StubTableFn {
+pub(crate) struct StubTableFn {
     call_def: CallDef,
 }
 
 impl StubTableFn {
-    fn new(name: &'static str, input: Vec<partiql_catalog::call_defs::CallSpecArg>) -> Self {
+    /// One `CallSpec` per entry of `overloads`, each a fixed argument list.
+    pub(crate) fn new(
+        name: &'static str,
+        overloads: Vec<Vec<partiql_catalog::call_defs::CallSpecArg>>,
+    ) -> Self {
         StubTableFn {
             call_def: CallDef {
                 names: vec![name],
-                overloads: vec![CallSpec {
-                    input,
-                    output: Box::new(move |args| {
-                        partiql_logical::ValueExpr::Call(partiql_logical::CallExpr {
-                            name: partiql_logical::CallName::ByName(name.to_string()),
-                            arguments: args,
-                        })
-                    }),
-                }],
+                overloads: overloads
+                    .into_iter()
+                    .map(|input| CallSpec {
+                        input,
+                        output: Box::new(move |args| {
+                            partiql_logical::ValueExpr::Call(partiql_logical::CallExpr {
+                                name: partiql_logical::CallName::ByName(name.to_string()),
+                                arguments: args,
+                            })
+                        }),
+                    })
+                    .collect(),
             },
         }
     }
@@ -698,33 +663,6 @@ impl VmTableFunction for ScanIonTableFunction {
             })?
             .to_string();
         Ok(Box::new(IonDataSource::new(path, layout.clone())))
-    }
-}
-
-/// CompilationCatalog that provides table function metadata for pqlite.
-pub struct TableFnCompilationCatalog {
-    column_names: Vec<String>,
-}
-
-impl TableFnCompilationCatalog {
-    pub fn new(column_names: Vec<String>) -> Self {
-        TableFnCompilationCatalog { column_names }
-    }
-}
-
-impl CompilationCatalog for TableFnCompilationCatalog {
-    fn get_table(&self, _path: &[BindingsName<'_>]) -> Option<DataSourceHandle> {
-        None
-    }
-
-    fn get_table_function(&self, name: &str) -> Option<VmTableFunctionHandle> {
-        match name {
-            "rand" | "mem" => Some(VmTableFunctionHandle::new(Arc::new(
-                ColumnarIntMetadata::new(self.column_names.clone()),
-            ))),
-            "scan_ion" => Some(VmTableFunctionHandle::new(Arc::new(DynamicSchemaMetadata))),
-            _ => None,
-        }
     }
 }
 

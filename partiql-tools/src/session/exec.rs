@@ -18,6 +18,7 @@ use crate::session::naming::{canonical_table_key, normalize_query};
 use crate::session::outcome::{DebugCapture, StatementOutcome, StatementTiming};
 use crate::session::planner;
 use crate::storage::{self, HeedDB};
+use crate::table_fns::TableFnRegistry;
 
 /// Result of dispatching a statement. Queries hand back a `QueryHandle` so the
 /// caller can drain rows on its own terms; non-query statements are already
@@ -121,6 +122,7 @@ impl<'vm> Iterator for CountingRows<'vm> {
 
 struct StatementCtx<'a> {
     debug: &'a DebugFlags,
+    fns: &'a TableFnRegistry,
     db: Option<&'a Arc<HeedDB>>,
     parse_time: Duration,
     lower_time: Duration,
@@ -143,6 +145,7 @@ impl StatementCtx<'_> {
 pub(super) fn run(
     db: Option<&Arc<HeedDB>>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     sql: &str,
 ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
     let sql = normalize_query(sql);
@@ -172,7 +175,7 @@ pub(super) fn run(
         None => return (Err("no statements after parse".into()), capture),
     };
 
-    match dispatch(stmt, debug, db, parse_time, &mut capture) {
+    match dispatch(stmt, debug, fns, db, parse_time, &mut capture) {
         Ok(out) => (Ok(out), DebugCapture::default()),
         Err(e) => (Err(e), capture),
     }
@@ -183,10 +186,11 @@ pub(super) fn run(
 pub(super) fn run_parsed(
     db: Option<&Arc<HeedDB>>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     stmt: &ast::AstNode<ast::Statement>,
 ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
     let mut capture = DebugCapture::default();
-    match dispatch(stmt, debug, db, Duration::ZERO, &mut capture) {
+    match dispatch(stmt, debug, fns, db, Duration::ZERO, &mut capture) {
         Ok(out) => (Ok(out), DebugCapture::default()),
         Err(e) => (Err(e), capture),
     }
@@ -197,15 +201,17 @@ pub(super) fn run_parsed(
 pub(super) fn execute_statement_silent(
     stmt: &ast::AstNode<ast::Statement>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     db: Arc<HeedDB>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture = DebugCapture::default();
-    let catalog = common::create_table_fn_catalog();
+    let catalog = fns.frontend_catalog();
     let statement =
         common::lower_statement(&*catalog, stmt).map_err(|e| format!("Lower error: {:?}", e))?;
 
     let mut ctx = StatementCtx {
         debug,
+        fns,
         db: Some(&db),
         parse_time: Duration::ZERO,
         lower_time: Duration::ZERO,
@@ -230,11 +236,12 @@ pub(super) fn execute_statement_silent(
 fn dispatch(
     stmt: &ast::AstNode<ast::Statement>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     db: Option<&Arc<HeedDB>>,
     parse_time: Duration,
     capture: &mut DebugCapture,
 ) -> Result<RunOutcome, Box<dyn std::error::Error>> {
-    let catalog = common::create_table_fn_catalog();
+    let catalog = fns.frontend_catalog();
 
     let lower_start = Instant::now();
     let statement =
@@ -243,6 +250,7 @@ fn dispatch(
 
     let mut ctx = StatementCtx {
         debug,
+        fns,
         db,
         parse_time,
         lower_time,
@@ -281,8 +289,8 @@ fn compile_query(
 ) -> Result<QueryHandle, Box<dyn std::error::Error>> {
     let compile_start = Instant::now();
     let (compiled, catalog_id) =
-        planner::build_compiled(&plan, ctx.debug, ctx.db.cloned(), ctx.capture)?;
-    let exec_context = planner::build_exec_context(ctx.db.cloned(), catalog_id, &compiled);
+        planner::build_compiled(&plan, ctx.debug, ctx.fns, ctx.db.cloned(), ctx.capture)?;
+    let exec_context = planner::build_exec_context(ctx.fns, ctx.db.cloned(), catalog_id, &compiled);
     let vm = partiql_vm::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
     let compile_time = compile_start.elapsed();
@@ -319,7 +327,7 @@ fn exec_ctas(
         .map_err(|e| format!("Error: {}", e))?;
 
     let (rows, compile_time, exec_start) =
-        planner::drain_source_rows(&query, ctx.debug, db, ctx.capture)?;
+        planner::drain_source_rows(&query, ctx.debug, ctx.fns, db, ctx.capture)?;
 
     let n = {
         let mut writer = db
@@ -361,7 +369,7 @@ fn exec_insert(
         .ok_or("Error: The `--db <PATH>` option is required for INSERT.")?;
 
     let (rows, compile_time, exec_start) =
-        planner::drain_source_rows(&query, ctx.debug, db, ctx.capture)?;
+        planner::drain_source_rows(&query, ctx.debug, ctx.fns, db, ctx.capture)?;
 
     // Row count is tallied here, not from commit(): open_table_for_append seeds
     // row_id at the high-water mark, so commit() returns the absolute counter

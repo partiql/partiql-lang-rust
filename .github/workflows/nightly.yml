@@ -47,3 +47,9 @@ jobs:
         run: cargo build --verbose --workspace
       - name: Cargo Test excluding conformance tests
         run: cargo test --verbose --workspace
+      # See ci_build_test.yml; the plugin ABI is not supported on Windows.
+      - name: Test unstable pqlite plugin ABI
+        if: runner.os != 'Windows'
+        env:
+          RUSTFLAGS: --cfg pqlite_unstable_plugins
+        run: cargo test --verbose -p partiql-tools

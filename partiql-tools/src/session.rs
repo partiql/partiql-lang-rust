@@ -40,11 +40,14 @@ pub enum Commands {
 }
 
 use crate::storage::HeedDB;
+use crate::table_fns::TableFnRegistry;
 
-/// A stateful pqlite session: an optionally-open database plus debug settings.
+/// A stateful pqlite session: an optionally-open database, debug settings, and
+/// the table functions queries may call.
 pub struct PqliteSession {
     db: Option<Arc<HeedDB>>,
     debug: DebugFlags,
+    table_fns: TableFnRegistry,
 }
 
 impl PqliteSession {
@@ -54,12 +57,28 @@ impl PqliteSession {
         Ok(PqliteSession {
             db: Some(db),
             debug,
+            table_fns: TableFnRegistry::builtin(),
         })
     }
 
     /// A session with no database (lazy-open): only db-free queries succeed.
     pub fn open_without_db(debug: DebugFlags) -> Self {
-        PqliteSession { db: None, debug }
+        PqliteSession {
+            db: None,
+            debug,
+            table_fns: TableFnRegistry::builtin(),
+        }
+    }
+
+    /// Replace the session's table functions (the built-ins by default).
+    /// Start from `TableFnRegistry::builtin()` to extend rather than replace.
+    pub fn with_table_fns(mut self, table_fns: TableFnRegistry) -> Self {
+        self.table_fns = table_fns;
+        self
+    }
+
+    pub fn table_fns(&self) -> &TableFnRegistry {
+        &self.table_fns
     }
 
     /// Parse + lower + compile the statement and return a `RunOutcome`. For a
@@ -73,7 +92,9 @@ impl PqliteSession {
         command: &Commands,
     ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
         match command {
-            Commands::Exec { query } => exec::run(self.db.as_ref(), &self.debug, query),
+            Commands::Exec { query } => {
+                exec::run(self.db.as_ref(), &self.debug, &self.table_fns, query)
+            }
         }
     }
 
@@ -84,7 +105,7 @@ impl PqliteSession {
         &self,
         stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
     ) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
-        exec::run_parsed(self.db.as_ref(), &self.debug, stmt)
+        exec::run_parsed(self.db.as_ref(), &self.debug, &self.table_fns, stmt)
     }
 
     pub fn debug_flags(&self) -> &DebugFlags {

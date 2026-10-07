@@ -9,17 +9,17 @@ use partiql_vm::EvaluationMode;
 use partiql_vm::{CompilationContext, ExecutionCatalog, ExecutionContext, PlanCompiler};
 
 use crate::catalog::{HeedCompilationCatalog, HeedExecutionCatalog};
-use crate::common;
 use crate::session::debug::DebugFlags;
 use crate::session::outcome::DebugCapture;
 use crate::storage::{HeedDB, StorageError};
+use crate::table_fns::TableFnRegistry;
 
-/// Bundles `HeedCompilationCatalog` with the existing `TableFnCompilationCatalog`
+/// Bundles `HeedCompilationCatalog` with the session's table functions
 /// under `PlanCompiler`'s single `"default"` catalog name. Also records the
 /// first unresolved bare table name so `build_compiled` can fail fast with
 /// "Table not found" instead of letting Permissive mode yield a MISSING row.
 struct CombinedCatalog {
-    table_fns: common::TableFnCompilationCatalog,
+    table_fns: TableFnRegistry,
     heed: Option<HeedCompilationCatalog>,
     unresolved_table_name: Arc<Mutex<Option<String>>>,
 }
@@ -51,7 +51,7 @@ impl partiql_vm::CompilationCatalog for CombinedCatalog {
     }
 
     fn get_table_function(&self, name: &str) -> Option<partiql_vm::source::TableFunctionHandle> {
-        self.table_fns.get_table_function(name)
+        self.table_fns.table_function_handle(name)
     }
 }
 
@@ -59,6 +59,7 @@ impl partiql_vm::CompilationCatalog for CombinedCatalog {
 pub(super) fn build_compiled(
     logical: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     db: Option<Arc<HeedDB>>,
     capture: &mut DebugCapture,
 ) -> Result<(partiql_vm::CompiledPlan, CatalogId), Box<dyn std::error::Error>> {
@@ -68,10 +69,9 @@ pub(super) fn build_compiled(
 
     let mut context = CompilationContext::new();
 
-    let column_names = vec!["a".to_string(), "b".to_string()];
     let unresolved_table_name: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let combined = CombinedCatalog {
-        table_fns: common::TableFnCompilationCatalog::new(column_names),
+        table_fns: fns.clone(),
         heed: db.map(HeedCompilationCatalog::new),
         unresolved_table_name: Arc::clone(&unresolved_table_name),
     };
@@ -103,14 +103,13 @@ pub(super) fn build_compiled(
 /// The Heed catalog is `prepare()`-d from `compiled` before being boxed so
 /// `ScanId → table-name` mappings are populated before the VM calls `create()`.
 pub(super) fn build_exec_context(
+    fns: &TableFnRegistry,
     db: Option<Arc<HeedDB>>,
     catalog_id: CatalogId,
     compiled: &partiql_vm::CompiledPlan,
 ) -> ExecutionContext {
     let mut exec_context = ExecutionContext::new();
-    exec_context.register_table_function("rand", Arc::new(common::RandTableFunction));
-    exec_context.register_table_function("mem", Arc::new(common::MemTableFunction));
-    exec_context.register_table_function("scan_ion", Arc::new(common::ScanIonTableFunction));
+    fns.register_all(&mut exec_context);
 
     if let Some(db) = db {
         let mut heed_exec = HeedExecutionCatalog::new(db);
@@ -135,15 +134,16 @@ pub(super) type DrainedSource = (Vec<Vec<u8>>, std::time::Duration, Instant);
 pub(super) fn drain_source_rows(
     query: &partiql_logical::LogicalPlan<partiql_logical::BindingsOp>,
     debug: &DebugFlags,
+    fns: &TableFnRegistry,
     db: &Arc<HeedDB>,
     capture: &mut DebugCapture,
 ) -> Result<DrainedSource, Box<dyn std::error::Error>> {
     let compile_start = Instant::now();
-    let (compiled, catalog_id) = build_compiled(query, debug, Some(Arc::clone(db)), capture)?;
+    let (compiled, catalog_id) = build_compiled(query, debug, fns, Some(Arc::clone(db)), capture)?;
     let compile_time = compile_start.elapsed();
 
     let exec_start = Instant::now();
-    let exec_context = build_exec_context(Some(Arc::clone(db)), catalog_id, &compiled);
+    let exec_context = build_exec_context(fns, Some(Arc::clone(db)), catalog_id, &compiled);
     let mut vm = partiql_vm::PartiQLVM::new(compiled, &exec_context)
         .map_err(|e| format!("Execution setup error: {:?}", e))?;
 
