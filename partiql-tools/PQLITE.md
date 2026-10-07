@@ -85,11 +85,47 @@ cargo build --release --bin pqlite
 
 ```
 pqlite open <db>                              # REPL against <db>
-pqlite exec [--db <path>] [--format text|ion] "<query>"
+pqlite exec [--db <path>] [--format text|ion|none] "<stmt>[; <stmt>...]"
 pqlite --version
 pqlite --debug ast,plan,program ...           # or --debug all (alias '*')
 pqlite completions <shell>                    # print a shell completion script (see Installation)
 ```
+
+**Multiple statements**
+
+`exec` and the REPL both accept several `;`-separated statements in one input
+(`"CREATE TABLE t; INSERT INTO t SELECT * FROM << {'a': 1} >>; SELECT * FROM t"`).
+In the REPL an entry runs once it ends with `;`, so a script can span several lines.
+
+- Splitting is done by the PartiQL parser, so a `;` inside a string, quoted
+  identifier, or comment does not split. A trailing `;` is optional; an empty
+  statement (`;;`) is a parse error.
+- A syntax error anywhere rejects the whole input before any statement runs.
+- Otherwise statements run in order. The first failing statement stops the run
+  and its error is labeled `Statement N: ...`. Earlier statements' output and
+  writes are kept. `exec` then exits 1; the REPL skips the rest of that entry and
+  keeps the session open.
+
+**Output formats** (`exec --format`)
+
+```
+text   (default) rows on stdout; per-statement summary and timing on stderr
+ion    one Ion envelope per statement on stdout; stderr silent on success
+none   runs every statement to completion (all rows drained) but writes nothing
+       to stdout; timing and --debug output still go to stderr. For benchmarking.
+```
+
+In `text` and `none` mode, timing is printed to stderr, one line per statement. The
+input is parsed once up front, so parse time appears only on the total line. Rows are
+rows returned (queries) or written (CTAS / INSERT), and the total sums them:
+
+```
+Statement 1: (3 rows in 0.5ms, lower: 0.3ms, compile: 0.1ms, exec: 0.1ms)
+Statement 2: (2 rows in 0.3ms, lower: 0.1ms, compile: 0.1ms, exec: 0.1ms)
+Total Timing: (5 rows in 0.9ms, parse: 0.1ms, lower: 0.4ms, compile: 0.2ms, exec: 0.2ms)
+```
+
+A single statement prints only the `Total Timing:` line.
 
 **REPL meta commands**
 
@@ -157,6 +193,7 @@ partiql-tools/
 │   │   ├── ion_output.rs       # Ion envelope for non-query outcomes + shared escape helper
 │   │   ├── value.rs            # VM register rows -> partiql_value::Value; Ion encoder adapter
 │   │   ├── debug.rs            # --debug ast|plan|program capture
+│   │   ├── script.rs           # parse `;`-separated input once into a Script (via the parser)
 │   │   └── naming.rs           # table-name canonicalization
 │   ├── bootstrap/
 │   │   └── v1.pql              # v1 DDL script, embedded via include_str!

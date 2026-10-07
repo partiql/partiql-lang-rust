@@ -12,6 +12,11 @@ use partiql_value::BindingsName;
 pub enum OutputFormat {
     Text,
     Ion,
+    // Run every statement to completion (draining all query rows) but write
+    // nothing to stdout; timing footers and `--debug` output still go to
+    // stderr. Plain comment, not `///`: a variant doc would become per-value
+    // help text in the generated shell completions.
+    None,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -19,6 +24,7 @@ impl std::fmt::Display for OutputFormat {
         let s = match self {
             OutputFormat::Text => "text",
             OutputFormat::Ion => "ion",
+            OutputFormat::None => "none",
         };
         f.write_str(s)
     }
@@ -31,6 +37,21 @@ pub struct StatementTiming {
     /// `Duration::ZERO` for pure-DDL CREATE TABLE (no compile step).
     pub compile: Duration,
     pub exec: Duration,
+}
+
+impl StatementTiming {
+    pub fn total(&self) -> Duration {
+        self.parse + self.lower + self.compile + self.exec
+    }
+}
+
+impl std::ops::AddAssign for StatementTiming {
+    fn add_assign(&mut self, other: Self) {
+        self.parse += other.parse;
+        self.lower += other.lower;
+        self.compile += other.compile;
+        self.exec += other.exec;
+    }
 }
 
 /// AST/plan/program captured under `--debug`, flushed to stderr.
@@ -71,6 +92,15 @@ impl StatementOutcome {
             StatementOutcome::CreateTableAs { debug, .. }
             | StatementOutcome::InsertInto { debug, .. }
             | StatementOutcome::CreateTable { debug, .. } => debug,
+        }
+    }
+
+    /// Rows written, or `None` for CREATE TABLE (no rows).
+    pub fn rows(&self) -> Option<u64> {
+        match self {
+            StatementOutcome::CreateTableAs { rows, .. }
+            | StatementOutcome::InsertInto { rows, .. } => Some(*rows),
+            StatementOutcome::CreateTable { .. } => None,
         }
     }
 

@@ -181,6 +181,21 @@ pub(super) fn run(
     }
 }
 
+/// Lower + dispatch an already-parsed statement (from a `Script`). Parse
+/// time is accounted at the script level, so it is zero here.
+pub(super) fn run_parsed(
+    db: Option<&Arc<HeedDB>>,
+    debug: &DebugFlags,
+    fns: &TableFnRegistry,
+    stmt: &ast::AstNode<ast::Statement>,
+) -> (Result<RunOutcome, Box<dyn std::error::Error>>, DebugCapture) {
+    let mut capture = DebugCapture::default();
+    match dispatch(stmt, debug, fns, db, Duration::ZERO, &mut capture) {
+        Ok(out) => (Ok(out), DebugCapture::default()),
+        Err(e) => (Err(e), capture),
+    }
+}
+
 /// Bootstrap entry: no debug capture, no rendering. Query statements drain
 /// their rows internally so their side effects run without needing a renderer.
 pub(super) fn execute_statement_silent(

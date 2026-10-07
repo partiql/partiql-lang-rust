@@ -110,6 +110,14 @@ fn aggregation_over_many_batches() {
 }
 
 #[test]
+fn plugin_functions_resolve_in_every_statement_of_a_script() {
+    let out =
+        query("SELECT t.id FROM c_seq(1) AS t; SELECT t.name FROM c_seq(2) AS t WHERE t.id = 1");
+    assert!(out.contains("{id: 0}"), "stdout: {out}");
+    assert!(out.contains(r#"{name: "row1"}"#), "stdout: {out}");
+}
+
+#[test]
 fn empty_stream_and_early_close() {
     assert_eq!(query("SELECT * FROM c_seq(0) AS t"), "{rows: $bag::[]}");
     // LIMIT stops reading and releases the stream before it is exhausted.

@@ -2,9 +2,9 @@ use std::borrow::Cow;
 use std::io::Write;
 
 use partiql_tools::session::{
-    flush_debug, normalize_query, render_outcome_ion, render_outcome_text,
-    render_query_footer_text, render_query_ion, render_query_text, Commands, DebugFlags,
-    OutputFormat, PqliteSession, RunOutcome,
+    flush_debug, normalize_query, parse_script, render_outcome_ion, render_outcome_text,
+    render_query_ion, render_query_text, render_statement_timing, render_total_timing, DebugFlags,
+    OutputFormat, PqliteSession, RunOutcome, Script, StatementTiming,
 };
 use partiql_tools::table_fns::TableFnRegistry;
 
@@ -37,7 +37,7 @@ struct Cli {
 
     /// UNSTABLE: load table functions from a plugin shared library. Repeatable.
     #[cfg(pqlite_unstable_plugins)]
-    #[arg(long = "load", global = true, value_name = "PATH")]
+    #[arg(long = "load", global = true, value_name = "PATH", value_hint = ValueHint::FilePath)]
     load: Vec<std::path::PathBuf>,
 
     /// UNSTABLE: `key=value` option passed to every loaded plugin. Repeatable.
@@ -69,15 +69,18 @@ enum CliCommand {
         #[arg(value_hint = ValueHint::FilePath)]
         db: std::path::PathBuf,
     },
-    /// Execute a single query immediately, optionally against a database file.
+    /// Execute one or more `;`-separated statements immediately, optionally
+    /// against a database file. Statements run in order; the first failure
+    /// stops the run and exits non-zero.
     Exec {
-        /// The PartiQL query string to run.
+        /// The PartiQL statement(s) to run, e.g. "SELECT 1; SELECT 2".
         #[arg(value_hint = ValueHint::Other)]
         query: String,
         /// Path to the database file. Omit for db-free queries.
         #[arg(long, value_hint = ValueHint::FilePath)]
         db: Option<std::path::PathBuf>,
-        /// Output format: `text` (default) or `ion`.
+        /// Output format: `text` (default), `ion`, or `none` (run to
+        /// completion, print nothing to stdout).
         #[arg(long, default_value_t = OutputFormat::Text, value_enum)]
         format: OutputFormat,
     },
@@ -129,13 +132,24 @@ fn main() {
 
     match cli.command {
         CliCommand::Exec { query, db, format } => {
-            // Reject empty query before opening the database so a `--db <path>`
-            // invocation with a blank query does not create the file on disk.
+            // Reject empty or unparseable input before opening the database so
+            // a `--db <path>` invocation that cannot run does not create the
+            // file on disk.
             if normalize_query(&query).is_empty() {
                 eprintln!("Error: empty query");
                 std::process::exit(1);
             }
-            let cmd = Commands::Exec { query };
+            let script = match parse_script(&query, &debug) {
+                Ok(s) if s.statements().is_empty() => {
+                    eprintln!("Error: empty query");
+                    std::process::exit(1);
+                }
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            };
             let session = match db.as_deref() {
                 Some(p) => match PqliteSession::open(p, debug) {
                     Ok(s) => s.with_table_fns(fns),
@@ -148,7 +162,7 @@ fn main() {
             };
             let mut stdout = std::io::stdout();
             let mut stderr = std::io::stderr();
-            if let Err(e) = dispatch(&session, &cmd, format, &mut stdout, &mut stderr) {
+            if let Err(e) = run_script(&session, &script, format, &mut stdout, &mut stderr) {
                 eprintln!("{}", e);
                 std::process::exit(1);
             }
@@ -158,17 +172,61 @@ fn main() {
     }
 }
 
-/// Render a session outcome to `stdout`/`stderr`. Debug capture flushes to
-/// stderr BEFORE any query rows land on stdout so the ordering matches every
-/// `--debug` test expectation.
-fn dispatch(
+/// Run a parsed script's statements in order. Stops at the first failure and
+/// returns its error labeled with the 1-based statement number; output of the
+/// statements before it has already been written.
+///
+/// Outside Ion mode, timing goes to stderr: with several statements, one
+/// `Statement N:` line after each, then a `Total Timing:` line (which adds the
+/// script's parse time); with one statement, just the `Total Timing:` line.
+fn run_script(
     session: &PqliteSession,
-    cmd: &Commands,
+    script: &Script<'_>,
     format: OutputFormat,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (result, on_error_capture) = session.run(cmd);
+) -> Result<(), String> {
+    let io_err = |e: std::io::Error| e.to_string();
+    flush_debug(&script.debug, stderr).map_err(io_err)?;
+    // Ion mode is silent on stderr for successful statements; the caller
+    // pipes stdout to an Ion parser and expects no interleaved lines.
+    let show_timing = !matches!(format, OutputFormat::Ion);
+    let statements = script.statements();
+    let mut total = StatementTiming {
+        parse: script.parse_time,
+        ..Default::default()
+    };
+    let mut total_rows: Option<u64> = None;
+    for (i, stmt) in statements.iter().enumerate() {
+        let n = i + 1;
+        let (rows, timing) = dispatch(session, stmt, format, stdout, stderr)
+            .map_err(|e| format!("Statement {n}: {e}"))?;
+        total += timing;
+        if let Some(r) = rows {
+            *total_rows.get_or_insert(0) += r;
+        }
+        if show_timing && statements.len() > 1 {
+            render_statement_timing(n, rows, &timing, stderr).map_err(io_err)?;
+        }
+    }
+    if show_timing {
+        render_total_timing(total_rows, &total, stderr).map_err(io_err)?;
+    }
+    Ok(())
+}
+
+/// Run one statement and render its result to `stdout`/`stderr`, returning
+/// its row count (rows returned or written; `None` for CREATE TABLE) and
+/// timing. Debug capture flushes to stderr BEFORE any query rows land on
+/// stdout so the ordering matches every `--debug` test expectation.
+fn dispatch(
+    session: &PqliteSession,
+    stmt: &partiql_ast::ast::AstNode<partiql_ast::ast::Statement>,
+    format: OutputFormat,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(Option<u64>, StatementTiming), Box<dyn std::error::Error>> {
+    let (result, on_error_capture) = session.run_statement(stmt);
     let outcome = match result {
         Ok(o) => o,
         Err(e) => {
@@ -183,21 +241,19 @@ fn dispatch(
             let ((), footer) = handle.drain(|rows, shape| match format {
                 OutputFormat::Text => render_query_text(rows, shape, stdout),
                 OutputFormat::Ion => render_query_ion(rows, shape, stdout),
+                // `drain` consumes any rows the renderer leaves, so the query
+                // still runs to completion and the timing is real.
+                OutputFormat::None => Ok(()),
             })?;
-            // Ion mode is silent on stderr for successful queries; the caller
-            // pipes stdout to an Ion parser and expects no interleaved lines.
-            if !matches!(format, OutputFormat::Ion) {
-                render_query_footer_text(&footer, stderr)?;
-            }
-            Ok(())
+            Ok((Some(footer.row_count), footer.timing))
         }
         RunOutcome::Statement(outcome) => {
             flush_debug(outcome.debug(), stderr)?;
             match format {
                 OutputFormat::Ion => render_outcome_ion(&outcome, stdout)?,
-                OutputFormat::Text => render_outcome_text(&outcome, stderr)?,
+                OutputFormat::Text | OutputFormat::None => render_outcome_text(&outcome, stderr)?,
             }
-            Ok(())
+            Ok((outcome.rows(), *outcome.timing()))
         }
     }
 }
@@ -285,7 +341,9 @@ fn print_help(session: &PqliteSession) {
     println!("  .quit     Exit the REPL (alias: .exit)");
     println!("  .exit     Exit the REPL (alias: .quit)");
     println!();
-    println!("To run a query, type any PartiQL statement and press Enter.");
+    println!("To run a query, type any PartiQL statement ending in ';' and press Enter.");
+    println!("Several ';'-separated statements in one entry run in order; the first");
+    println!("failing statement stops the rest of that entry.");
     println!("Available table functions:");
     for f in session.table_fns().iter() {
         println!("  {}", f.usage);
@@ -320,6 +378,43 @@ fn print_startup_banner(db_path: &std::path::Path) {
     eprintln!("For usage information, enter \".help\".");
 }
 
+/// What the REPL loop does after an entry.
+enum EntryOutcome {
+    Continue,
+    Quit,
+}
+
+/// Handle one completed REPL entry (a meta-command, or one or more
+/// `;`-separated statements, possibly spanning several lines). Errors are
+/// written to `stderr` and stop the rest of the entry, never the session.
+fn handle_entry(
+    session: &PqliteSession,
+    buffer: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> EntryOutcome {
+    let trimmed = buffer.trim();
+    if trimmed.starts_with('.') {
+        return match handle_meta_command(trimmed, session) {
+            MetaOutcome::Handled => EntryOutcome::Continue,
+            MetaOutcome::Quit => EntryOutcome::Quit,
+        };
+    }
+
+    // Blank input or a lone `;` normalizes to empty — skip rather than parse.
+    if normalize_query(trimmed).is_empty() {
+        return EntryOutcome::Continue;
+    }
+
+    let result = parse_script(trimmed, session.debug_flags())
+        .map_err(|e| e.to_string())
+        .and_then(|script| run_script(session, &script, OutputFormat::Text, stdout, stderr));
+    if let Err(e) = result {
+        let _ = writeln!(stderr, "{}", e);
+    }
+    EntryOutcome::Continue
+}
+
 /// Per-statement errors are reported but never terminate the session.
 fn run_repl(debug: DebugFlags, fns: TableFnRegistry, db_path: &std::path::Path) {
     // Hard-fail rather than fall back to in-memory: a silently non-persisting
@@ -346,34 +441,11 @@ fn run_repl(debug: DebugFlags, fns: TableFnRegistry, db_path: &std::path::Path) 
     loop {
         match line_editor.read_line(&prompt) {
             Ok(Signal::Success(buffer)) => {
-                let trimmed = buffer.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                if trimmed.starts_with('.') {
-                    match handle_meta_command(trimmed, &session) {
-                        MetaOutcome::Handled => continue,
-                        MetaOutcome::Quit => break,
-                    }
-                }
-
-                let query = normalize_query(trimmed);
-
-                // A lone `;` normalizes to empty — skip rather than parse "".
-                if query.is_empty() {
-                    continue;
-                }
-
                 let mut stdout = std::io::stdout();
                 let mut stderr = std::io::stderr();
-                let cmd = Commands::Exec {
-                    query: query.to_string(),
-                };
-                if let Err(e) =
-                    dispatch(&session, &cmd, OutputFormat::Text, &mut stdout, &mut stderr)
-                {
-                    eprintln!("{}", e);
+                match handle_entry(&session, &buffer, &mut stdout, &mut stderr) {
+                    EntryOutcome::Continue => {}
+                    EntryOutcome::Quit => break,
                 }
             }
             Ok(Signal::CtrlC) => {
@@ -389,5 +461,59 @@ fn run_repl(debug: DebugFlags, fns: TableFnRegistry, db_path: &std::path::Path) 
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drive one REPL entry without a tty (reedline needs a real terminal).
+    fn entry(buffer: &str) -> (String, String) {
+        let session = PqliteSession::open_without_db(DebugFlags::default());
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        handle_entry(&session, buffer, &mut out, &mut err);
+        (
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
+    }
+
+    fn complete(line: &str) -> bool {
+        matches!(PqliteValidator.validate(line), ValidationResult::Complete)
+    }
+
+    #[test]
+    fn validator_waits_for_terminating_semicolon_across_lines() {
+        assert!(!complete("SELECT 1;\nSELECT 2"));
+        assert!(complete("SELECT 1;\nSELECT 2;"));
+        assert!(complete(".help"));
+    }
+
+    #[test]
+    fn multi_line_multi_statement_entry_runs_each_statement() {
+        let (out, err) = entry("SELECT VALUE 'a;b' FROM << 1 >>;\nSELECT VALUE 2\n  FROM << 1 >>;");
+        assert!(out.contains("'a;b'") && out.contains('2'), "stdout: {out}");
+        assert!(
+            err.contains("Statement 1: (1 rows in")
+                && err.contains("Statement 2: (1 rows in")
+                && err.contains("Total Timing: (2 rows in"),
+            "stderr: {err}"
+        );
+        assert!(!err.contains("Statement 3"), "stderr: {err}");
+    }
+
+    #[test]
+    fn error_stops_the_rest_of_the_entry() {
+        let (out, err) =
+            entry("SELECT VALUE 1 FROM << 1 >>; SELECT * FROM ghost; SELECT VALUE 3 FROM << 1 >>;");
+        assert!(out.contains('1') && !out.contains('3'), "stdout: {out}");
+        assert!(err.contains("Statement 2: "), "stderr: {err}");
+        assert!(!err.contains("Statement 3"), "stderr: {err}");
+    }
+
+    #[test]
+    fn lone_semicolon_is_skipped() {
+        assert_eq!(entry(" ; "), (String::new(), String::new()));
     }
 }
