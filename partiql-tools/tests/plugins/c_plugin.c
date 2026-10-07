@@ -341,6 +341,10 @@ static int fill_table(const PqliteOpenRequest* req, StreamPriv* p, char** err) {
 static int32_t plugin_open(void* plugin_data, const PqliteOpenRequest* req,
                            struct ArrowArrayStream* out, char** err) {
   (void)plugin_data;
+  if (req->struct_size < offsetof(PqliteOpenRequest, cancelled) + sizeof req->cancelled) {
+    *err = error_string("host is too old");
+    return EINVAL;
+  }
   StreamPriv* p = calloc(1, sizeof *p);
   if (!p) return ENOMEM;
   p->cancelled = req->cancelled;

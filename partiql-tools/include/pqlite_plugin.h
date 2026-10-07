@@ -21,10 +21,14 @@
  *   producer). Within one major version, fields may only be APPENDED; a reader
  *   must treat fields past the producer's `struct_size` as absent/zero, and
  *   accept any `struct_size` at least as large as the first v1 layout. Any
- *   other change bumps the major version. Hence arrays of these structs are
- *   strided by the producer's `struct_size` (see `PqlitePluginV1.functions`).
+ *   other change bumps the major version. This applies both ways: plugins
+ *   check `struct_size` of `PqliteHostV1` and `PqliteOpenRequest` before
+ *   reading fields added after v1. Arrays of these structs are strided by the
+ *   producer's `struct_size` (see `PqlitePluginV1.functions`).
  *
- * Threading.  `pqlite_plugin_init` is called once, from one thread. `open`
+ * Threading.  `pqlite_plugin_init` is called once per load (`--load` given
+ *   twice loads twice), from one thread; `static_schema` is called from that
+ *   same thread during the load. `open`
  *   may be called concurrently from several threads. A given ArrowArrayStream
  *   is driven by one thread at a time but may move between threads. Plugin
  *   global state must be thread-safe. Host callbacks are thread-safe.
@@ -210,8 +214,9 @@ typedef struct PqliteOpenRequest {
   size_t n_args;
   /* Projection pushdown. If `whole_row` is non-zero the query needs every
    * column (e.g. SELECT *, COUNT(*)) and `fields` is empty. Otherwise
-   * `fields` lists the field names the query reads, spelled as in the
-   * query; the stream may contain only those columns (extra columns are
+   * `fields` lists the field names the query reads, spelled as in the query
+   * (or as in `static_schema`, for functions that have one); the stream may
+   * contain only those columns (extra columns are
    * ignored, absent ones read as MISSING). The host matches stream columns to
    * these names ASCII-case-insensitively, so plugins should match the same
    * way. */
@@ -242,7 +247,10 @@ typedef struct PqlitePluginV1 {
   /* Start a scan. On success returns 0 and fills `*out` (host-allocated) with
    * a stream whose schema is a struct, one child per column; each `get_next`
    * yields one record batch (a struct array). On failure returns non-zero and
-   * may set `*err` to a message the host frees with `free_string`. */
+   * may set `*err` to a message the host frees with `free_string`; if it set
+   * `out->release`, the host releases `*out` too. The host does not validate
+   * the Arrow data (only dictionary keys are bounds-checked), so streams must
+   * be well-formed. */
   int32_t (*open)(void* plugin_data, const PqliteOpenRequest* req,
                   struct ArrowArrayStream* out, char** err);
 

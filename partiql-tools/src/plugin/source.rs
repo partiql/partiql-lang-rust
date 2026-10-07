@@ -272,6 +272,9 @@ impl PluginDataSource {
                     return Ok(false);
                 }
                 Some(Err(e)) => return Err(reader_err(format!("{}: {e}", self.name))),
+                // Skip empty batches: rotating one into `prev` would drop the
+                // batch the previous row still borrows from.
+                Some(Ok(batch)) if batch.num_rows() == 0 => {}
                 Some(Ok(batch)) => {
                     let schema = batch.schema();
                     let names = || schema.fields().iter().map(|f| f.name().as_str());
@@ -523,8 +526,9 @@ fn out_of_range(arr: &dyn Array) -> EngineError {
     ))
 }
 
-/// The values index for `row`; plugin data is untrusted, so out-of-range
-/// (including negative) keys are an error rather than an arrow panic.
+/// The values index for `row`. Arrow's FFI import doesn't validate keys, so a
+/// buggy plugin's out-of-range (or negative) key is reported as an error
+/// rather than panicking inside arrow.
 fn dict_key(keys: &dyn Array, row: usize, n_values: usize) -> Result<usize> {
     macro_rules! k {
         ($t:ty) => {
@@ -750,6 +754,30 @@ mod tests {
             targets: Vec::new(),
             cancelled: Box::new(AtomicU32::new(0)),
         }
+    }
+
+    #[test]
+    fn empty_batches_do_not_release_the_previous_batch() {
+        let schema = Arc::new(arrow_schema::Schema::new(vec![Field::new(
+            "s",
+            DataType::Utf8,
+            false,
+        )]));
+        let batch = |v: Vec<&str>| {
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(StringArray::from(v))]).unwrap()
+        };
+        let batches = vec![batch(vec!["a"]), batch(vec![]), batch(vec!["c"])];
+        let reader = RecordBatchIterator::new(batches.into_iter().map(Ok), schema.clone());
+        let mut src = source();
+        src.stream = Some(
+            ArrowArrayStreamReader::try_new(FFI_ArrowArrayStream::new(Box::new(reader))).unwrap(),
+        );
+        assert!(src.ensure_row().unwrap());
+        src.row += 1;
+        assert!(src.ensure_row().unwrap());
+        // Row "a" may still be borrowed, so its batch must be `prev`.
+        let prev = src.prev.as_ref().expect("prev kept");
+        assert_eq!(prev.column(0).as_string::<i32>().value(0), "a");
     }
 
     #[test]

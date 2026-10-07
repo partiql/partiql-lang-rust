@@ -117,6 +117,9 @@ pub unsafe fn load_from_init(
     if out.is_null() {
         return Err(format!("{label}: pqlite_plugin_init returned no vtable"));
     }
+    if !out.is_aligned() {
+        return Err(format!("{label}: plugin vtable is misaligned"));
+    }
     // `struct_size` and `abi_version` lead every vtable version; check the
     // version before trusting the rest of the layout, and the size before
     // reading the version.
@@ -220,6 +223,15 @@ unsafe fn fn_defs(vt: &PqlitePluginV1) -> Result<Vec<ffi::PqliteTableFnDef>, Str
     if vt.functions.is_null() {
         return Err("plugin declares functions but none are given".to_string());
     }
+    if !vt.functions.is_aligned() {
+        return Err("function definitions are misaligned".to_string());
+    }
+    if vt.n_functions > MAX_FUNCTIONS {
+        return Err(format!(
+            "{} functions declared (max {MAX_FUNCTIONS})",
+            vt.n_functions
+        ));
+    }
     let (first, stride) =
         ffi::read_prefixed(vt.functions).map_err(|e| format!("function #0: {e}"))?;
     // Alignment is a power of two (`is_multiple_of` is above MSRV).
@@ -241,6 +253,9 @@ unsafe fn fn_defs(vt: &PqlitePluginV1) -> Result<Vec<ffi::PqliteTableFnDef>, Str
     }
     Ok(defs)
 }
+
+/// Sanity bound on `n_functions`, so a garbage count is an error, not an abort.
+const MAX_FUNCTIONS: usize = 4096;
 
 /// Each arity becomes its own planner overload; keep that list small.
 const MAX_ARGS: u32 = 16;
