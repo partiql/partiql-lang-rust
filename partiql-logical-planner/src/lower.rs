@@ -407,6 +407,16 @@ impl<'a> AstToLogical<'a> {
         }
     }
 
+    /// If `id` is a FROM item whose source expression is being lowered (i.e. it is on the
+    /// FROM-item stack), returns the id of the query owning it.
+    fn active_from_source_query(&self, id: NodeId) -> Option<NodeId> {
+        if !self.from_let_id_stack.contains(&id) {
+            return None;
+        }
+        let query = *self.key_registry.from_lets.get(&id)?;
+        self.query_id_stack.contains(&query).then_some(query)
+    }
+
     /// If the node being lowered is (within) the source expression of a FROM item of the
     /// innermost query, returns that FROM item's id and the id of the query owning it.
     fn current_from_source(&self) -> Option<(NodeId, NodeId)> {
@@ -427,13 +437,12 @@ impl<'a> AstToLogical<'a> {
     /// the scopes found walking up the `id_stack` over-approximate what is visible; the
     /// `hidden` scopes below trim that to the PartiQL scoping rules. `pass` selects either an
     /// exact match on a visible variable at any level, or an implicit attribute of the single
-    /// FROM binding at the innermost level that has FROM bindings.
+    /// FROM binding of the innermost query that has FROM bindings in scope.
     fn search_locals(
         &self,
         varref: &ast::VarRef,
         pass: LocalPass,
     ) -> Result<Option<logical::ValueExpr>, AstTransformError> {
-        let mut ids: Vec<NodeId> = self.id_stack.iter().rev().copied().collect();
         // A node never sees its own bindings (e.g. `example` in `FROM example e` must not
         // resolve against `e`), nor FROM items of queries other than the current one and
         // those enclosing it (e.g. those of a nested subquery).
@@ -445,46 +454,62 @@ impl<'a> AstToLogical<'a> {
                 .filter(|(_, query)| !self.query_id_stack.contains(query))
                 .map(|(from_let, _)| *from_let),
         );
-        let mut levels: Vec<&[NodeId]> = vec![];
-        let from_source = self.current_from_source();
-        if let Some((from_let, query)) = from_source {
-            // A FROM item's source sees the FROM items before it (lateral) and the scopes of
-            // enclosing queries -- never other bindings of its own query (GROUP BY keys,
-            // later FROM items, ...).
-            if let Some(scope_ids) = self.key_registry.in_scope.get(&from_let) {
-                levels.push(scope_ids);
+
+        // Scope levels, innermost first. A level flagged `false` is the lateral scope of a
+        // FROM source, where unmatched names are globals rather than implicit attributes.
+        let mut levels: Vec<(Vec<NodeId>, bool)> = vec![];
+        let ids: Vec<NodeId> = self.id_stack.iter().rev().copied().collect();
+        let mut i = 0;
+        while i < ids.len() {
+            let id = ids[i];
+            if let Some(query) = self.active_from_source_query(id) {
+                // A FROM item's source -- including any subquery nested in it -- sees the
+                // FROM items before it (lateral) and the scopes of enclosing queries, never
+                // other bindings of its own query (GROUP BY keys, later FROM items, ...).
+                let lateral = self.key_registry.in_scope.get(&id);
+                let is_lateral = |n: &NodeId| lateral.is_some_and(|l| l.contains(n));
+                levels.push((
+                    lateral
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|n| !hidden.contains(n))
+                        .collect(),
+                    false,
+                ));
+                if let Some(own) = self.key_registry.in_scope.get(&query) {
+                    hidden.extend(own.iter().filter(|n| !is_lateral(n)));
+                }
+                i = ids
+                    .iter()
+                    .position(|n| *n == query)
+                    .expect("query on id_stack")
+                    + 1;
+                continue;
             }
-            if let Some(own) = self.key_registry.in_scope.get(&query) {
-                hidden.extend(own.iter().filter(|id| {
-                    self.key_registry
-                        .in_scope
-                        .get(&from_let)
-                        .is_none_or(|l| !l.contains(id))
-                }));
+            if let Some(scope_ids) = self.key_registry.in_scope.get(&id) {
+                levels.push((
+                    scope_ids
+                        .iter()
+                        .copied()
+                        .filter(|n| !hidden.contains(n))
+                        .collect(),
+                    true,
+                ));
             }
-            let q = ids
-                .iter()
-                .position(|id| *id == query)
-                .expect("query on id_stack");
-            ids.drain(..=q);
+            i += 1;
         }
-        levels.extend(
-            ids.iter()
-                .filter_map(|id| self.key_registry.in_scope.get(id))
-                .map(Vec::as_slice),
-        );
 
         let visible = |scope_ids: &[NodeId]| -> Vec<(NodeId, &name_resolver::KeySchema)> {
             scope_ids
                 .iter()
-                .filter(|id| !hidden.contains(*id))
                 .filter_map(|id| self.key_registry.schema.get(id).map(|schema| (*id, schema)))
                 .collect()
         };
 
         // Exact match against any visible variable, innermost first
         if pass == LocalPass::Exact {
-            for scope_ids in &levels {
+            for (scope_ids, _) in &levels {
                 for (_, schema) in visible(scope_ids) {
                     for produce in &schema.produce {
                         if Self::names_match(
@@ -504,21 +529,34 @@ impl<'a> AstToLogical<'a> {
             return Ok(None);
         }
 
+        // Implicit attribute: with no schema for the FROM bindings, an unqualified name is an
+        // attribute of a FROM binding. That is only decidable when exactly one FROM item (its
+        // `AS` binding, the first produced name) of the innermost query with any is in scope;
+        // with several it is ambiguous. GROUP BY keys are not candidates. A level may mix FROM
+        // items of several queries (GROUP BY keys see every FROM item seen so far), so
+        // candidates are grouped by owning query, innermost first.
+        //
         // An unmatched name in a FROM source is a global (table), not an implicit attribute
         // of a preceding item: `FROM t1, t2` must not become `t1.t2`; a lateral reference
         // must be explicit (`FROM t1, t1.nodes n`).
-        if from_source.is_some() {
-            return Ok(None);
-        }
-
-        // Implicit attribute: with no schema for the FROM bindings, an unqualified name is an attribute of
-        // a FROM binding. That is only decidable when exactly one FROM item (its `AS` binding,
-        // the first produced name) is in scope at the innermost level that has any; with
-        // several it is ambiguous. GROUP BY keys are not candidates.
-        for scope_ids in &levels {
-            let candidates: Vec<String> = visible(scope_ids)
-                .iter()
+        for (scope_ids, implicit) in &levels {
+            if !implicit {
+                return Ok(None);
+            }
+            let from_items: Vec<(NodeId, &name_resolver::KeySchema)> = visible(scope_ids)
+                .into_iter()
                 .filter(|(id, _)| self.key_registry.from_lets.contains_key(id))
+                .collect();
+            let Some(query) = self.query_id_stack.iter().rev().find(|q| {
+                from_items
+                    .iter()
+                    .any(|(id, _)| self.key_registry.from_lets.get(id) == Some(*q))
+            }) else {
+                continue;
+            };
+            let candidates: Vec<String> = from_items
+                .iter()
+                .filter(|(id, _)| self.key_registry.from_lets.get(id) == Some(query))
                 .filter_map(|(_, schema)| schema.produce.first())
                 .map(Self::symbol_name)
                 .collect::<Result<_, _>>()?;
@@ -3194,6 +3232,60 @@ mod tests {
         let plan = lower_static("SELECT a FROM example e WHERE EXISTS (SELECT 1 FROM table1 t)")
             .expect("lower");
         assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
+    }
+
+    fn subquery_scan_project_exprs<'p>(
+        plan: &'p LogicalPlan<BindingsOp>,
+        as_key: &str,
+    ) -> &'p [(String, ValueExpr)] {
+        match scan_expr(plan, as_key) {
+            ValueExpr::SubQueryExpr(sq) => project_exprs(&sq.plan),
+            other => panic!("scan `{as_key}` is not a subquery: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_static_subquery_in_from_source_does_not_see_later_from_items() {
+        // `t` inside `s` is not the later outer item `t` (unavailable when `s` is evaluated)
+        // but an attribute of the subquery's own binding `q`.
+        let plan =
+            lower_static("SELECT s.x FROM (SELECT t.x AS x FROM <<{'x':1}>> q) s, <<{'x':2}>> t")
+                .expect("lower");
+        let t_x = ValueExpr::Path(
+            Box::new(attr("q", "t")),
+            vec![PathComponent::Key(BindingsName::CaseInsensitive(
+                "x".into(),
+            ))],
+        );
+        assert_eq!(
+            subquery_scan_project_exprs(&plan, "s"),
+            &[("x".to_string(), t_x)]
+        );
+    }
+
+    #[test]
+    fn test_static_subquery_in_from_source_sees_preceding_from_items() {
+        let plan = lower_static("SELECT s.y FROM table1 a, (SELECT a.x AS y FROM <<1>> q) s")
+            .expect("lower");
+        assert_eq!(
+            subquery_scan_project_exprs(&plan, "s"),
+            &[("y".to_string(), attr("a", "x"))]
+        );
+    }
+
+    #[test]
+    fn test_static_nested_group_by_key_is_attribute_of_its_own_query() {
+        // The GROUP BY key sees the outer `o` too, but `x` belongs to the inner query's
+        // single FROM binding `i` -- not ambiguous.
+        let plan = lower_static(
+            "SELECT * FROM outer_table o WHERE EXISTS (SELECT COUNT(*) FROM inner_table i GROUP BY x)",
+        )
+        .expect("lower");
+        let group_by = format!("{plan:?}");
+        assert!(
+            group_by.contains(r#"exprs: {"x": Path(VarRef(CaseInsensitive("i"), Local), [Key(CaseInsensitive("x"))])}"#),
+            "{group_by}"
+        );
     }
 
     #[test]
