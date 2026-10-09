@@ -130,24 +130,38 @@ let (op, scope) = self.lower_group_by(op, &s.group_by, &scope, aggs)?;
 | Unit tests | Only through the full `lower()` | Call `resolve`/`lower_expr` with a hand-built `Scope` |
 | Debugging | Inspect stacks mid-walk | Ordinary call stack and return values |
 
-## Migration
+## Migration (as done)
 
-0. Land #689's VM fixes on their own (key remap, pushdown, GROUP BY registers). They
-   don't depend on lowering.
-1. Add a new `Lowerer` for `VarRefResolution::Static` only, the VM path. The legacy
-   `Dynamic` path stays on the old visitor until the new one is ready.
-2. Port in this order: SELECT/FROM/WHERE/projection and expressions; then GROUP BY,
-   HAVING and aggregates; ORDER BY and LIMIT; joins and subqueries; set ops, VALUES and
-   graph MATCH; DML.
-   Gate each step: the VM conformance count must be at least main's (4696), with no new
-   failures, and the pqlite e2e fixtures from #689 must pass.
-3. Move `Dynamic` over: `Scope` lists the candidates for `DynamicLookup`. Gate: the
-   legacy conformance failure set is unchanged.
-4. Delete the visitor-based `AstToLogical` and `NameResolver`'s `in_scope`/`KeyRegistry`.
+The visitor-based `lower.rs` was replaced in one step by `lower/` (`mod.rs` for queries
+and clauses, `scope.rs` for scopes and name resolution, `expr.rs` for expressions), and
+both resolution modes moved at once. The planner no longer runs `NameResolver`. That
+crate is unchanged, since it is published.
+
+- **Dynamic** keeps `main`'s candidate lists for `DynamicLookup`, built from the current
+  query level only. The evaluator binds an enclosing query's variables as globals of a
+  subquery.
+- **Static** implements #689's rules: no self-visibility, lateral FROM, globals first
+  only in FROM, the single-binding implicit attribute, and `AmbiguousReference`.
+- INNER, LEFT, CROSS and comma joins are lateral; RIGHT and FULL joins are not.
+- Behaviour changes, each a fix:
+  - A SELECT item equal to a GROUP BY key reads that key's alias. It used to read its
+    own alias, which gave `unresolved var k`.
+  - Aggregates in HAVING and ORDER BY reach the GROUP BY.
+  - Unnamed SELECT items are named by position (`_2`).
+  - Set-operation subqueries in scalar position lower.
+  - Static ORDER BY sees SELECT aliases.
+  - `WITH`, `LET` and `SELECT e.*` report NotYetImplemented instead of silently
+    misplanning.
+- Conformance against `main`:
+  - Legacy: 5668 → 5670, 0 newly failing.
+  - VM: 4696 → 4716, with 6 newly failing (`pg_select_01`, `select_where_string_equals_*`).
+    Correct resolution of `a.name` exposes the VM pushdown bug that drops the whole row
+    for `SELECT *`, which #689's VM fixes address. On `main` these passed only because
+    `a.name` wrongly resolved to a global table `a`.
+- Still to do: land #689's VM fixes as their own PR (key remap, pushdown, GROUP BY
+  registers).
 
 ## Open questions
 
-- Reuse helpers that aren't tied to the visitor (function-registry lookup, literal and
-  coercion helpers) as they are, or move them into a `lower/expr.rs` module?
 - Should `Scope` carry types later, so closed schemas can disambiguate the way Kotlin's
   `matchStruct` does? The design allows it, but it isn't part of this work.

@@ -66,13 +66,12 @@ fn subquery_empty_result() {
     );
 }
 
-/// A set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subquery in scalar position is not handled by
-/// this change — only scalar-position `SELECT` subqueries are lowered. It still fails lowering,
-/// as it did before; documented here to bound the change.
+/// A set-operation (`UNION`/`EXCEPT`/`INTERSECT`) subquery in scalar position lowers to a
+/// `SubQueryExpr` like a `SELECT` subquery; the evaluator does not implement `UNION` yet.
 #[test]
-fn setop_subquery_in_scalar_position_unsupported() {
+fn setop_subquery_in_scalar_position() {
     let res = eval(
         "SELECT (SELECT VALUE 1 FROM [0] AS z UNION SELECT VALUE 2 FROM [0] AS z) AS s FROM [0] AS t",
     );
-    assert_matches!(res, Err(TestError::Lower(_)));
+    assert_matches!(res, Err(TestError::Plan(_)));
 }

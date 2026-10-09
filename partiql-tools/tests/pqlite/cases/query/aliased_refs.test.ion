@@ -1,0 +1,41 @@
+// Variable references through a FROM alias over a stored table. Before the
+// static-resolution fix the scan source `example` lowered to `e.example`, so every
+// aliased query scanned a single MISSING row.
+{ sql: "CREATE TABLE example" }
+{ sql: "INSERT INTO example SELECT * FROM << {'a':1,'b':4,'c':'x','d':1}, {'a':3,'b':6,'c':'x','d':1}, {'a':5,'b':9,'c':'y','d':2} >>", expect: { affected_rows: 3 } }
+
+// No alias: the inferred binding is the table name.
+{ sql: "SELECT a FROM example", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+{ sql: "SELECT example.a FROM example", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+
+// Alias, with and without AS; qualified and unqualified (implicit `e.a`) refs.
+{ sql: "SELECT e.a FROM example e", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+{ sql: "SELECT e.a FROM example AS e", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+{ sql: "SELECT a FROM example e", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+{ sql: "SELECT * FROM example e", expect: { rows: $bag::[ { a: 1, b: 4, c: "x", d: 1 }, { a: 3, b: 6, c: "x", d: 1 }, { a: 5, b: 9, c: "y", d: 2 } ] } }
+{ sql: "SELECT e.a FROM example e LIMIT 1", expect: { rows: $bag::[ { a: 1 } ] } }
+
+// SELECT VALUE
+{ sql: "SELECT VALUE e FROM example e", expect: { rows: $bag::[ { a: 1, b: 4, c: "x", d: 1 }, { a: 3, b: 6, c: "x", d: 1 }, { a: 5, b: 9, c: "y", d: 2 } ] } }
+{ sql: "SELECT VALUE e.a FROM example e", expect: { rows: $bag::[ 1, 3, 5 ] } }
+{ sql: "SELECT VALUE a FROM example e", expect: { rows: $bag::[ 1, 3, 5 ] } }
+
+// WHERE: the same field in WHERE and SELECT. The `skip::` steps fail in the VM
+// with "invalid key index" (sub-program key remap), independent of lowering.
+skip::{ sql: "SELECT a FROM example WHERE a > 2", expect: { rows: $bag::[ { a: 3 }, { a: 5 } ] } }
+skip::{ sql: "SELECT e.a FROM example e WHERE e.a > 2", expect: { rows: $bag::[ { a: 3 }, { a: 5 } ] } }
+skip::{ sql: "SELECT a, e.b FROM example e WHERE e.a > 2 AND b > 5", expect: { rows: $bag::[ { a: 3, b: 6 }, { a: 5, b: 9 } ] } }
+
+// GROUP BY: mixed qualified/unqualified keys and aggregate arguments (the
+// `skip::` step hits the same VM key remap bug).
+skip::{ sql: "SELECT SUM(e.a) AS sa, SUM(b) AS sb FROM example e WHERE e.a > 0 GROUP BY e.c, d", expect: { rows: $bag::[ { sa: 4, sb: 10 }, { sa: 5, sb: 9 } ] } }
+{ sql: "SELECT e.c AS c, COUNT(*) AS n FROM example e GROUP BY e.c", expect: { rows: $bag::[ { c: "x", n: 2 }, { c: "y", n: 1 } ] } }
+{ sql: "SELECT c AS k, SUM(a) AS s FROM example e GROUP BY c", expect: { rows: $bag::[ { k: "x", s: 4 }, { k: "y", s: 5 } ] } }
+// A SELECT item equal to a GROUP BY key reads that key, whatever its own alias.
+{ sql: "SELECT e.c AS k, SUM(e.a) AS s FROM example e WHERE e.b > 4 GROUP BY e.c", expect: { rows: $bag::[ { k: "x", s: 3 }, { k: "y", s: 5 } ] } }
+{ sql: "SELECT COUNT(*) AS c FROM example e", expect: { rows: $bag::[ { c: 3 } ] } }
+
+// With an alias in scope the table name is not a binding. pqlite's planning
+// catalog does not know its tables, so this lowers to `e.example.a`; with a
+// catalog entry it would be a path on the global bag. Both are MISSING here.
+{ sql: "SELECT example.a FROM example e", expect: { rows: $bag::[ { a: $missing::null }, { a: $missing::null }, { a: $missing::null } ] } }
