@@ -46,6 +46,8 @@ pub struct KeyRegistry {
     pub in_scope: FnvIndexMap<NodeId, Vec<NodeId>>,
     pub schema: FnvIndexMap<NodeId, KeySchema>,
     pub aliases: FnvIndexMap<NodeId, Symbol>,
+    /// Every `FROM` item (`FromLet`) id, mapped to the id of the query that owns it.
+    pub from_lets: FnvIndexMap<NodeId, NodeId>,
 }
 
 #[derive(Debug)]
@@ -101,6 +103,7 @@ pub struct NameResolver<'c> {
     in_scope: FnvIndexMap<NodeId, Vec<NodeId>>,
     schema: FnvIndexMap<NodeId, KeySchema>,
     aliases: FnvIndexMap<NodeId, Symbol>,
+    from_lets: FnvIndexMap<NodeId, NodeId>,
 
     // errors that occur during name resolution
     errors: Vec<AstTransformError>,
@@ -122,6 +125,7 @@ impl<'c> NameResolver<'c> {
             in_scope: Default::default(),
             schema: Default::default(),
             aliases: Default::default(),
+            from_lets: Default::default(),
 
             // errors that occur during name resolution
             errors: Default::default(),
@@ -146,10 +150,12 @@ impl<'c> NameResolver<'c> {
         let in_scope = std::mem::take(&mut self.in_scope);
         let schema = std::mem::take(&mut self.schema);
         let aliases = std::mem::take(&mut self.aliases);
+        let from_lets = std::mem::take(&mut self.from_lets);
         Ok(KeyRegistry {
             in_scope,
             schema,
             aliases,
+            from_lets,
         })
     }
 
@@ -321,6 +327,16 @@ impl<'ast> Visitor<'ast> for NameResolver<'_> {
         }
 
         self.lateral_stack.last_mut().unwrap().push(id);
+
+        let queries = self.enclosing_clause.get(&EnclosingClause::Query);
+        if let Some(query) = self
+            .id_path_to_root
+            .iter()
+            .rev()
+            .find(|id| queries.is_some_and(|qs| qs.contains(id)))
+        {
+            self.from_lets.insert(id, *query);
+        }
         Traverse::Continue
     }
 

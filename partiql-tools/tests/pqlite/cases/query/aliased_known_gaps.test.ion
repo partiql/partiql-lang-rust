@@ -1,0 +1,29 @@
+// Aliased-reference queries that still fail for reasons unrelated to name
+// resolution (their logical plans are correct). Kept `skip::` so the suite
+// stays green; un-skip as the VM grows.
+{ sql: "CREATE TABLE example" }
+{ sql: "INSERT INTO example SELECT * FROM << {'a':1,'b':4,'c':'x','d':1}, {'a':3,'b':6,'c':'x','d':1}, {'a':5,'b':9,'c':'y','d':2} >>", expect: { affected_rows: 3 } }
+{ sql: "CREATE TABLE table1" }
+{ sql: "INSERT INTO table1 SELECT * FROM << {'id':1,'nodes':[{'x':10},{'x':11}]}, {'id':2,'nodes':[{'x':20}]} >>", expect: { affected_rows: 2 } }
+
+// VM: Join is not compiled ("unsupported operator: Discriminant(6)").
+skip::{ sql: "SELECT n.x FROM table1 t1, t1.nodes n", expect: { rows: $bag::[ { x: 10 }, { x: 11 }, { x: 20 } ] } }
+skip::{ sql: "SELECT t1.id, n.x FROM table1 AS t1 CROSS JOIN t1.nodes AS n", expect: { rows: $bag::[ { id: 1, x: 10 }, { id: 1, x: 11 }, { id: 2, x: 20 } ] } }
+skip::{ sql: "SELECT e.a, t.id FROM example e, table1 t WHERE e.a = t.id", expect: { rows: $bag::[ { a: 1, id: 1 } ] } }
+
+// VM: OrderBy is not compiled ("unsupported operator: Discriminant(4)").
+skip::{ sql: "SELECT e.a FROM example e ORDER BY e.a DESC", expect: { rows: $bag::[ { a: 5 }, { a: 3 }, { a: 1 } ] } }
+
+// VM: SubQueryExpr in FROM / WHERE is not compiled.
+skip::{ sql: "SELECT s.a FROM (SELECT e.a FROM example e) s", expect: { rows: $bag::[ { a: 1 }, { a: 3 }, { a: 5 } ] } }
+skip::{ sql: "SELECT e.a FROM example e WHERE e.a IN (SELECT VALUE t.id FROM table1 t)", expect: { rows: $bag::[ { a: 1 } ] } }
+
+// VM: GROUP BY + WHERE with a renamed key fails ("unresolved var k"), with or
+// without an alias; without the WHERE it works.
+skip::{ sql: "SELECT e.c AS k, SUM(e.a) AS s FROM example e WHERE e.b > 4 GROUP BY e.c", expect: { rows: $bag::[ { k: "x", s: 3 }, { k: "y", s: 5 } ] } }
+
+// VM: COUNT(*) over empty input yields no row instead of { c: 0 }.
+skip::{ sql: "SELECT COUNT(*) AS c FROM example e WHERE e.a > 100", expect: { rows: $bag::[ { c: 0 } ] } }
+
+// Lowering: `e.*` (PathUnpivot) is not implemented.
+skip::{ sql: "SELECT e.* FROM example e", expect: { rows: $bag::[ { a: 1, b: 4, c: "x", d: 1 }, { a: 3, b: 6, c: "x", d: 1 }, { a: 5, b: 9, c: "y", d: 2 } ] } }
