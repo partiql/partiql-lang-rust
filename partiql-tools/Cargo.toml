@@ -40,6 +40,11 @@ clap_complete = "4.6"
 # default-features disabled drops the serde / serde-json / serde-bincode codecs
 # we don't use; the LMDB backend and the Str/Bytes codecs are unaffected.
 heed = { version = "0.20", default-features = false }
+# `highlight` compiles partiql-parser's lexer sources; keep these in step with it.
+logos = "0.15"
+thiserror = "1.0"
+# Matches reedline's own dependency, which it does not re-export.
+nu-ansi-term = "0.50"
 reedline = "0.48.0"
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
 

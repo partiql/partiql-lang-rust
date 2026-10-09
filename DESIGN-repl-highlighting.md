@@ -1,6 +1,6 @@
 # Design: syntax highlighting in the `pqlite` REPL
 
-Status: proposal (no code yet). Branch: `feat/pqlite-repl-highlighting`.
+Status: approved (option: `#[path]` include); implemented. Branch: `feat/pqlite-repl-highlighting`.
 
 ## Problem
 
@@ -75,82 +75,41 @@ quoted identifier. Any other `InvalidInput` is a local error token.
 
 ## Proposed architecture
 
-### 1. `partiql-parser`: a small, stable classification API (additive, minor bump)
+### 1. Reuse the parser's lexer without changing its API (chosen)
 
-New file `partiql-parser/src/lexer/classify.rs`, re-exported as
-`partiql_parser::highlight`:
-
-```rust
-/// Coarse lexical category of a span of PartiQL text, for editors/highlighters.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TokenCategory {
-    Keyword,            // SELECT, FROM, CASE, DATE, ... (reserved)
-    NonReservedKeyword, // ANY, SIMPLE, LABEL, NODE, ... (also valid identifiers)
-    Constant,           // TRUE FALSE NULL MISSING
-    Identifier,         // foo, $x
-    QuotedIdentifier,   // "Foo"
-    Variable,           // @x, @"x"
-    String,             // 'abc'
-    Number,             // 1, 1.5, 1e3
-    IonLiteral,         // `{a: 1}`
-    Operator,           // = <> || + - * / % < <= ~> ...
-    Punctuation,        // ( ) [ ] { } << >> , ; : .
-    Comment,            // -- ..., /* ... */
-    Invalid,            // unrecognized input
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClassifiedToken {
-    pub span: std::ops::Range<usize>, // byte offsets into the input
-    pub category: TokenCategory,
-    /// false for an unterminated string / quoted ident / comment / Ion literal
-    /// (span then runs to end of input and classification stops).
-    pub terminated: bool,
-}
-
-/// Lex `text` for highlighting. Never fails; whitespace/newlines are not emitted.
-pub fn classify(text: &str) -> impl Iterator<Item = ClassifiedToken> + '_;
-```
-
-How it works: wrap `PartiqlLexer` (the raw lexer, not the preprocessor, which
-rewrites special-form function syntax for the parser) and map each token
-through one **exhaustive `match` on `Token`**:
+`partiql-tools` is `publish = false` and sits in the same workspace, so it
+compiles the parser's lexer sources directly. `partiql-parser` is untouched.
 
 ```rust
-fn category(tok: &Token<'_>) -> TokenCategory {
-    use Token::*;
-    match tok {
-        Select | From | Where | /* ... every reserved keyword ... */ => TokenCategory::Keyword,
-        t if t.is_var_non_reserved() => TokenCategory::NonReservedKeyword,
-        True | False | Null | Missing => TokenCategory::Constant,
-        UnquotedIdent(_) => TokenCategory::Identifier,
-        QuotedIdent(_) => TokenCategory::QuotedIdentifier,
-        UnquotedAtIdentifier(_) | QuotedAtIdentifier(_) => TokenCategory::Variable,
-        String(_) => TokenCategory::String,
-        Int(_) | Real(_) | ExpReal(_) => TokenCategory::Number,
-        EmbeddedDoc(_) => TokenCategory::IonLiteral,
-        CommentLine(_) | CommentBlock(_) => TokenCategory::Comment,
-        OpenParen | CloseParen | Comma | Semicolon | /* ... */ => TokenCategory::Punctuation,
-        Equal | LessGreater | DblPipe | /* ... incl. graph arrows */ => TokenCategory::Operator,
-        // never surfaced by PartiqlLexer
-        Newline | CommentBlockStart | EmbeddedDocQuote | EmptyEmbeddedDocQuote => TokenCategory::Invalid,
-    }
-}
+// partiql-tools/src/lib.rs. The included files use `crate::error` / `crate::lexer`,
+// so these sit at the crate root.
+#[allow(dead_code, unexpected_cfgs)]
+#[path = "../../partiql-parser/src/error.rs"]
+mod error;
+mod lexer; // shim: mirrors lexer/mod.rs aliases, #[path]-includes partiql.rs, comment.rs,
+           // embedded_doc.rs, and carries `TODO: move to a tree-sitter PartiQL grammar`
+pub mod highlight;
 ```
 
-**Staying in sync with the grammar:** `#[non_exhaustive]` doesn't apply inside
-the defining crate, so the match has no `_` arm. Adding a `Token` variant
-**fails to compile** until someone classifies it, which keeps highlighting in
-step with the lexer the grammar uses. `Token` and LALRPOP stay private. The
-public surface is one function, one struct, and one `#[non_exhaustive]` enum,
-so adding a category later isn't a breaking change. No new dependencies and no
-feature flag are needed.
+`highlight::classify(text) -> Vec<Classified { span, category, terminated }>`
+runs `PartiqlLexer`. It uses the raw lexer, not the preprocessor, because the
+preprocessor rewrites special-form function syntax for the parser. Each token
+goes through one **exhaustive `match` on `Token`** with no `_` arm. Because
+`Token` is now local to `partiql-tools`, adding a lexer variant **fails to
+compile** until someone classifies it. That keeps highlighting in step with
+the lexer the LALRPOP grammar uses.
+
+The shim's `mod.rs` aliases mirror the parser's. If the parser renames or
+moves files, the `#[path]` includes fail to compile in CI, so the breakage
+shows up immediately.
+
+(Considered first: a public `partiql_parser::highlight` API, optionally
+feature-gated or `#[doc(hidden)]`. Rejected to keep the published crate's API
+unchanged.)
 
 ### 2. `partiql-tools`: `PqliteHighlighter`
 
-New module `partiql-tools/src/session/highlight.rs`, public so the binary and
-tests can use it:
+New module `partiql-tools/src/highlight.rs`, public so the binary can use it:
 
 ```rust
 pub struct Theme { pub keyword: Style, pub constant: Style, /* one per category */
@@ -187,18 +146,18 @@ impl reedline::Highlighter for PqliteHighlighter {
 
 - **Meta-commands:** if the trimmed buffer starts with `.`, the first word gets
   the meta style when it's a known command (`.help`, `.quit`, `.exit`) and the
-  invalid style otherwise. The rest is left plain. The known-command list moves
-  into a `const META_COMMANDS: &[&str]` that `handle_meta_command` and
-  `print_help` also use, so there's one source of truth.
-- **Function heuristic:** this lives in pqlite, not in the parser API. It's a
+  invalid style otherwise. The rest is left plain. The known commands are listed
+  in `highlight::META_COMMANDS`, which has to be kept in step with
+  `handle_meta_command`.
+- **Function heuristic:** this is applied in the highlighter, not in `classify`. It's a
   presentation decision, and peeking at the next token is cheap.
 - **Wiring** in `run_repl`:
   ```rust
-  let color = use_color(no_color_flag);
+  let color = color_enabled(no_color_flag);
   let mut editor = Reedline::create().with_history(..).with_validator(..).with_ansi_colors(color);
   if color { editor = editor.with_highlighter(Box::new(PqliteHighlighter::default())); }
   ```
-  `use_color` returns true only when stdout is a terminal, `NO_COLOR` is unset
+  `color_enabled` returns true only when stdout is a terminal, `NO_COLOR` is unset
   or empty (per no-color.org), `TERM != "dumb"`, and `--no-color` wasn't
   passed. `--no-color` is a new flag on the `open` subcommand. `exec` doesn't
   print colored output, so it doesn't need the flag.
@@ -264,7 +223,8 @@ parse per keystroke is explicitly avoided.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **A. `classify` API in partiql-parser (proposed)** | Same lexer as the grammar; compile error on new tokens; tiny stable API; handles nesting, escapes, and backtick fences correctly | Small public API addition to a published crate | **Recommended** |
+| **A. `#[path]`-include the parser's lexer in partiql-tools (chosen)** | Same lexer source as the grammar; compile error on new tokens; no API change; handles nesting, escapes, and backtick fences | Tied to the parser's file layout (breakage is a compile error); lexer compiled twice | **Chosen** |
+| A2. Public `classify` API in partiql-parser | Clean Rust; reusable | Public API addition to a published crate | Rejected |
 | B. Make `lexer`/`Token` public (or behind a feature) | Zero new code | Exposes ~150 variants plus logos details; every token rename becomes a semver break; consumers re-implement classification | Reject |
 | C. Regex or keyword list in pqlite | No parser changes | Drifts from the grammar; wrong on nested comments, `''`, backtick fences, `@"x"` | Reject |
 | D. Extract keywords at build time from `partiql.rs` / `.lalrpop` | Auto-synced keyword list | Brittle source scraping; still needs a hand-written lexer for everything else | Reject |
@@ -273,7 +233,7 @@ parse per keystroke is explicitly avoided.
 
 ## Testing plan
 
-- **partiql-parser** (`classify.rs` unit tests):
+- **classification** (`partiql-tools/src/highlight.rs` unit tests):
   - one case per category
   - keyword case-insensitivity (`select`, `SeLeCt`, `SELECT` → `Keyword`)
   - `TRUE`/`null` → `Constant`
@@ -285,7 +245,7 @@ parse per keystroke is explicitly avoided.
   - `#` → `Invalid`, with lexing continuing after it
   - UTF-8 spans
   - spans are sorted and non-overlapping (property-style loop over a corpus)
-- **partiql-tools** (`highlight.rs` unit tests, no tty, same approach as the validator tests):
+- **highlighter** (same file, plus `pqlite.rs`; no tty, same approach as the validator tests):
   - **concatenation invariant** `highlight(s).raw_string() == s` over a
     corpus. The corpus is every `sql` string under
     `tests/pqlite/cases/**/*.test.ion`, plus every prefix of a few queries to
@@ -299,18 +259,12 @@ parse per keystroke is explicitly avoided.
 
 ## Rollout
 
-One PR, `feat(pqlite): syntax highlighting in the REPL`, with two commits:
+One PR, `feat(pqlite): syntax highlighting in the REPL`. It includes the
+highlighter, the theme, `--no-color` / `NO_COLOR` handling, and a `PQLITE.md`
+note. Colors are on by default when stdout is a tty.
 
-1. `feat(parser): add token classification API for highlighting`
-2. `feat(pqlite): syntax highlighting in the REPL`. Includes the highlighter,
-   theme, `--no-color`/`NO_COLOR`, and a `PQLITE.md` note.
+## Decisions
 
-Colors are on by default when stdout is a tty. There is no config surface
-beyond `--no-color` and `NO_COLOR`.
-
-## Open questions for review
-
-1. Is a new public `partiql_parser::highlight` module OK, or should it be
-   `#[doc(hidden)]` or feature-gated (e.g. `highlight`) until the API settles?
-2. Should non-reserved keywords (`label`, `node`, `any`, …) render plain (proposed) or as keywords?
-3. Should the function-call heuristic be included in v1 (proposed: yes)?
+- Lexer access: `#[path]` include in partiql-tools, with a TODO there to move to a tree-sitter grammar.
+- Non-reserved keywords render plain.
+- The function-call heuristic is included.
