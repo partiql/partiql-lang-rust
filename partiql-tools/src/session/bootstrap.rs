@@ -8,6 +8,7 @@ use crate::common::parse_statements;
 use crate::session::debug::DebugFlags;
 use crate::session::exec;
 use crate::storage::{HeedDB, StorageError};
+use crate::table_fns::TableFnRegistry;
 
 /// The schema version this binary bootstraps to and requires.
 pub(super) const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -58,10 +59,12 @@ fn bootstrap_v1(db: &Arc<HeedDB>) -> Result<(), Box<dyn std::error::Error>> {
     // which is the same depth as the old bin (src/bin/); the path is unchanged.
     let script = include_str!("../bootstrap/v1.pql");
     let debug = DebugFlags::from_args(&[]);
+    // Bootstrap DDL never calls a table function; the built-ins suffice.
+    let fns = TableFnRegistry::builtin();
     let parsed = parse_statements(script).map_err(|e| format!("Parse error: {:?}", e))?;
     for stmt in &parsed.statements {
         // Bootstrap statements run muted: no timing footer, no captured debug.
-        match exec::execute_statement_silent(stmt, &debug, Arc::clone(db)) {
+        match exec::execute_statement_silent(stmt, &debug, &fns, Arc::clone(db)) {
             Ok(()) => {}
             Err(e) => {
                 let is_self_tables_exists = e

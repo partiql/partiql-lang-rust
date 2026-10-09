@@ -90,6 +90,17 @@ jobs:
         run: cargo build --verbose --workspace
       - name: Cargo Test excluding conformance tests
         run: cargo test --verbose --workspace
+      # pqlite's plugin C ABI is unstable and compiled in only with this cfg,
+      # which --all-features does not set. The tests build a C plugin with the
+      # system compiler and load it into pqlite.
+      - name: Test unstable pqlite plugin ABI
+        env:
+          RUSTFLAGS: --cfg pqlite_unstable_plugins
+        run: cargo test --verbose -p partiql-tools
+      - name: Clippy unstable pqlite plugin ABI
+        env:
+          RUSTFLAGS: --cfg pqlite_unstable_plugins
+        run: cargo clippy -p partiql-tools --all-targets -- -D warnings
 
   coverage:
     name: Code Coverage

@@ -1,8 +1,11 @@
 mod catalog;
 mod common;
+#[cfg(pqlite_unstable_plugins)]
+pub mod plugin;
 pub mod row_codec;
 pub mod session;
 pub mod storage;
+pub mod table_fns;
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
