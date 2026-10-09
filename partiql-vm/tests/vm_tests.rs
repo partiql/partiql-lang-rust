@@ -519,6 +519,47 @@ fn select_named_columns() {
     );
 }
 
+// `SchemalessMetadata` resolves every field, so these exercise scan pushdown:
+// a binding used both as a whole and through a field must still load whole rows.
+
+#[test]
+fn select_star_with_where_keeps_all_fields() {
+    assert_vm_eval(
+        "SELECT * FROM data AS d WHERE d.a > 1",
+        &[("data", "[{a: 1, b: 2}, {a: 3, b: 4, c: 5}]")],
+        "$bag::[{a: 3, b: 4, c: 5}]",
+    );
+}
+
+#[test]
+fn whole_row_and_field_in_projection() {
+    assert_vm_eval(
+        "SELECT VALUE {'row': d, 'a': d.a} FROM data AS d",
+        &[("data", "[{a: 1, b: 2}, {a: 3, b: 4}]")],
+        "$bag::[{row: {a: 1, b: 2}, a: 1}, {row: {a: 3, b: 4}, a: 3}]",
+    );
+}
+
+// Path steps after a pushed-down field navigate within that field.
+
+#[test]
+fn nested_path_after_pushdown() {
+    assert_vm_eval(
+        "SELECT VALUE d.a.b FROM data AS d",
+        &[("data", "[{a: {b: 1, c: 2}}, {a: {b: 3, c: 4}}]")],
+        "$bag::[1, 3]",
+    );
+}
+
+#[test]
+fn deep_nested_path_after_pushdown() {
+    assert_vm_eval(
+        "SELECT d.a.b.c AS x FROM data AS d WHERE d.a.b.c > 1",
+        &[("data", "[{a: {b: {c: 1}}}, {a: {b: {c: 2, d: 0}}}]")],
+        "$bag::[{x: 2}]",
+    );
+}
+
 #[test]
 fn filter_false_returns_empty() {
     assert_vm_eval(
