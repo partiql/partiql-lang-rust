@@ -159,7 +159,9 @@ typedef struct PqliteHostV1 {
   void (*log)(void* host_data, int32_t level, PqliteStr target, PqliteStr message);
 
   /* Key/value options the user passed for plugins (`--plugin-opt k=v`).
-   * Borrowed: valid only during pqlite_plugin_init. Keys are conventionally
+   * Borrowed: valid only during pqlite_plugin_init; the host leaves these
+   * fields unchanged afterwards, so `config` dangles once init returns and
+   * must not be read again. Keys are conventionally
    * prefixed with the plugin's name, e.g. "myplugin.cache_dir". */
   const PqliteKeyValue* config;
   size_t n_config;

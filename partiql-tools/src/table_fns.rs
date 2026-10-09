@@ -14,6 +14,7 @@ use partiql_catalog::catalog::{MutableCatalog, PartiqlCatalog, SharedCatalog};
 use partiql_catalog::table_fn::TableFunction as CatalogTableFunction;
 use partiql_vm::source::{DataSourceMetadata, TableFunction, TableFunctionHandle};
 use partiql_vm::ExecutionContext;
+use unicase::UniCase;
 
 use crate::common;
 
@@ -81,8 +82,8 @@ impl TableFnRegistry {
         reg
     }
 
-    /// Add a function. Fails if a function with the same name (ignoring ASCII
-    /// case) is already registered.
+    /// Add a function. Fails if a function with an equivalent name (see
+    /// [`same_name`]) is already registered.
     pub fn add(&mut self, def: TableFnDef) -> Result<(), String> {
         if self.get(def.name).is_some() {
             return Err(format!(
@@ -94,12 +95,12 @@ impl TableFnRegistry {
         Ok(())
     }
 
-    /// Look a function up by name, ignoring ASCII case.
+    /// Look a function up by name (see [`same_name`]).
     pub fn get(&self, name: &str) -> Option<&TableFnDef> {
         self.fns
             .iter()
             .map(|f| f.as_ref())
-            .find(|f| f.name.eq_ignore_ascii_case(name))
+            .find(|f| same_name(f.name, name))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &TableFnDef> {
@@ -136,4 +137,10 @@ impl TableFnRegistry {
             ctx.register_table_function(f.name, Arc::clone(&f.factory));
         }
     }
+}
+
+/// Whether two function names collide, using the catalog's Unicode case
+/// folding (so `straße` and `STRASSE` are the same name).
+pub(crate) fn same_name(a: &str, b: &str) -> bool {
+    UniCase::new(a) == UniCase::new(b)
 }

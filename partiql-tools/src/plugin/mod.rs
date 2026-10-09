@@ -74,12 +74,13 @@ pub unsafe fn load_from_init(
     config: &[(String, String)],
     registry: &mut TableFnRegistry,
 ) -> Result<PluginInfo, String> {
-    // Boxed until init succeeds; after that the plugin may keep `host`, so
-    // both are leaked for the process (see header).
-    let host_state = Box::new(HostState {
+    // The plugin may keep `host` once init succeeds, so both allocations are
+    // handed out as raw pointers up front and never written again; they are
+    // reclaimed only if init fails (see header).
+    let host_state = Box::into_raw(Box::new(HostState {
         label: label.to_string(),
         name: OnceLock::new(),
-    });
+    }));
     let kvs: Vec<PqliteKeyValue> = config
         .iter()
         .map(|(k, v)| PqliteKeyValue {
@@ -87,33 +88,36 @@ pub unsafe fn load_from_init(
             value: PqliteStr::new(v),
         })
         .collect();
-    let mut host = Box::new(PqliteHostV1 {
+    let host = Box::into_raw(Box::new(PqliteHostV1 {
         struct_size: std::mem::size_of::<PqliteHostV1>() as u32,
         abi_version: ffi::PQLITE_PLUGIN_ABI_VERSION,
         host_name: PqliteStr::new("pqlite"),
         host_version: PqliteStr::new(HOST_VERSION),
-        host_data: &*host_state as *const HostState as *mut c_void,
+        host_data: host_state.cast(),
         max_log_level: max_log_level(),
         log: Some(host_log),
         config: kvs.as_ptr(),
         n_config: kvs.len(),
-    });
+    }));
 
     let mut out: *const PqlitePluginV1 = std::ptr::null();
-    let rc = init(&*host, &mut out);
-    // Config is only borrowed for the duration of init.
-    host.config = std::ptr::null();
-    host.n_config = 0;
+    let rc = init(host, &mut out);
+    // Config is only borrowed for the duration of init; `host.config` now
+    // dangles and plugins must not read it.
     drop(kvs);
     if rc != 0 {
+        // SAFETY: both came from `Box::into_raw` above, and a failing plugin
+        // must not retain `host`.
+        drop(Box::from_raw(host));
+        drop(Box::from_raw(host_state));
         return Err(format!("{label}: pqlite_plugin_init failed ({rc})"));
     }
     // From here on the plugin is initialised and may hold on to `host` (and
-    // call `log` from its own threads), so it must stay valid for the process
+    // call `log` from its own threads), so both stay allocated for the process
     // even if the checks below reject the plugin. The cost is two small
     // allocations per plugin that loads.
-    let host_state: &'static HostState = Box::leak(host_state);
-    Box::leak(host);
+    // SAFETY: from `Box::into_raw` and never freed; only read from here on.
+    let host_state: &'static HostState = &*host_state;
     if out.is_null() {
         return Err(format!("{label}: pqlite_plugin_init returned no vtable"));
     }
@@ -168,10 +172,14 @@ pub unsafe fn load_from_init(
                 def.min_args, def.max_args
             ));
         }
+        // TODO: names that match a planner built-in scalar function or alias
+        // (e.g. `abs`) load but can't be called: lowering resolves built-ins
+        // before the catalog. Reject them here or resolve FROM-position calls
+        // as table functions first.
         if registry.get(&fn_name).is_some()
             || staged
                 .iter()
-                .any(|(name, ..)| name.eq_ignore_ascii_case(&fn_name))
+                .any(|(name, ..)| crate::table_fns::same_name(name, &fn_name))
         {
             return Err(format!(
                 "{label}: table function '{fn_name}' is already registered"

@@ -160,7 +160,8 @@ fn write_ion_string(s: &str, out: &mut String) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
+            // C0, DEL and C1 controls, as `session/ion_output.rs` does.
+            c if (c as u32) < 0x20 || (0x7f..=0x9f).contains(&(c as u32)) => {
                 let _ = write!(out, "\\x{:02x}", c as u32);
             }
             c => out.push(c),
@@ -208,5 +209,23 @@ mod tests {
         write_ion_float(1.5, &mut s);
         write_ion_string("a\"b\n", &mut s);
         assert_eq!(s, "1.5e0\"a\\\"b\\n\"");
+    }
+
+    #[test]
+    fn control_chars_are_escaped_and_round_trip() {
+        let text = "a\u{1}b\u{7f}c\u{85}d\u{9f}e\u{a0}";
+        let mut s = String::from("{");
+        write_ion_string(text, &mut s);
+        s.push_str(": ");
+        write_ion_string(text, &mut s);
+        s.push('}');
+        assert_eq!(
+            s,
+            "{\"a\\x01b\\x7fc\\x85d\\x9fe\u{a0}\": \"a\\x01b\\x7fc\\x85d\\x9fe\u{a0}\"}"
+        );
+        let elem = ion_rs::element::Element::read_one(s.as_bytes()).unwrap();
+        let (name, value) = elem.as_struct().unwrap().iter().next().unwrap();
+        assert_eq!(name.text(), Some(text));
+        assert_eq!(value.as_text(), Some(text));
     }
 }

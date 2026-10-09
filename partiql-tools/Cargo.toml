@@ -42,6 +42,8 @@ clap_complete = "4.6"
 heed = { version = "0.20", default-features = false }
 reedline = "0.48.0"
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
+# Same case folding as partiql-catalog's name lookup.
+unicase = "2.7"
 
 # UNSTABLE, in development: loading table functions from C-ABI shared
 # libraries (`pqlite --load`, see PLUGINS.md). Deliberately not a Cargo

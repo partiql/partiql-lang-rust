@@ -529,6 +529,48 @@ fn duplicate_function_names_are_rejected() {
     assert!(err.contains("already registered"), "{err}");
 }
 
+unsafe extern "C" fn case_folded_init(
+    _host: *const PqliteHostV1,
+    out: *mut *const PqlitePluginV1,
+) -> i32 {
+    let fns: &'static [PqliteTableFnDef; 2] = Box::leak(Box::new([
+        def("straße", "", 0, 0),
+        def("STRASSE", "", 0, 0),
+    ]));
+    *out = Box::leak(Box::new(PqlitePluginV1 {
+        struct_size: std::mem::size_of::<PqlitePluginV1>() as u32,
+        abi_version: PQLITE_PLUGIN_ABI_VERSION,
+        plugin_name: PqliteStr::new("foldplug"),
+        plugin_version: PqliteStr::new("0.0.1"),
+        plugin_data: std::ptr::null_mut(),
+        n_functions: fns.len(),
+        functions: fns.as_ptr(),
+        open: Some(test_open),
+        free_string: Some(test_free_string),
+    }));
+    0
+}
+
+/// Names equal under the catalog's Unicode case folding collide at load,
+/// rather than panicking when the frontend catalog is built.
+#[test]
+fn unicode_case_folded_names_are_rejected() {
+    let _g = serial();
+    let mut reg = TableFnRegistry::builtin();
+    let err = unsafe { load_from_init("libfold.so", case_folded_init, &[], &mut reg) }
+        .err()
+        .unwrap();
+    assert!(err.contains("'STRASSE' is already registered"), "{err}");
+    assert!(reg.get("straße").is_none());
+    let session = PqliteSession::open_without_db(DebugFlags::default()).with_table_fns(reg);
+    assert!(session
+        .run(&Commands::Exec {
+            query: "SELECT t.a FROM mem(1, 1) t".into()
+        })
+        .0
+        .is_ok());
+}
+
 #[test]
 fn failed_init_is_reported() {
     let _g = serial();
