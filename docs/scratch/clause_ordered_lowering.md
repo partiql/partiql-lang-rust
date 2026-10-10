@@ -134,8 +134,8 @@ let (op, scope) = self.lower_group_by(op, &s.group_by, &scope, aggs)?;
 
 The visitor-based `lower.rs` was replaced in one step by `lower/` (`mod.rs` for queries
 and clauses, `scope.rs` for scopes and name resolution, `expr.rs` for expressions), and
-both resolution modes moved at once. The planner no longer runs `NameResolver`. That
-crate is unchanged, since it is published.
+both resolution modes moved at once. `NameResolver` (`partiql-ast-passes::name_resolver`)
+was deleted.
 
 - **Dynamic** keeps `main`'s candidate lists for `DynamicLookup`, built from the current
   query level only. The evaluator binds an enclosing query's variables as globals of a

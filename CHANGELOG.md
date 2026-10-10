@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-parser: `Parsed`'s `ast` field replaced by `statements: Vec<AstNode<Statement>>`. The `Item` enum is renamed to `Statement` with bare variants (`Statement::Query(TopLevelQuery)`, `Statement::Ddl(DdlOp)`, `Statement::Dml(Dml)`). The single-field `Ddl` wrapper struct is removed; `DdlOp` is held directly. Code that accessed `parsed.ast` must now use `parsed.statements[0]` and match on `Statement` variants.
 - *BREAKING* partiql-parser: `INSERT` and `INTO` are now reserved keywords (per SQL:2003), so they can no longer be used as bare identifiers. A query such as `SELECT x AS into FROM t` must now quote the identifier (`"into"`).
 - *BREAKING* partiql-catalog: `ReadOnlyCatalog` gains a required `fn name(&self) -> &str`. External implementors must add it.
+- *BREAKING* partiql-ast-passes: removes the `name_resolver` module (`NameResolver`, `KeyRegistry`). The logical planner now resolves names while lowering, clause by clause.
+- partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases, lateral joins and ambiguous unqualified names (new `AstTransformError::AmbiguousReference`) resolve per the spec.
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
 
 ### Added
