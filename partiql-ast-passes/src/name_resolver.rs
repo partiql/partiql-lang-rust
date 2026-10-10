@@ -1,3 +1,6 @@
+// TODO delete this module: it is unused since the logical planner resolves names while
+//  lowering, clause by clause (`partiql-logical-planner/src/lower/scope.rs`).
+
 use crate::error::{AstTransformError, AstTransformationError};
 use fnv::FnvBuildHasher;
 use indexmap::{IndexMap, IndexSet};
