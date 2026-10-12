@@ -21,5 +21,5 @@ skip::{ sql: "SELECT e.a FROM example e WHERE e.a IN (SELECT VALUE t.id FROM tab
 // VM: COUNT(*) over empty input yields no row instead of { c: 0 }.
 skip::{ sql: "SELECT COUNT(*) AS c FROM example e WHERE e.a > 100", expect: { rows: $bag::[ { c: 0 } ] } }
 
-// Lowering: `SELECT e.*` is not implemented.
+// Lowering: `e.*` (PathUnpivot) is not implemented.
 skip::{ sql: "SELECT e.* FROM example e", expect: { rows: $bag::[ { a: 1, b: 4, c: "x", d: 1 }, { a: 3, b: 6, c: "x", d: 1 }, { a: 5, b: 9, c: "y", d: 2 } ] } }
