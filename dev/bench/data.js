@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791839437846,
+  "lastUpdate": 1791848259589,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -48425,6 +48425,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 21228,
             "range": "± 94",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "00ee337a5aced586099308ac35d94e0850473a55",
+          "message": "fix(vm): remap inlined key indices and fix projection pushdown (#689)\n\n* fix(vm): remap interned keys when inlining sub-programs; complete projection pushdown\n\n- inline_program remapped key indices by offset although keys are interned,\n  giving 'invalid key index' or reading the wrong field (also LIKE patterns,\n  CreateTableFnCursor) when WHERE and SELECT share a field.\n- The pushdown extractor walks every expression kind; a whole-row reference\n  (SELECT *, bare alias) loads the whole value instead of dropping it.\n- A path over a pushed-down field keeps navigating its remaining steps.\n- Projection scratch registers start above the GROUP BY sorter's registers.\n\n* test(pqlite): enable aliased-reference fixtures fixed by the VM key remap\n\n* fix(vm): read a field of a GROUP BY key, not the key, in key.field\n\nAfter `GROUP BY d.k AS k`, `k.k` resolved field `k` as the pushed-down\ncolumn `k` (the key itself). The pushdown shortcut now applies only when the\npath's base is the scan binding or names no other binding.\n\n* test(conformance): require a non-empty error list for AmbiguousReference fail_eval\n\n`.all` is true for an empty error list, so an empty lowering error would have\nsatisfied an expected failure. Also test that a subquery's GROUP BY alias does\nnot capture an outer name.\n\n* refactor(vm): make inlined-instruction remapping exhaustive\n\nremap_inst listed the instructions that index the constant or key pool and\ncloned everything else, so a new key-indexing instruction would silently skip\nthe remap. Every Inst variant is now listed; instructions with absolute jump\ntargets are rejected, since scalar sub-programs never emit them. Also mark the\nname-only field lookup in path lowering as TODO(#695).",
+          "timestamp": "2026-10-12T16:19:45-07:00",
+          "tree_id": "f5a81580e480f1a86e5922dae24a62fb7fa90537",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/00ee337a5aced586099308ac35d94e0850473a55"
+        },
+        "date": 1791848257910,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 677041,
+            "range": "± 6262",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 952752,
+            "range": "± 14268",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 922201,
+            "range": "± 1118",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 952175,
+            "range": "± 2013",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 927287,
+            "range": "± 2507",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 953397,
+            "range": "± 2466",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 936738,
+            "range": "± 1993",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 959931,
+            "range": "± 3854",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 927103,
+            "range": "± 2156",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 953485,
+            "range": "± 3518",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1189590,
+            "range": "± 11536",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1488806,
+            "range": "± 12750",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2055388,
+            "range": "± 57583",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1342174,
+            "range": "± 7965",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1652482,
+            "range": "± 12164",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2224967,
+            "range": "± 7551",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 3743,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 33520,
+            "range": "± 307",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 65064,
+            "range": "± 504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1251,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 17114,
+            "range": "± 65",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 33957,
+            "range": "± 83",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 53879,
+            "range": "± 115",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 826233,
+            "range": "± 1227",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1667186,
+            "range": "± 6547",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 15153735,
+            "range": "± 254327",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 85345413,
+            "range": "± 757627",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 164523430,
+            "range": "± 625213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 487442010,
+            "range": "± 3377574",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 459945795,
+            "range": "± 1655796",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9271,
+            "range": "± 40",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2803,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 354,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 597,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1707,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 5021,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 13350,
+            "range": "± 46",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 19199,
+            "range": "± 123",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 17286,
+            "range": "± 375",
             "unit": "ns/iter"
           }
         ]
