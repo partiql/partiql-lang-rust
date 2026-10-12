@@ -596,6 +596,15 @@ fn test_static_subquery_from_items_do_not_leak_into_outer_query() {
     assert_eq!(project_exprs(&plan), &[("a".to_string(), attr("e", "a"))]);
 }
 
+#[test]
+fn test_static_subquery_group_by_alias_does_not_leak_into_outer_query() {
+    let plan = lower_static(
+        "SELECT k FROM example x WHERE EXISTS (SELECT 1 FROM table1 y GROUP BY y.k AS k)",
+    )
+    .expect("lower");
+    assert_eq!(project_exprs(&plan), &[("k".to_string(), attr("x", "k"))]);
+}
+
 fn subquery_scan_project_exprs<'p>(
     plan: &'p LogicalPlan<BindingsOp>,
     as_key: &str,

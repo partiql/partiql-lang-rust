@@ -450,7 +450,7 @@ impl<'a> PlanCompiler<'a> {
             for arg_expr in &tf_info.arguments {
                 let target = builder.alloc_reg_pub();
                 let prog = expr_compiler.compile_to_program(arg_expr, target, target + 1)?;
-                self.inline_program(&prog, builder);
+                self.inline_program(&prog, builder)?;
                 arg_slots.push(target);
             }
 
@@ -469,7 +469,7 @@ impl<'a> PlanCompiler<'a> {
             let expr_compiler = LogicalExprCompiler::new(&result.resolver);
             let expr_program =
                 expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
-            self.inline_program(&expr_program, builder);
+            self.inline_program(&expr_program, builder)?;
             if self.mode == EvaluationMode::Strict {
                 builder.insts.push(Inst::AssertCollection { src: 0 });
             }
@@ -509,7 +509,7 @@ impl<'a> PlanCompiler<'a> {
                     )?;
 
                     // Inline the filter program's instructions
-                    self.inline_program(&filter_program, builder);
+                    self.inline_program(&filter_program, builder)?;
 
                     // Emit: JumpIfNotTrue → back to loop_head (skip this row)
                     let jump_idx = builder.emit_jump_if_not_true(pred_slot);
@@ -631,7 +631,7 @@ impl<'a> PlanCompiler<'a> {
         for (i, (_name, expr)) in key_exprs.iter().enumerate() {
             let dst = record_base + i as u16;
             let prog = expr_compiler.compile_to_program(expr, dst, temp_slot)?;
-            self.inline_program(&prog, builder);
+            self.inline_program(&prog, builder)?;
             temp_slot = temp_slot.max(dst + 1 + prog.reg_count);
         }
 
@@ -639,7 +639,7 @@ impl<'a> PlanCompiler<'a> {
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
             let dst = record_base + key_count as u16 + i as u16;
             let prog = expr_compiler.compile_to_program(&agg.expr, dst, temp_slot)?;
-            self.inline_program(&prog, builder);
+            self.inline_program(&prog, builder)?;
             temp_slot = temp_slot.max(dst + 1 + prog.reg_count);
         }
 
@@ -937,7 +937,7 @@ impl<'a> PlanCompiler<'a> {
                         having_pred_reg,
                         having_temp,
                     )?;
-                    self.inline_program(&prog, builder);
+                    self.inline_program(&prog, builder)?;
                     having_skip_idx = Some(builder.emit_jump_if_not_true(having_pred_reg));
                 }
                 BindingsOp::Project(project) => {
@@ -1015,7 +1015,7 @@ impl<'a> PlanCompiler<'a> {
         let resolver = &result.resolver;
         let expr_compiler = LogicalExprCompiler::new(resolver);
         let program = expr_compiler.compile_to_program(&eq.expr, 0, result.slot_count as u16)?;
-        self.inline_program(&program, builder);
+        self.inline_program(&program, builder)?;
         builder.emit_emit_row();
         builder.emit_halt();
 
@@ -1045,9 +1045,11 @@ impl<'a> PlanCompiler<'a> {
             exprs.push((target_slot, expr.clone()));
         }
 
-        let program =
-            expr_compiler.compile_to_program_multi(&exprs, (output_start + num_outputs) as u16)?;
-        self.inline_program(&program, builder);
+        // Scratch registers start above both the outputs and every register already
+        // in use (e.g. the GROUP BY phase's record and key registers).
+        let temp_base = ((output_start + num_outputs) as u16).max(builder.next_reg());
+        let program = expr_compiler.compile_to_program_multi(&exprs, temp_base)?;
+        self.inline_program(&program, builder)?;
         Ok(())
     }
 
@@ -1060,12 +1062,10 @@ impl<'a> PlanCompiler<'a> {
         builder: &mut ProgramBuilder,
     ) -> Result<()> {
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program = expr_compiler.compile_to_program(
-            &pv.expr,
-            output_slot as SlotId,
-            (output_slot + 1) as u16,
-        )?;
-        self.inline_program(&program, builder);
+        let temp_base = ((output_slot + 1) as u16).max(builder.next_reg());
+        let program =
+            expr_compiler.compile_to_program(&pv.expr, output_slot as SlotId, temp_base)?;
+        self.inline_program(&program, builder)?;
         Ok(())
     }
 
@@ -1091,8 +1091,9 @@ impl<'a> PlanCompiler<'a> {
             VarRefType::Local,
         );
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-        let program = expr_compiler.compile_to_program(&copy_expr, output_slot, output_slot + 1)?;
-        self.inline_program(&program, builder);
+        let temp_base = (output_slot + 1).max(builder.next_reg());
+        let program = expr_compiler.compile_to_program(&copy_expr, output_slot, temp_base)?;
+        self.inline_program(&program, builder)?;
 
         match self.mode {
             EvaluationMode::Permissive => {
@@ -1114,7 +1115,11 @@ impl<'a> PlanCompiler<'a> {
     ///
     /// This copies all instructions from a sub-program into the main program builder.
     /// Constants and keys are merged, and register/const/key indices are remapped.
-    fn inline_program(&self, sub_program: &crate::expr::Program, builder: &mut ProgramBuilder) {
+    fn inline_program(
+        &self,
+        sub_program: &crate::expr::Program,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
         // For now, simply append instructions directly.
         // This works because the sub-program was compiled with the same slot_count
         // and registers start from slot_count, which matches the main builder.
@@ -1125,26 +1130,29 @@ impl<'a> PlanCompiler<'a> {
 
         // Remap const indices
         let const_offset = builder.consts_len() as u16;
-        let key_offset = builder.keys_len() as u16;
 
         // Copy constants
         for c in sub_program.consts.iter() {
             builder.push_const_pub(c.clone());
         }
 
-        // Copy keys
-        for k in sub_program.keys.iter() {
-            builder.push_key_pub(k.clone());
-        }
+        // Copy keys. Keys are interned (deduplicated), so a key already in the
+        // pool keeps its existing index; remap per key rather than by offset.
+        let key_map: Vec<u16> = sub_program
+            .keys
+            .iter()
+            .map(|k| builder.push_key_pub(k.clone()))
+            .collect();
 
         // Copy instructions with remapped indices
         for inst in &sub_program.insts {
-            let remapped = remap_inst(inst, const_offset, key_offset);
+            let remapped = remap_inst(inst, const_offset, &key_map)?;
             builder.insts.push(remapped);
         }
 
         // Update next_reg high-water mark
         builder.update_next_reg(sub_program.reg_count);
+        Ok(())
     }
 
     /// Find the ScanId for a given scan in the result's metadata.
@@ -1223,6 +1231,7 @@ impl<'a> PlanCompiler<'a> {
             BindingsOp::ProjectAll(mode) => {
                 let input_id = graph.single_input(id)?;
                 let mode = mode.clone();
+                ctx.request_all_whole_values();
                 let mut result = self.compile_node(graph, input_id, ctx)?;
                 self.apply_project_all_metadata(&mut result, &mode)?;
                 Ok(result)
@@ -1294,7 +1303,8 @@ impl<'a> PlanCompiler<'a> {
         let mut column_slots = FxHashMap::default();
         let mut base_row_slot: Option<SlotId> = None;
         let mut next_slot: SlotId = 0;
-        let mut needs_whole_value = my_requests.is_empty();
+        let mut needs_whole_value =
+            my_requests.is_empty() || ctx.needs_whole_value(&scan.as_key, table_name.as_deref());
 
         if !needs_whole_value {
             for req in &my_requests {
@@ -1584,7 +1594,8 @@ impl<'a> PlanCompiler<'a> {
         let mut column_slots = FxHashMap::default();
         let mut base_row_slot: Option<SlotId> = None;
         let mut next_slot: SlotId = 0;
-        let mut needs_whole_value = my_requests.is_empty();
+        let mut needs_whole_value =
+            my_requests.is_empty() || ctx.needs_whole_value(&scan.as_key, table_name.as_deref());
 
         if !needs_whole_value {
             for req in &my_requests {
@@ -1927,9 +1938,21 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
     }
 }
 
-/// Remap constant and key indices in an instruction.
-fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
-    match inst {
+/// Remap constant and key indices in an instruction of an inlined sub-program.
+///
+/// The match is exhaustive on purpose: a new instruction must say whether it indexes
+/// the constant or key pool, since an unmapped index silently reads a different entry
+/// after inlining.
+fn remap_inst(inst: &Inst, const_offset: u16, key_map: &[u16]) -> Result<Inst> {
+    let key = |idx: u16| -> Result<u16> {
+        key_map.get(idx as usize).copied().ok_or_else(|| {
+            EngineError::IllegalState(format!(
+                "inlined sub-program references key index {idx} outside its key pool (len {})",
+                key_map.len()
+            ))
+        })
+    };
+    Ok(match inst {
         Inst::LoadConst { dst, const_idx } => Inst::LoadConst {
             dst: *dst,
             const_idx: *const_idx + const_offset,
@@ -1937,7 +1960,7 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
         Inst::GetField { dst, base, key_idx } => Inst::GetField {
             dst: *dst,
             base: *base,
-            key_idx: *key_idx + key_offset,
+            key_idx: key(*key_idx)?,
         },
         Inst::CallUdf {
             dst,
@@ -1945,8 +1968,24 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
             args,
         } => Inst::CallUdf {
             dst: *dst,
-            func_idx: *func_idx + key_offset,
+            func_idx: key(*func_idx)?,
             args: args.clone(),
+        },
+        Inst::LikeMatch {
+            dst,
+            value,
+            pattern_idx,
+        } => Inst::LikeMatch {
+            dst: *dst,
+            value: *value,
+            pattern_idx: key(*pattern_idx)?,
+        },
+        Inst::CreateTableFnCursor {
+            cursor_id,
+            func_name_idx,
+        } => Inst::CreateTableFnCursor {
+            cursor_id: *cursor_id,
+            func_name_idx: key(*func_name_idx)?,
         },
         Inst::CoerceToTuple {
             dst,
@@ -1957,9 +1996,88 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_offset: u16) -> Inst {
             src: *src,
             const_idx: *const_idx + const_offset,
         },
-        // All other instructions don't reference const/key pools
-        other => other.clone(),
-    }
+
+        // Absolute jump targets would need relocating; scalar sub-programs never emit them.
+        Inst::NextRow { .. }
+        | Inst::Jump { .. }
+        | Inst::JumpIfNotTrue { .. }
+        | Inst::DecrOrJump { .. }
+        | Inst::SorterSort { .. }
+        | Inst::SorterNext { .. }
+        | Inst::Gosub { .. } => {
+            return Err(EngineError::IllegalState(format!(
+                "cannot inline a sub-program with a jump: {inst:?}"
+            )))
+        }
+
+        // These reference only registers, slots, cursors, sorters or inline operands.
+        Inst::Cast { .. }
+        | Inst::AddI64 { .. }
+        | Inst::AddF64 { .. }
+        | Inst::AddDecimal { .. }
+        | Inst::AddDynamic { .. }
+        | Inst::SubI64 { .. }
+        | Inst::SubF64 { .. }
+        | Inst::SubDecimal { .. }
+        | Inst::SubDynamic { .. }
+        | Inst::ModI64 { .. }
+        | Inst::ModF64 { .. }
+        | Inst::ModDecimal { .. }
+        | Inst::ModDynamic { .. }
+        | Inst::EqI64 { .. }
+        | Inst::EqF64 { .. }
+        | Inst::EqDecimal { .. }
+        | Inst::EqBool { .. }
+        | Inst::EqStr { .. }
+        | Inst::EqDynamic { .. }
+        | Inst::MulI64 { .. }
+        | Inst::MulF64 { .. }
+        | Inst::MulDecimal { .. }
+        | Inst::MulDynamic { .. }
+        | Inst::DivI64 { .. }
+        | Inst::DivF64 { .. }
+        | Inst::DivDecimal { .. }
+        | Inst::DivDynamic { .. }
+        | Inst::ExpF64 { .. }
+        | Inst::ExpDynamic { .. }
+        | Inst::GtI64 { .. }
+        | Inst::GtF64 { .. }
+        | Inst::GtDecimal { .. }
+        | Inst::GtStr { .. }
+        | Inst::GtDynamic { .. }
+        | Inst::LtI64 { .. }
+        | Inst::LtF64 { .. }
+        | Inst::LtDecimal { .. }
+        | Inst::LtStr { .. }
+        | Inst::LtDynamic { .. }
+        | Inst::ConcatStr { .. }
+        | Inst::ConcatDynamic { .. }
+        | Inst::InDynamic { .. }
+        | Inst::AndBool { .. }
+        | Inst::OrBool { .. }
+        | Inst::NotBool { .. }
+        | Inst::NegNum { .. }
+        | Inst::LikeDynamicMatch { .. }
+        | Inst::MaterializeCursor { .. }
+        | Inst::StoreSlot { .. }
+        | Inst::MakeTuple { .. }
+        | Inst::MakeList { .. }
+        | Inst::MakeBag { .. }
+        | Inst::AssertTuple { .. }
+        | Inst::AssertCollection { .. }
+        | Inst::OpenCursor { .. }
+        | Inst::CloseCursor { .. }
+        | Inst::EmitRow
+        | Inst::Halt
+        | Inst::SorterInsert { .. }
+        | Inst::SorterData { .. }
+        | Inst::AggStep { .. }
+        | Inst::AggFinal { .. }
+        | Inst::AggReset { .. }
+        | Inst::Return { .. }
+        | Inst::Copy { .. }
+        | Inst::CompareEq { .. } => inst.clone(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2037,5 +2155,44 @@ impl SlotResolver for EmptySlotResolver {
     }
     fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remap_inst_maps_pool_indices() {
+        let key_map = [7, 3];
+        let inst = Inst::GetField {
+            dst: 1,
+            base: 0,
+            key_idx: 1,
+        };
+        assert!(matches!(
+            remap_inst(&inst, 5, &key_map),
+            Ok(Inst::GetField { key_idx: 3, .. })
+        ));
+        let inst = Inst::LoadConst {
+            dst: 1,
+            const_idx: 2,
+        };
+        assert!(matches!(
+            remap_inst(&inst, 5, &key_map),
+            Ok(Inst::LoadConst { const_idx: 7, .. })
+        ));
+        // A key index outside the sub-program's pool is an error, not a panic.
+        let inst = Inst::GetField {
+            dst: 1,
+            base: 0,
+            key_idx: 2,
+        };
+        assert!(remap_inst(&inst, 5, &key_map).is_err());
+    }
+
+    #[test]
+    fn remap_inst_rejects_jumps() {
+        assert!(remap_inst(&Inst::Jump { target: 4 }, 0, &[]).is_err());
     }
 }
