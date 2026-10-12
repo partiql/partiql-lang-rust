@@ -560,6 +560,16 @@ fn deep_nested_path_after_pushdown() {
     );
 }
 
+/// `k.k` reads field `k` of the GROUP BY key `k`, not the key itself.
+#[test]
+fn path_into_group_key_named_like_its_field() {
+    assert_vm_eval(
+        "SELECT k.k AS kk FROM data AS d GROUP BY d.k AS k",
+        &[("data", "[{k: {k: 1}}]")],
+        "$bag::[{kk: 1}]",
+    );
+}
+
 #[test]
 fn filter_false_returns_empty() {
     assert_vm_eval(

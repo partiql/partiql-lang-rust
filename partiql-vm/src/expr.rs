@@ -2373,11 +2373,21 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
             }
             ValueExpr::Path(base, components) => {
                 // First, try to resolve the first component as a pushed-down field of the
-                // base binding; any remaining components navigate within that field.
-                if let (ValueExpr::VarRef(..), Some(PathComponent::Key(name))) =
+                // base binding; any remaining components navigate within that field. Skip
+                // this when the base is some other binding: after `GROUP BY d.k AS k`, `k.k`
+                // reads field `k` of the key `k`, not the key itself.
+                if let (ValueExpr::VarRef(base_name, scope), Some(PathComponent::Key(name))) =
                     (&**base, components.first())
                 {
-                    if let Some(slot) = self.resolver.resolve_field(name) {
+                    let base_is_other_binding = !self.resolver.is_alias(base_name)
+                        && self
+                            .resolver
+                            .resolve_var(base_name, scope.clone())
+                            .is_some();
+                    if let Some(slot) = (!base_is_other_binding)
+                        .then(|| self.resolver.resolve_field(name))
+                        .flatten()
+                    {
                         return path_tail(Expr::SlotRef(slot), &components[1..]);
                     }
                 }
