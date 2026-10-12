@@ -1,5 +1,13 @@
 mod catalog;
 mod common;
+// The parser's lexer sources, compiled here for REPL highlighting; see `lexer`.
+#[allow(dead_code, unexpected_cfgs)]
+#[path = "../../partiql-parser/src/error.rs"]
+mod error;
+pub mod highlight;
+// `LexResult` keeps the raw lex error here, so the parser's `Into` is a no-op.
+#[allow(dead_code, clippy::useless_conversion)]
+mod lexer;
 pub mod row_codec;
 pub mod session;
 pub mod storage;

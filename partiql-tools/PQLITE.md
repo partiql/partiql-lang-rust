@@ -84,7 +84,7 @@ cargo build --release --bin pqlite
 **Usage**
 
 ```
-pqlite open <db>                              # REPL against <db>
+pqlite open [--no-color] <db>                 # REPL against <db>
 pqlite exec [--db <path>] [--format text|ion|none] "<stmt>[; <stmt>...]"
 pqlite --version
 pqlite --debug ast,plan,program ...           # or --debug all (alias '*')
@@ -133,6 +133,13 @@ A single statement prints only the `Total Timing:` line.
 .help
 .quit    (alias .exit)
 ```
+
+**REPL syntax highlighting**
+
+The REPL colors keywords, literals, Ion literals, comments, and function calls as you
+type, using the parser's own lexer. An unclosed string or comment stays colored to the
+end of the entry. It's off when stdout isn't a terminal, `NO_COLOR` is set, `TERM=dumb`,
+or with `pqlite open --no-color <db>`.
 
 **Table functions**
 

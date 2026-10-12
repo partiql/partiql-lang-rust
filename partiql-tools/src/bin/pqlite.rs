@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::io::Write;
 
+use partiql_tools::highlight::{color_enabled, PqliteHighlighter};
 use partiql_tools::session::{
     flush_debug, normalize_query, parse_script, render_outcome_ion, render_outcome_text,
     render_query_ion, render_query_text, render_statement_timing, render_total_timing, DebugFlags,
@@ -57,6 +58,10 @@ enum CliCommand {
         /// Path to the database file. The parent directory must already exist.
         #[arg(value_hint = ValueHint::FilePath)]
         db: std::path::PathBuf,
+        /// Disable syntax highlighting. Also off when `NO_COLOR` is set or
+        /// stdout isn't a terminal.
+        #[arg(long)]
+        no_color: bool,
     },
     /// Execute one or more `;`-separated statements immediately, optionally
     /// against a database file. Statements run in order; the first failure
@@ -121,7 +126,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        CliCommand::Open { db } => run_repl(debug, &db),
+        CliCommand::Open { db, no_color } => run_repl(debug, &db, color_enabled(no_color)),
         CliCommand::Completions { shell } => {
             let mut command = Cli::command();
             let bin_name = command.get_name().to_string();
@@ -374,7 +379,7 @@ fn handle_entry(
 }
 
 /// Per-statement errors are reported but never terminate the session.
-fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
+fn run_repl(debug: DebugFlags, db_path: &std::path::Path, color: bool) {
     // Hard-fail rather than fall back to in-memory: a silently non-persisting
     // db is worse than refusing to start.
     let session = match PqliteSession::open(db_path, debug) {
@@ -393,7 +398,11 @@ fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
 
     let mut line_editor = Reedline::create()
         .with_history(build_history())
-        .with_validator(Box::new(PqliteValidator));
+        .with_validator(Box::new(PqliteValidator))
+        .with_ansi_colors(color);
+    if color {
+        line_editor = line_editor.with_highlighter(Box::new(PqliteHighlighter::default()));
+    }
     let prompt = PqlitePrompt;
 
     loop {
@@ -425,6 +434,7 @@ fn run_repl(debug: DebugFlags, db_path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reedline::Highlighter;
 
     /// Drive one REPL entry without a tty (reedline needs a real terminal).
     fn entry(buffer: &str) -> (String, String) {
@@ -468,6 +478,14 @@ mod tests {
         assert!(out.contains('1') && !out.contains('3'), "stdout: {out}");
         assert!(err.contains("Statement 2: "), "stderr: {err}");
         assert!(!err.contains("Statement 3"), "stderr: {err}");
+    }
+
+    #[test]
+    fn highlighter_covers_a_multi_statement_entry() {
+        let buffer = "SELECT VALUE 'a;b' FROM << 1 >>;\nSELECT VALUE 2\n  FROM << 1 >>;";
+        let styled = PqliteHighlighter::default().highlight(buffer, buffer.len());
+        assert_eq!(styled.raw_string(), buffer);
+        assert!(styled.buffer.iter().any(|(_, s)| s == "'a;b'"));
     }
 
     #[test]
