@@ -834,3 +834,46 @@ fn test_static_order_by_binding_shadows_select_alias() {
         .expect("order by");
     assert_eq!(order_by.specs[0].expr, attr("a", "y"));
 }
+
+#[test]
+fn test_static_quoted_name_matches_exactly() {
+    // `"e"` is the binding `e`; `"E"` is not, so it is an attribute of `e`.
+    let plan = lower_static("SELECT \"E\".a AS x, \"e\".b AS y FROM t AS e").expect("lower");
+    let key = |k: &str| PathComponent::Key(BindingsName::CaseInsensitive(k.to_string().into()));
+    let e_quoted = ValueExpr::VarRef(BindingsName::CaseSensitive("e".into()), VarRefType::Local);
+    let e_dot_quoted_e = ValueExpr::Path(
+        Box::new(ValueExpr::VarRef(
+            BindingsName::CaseInsensitive("e".into()),
+            VarRefType::Local,
+        )),
+        vec![PathComponent::Key(BindingsName::CaseSensitive("E".into()))],
+    );
+    assert_eq!(
+        project_exprs(&plan),
+        &[
+            (
+                "x".to_string(),
+                ValueExpr::Path(Box::new(e_dot_quoted_e), vec![key("a")])
+            ),
+            (
+                "y".to_string(),
+                ValueExpr::Path(Box::new(e_quoted), vec![key("b")])
+            )
+        ]
+    );
+}
+
+#[test]
+fn test_static_set_op_order_by_reads_the_set_result() {
+    let plan = lower_static("(SELECT a FROM t UNION SELECT a FROM u) ORDER BY a").expect("lower");
+    assert_matches!(scan_expr(&plan, "$__set"), ValueExpr::SubQueryExpr(_));
+    let order_by = plan
+        .operators()
+        .iter()
+        .find_map(|op| match op {
+            BindingsOp::OrderBy(order_by) => Some(order_by),
+            _ => None,
+        })
+        .expect("order by");
+    assert_eq!(order_by.specs[0].expr, attr("$__set", "a"));
+}

@@ -177,9 +177,13 @@ impl<'s> Cx<'s> {
     }
 }
 
-/// Static resolution matches binding names case-insensitively.
+/// Whether reference `name` matches `binding`: exactly if the reference is quoted, else
+/// case-insensitively.
 fn names_match(name: &SymbolPrimitive, binding: &str) -> bool {
-    unicase::eq(name.value.as_str(), binding)
+    match name.case {
+        CaseSensitivity::CaseSensitive => name.value == binding,
+        _ => unicase::eq(name.value.as_str(), binding),
+    }
 }
 
 fn push_unique(lookups: &mut Vec<ValueExpr>, expr: ValueExpr) {
@@ -335,8 +339,7 @@ impl Lowerer<'_> {
                 let same = if b.generated {
                     b.name.value == name.value
                 } else {
-                    name.case == CaseSensitivity::CaseInsensitive
-                        && unicase::eq(b.name.value.as_str(), name.value.as_str())
+                    names_match(name, &b.name.value)
                 };
                 let expr = if same {
                     var(&b.name)?

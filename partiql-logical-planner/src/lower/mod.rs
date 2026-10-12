@@ -109,17 +109,59 @@ impl<'a> Lowerer<'a> {
             return self.lower_select(&select.node, order_by, limit_offset, outer);
         }
 
-        let mut out = self.lower_query_set(&query.set.node, outer)?;
-        let scope = Scope::new(outer);
+        if order_by.is_none() && limit_offset.is_none() {
+            return self.lower_query_set(&query.set.node, outer);
+        }
+        self.lower_ordered_query_set(&query.set.node, order_by, limit_offset, outer)
+    }
+
+    /// Lowers ORDER BY / LIMIT over a set operation (or other non-SELECT query). Its rows
+    /// have no binding name, so its result is scanned as `$__set`, and ORDER BY / LIMIT resolve
+    /// against that binding: `(A UNION B) ORDER BY a` is lowered like
+    /// `SELECT VALUE $__set FROM (A UNION B) AS $__set ORDER BY $__set.a`.
+    fn lower_ordered_query_set(
+        &mut self,
+        set: &QuerySet,
+        order_by: Option<&OrderByExpr>,
+        limit_offset: Option<&LimitOffsetClause>,
+        outer: Option<&Scope<'_>>,
+    ) -> Result<OpId> {
+        let outer_plan = std::mem::take(&mut self.plan);
+        let result = self.lower_query_set(set, outer);
+        let set_plan = std::mem::replace(&mut self.plan, outer_plan);
+        result?;
+
+        let name = SymbolPrimitive {
+            value: "$__set".to_string(),
+            case: CaseSensitivity::CaseInsensitive,
+        };
+        let mut ops = vec![self.plan.add_operator(BindingsOp::Scan(logical::Scan {
+            expr: ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan: set_plan }),
+            as_key: name.value.clone(),
+            at_key: None,
+        }))];
+        let row = ValueExpr::VarRef(symprim_to_binding(&name)?, VarRefType::Local);
+        let mut scope = Scope::new(outer);
+        scope.bind(name, true, BindingKind::FromAs);
+
         if let Some(order_by) = order_by {
             let op = self.lower_order_by(order_by, Cx::new(&scope, Clause::OrderBy))?;
-            out = self.chain(out, op);
+            ops.push(self.plan.add_operator(op));
         }
         if let Some(limit_offset) = limit_offset {
             let op = self.lower_limit_offset(limit_offset, Cx::new(&scope, Clause::Limit))?;
-            out = self.chain(out, op);
+            ops.push(self.plan.add_operator(op));
         }
-        Ok(out)
+        ops.push(
+            self.plan
+                .add_operator(BindingsOp::ProjectValue(logical::ProjectValue {
+                    expr: row,
+                })),
+        );
+        for pair in ops.windows(2) {
+            self.plan.add_flow(pair[0], pair[1]);
+        }
+        Ok(*ops.last().expect("a ProjectValue"))
     }
 
     /// Lowers a set operation or an expression query (anything but a SELECT).
@@ -525,12 +567,6 @@ impl<'a> Lowerer<'a> {
         let plan = std::mem::replace(&mut self.plan, outer_plan);
         result?;
         Ok(ValueExpr::SubQueryExpr(logical::SubQueryExpr { plan }))
-    }
-
-    fn chain(&mut self, input: OpId, op: BindingsOp) -> OpId {
-        let id = self.plan.add_operator(op);
-        self.plan.add_flow(input, id);
-        id
     }
 
     /// A fresh name for a binding the query does not name.
