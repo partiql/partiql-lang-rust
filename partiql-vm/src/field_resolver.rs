@@ -10,9 +10,9 @@
 //! 4. Scan nodes populate column_slots in the resolver
 //! 5. Expression compiler uses resolver to emit SlotRef instead of GetField
 
-use partiql_logical::{PathComponent, ValueExpr};
+use partiql_logical::{PathComponent, Pattern, ValueExpr};
 use partiql_value::BindingsName;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Unique identifier for a field request (used for deduplication).
 type FieldRequestId = u32;
@@ -35,6 +35,12 @@ pub(crate) struct CompileContext {
     next_id: FieldRequestId,
     /// Deduplication: (alias, field) → existing request ID
     seen: FxHashMap<(String, String), FieldRequestId>,
+    /// Aliases whose whole row value is referenced (e.g. a bare `VarRef(alias)`), so their
+    /// scans must load the whole value rather than only the requested fields.
+    whole_values: FxHashSet<String>,
+    /// Some expression may reference any scan's whole value (`SELECT *`, or an expression
+    /// the extractor does not walk), so no scan may rely on field pushdown alone.
+    whole_values_all: bool,
 }
 
 impl CompileContext {
@@ -59,6 +65,25 @@ impl CompileContext {
     }
 
     /// Get all requests targeting a specific alias.
+    /// Request the whole value of the scan bound to `alias`.
+    pub fn request_whole_value(&mut self, alias: &str) {
+        self.whole_values.insert(alias.to_string());
+    }
+
+    /// Request the whole value of every scan.
+    pub fn request_all_whole_values(&mut self) {
+        self.whole_values_all = true;
+    }
+
+    /// Whether the scan bound to `alias` (or named `table_name`) must load its whole value.
+    pub fn needs_whole_value(&self, alias: &str, table_name: Option<&str>) -> bool {
+        self.whole_values_all
+            || self.whole_values.iter().any(|a| {
+                a.eq_ignore_ascii_case(alias)
+                    || table_name.is_some_and(|t| a.eq_ignore_ascii_case(t))
+            })
+    }
+
     pub fn requests_for_alias<'a>(
         &'a self,
         alias: &str,
@@ -80,8 +105,9 @@ impl CompileContext {
 // Expression field extraction
 // ---------------------------------------------------------------------------
 
-/// Walks a `ValueExpr` tree, finding `Path(VarRef(alias), [Key(field)])` patterns
-/// and recording field requests in the `CompileContext`.
+/// Walks a `ValueExpr` tree and records what each scan must provide in the
+/// `CompileContext`: a field for every `alias.field[...]` path, and the whole value for
+/// every other use of a binding (a bare `alias`, `alias[0]`, ...).
 pub(crate) struct ExprFieldExtractor<'a> {
     ctx: &'a mut CompileContext,
 }
@@ -96,52 +122,79 @@ impl<'a> ExprFieldExtractor<'a> {
         self.walk(expr);
     }
 
+    fn walk_all<'e>(&mut self, exprs: impl IntoIterator<Item = &'e ValueExpr>) {
+        exprs.into_iter().for_each(|e| self.walk(e));
+    }
+
     fn walk(&mut self, expr: &ValueExpr) {
         match expr {
             ValueExpr::Path(base, steps) => {
-                if let Some((alias, field)) = try_decompose_field_access(base, steps) {
-                    self.ctx.request_field(&alias, &field);
-                } else {
-                    // Complex path — walk sub-expressions for any nested field accesses
-                    self.walk(base);
-                    for step in steps {
-                        if let PathComponent::KeyExpr(key_expr) = step {
-                            self.walk(key_expr);
-                        }
+                match (&**base, steps.first()) {
+                    // `alias.field...`: only `field` is needed from the scan; any further
+                    // steps navigate within it.
+                    (ValueExpr::VarRef(alias, _), Some(PathComponent::Key(field))) => {
+                        self.ctx.request_field(
+                            &bindings_name_to_string(alias),
+                            &bindings_name_to_string(field),
+                        );
+                    }
+                    _ => self.walk(base),
+                }
+                for step in steps {
+                    match step {
+                        PathComponent::KeyExpr(e) | PathComponent::IndexExpr(e) => self.walk(e),
+                        _ => {}
                     }
                 }
             }
-            ValueExpr::BinaryExpr(_op, lhs, rhs) => {
-                self.walk(lhs);
-                self.walk(rhs);
+            // A bare variable needs the whole value bound to it.
+            ValueExpr::VarRef(alias, _) => {
+                self.ctx
+                    .request_whole_value(&bindings_name_to_string(alias));
             }
-            ValueExpr::UnExpr(_op, operand) => {
-                self.walk(operand);
+            ValueExpr::Lit(_) | ValueExpr::DBRef(_) => {}
+            ValueExpr::UnExpr(_, e) => self.walk(e),
+            ValueExpr::BinaryExpr(_, lhs, rhs) => self.walk_all([&**lhs, &**rhs]),
+            ValueExpr::DynamicLookup(lookups) => self.walk_all(lookups.iter()),
+            ValueExpr::TupleExpr(t) => self.walk_all(t.attrs.iter().chain(&t.values)),
+            ValueExpr::ListExpr(l) => self.walk_all(&l.elements),
+            ValueExpr::BagExpr(b) => self.walk_all(&b.elements),
+            ValueExpr::BetweenExpr(b) => self.walk_all([&*b.value, &*b.from, &*b.to]),
+            ValueExpr::PatternMatchExpr(m) => {
+                self.walk(&m.value);
+                match &m.pattern {
+                    Pattern::LikeNonStringNonLiteral(p) => self.walk_all([&*p.pattern, &*p.escape]),
+                    Pattern::Like(_) => {}
+                    _ => self.ctx.request_all_whole_values(),
+                }
             }
-            // Leaf expressions — no field accesses to extract
-            ValueExpr::Lit(_) | ValueExpr::VarRef(_, _) | ValueExpr::DBRef(_) => {}
-            // For other expression types, just skip for now.
-            // Complex expressions (Case, Call, etc.) can be extended later.
-            _ => {}
+            ValueExpr::SimpleCase(c) => {
+                self.walk(&c.expr);
+                self.walk_cases(&c.cases, c.default.as_deref());
+            }
+            ValueExpr::SearchedCase(c) => self.walk_cases(&c.cases, c.default.as_deref()),
+            ValueExpr::IsTypeExpr(t) => self.walk(&t.expr),
+            ValueExpr::NullIfExpr(n) => self.walk_all([&*n.lhs, &*n.rhs]),
+            ValueExpr::CoalesceExpr(c) => self.walk_all(&c.elements),
+            ValueExpr::Call(c) => self.walk_all(&c.arguments),
+            // A subquery or graph match may reference outer bindings in ways not visible
+            // here, and future expression kinds are unknown: load whole values.
+            _ => self.ctx.request_all_whole_values(),
         }
     }
-}
 
-/// Try to decompose `Path(VarRef(alias), [Key(field)])` into (alias, field).
-fn try_decompose_field_access(
-    base: &ValueExpr,
-    steps: &[PathComponent],
-) -> Option<(String, String)> {
-    if let ValueExpr::VarRef(alias, _) = base {
-        if steps.len() == 1 {
-            if let PathComponent::Key(field_name) = &steps[0] {
-                let alias_str = bindings_name_to_string(alias);
-                let field_str = bindings_name_to_string(field_name);
-                return Some((alias_str, field_str));
-            }
+    fn walk_cases(
+        &mut self,
+        cases: &[(Box<ValueExpr>, Box<ValueExpr>)],
+        default: Option<&ValueExpr>,
+    ) {
+        for (when, then) in cases {
+            self.walk_all([&**when, &**then]);
+        }
+        if let Some(default) = default {
+            self.walk(default);
         }
     }
-    None
 }
 
 fn bindings_name_to_string(name: &BindingsName<'_>) -> String {
@@ -149,5 +202,76 @@ fn bindings_name_to_string(name: &BindingsName<'_>) -> String {
         BindingsName::CaseSensitive(s) => s.as_ref().to_string(),
         BindingsName::CaseInsensitive(s) => s.as_ref().to_string(),
         other => format!("{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use partiql_logical::{CallExpr, CallName, Lit, SearchedCase, VarRefType};
+
+    fn var(name: &str) -> ValueExpr {
+        ValueExpr::VarRef(
+            BindingsName::CaseInsensitive(name.to_string().into()),
+            VarRefType::Local,
+        )
+    }
+
+    fn path(base: &str, keys: &[&str]) -> ValueExpr {
+        ValueExpr::Path(
+            Box::new(var(base)),
+            keys.iter()
+                .map(|k| PathComponent::Key(BindingsName::CaseInsensitive(k.to_string().into())))
+                .collect(),
+        )
+    }
+
+    fn extract(expr: &ValueExpr) -> CompileContext {
+        let mut ctx = CompileContext::new();
+        ExprFieldExtractor::new(&mut ctx).extract(expr);
+        ctx
+    }
+
+    fn fields(ctx: &CompileContext, alias: &str) -> Vec<String> {
+        ctx.requests_for_alias(alias, None)
+            .iter()
+            .map(|r| r.field_name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn nested_path_requests_its_first_field() {
+        let ctx = extract(&path("a", &["x", "y"]));
+        assert_eq!(fields(&ctx, "a"), ["x"]);
+        assert!(!ctx.needs_whole_value("a", None));
+    }
+
+    #[test]
+    fn call_and_case_arguments_are_walked() {
+        let expr = ValueExpr::SearchedCase(SearchedCase {
+            cases: vec![(
+                Box::new(path("a", &["flag"])),
+                Box::new(ValueExpr::Call(CallExpr {
+                    name: CallName::Lower,
+                    arguments: vec![path("a", &["name"])],
+                })),
+            )],
+            default: Some(Box::new(ValueExpr::Lit(Box::new(Lit::Null)))),
+        });
+        let ctx = extract(&expr);
+        assert_eq!(fields(&ctx, "a"), ["flag", "name"]);
+        assert!(!ctx.needs_whole_value("a", None));
+    }
+
+    #[test]
+    fn bare_variable_requests_whole_value_of_that_binding_only() {
+        let expr = ValueExpr::BinaryExpr(
+            partiql_logical::BinaryOp::Eq,
+            Box::new(var("a")),
+            Box::new(path("b", &["x"])),
+        );
+        let ctx = extract(&expr);
+        assert!(ctx.needs_whole_value("a", None));
+        assert!(!ctx.needs_whole_value("b", None));
     }
 }
