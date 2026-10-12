@@ -38,3 +38,28 @@ fn quoted_name_is_case_sensitive() {
         Value::from(partiql_value::bag![1])
     );
 }
+
+/// An aggregate's argument is evaluated on each input row, so a name that is also a GROUP BY
+/// key reads the FROM binding's attribute, not the key.
+#[test]
+fn aggregate_argument_sees_names_from_before_group_by() {
+    let data = "<< {'c': 1, 'v': 10}, {'c': 1, 'v': 20}, {'c': 2, 'v': 5} >>";
+    assert_eq!(
+        eval(&format!(
+            "SELECT c, SUM(c) AS s FROM {data} AS e GROUP BY c"
+        )),
+        Value::from(partiql_value::bag![
+            tuple![("c", 1), ("s", 2)],
+            tuple![("c", 2), ("s", 2)]
+        ])
+    );
+    assert_eq!(
+        eval(&format!(
+            "SELECT c, SUM(v) AS s FROM {data} AS e GROUP BY c HAVING SUM(c) > 1 ORDER BY SUM(v)"
+        )),
+        Value::from(list![
+            tuple![("c", 2), ("s", 5)],
+            tuple![("c", 1), ("s", 30)]
+        ])
+    );
+}

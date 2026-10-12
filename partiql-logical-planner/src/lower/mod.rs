@@ -246,6 +246,8 @@ impl<'a> Lowerer<'a> {
         }
 
         // GROUP BY binds its keys and `GROUP AS` name into `scope`.
+        // Aggregate arguments see the names from before GROUP BY.
+        let pre_group = scope.prefix(scope.len());
         let group_by = match &select.group_by {
             Some(group_by) => Some(self.lower_group_by(&group_by.node, &mut scope)?),
             None => None,
@@ -253,14 +255,16 @@ impl<'a> Lowerer<'a> {
 
         let having = match &select.having {
             Some(having) => {
-                let cx = Cx::new(&scope, Clause::Having).coerce(true);
+                let cx = Cx::new(&scope, Clause::Having)
+                    .coerce(true)
+                    .aggregates_over(&pre_group);
                 Some(self.lower_expr(&having.node.expr, cx)?)
             }
             None => None,
         };
 
         let mut projection =
-            self.lower_projection(&select.project.node, &scope, project_all_mode)?;
+            self.lower_projection(&select.project.node, &scope, &pre_group, project_all_mode)?;
         if let Some(group_by) = &group_by {
             group_by.substitute_keys(&mut projection);
         }
@@ -270,7 +274,7 @@ impl<'a> Lowerer<'a> {
             Some(order_by) => {
                 let cx = Cx {
                     select_aliases: Some(&select_aliases),
-                    ..Cx::new(&scope, Clause::OrderBy)
+                    ..Cx::new(&scope, Clause::OrderBy).aggregates_over(&pre_group)
                 };
                 Some(self.lower_order_by(order_by, cx)?)
             }
@@ -476,9 +480,10 @@ impl<'a> Lowerer<'a> {
         &mut self,
         projection: &Projection,
         scope: &Scope<'_>,
+        pre_group: &Scope<'_>,
         project_all_mode: ProjectAllMode,
     ) -> Result<BindingsOp> {
-        let cx = Cx::new(scope, Clause::Select);
+        let cx = Cx::new(scope, Clause::Select).aggregates_over(pre_group);
         let op = match &projection.kind {
             ProjectionKind::ProjectStar => BindingsOp::ProjectAll(project_all_mode),
             ProjectionKind::ProjectList(items) => {
