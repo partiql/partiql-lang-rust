@@ -1,4 +1,4 @@
-use partiql_ast_passes::error::AstTransformationError;
+use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
 #[cfg(not(feature = "eval_vm"))]
 use partiql_eval as eval;
 use std::ops::Deref;
@@ -243,6 +243,10 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
     match result {
         Ok(result) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{result:#?}`"),
         Err(TestError::Parse(_)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error"),
+        // A planner that resolves names statically may reject an invalid query while
+        // lowering rather than at evaluation; that satisfies an expected failure. Other
+        // lowering errors (e.g. an unsupported feature) do not.
+        Err(TestError::Lower(err)) if err.errors.iter().all(|e| matches!(e, AstTransformError::AmbiguousReference { .. })) => {}
         Err(TestError::Lower(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected lowering error `{err:?}`"),
         Err(TestError::Plan(_)) | Err(TestError::Eval(_)) => {}
     }

@@ -1,12 +1,10 @@
 #![deny(rust_2018_idioms)]
 #![deny(clippy::all)]
 
-use crate::lower::AstToLogical;
+use crate::lower::{symprim_to_binding, Lowerer};
 
 use partiql_ast::ast;
 use partiql_ast_passes::error::{AstTransformError, AstTransformationError};
-use partiql_ast_passes::name_resolver::NameResolver;
-use partiql_common::node::NodeId;
 use partiql_logical as logical;
 use partiql_parser::Parsed;
 
@@ -53,11 +51,7 @@ impl<'c> LogicalPlanner<'c> {
     /// Lower a single parsed statement into a top-level [`logical::LogicalStatement`].
     ///
     /// This is the full-fidelity entry point: it preserves the statement
-    /// category (query vs. DDL). It takes a single `AstNode<Statement>` rather
-    /// than a bare `Statement` because query-bearing statements (a top-level
-    /// query, or a CTAS source) are lowered through the two-pass pipeline, which
-    /// keys name resolution and lowering on the node's parse-time `NodeId`.
-    /// Iterating a multi-statement parse is the caller's concern. [`Self::lower`]
+    /// category (query vs. DDL). Iterating a multi-statement parse is the caller's concern. [`Self::lower`]
     /// is a back-compat shim over this.
     #[inline]
     pub fn lower_statement(
@@ -66,18 +60,18 @@ impl<'c> LogicalPlanner<'c> {
     ) -> Result<logical::LogicalStatement, AstTransformationError> {
         match &stmt.node {
             ast::Statement::Query(q) => {
-                let plan = self.lower_query(q, stmt.id)?;
+                let plan = self.lower_query(q)?;
                 Ok(logical::LogicalStatement::Query(plan))
             }
             ast::Statement::Ddl(ast::DdlOp::CreateTable(ct)) => {
-                let table_name = AstToLogical::symprim_to_binding(&ct.table_name)
+                let table_name = symprim_to_binding(&ct.table_name)
                     .map_err(|e| AstTransformationError { errors: vec![e] })?;
                 match &ct.as_query {
                     None => Ok(logical::LogicalStatement::CreateTable { table_name }),
                     Some(inner) => {
                         // `as_query` is a `TopLevelQuery` (it may carry a `WITH` clause),
                         // so it feeds the existing pipeline directly — no wrapping needed.
-                        let plan = self.lower_query(&inner.node, stmt.id)?;
+                        let plan = self.lower_query(&inner.node)?;
                         Ok(logical::LogicalStatement::CreateTableAs {
                             table_name,
                             query: plan,
@@ -92,7 +86,7 @@ impl<'c> LogicalPlanner<'c> {
                     // VarRef here; qualified/path targets are spec-legal but not yet
                     // lowered.
                     let table_name = match &*insert.target {
-                        ast::Expr::VarRef(v) => AstToLogical::symprim_to_binding(&v.node.name)
+                        ast::Expr::VarRef(v) => symprim_to_binding(&v.node.name)
                             .map_err(|e| AstTransformationError { errors: vec![e] })?,
                         _ => {
                             return Err(AstTransformationError {
@@ -110,7 +104,7 @@ impl<'c> LogicalPlanner<'c> {
                                 with: None,
                                 query: q.clone(),
                             };
-                            self.lower_query(&wrapped, stmt.id)?
+                            self.lower_query(&wrapped)?
                         }
                         _ => {
                             return Err(AstTransformationError {
@@ -184,16 +178,12 @@ impl<'c> LogicalPlanner<'c> {
         }
     }
 
-    /// Shared two-pass lowering of a `TopLevelQuery` (name resolution + visitor).
+    /// Shared lowering of a `TopLevelQuery`.
     #[inline]
     fn lower_query(
         &self,
         query: &ast::TopLevelQuery,
-        stmt_id: NodeId,
     ) -> Result<logical::LogicalPlan<logical::BindingsOp>, AstTransformationError> {
-        let mut resolver = NameResolver::new(self.catalog);
-        let registry = resolver.resolve(query, stmt_id)?;
-        let planner = AstToLogical::new(self.catalog, registry, self.var_resolution);
-        planner.lower_query(query, stmt_id)
+        Lowerer::new(self.catalog, self.var_resolution).lower(query)
     }
 }

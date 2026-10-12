@@ -1,0 +1,7 @@
+// With two FROM bindings of unknown type, an unqualified name could be an
+// attribute of either, so lowering rejects it (previously it silently became
+// an attribute of the first binding). Lowering runs before the VM compiler, so
+// this is reachable even though the VM cannot compile joins yet.
+{ sql: "CREATE TABLE table1" }
+{ sql: "SELECT x FROM table1 t1, t1.nodes n", expect: { error: "Ambiguous" } }
+{ sql: "SELECT x FROM table1 t1, table1 t2", expect: { error: "Ambiguous" } }

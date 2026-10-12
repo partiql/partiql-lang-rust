@@ -1,0 +1,19 @@
+// Nested paths through a FROM alias over a stored table (previously MISSING:
+// the scan source lowered to `n.nested`). Also covers a nested path combined
+// with another field and used in WHERE.
+{ sql: "CREATE TABLE nested" }
+{ sql: "INSERT INTO nested SELECT * FROM << {'id':1,'a':{'b':10,'c':'p'},'x':7}, {'id':2,'a':{'b':20,'c':'q'},'x':8} >>", expect: { affected_rows: 2 } }
+
+{ sql: "SELECT n.a.b FROM nested n", expect: { rows: $bag::[ { b: 10 }, { b: 20 } ] } }
+{ sql: "SELECT a.b FROM nested n", expect: { rows: $bag::[ { b: 10 }, { b: 20 } ] } }
+{ sql: "SELECT n.a.b, n.id FROM nested n", expect: { rows: $bag::[ { b: 10, id: 1 }, { b: 20, id: 2 } ] } }
+{ sql: "SELECT n.a.b AS ab, x FROM nested n", expect: { rows: $bag::[ { ab: 10, x: 7 }, { ab: 20, x: 8 } ] } }
+{ sql: "SELECT n.id FROM nested n WHERE n.a.b > 15", expect: { rows: $bag::[ { id: 2 } ] } }
+{ sql: "SELECT id FROM nested n WHERE a.b > 15", expect: { rows: $bag::[ { id: 2 } ] } }
+{ sql: "SELECT VALUE n.a FROM nested n", expect: { rows: $bag::[ { b: 10, c: "p" }, { b: 20, c: "q" } ] } }
+{ sql: "SELECT VALUE n.a.b FROM nested n", expect: { rows: $bag::[ 10, 20 ] } }
+
+// Without an alias (worked before the fix too).
+{ sql: "SELECT nested.a.b FROM nested", expect: { rows: $bag::[ { b: 10 }, { b: 20 } ] } }
+{ sql: "SELECT a.b, id FROM nested", expect: { rows: $bag::[ { b: 10, id: 1 }, { b: 20, id: 2 } ] } }
+{ sql: "SELECT id FROM nested WHERE a.b > 15", expect: { rows: $bag::[ { id: 2 } ] } }
