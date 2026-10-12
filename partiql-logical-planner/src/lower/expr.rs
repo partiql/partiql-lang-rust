@@ -306,9 +306,12 @@ impl Lowerer<'_> {
     /// value the GROUP BY computes for it: `SELECT a, SUM(b) FROM t GROUP BY a` becomes
     /// `SELECT a, $__agg_1 FROM t GROUP BY a` with `$__agg_1 = SUM(b)` on the GROUP BY.
     fn lower_call_agg(&mut self, call: &CallAgg, cx: Cx<'_>) -> Result<ValueExpr> {
+        // The argument is evaluated per input row: it sees the names from before GROUP BY,
+        // and no SELECT aliases.
         let arg_cx = Cx {
             scope: cx.aggregate_scope.unwrap_or(cx.scope),
             aggregate_scope: None,
+            select_aliases: None,
             ..cx
         };
         let mut args = self.lower_call_args(&call.args, arg_cx)?;

@@ -40,26 +40,33 @@ fn quoted_name_is_case_sensitive() {
 }
 
 /// An aggregate's argument is evaluated on each input row, so a name that is also a GROUP BY
-/// key reads the FROM binding's attribute, not the key.
+/// key reads the FROM binding's attribute, not the key: in SELECT, HAVING and ORDER BY.
 #[test]
 fn aggregate_argument_sees_names_from_before_group_by() {
-    let data = "<< {'c': 1, 'v': 10}, {'c': 1, 'v': 20}, {'c': 2, 'v': 5} >>";
+    // Per group `c`: SUM(c) is 5 for c = 1, 3 for c = 3 and 4 for c = 4, so ordering by
+    // SUM(c) differs from ordering by `c`.
+    let data = "<< {'c': 1}, {'c': 1}, {'c': 1}, {'c': 1}, {'c': 1}, {'c': 3}, {'c': 4} >>";
     assert_eq!(
         eval(&format!(
             "SELECT c, SUM(c) AS s FROM {data} AS e GROUP BY c"
         )),
         Value::from(partiql_value::bag![
-            tuple![("c", 1), ("s", 2)],
-            tuple![("c", 2), ("s", 2)]
+            tuple![("c", 1), ("s", 5)],
+            tuple![("c", 3), ("s", 3)],
+            tuple![("c", 4), ("s", 4)]
         ])
+    );
+    // A NULL SUM would drop every group.
+    assert_eq!(
+        eval(&format!(
+            "SELECT VALUE c FROM {data} AS e GROUP BY c HAVING SUM(c) > 3"
+        )),
+        Value::from(partiql_value::bag![1, 4])
     );
     assert_eq!(
         eval(&format!(
-            "SELECT c, SUM(v) AS s FROM {data} AS e GROUP BY c HAVING SUM(c) > 1 ORDER BY SUM(v)"
+            "SELECT VALUE c FROM {data} AS e GROUP BY c ORDER BY SUM(c)"
         )),
-        Value::from(list![
-            tuple![("c", 2), ("s", 5)],
-            tuple![("c", 1), ("s", 30)]
-        ])
+        Value::from(list![3, 4, 1])
     );
 }
