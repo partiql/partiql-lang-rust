@@ -243,10 +243,12 @@ pub(crate) fn fail_eval(statement: &str, mode: EvaluationMode, env: &Option<Test
     match result {
         Ok(result) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, expected `Err(_)`, but was `{result:#?}`"),
         Err(TestError::Parse(_)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected parse error"),
-        // A planner that resolves names statically may reject an invalid query while
-        // lowering rather than at evaluation; that satisfies an expected failure. Other
-        // lowering errors (e.g. an unsupported feature) do not.
-        Err(TestError::Lower(err)) if err.errors.iter().all(|e| matches!(e, AstTransformError::AmbiguousReference { .. })) => {}
+        // A planner that resolves names statically rejects an ambiguous name while lowering
+        // rather than at evaluation; that is an error in the query, so it satisfies an expected
+        // failure. Other lowering errors (e.g. an unsupported feature) do not.
+        Err(TestError::Lower(err))
+            if !err.errors.is_empty()
+                && err.errors.iter().all(|e| matches!(e, AstTransformError::AmbiguousReference { .. })) => {}
         Err(TestError::Lower(err)) => panic!("When evaluating (mode = {mode:#?}) `{statement}`, unexpected lowering error `{err:?}`"),
         Err(TestError::Plan(_)) | Err(TestError::Eval(_)) => {}
     }
