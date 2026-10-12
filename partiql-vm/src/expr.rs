@@ -2376,6 +2376,8 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 // base binding; any remaining components navigate within that field. Skip
                 // this when the base is some other binding: after `GROUP BY d.k AS k`, `k.k`
                 // reads field `k` of the key `k`, not the key itself.
+                // TODO(#695): field slots are keyed by field name only; key them by
+                // (binding, field) and drop this name-only lookup.
                 if let (ValueExpr::VarRef(base_name, scope), Some(PathComponent::Key(name))) =
                     (&**base, components.first())
                 {

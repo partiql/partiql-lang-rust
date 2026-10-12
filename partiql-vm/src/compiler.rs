@@ -1938,10 +1938,11 @@ fn bindings_name_matches(name: &BindingsName<'_>, target: &str) -> bool {
     }
 }
 
-/// Remap constant and key indices in an instruction.
+/// Remap constant and key indices in an instruction of an inlined sub-program.
 ///
-/// Every instruction field that indexes the key pool must be listed here; an
-/// unmapped key index silently reads a different key after inlining.
+/// The match is exhaustive on purpose: a new instruction must say whether it indexes
+/// the constant or key pool, since an unmapped index silently reads a different entry
+/// after inlining.
 fn remap_inst(inst: &Inst, const_offset: u16, key_map: &[u16]) -> Result<Inst> {
     let key = |idx: u16| -> Result<u16> {
         key_map.get(idx as usize).copied().ok_or_else(|| {
@@ -1995,8 +1996,87 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_map: &[u16]) -> Result<Inst> {
             src: *src,
             const_idx: *const_idx + const_offset,
         },
-        // All other instructions don't reference const/key pools
-        other => other.clone(),
+
+        // Absolute jump targets would need relocating; scalar sub-programs never emit them.
+        Inst::NextRow { .. }
+        | Inst::Jump { .. }
+        | Inst::JumpIfNotTrue { .. }
+        | Inst::DecrOrJump { .. }
+        | Inst::SorterSort { .. }
+        | Inst::SorterNext { .. }
+        | Inst::Gosub { .. } => {
+            return Err(EngineError::IllegalState(format!(
+                "cannot inline a sub-program with a jump: {inst:?}"
+            )))
+        }
+
+        // These reference only registers, slots, cursors, sorters or inline operands.
+        Inst::Cast { .. }
+        | Inst::AddI64 { .. }
+        | Inst::AddF64 { .. }
+        | Inst::AddDecimal { .. }
+        | Inst::AddDynamic { .. }
+        | Inst::SubI64 { .. }
+        | Inst::SubF64 { .. }
+        | Inst::SubDecimal { .. }
+        | Inst::SubDynamic { .. }
+        | Inst::ModI64 { .. }
+        | Inst::ModF64 { .. }
+        | Inst::ModDecimal { .. }
+        | Inst::ModDynamic { .. }
+        | Inst::EqI64 { .. }
+        | Inst::EqF64 { .. }
+        | Inst::EqDecimal { .. }
+        | Inst::EqBool { .. }
+        | Inst::EqStr { .. }
+        | Inst::EqDynamic { .. }
+        | Inst::MulI64 { .. }
+        | Inst::MulF64 { .. }
+        | Inst::MulDecimal { .. }
+        | Inst::MulDynamic { .. }
+        | Inst::DivI64 { .. }
+        | Inst::DivF64 { .. }
+        | Inst::DivDecimal { .. }
+        | Inst::DivDynamic { .. }
+        | Inst::ExpF64 { .. }
+        | Inst::ExpDynamic { .. }
+        | Inst::GtI64 { .. }
+        | Inst::GtF64 { .. }
+        | Inst::GtDecimal { .. }
+        | Inst::GtStr { .. }
+        | Inst::GtDynamic { .. }
+        | Inst::LtI64 { .. }
+        | Inst::LtF64 { .. }
+        | Inst::LtDecimal { .. }
+        | Inst::LtStr { .. }
+        | Inst::LtDynamic { .. }
+        | Inst::ConcatStr { .. }
+        | Inst::ConcatDynamic { .. }
+        | Inst::InDynamic { .. }
+        | Inst::AndBool { .. }
+        | Inst::OrBool { .. }
+        | Inst::NotBool { .. }
+        | Inst::NegNum { .. }
+        | Inst::LikeDynamicMatch { .. }
+        | Inst::MaterializeCursor { .. }
+        | Inst::StoreSlot { .. }
+        | Inst::MakeTuple { .. }
+        | Inst::MakeList { .. }
+        | Inst::MakeBag { .. }
+        | Inst::AssertTuple { .. }
+        | Inst::AssertCollection { .. }
+        | Inst::OpenCursor { .. }
+        | Inst::CloseCursor { .. }
+        | Inst::EmitRow
+        | Inst::Halt
+        | Inst::SorterInsert { .. }
+        | Inst::SorterData { .. }
+        | Inst::AggStep { .. }
+        | Inst::AggFinal { .. }
+        | Inst::AggReset { .. }
+        | Inst::Return { .. }
+        | Inst::Copy { .. }
+        | Inst::CompareEq { .. } => inst.clone(),
     })
 }
 
@@ -2075,5 +2155,44 @@ impl SlotResolver for EmptySlotResolver {
     }
     fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remap_inst_maps_pool_indices() {
+        let key_map = [7, 3];
+        let inst = Inst::GetField {
+            dst: 1,
+            base: 0,
+            key_idx: 1,
+        };
+        assert!(matches!(
+            remap_inst(&inst, 5, &key_map),
+            Ok(Inst::GetField { key_idx: 3, .. })
+        ));
+        let inst = Inst::LoadConst {
+            dst: 1,
+            const_idx: 2,
+        };
+        assert!(matches!(
+            remap_inst(&inst, 5, &key_map),
+            Ok(Inst::LoadConst { const_idx: 7, .. })
+        ));
+        // A key index outside the sub-program's pool is an error, not a panic.
+        let inst = Inst::GetField {
+            dst: 1,
+            base: 0,
+            key_idx: 2,
+        };
+        assert!(remap_inst(&inst, 5, &key_map).is_err());
+    }
+
+    #[test]
+    fn remap_inst_rejects_jumps() {
+        assert!(remap_inst(&Inst::Jump { target: 4 }, 0, &[]).is_err());
     }
 }
