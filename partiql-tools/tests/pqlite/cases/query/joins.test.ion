@@ -1,0 +1,50 @@
+// Joins in the VM: nested loops over one cursor per FROM item. Stored tables,
+// inline bags, table functions, and lateral (correlated) right sides.
+{ sql: "CREATE TABLE a" }
+{ sql: "INSERT INTO a SELECT * FROM << {'k':1,'x':'a1','arr':[1,2]}, {'k':2,'x':'a2','arr':[]}, {'k':3,'x':'a3'} >>", expect: { affected_rows: 3 } }
+{ sql: "CREATE TABLE b" }
+{ sql: "INSERT INTO b SELECT * FROM << {'k':1,'y':'b1'}, {'k':1,'y':'b1b'}, {'k':2,'y':'b2'}, {'k':4,'y':'b4'} >>", expect: { affected_rows: 4 } }
+{ sql: "CREATE TABLE table1" }
+{ sql: "INSERT INTO table1 SELECT * FROM << {'id':1,'nodes':[{'x':10},{'x':11}]}, {'id':2,'nodes':[{'x':20}]} >>", expect: { affected_rows: 2 } }
+
+// INNER JOIN ... ON, and the comma join with the predicate in WHERE
+{ sql: "SELECT a.x, b.y FROM a JOIN b ON a.k = b.k", expect: { rows: $bag::[ { x: "a1", y: "b1" }, { x: "a1", y: "b1b" }, { x: "a2", y: "b2" } ] } }
+{ sql: "SELECT a.x, b.y FROM a, b WHERE a.k = b.k", expect: { rows: $bag::[ { x: "a1", y: "b1" }, { x: "a1", y: "b1b" }, { x: "a2", y: "b2" } ] } }
+{ sql: "SELECT a.x, b.y FROM a JOIN b ON a.k < b.k AND b.k < 3", expect: { rows: $bag::[ { x: "a1", y: "b2" } ] } }
+
+// CROSS JOIN: both sides have a field `k`; each qualified reference reads its own
+{ sql: "SELECT a.k AS ak, b.k AS bk FROM a CROSS JOIN b WHERE a.k = 3", expect: { rows: $bag::[ { ak: 3, bk: 1 }, { ak: 3, bk: 1 }, { ak: 3, bk: 2 }, { ak: 3, bk: 4 } ] } }
+
+// LEFT JOIN pads the right side with NULL when nothing matches
+{ sql: "SELECT VALUE [a.x, b] FROM a LEFT JOIN b ON a.k = b.k AND b.y = 'b2'", expect: { rows: $bag::[ ["a1", null], ["a2", { k: 2, y: "b2" }], ["a3", null] ] } }
+
+// Lateral: the right side reads the current left row
+{ sql: "SELECT n.x FROM table1 t1, t1.nodes n", expect: { rows: $bag::[ { x: 10 }, { x: 11 }, { x: 20 } ] } }
+{ sql: "SELECT t1.id, n.x FROM table1 AS t1 CROSS JOIN t1.nodes AS n", expect: { rows: $bag::[ { id: 1, x: 10 }, { id: 1, x: 11 }, { id: 2, x: 20 } ] } }
+{ sql: "SELECT VALUE [a.x, v] FROM a LEFT JOIN a.arr v ON true WHERE a.k < 3", expect: { rows: $bag::[ ["a1", 1], ["a1", 2], ["a2", null] ] } }
+
+// Three-way join, GROUP BY over a join, LIMIT over a join
+{ sql: "SELECT a.x, b.y, c.y AS z FROM a JOIN b ON a.k = b.k JOIN b c ON c.k = a.k WHERE a.k = 2", expect: { rows: $bag::[ { x: "a2", y: "b2", z: "b2" } ] } }
+{ sql: "SELECT a.k AS k, COUNT(*) AS c FROM a JOIN b ON a.k = b.k GROUP BY a.k", expect: { rows: $bag::[ { k: 1, c: 2 }, { k: 2, c: 1 } ] } }
+{ sql: "SELECT VALUE [x.a, y.b] FROM << {'a':1}, {'a':2} >> x, << {'b':10}, {'b':20} >> y LIMIT 3", expect: { rows: $bag::[ [1, 10], [1, 20], [2, 10] ] } }
+
+// Table functions on both sides
+{ sql: "SELECT t.a, u.b FROM mem(2, 2) t, mem(2, 2) u", expect: { rows: $bag::[ { a: 0, b: 0 }, { a: 0, b: 1 }, { a: 1, b: 0 }, { a: 1, b: 1 } ] } }
+
+// Two FROM items whose aliases differ only in case make the alias ambiguous
+{ sql: "SELECT x.k FROM a AS x, b AS X", expect: { error: "unresolved" } }
+
+// RIGHT and FULL: matched rows, then the unmatched right rows with the left side NULL
+{ sql: "SELECT VALUE [a.x, b.y] FROM a RIGHT JOIN b ON a.k = b.k", expect: { rows: $bag::[ ["a1", "b1"], ["a1", "b1b"], ["a2", "b2"], [$missing::null, "b4"] ] } }
+{ sql: "SELECT VALUE [a.x, b.y] FROM a FULL JOIN b ON a.k = b.k", expect: { rows: $bag::[ ["a1", "b1"], ["a1", "b1b"], ["a2", "b2"], ["a3", $missing::null], [$missing::null, "b4"] ] } }
+{ sql: "SELECT VALUE [a, b] FROM a FULL JOIN b ON false WHERE a.k = 3 OR b.k = 4", expect: { rows: $bag::[ [{ k: 3, x: "a3" }, null], [null, { k: 4, y: "b4" }] ] } }
+{ sql: "SELECT VALUE b.y FROM << >> a FULL JOIN b ON true", expect: { rows: $bag::[ "b1", "b1b", "b2", "b4" ] } }
+{ sql: "SELECT VALUE [a.x, b.y, c.y] FROM a JOIN b ON a.k = b.k RIGHT JOIN b c ON c.k = b.k WHERE c.k > 1", expect: { rows: $bag::[ ["a2", "b2", "b2"], [$missing::null, $missing::null, "b4"] ] } }
+{ sql: "SELECT a.k AS k, COUNT(*) AS c FROM a FULL JOIN b ON a.k = b.k GROUP BY a.k", expect: { rows: $bag::[ { k: $missing::null, c: 1 }, { k: 1, c: 2 }, { k: 2, c: 1 }, { k: 3, c: 1 } ] } }
+{ sql: "SELECT VALUE [a.x, b.y, c.y] FROM a FULL JOIN (b JOIN b c ON b.k = c.k AND b.y = c.y) ON a.k = b.k", expect: { rows: $bag::[ ["a1", "b1", "b1"], ["a1", "b1b", "b1b"], ["a2", "b2", "b2"], ["a3", $missing::null, $missing::null], [$missing::null, "b4", "b4"] ] } }
+// Projected fields of a padded side are MISSING, as for a whole row (NULL.field)
+{ sql: "SELECT VALUE [t.a, u.b] FROM mem(2, 2) t FULL JOIN mem(3, 2) u ON t.a = u.b", expect: { rows: $bag::[ [0, 0], [1, 1], [$missing::null, 2] ] } }
+
+// SELECT * concatenates the bindings' fields in FROM order
+{ sql: "SELECT * FROM << {'p': 1} >> x, << {'q': 2} >> y", expect: { rows: $bag::[ { p: 1, q: 2 } ] } }
+{ sql: "SELECT * FROM << {'p': 1}, {'p': 2} >> x LEFT JOIN << {'q': 2} >> y ON x.p = y.q", expect: { rows: $bag::[ { p: 1, _1: null }, { p: 2, q: 2 } ] } }
