@@ -1,0 +1,50 @@
+// Join edge cases: duplicate, NULL and MISSING keys, empty sides, chained and nested outer
+// joins, many-way joins. `l` and `r` both have key 1 twice; NULL and MISSING keys never
+// match (`NULL = NULL` is not true); 5 and 6 match nothing.
+{ sql: "CREATE TABLE l" }
+{ sql: "INSERT INTO l SELECT * FROM << {'k':1,'v':'l1'}, {'k':1,'v':'l1b'}, {'k':null,'v':'lnull'}, {'v':'lmiss'}, {'k':5,'v':'l5'} >>", expect: { affected_rows: 5 } }
+{ sql: "CREATE TABLE r" }
+{ sql: "INSERT INTO r SELECT * FROM << {'k':1,'w':'r1'}, {'k':1,'w':'r1b'}, {'k':null,'w':'rnull'}, {'w':'rmiss'}, {'k':6,'w':'r6'} >>", expect: { affected_rows: 5 } }
+{ sql: "CREATE TABLE e" }
+
+// Duplicate keys pair up many-to-many; NULL/MISSING keys are padded, never matched
+{ sql: "SELECT VALUE [l.v, r.w] FROM l JOIN r ON l.k = r.k", expect: { rows: $bag::[ ["l1", "r1"], ["l1", "r1b"], ["l1b", "r1"], ["l1b", "r1b"] ] } }
+{ sql: "SELECT VALUE [l.v, r.w] FROM l LEFT JOIN r ON l.k = r.k", expect: { rows: $bag::[ ["l1", "r1"], ["l1", "r1b"], ["l1b", "r1"], ["l1b", "r1b"], ["lnull", $missing::null], ["lmiss", $missing::null], ["l5", $missing::null] ] } }
+{ sql: "SELECT VALUE [l.v, r.w] FROM l RIGHT JOIN r ON l.k = r.k", expect: { rows: $bag::[ ["l1", "r1"], ["l1", "r1b"], ["l1b", "r1"], ["l1b", "r1b"], [$missing::null, "rnull"], [$missing::null, "rmiss"], [$missing::null, "r6"] ] } }
+{ sql: "SELECT VALUE [l.v, r.w] FROM l FULL JOIN r ON l.k = r.k", expect: { rows: $bag::[ ["l1", "r1"], ["l1", "r1b"], ["l1b", "r1"], ["l1b", "r1b"], ["lnull", $missing::null], ["lmiss", $missing::null], ["l5", $missing::null], [$missing::null, "rnull"], [$missing::null, "rmiss"], [$missing::null, "r6"] ] } }
+
+// An empty side, for every join kind
+{ sql: "SELECT VALUE [l.v, e.z] FROM l JOIN e ON true", expect: { rows: $bag::[] } }
+{ sql: "SELECT VALUE [l.v, e.z] FROM l CROSS JOIN e", expect: { rows: $bag::[] } }
+{ sql: "SELECT VALUE [l.v, e.z] FROM e CROSS JOIN l", expect: { rows: $bag::[] } }
+{ sql: "SELECT VALUE l.v FROM l LEFT JOIN e ON true", expect: { rows: $bag::[ "l1", "l1b", "lnull", "lmiss", "l5" ] } }
+{ sql: "SELECT VALUE l.v FROM l RIGHT JOIN e ON true", expect: { rows: $bag::[] } }
+{ sql: "SELECT VALUE r.w FROM e RIGHT JOIN r ON true", expect: { rows: $bag::[ "r1", "r1b", "rnull", "rmiss", "r6" ] } }
+{ sql: "SELECT VALUE r.w FROM e FULL JOIN r ON true", expect: { rows: $bag::[ "r1", "r1b", "rnull", "rmiss", "r6" ] } }
+{ sql: "SELECT VALUE [e.z, e2.z] FROM e FULL JOIN e e2 ON true", expect: { rows: $bag::[] } }
+
+// ON that reads only one side: l5 pairs with every r row, the other l rows are padded
+{ sql: "SELECT COUNT(*) AS n FROM l LEFT JOIN r ON l.v = 'l5'", expect: { rows: $bag::[ { n: 9 } ] } }
+{ sql: "SELECT COUNT(*) AS n FROM l RIGHT JOIN r ON r.w = 'r6'", expect: { rows: $bag::[ { n: 9 } ] } }
+
+// Chained LEFT joins: a padded middle side makes the next ON unknown, so it pads too
+{ sql: "SELECT VALUE [l.v, r.w, r2.w] FROM l LEFT JOIN r ON l.k = r.k LEFT JOIN r r2 ON r2.w = r.w", expect: { rows: $bag::[ ["l1", "r1", "r1"], ["l1", "r1b", "r1b"], ["l1b", "r1", "r1"], ["l1b", "r1b", "r1b"], ["lnull", $missing::null, $missing::null], ["lmiss", $missing::null, $missing::null], ["l5", $missing::null, $missing::null] ] } }
+
+// An outer join nested on the right of an outer join
+{ sql: "SELECT VALUE [l.v, r.w, z.z] FROM l FULL JOIN (r LEFT JOIN << {'z': 'r6'} >> z ON z.z = r.w) ON l.k = r.k", expect: { rows: $bag::[ ["l1", "r1", $missing::null], ["l1", "r1b", $missing::null], ["l1b", "r1", $missing::null], ["l1b", "r1b", $missing::null], ["lnull", $missing::null, $missing::null], ["lmiss", $missing::null, $missing::null], ["l5", $missing::null, $missing::null], [$missing::null, "rnull", $missing::null], [$missing::null, "rmiss", $missing::null], [$missing::null, "r6", "r6"] ] } }
+
+// LIMIT that stops inside RIGHT JOIN's second pass (the unmatched right rows)
+{ sql: "SELECT VALUE l.v FROM l RIGHT JOIN r ON l.k = r.k LIMIT 5", expect: { rows: $bag::[ "l1", "l1", "l1b", "l1b", $missing::null ] } }
+
+// SELECT * with either side padded
+{ sql: "SELECT * FROM << {'p': 1} >> x FULL JOIN << {'q': 2} >> y ON false", expect: { rows: $bag::[ { p: 1, _1: null }, { _1: null, q: 2 } ] } }
+
+// Five FROM items: inner, inline, LEFT and CROSS joins together
+{ sql: "SELECT VALUE [l.v, r.w, m.a, n.b, o.c] FROM l JOIN r ON l.k = r.k JOIN << {'a': 1} >> m ON m.a = l.k LEFT JOIN << {'b': 'r1'} >> n ON n.b = r.w CROSS JOIN << {'c': 0}, {'c': 1} >> o WHERE o.c = 0", expect: { rows: $bag::[ ["l1", "r1", 1, "r1", 0], ["l1", "r1b", 1, $missing::null, 0], ["l1b", "r1", 1, "r1", 0], ["l1b", "r1b", 1, $missing::null, 0] ] } }
+// Five FROM items cross joined: 5^5 rows
+{ sql: "SELECT COUNT(*) AS n FROM l, r, l l2, r r2, l l3", expect: { rows: $bag::[ { n: 3125 } ] } }
+// Five FROM items with every outer join kind
+{ sql: "SELECT COUNT(*) AS n FROM l LEFT JOIN r ON l.k = r.k RIGHT JOIN r r2 ON r2.w = r.w FULL JOIN l l2 ON l2.v = l.v JOIN r r3 ON true", expect: { rows: $bag::[ { n: 50 } ] } }
+
+// Not yet: subqueries in FROM, joined or not, are not compiled by the VM
+{ sql: "SELECT VALUE [s.v, r.w] FROM (SELECT l.v, l.k FROM l) s JOIN r ON s.k = r.k", expect: { error: "SubQueryExpr" } }
