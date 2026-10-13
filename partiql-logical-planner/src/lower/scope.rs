@@ -160,6 +160,9 @@ pub(super) struct Cx<'s> {
     pub coerce: bool,
     /// The SELECT list, when lowering the ORDER BY of a SELECT query.
     pub select_aliases: Option<&'s [SelectAlias]>,
+    /// Where aggregate arguments resolve: the scope before GROUP BY, since an aggregate's
+    /// argument is evaluated on each input row of its group, not on the group.
+    pub aggregate_scope: Option<&'s Scope<'s>>,
 }
 
 impl<'s> Cx<'s> {
@@ -169,6 +172,14 @@ impl<'s> Cx<'s> {
             clause,
             coerce: false,
             select_aliases: None,
+            aggregate_scope: None,
+        }
+    }
+
+    pub fn aggregates_over(self, aggregate_scope: &'s Scope<'s>) -> Self {
+        Cx {
+            aggregate_scope: Some(aggregate_scope),
+            ..self
         }
     }
 

@@ -3,3 +3,5 @@
 // Single-group GROUP BY: one output row avoids hash-iteration-order flake
 // while still exercising the aggregate path.
 { sql: "SELECT g.k AS k, COUNT(*) AS n FROM << {'k':'x'}, {'k':'x'}, {'k':'x'} >> g GROUP BY g.k", expect: { rows: $bag::[ { k: "x", n: 3 } ] } }
+// An aggregate's argument reads the input row, not the GROUP BY key of the same name.
+{ sql: "SELECT c, SUM(c) AS s FROM << {'c': 1}, {'c': 1}, {'c': 2} >> e GROUP BY c", expect: { rows: $bag::[ { c: 1, s: 2 }, { c: 2, s: 2 } ] } }

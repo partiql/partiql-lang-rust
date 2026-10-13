@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *BREAKING* partiql-parser: `INSERT` and `INTO` are now reserved keywords (per SQL:2003), so they can no longer be used as bare identifiers. A query such as `SELECT x AS into FROM t` must now quote the identifier (`"into"`).
 - *BREAKING* partiql-catalog: `ReadOnlyCatalog` gains a required `fn name(&self) -> &str`. External implementors must add it.
 - *BREAKING* partiql-ast-passes: removes the `name_resolver` module (`NameResolver`, `KeyRegistry`). The logical planner now resolves names while lowering, clause by clause.
-- partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases, lateral joins and ambiguous unqualified names (new `AstTransformError::AmbiguousReference`) resolve per the spec.
+- partiql-logical-planner: lowering rewritten as per-clause functions with explicit scopes; FROM aliases and lateral joins resolve per the spec. With `VarRefResolution::Static`, an unqualified name with several candidate FROM bindings is a new `AstTransformError::AmbiguousReference`; `Dynamic` still picks the first non-`MISSING` candidate at evaluation time.
+- partiql-logical-planner: aggregate arguments resolve against the names visible before `GROUP BY` (`SUM(c) ... GROUP BY c` sums the input's `c`).
 - *BREAKING* partiql-eval: the experimental bytecode VM added in 0.15.0-alpha.1 has moved to the new `partiql-vm` crate. `partiql-eval` is back to only the tree-walking evaluator, with the same public API as 0.15.0.
 
 ### Added

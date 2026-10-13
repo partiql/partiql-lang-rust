@@ -886,3 +886,25 @@ fn test_static_set_op_order_by_reads_the_set_result() {
         .expect("order by");
     assert_eq!(order_by.specs[0].expr, attr("$__set", "a"));
 }
+
+#[test]
+fn test_aggregate_arguments_resolve_before_group_by() {
+    // `c` is also the GROUP BY key, but each aggregate reads the input row's `e.c`, whether
+    // it is in SELECT, HAVING or ORDER BY.
+    let plan = lower_static(
+        "SELECT c, SUM(c) AS s FROM t AS e GROUP BY c HAVING MAX(c) > 1 ORDER BY MIN(c)",
+    )
+    .expect("lower");
+    let group_by = plan
+        .operators()
+        .iter()
+        .find_map(|op| match op {
+            BindingsOp::GroupBy(group_by) => Some(group_by),
+            _ => None,
+        })
+        .expect("group by");
+    assert_eq!(group_by.aggregate_exprs.len(), 3);
+    for agg in &group_by.aggregate_exprs {
+        assert_eq!(agg.expr, attr("e", "c"), "{agg:?}");
+    }
+}
