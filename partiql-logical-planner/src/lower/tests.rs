@@ -890,7 +890,10 @@ fn test_static_set_op_order_by_reads_the_set_result() {
 #[test]
 fn test_aggregate_arguments_resolve_before_group_by() {
     // `c` is also the GROUP BY key, but each aggregate reads the input row's `e.c`, whether
-    // it is in SELECT, HAVING or ORDER BY.
+    // it is in SELECT, HAVING or ORDER BY. This also exercises the `debug_assert!` in
+    // `lower_call_agg`: lowering an aggregate in any of these three clauses without a
+    // pre-GROUP-BY scope would panic here in debug builds rather than silently rebinding
+    // the argument to the group key.
     let plan = lower_static(
         "SELECT c, SUM(c) AS s FROM t AS e GROUP BY c HAVING MAX(c) > 1 ORDER BY MIN(c)",
     )

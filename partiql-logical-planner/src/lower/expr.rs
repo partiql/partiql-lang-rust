@@ -307,7 +307,17 @@ impl Lowerer<'_> {
     /// `SELECT a, $__agg_1 FROM t GROUP BY a` with `$__agg_1 = SUM(b)` on the GROUP BY.
     fn lower_call_agg(&mut self, call: &CallAgg, cx: Cx<'_>) -> Result<ValueExpr> {
         // The argument is evaluated per input row: it sees the names from before GROUP BY,
-        // and no SELECT aliases.
+        // and no SELECT aliases. Every clause that can hold an aggregate (SELECT, HAVING,
+        // ORDER BY) must set `aggregate_scope` via `Cx::aggregates_over`; otherwise the
+        // `unwrap_or(cx.scope)` below falls back onto the post-GROUP BY scope and silently
+        // rebinds an unqualified argument to its group key -- the exact bug this scope split
+        // fixes. Assert the invariant so a future clause that forgets it fails loudly in
+        // tests instead of returning a wrong value with no error.
+        debug_assert!(
+            cx.aggregate_scope.is_some(),
+            "aggregate lowered in {:?} without a pre-GROUP-BY scope; call Cx::aggregates_over",
+            cx.clause,
+        );
         let arg_cx = Cx {
             scope: cx.aggregate_scope.unwrap_or(cx.scope),
             aggregate_scope: None,
