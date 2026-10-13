@@ -12,8 +12,8 @@ use crate::source::{
 };
 use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, Project,
-    ProjectAllMode, ProjectValue, Scan, ValueExpr, VarRefType,
+    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, PathComponent,
+    Project, ProjectAllMode, ProjectValue, Scan, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -456,6 +456,8 @@ impl<'a> PlanCompiler<'a> {
                 cursor_infos.push(CursorInfo {
                     scan_id,
                     slot_base: 0,
+                    width: 1,
+                    spool: None,
                 });
 
                 builder.emit_open_cursor(cursor_id);
@@ -661,14 +663,12 @@ impl<'a> PlanCompiler<'a> {
     /// Emit the loops of a FROM subtree: one cursor loop per scan, nested for joins.
     ///
     /// A join reopens its right side for every left row, so a lateral right side
-    /// (`FROM t, t.arr x`) sees the current left row.
+    /// (`FROM t, t.arr x`) sees the current left row. A right side that does not read the
+    /// left side is spooled instead: read once per entry into the join, then replayed.
     ///
-    /// TODO: a side that does not read the other side is recomputed on every pass (the
-    /// right side per left row; for RIGHT/FULL also the left side per right row). Memoize
-    /// it instead: build it once per entry into the join, e.g. into a B-tree keyed on the
-    /// ON equality (a `CreateBTree` / probe instruction pair), then replay or probe it.
-    /// That also keeps nondeterministic or remote sources (`rand()`, plugins) from being
-    /// re-read.
+    /// TODO: the spool replays every row; for RIGHT/FULL the left side is still rescanned
+    /// per right row. Memoize a side into a B-tree keyed on the ON equality (a `CreateBTree`
+    /// / probe instruction pair) so each row probes instead of scanning.
     /// ```text
     ///   <left loops>                       // innermost left NextRow = L.head
     ///   Jump open_right
@@ -728,6 +728,10 @@ impl<'a> PlanCompiler<'a> {
                 join.kind
             )));
         }
+        // RIGHT and FULL never see the left side; the planner scopes them that way.
+        let spool = right_scan.is_some()
+            && (unmatched_right || !reads_any(graph, right_id, &from_aliases(graph, left_id)?)?);
+
         let f = builder.push_const_pub(ValueOwned::Bool(false));
         let t = builder.push_const_pub(ValueOwned::Bool(true));
         let null = builder.push_const_pub(ValueOwned::Null);
@@ -779,8 +783,8 @@ impl<'a> PlanCompiler<'a> {
             builder.patch_target(next_left, left.head);
         }
 
-        // Pass 2: the left side ended. For each right row, scan the left side again; emit the
-        // right row if no left row matches it.
+        // Pass 2: the left side ended. For each right row (replayed from the spool), scan
+        // the left side again; emit the right row if no left row matches it.
         let mut exits = left.exits.clone();
         let mut cursors = left.cursors.clone();
         let mut pass2_head = 0;
@@ -845,6 +849,9 @@ impl<'a> PlanCompiler<'a> {
 
         let right = self.emit_from(graph, right_id, result, builder, cursor_infos)?;
         debug_assert_eq!(right.outer_cursor, right_cursor);
+        if spool {
+            cursor_infos[right_cursor as usize].spool = Some(left.outer_cursor);
+        }
         for idx in &right.exits {
             builder.patch_target(*idx, right_done);
         }
@@ -925,6 +932,8 @@ impl<'a> PlanCompiler<'a> {
         cursor_infos.push(CursorInfo {
             scan_id,
             slot_base: self.scan_slot_bases.get(&scan_id).copied().unwrap_or(0),
+            width: self.scan_widths.get(&scan_id).copied().unwrap_or(1),
+            spool: None,
         });
         self.emit_create_scan(scan_id, cursor_id, result, builder)?;
         builder.emit_open_cursor(cursor_id);
@@ -1403,6 +1412,8 @@ impl<'a> PlanCompiler<'a> {
             cursor_infos.push(CursorInfo {
                 scan_id,
                 slot_base: self.scan_slot_bases.get(&scan_id).copied().unwrap_or(0),
+                width: 1,
+                spool: None,
             });
             builder.emit_open_cursor(cursor_id);
             let next_row_idx = builder.emit_next_row(cursor_id);
@@ -2222,6 +2233,60 @@ fn from_scans(graph: &PlanGraph<'_>, id: OpId) -> Result<Vec<OpId>> {
 
 fn count_scans(graph: &PlanGraph<'_>, id: OpId) -> Result<usize> {
     Ok(from_scans(graph, id)?.len())
+}
+
+/// The names a FROM subtree binds (`AS` and `AT` aliases).
+fn from_aliases(graph: &PlanGraph<'_>, id: OpId) -> Result<Vec<String>> {
+    let mut names = vec![];
+    for scan in from_scans(graph, id)? {
+        if let BindingsOp::Scan(scan) = graph.operator(scan)? {
+            names.push(scan.as_key.clone());
+            names.extend(scan.at_key.clone());
+        }
+    }
+    Ok(names)
+}
+
+/// Whether a FROM subtree's source expressions may read any of `names`.
+fn reads_any(graph: &PlanGraph<'_>, id: OpId, names: &[String]) -> Result<bool> {
+    Ok(from_source_exprs(graph, id)?
+        .into_iter()
+        .any(|expr| expr_reads_any(expr, names)))
+}
+
+/// Whether `expr` may reference a variable in `names`. Conservative: an expression kind
+/// it does not look into counts as a reference.
+fn expr_reads_any(expr: &ValueExpr, names: &[String]) -> bool {
+    let any = |exprs: &mut dyn Iterator<Item = &ValueExpr>| {
+        for e in exprs {
+            if expr_reads_any(e, names) {
+                return true;
+            }
+        }
+        false
+    };
+    match expr {
+        ValueExpr::VarRef(name, _) => names.iter().any(|n| bindings_name_matches(name, n)),
+        ValueExpr::Lit(_) | ValueExpr::DBRef(_) => false,
+        ValueExpr::UnExpr(_, e) => expr_reads_any(e, names),
+        ValueExpr::BinaryExpr(_, l, r) => expr_reads_any(l, names) || expr_reads_any(r, names),
+        ValueExpr::DynamicLookup(lookups) => any(&mut lookups.iter()),
+        ValueExpr::Path(base, steps) => {
+            expr_reads_any(base, names)
+                || steps.iter().any(|step| match step {
+                    PathComponent::KeyExpr(e) | PathComponent::IndexExpr(e) => {
+                        expr_reads_any(e, names)
+                    }
+                    PathComponent::Key(_) | PathComponent::Index(_) => false,
+                    _ => true,
+                })
+        }
+        ValueExpr::TupleExpr(t) => any(&mut t.attrs.iter().chain(&t.values)),
+        ValueExpr::ListExpr(l) => any(&mut l.elements.iter()),
+        ValueExpr::BagExpr(b) => any(&mut b.elements.iter()),
+        ValueExpr::Call(call) => any(&mut call.arguments.iter()),
+        _ => true,
+    }
 }
 
 /// The expressions a FROM subtree evaluates per row of what is to its left: scan sources and

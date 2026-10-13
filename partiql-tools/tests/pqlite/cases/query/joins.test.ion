@@ -44,6 +44,9 @@
 // Projected fields of a padded side are MISSING, as for a whole row (NULL.field)
 { sql: "SELECT VALUE [t.a, u.b] FROM mem(2, 2) t FULL JOIN mem(3, 2) u ON t.a = u.b", expect: { rows: $bag::[ [0, 0], [1, 1], [$missing::null, 2] ] } }
 
+// A right side that does not read the left side is scanned once and replayed
+{ sql: "SELECT COUNT(*) AS c FROM mem(3, 1) t, rand(2, 1) u GROUP BY u.a", expect: { rows: $bag::[ { c: 3 }, { c: 3 } ] } }
+
 // SELECT * concatenates the bindings' fields in FROM order
 { sql: "SELECT * FROM << {'p': 1} >> x, << {'q': 2} >> y", expect: { rows: $bag::[ { p: 1, q: 2 } ] } }
 { sql: "SELECT * FROM << {'p': 1}, {'p': 2} >> x LEFT JOIN << {'q': 2} >> y ON x.p = y.q", expect: { rows: $bag::[ { p: 1, _1: null }, { p: 2, q: 2 } ] } }

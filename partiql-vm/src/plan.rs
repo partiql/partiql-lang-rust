@@ -74,6 +74,35 @@ pub struct CursorInfo {
     /// `ScanLayout` slots relative to this base, so several cursors (one per side of a
     /// join) can each fill their own registers.
     pub slot_base: u16,
+    /// Number of registers in the window.
+    pub width: u16,
+    /// `Some(outer)`: buffer the rows of the first scan and replay them on later scans,
+    /// until cursor `outer` opens again. The inner side of a join that does not depend on
+    /// the outer side, where `outer` is the join's outermost cursor: the join is entered
+    /// again (and the inner side may differ) exactly when that cursor reopens.
+    pub spool: Option<u16>,
+}
+
+/// Rows buffered by a spooled cursor.
+#[derive(Default)]
+struct Spool {
+    rows: Vec<Vec<ValueOwned>>,
+    /// The source was read to the end; later scans replay `rows`.
+    filled: bool,
+    /// Next row to replay.
+    next: usize,
+}
+
+impl Spool {
+    fn clear(&mut self) {
+        *self = Spool::default();
+    }
+
+    fn next_replayed(&mut self) -> Option<&[ValueOwned]> {
+        let row = self.rows.get(self.next)?;
+        self.next += 1;
+        Some(row)
+    }
 }
 
 /// Compiled query execution plan — pure bytecode.
@@ -143,9 +172,15 @@ impl Clone for CompiledPlan {
     }
 }
 
-/// Where a cursor's slots start in the registers.
+/// Where a cursor's slots start in the registers, and whether it spools.
 fn cursor_window(cursor: &CursorInfo) -> String {
-    format!("  (base {})", cursor.slot_base)
+    match cursor.spool {
+        Some(outer) => format!(
+            "  (base {}, spooled until {} opens)",
+            cursor.slot_base, outer
+        ),
+        None => format!("  (base {})", cursor.slot_base),
+    }
 }
 
 impl fmt::Display for CompiledPlan {
@@ -360,6 +395,10 @@ pub struct PartiQLVM {
     table_functions: HashMap<String, Arc<dyn crate::source::TableFunction>>,
     /// Sorters for GROUP BY (indexed by sorter_id from bytecode).
     sorters: Vec<Option<crate::sorter::Sorter>>,
+    /// Buffered rows of each spooled cursor (indexed by cursor_id).
+    spools: Vec<Option<Spool>>,
+    /// For each cursor, the spooled cursors whose rows its opening invalidates.
+    spool_resets: Vec<Vec<usize>>,
     /// Whether each cursor's data source is open, so closing is idempotent.
     source_open: Vec<bool>,
 }
@@ -407,6 +446,8 @@ impl PartiQLVM {
             builtins: BuiltinFunctions::new(),
             table_functions: exec_context.table_functions().clone(),
             sorters,
+            spools: Vec::new(),
+            spool_resets: Vec::new(),
             source_open: Vec::new(),
         };
         vm.reset_cursor_state();
@@ -459,8 +500,27 @@ impl PartiQLVM {
         Ok(())
     }
 
-    /// Forget which sources are open.
+    /// Whether a spooled cursor replays its buffer, so its source need not be rebuilt.
+    fn spool_filled(&self, cursor_id: u16) -> bool {
+        self.spools[cursor_id as usize]
+            .as_ref()
+            .is_some_and(|s| s.filled)
+    }
+
+    /// Forget spooled rows and which sources are open.
     fn reset_cursor_state(&mut self) {
+        self.spools = self
+            .compiled
+            .cursors
+            .iter()
+            .map(|c| c.spool.map(|_| Spool::default()))
+            .collect();
+        self.spool_resets = vec![Vec::new(); self.compiled.cursors.len()];
+        for (inner, c) in self.compiled.cursors.iter().enumerate() {
+            if let Some(outer) = c.spool {
+                self.spool_resets[outer as usize].push(inner);
+            }
+        }
         self.source_open = vec![false; self.compiled.cursors.len()];
     }
 
@@ -584,6 +644,19 @@ impl<'vm> QueryIterator<'vm> {
             match inst {
                 Inst::OpenCursor { cursor_id } => {
                     let c = *cursor_id as usize;
+                    if let Some(spool) = self.vm.spools[c].as_mut() {
+                        if spool.filled {
+                            spool.next = 0;
+                            continue;
+                        }
+                        spool.clear();
+                    }
+                    // Entering a join again: its spooled inner sides may differ now
+                    for &inner in &self.vm.spool_resets[c] {
+                        if let Some(spool) = self.vm.spools[inner].as_mut() {
+                            spool.clear();
+                        }
+                    }
                     let cursor = match self.vm.cursors.get_mut(c) {
                         Some(Some(c)) => c,
                         _ => {
@@ -608,7 +681,29 @@ impl<'vm> QueryIterator<'vm> {
                     let bank_id = CURSOR_BANK_BASE + c;
                     self.vm.banks[1].reset();
                     self.vm.banks[bank_id].reset();
-                    let slot_base = self.vm.compiled.cursors[c].slot_base as usize;
+                    let info = &self.vm.compiled.cursors[c];
+                    let (slot_base, width) = (info.slot_base as usize, info.width as usize);
+
+                    // A filled spool replays its rows instead of reading the source
+                    if let Some(spool) = self.vm.spools[c].as_mut().filter(|s| s.filled) {
+                        match spool.next_replayed() {
+                            Some(row) => {
+                                let writer = RegisterWriter::new(
+                                    &mut regs[slot_base..],
+                                    &self.vm.banks[bank_id],
+                                );
+                                for (j, value) in row.iter().enumerate() {
+                                    // Safety: spooled rows live in the VM and are not
+                                    // modified while the spool is filled; the registers
+                                    // are rewritten before the rows are cleared.
+                                    let value: &ValueOwned = unsafe { &*(value as *const _) };
+                                    writer.regs[j] = ValueRef::from_owned(value, writer.arena);
+                                }
+                            }
+                            None => self.vm.ip = *eof_target as usize,
+                        }
+                        continue;
+                    }
 
                     let cursor = match self.vm.cursors.get_mut(c) {
                         Some(Some(c)) => c,
@@ -629,6 +724,18 @@ impl<'vm> QueryIterator<'vm> {
                             Err(e) => return Some(Err(e)),
                         }
                     };
+
+                    if let Some(spool) = self.vm.spools[c].as_mut() {
+                        if has_row {
+                            let row = regs[slot_base..slot_base + width]
+                                .iter()
+                                .map(|v| value_ref_to_owned(*v))
+                                .collect();
+                            spool.rows.push(row);
+                        } else {
+                            spool.filled = true;
+                        }
+                    }
 
                     if !has_row {
                         self.vm.ip = *eof_target as usize;
@@ -704,6 +811,9 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 Inst::MaterializeCursor { src, cursor_id } => {
+                    if self.vm.spool_filled(*cursor_id) {
+                        continue;
+                    }
                     let collection = regs[*src as usize];
                     let values = match collection {
                         ValueRef::Bag(items) | ValueRef::List(items) => {
@@ -719,6 +829,9 @@ impl<'vm> QueryIterator<'vm> {
                     cursor_id,
                     func_name_idx,
                 } => {
+                    if self.vm.spool_filled(*cursor_id) {
+                        continue;
+                    }
                     let func_name = &program.keys[*func_name_idx as usize];
                     let table_fn = match self.vm.table_functions.get(func_name) {
                         Some(f) => f.clone(),
