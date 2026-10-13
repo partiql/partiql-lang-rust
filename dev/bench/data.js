@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791915386945,
+  "lastUpdate": 1791933342655,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -49217,6 +49217,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 21834,
             "range": "± 36",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "82ab2ba46895600e26c0a4f893995b70bfe87750",
+          "message": "feat(partiql-vm): support all joins with nested loops (#693)\n\nINNER, CROSS, comma, LEFT, RIGHT, FULL and lateral joins, plus SELECT *\nover joins. Each cursor fills its own register window and row bank, and\na join reopens its right side for every left row. RIGHT/FULL emit the\nunmatched right rows in a second pass that rescans the left side.\n\nJoins compile to the existing cursor and jump instructions; SELECT *\nover a join adds ConcatTuples. Also makes AND/OR/NOT three-valued.",
+          "timestamp": "2026-10-13T15:57:45-07:00",
+          "tree_id": "df63ea01cf67944c5df5ba7083e5f2340822c827",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/82ab2ba46895600e26c0a4f893995b70bfe87750"
+        },
+        "date": 1791933341247,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 650510,
+            "range": "± 3046",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 1034046,
+            "range": "± 3736",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 992927,
+            "range": "± 4318",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 1031770,
+            "range": "± 8882",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 995614,
+            "range": "± 3375",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 1034849,
+            "range": "± 10566",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 1003478,
+            "range": "± 9027",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 1042400,
+            "range": "± 4873",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 996499,
+            "range": "± 12902",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 1035158,
+            "range": "± 9524",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1283106,
+            "range": "± 10150",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1609403,
+            "range": "± 4716",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2217214,
+            "range": "± 22502",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1458034,
+            "range": "± 3633",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1801510,
+            "range": "± 14897",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2415036,
+            "range": "± 4995",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 3616,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 33945,
+            "range": "± 374",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 67281,
+            "range": "± 213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1262,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 17675,
+            "range": "± 42",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 35725,
+            "range": "± 649",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 56174,
+            "range": "± 592",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 897851,
+            "range": "± 3247",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1805684,
+            "range": "± 13624",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 16564775,
+            "range": "± 228307",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 92233501,
+            "range": "± 789938",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 175496989,
+            "range": "± 434042",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 544768242,
+            "range": "± 5201924",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 479544724,
+            "range": "± 1116694",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 9235,
+            "range": "± 92",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2653,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 282,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 28,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 506,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 1619,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 4952,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 12617,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 18580,
+            "range": "± 66",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 15703,
+            "range": "± 59",
             "unit": "ns/iter"
           }
         ]
