@@ -12,8 +12,8 @@ use crate::source::{
 };
 use crate::value::{FieldName, FieldShape, PhysicalType, RowShape, Shape, ValueOwned};
 use partiql_logical::{
-    BindingsOp, CallName, DBRef, GroupBy, LimitOffset, LogicalPlan, OpId, Project, ProjectAllMode,
-    ProjectValue, Scan, ValueExpr, VarRefType,
+    BindingsOp, CallName, DBRef, GroupBy, JoinKind, LimitOffset, LogicalPlan, OpId, Project,
+    ProjectAllMode, ProjectValue, Scan, ValueExpr, VarRefType,
 };
 use partiql_value::BindingsName;
 use rustc_hash::FxHashMap;
@@ -63,6 +63,17 @@ impl<'p> PlanGraph<'p> {
         }
     }
 
+    /// Get the (left, right) inputs of a join.
+    fn join_inputs(&self, id: OpId) -> Result<(OpId, OpId)> {
+        match self.inputs.get(&id).map(|v| v.as_slice()) {
+            Some(&[(left, 0), (right, 1)]) => Ok((left, right)),
+            _ => Err(EngineError::InvalidPlan(format!(
+                "expected left and right inputs for join {:?}",
+                id
+            ))),
+        }
+    }
+
     /// Find the sink node (the node with no outgoing edges that is a Sink).
     fn find_sink(&self) -> Result<OpId> {
         let mut sink = None;
@@ -107,6 +118,8 @@ struct SubtreeResult {
 enum ResolverKind {
     /// Single-scan resolver (maps alias and column names to slots)
     Pipeline(PipelineSlotResolver),
+    /// One resolver per FROM binding of a join, in FROM order
+    Multi(Vec<PipelineSlotResolver>),
     /// Global resolver for expression queries that reference catalog objects
     Global(GlobalSlotResolver),
     /// Empty resolver for expression queries with no variable references
@@ -117,6 +130,9 @@ impl SlotResolver for ResolverKind {
     fn resolve_var(&self, name: &BindingsName<'_>, scope: VarRefType) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_var(name, scope),
+            // A global (catalog) name never means a FROM binding of the same name
+            ResolverKind::Multi(_) if scope == VarRefType::Global => None,
+            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
             ResolverKind::Global(r) => r.resolve_var(name, scope),
             ResolverKind::Empty => None,
         }
@@ -124,6 +140,7 @@ impl SlotResolver for ResolverKind {
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_alias(name),
+            ResolverKind::Multi(rs) => binding_for(rs, name).and_then(|r| r.base_row_slot),
             ResolverKind::Global(r) => r.resolve_alias(name),
             ResolverKind::Empty => None,
         }
@@ -131,6 +148,8 @@ impl SlotResolver for ResolverKind {
     fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId> {
         match self {
             ResolverKind::Pipeline(r) => r.resolve_field(name),
+            // An unqualified field is ambiguous across join bindings; the planner qualifies it.
+            ResolverKind::Multi(_) => None,
             ResolverKind::Global(r) => r.resolve_field(name),
             ResolverKind::Empty => None,
         }
@@ -138,9 +157,63 @@ impl SlotResolver for ResolverKind {
     fn is_alias(&self, name: &BindingsName<'_>) -> bool {
         match self {
             ResolverKind::Pipeline(r) => r.is_alias(name),
+            ResolverKind::Multi(rs) => binding_for(rs, name).is_some(),
             ResolverKind::Global(_) => false,
             ResolverKind::Empty => false,
         }
+    }
+    fn resolve_qualified(
+        &self,
+        alias: &BindingsName<'_>,
+        field: &BindingsName<'_>,
+    ) -> Option<SlotId> {
+        match self {
+            ResolverKind::Pipeline(r) => r.resolve_qualified(alias, field),
+            ResolverKind::Multi(rs) => binding_for(rs, alias)?.resolve_qualified(alias, field),
+            ResolverKind::Global(_) | ResolverKind::Empty => None,
+        }
+    }
+}
+
+impl ResolverKind {
+    /// The per-binding resolvers of a FROM subtree, shifted to start at register `offset`.
+    fn into_bindings(self, offset: SlotId) -> Result<Vec<PipelineSlotResolver>> {
+        let mut bindings = match self {
+            ResolverKind::Pipeline(r) => vec![r],
+            ResolverKind::Multi(rs) => rs,
+            ResolverKind::Global(_) | ResolverKind::Empty => {
+                return Err(EngineError::InvalidPlan(
+                    "join input is not a FROM source".to_string(),
+                ))
+            }
+        };
+        for r in &mut bindings {
+            r.base_row_slot = r.base_row_slot.map(|s| s + offset);
+            for slot in r.column_slots.values_mut() {
+                *slot += offset;
+            }
+        }
+        Ok(bindings)
+    }
+}
+
+/// The join binding `name` refers to: an alias match first, then a table name. `None` when
+/// no binding or more than one matches (`FROM t1 AS x, t2 AS X` makes `x` ambiguous).
+fn binding_for<'r>(
+    bindings: &'r [PipelineSlotResolver],
+    name: &BindingsName<'_>,
+) -> Option<&'r PipelineSlotResolver> {
+    let first_two = |pred: &dyn Fn(&PipelineSlotResolver) -> bool| {
+        let mut matches = bindings.iter().filter(move |r| pred(r));
+        (matches.next(), matches.next())
+    };
+    match first_two(&|r| bindings_name_matches(name, &r.scan_alias)) {
+        (Some(r), None) => Some(r),
+        (Some(_), Some(_)) => None,
+        (None, _) => match first_two(&|r| r.matches_alias_or_table(name)) {
+            (Some(r), None) => Some(r),
+            _ => None,
+        },
     }
 }
 
@@ -170,6 +243,14 @@ impl SlotResolver for GlobalSlotResolver {
     fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
         false
     }
+    /// Catalog objects are loaded whole; none has pushed-down fields.
+    fn resolve_qualified(
+        &self,
+        _alias: &BindingsName<'_>,
+        _field: &BindingsName<'_>,
+    ) -> Option<SlotId> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +267,28 @@ pub struct PlanCompiler<'a> {
     table_fn_arg_slots: HashMap<ScanId, Vec<SlotId>>,
     next_sorter_id: usize,
     sorter_infos: Vec<SorterCompileInfo>,
+    /// The scan compiled for each `Scan` operator.
+    scan_ids: HashMap<OpId, ScanId>,
+    /// First register of each scan's cursor window.
+    scan_slot_bases: HashMap<ScanId, SlotId>,
+    /// Registers taken by the rows of each FROM subtree (a `Scan` or a `Join`).
+    from_slots: HashMap<OpId, usize>,
+    /// Registers in each scan's cursor window.
+    scan_widths: HashMap<ScanId, u16>,
+    /// Scans that load whole rows (rather than projected fields).
+    whole_row_scans: std::collections::HashSet<ScanId>,
+}
+
+/// The loops of a FROM subtree, as emitted by `emit_from`.
+struct LoopNest {
+    /// The innermost `NextRow`: where the row body jumps back to for the next row.
+    head: u32,
+    /// `NextRow`s whose end-of-input leaves the whole nest, patched by the caller.
+    exits: Vec<usize>,
+    /// The outermost cursor, still open when the nest ends (inner cursors close themselves).
+    outer_cursor: u16,
+    /// Every cursor of the nest.
+    cursors: Vec<u16>,
 }
 
 struct SorterCompileInfo {
@@ -211,6 +314,11 @@ impl<'a> PlanCompiler<'a> {
             table_fn_arg_slots: HashMap::new(),
             next_sorter_id: 0,
             sorter_infos: Vec::new(),
+            scan_ids: HashMap::new(),
+            scan_slot_bases: HashMap::new(),
+            from_slots: HashMap::new(),
+            scan_widths: HashMap::new(),
+            whole_row_scans: Default::default(),
         }
     }
 
@@ -345,7 +453,10 @@ impl<'a> PlanCompiler<'a> {
                 // Emit: OpenCursor → NextRow (with eof_target placeholder)
                 let scan_id = self.find_scan_id_for(scan, result)?;
                 let cursor_id = cursor_infos.len() as u16;
-                cursor_infos.push(CursorInfo { scan_id });
+                cursor_infos.push(CursorInfo {
+                    scan_id,
+                    slot_base: 0,
+                });
 
                 builder.emit_open_cursor(cursor_id);
                 let _next_row_idx = builder.emit_next_row(cursor_id);
@@ -395,7 +506,7 @@ impl<'a> PlanCompiler<'a> {
             let op = graph.operator(current_id)?;
             chain.push((current_id, op.clone()));
             match op {
-                BindingsOp::Scan(_) | BindingsOp::ExprQuery(_) => break,
+                BindingsOp::Scan(_) | BindingsOp::Join(_) | BindingsOp::ExprQuery(_) => break,
                 _ => {
                     current_id = graph.single_input(current_id)?;
                 }
@@ -410,19 +521,15 @@ impl<'a> PlanCompiler<'a> {
         }
 
         // --- Scan-based pipeline ---
-        // First element must be a Scan
-        let scan = match chain.first() {
-            Some((_, BindingsOp::Scan(scan))) => scan,
+        // First element must be a FROM source (a Scan or a Join of scans)
+        let from_id = match chain.first() {
+            Some((id, BindingsOp::Scan(_) | BindingsOp::Join(_))) => *id,
             _ => {
                 return Err(EngineError::InvalidPlan(
                     "pipeline must start with Scan".to_string(),
                 ))
             }
         };
-
-        let scan_id = self.find_scan_id_for(scan, result)?;
-        let cursor_id = cursor_infos.len() as u16;
-        cursor_infos.push(CursorInfo { scan_id });
 
         // Pre-scan chain for LIMIT value.
         let mut limit_value: Option<usize> = None;
@@ -442,71 +549,25 @@ impl<'a> PlanCompiler<'a> {
             None
         };
 
-        // For table function scans, compile arguments and emit CreateTableFnCursor + OpenCursor
-        if let Some(tf_info) = self.table_fn_scans.get(&scan_id).cloned() {
-            // Compile each argument expression into its own register
-            let mut arg_slots: Vec<SlotId> = Vec::new();
-            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-            for arg_expr in &tf_info.arguments {
-                let target = builder.alloc_reg_pub();
-                let prog = expr_compiler.compile_to_program(arg_expr, target, target + 1)?;
-                self.inline_program(&prog, builder)?;
-                arg_slots.push(target);
-            }
-
-            // Store resolved arg_slots for the CompiledPlan
-            self.table_fn_arg_slots.insert(scan_id, arg_slots);
-
-            // Emit CreateTableFnCursor + OpenCursor
-            let func_name_idx = builder.push_key_pub(tf_info.func_name.clone());
-            builder.insts.push(Inst::CreateTableFnCursor {
-                cursor_id,
-                func_name_idx,
-            });
-            builder.emit_open_cursor(cursor_id);
-        } else if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
-            // For expression-based scans, compile the expression and emit MaterializeCursor
-            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-            let expr_program =
-                expr_compiler.compile_to_program(&expr, 0, result.slot_count as u16)?;
-            self.inline_program(&expr_program, builder)?;
-            if self.mode == EvaluationMode::Strict {
-                builder.insts.push(Inst::AssertCollection { src: 0 });
-            }
-            builder
-                .insts
-                .push(Inst::MaterializeCursor { src: 0, cursor_id });
-            builder.emit_open_cursor(cursor_id);
-        } else {
-            // Regular catalog scan
-            builder.emit_open_cursor(cursor_id);
-        }
-
-        // Emit: NextRow (loop head)
-        let loop_head = builder.current_offset() as usize;
-        let next_row_idx = builder.emit_next_row(cursor_id);
+        // Emit the scan loops: OpenCursor → NextRow (loop head), nested for joins
+        let nest = self.emit_from(graph, from_id, result, builder, cursor_infos)?;
+        let loop_head = nest.head as usize;
 
         // Track slot allocation incrementally (mirroring the analysis pass).
-        // The scan occupies slots 0..scan_slots. Each subsequent operator allocates
+        // The FROM rows occupy slots 0..from_slots. Each subsequent operator allocates
         // from current_slot onward.
-        let scan_slots = result
-            .scan_metadata
-            .get(&scan_id)
-            .map(|m| m.layout.projections.len())
-            .unwrap_or(1);
-        let mut current_slot = scan_slots;
+        let mut current_slot = self.from_slots.get(&from_id).copied().unwrap_or(1);
 
         for (_, op) in chain.iter().skip(1) {
             match op {
                 BindingsOp::Filter(filter) => {
-                    let pred_slot = current_slot as SlotId;
+                    // The predicate and its temps go above every allocated register: the
+                    // slots past the FROM rows may hold join state (e.g. LEFT JOIN flags).
                     current_slot += 1;
+                    let pred_slot = builder.alloc_reg_pub();
                     let expr_compiler = LogicalExprCompiler::new(&result.resolver);
-                    let filter_program = expr_compiler.compile_to_program(
-                        &filter.expr,
-                        pred_slot,
-                        current_slot as u16,
-                    )?;
+                    let filter_program =
+                        expr_compiler.compile_to_program(&filter.expr, pred_slot, pred_slot + 1)?;
 
                     // Inline the filter program's instructions
                     self.inline_program(&filter_program, builder)?;
@@ -532,10 +593,7 @@ impl<'a> PlanCompiler<'a> {
                     return self.emit_group_by_pipeline(
                         &chain,
                         group_by,
-                        scan_id,
-                        cursor_id,
-                        loop_head,
-                        next_row_idx,
+                        &nest,
                         current_slot,
                         result,
                         builder,
@@ -577,20 +635,351 @@ impl<'a> PlanCompiler<'a> {
         // --- After loop ---
         let after_loop = builder.current_offset();
 
-        // Patch NextRow's eof_target to point here
-        builder.patch_target(next_row_idx, after_loop);
-
-        // Patch DecrOrJump's target to point here (skip to CloseCursor when limit reached)
-        if let Some(idx) = decr_jump_idx {
-            builder.patch_target(idx, after_loop);
+        // Patch the outermost NextRow's eof_target to point here
+        for idx in &nest.exits {
+            builder.patch_target(*idx, after_loop);
         }
 
-        // Emit: CloseCursor
-        builder.emit_close_cursor(cursor_id);
+        // Emit: CloseCursor (inner join cursors closed themselves at their end)
+        builder.emit_close_cursor(nest.outer_cursor);
 
         // Emit: Halt
         builder.emit_halt();
 
+        // LIMIT reached mid-row: every cursor of the nest is still open
+        if let Some(idx) = decr_jump_idx {
+            builder.patch_target(idx, builder.current_offset());
+            for cursor_id in &nest.cursors {
+                builder.emit_close_cursor(*cursor_id);
+            }
+            builder.emit_halt();
+        }
+
+        Ok(())
+    }
+
+    /// Emit the loops of a FROM subtree: one cursor loop per scan, nested for joins.
+    ///
+    /// A join reopens its right side for every left row, so a lateral right side
+    /// (`FROM t, t.arr x`) sees the current left row.
+    ///
+    /// TODO: a side that does not read the other side is recomputed on every pass (the
+    /// right side per left row; for RIGHT/FULL also the left side per right row). Memoize
+    /// it instead: build it once per entry into the join, e.g. into a B-tree keyed on the
+    /// ON equality (a `CreateBTree` / probe instruction pair), then replay or probe it.
+    /// That also keeps nondeterministic or remote sources (`rand()`, plugins) from being
+    /// re-read.
+    /// ```text
+    ///   <left loops>                       // innermost left NextRow = L.head
+    ///   Jump open_right
+    ///   right_done: CloseCursor(R); Jump L.head
+    ///   open_right: <open R>
+    ///   R.head: NextRow(R, eof=right_done)
+    ///   [ON predicate; JumpIfNotTrue R.head]
+    ///   <row body>                         // jumps back to the nest's head
+    /// ```
+    ///
+    /// LEFT and FULL track whether a right row matched; when none did, `right_done` sets
+    /// the right side's registers to NULL and runs the body once with `padding` set.
+    /// RIGHT and FULL add a second pass once the left side ends: for each right row, scan
+    /// the left side again, and if no left row matches, run the body with the left side's
+    /// registers NULL. The body of a padded or pass-2 row returns to a `cont` stub that
+    /// picks the next row.
+    fn emit_from(
+        &mut self,
+        graph: &PlanGraph<'_>,
+        id: OpId,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
+    ) -> Result<LoopNest> {
+        let join = match graph.operator(id)? {
+            BindingsOp::Scan(_) => {
+                let scan_id = self.scan_id(id)?;
+                let cursor_id = self.emit_open_scan(scan_id, result, builder, cursor_infos)?;
+                let head = builder.current_offset();
+                let next_row_idx = builder.emit_next_row(cursor_id);
+                return Ok(LoopNest {
+                    head,
+                    exits: vec![next_row_idx],
+                    outer_cursor: cursor_id,
+                    cursors: vec![cursor_id],
+                });
+            }
+            BindingsOp::Join(join) => join,
+            other => {
+                return Err(EngineError::InvalidPlan(format!(
+                    "unsupported FROM source: {:?}",
+                    std::mem::discriminant(other)
+                )))
+            }
+        };
+
+        let (left_id, right_id) = graph.join_inputs(id)?;
+        let pad_right = matches!(join.kind, JoinKind::Left | JoinKind::Full);
+        let unmatched_right = matches!(join.kind, JoinKind::Right | JoinKind::Full);
+        let right_scan = match graph.operator(right_id)? {
+            BindingsOp::Scan(_) => Some(self.scan_id(right_id)?),
+            _ => None,
+        };
+        if unmatched_right && right_scan.is_none() {
+            return Err(EngineError::UnsupportedExpr(format!(
+                "{:?} JOIN with a join on its right side",
+                join.kind
+            )));
+        }
+        let f = builder.push_const_pub(ValueOwned::Bool(false));
+        let t = builder.push_const_pub(ValueOwned::Bool(true));
+        let null = builder.push_const_pub(ValueOwned::Null);
+        let load = |builder: &mut ProgramBuilder, dst: SlotId, const_idx: u16| {
+            builder.insts.push(Inst::LoadConst { dst, const_idx })
+        };
+        // A fresh register is MISSING, which reads as false.
+        let flag = |builder: &mut ProgramBuilder, used: bool| {
+            if used {
+                builder.alloc_reg_pub()
+            } else {
+                0
+            }
+        };
+        let matched = flag(builder, pad_right);
+        let padding = flag(builder, pad_right);
+        let pass2 = flag(builder, unmatched_right);
+        let left_matched = flag(builder, unmatched_right);
+
+        // The right side's cursor comes after the left side's, and for RIGHT/FULL after
+        // pass 2's second scan of the left side.
+        let left_scans = count_scans(graph, left_id)?;
+        let passes = if unmatched_right { 2 } else { 1 };
+        let right_cursor = (cursor_infos.len() + left_scans * passes) as u16;
+        if unmatched_right {
+            load(builder, pass2, f);
+        }
+        let left = self.emit_from(graph, left_id, result, builder, cursor_infos)?;
+        if pad_right {
+            load(builder, matched, f);
+        }
+        let skip_done = builder.emit_jump();
+
+        // The right side ended for this left row.
+        let right_done = builder.current_offset();
+        builder.emit_close_cursor(right_cursor);
+        let mut to_body = vec![];
+        if pad_right {
+            // No right row matched: emit the left row once with the right side NULL.
+            let pad = builder.emit_jump_if_not_true(matched);
+            let next_left = builder.emit_jump();
+            builder.patch_target(next_left, left.head);
+            builder.patch_target(pad, builder.current_offset());
+            self.emit_null_window(graph, right_id, null, builder)?;
+            load(builder, padding, t);
+            to_body.push(builder.emit_jump());
+        } else {
+            let next_left = builder.emit_jump();
+            builder.patch_target(next_left, left.head);
+        }
+
+        // Pass 2: the left side ended. For each right row, scan the left side again; emit the
+        // right row if no left row matches it.
+        let mut exits = left.exits.clone();
+        let mut cursors = left.cursors.clone();
+        let mut pass2_head = 0;
+        if let (true, Some(scan_id)) = (unmatched_right, right_scan) {
+            for idx in &left.exits {
+                builder.patch_target(*idx, builder.current_offset());
+            }
+            load(builder, pass2, t);
+            self.emit_create_scan(scan_id, right_cursor, result, builder)?;
+            builder.emit_open_cursor(right_cursor);
+            pass2_head = builder.current_offset();
+            let next_right = builder.emit_next_row(right_cursor);
+            load(builder, left_matched, f);
+            let left2 = self.emit_from(graph, left_id, result, builder, cursor_infos)?;
+            if let Some(on) = &join.on {
+                let pred_reg = builder.alloc_reg_pub();
+                let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+                let prog = expr_compiler.compile_to_program(on, pred_reg, pred_reg + 1)?;
+                self.inline_program(&prog, builder)?;
+                let skip = builder.emit_jump_if_not_true(pred_reg);
+                builder.patch_target(skip, left2.head);
+            }
+            load(builder, left_matched, t);
+            let next_left2 = builder.emit_jump();
+            builder.patch_target(next_left2, left2.head);
+            for idx in &left2.exits {
+                builder.patch_target(*idx, builder.current_offset());
+            }
+            builder.emit_close_cursor(left2.outer_cursor);
+            let pad = builder.emit_jump_if_not_true(left_matched);
+            let next = builder.emit_jump();
+            builder.patch_target(next, pass2_head);
+            builder.patch_target(pad, builder.current_offset());
+            self.emit_null_window(graph, left_id, null, builder)?;
+            to_body.push(builder.emit_jump());
+            builder.patch_target(next_right, builder.current_offset());
+            builder.emit_close_cursor(right_cursor);
+            load(builder, pass2, f);
+            exits = vec![builder.emit_jump()];
+            cursors.extend(left2.cursors);
+        }
+
+        // Where the row body continues for this join: the next right row, or after a
+        // padded row the next left row, or in pass 2 the next right row of pass 2.
+        let cont = builder.current_offset();
+        let mut to_right_head = vec![];
+        if unmatched_right {
+            let not_pass2 = builder.emit_jump_if_not_true(pass2);
+            let next = builder.emit_jump();
+            builder.patch_target(next, pass2_head);
+            builder.patch_target(not_pass2, builder.current_offset());
+        }
+        if pad_right {
+            to_right_head.push(builder.emit_jump_if_not_true(padding));
+            load(builder, padding, f);
+            let next_left = builder.emit_jump();
+            builder.patch_target(next_left, left.head);
+        } else if unmatched_right {
+            to_right_head.push(builder.emit_jump());
+        }
+        builder.patch_target(skip_done, builder.current_offset());
+
+        let right = self.emit_from(graph, right_id, result, builder, cursor_infos)?;
+        debug_assert_eq!(right.outer_cursor, right_cursor);
+        for idx in &right.exits {
+            builder.patch_target(*idx, right_done);
+        }
+
+        if let Some(on) = &join.on {
+            let pred_reg = builder.alloc_reg_pub();
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            let prog = expr_compiler.compile_to_program(on, pred_reg, pred_reg + 1)?;
+            self.inline_program(&prog, builder)?;
+            let skip = builder.emit_jump_if_not_true(pred_reg);
+            builder.patch_target(skip, right.head);
+        }
+        if pad_right {
+            load(builder, matched, t);
+        }
+        for idx in to_body {
+            builder.patch_target(idx, builder.current_offset());
+        }
+        for idx in to_right_head {
+            builder.patch_target(idx, right.head);
+        }
+
+        cursors.extend(right.cursors);
+        Ok(LoopNest {
+            head: if pad_right || unmatched_right {
+                cont
+            } else {
+                right.head
+            },
+            exits,
+            outer_cursor: left.outer_cursor,
+            cursors,
+        })
+    }
+
+    fn scan_id(&self, id: OpId) -> Result<ScanId> {
+        self.scan_ids
+            .get(&id)
+            .copied()
+            .ok_or_else(|| EngineError::InvalidPlan(format!("scan {:?} was not compiled", id)))
+    }
+
+    /// Outer join padding: bind each variable of a FROM subtree to NULL. A scan that
+    /// projected fields gets MISSING in them instead, as `NULL.field` is MISSING.
+    fn emit_null_window(
+        &self,
+        graph: &PlanGraph<'_>,
+        id: OpId,
+        null: u16,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        let missing = builder.push_const_pub(ValueOwned::Missing);
+        for scan in from_scans(graph, id)? {
+            let scan_id = self.scan_id(scan)?;
+            let base = self.scan_slot_bases[&scan_id];
+            let width = self.scan_widths[&scan_id];
+            let const_idx = if self.whole_row_scans.contains(&scan_id) {
+                null
+            } else {
+                missing
+            };
+            for dst in base..base + width {
+                builder.insts.push(Inst::LoadConst { dst, const_idx });
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit the instructions that bind and open a scan's cursor; returns the cursor id.
+    fn emit_open_scan(
+        &mut self,
+        scan_id: ScanId,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+        cursor_infos: &mut Vec<CursorInfo>,
+    ) -> Result<u16> {
+        let cursor_id = cursor_infos.len() as u16;
+        cursor_infos.push(CursorInfo {
+            scan_id,
+            slot_base: self.scan_slot_bases.get(&scan_id).copied().unwrap_or(0),
+        });
+        self.emit_create_scan(scan_id, cursor_id, result, builder)?;
+        builder.emit_open_cursor(cursor_id);
+        Ok(cursor_id)
+    }
+
+    /// Emit the instructions that (re)build a table function or expression scan's data
+    /// source; a catalog scan needs none.
+    fn emit_create_scan(
+        &mut self,
+        scan_id: ScanId,
+        cursor_id: u16,
+        result: &SubtreeResult,
+        builder: &mut ProgramBuilder,
+    ) -> Result<()> {
+        if let Some(tf_info) = self.table_fn_scans.get(&scan_id).cloned() {
+            // Compile each argument expression into its own register. A scan built twice
+            // (RIGHT/FULL pass 2) reuses the registers its CompiledPlan entry names.
+            let arg_slots = match self.table_fn_arg_slots.get(&scan_id) {
+                Some(slots) => slots.clone(),
+                None => tf_info
+                    .arguments
+                    .iter()
+                    .map(|_| builder.alloc_reg_pub())
+                    .collect(),
+            };
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            for (arg_expr, &target) in tf_info.arguments.iter().zip(&arg_slots) {
+                let temps = (target + 1).max(builder.next_reg());
+                let prog = expr_compiler.compile_to_program(arg_expr, target, temps)?;
+                self.inline_program(&prog, builder)?;
+            }
+
+            // Store resolved arg_slots for the CompiledPlan
+            self.table_fn_arg_slots.insert(scan_id, arg_slots);
+
+            let func_name_idx = builder.push_key_pub(tf_info.func_name.clone());
+            builder.insts.push(Inst::CreateTableFnCursor {
+                cursor_id,
+                func_name_idx,
+            });
+        } else if let Some(expr) = self.expr_scans.get(&scan_id).cloned() {
+            // For expression-based scans, compile the expression and emit MaterializeCursor
+            let expr_compiler = LogicalExprCompiler::new(&result.resolver);
+            // A temp register: register 0 may hold an outer (left) join row.
+            let src = builder.alloc_reg_pub();
+            let expr_program = expr_compiler.compile_to_program(&expr, src, src + 1)?;
+            self.inline_program(&expr_program, builder)?;
+            if self.mode == EvaluationMode::Strict {
+                builder.insts.push(Inst::AssertCollection { src });
+            }
+            builder
+                .insts
+                .push(Inst::MaterializeCursor { src, cursor_id });
+        }
         Ok(())
     }
 
@@ -604,16 +993,14 @@ impl<'a> PlanCompiler<'a> {
         &mut self,
         chain: &[(OpId, BindingsOp)],
         group_by: &GroupBy,
-        scan_id: ScanId,
-        cursor_id: u16,
-        loop_head: usize,
-        next_row_idx: usize,
+        nest: &LoopNest,
         current_slot: usize,
         result: &SubtreeResult,
         builder: &mut ProgramBuilder,
         cursor_infos: &mut Vec<CursorInfo>,
     ) -> Result<()> {
-        let _ = (scan_id, cursor_infos);
+        let _ = cursor_infos;
+        let loop_head = nest.head;
         let expr_compiler = LogicalExprCompiler::new(&result.resolver);
 
         // --- Determine what to insert into the sorter ---
@@ -623,9 +1010,11 @@ impl<'a> PlanCompiler<'a> {
         let agg_count = group_by.aggregate_exprs.len();
         let record_count = key_count + agg_count; // fields per sorter record
 
-        // Allocate registers for computing record fields before SorterInsert
-        let record_base = current_slot as u16;
+        // Allocate registers for computing record fields before SorterInsert, above any
+        // register already allocated (join state lives there)
+        let record_base = (current_slot as u16).max(builder.next_reg());
         let mut temp_slot = record_base + record_count as u16;
+        builder.update_next_reg(temp_slot);
 
         // Compile key expressions into record_base..record_base+key_count
         for (i, (_name, expr)) in key_exprs.iter().enumerate() {
@@ -656,14 +1045,16 @@ impl<'a> PlanCompiler<'a> {
 
         // Emit: Jump back to NextRow (continue input scan loop)
         let back_jump = builder.emit_jump();
-        builder.patch_target(back_jump, loop_head as u32);
+        builder.patch_target(back_jump, loop_head);
 
         // --- After input loop ---
         let after_input = builder.current_offset();
-        builder.patch_target(next_row_idx, after_input);
+        for idx in &nest.exits {
+            builder.patch_target(*idx, after_input);
+        }
 
         // Emit: CloseCursor (done reading input)
-        builder.emit_close_cursor(cursor_id);
+        builder.emit_close_cursor(nest.outer_cursor);
 
         // === PHASE 2: Sort + Iterate ===
 
@@ -927,9 +1318,12 @@ impl<'a> PlanCompiler<'a> {
 
         let mut having_skip_idx: Option<usize> = None;
 
+        // Output slots mirror the analysis pass, which reserves one slot per HAVING
+        let mut output_slot = 0;
         for (_, op) in chain.iter().skip(group_by_idx + 1) {
             match op {
                 BindingsOp::Having(having) => {
+                    output_slot += 1;
                     let having_pred_reg = builder.alloc_reg_pub();
                     let having_temp = having_pred_reg + 1;
                     let prog = grouped_expr_compiler.compile_to_program(
@@ -941,13 +1335,13 @@ impl<'a> PlanCompiler<'a> {
                     having_skip_idx = Some(builder.emit_jump_if_not_true(having_pred_reg));
                 }
                 BindingsOp::Project(project) => {
-                    self.emit_project_at(project, &grouped_result, 0, builder)?;
+                    self.emit_project_at(project, &grouped_result, output_slot, builder)?;
                 }
                 BindingsOp::ProjectValue(pv) => {
-                    self.emit_project_value_at(pv, &grouped_result, 0, builder)?;
+                    self.emit_project_value_at(pv, &grouped_result, output_slot, builder)?;
                 }
                 BindingsOp::ProjectAll(_mode) => {
-                    self.emit_project_all_at(&grouped_result, 0, builder)?;
+                    self.emit_project_all_at(&grouped_result, output_slot, builder)?;
                 }
                 _ => {}
             }
@@ -1006,7 +1400,10 @@ impl<'a> PlanCompiler<'a> {
         let mut next_row_indices = Vec::new();
         for &scan_id in result.scan_metadata.keys() {
             let cursor_id = cursor_infos.len() as u16;
-            cursor_infos.push(CursorInfo { scan_id });
+            cursor_infos.push(CursorInfo {
+                scan_id,
+                slot_base: self.scan_slot_bases.get(&scan_id).copied().unwrap_or(0),
+            });
             builder.emit_open_cursor(cursor_id);
             let next_row_idx = builder.emit_next_row(cursor_id);
             next_row_indices.push(next_row_idx);
@@ -1078,6 +1475,25 @@ impl<'a> PlanCompiler<'a> {
     ) -> Result<()> {
         let alias = match &result.resolver {
             ResolverKind::Pipeline(r) => r.scan_alias.clone(),
+            ResolverKind::Multi(bindings) => {
+                // Concatenate each binding's fields, in FROM order
+                let srcs = bindings
+                    .iter()
+                    .map(|b| {
+                        b.base_row_slot.ok_or_else(|| {
+                            EngineError::InvalidPlan(format!(
+                                "SELECT * without the whole row of {}",
+                                b.scan_alias
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                builder.insts.push(Inst::ConcatTuples {
+                    dst: output_slot as SlotId,
+                    srcs,
+                });
+                return Ok(());
+            }
             ResolverKind::Global(_) | ResolverKind::Empty => {
                 return Err(EngineError::InvalidPlan(
                     "SELECT * on expression query".to_string(),
@@ -1193,7 +1609,57 @@ impl<'a> PlanCompiler<'a> {
                 let input_id = graph.single_input(id)?;
                 self.compile_node(graph, input_id, ctx)
             }
-            BindingsOp::Scan(scan) => self.compile_scan(scan, ctx),
+            BindingsOp::Scan(scan) => {
+                let result = self.compile_scan(scan, ctx)?;
+                let scan_id = *result.scan_metadata.keys().next().ok_or_else(|| {
+                    EngineError::InvalidPlan("scan produced no metadata".to_string())
+                })?;
+                self.scan_ids.insert(id, scan_id);
+                self.scan_slot_bases.insert(scan_id, 0);
+                self.scan_widths.insert(scan_id, result.slot_count as u16);
+                if matches!(&result.resolver, ResolverKind::Pipeline(r) if r.base_row_slot.is_some())
+                {
+                    self.whole_row_scans.insert(scan_id);
+                }
+                self.from_slots.insert(id, result.slot_count);
+                Ok(result)
+            }
+            BindingsOp::Join(join) => {
+                let (left_id, right_id) = graph.join_inputs(id)?;
+                {
+                    let mut extractor = ExprFieldExtractor::new(ctx);
+                    if let Some(on) = &join.on {
+                        extractor.extract(on);
+                    }
+                    // A lateral right side (`FROM t, t.arr x`) reads fields of the left side.
+                    for expr in from_source_exprs(graph, right_id)? {
+                        extractor.extract(expr);
+                    }
+                }
+                let left = self.compile_node(graph, left_id, ctx)?;
+                let right = self.compile_node(graph, right_id, ctx)?;
+
+                // The right side's registers follow the left side's.
+                let offset = left.slot_count as SlotId;
+                for scan_id in right.scan_metadata.keys() {
+                    if let Some(base) = self.scan_slot_bases.get_mut(scan_id) {
+                        *base += offset;
+                    }
+                }
+                let mut bindings = left.resolver.into_bindings(0)?;
+                bindings.extend(right.resolver.into_bindings(offset)?);
+                let mut scan_metadata = left.scan_metadata;
+                scan_metadata.extend(right.scan_metadata);
+                let slot_count = left.slot_count + right.slot_count;
+                self.from_slots.insert(id, slot_count);
+                Ok(SubtreeResult {
+                    resolver: ResolverKind::Multi(bindings),
+                    cursor_id: None,
+                    scan_metadata,
+                    slot_count,
+                    shape: None,
+                })
+            }
             BindingsOp::Filter(filter) => {
                 let input_id = graph.single_input(id)?;
                 let filter_expr = filter.expr.clone();
@@ -1281,6 +1747,11 @@ impl<'a> PlanCompiler<'a> {
     fn compile_scan(&mut self, scan: &Scan, ctx: &CompileContext) -> Result<SubtreeResult> {
         // Try inline scan for literal expressions first (compile-time constants)
         if let Some(values) = try_expr_to_inline_values(&scan.expr) {
+            if self.mode == EvaluationMode::Strict && !is_collection_expr(&scan.expr) {
+                return Err(EngineError::StrictModeViolation(
+                    "FROM clause requires collection value".to_string(),
+                ));
+            }
             return self.compile_inline_scan(scan, values);
         }
         // Try table function resolution (Call expressions)
@@ -1400,14 +1871,16 @@ impl<'a> PlanCompiler<'a> {
             let slot = next_slot;
             next_slot += 1;
 
+            // Each implicit scan writes its window's first register, `slot`.
             let layout = ScanLayout {
                 projections: vec![ScanProjection {
                     source: ScanSource::whole_value(),
-                    target_slot: slot,
+                    target_slot: 0,
                 }],
             };
             let object_id = ObjectId::new(catalog_id, reader_factory.entry_id);
             scan_metadata.insert(scan_id, ScanMetadata { layout, object_id });
+            self.scan_slot_bases.insert(scan_id, slot);
             slots.insert(name, slot);
         }
 
@@ -1733,6 +2206,43 @@ impl<'a> PlanCompiler<'a> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// The `Scan` operators of a FROM subtree, in FROM order.
+fn from_scans(graph: &PlanGraph<'_>, id: OpId) -> Result<Vec<OpId>> {
+    match graph.operator(id)? {
+        BindingsOp::Scan(_) => Ok(vec![id]),
+        BindingsOp::Join(_) => {
+            let (left, right) = graph.join_inputs(id)?;
+            let mut scans = from_scans(graph, left)?;
+            scans.extend(from_scans(graph, right)?);
+            Ok(scans)
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+fn count_scans(graph: &PlanGraph<'_>, id: OpId) -> Result<usize> {
+    Ok(from_scans(graph, id)?.len())
+}
+
+/// The expressions a FROM subtree evaluates per row of what is to its left: scan sources and
+/// table function arguments.
+fn from_source_exprs<'p>(graph: &PlanGraph<'p>, id: OpId) -> Result<Vec<&'p ValueExpr>> {
+    match graph.operator(id)? {
+        BindingsOp::Scan(scan) => Ok(match &scan.expr {
+            ValueExpr::Call(call) => call.arguments.iter().collect(),
+            expr => vec![expr],
+        }),
+        BindingsOp::Join(join) => {
+            let (left, right) = graph.join_inputs(id)?;
+            let mut exprs = from_source_exprs(graph, left)?;
+            exprs.extend(from_source_exprs(graph, right)?);
+            exprs.extend(join.on.as_ref());
+            Ok(exprs)
+        }
+        _ => Ok(vec![]),
+    }
+}
+
 fn extract_table_name(expr: &ValueExpr) -> Option<String> {
     match expr {
         ValueExpr::VarRef(name, _) => binding_name_string(name),
@@ -1793,6 +2303,18 @@ fn try_expr_to_inline_values(expr: &ValueExpr) -> Option<Vec<ValueOwned>> {
 }
 
 /// Try to convert a single ValueExpr to a ValueOwned (for literal expressions).
+/// Whether a literal FROM source is a collection (rather than a value scanned as `<<value>>`).
+fn is_collection_expr(expr: &ValueExpr) -> bool {
+    match expr {
+        ValueExpr::Lit(lit) => matches!(
+            lit.as_ref(),
+            partiql_logical::Lit::List(_) | partiql_logical::Lit::Bag(_)
+        ),
+        ValueExpr::ListExpr(_) | ValueExpr::BagExpr(_) => true,
+        _ => false,
+    }
+}
+
 fn try_expr_to_single_value(expr: &ValueExpr) -> Option<ValueOwned> {
     match expr {
         ValueExpr::Lit(lit) => lit_to_value(lit).ok(),
@@ -1996,6 +2518,10 @@ fn remap_inst(inst: &Inst, const_offset: u16, key_map: &[u16]) -> Result<Inst> {
             src: *src,
             const_idx: *const_idx + const_offset,
         },
+        Inst::ConcatTuples { dst, srcs } => Inst::ConcatTuples {
+            dst: *dst,
+            srcs: srcs.clone(),
+        },
 
         // Absolute jump targets would need relocating; scalar sub-programs never emit them.
         Inst::NextRow { .. }
@@ -2107,6 +2633,18 @@ impl PipelineSlotResolver {
 }
 
 impl SlotResolver for PipelineSlotResolver {
+    fn resolve_qualified(
+        &self,
+        alias: &BindingsName<'_>,
+        field: &BindingsName<'_>,
+    ) -> Option<SlotId> {
+        if self.matches_alias_or_table(alias) {
+            self.resolve_field(field)
+        } else {
+            None
+        }
+    }
+
     fn resolve_var(&self, name: &BindingsName<'_>, _scope: VarRefType) -> Option<SlotId> {
         if self.matches_alias_or_table(name) {
             return self.base_row_slot;
@@ -2155,6 +2693,13 @@ impl SlotResolver for EmptySlotResolver {
     }
     fn is_alias(&self, _name: &BindingsName<'_>) -> bool {
         false
+    }
+    fn resolve_qualified(
+        &self,
+        _alias: &BindingsName<'_>,
+        _field: &BindingsName<'_>,
+    ) -> Option<SlotId> {
+        None
     }
 }
 

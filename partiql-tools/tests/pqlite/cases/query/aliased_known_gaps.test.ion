@@ -6,11 +6,6 @@
 { sql: "CREATE TABLE table1" }
 { sql: "INSERT INTO table1 SELECT * FROM << {'id':1,'nodes':[{'x':10},{'x':11}]}, {'id':2,'nodes':[{'x':20}]} >>", expect: { affected_rows: 2 } }
 
-// VM: Join is not compiled ("unsupported operator: Discriminant(6)").
-skip::{ sql: "SELECT n.x FROM table1 t1, t1.nodes n", expect: { rows: $bag::[ { x: 10 }, { x: 11 }, { x: 20 } ] } }
-skip::{ sql: "SELECT t1.id, n.x FROM table1 AS t1 CROSS JOIN t1.nodes AS n", expect: { rows: $bag::[ { id: 1, x: 10 }, { id: 1, x: 11 }, { id: 2, x: 20 } ] } }
-skip::{ sql: "SELECT e.a, t.id FROM example e, table1 t WHERE e.a = t.id", expect: { rows: $bag::[ { a: 1, id: 1 } ] } }
-
 // VM: OrderBy is not compiled ("unsupported operator: Discriminant(4)").
 skip::{ sql: "SELECT e.a FROM example e ORDER BY e.a DESC", expect: { rows: $bag::[ { a: 5 }, { a: 3 }, { a: 1 } ] } }
 

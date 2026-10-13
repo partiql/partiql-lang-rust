@@ -59,6 +59,9 @@ pub struct TableFnScanMetadata {
     pub arg_slots: Vec<crate::arena::SlotId>,
 }
 
+/// Index of cursor 0's row bank; cursor `n` uses bank `CURSOR_BANK_BASE + n`.
+const CURSOR_BANK_BASE: usize = 2;
+
 /// Metadata for a cursor in bytecode mode.
 ///
 /// Each cursor corresponds to a data source that can be opened/closed/iterated.
@@ -67,6 +70,10 @@ pub struct TableFnScanMetadata {
 #[derive(Clone, Debug)]
 pub struct CursorInfo {
     pub scan_id: ScanId,
+    /// First register of this cursor's window. A data source writes its row into
+    /// `ScanLayout` slots relative to this base, so several cursors (one per side of a
+    /// join) can each fill their own registers.
+    pub slot_base: u16,
 }
 
 /// Compiled query execution plan — pure bytecode.
@@ -136,6 +143,11 @@ impl Clone for CompiledPlan {
     }
 }
 
+/// Where a cursor's slots start in the registers.
+fn cursor_window(cursor: &CursorInfo) -> String {
+    format!("  (base {})", cursor.slot_base)
+}
+
 impl fmt::Display for CompiledPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "CompiledPlan {{")?;
@@ -165,7 +177,7 @@ impl fmt::Display for CompiledPlan {
                         }
                     }
                 }
-                writeln!(f)?;
+                writeln!(f, "{}", cursor_window(cursor))?;
             } else if let Some(meta) = self.scan_metadata.get(&cursor.scan_id) {
                 write!(f, "    {:4}: ", i)?;
                 for (j, proj) in meta.layout.projections.iter().enumerate() {
@@ -184,7 +196,7 @@ impl fmt::Display for CompiledPlan {
                         }
                     }
                 }
-                writeln!(f)?;
+                writeln!(f, "{}", cursor_window(cursor))?;
             } else {
                 writeln!(f, "    {:4}: scan_id={:?}", i, cursor.scan_id)?;
             }
@@ -329,8 +341,10 @@ pub struct PartiQLVM {
     /// Data source cursors. Index = cursor_id.
     cursors: Vec<Option<DataSourceImpl>>,
     /// Memory banks. Bank 0 = query-level (persistent across rows).
-    /// Bank 1 = per-cursor row-level bank, reset at each NextRow.
-    /// Bank 2+ = sorter banks (persistent until sorter closes).
+    /// Bank 1 = scratch bank for expression temporaries, reset at each NextRow.
+    /// Banks 2..2+cursors = one row bank per cursor, reset at that cursor's NextRow, so an
+    /// outer join row stays valid while the inner cursor advances.
+    /// Banks after those = sorter banks (persistent until sorter closes).
     banks: Vec<Arena>,
     /// Unified register array: [0..slot_count] are output slots, rest are temporaries.
     registers: Vec<ValueRef<'static>>,
@@ -346,6 +360,8 @@ pub struct PartiQLVM {
     table_functions: HashMap<String, Arc<dyn crate::source::TableFunction>>,
     /// Sorters for GROUP BY (indexed by sorter_id from bytecode).
     sorters: Vec<Option<crate::sorter::Sorter>>,
+    /// Whether each cursor's data source is open, so closing is idempotent.
+    source_open: Vec<bool>,
 }
 
 impl PartiQLVM {
@@ -368,11 +384,14 @@ impl PartiQLVM {
         let total_regs = compiled.program.reg_count as usize;
         let registers = vec![ValueRef::Missing; total_regs];
 
-        // Pre-allocate banks: bank[0]=query, bank[1]=row, bank[2..]=sorters
+        // Pre-allocate banks: bank[0]=query, bank[1]=scratch, then one per cursor, then sorters
         let mut banks = vec![Arena::new(4096), Arena::new(16384)];
+        for _ in 0..compiled.cursors.len() {
+            banks.push(Arena::new(16384));
+        }
         let mut sorters: Vec<Option<crate::sorter::Sorter>> = Vec::new();
-        for (i, meta) in compiled.sorter_metadata.iter().enumerate() {
-            let bank_id = 2 + i;
+        for meta in compiled.sorter_metadata.iter() {
+            let bank_id = banks.len();
             banks.push(Arena::new(16384));
             sorters.push(Some(crate::sorter::Sorter::new(bank_id, meta.key_count)));
         }
@@ -388,7 +407,9 @@ impl PartiQLVM {
             builtins: BuiltinFunctions::new(),
             table_functions: exec_context.table_functions().clone(),
             sorters,
+            source_open: Vec::new(),
         };
+        vm.reset_cursor_state();
 
         // Pre-create data sources from catalog
         vm.bind_cursors(exec_context)?;
@@ -438,6 +459,11 @@ impl PartiQLVM {
         Ok(())
     }
 
+    /// Forget which sources are open.
+    fn reset_cursor_state(&mut self) {
+        self.source_open = vec![false; self.compiled.cursors.len()];
+    }
+
     /// Get the result shape for this VM's query.
     pub fn shape(&self) -> &Shape {
         self.compiled.result_shape()
@@ -472,6 +498,7 @@ impl PartiQLVM {
         for reg in self.registers.iter_mut() {
             *reg = ValueRef::Missing;
         }
+        self.reset_cursor_state();
         Ok(ExecutionResult::Query(QueryIterator::new(self)))
     }
 
@@ -488,6 +515,7 @@ impl PartiQLVM {
         }
         self.table_functions = exec_context.table_functions().clone();
         self.bind_cursors(exec_context)?;
+        self.reset_cursor_state();
         self.ip = 0;
         self.halted = false;
         for bank in &self.banks {
@@ -555,7 +583,8 @@ impl<'vm> QueryIterator<'vm> {
 
             match inst {
                 Inst::OpenCursor { cursor_id } => {
-                    let cursor = match self.vm.cursors.get_mut(*cursor_id as usize) {
+                    let c = *cursor_id as usize;
+                    let cursor = match self.vm.cursors.get_mut(c) {
                         Some(Some(c)) => c,
                         _ => {
                             return Some(Err(EngineError::IllegalState(format!(
@@ -567,16 +596,21 @@ impl<'vm> QueryIterator<'vm> {
                     if let Err(e) = cursor.open() {
                         return Some(Err(e));
                     }
+                    self.vm.source_open[c] = true;
                 }
 
                 Inst::NextRow {
                     cursor_id,
                     eof_target,
                 } => {
-                    // Reset the row-level bank for the new row
+                    // Reset the scratch bank and this cursor's row bank for the new row
+                    let c = *cursor_id as usize;
+                    let bank_id = CURSOR_BANK_BASE + c;
                     self.vm.banks[1].reset();
+                    self.vm.banks[bank_id].reset();
+                    let slot_base = self.vm.compiled.cursors[c].slot_base as usize;
 
-                    let cursor = match self.vm.cursors.get_mut(*cursor_id as usize) {
+                    let cursor = match self.vm.cursors.get_mut(c) {
                         Some(Some(c)) => c,
                         _ => {
                             return Some(Err(EngineError::IllegalState(format!(
@@ -588,7 +622,8 @@ impl<'vm> QueryIterator<'vm> {
 
                     // Write next row into registers via RegisterWriter (row bank)
                     let has_row = {
-                        let mut writer = RegisterWriter::new(regs, &self.vm.banks[1]);
+                        let mut writer =
+                            RegisterWriter::new(&mut regs[slot_base..], &self.vm.banks[bank_id]);
                         match cursor.next_row(&mut writer) {
                             Ok(has) => has,
                             Err(e) => return Some(Err(e)),
@@ -601,7 +636,11 @@ impl<'vm> QueryIterator<'vm> {
                 }
 
                 Inst::CloseCursor { cursor_id } => {
-                    let cursor = match self.vm.cursors.get_mut(*cursor_id as usize) {
+                    let c = *cursor_id as usize;
+                    if !self.vm.source_open[c] {
+                        continue;
+                    }
+                    let cursor = match self.vm.cursors.get_mut(c) {
                         Some(Some(c)) => c,
                         _ => {
                             return Some(Err(EngineError::IllegalState(format!(
@@ -610,6 +649,7 @@ impl<'vm> QueryIterator<'vm> {
                             ))))
                         }
                     };
+                    self.vm.source_open[c] = false;
                     if let Err(e) = cursor.close() {
                         return Some(Err(e));
                     }
@@ -905,10 +945,11 @@ impl<'vm> Iterator for QueryIterator<'vm> {
 impl Drop for QueryIterator<'_> {
     fn drop(&mut self) {
         // Best-effort close all open cursors
-        for cursor in self.vm.cursors.iter_mut() {
-            if let Some(ds) = cursor.as_mut() {
+        for (cursor, open) in self.vm.cursors.iter_mut().zip(&mut self.vm.source_open) {
+            if let Some(ds) = cursor.as_mut().filter(|_| *open) {
                 let _ = ds.close();
             }
+            *open = false;
         }
         for bank in &self.vm.banks {
             bank.reset();

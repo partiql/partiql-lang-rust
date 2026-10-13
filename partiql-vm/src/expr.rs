@@ -390,6 +390,24 @@ pub enum Inst {
         src: u16,
     },
 
+    /// Build one tuple from the values in `srcs`, in order: `SELECT *` over a join, where
+    /// each register holds one FROM binding's row (as the legacy evaluator's
+    /// `coerce_into_tuple` + concatenation).
+    ///
+    /// Each source contributes:
+    /// - a tuple: all of its fields, in order (duplicate names are kept);
+    /// - MISSING: nothing;
+    /// - anything else (including the NULL of an outer join's padded side): one field
+    ///   named `_1` holding the value.
+    ///
+    /// The result is allocated in the row's arena.
+    ConcatTuples {
+        /// Register receiving the new tuple.
+        dst: u16,
+        /// Registers holding the bindings' values, in FROM order.
+        srcs: Vec<u16>,
+    },
+
     /// Strict mode: assert src is a List or Bag. If not, runtime error.
     /// Handled in the VM dispatch loop (relational instruction).
     AssertCollection {
@@ -1552,19 +1570,20 @@ impl Program {
                     }
                 }
             }
+            // Three-valued logic, as `partiql_value`'s `BinaryAnd`/`BinaryOr`/`Not`: NULL and
+            // MISSING are unknown; any other non-boolean is a type mismatch (MISSING).
             Inst::AndBool { dst, a, b } => {
-                let av = regs[*a as usize].as_bool()?;
-                let bv = regs[*b as usize].as_bool()?;
-                regs[*dst as usize] = ValueRef::Bool(av && bv);
+                regs[*dst as usize] = logic(regs[*a as usize], regs[*b as usize], false);
             }
             Inst::OrBool { dst, a, b } => {
-                let av = regs[*a as usize].as_bool()?;
-                let bv = regs[*b as usize].as_bool()?;
-                regs[*dst as usize] = ValueRef::Bool(av || bv);
+                regs[*dst as usize] = logic(regs[*a as usize], regs[*b as usize], true);
             }
             Inst::NotBool { dst, src } => {
-                let sv = regs[*src as usize].as_bool()?;
-                regs[*dst as usize] = ValueRef::Bool(!sv);
+                regs[*dst as usize] = match regs[*src as usize] {
+                    ValueRef::Bool(v) => ValueRef::Bool(!v),
+                    ValueRef::Null | ValueRef::Missing => ValueRef::Null,
+                    _ => ValueRef::Missing,
+                };
             }
             Inst::NegNum { dst, src } => {
                 regs[*dst as usize] = match regs[*src as usize] {
@@ -1719,6 +1738,21 @@ impl Program {
                 }
             }
 
+            Inst::ConcatTuples { dst, srcs } => {
+                let name = ValueRef::Str("_1");
+                let mut fields = Vec::new();
+                for src in srcs {
+                    match regs[*src as usize] {
+                        ValueRef::Tuple(t) => {
+                            fields.extend(t.fields.iter().map(|f| (ValueRef::Str(f.name), f.value)))
+                        }
+                        ValueRef::Missing => {}
+                        value => fields.push((name, value)),
+                    }
+                }
+                regs[*dst as usize] = ValueRef::Tuple(arena.alloc_tuple(fields));
+            }
+
             // Relational instructions are handled by the VM dispatch loop,
             // not by eval_inst. If we reach them here, it's a bug.
             Inst::OpenCursor { .. }
@@ -1786,6 +1820,12 @@ pub trait SlotResolver {
     fn resolve_alias(&self, name: &BindingsName<'_>) -> Option<SlotId>;
     fn resolve_field(&self, name: &BindingsName<'_>) -> Option<SlotId>;
     fn is_alias(&self, name: &BindingsName<'_>) -> bool;
+    /// The slot holding field `field` of the binding named `alias`, when the scan projected it.
+    fn resolve_qualified(
+        &self,
+        alias: &BindingsName<'_>,
+        field: &BindingsName<'_>,
+    ) -> Option<SlotId>;
 }
 
 #[derive(Default)]
@@ -2372,6 +2412,15 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
                 Err(EngineError::UnsupportedExpr("dynamic lookup".to_string()))
             }
             ValueExpr::Path(base, components) => {
+                // `alias.field` the scan of `alias` projected into its own slot
+                if let (ValueExpr::VarRef(alias, _), Some(PathComponent::Key(field))) =
+                    (&**base, components.first())
+                {
+                    if let Some(slot) = self.resolver.resolve_qualified(alias, field) {
+                        return path_tail(Expr::SlotRef(slot), &components[1..]);
+                    }
+                }
+
                 // First, try to resolve the first component as a pushed-down field of the
                 // base binding; any remaining components navigate within that field. Skip
                 // this when the base is some other binding: after `GROUP BY d.k AS k`, `k.k`
@@ -2594,6 +2643,25 @@ pub(crate) fn lit_to_value(lit: &Lit) -> Result<ValueOwned> {
         Lit::Variant(_, _) => todo!("Variant literals are not (yet) supported."),
         other => return Err(EngineError::UnsupportedExpr(format!("{other:?}"))),
     })
+}
+
+/// Three-valued AND (`dominant` false) or OR (`dominant` true). The dominant value decides
+/// the result even next to an unknown; otherwise an unknown makes NULL, a mismatch MISSING.
+fn logic<'a>(a: ValueRef<'a>, b: ValueRef<'a>, dominant: bool) -> ValueRef<'a> {
+    let logical =
+        |v: &ValueRef<'_>| matches!(v, ValueRef::Null | ValueRef::Missing | ValueRef::Bool(_));
+    match (a, b) {
+        (ValueRef::Bool(x), ValueRef::Bool(y)) => {
+            ValueRef::Bool(if dominant { x || y } else { x && y })
+        }
+        (ValueRef::Bool(x), other) | (other, ValueRef::Bool(x))
+            if x == dominant && matches!(other, ValueRef::Null | ValueRef::Missing) =>
+        {
+            ValueRef::Bool(dominant)
+        }
+        (a, b) if logical(&a) && logical(&b) => ValueRef::Null,
+        _ => ValueRef::Missing,
+    }
 }
 
 fn call_name(call: &CallExpr) -> String {
