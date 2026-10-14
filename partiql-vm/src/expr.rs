@@ -1834,6 +1834,8 @@ pub struct ProgramBuilder {
     consts: Vec<ValueOwned>,
     keys: Vec<String>,
     next_reg: u16,
+    /// Registers used: the high-water mark of `next_reg`.
+    reg_count: u16,
     slot_count: u16,
 }
 
@@ -1844,90 +1846,19 @@ impl ProgramBuilder {
             consts: Vec::new(),
             keys: Vec::new(),
             next_reg: slot_count,
+            reg_count: slot_count,
             slot_count,
         }
     }
 
-    // === Relational instruction emission helpers ===
-
-    /// Emit an OpenCursor instruction
-    pub fn emit_open_cursor(&mut self, cursor_id: u16) {
-        self.insts.push(Inst::OpenCursor { cursor_id });
-    }
-
-    /// Emit a NextRow instruction. Returns the index of this instruction
-    /// so the caller can patch the eof_target later.
-    pub fn emit_next_row(&mut self, cursor_id: u16) -> usize {
-        let idx = self.insts.len();
-        // Placeholder eof_target — must be patched by caller
-        self.insts.push(Inst::NextRow {
-            cursor_id,
-            eof_target: 0,
-        });
-        idx
-    }
-
-    /// Emit a CloseCursor instruction
-    pub fn emit_close_cursor(&mut self, cursor_id: u16) {
-        self.insts.push(Inst::CloseCursor { cursor_id });
-    }
-
-    /// Emit an unconditional Jump. Returns the index so it can be patched.
-    pub fn emit_jump(&mut self) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::Jump { target: 0 });
-        idx
-    }
-
-    /// Emit a conditional jump (JumpIfNotTrue). Returns the index so it can be patched.
-    pub fn emit_jump_if_not_true(&mut self, src: u16) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::JumpIfNotTrue { src, target: 0 });
-        idx
-    }
-
-    /// Emit an EmitRow instruction
-    pub fn emit_emit_row(&mut self) {
-        self.insts.push(Inst::EmitRow);
-    }
-
-    /// Emit a Halt instruction
-    pub fn emit_halt(&mut self) {
-        self.insts.push(Inst::Halt);
-    }
-
-    /// Emit a DecrOrJump instruction. Returns the index so it can be patched.
-    pub fn emit_decr_or_jump(&mut self, counter_reg: u16) -> usize {
-        let idx = self.insts.len();
-        self.insts.push(Inst::DecrOrJump {
-            counter_reg,
-            target: 0,
-        });
-        idx
-    }
-
-    /// Patch a previously emitted instruction's jump target.
-    /// Works for NextRow (eof_target), Jump, JumpIfNotTrue, DecrOrJump.
-    pub fn patch_target(&mut self, inst_idx: usize, target: u32) {
-        match &mut self.insts[inst_idx] {
-            Inst::NextRow { eof_target, .. } => *eof_target = target,
-            Inst::Jump { target: t } => *t = target,
-            Inst::JumpIfNotTrue { target: t, .. } => *t = target,
-            Inst::DecrOrJump { target: t, .. } => *t = target,
-            _ => panic!("patch_target called on non-patchable instruction"),
-        }
-    }
-
-    /// Get the current instruction count (next instruction index)
-    pub fn current_offset(&self) -> u32 {
-        self.insts.len() as u32
-    }
-
-    // === Public accessors for inline_program support ===
-
-    /// Allocate a register (public for compiler use).
-    pub fn alloc_reg_pub(&mut self) -> u16 {
-        self.alloc_reg()
+    /// Emit `expr`, evaluated into register `dst`. Its temporaries start at the first
+    /// register the builder was not told about; they are free again afterwards.
+    pub fn emit_expr(&mut self, expr: &Expr, dst: SlotId) -> Result<()> {
+        let scratch = self.next_reg;
+        ExprCompiler { builder: self }.compile_to_slot(expr, dst)?;
+        self.reg_count = self.reg_count.max(self.next_reg);
+        self.next_reg = scratch;
+        Ok(())
     }
 
     /// Push a constant and return its index (public for compiler use).
@@ -1938,24 +1869,6 @@ impl ProgramBuilder {
     /// Push a key and return its index (public for compiler use).
     pub fn push_key_pub(&mut self, key: String) -> u16 {
         self.intern_key(key)
-    }
-
-    /// Get the number of constants currently in the pool.
-    pub fn consts_len(&self) -> usize {
-        self.consts.len()
-    }
-
-    /// The first register not yet allocated; scratch registers of an inlined
-    /// sub-program must start at or above it.
-    pub fn next_reg(&self) -> u16 {
-        self.next_reg
-    }
-
-    /// Update next_reg to at least the given value (for merging sub-programs).
-    pub fn update_next_reg(&mut self, reg_count: u16) {
-        if reg_count > self.next_reg {
-            self.next_reg = reg_count;
-        }
     }
 
     pub fn build(self) -> Program {
@@ -1985,7 +1898,7 @@ impl ProgramBuilder {
             arena,
             const_refs,
             keys: self.keys,
-            reg_count: self.next_reg,
+            reg_count: self.reg_count.max(self.next_reg),
             slot_count: self.slot_count,
         }
     }
@@ -2010,18 +1923,14 @@ impl ProgramBuilder {
     }
 }
 
-pub struct ExprCompiler {
-    builder: ProgramBuilder,
+/// Compiles an [`Expr`] into a [`ProgramBuilder`], taking temporaries from its next
+/// unallocated register.
+struct ExprCompiler<'b> {
+    builder: &'b mut ProgramBuilder,
 }
 
-impl ExprCompiler {
-    pub fn new(slot_count: u16) -> Self {
-        ExprCompiler {
-            builder: ProgramBuilder::new(slot_count),
-        }
-    }
-
-    pub fn compile_expr(&mut self, expr: &Expr) -> Result<u16> {
+impl ExprCompiler<'_> {
+    fn compile_expr(&mut self, expr: &Expr) -> Result<u16> {
         match expr {
             Expr::Literal(value) => {
                 let reg = self.builder.alloc_reg();
@@ -2326,14 +2235,10 @@ impl ExprCompiler {
         }
     }
 
-    pub fn compile_to_slot(&mut self, expr: &Expr, slot: SlotId) -> Result<()> {
+    fn compile_to_slot(&mut self, expr: &Expr, slot: SlotId) -> Result<()> {
         let reg = self.compile_expr(expr)?;
         self.builder.insts.push(Inst::StoreSlot { slot, src: reg });
         Ok(())
-    }
-
-    pub fn finish(self) -> Program {
-        self.builder.build()
     }
 }
 
@@ -2346,32 +2251,8 @@ impl<'a, R: SlotResolver> LogicalExprCompiler<'a, R> {
         LogicalExprCompiler { resolver }
     }
 
-    pub fn compile_to_program(
-        &self,
-        expr: &ValueExpr,
-        slot: SlotId,
-        slot_count: u16,
-    ) -> Result<Program> {
-        let expr = self.lower_expr(expr)?;
-        let mut compiler = ExprCompiler::new(slot_count);
-        compiler.compile_to_slot(&expr, slot)?;
-        Ok(compiler.finish())
-    }
-
-    pub fn compile_to_program_multi(
-        &self,
-        exprs: &[(SlotId, ValueExpr)],
-        slot_count: u16,
-    ) -> Result<Program> {
-        let mut compiler = ExprCompiler::new(slot_count);
-        for (slot, expr) in exprs {
-            let lowered = self.lower_expr(expr)?;
-            compiler.compile_to_slot(&lowered, *slot)?;
-        }
-        Ok(compiler.finish())
-    }
-
-    fn lower_expr(&self, expr: &ValueExpr) -> Result<Expr> {
+    /// Lower `expr`, resolving its names to registers.
+    pub fn lower_expr(&self, expr: &ValueExpr) -> Result<Expr> {
         match expr {
             ValueExpr::Lit(lit) => Ok(Expr::Literal(lit_to_value(lit)?)),
             ValueExpr::VarRef(name, scope) => self

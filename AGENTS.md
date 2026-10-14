@@ -126,7 +126,8 @@ When adding a new engine feature, the usual loop is: write a `.test.ion` under `
 ## Bytecode VM (`partiql-vm`)
 
 The VM lives in `partiql-vm/src/`:
-- `compiler.rs` — Walks the `LogicalPlan` graph and emits bytecode (`Inst` stream) + metadata.
+- `lower_ir.rs` — Compiler pass 1: lowers the `LogicalPlan` to a resolved IR (every register and cursor assigned, expressions lowered to register references).
+- `compile.rs` — Compiler pass 2: emits bytecode (`Inst` stream) from the IR; `PlanCompiler` is the entry point.
 - `expr.rs` — Defines `Inst` (typed register-machine instructions) and `Expr` (expression tree for fallback).
 - `plan.rs` — `CompiledPlan` struct holding the program, scan metadata, cursor info, constants.
 - `arena.rs` — Slot-based register arena for VM execution.

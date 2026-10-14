@@ -217,7 +217,8 @@ partiql-tools/
     └── pqlite_ingestion.rs     # ingestion-function integration tests
 
 partiql-vm/src/                # bytecode VM
-├── compiler.rs                 # logical plan → Inst stream
+├── lower_ir.rs                 # logical plan → resolved IR (registers, cursors)
+├── compile.rs                  # IR → Inst stream
 ├── expr.rs                     # Inst enum
 ├── plan.rs                     # CompiledPlan, agg_step, sorter
 ├── arena.rs                    # register arena 
