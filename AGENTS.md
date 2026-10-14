@@ -108,7 +108,7 @@ Inside the REPL, pass `--debug` at launch (`pqlite --debug plan open db.pqlite`)
 
 ### End-to-end test harness
 
-Golden-file tests live under `partiql-tools/tests/pqlite/cases/**/*.test.ion`. Each `.test.ion` file is a sequence of Ion structs of the form `{ sql: "...", expect: { rows: $bag::[...] } }`. `expect` supports `rows`, `affected_rows`, `created_table`, or `error: "substring"`; annotate a struct with `skip::` to keep a known-broken case in tree. The `partiql_tools::pqlite_e2e::case` test runs them via `rstest` file globbing.
+Golden-file tests live under `partiql-tools/tests/pqlite/cases/**/*.test.ion`. Each `.test.ion` file is a sequence of steps. A bare string (usually a `'''...'''` long string) is a setup script of `;`-separated statements that must all succeed, with no other assertion — use it for the CREATE/INSERT a query test needs. A struct `{ sql: '''...''', expect: ... }` is an asserted step: `expect: $bag::[...]` is shorthand for `expect: { rows: $bag::[...] }`; the struct form also supports `affected_rows`, `created_table` (only assert these when the test is about DDL/DML), or `error: "substring"`. Annotate a step with `skip::` to keep a known-broken case in tree. Format each struct across lines with the SQL indented in a long string (see existing fixtures). The `partiql_tools::pqlite_e2e::case` test runs them via `rstest` file globbing.
 
 ```bash
 # Run every fixture (each file is its own test case)
