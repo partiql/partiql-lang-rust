@@ -69,6 +69,11 @@ impl<'a> PlanCompiler<'a> {
 // Assembler
 // ---------------------------------------------------------------------------
 
+/// The most instructions a program may have. Code can grow faster than the query text (a
+/// FULL JOIN emits its left side twice, so nesting them doubles the code at each level),
+/// so this bounds what compiling a query may allocate.
+const MAX_PROGRAM_LEN: usize = 1 << 20;
+
 /// A jump target, placed with [`Asm::bind`] before or after the jumps to it.
 #[derive(Clone, Copy)]
 struct Label(usize);
@@ -82,6 +87,8 @@ struct Asm {
     /// Each routine's code; the current routine's is in `b.insts` instead.
     routines: Vec<Vec<Inst>>,
     current: usize,
+    /// The total length of the routines other than the current one.
+    others_len: usize,
     /// Each label's (routine, offset), once bound.
     labels: Vec<Option<(usize, u32)>>,
     /// Jumps to resolve: (routine, offset, target).
@@ -94,6 +101,7 @@ impl Asm {
             b,
             routines: vec![vec![]],
             current: 0,
+            others_len: 0,
             labels: vec![],
             fixups: vec![],
         }
@@ -124,8 +132,17 @@ impl Asm {
     fn resume(&mut self, routine: usize) {
         debug_assert_ne!(routine, self.current);
         let code = std::mem::take(&mut self.routines[routine]);
+        self.others_len = self.others_len + self.b.insts.len() - code.len();
         self.routines[self.current] = std::mem::replace(&mut self.b.insts, code);
         self.current = routine;
+    }
+
+    /// Fail once the program has outgrown [`MAX_PROGRAM_LEN`].
+    fn check_len(&self) -> Result<()> {
+        match self.others_len + self.b.insts.len() > MAX_PROGRAM_LEN {
+            true => Err(EngineError::TooLarge("instructions")),
+            false => Ok(()),
+        }
     }
 
     fn push(&mut self, inst: Inst) {
@@ -150,9 +167,10 @@ impl Asm {
         self.push_to(Inst::Gosub { ret_reg, target: 0 }, target);
     }
 
-    fn load_const(&mut self, dst: SlotId, value: ValueOwned) {
-        let const_idx = self.b.push_const_pub(value);
+    fn load_const(&mut self, dst: SlotId, value: ValueOwned) -> Result<()> {
+        let const_idx = self.b.push_const_pub(value)?;
         self.push(Inst::LoadConst { dst, const_idx });
+        Ok(())
     }
 
     /// Lay the routines out in order and resolve the jumps.
@@ -252,11 +270,13 @@ impl<'q> Emitter<'q> {
                 self.asm.push(Inst::Halt);
             }
         }
+        self.asm.check_len()?;
         Ok(self.asm.finish())
     }
 
     /// The code producing the rows of `op`, running `row` for each.
     fn emit_op(&mut self, op: &'q Op, row: Row<'_, 'q>) -> Result<()> {
+        self.asm.check_len()?;
         match op {
             Op::Scan(scan) => self.emit_scan(scan, row),
             Op::Join(join) => self.emit_join(join, row),
@@ -318,7 +338,7 @@ impl<'q> Emitter<'q> {
         match output {
             Output::Eval { dst, expr } => self.asm.b.emit_expr(expr, *dst)?,
             Output::CoerceToTuple(reg) => {
-                let const_idx = self.asm.b.push_const_pub(ValueOwned::String("_1".into()));
+                let const_idx = self.asm.b.push_const_pub(ValueOwned::String("_1".into()))?;
                 self.asm.push(Inst::CoerceToTuple {
                     dst: *reg,
                     src: *reg,
@@ -334,20 +354,26 @@ impl<'q> Emitter<'q> {
         Ok(())
     }
 
-    /// Stopping mid-row leaves the input's cursors open, so `done` closes them (closing
-    /// is idempotent):
+    /// The count is checked after each row, so the input stops as soon as the last row is
+    /// out rather than when it produces one more. `LIMIT 0` runs nothing. Stopping mid-row
+    /// leaves the input's cursors open, so `done` closes them (closing is idempotent):
     /// ```text
-    ///         counter = count
+    ///         counter = count - 1
     ///         for each input row:
+    ///             <row>
     ///             if counter = 0: goto done
-    ///             counter -= 1; <row>
+    ///             counter -= 1
     ///   done: CloseCursor each of the input's cursors
     /// ```
     fn emit_limit(&mut self, limit: &'q Limit, row: Row<'_, 'q>) -> Result<()> {
+        if limit.count == 0 {
+            return Ok(());
+        }
         let done = self.asm.label();
         self.asm
-            .load_const(limit.counter, ValueOwned::I64(limit.count));
+            .load_const(limit.counter, ValueOwned::I64(limit.count - 1))?;
         self.emit_op(&limit.input, &mut |e| {
+            row(e)?;
             e.asm.push_to(
                 Inst::DecrOrJump {
                     counter_reg: limit.counter,
@@ -355,7 +381,7 @@ impl<'q> Emitter<'q> {
                 },
                 done,
             );
-            row(e)
+            Ok(())
         })?;
         self.asm.bind(done);
         for cursor_id in cursors(&limit.input) {
@@ -469,10 +495,10 @@ impl<'q> Emitter<'q> {
         sub: Label,
     ) -> Result<()> {
         self.emit_op(kept, &mut |e| {
-            e.asm.load_const(join.matched, ValueOwned::Bool(false));
+            e.asm.load_const(join.matched, ValueOwned::Bool(false))?;
             e.emit_op(other, &mut |e| {
                 e.emit_if(join.on.as_ref(), &mut |e| {
-                    e.asm.load_const(join.matched, ValueOwned::Bool(true));
+                    e.asm.load_const(join.matched, ValueOwned::Bool(true))?;
                     e.asm.gosub(join.ret, sub);
                     Ok(())
                 })
@@ -520,7 +546,7 @@ impl<'q> Emitter<'q> {
                     false => ValueOwned::Missing,
                 };
                 for dst in scan.window.clone() {
-                    self.asm.load_const(dst, value.clone());
+                    self.asm.load_const(dst, value.clone())?;
                 }
             }
             Op::Join(join) => {
@@ -544,7 +570,7 @@ impl<'q> Emitter<'q> {
                 for (dst, arg) in args {
                     self.asm.b.emit_expr(arg, *dst)?;
                 }
-                let func_name_idx = self.asm.b.push_key_pub(func_name.clone());
+                let func_name_idx = self.asm.b.push_key_pub(func_name.clone())?;
                 self.asm.push(Inst::CreateTableFnCursor {
                     cursor_id,
                     func_name_idx,
@@ -588,7 +614,7 @@ impl<'q> Emitter<'q> {
             accum_start: agg.accums.start,
             count: agg.accums.len() as u16,
         };
-        self.asm.load_const(agg.has_data, ValueOwned::Bool(false));
+        self.asm.load_const(agg.has_data, ValueOwned::Bool(false))?;
         self.asm.push(reset_accums.clone());
         self.emit_op(&agg.input, &mut |e| {
             for (dst, expr) in (agg.insert..).zip(&agg.record_exprs) {
@@ -655,7 +681,7 @@ impl<'q> Emitter<'q> {
                 });
             }
         }
-        self.asm.load_const(agg.has_data, ValueOwned::Bool(true));
+        self.asm.load_const(agg.has_data, ValueOwned::Bool(true))?;
         self.asm.push_to(
             Inst::SorterNext {
                 sorter_id,

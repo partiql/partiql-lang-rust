@@ -1,10 +1,11 @@
 use crate::arena::{Arena, SlotId};
-use crate::error::{EngineError, Result};
+use crate::error::{count_u16, EngineError, Result};
 use crate::value::{value_get_field_ref, ValueOwned, ValueRef};
 use partiql_logical::{CallExpr, CallName, Lit, PathComponent, ValueExpr, VarRefType};
 use partiql_value::BindingsName;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -454,7 +455,8 @@ pub enum Inst {
     Halt,
 
     /// Decrement the i64 counter in `counter_reg`. If it was already 0, jump to `target`.
-    /// Used for LIMIT: initialize counter with the limit value, then DecrOrJump before EmitRow.
+    /// Used for LIMIT: initialize counter with the limit value minus one, then DecrOrJump
+    /// after each row.
     DecrOrJump {
         counter_reg: u16,
         target: u32,
@@ -1832,6 +1834,8 @@ pub trait SlotResolver {
 pub struct ProgramBuilder {
     pub(crate) insts: Vec<Inst>,
     consts: Vec<ValueOwned>,
+    /// The index of each constant that is shared rather than pushed again.
+    shared_consts: FxHashMap<ValueOwned, u16>,
     keys: Vec<String>,
     next_reg: u16,
     /// Registers used: the high-water mark of `next_reg`.
@@ -1844,6 +1848,7 @@ impl ProgramBuilder {
         ProgramBuilder {
             insts: Vec::new(),
             consts: Vec::new(),
+            shared_consts: FxHashMap::default(),
             keys: Vec::new(),
             next_reg: slot_count,
             reg_count: slot_count,
@@ -1862,12 +1867,12 @@ impl ProgramBuilder {
     }
 
     /// Push a constant and return its index (public for compiler use).
-    pub fn push_const_pub(&mut self, value: ValueOwned) -> u16 {
+    pub fn push_const_pub(&mut self, value: ValueOwned) -> Result<u16> {
         self.push_const(value)
     }
 
     /// Push a key and return its index (public for compiler use).
-    pub fn push_key_pub(&mut self, key: String) -> u16 {
+    pub fn push_key_pub(&mut self, key: String) -> Result<u16> {
         self.intern_key(key)
     }
 
@@ -1903,23 +1908,45 @@ impl ProgramBuilder {
         }
     }
 
-    fn alloc_reg(&mut self) -> u16 {
+    fn alloc_reg(&mut self) -> Result<u16> {
         let reg = self.next_reg;
-        self.next_reg = self.next_reg.checked_add(1).expect("register overflow");
-        reg
+        self.next_reg = reg
+            .checked_add(1)
+            .ok_or(EngineError::TooLarge("registers"))?;
+        Ok(reg)
     }
 
-    fn push_const(&mut self, value: ValueOwned) -> u16 {
-        self.consts.push(value);
-        (self.consts.len() - 1) as u16
-    }
-
-    fn intern_key(&mut self, key: String) -> u16 {
-        if let Some((idx, _)) = self.keys.iter().enumerate().find(|(_, k)| *k == &key) {
-            return idx as u16;
+    /// Push a constant, sharing one already pushed when equal. Only scalars whose equality
+    /// is identity are shared: equal decimals can differ in scale, equal floats in sign.
+    fn push_const(&mut self, value: ValueOwned) -> Result<u16> {
+        let shared = matches!(
+            value,
+            ValueOwned::Missing
+                | ValueOwned::Null
+                | ValueOwned::Bool(_)
+                | ValueOwned::I64(_)
+                | ValueOwned::String(_)
+        );
+        if shared {
+            if let Some(&idx) = self.shared_consts.get(&value) {
+                return Ok(idx);
+            }
         }
+        let idx = count_u16(self.consts.len(), "constants")?;
+        if shared {
+            self.shared_consts.insert(value.clone(), idx);
+        }
+        self.consts.push(value);
+        Ok(idx)
+    }
+
+    fn intern_key(&mut self, key: String) -> Result<u16> {
+        if let Some((idx, _)) = self.keys.iter().enumerate().find(|(_, k)| *k == &key) {
+            return count_u16(idx, "keys");
+        }
+        let idx = count_u16(self.keys.len(), "keys")?;
         self.keys.push(key);
-        (self.keys.len() - 1) as u16
+        Ok(idx)
     }
 }
 
@@ -1933,8 +1960,8 @@ impl ExprCompiler<'_> {
     fn compile_expr(&mut self, expr: &Expr) -> Result<u16> {
         match expr {
             Expr::Literal(value) => {
-                let reg = self.builder.alloc_reg();
-                let const_idx = self.builder.push_const(value.clone());
+                let reg = self.builder.alloc_reg()?;
+                let const_idx = self.builder.push_const(value.clone())?;
                 self.builder.insts.push(Inst::LoadConst {
                     dst: reg,
                     const_idx,
@@ -1949,9 +1976,9 @@ impl ExprCompiler<'_> {
             Expr::Add(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::AddDynamic {
                     dst,
                     a: l,
@@ -1964,9 +1991,9 @@ impl ExprCompiler<'_> {
             Expr::Sub(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::SubDynamic {
                     dst,
                     a: l,
@@ -1979,9 +2006,9 @@ impl ExprCompiler<'_> {
             Expr::Mod(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::ModDynamic {
                     dst,
                     a: l,
@@ -1994,9 +2021,9 @@ impl ExprCompiler<'_> {
             Expr::Eq(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::EqDynamic {
                     dst,
                     a: l,
@@ -2009,26 +2036,26 @@ impl ExprCompiler<'_> {
             Expr::And(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::AndBool { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Or(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::OrBool { dst, a: l, b: r });
                 Ok(dst)
             }
             Expr::Not(expr) => {
                 let src = self.compile_expr(expr)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::NotBool { dst, src });
                 Ok(dst)
             }
             Expr::Neg(expr) => {
                 let src = self.compile_expr(expr)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::NegNum { dst, src });
                 Ok(dst)
             }
@@ -2042,9 +2069,9 @@ impl ExprCompiler<'_> {
                 escape,
             } => {
                 let value_reg = self.compile_expr(value)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 let regex_str = like_to_re_pattern(pattern, escape);
-                let pattern_idx = self.builder.intern_key(regex_str);
+                let pattern_idx = self.builder.intern_key(regex_str)?;
                 self.builder.insts.push(Inst::LikeMatch {
                     dst,
                     value: value_reg,
@@ -2060,7 +2087,7 @@ impl ExprCompiler<'_> {
                 let value_reg = self.compile_expr(value)?;
                 let pattern_reg = self.compile_expr(pattern)?;
                 let escape_reg = self.compile_expr(escape)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::LikeDynamicMatch {
                     dst,
                     value: value_reg,
@@ -2071,8 +2098,8 @@ impl ExprCompiler<'_> {
             }
             Expr::GetField(base, key) => {
                 let base_reg = self.compile_expr(base)?;
-                let dst = self.builder.alloc_reg();
-                let key_idx = self.builder.intern_key(key.clone());
+                let dst = self.builder.alloc_reg()?;
+                let key_idx = self.builder.intern_key(key.clone())?;
                 self.builder.insts.push(Inst::GetField {
                     dst,
                     base: base_reg,
@@ -2085,8 +2112,8 @@ impl ExprCompiler<'_> {
                 for arg in args {
                     arg_regs.push(self.compile_expr(arg)?);
                 }
-                let dst = self.builder.alloc_reg();
-                let func_idx = self.builder.intern_key(name.clone());
+                let dst = self.builder.alloc_reg()?;
+                let func_idx = self.builder.intern_key(name.clone())?;
                 self.builder.insts.push(Inst::CallUdf {
                     dst,
                     func_idx,
@@ -2105,7 +2132,7 @@ impl ExprCompiler<'_> {
                 for value in values {
                     value_regs.push(self.compile_expr(value)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeTuple {
                     dst,
                     attr_regs,
@@ -2118,7 +2145,7 @@ impl ExprCompiler<'_> {
                 for element in elements {
                     elements_regs.push(self.compile_expr(element)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeList {
                     dst,
                     element_regs: elements_regs,
@@ -2128,9 +2155,9 @@ impl ExprCompiler<'_> {
             Expr::Mul(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MulDynamic {
                     dst,
                     a: l,
@@ -2143,9 +2170,9 @@ impl ExprCompiler<'_> {
             Expr::Div(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::DivDynamic {
                     dst,
                     a: l,
@@ -2158,9 +2185,9 @@ impl ExprCompiler<'_> {
             Expr::Exp(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::ExpDynamic {
                     dst,
                     a: l,
@@ -2173,9 +2200,9 @@ impl ExprCompiler<'_> {
             Expr::Gt(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::GtDynamic {
                     dst,
                     a: l,
@@ -2188,9 +2215,9 @@ impl ExprCompiler<'_> {
             Expr::Lt(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
-                let l_cast = self.builder.alloc_reg();
-                let r_cast = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
+                let l_cast = self.builder.alloc_reg()?;
+                let r_cast = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::LtDynamic {
                     dst,
                     a: l,
@@ -2203,7 +2230,7 @@ impl ExprCompiler<'_> {
             Expr::Concat(left, right) => {
                 let l = self.compile_expr(left)?;
                 let r = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder
                     .insts
                     .push(Inst::ConcatDynamic { dst, a: l, b: r });
@@ -2212,7 +2239,7 @@ impl ExprCompiler<'_> {
             Expr::In(left, right) => {
                 let value = self.compile_expr(left)?;
                 let collection = self.compile_expr(right)?;
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::InDynamic {
                     dst,
                     value,
@@ -2225,7 +2252,7 @@ impl ExprCompiler<'_> {
                 for element in elements {
                     elements_regs.push(self.compile_expr(element)?);
                 }
-                let dst = self.builder.alloc_reg();
+                let dst = self.builder.alloc_reg()?;
                 self.builder.insts.push(Inst::MakeBag {
                     dst,
                     element_regs: elements_regs,

@@ -1,0 +1,7 @@
+// LIMIT 0 reads nothing
+{ sql: "SELECT VALUE x FROM << 1, 2, 3 >> x LIMIT 0", expect: { rows: $bag::[] } }
+{ sql: "SELECT VALUE x FROM << 1, 2, 3 >> x LIMIT 3", expect: { rows: $bag::[ 1, 2, 3 ] } }
+{ sql: "SELECT VALUE x FROM << 1, 2, 3 >> x LIMIT 9223372036854775807", expect: { rows: $bag::[ 1, 2, 3 ] } }
+// LIMIT stops once its last row is out: the row after it, which fails, is never evaluated
+{ sql: "SELECT VALUE x FROM << 1, 'a' >> x WHERE x + 1 > 0 LIMIT 1", expect: { rows: $bag::[ 1 ] } }
+{ sql: "SELECT VALUE [a, b] FROM << 1, 2 >> a, << 1, 'a' >> b WHERE b + 1 > 0 LIMIT 1", expect: { rows: $bag::[ [1, 1] ] } }

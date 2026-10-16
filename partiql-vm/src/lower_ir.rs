@@ -9,7 +9,7 @@
 
 use crate::arena::SlotId;
 use crate::catalog::CompilationContext;
-use crate::error::{EngineError, Result};
+use crate::error::{count_u16, EngineError, Result};
 use crate::expr::{lit_to_value, AggFunc, Expr, LogicalExprCompiler, SlotResolver};
 use crate::field_resolver::{CompileContext, ExprFieldExtractor};
 use crate::plan::{
@@ -412,14 +412,17 @@ struct JoinLayout<'p> {
 }
 
 impl<'a> Lowerer<'a> {
-    fn alloc(&mut self, count: u16) -> Range<SlotId> {
+    fn alloc(&mut self, count: usize) -> Result<Range<SlotId>> {
         let start = self.next_reg;
-        self.next_reg = start.checked_add(count).expect("register overflow");
-        start..self.next_reg
+        self.next_reg = u16::try_from(count)
+            .ok()
+            .and_then(|count| start.checked_add(count))
+            .ok_or(EngineError::TooLarge("registers"))?;
+        Ok(start..self.next_reg)
     }
 
-    fn alloc_reg(&mut self) -> SlotId {
-        self.alloc(1).start
+    fn alloc_reg(&mut self) -> Result<SlotId> {
+        Ok(self.alloc(1)?.start)
     }
 
     fn alloc_scan_id(&mut self) -> ScanId {
@@ -429,9 +432,10 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Register a cursor reading `scan_id` into the registers from `slot_base`.
-    fn add_cursor(&mut self, scan_id: ScanId, slot_base: SlotId) -> u16 {
+    fn add_cursor(&mut self, scan_id: ScanId, slot_base: SlotId) -> Result<u16> {
+        let cursor_id = count_u16(self.cursors.len(), "cursors")?;
         self.cursors.push(CursorInfo { scan_id, slot_base });
-        (self.cursors.len() - 1) as u16
+        Ok(cursor_id)
     }
 
     /// Lower the operators from `top` (just below the sink) down to the query's sources.
@@ -490,7 +494,7 @@ impl<'a> Lowerer<'a> {
                 Lowered::projected(input, outputs, shape)
             }
             BindingsOp::ProjectValue(pv) => {
-                let dst = self.alloc_reg();
+                let dst = self.alloc_reg()?;
                 let outputs = vec![Output::Eval {
                     dst,
                     expr: lower_expr(&pv.expr, &resolver)?,
@@ -508,7 +512,7 @@ impl<'a> Lowerer<'a> {
                     let limit = Limit {
                         input,
                         count: count as i64,
-                        counter: self.alloc_reg(),
+                        counter: self.alloc_reg()?,
                     };
                     Lowered::new(Op::Limit(Box::new(limit)), resolver, shape)
                 }
@@ -538,11 +542,11 @@ impl<'a> Lowerer<'a> {
         match graph.operator(id)? {
             BindingsOp::Scan(scan) => {
                 let (scan_id, binding, width) = self.compile_scan(scan, ctx)?;
-                let window = self.alloc(width);
+                let window = self.alloc(width)?;
                 let binding = binding.shifted(window.start);
                 let slots = ScanSlots {
                     scan_id,
-                    cursor: self.add_cursor(scan_id, window.start),
+                    cursor: self.add_cursor(scan_id, window.start)?,
                     window,
                     whole_row: binding.base_row_slot.is_some(),
                 };
@@ -608,8 +612,8 @@ impl<'a> Lowerer<'a> {
                     .on
                     .map(|on| self.lower_cond(on, resolver))
                     .transpose()?,
-                matched: self.alloc_reg(),
-                ret: self.alloc_reg(),
+                matched: self.alloc_reg()?,
+                ret: self.alloc_reg()?,
             }))),
         }
     }
@@ -636,7 +640,7 @@ impl<'a> Lowerer<'a> {
 
     fn lower_cond(&mut self, expr: &ValueExpr, resolver: &impl SlotResolver) -> Result<Cond> {
         Ok(Cond {
-            pred: self.alloc_reg(),
+            pred: self.alloc_reg()?,
             expr: lower_expr(expr, resolver)?,
         })
     }
@@ -647,7 +651,7 @@ impl<'a> Lowerer<'a> {
         project: &LogicalProject,
         resolver: &ResolverKind,
     ) -> Result<(Vec<Output>, Shape)> {
-        let dsts = self.alloc(project.exprs.len() as u16);
+        let dsts = self.alloc(project.exprs.len())?;
         let mut outputs = Vec::with_capacity(project.exprs.len());
         let mut fields = Vec::with_capacity(project.exprs.len());
         for (dst, (name, expr)) in dsts.zip(&project.exprs) {
@@ -665,7 +669,7 @@ impl<'a> Lowerer<'a> {
 
     /// Lower `SELECT *`: its outputs and its output register.
     fn lower_project_all(&mut self, resolver: &ResolverKind) -> Result<(Vec<Output>, SlotId)> {
-        let dst = self.alloc_reg();
+        let dst = self.alloc_reg()?;
         let mut outputs = vec![];
         match resolver {
             ResolverKind::Pipeline(binding) => {
@@ -715,33 +719,34 @@ impl<'a> Lowerer<'a> {
         resolver: &ResolverKind,
     ) -> Result<(Aggregate, ResolverKind)> {
         let keys: Vec<(&String, &ValueExpr)> = group_by.exprs.iter().collect();
-        let key_count = keys.len() as u16;
-        let record_len = key_count + group_by.aggregate_exprs.len() as u16;
+        // Every index into the record fits a register number once the record is allocated
+        let record_len = keys.len() + group_by.aggregate_exprs.len();
+        let key_count = count_u16(keys.len(), "GROUP BY keys")?;
 
-        let mut record_exprs = Vec::with_capacity(record_len as usize);
+        let mut record_exprs = Vec::with_capacity(record_len);
         for (_, expr) in &keys {
             record_exprs.push(lower_expr(expr, resolver)?);
         }
         for agg in &group_by.aggregate_exprs {
             record_exprs.push(lower_expr(&agg.expr, resolver)?);
         }
-        let sorter = self.sorters.len() as u16;
+        let sorter = count_u16(self.sorters.len(), "GROUP BY clauses")?;
         self.sorters.push(SorterMetadata {
             key_count: key_count as usize,
         });
-        let insert = self.alloc(record_len).start;
+        let insert = self.alloc(record_len)?.start;
 
-        let record = self.alloc(record_len).start;
-        let group_keys = self.alloc(key_count).start;
+        let record = self.alloc(record_len)?.start;
+        let group_keys = self.alloc(keys.len())?.start;
         let accums_start = self.next_reg;
         let mut aggs = Vec::with_capacity(group_by.aggregate_exprs.len());
         for (i, agg) in group_by.aggregate_exprs.iter().enumerate() {
             let input = record + key_count + i as u16;
-            let accum = self.alloc_reg();
+            let accum = self.alloc_reg()?;
             let (steps, finalize) = match &agg.func {
                 // AVG keeps a sum and a count
                 partiql_logical::AggFunc::AggAvg => (
-                    vec![(AggFunc::Sum, accum), (AggFunc::Count, self.alloc_reg())],
+                    vec![(AggFunc::Sum, accum), (AggFunc::Count, self.alloc_reg()?)],
                     AggFunc::Avg,
                 ),
                 other => {
@@ -781,13 +786,13 @@ impl<'a> Lowerer<'a> {
             record,
             key_count,
             keys: group_keys,
-            same_group: self.alloc_reg(),
-            key_eq: self.alloc_reg(),
-            new_group: self.alloc_reg(),
+            same_group: self.alloc_reg()?,
+            key_eq: self.alloc_reg()?,
+            new_group: self.alloc_reg()?,
             aggs,
             accums,
-            has_data: self.alloc_reg(),
-            ret: self.alloc_reg(),
+            has_data: self.alloc_reg()?,
+            ret: self.alloc_reg()?,
         };
         Ok((aggregate, grouped))
     }
@@ -812,7 +817,7 @@ impl<'a> Lowerer<'a> {
             };
 
             let scan_id = self.alloc_scan_id();
-            let slot = self.alloc_reg();
+            let slot = self.alloc_reg()?;
             let layout = ScanLayout {
                 projections: vec![ScanProjection {
                     source: ScanSource::whole_value(),
@@ -823,7 +828,7 @@ impl<'a> Lowerer<'a> {
             self.scan_metadata
                 .insert(scan_id, ScanMetadata { layout, object_id });
             self.scans.insert(scan_id, ScanKind::Bound);
-            cursors.push(self.add_cursor(scan_id, slot));
+            cursors.push(self.add_cursor(scan_id, slot)?);
             slots.insert(name, slot);
         }
 
@@ -833,7 +838,7 @@ impl<'a> Lowerer<'a> {
             ResolverKind::Global(GlobalSlotResolver { slots })
         };
         let expr = lower_expr(&expr_query.expr, &resolver)?;
-        let dst = self.alloc_reg();
+        let dst = self.alloc_reg()?;
         let shape = Shape::Single(RowShape::Register(dst as usize, PhysicalType::Dynamic));
         Ok((Root::Expr { cursors, expr, dst }, shape))
     }
@@ -848,7 +853,7 @@ impl<'a> Lowerer<'a> {
         &mut self,
         scan: &Scan,
         ctx: &CompileContext,
-    ) -> Result<(ScanId, PipelineSlotResolver, u16)> {
+    ) -> Result<(ScanId, PipelineSlotResolver, usize)> {
         // Literal collections are inlined at compile time
         if let Some(values) = try_expr_to_inline_values(&scan.expr) {
             if self.mode == EvaluationMode::Strict && !is_collection_expr(&scan.expr) {
@@ -868,12 +873,12 @@ impl<'a> Lowerer<'a> {
                     let table_name = Some(func_name.clone());
                     let (binding, layout) =
                         pushdown(scan, table_name, ctx, |field| handle.resolve(field));
-                    let width = layout.projections.len() as u16;
+                    let width = layout.projections.len();
                     let tf = TableFnScan {
                         func_name: func_name.clone(),
                         layout: layout.clone(),
                         arguments: call.arguments.clone(),
-                        arg_slots: self.alloc(call.arguments.len() as u16).collect(),
+                        arg_slots: self.alloc(call.arguments.len())?.collect(),
                     };
                     let scan_id = self.alloc_scan_id();
                     self.scan_metadata.insert(
@@ -892,7 +897,7 @@ impl<'a> Lowerer<'a> {
         // Catalog tables
         let Ok((catalog_id, reader_factory)) = self.resolve_reader_factory(scan) else {
             // Anything else is evaluated at runtime and scanned from its value
-            let src = self.alloc_reg();
+            let src = self.alloc_reg()?;
             let scan_id = self.whole_value_scan(ScanKind::Expr {
                 expr: scan.expr.clone(),
                 src,
@@ -902,7 +907,7 @@ impl<'a> Lowerer<'a> {
         let table_name = extract_table_name(&scan.expr);
         let (binding, layout) =
             pushdown(scan, table_name, ctx, |field| reader_factory.resolve(field));
-        let width = layout.projections.len() as u16;
+        let width = layout.projections.len();
         let scan_id = self.alloc_scan_id();
         let object_id = ObjectId::new(catalog_id, reader_factory.entry_id);
         self.scan_metadata
