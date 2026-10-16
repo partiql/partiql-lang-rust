@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791933342655,
+  "lastUpdate": 1792161821276,
   "repoUrl": "https://github.com/partiql/partiql-lang-rust",
   "entries": {
     "PartiQL (rust) Benchmark": [
@@ -49481,6 +49481,270 @@ window.BENCHMARK_DATA = {
             "name": "parse-complex-match",
             "value": 15703,
             "range": "± 59",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "40360967+johnedquinn@users.noreply.github.com",
+            "name": "John Ed Quinn",
+            "username": "johnedquinn"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e55bc32326e762e0da96671690946ac10d780651",
+          "message": "refactor(partiql-vm): lower plans to a physical operator tree before emitting bytecode (#698)\n\n* refactor(partiql-vm): lower plans to a physical operator tree before emitting bytecode\n\nSplit the compiler into two passes:\n\n- lower_ir.rs lowers the logical plan to a physical plan: a tree of operators\n  (Op = Scan | Join | Filter | Project | Aggregate | Limit) with every algorithm,\n  register and cursor decided, and expressions lowered to register references.\n- compile.rs emits bytecode produce/consume style: emit_op(op, row) emits the\n  code producing op's rows, with the operator above it as row. Each join kind has\n  its own function; RIGHT JOIN is LEFT JOIN with the sides swapped. Code goes\n  into routines (the main program, then each subroutine), and jumps target labels.\n\nEach operator sets up its own state on entry (LIMIT's counter, GROUP BY's\naccumulators), and LIMIT exits through its own cursor cleanup.\n\nExpressions now compile straight into the program builder, with temporaries\nreused across expressions, so inline_program/remap_inst are gone.\n\nAlso fixes GROUP BY with LIMIT, which returned no rows.\n\nCloses #697\n\n* fix(partiql-vm): bound compiled program size and stop LIMIT at its last row\n\nAddress review comments on #698:\n- Return EngineError::TooLarge instead of panicking or silently truncating\n  when a query needs more registers, cursors, constants, keys or\n  GROUP BY slots than a u16 can address.\n- Share constants for scalars (MISSING, NULL, bool, int, string), so the\n  constant pool no longer grows with every LoadConst.\n- Cap programs at 2^20 instructions; nested FULL JOINs double the code at\n  each level and could otherwise allocate without bound.\n- Check LIMIT's counter after each row rather than before, so the input\n  stops once its last row is out instead of producing one more; LIMIT 0\n  emits nothing.",
+          "timestamp": "2026-10-16T07:25:16-07:00",
+          "tree_id": "10e694665b8b3ed3d954ec6617fc72f3a149aba6",
+          "url": "https://github.com/partiql/partiql-lang-rust/commit/e55bc32326e762e0da96671690946ac10d780651"
+        },
+        "date": 1792161819407,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "arith_agg-avg",
+            "value": 793422,
+            "range": "± 10262",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct",
+            "value": 878688,
+            "range": "± 4121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count",
+            "value": 842436,
+            "range": "± 9214",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-count_distinct",
+            "value": 877207,
+            "range": "± 24972",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min",
+            "value": 851586,
+            "range": "± 2367",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-min_distinct",
+            "value": 882852,
+            "range": "± 3007",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max",
+            "value": 860688,
+            "range": "± 7475",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-max_distinct",
+            "value": 887561,
+            "range": "± 5919",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum",
+            "value": 852729,
+            "range": "± 2817",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-sum_distinct",
+            "value": 882156,
+            "range": "± 4974",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum",
+            "value": 1135007,
+            "range": "± 5500",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by",
+            "value": 1517661,
+            "range": "± 16587",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg-count-min-max-sum-group_by-group_as",
+            "value": 2086053,
+            "range": "± 5870",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct",
+            "value": 1328527,
+            "range": "± 37326",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by",
+            "value": 1725941,
+            "range": "± 26870",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "arith_agg-avg_distinct-count_distinct-min_distinct-max_distinct-sum_distinct-group_by-group_as",
+            "value": 2318844,
+            "range": "± 23169",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-1",
+            "value": 5094,
+            "range": "± 104",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-15",
+            "value": 42531,
+            "range": "± 571",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-30",
+            "value": 82883,
+            "range": "± 345",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-1",
+            "value": 1307,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-15",
+            "value": 15729,
+            "range": "± 258",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile-30",
+            "value": 31771,
+            "range": "± 125",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-1",
+            "value": 60399,
+            "range": "± 519",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-15",
+            "value": 949170,
+            "range": "± 4692",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "plan-30",
+            "value": 1896294,
+            "range": "± 21341",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-1",
+            "value": 13303365,
+            "range": "± 146163",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-15",
+            "value": 90551572,
+            "range": "± 1140847",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "eval-30",
+            "value": 173855069,
+            "range": "± 1488991",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cartesian join",
+            "value": 495298258,
+            "range": "± 8418658",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "inner equi join",
+            "value": 418694523,
+            "range": "± 918288",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "join",
+            "value": 10369,
+            "range": "± 42",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple",
+            "value": 2457,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "simple-no",
+            "value": 396,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "numbers",
+            "value": 108,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-simple",
+            "value": 660,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-ion",
+            "value": 2152,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-group",
+            "value": 6421,
+            "range": "± 45",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex",
+            "value": 16677,
+            "range": "± 71",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-fexpr",
+            "value": 23155,
+            "range": "± 412",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse-complex-match",
+            "value": 20994,
+            "range": "± 163",
             "unit": "ns/iter"
           }
         ]
